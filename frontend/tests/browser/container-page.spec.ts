@@ -65,16 +65,14 @@ test("the picture draws how it is reached and what it keeps", async ({ page }) =
   await expect(page.getByText("The firewall does not apply to these ports")).toBeVisible()
 })
 
-test("a crash loop is the verdict and the first thing on its page", async ({ page }) => {
+test("a crash loop remains visible in native state and events", async ({ page }) => {
   await mockContainerPage(page)
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto(`/docker/containers/${RUNNER}?tab=overview`)
 
   const identity = page.locator("[data-slot=host-identity]")
-  await expect(identity.getByText("Restarting in a loop")).toBeVisible()
-  await expect(identity.getByText("exit 1")).toBeVisible()
-  await expect(page.getByText("Restart loop: 23 starts in the last 19 minutes.")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Read those lines" })).toBeVisible()
+  await expect(identity.getByText("Restarting", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Read those lines" })).toHaveCount(0)
 
   // Twenty-three exits and starts are one line in Recent, not forty-six.
   const recent = page.getByRole("list", { name: "Recent events" })
@@ -187,14 +185,14 @@ test("inspect reads the document a section at a time, coloured and still masked"
   await expect(page.getByText('"running"')).toBeVisible()
 })
 
-test("a standalone container's configuration prepares its fix as a card", async ({ page }) => {
+test("a standalone container's configuration keeps the manual specification", async ({ page }) => {
   await mockContainerPage(page)
   await page.goto(`/docker/containers/${STANDALONE}?tab=configure`)
-  await expect(page.getByText("uptime-kuma follows the moving tag :1")).toBeVisible()
+  await expect(page.getByText("uptime-kuma follows the moving tag :1")).toHaveCount(0)
   await expect(page.getByLabel("Replacement specification", { exact: true })).toHaveValue(
     /louislam\/uptime-kuma:1/,
   )
-  await expect(page.getByText("As it runs now")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Preview replacement", exact: true })).toBeVisible()
 })
 
 test("usage marks the restart loop on the runner's charts and says it is not running", async ({

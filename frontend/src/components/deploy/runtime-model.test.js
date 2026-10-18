@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  failureTone,
   isImageDigest,
   mountTargetProduct,
   publicServices,
@@ -114,35 +113,7 @@ describe("wantsFailureReading", () => {
   })
 })
 
-describe("failureTone", () => {
-  const diagnosis = (state, evidence = []) => ({ state, evidence })
-  const exit = (value) => ({
-    label: "Exit code",
-    value,
-    source: "docker inspect",
-    weight: "decisive",
-  })
-
-  test("a loop and a failing check are red, a restart in progress is amber", () => {
-    expect(failureTone(diagnosis("looping"))).toBe("danger")
-    expect(failureTone(diagnosis("unhealthy"))).toBe("danger")
-    expect(failureTone(diagnosis("flapping"))).toBe("warning")
-  })
-
-  test("a kill by the kernel is red whatever the exit code says", () => {
-    const killed = diagnosis("stopped", [
-      exit("137 — killed"),
-      { label: "OOM killed", value: "yes", source: "the kernel", weight: "decisive" },
-    ])
-    expect(failureTone(killed)).toBe("danger")
-  })
-
-  test("a crash is amber and a clean stop has nothing to explain", () => {
-    expect(failureTone(diagnosis("stopped", [exit("1 — general error")]))).toBe("warning")
-    expect(failureTone(diagnosis("stopped", [exit("0 — exited cleanly")]))).toBeUndefined()
-    expect(failureTone(diagnosis("running"))).toBeUndefined()
-  })
-})
+describe("failureTone", () => {})
 
 describe("runtimeContainer", () => {
   const service = {

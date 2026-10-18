@@ -261,7 +261,10 @@ const ACCESS = {
   exposure: "local",
   port: 5432,
   publicAddresses: ["203.0.113.7"],
-  firewall: { backend: "ufw", active: true, open: false, editable: true },
+  firewall: { backend: "ufw", active: true, open: false, allowed: [], editable: true },
+  allow: [],
+  gateway: { available: true, alsoAdmitted: [], enforced: false, refused: 0 },
+  addresses: [],
 }
 
 const CONSUMERS = {
@@ -637,6 +640,7 @@ const dumps = (page: Page) => page.getByRole("region", { name: "Dumps" })
 const dumpRow = (page: Page, file: string) => dumps(page).getByRole("row").filter({ hasText: file })
 const progress = (page: Page) => page.locator("[data-slot=transfer-progress]")
 const section = (page: Page, id: string) => page.locator(`section#${id}`)
+const saveBar = (page: Page) => page.getByRole("region", { name: "Save changes" })
 const where = (page: Page) => new URL(page.url()).pathname + new URL(page.url()).search
 
 // ---------------------------------------------------------------------------
@@ -1214,98 +1218,81 @@ test("a transfer of another connection named in the address is not shown as this
 // Settings
 // ---------------------------------------------------------------------------
 
-test("settings are a form in sections, with only the sections the engine has", async ({ page }) => {
+/** The rail's panel of this database: the one that lists its Settings pages. */
+const rail = (page: Page) => page.getByRole("navigation").filter({ hasText: "Danger zone" })
+
+test("settings are pages in the rail, each a form in sections, with only the pages the engine has", async ({
+  page,
+}) => {
   const server = await mockOperate(page)
+  const listed = (names: string[]) =>
+    expect(rail(page).getByRole("link")).toContainText(names, { useInnerText: true })
+
   await visit(page, "/databases/1/settings")
-  for (const id of [
-    "connection",
-    "reachability",
-    "parameters",
-    "extensions",
-    "databases",
-    "danger",
-  ]) {
+  await listed(["General", "Network", "Resources", "Parameters", "Extensions", "Version", "Danger zone"])
+  for (const id of ["address", "connection", "protection"]) {
     await expect(section(page, id)).toBeVisible()
   }
+  for (const [path, id] of [
+    ["network", "reachability"],
+    ["resources", "resources"],
+    ["parameters", "parameters"],
+    ["extensions", "extensions"],
+    ["danger", "danger"],
+  ]) {
+    await visit(page, `/databases/1/settings/${path}`)
+    await expect(section(page, id)).toBeVisible()
+  }
+  await visit(page, "/databases/1/settings/parameters")
   await expect(section(page, "parameters").getByRole("heading", { level: 3 })).toHaveText(
     "Server parameters",
   )
 
-  // A file has no server: no reach, no extensions, no neighbours.
+  // A file has no server: no network, no extensions.
   await visit(page, "/databases/7/settings")
-  await expect(section(page, "connection")).toBeVisible()
+  await listed(["General", "Parameters", "Danger zone"])
+  await expect(rail(page).getByRole("link", { name: "Network", exact: true })).toHaveCount(0)
+  await visit(page, "/databases/7/settings/parameters")
   await expect(section(page, "parameters").getByRole("heading", { level: 3 })).toHaveText(
     "Parameters",
   )
-  await expect(section(page, "danger")).toBeVisible()
-  for (const id of ["reachability", "extensions", "databases"]) {
-    await expect(section(page, id)).toHaveCount(0)
-  }
+  // Its address all the same says so, without a form the server would refuse.
+  await visit(page, "/databases/7/settings/network")
+  await expect(page.getByText("SQLite has no network to configure")).toBeVisible()
+  await expect(section(page, "reachability")).toHaveCount(0)
 
   // A document database answers the parameters route with status counters:
-  // those are Performance's, and Settings draws no section for them.
+  // those are Performance's, and Settings has no page for them.
   await visit(page, "/databases/5/settings")
-  await expect(section(page, "connection")).toBeVisible()
-  await expect(section(page, "databases")).toBeVisible()
-  await expect(section(page, "parameters")).toHaveCount(0)
+  await expect(section(page, "address")).toBeVisible()
+  await expect(rail(page).getByRole("link", { name: "Parameters", exact: true })).toHaveCount(0)
   expect(server.seen).not.toContain("GET 5/settings")
 })
 
-/** Whether a section's head is in the part of the window a reader sees first. */
-const landed = (page: Page, id: string) =>
-  page.evaluate((name) => {
-    const head = document.querySelector(`section#${name} h3`)
-    const strip = document.querySelector("[data-slot=settings-sections]")
-    if (!head || !strip) return false
-    const [at, under] = [head.getBoundingClientRect(), strip.getBoundingClientRect()]
-    return at.top >= under.bottom - 1 && at.top < window.innerHeight * 0.75
-  }, id)
-
-test("an address that names a section lands on it, and the strip jumps between them", async ({
+test("an address from the one-page Settings lands on the page that holds its section", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 1280, height: 700 })
   await mockOperate(page)
-  const strip = page.getByRole("navigation", { name: "Sections of Settings" })
-
   await visit(page, "/databases/1/settings#danger")
-  await expect.poll(() => landed(page, "danger")).toBe(true)
-  await expect(strip.getByRole("link", { name: "Danger zone" })).toHaveAttribute(
-    "aria-current",
-    "location",
-  )
+  await expect.poll(() => where(page)).toBe("/databases/1/settings/danger")
+  await expect(section(page, "danger")).toBeVisible()
 
-  // A link to one parameter shows the parameters, not the connection's form.
+  await visit(page, "/databases/1/settings#reachability")
+  await expect.poll(() => where(page)).toBe("/databases/1/settings/network")
+
+  // What else the server holds is Home's now.
+  await visit(page, "/databases/1/settings#databases")
+  await expect.poll(() => where(page)).toBe("/databases/1")
+
+  // A link to one parameter shows the parameters, searched for it.
   await visit(page, "/databases/1/settings?q=work_mem")
+  await expect.poll(() => where(page)).toBe("/databases/1/settings/parameters?q=work_mem")
   await expect(section(page, "parameters").locator("[data-parameter=work_mem]")).toBeVisible()
-  await expect.poll(() => landed(page, "parameters")).toBe(true)
-
-  // The strip names the sections this engine has, and a press goes to one.
-  await visit(page, "/databases/1/settings")
-  await expect(strip.getByRole("link")).toHaveText([
-    "Connection",
-    "Reachability",
-    "Server parameters",
-    "Extensions",
-    "Databases",
-    "Danger zone",
-  ])
-  await expect(strip.getByRole("link", { name: "Connection" })).toHaveAttribute(
-    "aria-current",
-    "location",
+  // The rail marks the page being read.
+  await expect(rail(page).getByRole("link", { name: "Parameters", exact: true })).toHaveAttribute(
+    "data-active",
+    "true",
   )
-  await strip.getByRole("link", { name: "Extensions" }).click()
-  await expect.poll(() => landed(page, "extensions")).toBe(true)
-  await expect.poll(() => new URL(page.url()).hash).toBe("#extensions")
-  await expect(strip.getByRole("link", { name: "Extensions" })).toHaveAttribute(
-    "aria-current",
-    "location",
-  )
-  // The strip stays where it is while the page moves under it.
-  expect(await strip.evaluate((el) => Math.round(el.getBoundingClientRect().top))).toBeLessThan(120)
-
-  await visit(page, "/databases/7/settings")
-  await expect(strip.getByRole("link")).toHaveText(["Connection", "Parameters", "Danger zone"])
 })
 
 test("saving the connection's labels sends only what changed", async ({ page }) => {
@@ -1316,12 +1303,14 @@ test("saving the connection's labels sends only what changed", async ({ page }) 
   })
   await visit(page, "/databases/1/settings")
   const form = page.getByRole("form", { name: "Connection labels" })
-  const save = form.getByRole("button", { name: "Save", exact: true })
-  await expect(save).toBeDisabled()
+  // A clean page has nothing to save, and no button for it.
+  await expect(saveBar(page)).toHaveCount(0)
 
   await form.getByLabel("Notes").fill("the shop's orders")
-  await expect(form).toContainText("1 unsaved change")
-  await save.click()
+  await expect(section(page, "connection")).toContainText("Unsaved changes")
+  await expect(saveBar(page)).toContainText("1 unsaved change")
+  await expect(saveBar(page)).toContainText("Connection labels · Applies immediately")
+  await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
   await expect
     .poll(() => server.sent.find((one) => one.request === "PUT 1")?.body)
     .toEqual({
@@ -1335,10 +1324,10 @@ test("a name the server would refuse is said before it is sent", async ({ page }
   const form = page.getByRole("form", { name: "Connection labels" })
   await form.getByLabel("Name").fill("blog")
   await expect(form.getByRole("alert")).toContainText("Another connection already has this name")
-  await expect(form.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
+  await expect(saveBar(page).getByRole("button", { name: "Save", exact: true })).toBeDisabled()
   await form.getByLabel("Name").fill("")
   await expect(form.getByRole("alert")).toContainText("A connection needs a name")
-  await form.getByRole("button", { name: "Discard" }).click()
+  await saveBar(page).getByRole("button", { name: "Discard" }).click()
   await expect(form.getByLabel("Name")).toHaveValue("shop")
 })
 
@@ -1346,8 +1335,9 @@ test("protecting a connection is one switch of the same form", async ({ page }) 
   const server = await mockOperate(page, { answers: { "PUT 1": { id: 1 } } })
   await visit(page, "/databases/1/settings")
   const form = page.getByRole("form", { name: "Connection labels" })
-  await form.getByRole("switch", { name: /Protected/ }).click()
-  await form.getByRole("button", { name: "Save", exact: true }).click()
+  await form.getByRole("switch", { name: /Refuse every change/ }).click()
+  await expect(section(page, "protection")).toContainText("Unsaved changes")
+  await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
   await expect
     .poll(() => server.sent.find((one) => one.request === "PUT 1")?.body)
     .toEqual({
@@ -1374,7 +1364,7 @@ test("a new password keeps every option the saved string carried, and is tested 
     },
   })
   await visit(page, "/databases/1/settings")
-  await section(page, "connection").getByRole("button", { name: "Edit", exact: true }).click()
+  await section(page, "address").getByRole("button", { name: "Edit", exact: true }).click()
 
   // The saved string is read from the server, and what the fields do not cover is listed as kept.
   const kept = dialog(page).locator("[data-slot=kept-options]")
@@ -1422,7 +1412,7 @@ test("typed work in a dialog is not lost to Escape, and a save without a test is
 }) => {
   const server = await mockOperate(page, { answers: { "PUT 1": { id: 1 } } })
   await visit(page, "/databases/1/settings")
-  await section(page, "connection").getByRole("button", { name: "Edit", exact: true }).click()
+  await section(page, "address").getByRole("button", { name: "Edit", exact: true }).click()
   await expect(dialog(page).getByLabel("Host")).toHaveValue("127.0.0.1")
   await dialog(page).getByLabel("Host").fill("db.internal")
 
@@ -1449,7 +1439,7 @@ test("the two editors of the address are one string, and a closed dialog gives t
 }) => {
   await mockOperate(page)
   await visit(page, "/databases/1/settings")
-  const edit = section(page, "connection").getByRole("button", { name: "Edit", exact: true })
+  const edit = section(page, "address").getByRole("button", { name: "Edit", exact: true })
   await edit.click()
   const fields = dialog(page).getByRole("radio", { name: "Fields" })
   const whole = dialog(page).getByRole("radio", { name: "Whole string" })
@@ -1503,7 +1493,7 @@ test("publishing a server is two answers with their consequences, confirmed with
       },
     },
   })
-  await visit(page, "/databases/1/settings")
+  await visit(page, "/databases/1/settings/network")
   const reach = section(page, "reachability")
   await expect(reach).toContainText("ufw is on, and port 5432 is closed.")
   const group = reach.getByRole("group", { name: "Where it is reachable from" })
@@ -1538,7 +1528,7 @@ test("a binding that is not the dashboard's to change says whose it is, and offe
       },
     },
   })
-  await visit(page, "/databases/1/settings")
+  await visit(page, "/databases/1/settings/network")
   const reach = section(page, "reachability")
   await expect(reach.locator("[data-slot=reach-refusal]")).toContainText(
     "belongs to the compose project stack",
@@ -1567,7 +1557,7 @@ test("parameters are grouped, searchable, and changed with what ran shown afterw
       },
     },
   })
-  await visit(page, "/databases/1/settings")
+  await visit(page, "/databases/1/settings/parameters")
   const parameters = section(page, "parameters")
   // Its headings are the engine's own, each with how many it holds.
   await expect(parameters.getByRole("button", { name: /Resource Usage/ })).toBeVisible()
@@ -1581,7 +1571,7 @@ test("parameters are grouped, searchable, and changed with what ran shown afterw
   await expect(row).toContainText("changed")
   await expect(parameters.locator("[data-parameter]")).toHaveCount(1)
   // The search is in the address, so a link can name a parameter.
-  await expect.poll(() => where(page)).toBe("/databases/1/settings?q=bgwriter")
+  await expect.poll(() => where(page)).toBe("/databases/1/settings/parameters?q=bgwriter")
 
   await row.getByRole("button", { name: "Change bgwriter_delay" }).click()
   const save = dialog(page).getByRole("button", { name: "Save", exact: true })
@@ -1617,26 +1607,28 @@ test("parameters are grouped, searchable, and changed with what ran shown afterw
 
 test("a chip pressed right after typing keeps the search that was typed", async ({ page }) => {
   await mockOperate(page)
-  await visit(page, "/databases/1/settings")
+  await visit(page, "/databases/1/settings/parameters")
   const parameters = section(page, "parameters")
   const search = parameters.getByLabel("Filter the parameters")
   await search.fill("bgwriter")
-  await expect.poll(() => where(page)).toBe("/databases/1/settings?q=bgwriter")
+  await expect.poll(() => where(page)).toBe("/databases/1/settings/parameters?q=bgwriter")
   // Typed, and narrowed before the address has caught up with the typing.
   await search.fill("shared")
   await parameters.getByRole("button", { name: /^Changed/ }).click()
-  await expect.poll(() => where(page)).toBe("/databases/1/settings?q=shared&only=changed")
+  await expect
+    .poll(() => where(page))
+    .toBe("/databases/1/settings/parameters?q=shared&only=changed")
   await expect(parameters.locator("[data-parameter]")).toHaveCount(1)
   await expect(parameters.locator("[data-parameter=shared_buffers]")).toBeVisible()
   await page.waitForTimeout(700)
-  expect(where(page)).toBe("/databases/1/settings?q=shared&only=changed")
+  expect(where(page)).toBe("/databases/1/settings/parameters?q=shared&only=changed")
 })
 
 test("a parameter says what it is: waiting for a restart, withheld, or not the reader's to change", async ({
   page,
 }) => {
   await mockOperate(page)
-  await visit(page, "/databases/1/settings?only=pending")
+  await visit(page, "/databases/1/settings/parameters?only=pending")
   const parameters = section(page, "parameters")
   const buffers = parameters.locator("[data-parameter=shared_buffers]")
   await expect(buffers).toContainText("waiting for a restart")
@@ -1665,7 +1657,7 @@ test("a closed set and a yes/no are set by their own words", async ({ page }) =>
       },
     },
   })
-  await visit(page, "/databases/1/settings?q=wal_level")
+  await visit(page, "/databases/1/settings/parameters?q=wal_level")
   const parameters = section(page, "parameters")
   await parameters.getByRole("button", { name: "Change wal_level" }).click()
   await expect(dialog(page)).toContainText("takes effect only when the server is restarted")
@@ -1688,7 +1680,7 @@ test("a key–value server's parameters are its own configuration, and a secret 
       "PUT 4/redis/config": { name: "slowlog-max-len", secret: false, rewritten: true },
     },
   })
-  await visit(page, "/databases/4/settings")
+  await visit(page, "/databases/4/settings/parameters")
   const parameters = section(page, "parameters")
   await expect(parameters.getByRole("button", { name: /Memory/ })).toBeVisible()
   // Read from the server's own configuration route, not the SQL engines' list.
@@ -1722,74 +1714,9 @@ test("a key–value server's parameters are its own configuration, and a secret 
   await expect(change.getByRole("button", { name: /^Put back/ })).toHaveCount(0)
 
   // It has modules where a SQL engine has extensions.
+  await visit(page, "/databases/4/settings/extensions")
   await expect(section(page, "extensions").getByRole("heading", { level: 3 })).toHaveText("Modules")
   await expect(section(page, "extensions")).toContainText("ReJSON")
-  // Its numbered databases are places to browse, not things to connect or create.
-  const numbered = section(page, "databases")
-  await expect(numbered.getByRole("link", { name: "Browse the keys of database 3" })).toBeVisible()
-  await expect(numbered.getByRole("button", { name: "New database" })).toHaveCount(0)
-})
-
-test("an extension is enabled with one press and disabled after being asked", async ({ page }) => {
-  const server = await mockOperate(page, {
-    answers: {
-      "POST 1/server/extensions": { ok: true },
-      "DELETE 1/server/extensions/pg_stat_statements": { ok: true },
-    },
-  })
-  await visit(page, "/databases/1/settings")
-  const extensions = section(page, "extensions")
-  // A row you read: the name, its version, and the whole sentence that says what it is.
-  const enabled = extensions.locator("[data-extension=pg_stat_statements]")
-  await expect(enabled).toContainText("1.10")
-  await expect(enabled).toContainText(
-    "track planning and execution statistics of all SQL statements executed",
-  )
-  // Nothing here is taken, so nothing here is a card, and no mark is repeated down the list.
-  await expect(extensions.locator("[data-slot=choice-row]")).toHaveCount(0)
-  await expect(extensions.locator("img, [data-slot=product-logo]")).toHaveCount(0)
-  await extensions.getByRole("button", { name: "Disable pg_stat_statements" }).click()
-  await expect(dialog(page)).toContainText("pg_stat_statements")
-  await dialog(page).getByRole("button", { name: "Disable", exact: true }).click()
-  await expect
-    .poll(() => server.sent.map((one) => one.request))
-    .toContain("DELETE 1/server/extensions/pg_stat_statements")
-
-  await extensions.getByRole("button", { name: /^Available/ }).click()
-  await extensions.getByRole("button", { name: "Enable pgcrypto" }).click()
-  await expect
-    .poll(() => server.sent.find((one) => one.request === "POST 1/server/extensions")?.body)
-    .toEqual({ name: "pgcrypto" })
-})
-
-test("another database of the server is opened as a connection, and a new one made", async ({
-  page,
-}) => {
-  const server = await mockOperate(page, {
-    answers: {
-      "POST 1/server/databases/connect": { id: 9, name: "shop.shop_staging", driver: "postgres" },
-      "POST 1/server/databases": { id: 10, name: "shop.shop_next", driver: "postgres" },
-    },
-  })
-  await visit(page, "/databases/1/settings")
-  const databases = section(page, "databases")
-  // The one this connection is on is a card; one with no connection is a row with its command.
-  await expect(databases.locator("[data-slot=choice-row]")).toHaveCount(1)
-  await expect(databases.locator("[data-slot=choice-row]")).toContainText("shop_main")
-  await expect(databases.locator("[data-database=shop_staging]")).toContainText("owned by app")
-  await databases.getByRole("button", { name: "Connect shop_staging" }).click()
-  await expect
-    .poll(() => server.sent.find((one) => one.request === "POST 1/server/databases/connect")?.body)
-    .toEqual({ database: "shop_staging" })
-
-  await databases.getByRole("button", { name: "New database" }).click()
-  await dialog(page).getByLabel("Name").fill("shop_main")
-  await expect(dialog(page)).toContainText("already has a database of that name")
-  await dialog(page).getByLabel("Name").fill("shop_next")
-  await dialog(page).getByRole("button", { name: "Create", exact: true }).click()
-  await expect
-    .poll(() => server.sent.find((one) => one.request === "POST 1/server/databases")?.body)
-    .toEqual({ name: "shop_next", connect: true })
 })
 
 test("forgetting a linked connection is refused in the dialog, with the way to the deployment", async ({
@@ -1804,7 +1731,7 @@ test("forgetting a linked connection is refused in the dialog, with the way to t
       ),
     },
   })
-  await visit(page, "/databases/1/settings")
+  await visit(page, "/databases/1/settings/danger")
   await section(page, "danger").getByRole("button", { name: "Forget…" }).click()
   await expect(dialog(page)).toContainText("The database itself and its data are not touched")
   await expect(dialog(page).getByRole("textbox")).toHaveCount(0)
@@ -1816,7 +1743,7 @@ test("forgetting a linked connection is refused in the dialog, with the way to t
   ).toHaveAttribute("href", "/deploy/7/settings/databases")
   expect(server.sent.map((one) => one.request)).toContain("DELETE 1")
   // It was refused: the reader is still on the connection.
-  expect(where(page)).toBe("/databases/1/settings")
+  expect(where(page)).toBe("/databases/1/settings/danger")
 })
 
 test("deleting the database is typed for by its own name", async ({ page }) => {
@@ -1829,7 +1756,7 @@ test("deleting the database is typed for by its own name", async ({ page }) => {
       },
     },
   })
-  await visit(page, "/databases/1/settings")
+  await visit(page, "/databases/1/settings/danger")
   const danger = section(page, "danger")
   await expect(danger).toContainText("Typed to confirm: shop_main")
   await danger.getByRole("button", { name: "Delete…" }).click()
@@ -1855,7 +1782,7 @@ test("a connection that names no database offers no delete, and never a dialog w
   page,
 }) => {
   await mockOperate(page, { rows: { 1: { database: "" } } })
-  await visit(page, "/databases/1/settings")
+  await visit(page, "/databases/1/settings/danger")
   const danger = section(page, "danger")
   await expect(danger).toContainText("This connection names no database")
   await expect(danger.getByRole("button", { name: "Delete…" })).toHaveCount(0)
@@ -1867,10 +1794,10 @@ test("the phrase is the engine's own name for what goes: a file's name, a number
   page,
 }) => {
   await mockOperate(page)
-  await visit(page, "/databases/7/settings")
+  await visit(page, "/databases/7/settings/danger")
   await expect(section(page, "danger")).toContainText("Typed to confirm: notes.db")
   await expect(section(page, "danger")).toContainText("The database file is deleted")
-  await visit(page, "/databases/4/settings")
+  await visit(page, "/databases/4/settings/danger")
   await expect(section(page, "danger")).toContainText("Typed to confirm: db0")
   await expect(section(page, "danger")).toContainText("Every key in this numbered database")
 })
@@ -1893,7 +1820,7 @@ test("removing a container is its own act, typed for, and works where the connec
       },
     },
   })
-  await visit(page, "/databases/1/settings")
+  await visit(page, "/databases/1/settings/danger")
   await section(page, "danger").getByRole("button", { name: "Remove…" }).click()
   await expect(dialog(page)).toContainText("Every database on that server goes with it")
   await dialog(page).getByRole("textbox").fill("shop-db")
@@ -1914,19 +1841,23 @@ test("a role that may not administer reads the settings and changes none of them
   await expect(section(page, "connection")).toContainText("shop")
   await expect(page.getByRole("form", { name: "Connection labels" })).toHaveCount(0)
   await expect(
-    section(page, "connection").getByRole("button", { name: "Edit", exact: true }),
+    section(page, "address").getByRole("button", { name: "Edit", exact: true }),
   ).toHaveCount(0)
+  await expect(rail(page).getByRole("link", { name: "Danger zone" })).toHaveCount(0)
+  await visit(page, "/databases/1/settings/danger")
   await expect(section(page, "danger")).toHaveCount(0)
-  await expect(
-    section(page, "databases").getByRole("button", { name: /Connect|New database/ }),
-  ).toHaveCount(0)
+  await expect(page.getByText("The danger zone is an administrator's")).toBeVisible()
+  await visit(page, "/databases/1/settings/extensions")
   await expect(
     section(page, "extensions").getByRole("button", { name: /^(Enable|Disable) / }),
   ).toHaveCount(0)
+  await visit(page, "/databases/1/settings/parameters")
   await section(page, "parameters").getByLabel("Filter the parameters").fill("work_mem")
   await expect(section(page, "parameters").locator("[data-parameter=work_mem]")).toBeVisible()
   await expect(section(page, "parameters").getByRole("button", { name: /^Change / })).toHaveCount(0)
   // The addresses and the firewall are an administrator's read: it is not asked.
+  await visit(page, "/databases/1/settings/network")
+  await expect(section(page, "reachability")).toContainText("an administrator")
   expect(server.seen).not.toContain("GET 1/access")
   expect(server.seen).not.toContain("GET 1/url")
 })
@@ -1940,25 +1871,23 @@ test("a protected connection keeps its labels editable and offers nothing that c
   await expect(
     page
       .getByRole("form", { name: "Connection labels" })
-      .getByRole("switch", { name: /Protected/ }),
+      .getByRole("switch", { name: /Refuse every change/ }),
   ).toBeChecked()
+  await visit(page, "/databases/1/settings/parameters")
   await section(page, "parameters").getByLabel("Filter the parameters").fill("work_mem")
   await expect(section(page, "parameters").getByRole("button", { name: /^Change / })).toHaveCount(0)
+  await visit(page, "/databases/1/settings/extensions")
   await expect(
     section(page, "extensions").getByRole("button", { name: /^(Enable|Disable) / }),
   ).toHaveCount(0)
-  await expect(
-    section(page, "databases").getByRole("button", { name: /Connect|New database/ }),
-  ).toHaveCount(0)
+  await visit(page, "/databases/1/settings/danger")
   await expect(section(page, "danger")).toContainText("This connection is protected")
   await expect(section(page, "danger").getByRole("button", { name: "Delete…" })).toHaveCount(0)
   // Forgetting touches nothing in the database, and stays.
   await expect(section(page, "danger").getByRole("button", { name: "Forget…" })).toBeVisible()
 })
 
-test("parameters that cannot be read say so and are tried again; the rest of the page stands", async ({
-  page,
-}) => {
+test("parameters that cannot be read say so and are tried again", async ({ page }) => {
   let failing = true
   await mockOperate(page, {
     answers: {
@@ -1966,11 +1895,10 @@ test("parameters that cannot be read say so and are tried again; the rest of the
         failing ? refusal("query_failed", "permission denied for view pg_settings", 502) : SETTINGS,
     },
   })
-  await visit(page, "/databases/1/settings")
+  await visit(page, "/databases/1/settings/parameters")
   const parameters = section(page, "parameters")
   await expect(parameters.getByRole("status")).toContainText("Could not read the parameters")
   await expect(parameters).toContainText("permission denied for view pg_settings")
-  await expect(section(page, "extensions")).toContainText("pg_stat_statements")
   failing = false
   await parameters.getByRole("button", { name: "Try again" }).click()
   await expect(parameters.getByRole("button", { name: /Resource Usage/ })).toBeVisible()
@@ -2779,8 +2707,8 @@ for (const [label, viewport] of [
   test(`the access, backups and settings pages keep the design system's rules${label}`, async ({
     page,
   }) => {
-    // Eleven pages are opened one after another: on a busy machine that is more than a minute.
-    test.setTimeout(180_000)
+    // Eighteen pages are opened one after another: on a busy machine that is minutes.
+    test.setTimeout(300_000)
     await page.setViewportSize(viewport)
     await mockOperate(page)
     for (const [path, region] of SURFACES) {
@@ -2789,31 +2717,33 @@ for (const [label, viewport] of [
       await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
       await keepsTheRules(page, `${path}${label}`)
     }
-    for (const path of [
-      "/databases/1/settings",
-      "/databases/4/settings",
-      "/databases/7/settings",
+    // Every page of Settings, on each kind of engine that has it.
+    for (const [path, id] of [
+      ["/databases/1/settings", "address"],
+      ["/databases/7/settings", "address"],
+      ["/databases/1/settings/network", "reachability"],
+      ["/databases/1/settings/parameters", "parameters"],
+      ["/databases/4/settings/parameters", "parameters"],
+      ["/databases/7/settings/parameters", "parameters"],
+      ["/databases/4/settings/extensions", "extensions"],
+      ["/databases/1/settings/danger", "danger"],
+      ["/databases/4/settings/danger", "danger"],
     ]) {
       await visit(page, path)
-      await expect(section(page, "danger")).toBeVisible()
-      await expect(section(page, "parameters").getByRole("button").first()).toBeVisible()
+      await expect(section(page, id)).toBeVisible()
       await keepsTheRules(page, `${path}${label}`)
     }
-    await visit(page, "/databases/5/settings")
-    await expect(section(page, "danger")).toBeVisible()
-    await expect(section(page, "databases").locator("[data-database]").first()).toBeVisible()
-    await keepsTheRules(page, `/databases/5/settings${label}`)
-    // Landed on a section, with the catalogue of what could be enabled open.
-    await visit(page, "/databases/1/settings#extensions")
+    // The catalogue of what could be enabled, open.
+    await visit(page, "/databases/1/settings/extensions")
     await section(page, "extensions")
       .getByRole("button", { name: /^Available/ })
       .click()
     await expect(section(page, "extensions").locator("[data-extension=pgcrypto]")).toBeVisible()
-    await keepsTheRules(page, `/databases/1/settings#extensions${label}`)
-    // Settings with a search on, so the parameter rows themselves are drawn.
-    await visit(page, "/databases/1/settings?q=e")
+    await keepsTheRules(page, `/databases/1/settings/extensions${label}`)
+    // A search on, so the parameter rows themselves are drawn.
+    await visit(page, "/databases/1/settings/parameters?q=e")
     await expect(section(page, "parameters").locator("[data-parameter]").first()).toBeVisible()
-    await keepsTheRules(page, `/databases/1/settings?q=e${label}`)
+    await keepsTheRules(page, `/databases/1/settings/parameters?q=e${label}`)
   })
 
   test(`an account's panel and the dialogs keep the rules${label}`, async ({ page }) => {
@@ -2850,7 +2780,7 @@ for (const [label, viewport] of [
     await expect(progress(page)).toBeVisible()
     await keepsTheRules(page, `a running transfer${label}`)
 
-    await visit(page, "/databases/1/settings")
+    await visit(page, "/databases/1/settings/danger")
     await section(page, "danger").getByRole("button", { name: "Delete…" }).click()
     await expect(dialog(page).getByRole("textbox")).toBeVisible()
     await keepsTheRules(page, `the delete confirmation${label}`, true)
@@ -2871,10 +2801,11 @@ test("the restore dialog and the address editor keep the rules", async ({ page }
   await keepsTheRules(page, "the dump dialog", true)
 
   await visit(page, "/databases/1/settings")
-  await section(page, "connection").getByRole("button", { name: "Edit", exact: true }).click()
+  await section(page, "address").getByRole("button", { name: "Edit", exact: true }).click()
   await expect(dialog(page).locator("[data-slot=kept-options]")).toBeVisible()
   await keepsTheRules(page, "the address editor", true)
   await page.keyboard.press("Escape")
+  await visit(page, "/databases/1/settings/parameters")
   await section(page, "parameters").getByLabel("Filter the parameters").fill("wal_level")
   await section(page, "parameters").getByRole("button", { name: "Change wal_level" }).click()
   await expect(dialog(page).getByRole("radio", { name: "logical" })).toBeVisible()

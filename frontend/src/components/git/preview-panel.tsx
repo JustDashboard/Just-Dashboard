@@ -11,7 +11,7 @@ import {
   GitTag,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { get, post, put } from "@/lib/api"
+import { ApiError, get, post, put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -28,6 +28,8 @@ import type {
 import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
+import { ContentConflict } from "@/components/files/content-conflict"
+import { unifiedDiff } from "@/components/files/diff"
 import { DiffView } from "@/components/files/diff-view"
 import type { GitRun } from "@/components/git/run"
 import { PreviewHeader } from "@/components/git/preview-header"
@@ -74,7 +76,11 @@ export type GitPreview =
   | { kind: "workflow"; id: number }
 
 /** What every preview gets from the workspace. */
+export type GitFileDraft = { content: string; original: FileContent }
+
 export type PreviewContext = {
+  fileDrafts?: Record<string, GitFileDraft>
+  onFileDraft?: (path: string, draft?: GitFileDraft) => void
   repoPath: string
   branch: string
   canWrite: boolean
@@ -233,10 +239,13 @@ function FilePreview({
   onClose: () => void
   onChanged: () => void
 }) {
-  const [file, setFile] = useState<FileContent>()
-  const [draft, setDraft] = useState("")
+  const [held] = useState(() => ctx.fileDrafts?.[path])
+  const [file, setFile] = useState<FileContent | undefined>(held?.original)
+  const [draft, setDraft] = useState(held?.content ?? "")
   const [error, setError] = useState<Error>()
   const [saving, setSaving] = useState(false)
+  const [conflict, setConflict] = useState(false)
+  const [reviewing, setReviewing] = useState(false)
 
   // Keyed on the path by the caller, so it mounts fresh per file and this only
   // ever fetches.
@@ -244,29 +253,69 @@ function FilePreview({
     const controller = new AbortController()
     get<FileContent>("/files/read", { path }, controller.signal)
       .then((f) => {
-        setFile(f)
-        setDraft(f.content)
+        if (controller.signal.aborted) return
+        setFile(held?.original ?? f)
+        setDraft(held?.content ?? f.content)
+        if (held && held.original.revision !== f.revision) setConflict(true)
       })
       .catch((err) => !controller.signal.aborted && setError(err))
     return () => controller.abort()
-  }, [path])
+  }, [held, path])
 
   const dirty = file !== undefined && draft !== file.content
 
   const save = async () => {
+    if (!file || file.binary || !canWrite || saving) return
     setSaving(true)
     try {
-      await put("/files/write", { path, content: draft })
+      const result = await put<{ revision?: string }>("/files/write", {
+        path,
+        content: draft,
+        expectedRevision: file.revision,
+      })
       notify.success("Saved", { description: path })
-      setFile((f) => (f ? { ...f, content: draft } : f))
+      setFile((f) => (f ? { ...f, content: draft, revision: result.revision } : f))
+      ctx.onFileDraft?.(path)
+      setConflict(false)
+      setReviewing(false)
       // A save can change the working tree, so let the status refresh.
       onChanged()
     } catch (err) {
-      notify.error("Could not save", err)
+      if (err instanceof ApiError && err.code === "content_conflict") setConflict(true)
+      else notify.error("Could not save", err)
     } finally {
       setSaving(false)
     }
   }
+
+  const refresh = async (discard = false) => {
+    try {
+      const current = await get<FileContent>("/files/read", { path })
+      if (current.binary && !discard)
+        throw new Error("The file is now binary. Reload it to inspect the current version.")
+      setFile(current)
+      if (discard) {
+        setDraft(current.content)
+        ctx.onFileDraft?.(path)
+      } else
+        ctx.onFileDraft?.(
+          path,
+          draft === current.content ? undefined : { content: draft, original: current },
+        )
+      setReviewing(!discard)
+      setConflict(false)
+    } catch (err) {
+      if (discard) throw err
+      notify.error("Could not read the current file", err)
+    }
+  }
+  const discard = () =>
+    ctx.confirm({
+      title: "Discard your changes",
+      description: <p>Your draft is discarded and the current file is read from disk.</p>,
+      confirmLabel: "Discard",
+      action: async () => refresh(true),
+    })
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -297,7 +346,17 @@ function FilePreview({
             >
               Blame
             </Button>
-            {dirty && <Tag tone="warning">unsaved</Tag>}
+            {dirty && (
+              <>
+                <Tag tone="warning">unsaved</Tag>
+                <Button size="xs" variant="ghost" onClick={() => setReviewing((value) => !value)}>
+                  Review changes
+                </Button>
+                <Button size="xs" variant="ghost" onClick={discard}>
+                  Discard draft
+                </Button>
+              </>
+            )}
             {file && !file.binary && canWrite && (
               <Button size="xs" onClick={save} disabled={!dirty || saving} pending={saving}>
                 <FloppyDisk className="size-3.5" />
@@ -307,6 +366,9 @@ function FilePreview({
           </>
         }
       />
+      {conflict && (
+        <ContentConflict busy={saving} onReview={() => void refresh()} onReload={discard} />
+      )}
       <div className="min-h-0 flex-1">
         {error && <ErrorState error={error} className="m-3" />}
         {!file && !error && <LoadingRows className="p-3" rows={8} />}
@@ -315,13 +377,29 @@ function FilePreview({
             This is a binary file ({bytes(file.size)}); it is not shown here.
           </div>
         )}
-        {file && !file.binary && (
+        {file && !file.binary && reviewing && (
+          <DiffView
+            body={
+              unifiedDiff(file.content, draft, path.split("/").pop() ?? path) ??
+              "Too many changes to summarise."
+            }
+            singleFile
+            className="h-full"
+          />
+        )}
+        {file && !file.binary && !reviewing && (
           <CodeEditor
             className="h-full"
             value={draft}
-            onChange={setDraft}
+            onChange={(content) => {
+              setDraft(content)
+              ctx.onFileDraft?.(
+                path,
+                content === file.content ? undefined : { content, original: file },
+              )
+            }}
             language={file.language}
-            readOnly={!canWrite}
+            readOnly={!canWrite || saving}
           />
         )}
       </div>

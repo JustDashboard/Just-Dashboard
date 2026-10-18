@@ -49,47 +49,36 @@ export function GatewayNotices({ view, onRefresh }: { view: GatewayView; onRefre
           them, or something deleted the table. Saving any entry loads it again.
         </Notice>
       )}
-      {admission.needed && !admission.present && (
-        <Notice tone="warning" icon={Warning} title="Owned admission rules need attention">
-          <p>
-            A required rule is missing, unsupported or unreadable. A saved forward may be refused
-            after translation. Inspect each chain below; the presence of these rules does not prove
-            the complete connection works.
-          </p>
-          {can("system.admin") &&
-            capability.writable &&
-            admission.chains?.some((chain) => chain.needed && chain.status === "absent") && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="mt-2"
-                onClick={() =>
-                  confirm({
-                    title: "Repair owned admission rules",
-                    description: (
-                      <p>
-                        Restore the dashboard&rsquo;s marked admission rules for its active
-                        translations. This may admit traffic previously refused by the missing
-                        rules.
-                      </p>
-                    ),
-                    confirmLabel: "Repair rules",
-                    action: async () => {
-                      await post("/network/gateway/admission/repair")
-                      onRefresh?.()
-                    },
-                  })
-                }
-              >
-                Repair owned rules
-              </Button>
-            )}
-        </Notice>
-      )}
       {(admission.chains || capability.layers || Boolean(view.flows?.length)) && (
         <Panel plain>
-          <PanelHeader title="Policy evidence" />
+          <PanelHeader
+            title="Policy evidence"
+            actions={
+              can("system.admin") &&
+              capability.writable &&
+              admission.chains?.some((chain) => chain.needed && chain.status === "absent") && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    confirm({
+                      title: "Repair owned admission rules",
+                      description:
+                        "Restore the dashboard's marked admission rules for its active translations. This may admit traffic previously refused by the missing rules.",
+                      confirmLabel: "Repair rules",
+                      action: async () => {
+                        await post("/network/gateway/admission/repair")
+                        onRefresh?.()
+                      },
+                    })
+                  }
+                >
+                  Repair owned rules
+                </Button>
+              )
+            }
+          />
           <PanelBody className="space-y-3">
             <DetailList>
               {admission.chains

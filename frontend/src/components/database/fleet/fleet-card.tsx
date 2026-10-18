@@ -93,11 +93,11 @@ export function workPages(engine: Engine) {
  * facts an amber `staging` sat beside an amber "never backed up" and nobody
  * could tell which of them was the problem.
  *
- * Its edge carries the database's hue, the same as its span on the band's
- * bars, its dot on the backup runway and its key in a row there, and what it
- * stores is drawn as a short bar in that hue against the largest database on
- * the server — so "which one is the big one" is answered across the shelf
- * without reading a figure.
+ * What it stores is drawn as a short bar in the database's hue — the same as
+ * its span on the band's bars and its key in a row there — against the
+ * largest database on the server, so "which one is the big one" is answered
+ * across the shelf without reading a figure. The card's edge carries no hue: the operator found the coloured stripe down it
+ * noise rather than a reading.
  */
 export function FleetCard({
   entry,
@@ -149,15 +149,6 @@ export function FleetCard({
               <BorderBeam size={80} duration={4} />
             </span>
           )}
-          <span
-            aria-hidden
-            data-slot="fleet-hue"
-            className={cn(
-              "pointer-events-none absolute inset-y-4 left-0 w-0.75 rounded-r-full",
-              down && "opacity-50",
-            )}
-            style={{ background: hue }}
-          />
           <div
             onClick={(event) => {
               // React carries a press inside the open menu up through its
@@ -166,7 +157,7 @@ export function FleetCard({
               if (!event.currentTarget.contains(target) || target.closest(CONTROL)) return
               router.push(href)
             }}
-            className="group group/choice flex h-full min-w-0 cursor-pointer flex-col gap-3.5 rounded-xl p-4 pl-5"
+            className="group group/choice flex h-full min-w-0 cursor-pointer flex-col gap-3.5 rounded-xl p-4"
           >
             <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
               <EngineMark engine={engine} className={cn("row-span-2", down && "opacity-60")} />
@@ -234,6 +225,7 @@ export function FleetCard({
                         className="mt-1.5 block h-1 w-full max-w-20 overflow-hidden rounded-full bg-meter-track"
                       >
                         <span
+                          data-slot="fleet-size"
                           className="block h-full rounded-full transition-[width] duration-700 ease-out"
                           style={{
                             width: `${Math.max((stored / largest) * 100, stored > 0 ? 4 : 0)}%`,

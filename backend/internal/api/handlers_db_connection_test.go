@@ -48,10 +48,15 @@ type fakeDBContainer struct {
 	hostIP                 string
 	hostPort, port         int
 	labels                 map[string]string
+	env                    []string
 	// What the container may use and how it restarts, as its configuration
 	// holds them: bytes, billionths of a processor, Docker's own word.
 	memory, nanoCPUs int64
 	restart          string
+	// used is the memory it uses now, as its stats report it, and oomKilled
+	// whether the kernel stopped it last time for going past its limit.
+	used      int64
+	oomKilled bool
 }
 
 type fakeDockerEngine struct {
@@ -114,6 +119,17 @@ func (f *fakeDockerEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/_ping":
 		w.Header().Set("API-Version", "1.47")
+	case path == "/info":
+		_ = json.NewEncoder(w).Encode(map[string]any{"NCPU": 8, "MemTotal": int64(8 << 30)})
+	case strings.HasPrefix(path, "/containers/") && strings.HasSuffix(path, "/stats"):
+		c := f.find(strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/stats"))
+		if c == nil || c.state != "running" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"read": "0001-01-01T00:00:00Z"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"read": "2026-01-02T03:04:05Z", "memory_stats": map[string]any{"usage": c.used},
+		})
 	case path == "/containers/json":
 		all := r.URL.Query().Get("all") == "1" || r.URL.Query().Get("all") == "true"
 		out := []map[string]any{}
@@ -147,9 +163,10 @@ func (f *fakeDockerEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.inspections[c.name]++
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"Id": c.id, "Name": "/" + c.name,
-			"Config": map[string]any{"Image": c.image, "Labels": c.labels},
+			"Config": map[string]any{"Image": c.image, "Labels": c.labels, "Env": c.env},
 			"State": map[string]any{
 				"Status": c.state, "Running": c.state == "running", "StartedAt": "2026-01-02T03:04:05Z",
+				"OOMKilled": c.oomKilled,
 			},
 			"HostConfig": map[string]any{
 				"NetworkMode": "bridge", "PortBindings": binding(c),
@@ -178,6 +195,19 @@ func (f *fakeDockerEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.calls = append(f.calls, verb+" "+c.name)
 		if verb == "stop" || verb == "restart" {
 			f.graces = append(f.graces, r.URL.Query().Get("t"))
+		}
+		if verb == "update" {
+			// As the Engine does: a zero is a limit left as it is.
+			var limits struct{ Memory, NanoCpus int64 }
+			_ = json.NewDecoder(r.Body).Decode(&limits)
+			if limits.Memory != 0 {
+				c.memory = limits.Memory
+			}
+			if limits.NanoCpus != 0 {
+				c.nanoCPUs = limits.NanoCpus
+			}
+			_, _ = w.Write([]byte(`{"Warnings":[]}`))
+			return
 		}
 		switch verb {
 		case "start", "restart":
@@ -696,6 +726,54 @@ func TestAStoppedContainerIsReportedAndNotDialled(t *testing.T) {
 	}
 	if !got.Power.Stop || !got.Power.Restart || got.Power.Start {
 		t.Errorf("power for a running container = %+v", got.Power)
+	}
+}
+
+// The summary says when the release a server runs stops being maintained,
+// from what the server last said it was — so a stopped one still says it —
+// and says nothing for a fork that keeps a calendar of its own.
+func TestSummarySaysWhenTheServersReleaseStopsBeingMaintained(t *testing.T) {
+	h := newConnHarness(t)
+	admin := h.as(auth.RoleAdmin)
+	for i, c := range []struct {
+		image    string
+		identity dbx.Identity
+		release  string
+		date     string
+	}{
+		{"postgres:13-alpine", dbx.Identity{Flavor: dbx.FlavorPostgres, Version: "PostgreSQL 13.14", Number: "13.14"}, "13", "2025-11-13"},
+		{"mariadb:10.6", dbx.Identity{Flavor: dbx.FlavorMariaDB, Version: "10.6.21-MariaDB-ubu2004", Number: "10.6.21"}, "10.6", "2026-07-06"},
+		{"cockroachdb/cockroach:v23.2.4", dbx.Identity{Flavor: dbx.FlavorCockroachDB, Version: "CockroachDB CCL v23.2.4", Number: "23.2.4"}, "", ""},
+	} {
+		port, _ := deafPort(t)
+		name := fmt.Sprintf("server-%d", i)
+		driver, engine, dsn := dbx.DriverPostgres, 5432, fmt.Sprintf("postgres://app:pw@127.0.0.1:%d/app?sslmode=disable", port)
+		switch c.identity.Flavor {
+		case dbx.FlavorMariaDB:
+			driver, engine, dsn = dbx.DriverMySQL, 3306, fmt.Sprintf("app:pw@tcp(127.0.0.1:%d)/app", port)
+		case dbx.FlavorCockroachDB:
+			engine = 26257
+		}
+		h.engine.containers = append(h.engine.containers, &fakeDBContainer{
+			id: name, name: name, image: c.image, state: "exited", hostIP: "127.0.0.1", hostPort: port, port: engine,
+		})
+		id := h.add(name, driver, dsn)
+		h.s.dbConns.identities.Store(id, dbIdentityKept{dsn: sha256.Sum256([]byte(dsn)), at: time.Now(), identity: c.identity})
+
+		got := readJSON[struct {
+			State     string         `json:"state"`
+			EndOfLife *dbx.EndOfLife `json:"endOfLife"`
+		}](t, do(t, admin, http.MethodGet, pathf("/databases/%d", id), ""))
+		if got.State != dbStateStopped {
+			t.Errorf("%s: state %q", c.image, got.State)
+		}
+		switch {
+		case c.release == "" && got.EndOfLife != nil:
+			t.Errorf("%s: a fork was dated %+v", c.image, got.EndOfLife)
+		case c.release != "" && (got.EndOfLife == nil || got.EndOfLife.Release != c.release ||
+			got.EndOfLife.Date.Format("2006-01-02") != c.date || !got.EndOfLife.Past):
+			t.Errorf("%s: end of life %+v, want %s ended %s", c.image, got.EndOfLife, c.release, c.date)
+		}
 	}
 }
 
@@ -1557,18 +1635,21 @@ func TestAFleetReadsTheMachineOnceForAllItsConnections(t *testing.T) {
 // being drawn.
 var gatedCapabilities = []string{
 	// connections and discovery
-	"server", "provision", "inventoryConnect", "hostAccount", "fileBased", "openByDefault", "dump",
+	"server", "provision", "serverTLS", "majorUpgrade", "inventoryConnect", "hostAccount", "fileBased", "openByDefault", "dump",
 	"serverDatabaseCreate", "serverDatabaseConnect",
 	// the workbench
 	"sql", "console", "changeSets", "keylessEdits", "updateDefault", "script", "transactions", "queryCancel",
-	"dollarQuoting", "regexFilter", "rowEstimate", "cellRead", "explainJSON", "explainAnalyze",
+	"dollarQuoting", "regexFilter", "rowEstimate", "cellRead", "explainJSON", "explainAnalyze", "indexWhatIf", "missingIndexes",
+	"assistant", "assistantPolicy",
+	// what an AI client reaches through the MCP endpoint
+	"mcp",
 	// the schema
 	"ddl", "schemas", "catalog", "views", "materializedViews", "routines", "triggers", "sequences", "enums",
-	"comments", "indexes", "extensions",
+	"comments", "indexes", "extensions", "rowSecurity", "schemaDiff", "pooler",
 	// watching and maintaining a server
 	"stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats", "maintenance",
-	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "advisor",
-	"engineAdvisor", "queryLog", "clickhouseViews", "sqliteFile",
+	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "statementsSetup", "statementHistory",
+	"queryLog", "clickhouseViews", "sqliteFile",
 	// Redis
 	"keys", "keyTree", "keyTypeFilter", "keyMeta", "valueDownload", "keyEncoding", "bulkKeys", "streams",
 	"logicalDatabases", "consoleClassify", "serverInfo", "commandStats", "latency", "queryLogReset",
@@ -1577,21 +1658,25 @@ var gatedCapabilities = []string{
 	"documents", "shellSyntax", "collections", "collectionOptions", "aggregation", "schemaAnalysis",
 	"indexUsage", "indexHide", "validation", "profiler",
 	// code generation and moving data
-	"orm", "export", "exportColumns", "exportQuery", "import", "importMapping", "importUpsert",
+	"orm", "seed", "export", "exportColumns", "exportQuery", "import", "importMapping", "importUpsert",
 	"importReplace", "importCreateTable", "dumpSchemaOnly", "dumpDataOnly", "dumpTables", "dumpCompression",
 	"dumpDatabases", "dumpUpload", "restoreNewDatabase", "copy", "copyStructureOnly",
+	// point-in-time recovery
+	"pitr",
 }
 
 // The flags that are a list of words: empty for an engine without the
 // feature, and never null.
 var listedCapabilities = []string{
 	"catalogGroups", "ddlOperations", "maintenanceActions", "ormTargets", "exportFormats", "importFormats",
+	"alertKinds",
 }
 
 // The flags that are a word where the feature comes in more than one form,
 // and false where the engine has none of them.
 var wordedCapabilities = []string{
 	"rowIdentity", "returnsChangedRow", "readOnlyScope", "importAtomic", "json", "hashFieldTtl", "commandReference",
+	"memoryBuffer", "onlineImport",
 }
 
 func TestDriverCatalogueCarriesCapabilitiesAndFlavours(t *testing.T) {
@@ -1632,6 +1717,11 @@ func TestDriverCatalogueCarriesCapabilitiesAndFlavours(t *testing.T) {
 		// server then reports a different address for.
 		if info, err := dbx.ParseDSN(d.ID, d.DSNExample); err != nil || (d.DefaultPort != 0 && info.Port != strconv.Itoa(d.DefaultPort)) {
 			t.Errorf("%s: its own DSN example does not parse to port %d: %+v %v", d.ID, d.DefaultPort, info, err)
+		}
+		for _, retired := range []string{"advisor", "engineAdvisor"} {
+			if _, present := d.Capabilities[retired]; present {
+				t.Errorf("%s advertises retired %s", d.ID, retired)
+			}
 		}
 		for _, flag := range gatedCapabilities {
 			if _, ok := d.Capabilities[flag].(bool); !ok {
@@ -2114,6 +2204,55 @@ func TestTopologyLinksADatabaseToItsOwnPage(t *testing.T) {
 	}](t, do(t, h.as(auth.RoleReadOnly), http.MethodGet, "/databases/topology", ""))
 	if len(topo.Nodes) != 1 || topo.Nodes[0].Href != pathf("/databases/%d", id) {
 		t.Errorf("topology nodes = %+v, want one linking to /databases/%d", topo.Nodes, id)
+	}
+}
+
+// A deployment that reaches its database the way an application would — at
+// one of this machine's addresses and the port the database container is
+// published on, which is not the loopback the dashboard saved it at — is the
+// database's reader, drawn as its project rather than its release's container.
+func TestTopologyFindsADeploymentByThePublishedAddressItHolds(t *testing.T) {
+	h := newConnHarness(t)
+	project, err := h.s.Store.DB.Exec(`INSERT INTO deploy_projects(name, repo_path, hook_secret, hook_id, created_at) VALUES('storefront', '/srv/storefront', 'sealed', 'storefront-hook', 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	environment, err := h.s.Store.DB.Exec(`INSERT INTO deploy_environments(project_id,name,slug,kind,created_at,updated_at) VALUES(?,'production','production','production',1,1)`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	environmentID, _ := environment.LastInsertId()
+	release := map[string]string{
+		"io.just-dashboard.managed": "true", "io.just-dashboard.environment-id": strconv.FormatInt(environmentID, 10),
+	}
+	h.engine.containers = []*fakeDBContainer{
+		{id: "db0000000001", name: "shop-db", image: "postgres:17-alpine", state: "running", hostIP: "0.0.0.0", hostPort: 59435, port: 5432},
+		{id: "app000000001", name: pathf("jd-e%d-r1", environmentID), image: "3f2a1b0c9d8e", state: "running", labels: release,
+			env: []string{"PORT=3000", "DATABASE_URL=postgres://app:secret@host.docker.internal:59435/app?sslmode=disable"}},
+		// A port that only begins with the database's is not its address.
+		{id: "app000000002", name: "billing", image: "billing:1", state: "running",
+			env: []string{"DATABASE_URL=postgres://app:secret@host.docker.internal:594351/app"}},
+	}
+	id := h.add("shop", dbx.DriverPostgres, "postgres://app:secret@127.0.0.1:59435/app?sslmode=disable&connect_timeout=1")
+	topo := readJSON[topologyResponse](t, do(t, h.as(auth.RoleReadOnly), http.MethodGet, "/databases/topology", ""))
+
+	reader := "deploy:" + strconv.FormatInt(environmentID, 10)
+	var drawn *topoNode
+	for i := range topo.Nodes {
+		if topo.Nodes[i].ID == reader {
+			drawn = &topo.Nodes[i]
+		}
+		if strings.HasPrefix(topo.Nodes[i].ID, "container:") {
+			t.Errorf("a container is drawn as itself: %+v", topo.Nodes[i])
+		}
+	}
+	if drawn == nil || drawn.Kind != "deployment" || drawn.Name != "storefront" || drawn.Href != pathf("/deploy/%d", projectID) {
+		t.Fatalf("nodes = %+v, want the release drawn as the storefront deployment", topo.Nodes)
+	}
+	want := topoEdge{From: pathf("db:%d", id), To: reader, Via: []string{"env"}, Status: "observed"}
+	if len(topo.Edges) != 1 || topo.Edges[0].From != want.From || topo.Edges[0].To != want.To || strings.Join(topo.Edges[0].Via, ",") != "env" {
+		t.Errorf("edges = %+v, want only %+v", topo.Edges, want)
 	}
 }
 

@@ -319,11 +319,10 @@ function SwapPicture({
   const from = useRef<HTMLSpanElement>(null)
   const now = useRef<HTMLSpanElement>(null)
   const next = useRef<HTMLSpanElement>(null)
-  // On the dialog's own ground over the dot grid, as every picture stands on
+  // On the dialog's own ground with no dot grid, as every picture stands on
   // its page's, rather than in a box of its own inside the dialog's.
   return (
     <div aria-hidden className="relative min-w-0 py-4">
-      <div className="wire-grid pointer-events-none absolute inset-0" />
       <div
         ref={container}
         className="relative flex min-w-0 items-center justify-between gap-10 px-4"

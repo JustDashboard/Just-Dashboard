@@ -6,9 +6,9 @@ import type { RedisCounter, RedisStats } from "@/components/database/redis/types
  * Redis counts things from the moment it started — commands processed, hits,
  * misses, bytes in — and a count since start says nothing about now. Two
  * samples do: the difference between them over the time between them is a
- * rate. The page keeps the samples it has taken since it was opened and
- * derives every rate from neighbouring pairs, so nothing here is recorded
- * history and nothing claims to be.
+ * rate. The page opens on the recorder's last hour of the same counters and
+ * keeps the samples it takes from then on, deriving every rate from
+ * neighbouring pairs.
  */
 export type StatSample = {
   /** The dashboard's clock when the server answered, in milliseconds. */
@@ -45,6 +45,25 @@ export function rateBetween(
   const seconds = (after.at - before.at) / 1000
   if (a === undefined || b === undefined || seconds <= 0 || b < a) return null
   return (b - a) / seconds
+}
+
+/**
+ * The recorder's snapshots of this server as samples. The recorder reads the
+ * same INFO counters this page does, every thirty seconds while the dashboard
+ * runs, and stamps them on the same clock, so the charts can open on the last
+ * hour it kept and carry on from there (`joinRecorded`). A snapshot without
+ * counters — a read that failed — is left out.
+ */
+export function recordedSamples(
+  snapshots: readonly { at: number; stats: unknown }[],
+): StatSample[] {
+  return snapshots.flatMap((snapshot) => {
+    const server = (snapshot?.stats as { server?: Partial<RedisStats["server"]> } | undefined)
+      ?.server
+    if (!server?.counters || typeof server.counters !== "object") return []
+    const at = typeof server.sampledAtMs === "number" ? server.sampledAtMs : snapshot.at
+    return Number.isFinite(at) ? [{ at, counters: server.counters }] : []
+  })
 }
 
 /** One moment of the page's own record: gauges as read, rates over the interval before it. */

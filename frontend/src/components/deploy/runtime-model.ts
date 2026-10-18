@@ -3,7 +3,6 @@ import type {
   DeploymentEngineRun,
   DeploymentRelease,
   DeploymentRuntimeService,
-  FailureDiagnosis,
   MetricEvent,
   PortExposure,
   PortScope,
@@ -111,29 +110,6 @@ const FAILING_STATES = new Set(["restarting", "exited", "dead"])
 
 export function wantsFailureReading(state: string) {
   return FAILING_STATES.has(state)
-}
-
-/**
- * Whether a diagnosis has something to say that the reader did not already
- * choose. A container somebody stopped exits with status 0, and a notice on
- * every stopped service would be the page crying wolf; a crash, a kill by the
- * kernel, a loop and a failing check are not.
- */
-export function failureTone(diagnosis: FailureDiagnosis): "warning" | "danger" | undefined {
-  switch (diagnosis.state) {
-    case "looping":
-    case "unhealthy":
-      return "danger"
-    case "flapping":
-      return "warning"
-    case "stopped": {
-      if (diagnosis.evidence.some((item) => item.label === "OOM killed")) return "danger"
-      const exit = diagnosis.evidence.find((item) => item.label === "Exit code")
-      return exit && !/^0\b/.test(exit.value) ? "warning" : undefined
-    }
-    default:
-      return undefined
-  }
 }
 
 /**

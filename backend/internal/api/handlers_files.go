@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/go-chi/chi/v5"
@@ -63,6 +66,8 @@ func (s *Server) mountFileRoutes(r chi.Router) {
 
 func mapFileError(err error) error {
 	switch {
+	case errors.Is(err, contentguard.ErrConflict):
+		return httpx.Err(http.StatusConflict, "content_conflict", err.Error())
 	case errors.Is(err, files.ErrOutsideRoot):
 		return httpx.Err(http.StatusForbidden, "outside_root", err.Error())
 	case errors.Is(err, files.ErrTooLarge):
@@ -167,8 +172,9 @@ func (s *Server) handleFileArchive(w http.ResponseWriter, r *http.Request) error
 }
 
 type writeFileRequest struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Path             string  `json:"path"`
+	Content          string  `json:"content"`
+	ExpectedRevision *string `json:"expectedRevision,omitempty"`
 }
 
 func (s *Server) handleFileWrite(w http.ResponseWriter, r *http.Request) error {
@@ -176,7 +182,7 @@ func (s *Server) handleFileWrite(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	if err := s.modules.files.Write(req.Path, req.Content); err != nil {
+	if err := s.modules.files.WriteChecked(req.Path, req.Content, req.ExpectedRevision); err != nil {
 		return mapFileError(err)
 	}
 	httpx.SetAudit(r, "file.write", req.Path, map[string]any{"bytes": len(req.Content)})
@@ -184,7 +190,10 @@ func (s *Server) handleFileWrite(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapFileError(err)
 	}
-	httpx.JSON(w, http.StatusOK, entry)
+	httpx.JSON(w, http.StatusOK, struct {
+		*files.Entry
+		Revision string `json:"revision"`
+	}{entry, contentguard.Revision(req.Content)})
 	return nil
 }
 
@@ -194,6 +203,17 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) error 
 		return httpx.BadRequest("path query parameter is required")
 	}
 	overwrite := r.URL.Query().Get("overwrite") == "true"
+	var expected *string
+	if r.URL.Query().Has("expectedRevision") {
+		revision := r.URL.Query().Get("expectedRevision")
+		if revision != "" {
+			digest, err := hex.DecodeString(revision)
+			if err != nil || len(digest) != sha256.Size {
+				return httpx.BadRequest("expectedRevision must be a SHA-256 revision or empty for a new file")
+			}
+		}
+		expected = &revision
+	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	reader, err := r.MultipartReader()
@@ -201,6 +221,7 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) error 
 		return httpx.BadRequest("expected a multipart upload: %v", err)
 	}
 	written := []string{}
+	revisions := map[string]string{}
 	for {
 		part, err := reader.NextPart()
 		if err == io.EOF {
@@ -221,18 +242,20 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) error 
 			part.Close()
 			continue
 		}
-		_, err = s.modules.files.Upload(filepath.Join(dir, name), part, overwrite)
+		hash := sha256.New()
+		_, err = s.modules.files.UploadChecked(filepath.Join(dir, name), io.TeeReader(part, hash), overwrite, expected)
 		part.Close()
 		if err != nil {
 			return uploadError(err)
 		}
 		written = append(written, name)
+		revisions[name] = hex.EncodeToString(hash.Sum(nil))
 	}
 	if len(written) == 0 {
 		return httpx.BadRequest("no file part found in the upload")
 	}
 	httpx.SetAudit(r, "file.upload", dir, map[string]any{"files": written})
-	httpx.JSON(w, http.StatusCreated, map[string]any{"uploaded": written, "path": dir})
+	httpx.JSON(w, http.StatusCreated, map[string]any{"uploaded": written, "path": dir, "revisions": revisions})
 	return nil
 }
 

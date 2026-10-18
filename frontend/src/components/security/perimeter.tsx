@@ -3,7 +3,7 @@
 import { useRef } from "react"
 import { Globe, SecureConnection, Shield, ShieldCheck, type Icon } from "@/components/icons"
 import { networkOf } from "@/lib/clients"
-import type { Exposure, Fail2banJail, FirewallStatus, Posture } from "@/lib/types"
+import type { Exposure, Fail2banJail, FirewallStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
@@ -11,7 +11,6 @@ import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/depl
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { EXPOSURE_GRADE } from "@/components/security/exposure-panel"
 import { openings, refusesByDefault } from "@/components/network/firewall-reading"
-import { worstLevel } from "@/components/security/posture-panel"
 
 type Fail2ban = { available: boolean; running: boolean; jails: Fail2banJail[] }
 
@@ -46,13 +45,11 @@ export function Perimeter({
   exposure,
   firewall,
   fail2ban,
-  posture,
   fromInternet,
 }: {
   exposure: Exposure | undefined
   firewall: FirewallStatus | undefined
   fail2ban: Fail2ban | undefined
-  posture: Posture | undefined
   /** Peers from the internet connected now; undefined while unread. */
   fromInternet: number | undefined
 }) {
@@ -66,9 +63,6 @@ export function Perimeter({
   const panel = useRef<HTMLDivElement>(null)
 
   const knocking = (fromInternet ?? 0) > 0
-  const sshFindings = posture?.findings.filter((f) => f.area === "ssh") ?? []
-  const sshLevel = worstLevel(sshFindings)
-  const noSshd = posture?.skipped.includes("ssh") ?? false
 
   const enforcing = Boolean(firewall?.available && firewall.enabled)
   const inbound = firewall?.policy?.incoming
@@ -101,13 +95,7 @@ export function Perimeter({
     {
       from: jail,
       to: sshd,
-      ...(noSshd
-        ? { dashed: true, still: true }
-        : sshLevel === "critical"
-          ? { still: true, tone: "danger" }
-          : sshLevel === "warning"
-            ? { still: true, tone: "warning" }
-            : { still: !knocking }),
+      still: !knocking,
     },
     { from: you, to: allow, ...(risky ? { still: true, tone: "warning" } : {}) },
     { from: allow, to: panel, ...(risky ? { still: true, tone: "warning" } : {}) },
@@ -115,7 +103,6 @@ export function Perimeter({
 
   return (
     <div className="relative min-w-0 animate-rise py-6">
-      <div aria-hidden className="wire-grid pointer-events-none absolute inset-0" />
       <div ref={container} className="relative min-w-0">
         {lines.map((line, index) => (
           <AnimatedBeam
@@ -221,41 +208,9 @@ export function Perimeter({
             <WireNode
               nodeRef={sshd}
               align="center"
-              mark={
-                noSshd ? (
-                  <WirePlaceholder fallback={SecureConnection} />
-                ) : (
-                  <Mark
-                    fallback={SecureConnection}
-                    tone={
-                      sshLevel === "critical"
-                        ? "danger"
-                        : sshLevel === "warning"
-                          ? "warning"
-                          : "logo"
-                    }
-                  />
-                )
-              }
+              mark={<Mark fallback={SecureConnection} tone="logo" />}
               eyebrow="Shell"
               title="sshd"
-              hint={
-                noSshd ? (
-                  "none on this host"
-                ) : sshFindings.length > 0 ? (
-                  <span
-                    className={cn(
-                      "line-clamp-2",
-                      sshLevel === "critical" && "text-destructive",
-                      sshLevel === "warning" && "text-warning",
-                    )}
-                  >
-                    {sshFindings[0].title}
-                  </span>
-                ) : posture ? (
-                  <span className="text-success">at recommendation</span>
-                ) : undefined
-              }
             />
           </li>
 

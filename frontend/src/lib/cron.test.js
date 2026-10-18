@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import {
   describeCron,
+  describeNativeCron,
+  isValidNativeCron,
+  nextNativeCronRun,
   isValidCron,
   nextCronRun,
   nextCronRunsIn,
@@ -38,6 +41,10 @@ describe("describing a schedule", () => {
     expect(isValidCron("0 3 * * mon")).toBe(true)
     expect(isValidCron("@reboot")).toBe(true)
     expect(isValidCron("@bogus")).toBe(false)
+    for (const schedule of ["*/5/2 * * * *", "1-2-3 * * * *", "1,,2 * * * *"]) {
+      expect(isValidCron(schedule)).toBe(false)
+      expect(nextCronRun(schedule)).toBeNull()
+    }
   })
 })
 
@@ -76,6 +83,8 @@ describe("recognising a preset", () => {
     expect(presetFor("* * * * *")).toBe("minute")
     expect(presetFor("*/5 * * * *")).toBe("5min")
     expect(presetFor("0 * * * *")).toBe("hourly")
+    expect(presetFor("15 * * * *")).toBe("custom")
+    expect(presetFor("45 * * * *")).toBe("custom")
     expect(presetFor("0 3 * * *")).toBe("daily")
     expect(presetFor("0 3 * * 1")).toBe("weekly")
     expect(presetFor("0 3 1 * *")).toBe("monthly")
@@ -171,4 +180,26 @@ describe("the next runs in a named zone", () => {
       expect(nextCronRunsIn(expression, zone, 1, from)).toEqual([nextCronRun(expression, from)])
     }
   })
+})
+
+test("star steps use native day intersection and reject unsupported step grammar", () => {
+  const from = new Date("2026-10-12T00:01:00Z")
+  expect(nextNativeCronRun("0 0 */2 * 1", from, "UTC")).toEqual(new Date("2026-10-19T00:00:00Z"))
+  expect(isValidNativeCron("5/5 * * * *")).toBe(false)
+  expect(isValidCron("*/999999999999999999999999 * * * *")).toBe(false)
+  expect(isValidCron("5-59/5 * * * *")).toBe(true)
+  expect(describeNativeCron("0 0 */2 * 1")).toContain("and on Monday")
+  expect(describeNativeCron("0 0 */2 * 1")).not.toContain("or on Monday")
+  expect(describeCron("0 0 * * */2")).toBe("At 00:00 on Sunday, Tuesday, Thursday and Saturday")
+})
+
+test("app forecasts preserve the Go scheduler's number steps and star-step day union", () => {
+  const from = new Date("2026-10-12T00:01:00Z")
+  expect(isValidCron("5/5 * * * *")).toBe(true)
+  expect(nextCronRunsIn("5/5 * * * *", "UTC", 2, from)).toEqual([
+    new Date("2026-10-12T00:05:00Z"),
+    new Date("2026-10-12T00:10:00Z"),
+  ])
+  expect(nextCronRunsIn("0 0 */2 * 1", "UTC", 1, from)).toEqual([new Date("2026-10-13T00:00:00Z")])
+  expect(describeCron("0 0 */2 * 1")).toContain("or on Monday")
 })

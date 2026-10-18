@@ -178,7 +178,7 @@ export default function NetworkGatewayPage() {
                       (chain) => chain.needed && chain.status === "unreadable",
                     )
                   ? "Unreadable"
-                  : "Needs attention"
+                  : "Unavailable"
           }
           tone={
             view.admission.needed ? (view.admission.present ? "success" : "warning") : "default"

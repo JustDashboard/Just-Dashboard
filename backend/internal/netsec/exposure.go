@@ -24,8 +24,6 @@ type Exposure struct {
 	Interfaces []string `json:"interfaces"`
 	// TailscaleIP is this machine's tailnet address, when it has one.
 	TailscaleIP string `json:"tailscaleIp,omitempty"`
-	// Recommendation is non-empty when there is a better arrangement.
-	Recommendation string `json:"recommendation,omitempty"`
 	// Client is the address the request arrived from, filled in by the
 	// handler rather than here so DescribeExposure stays a pure function. It
 	// is the one address an operator must never block, ban or leave off an
@@ -83,10 +81,6 @@ func DescribeExposure(allowed []*net.IPNet) Exposure {
 	case 0:
 		e.Grade = "tunnel"
 		e.Summary = "Reachable only over loopback — an SSH tunnel is the only way in."
-		if e.TailscaleIP != "" {
-			e.Recommendation = "Tailscale is already running on this host. Pointing the dashboard at " +
-				e.TailscaleIP + " would let you reach it from your own devices without an SSH tunnel."
-		}
 	case 1:
 		e.Grade = "tailscale"
 		e.Summary = "Reachable only from your tailnet. Nothing is exposed to the internet."
@@ -96,11 +90,9 @@ func DescribeExposure(allowed []*net.IPNet) Exposure {
 	case 3:
 		e.Grade = "public"
 		e.Summary = "Reachable from public addresses. The allowlist is the only thing in front of a root-equivalent panel."
-		e.Recommendation = "Move to Tailscale or an SSH tunnel. Either removes this machine from the internet entirely."
 	case 4:
 		e.Grade = "open"
 		e.Summary = "The allowlist admits every address on the internet."
-		e.Recommendation = "Narrow JD_ALLOWED_CIDRS immediately, or move to Tailscale. Anyone who finds this host can reach the login page."
 	}
 	return e
 }

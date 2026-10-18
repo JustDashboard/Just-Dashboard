@@ -37,6 +37,24 @@ saves at once on Ctrl/Cmd+S (Excalidraw's own save-to-file shortcut is disabled)
 saving, saved, failed, unnamed, conflict and deleted states. When changes cannot be saved, Back and
 in-board links ask before leaving without saving instead of doing nothing.
 
+A flush waits for every edit, including changes made while an earlier request was in flight.
+`lib/board-save.ts` drains successive snapshots against their acknowledged revisions, and editor-owned
+Back and resource-link navigation checks that the drawing is still clean before routing. A failed later save keeps the editor open with
+the leave choice. Reloading or closing the browser tab also warns while changes remain unsaved,
+including after a conflict or missing-drawing response; an explicit choice to leave without saving or
+delete the drawing suppresses that warning.
+
+Every dirty drawing also retains its name, scene, saved signature and original revision in this tab's
+memory (`lib/editor-drafts.ts`). Sidebar, command-palette and browser history navigation can unmount
+the editor without discarding that snapshot. Returning waits for the previous instance's in-flight
+saves to settle before restoring the draft and its acknowledged revision; no best-effort unmount
+write stands in for acknowledgement. A failed or conflicted save retains the draft, and the tab's
+unload warning stays active even on another page. Explicit Leave without saving, successful deletion
+or sign-out clears it. Buffers are never placed in Web Storage and do not survive a confirmed reload.
+Account cleanup fences late save responses with a generation, so they cannot restore a previous
+account's draft. Regression coverage includes failed sidebar/palette exits, Back and save completion
+while the editor is unmounted in `boards-ui.spec.ts`.
+
 `DELETE /boards/{id}` uses `s.destructive`: the `destructive` capability, tighter rate limit and
 audit. The editor uses ordinary confirmation before deleting the drawing. A failed save does not block
 deletion. All mutations

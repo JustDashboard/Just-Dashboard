@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   THRESHOLDS,
   behind,
+  clientGroups,
   blockedBy,
   concernOf,
   countByState,
@@ -272,5 +273,51 @@ describe("the session list at a glance", () => {
     expect(tallySessions(list([session("1", "active")], false))).toBeUndefined()
     expect(tallySessions(list([]))).toBeUndefined()
     expect(tallySessions(undefined)).toBeUndefined()
+  })
+})
+
+describe("the clients the sessions come from", () => {
+  test("one node per application, with what each of its sessions is doing", () => {
+    const groups = clientGroups([
+      session("1", "active", { application: "shop-api" }),
+      session("2", "idle", { application: "shop-api", idleSeconds: 4 }),
+      session("3", "idle", { application: "Shop-API", idleSeconds: 9 }),
+      session("4", "idle", { user: "reports" }),
+      session("5", "background", { application: "autovacuum launcher" }),
+    ])
+    expect(groups.map((group) => [group.name, group.named, group.sessions])).toEqual([
+      ["shop-api", "application", 3],
+      ["reports", "account", 1],
+    ])
+    expect(groups[0].counts.active).toBe(1)
+    expect(groups[0].counts.idle).toBe(2)
+  })
+
+  test("a client with a session stuck behind a lock comes first, then one holding a transaction", () => {
+    const groups = clientGroups([
+      session("1", "active", { application: "busy" }),
+      session("2", "active", { application: "busy" }),
+      session("3", "idle_in_transaction", {
+        application: "checkout",
+        transactionSeconds: THRESHOLDS.idleInTransaction + 5,
+      }),
+      session("4", "blocked", { application: "billing", seconds: 2 }),
+    ])
+    expect(groups.map((group) => [group.name, group.worst])).toEqual([
+      ["billing", "blocked"],
+      ["checkout", "open-transaction"],
+      ["busy", undefined],
+    ])
+  })
+
+  test("the dashboard's own read is one client, named for what it is, after its peers", () => {
+    const groups = clientGroups([
+      session("9", "active", { self: true, application: "pgx" }),
+      session("1", "idle", { application: "psql", idleSeconds: 60 }),
+    ])
+    expect(groups.map((group) => [group.key, group.name])).toEqual([
+      ["psql", "psql"],
+      ["self", "This dashboard"],
+    ])
   })
 })

@@ -185,8 +185,10 @@ function DiskShare({
   const report = (reports: PruneReport[]) => {
     const { reclaimed, message, failed } = pruneSummary(reports)
     if (failed.length && reclaimed === 0) notify.error(message)
+    else if (failed.length) notify.warning(message)
     else notify.success(message)
     onPruned()
+    return "reported" as const
   }
 
   const reclaim = (key: string) => {
@@ -210,6 +212,7 @@ function DiskShare({
               </p>
             </>
           ),
+          workingLabel: "Removing unused images…",
           action: async () => report([await pruneImages()]),
         })
     }
@@ -230,6 +233,7 @@ function DiskShare({
               </p>
             </>
           ),
+          workingLabel: "Reclaiming build cache…",
           action: async () => report([await pruneBuildCache()]),
         })
     }
@@ -245,6 +249,7 @@ function DiskShare({
               written to their own writable layer. Their images and volumes stay.
             </p>
           ),
+          workingLabel: "Removing stopped containers…",
           action: async () => report([await pruneContainers()]),
         })
     }
@@ -337,6 +342,7 @@ function DiskShare({
                           </p>
                         </>
                       ),
+                      workingLabel: "Reclaiming Docker space…",
                       action: async () => report(await prune(RECLAIM_SAFE)),
                     })
                   }

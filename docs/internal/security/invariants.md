@@ -17,16 +17,24 @@ A change that weakens any of these has to say so explicitly.
 4. Capability checks live on the route, never in the UI alone. Where the answer depends on what is *in* the
    request, the handler checks by hand and fails closed, and each such check has one owner:
    - `api.authoriseSQL` for SQL, on the verdict `dbx` reads off each statement by the rules of the
-     connection's own engine (`dbx.ParseScript`): the query, script and analysed-plan routes;
+     connection's own engine (`dbx.ParseScript`): the query, script and analysed-plan routes. Where a
+     statement ends is the engine's reading as well, a stored program's body included, and a statement
+     that holds statements of its own is never below `high`, so a protected connection refuses it;
    - the handler of `POST …/changes` for a change set, by the operations it holds: one that deletes
      rows needs the destructive capability;
    - `api.runDDL` for a schema form that changes a column's type or whose own SQL (a CHECK condition,
      an index predicate, a USING conversion, a function default) calls anything `dbx` does not vouch
      for — either needs the destructive capability on a route that otherwise asks for
-     `service.control`, for a preview as much as for a run;
+     `service.control`, for a preview as much as for a run. The same owner holds the routes that store
+     code in the database (`POST …/ddl/routine` and `…/ddl/trigger`): the query runner classifies every
+     `CREATE FUNCTION`, `PROCEDURE` and `TRIGGER` as high risk, so the form asks for what the console
+     asks, on every request; and `PATCH …/ddl/row-security`, where turning row-level security off or
+     no longer forcing it on the owner (`dbx.RowSecurityChange.TurnsOff`) is what makes it destructive;
    - `dbx.MaintenanceAction.NeedsDestructive` for a maintenance action that locks a table against the
      application or can lose rows, and the body of the power route, where `stop` and `restart` are
      what make the request destructive;
+   - `api.planDBLimits` for a change of a database container's limits, where lifting one replaces the
+     container;
    - `dbx.RedisClassify` for a Redis console command, and the body of the Redis bulk, rename and copy
      routes, where `action: delete|expire` and `overwrite` are what make the request destructive;
    - `dbx.MongoClassifyPipeline` and `dbx.MongoClassifyCommand` for a MongoDB pipeline and console
@@ -56,6 +64,24 @@ A change that weakens any of these has to say so explicitly.
      known gap rather than the boundary
      ([observability-security](../backend/observability-security.md))).
 
+   An API key can be narrowed to one capability, and that fails closed too. A key with a `scope`
+   (today only `metrics.read`, made by `CreateScopedAPIToken`, always on the read-only role) is
+   refused by `Authenticate` on every group with `403 key_scope` before any capability is asked;
+   the one group that admits it, `AuthenticateScoped` in `mountDatabaseMetricsExport`, also
+   requires a key rather than a session (`httpx.RequireToken`), and `Principal.Can` answers only
+   the scoped capability, so a route added to that group later cannot widen the key.
+
+   An MCP key (`scope = 'mcp'`, made by `CreateMCPToken`) is refused the same way by `Authenticate`
+   and `AuthenticateScoped` alike, and opens only `/api/v1/mcp` through `AuthenticateMCP`, which
+   takes no session cookie and no other key. There it keeps its role — its owner's or one made
+   narrower, never more than the owner holds now — so a statement is judged by `authoriseSQL`
+   exactly as the SQL editor judges it for that role — a destructive one
+   still needs `destructive` and spends the same budget — and the key's grants narrow it further:
+   only the connections `api_token_connections` names, each `read` or `write`, re-read on every call,
+   and never a protected connection, which is refused for every tool, reads included. A walk of
+   every route with an MCP key (`TestAnMCPKeyOpensNoOtherRoute`) holds the first half; the grants
+   are re-checked by the handler rather than trusted from the key.
+
    A database connection marked read-only adds one rule in front of all of these, and it fails closed
    the other way round: `protectReadOnlyConnections` refuses every request under `/databases/{id}` that
    is not a `GET` unless its route is on an allowlist, so a mutating route added later is refused until
@@ -75,7 +101,11 @@ A change that weakens any of these has to say so explicitly.
    (compose, the streaming runner, `Build`) because the Engine API has no equivalent; all three build argv
    explicitly. A database dump that is a SQL script is replayed by `dbx` over the dashboard's own
    connection (`dump_script.go`) and never piped to `psql` or `mysql`: each of those runs a shell for a
-   line of what it is fed (`\!`, `system`), which would make an uploaded dump that second shell.
+   line of what it is fed (`\!`, `system`), which would make an uploaded dump that second shell. A
+   major-version upgrade runs the servers' own clients inside their own containers through
+   `dockerx.ExecPipe`, each an argv with any password in its environment: `pg_dump` read by `pg_restore`
+   (an archive, never a script), and `psql` only with statements `dbx` wrote, each one `-c`. The roles'
+   script `pg_dumpall` writes is replayed by `dbx` over a connection, as a restored script is.
 7. Nothing but Caddy binds a routable address. The one exception is not the dashboard's own listener:
    a pull request preview is reachable at `https://<node>.<tailnet>.ts.net:<port>` because **tailscaled**
    listens on the host's tailnet address for ports **21000–21999** on the dashboard's behalf
@@ -88,6 +118,17 @@ A change that weakens any of these has to say so explicitly.
    a funnel or any other target of the operator's is never touched, at start, on a failed activation or
    on removal, since restore and withdrawal act only on a mapping whose upstream the row recorded. See
    [preview isolation](../deployments/preview-isolation.md#tailnet-only-addresses).
+   The second exception is Remote Desktop's stream bridge: on a server on a tailnet it publishes a
+   block of 20 UDP ports from 40000 on the **tailnet address only**, for WebRTC
+   ([Stream mode](../backend/remote-desktop.md#stream-mode)). Nothing is sent on them without a
+   stream negotiated over the bridge's WebSocket, which is behind the dashboard's session, and no
+   block is published on a server off a tailnet.
+   A database's port published from its Network page — on one of the host's own addresses, on every
+   interface kept to a list, or to anywhere — is not the dashboard's socket either: it is the operator's
+   explicit choice, in the destructive group and audited as `database.access.change`. A list is kept by
+   the network module's gateway table, whose prerouting drop runs before Docker's translation, never by
+   a host firewall rule that a published port's traffic does not meet
+   ([databases](../backend/databases-proxy-platform.md)).
    `GET /security/boundary` reports both halves as observed — a dashboard socket other than Caddy's
    on a routable address, no Caddy on the configured port, or a preview port that is funnelled or
    serves anything but a loopback upstream is a broken boundary on the Security overview — but the
@@ -110,7 +151,7 @@ A change that weakens any of these has to say so explicitly.
     actions come from a closed set with the account name validated before interpolation. The same
     validator gates the console route and the scheduler, so a schedule cannot send what the console
     refuses.
-11. Diagnosis claims only what an owner returned. An unavailable module is recorded as a *silence* with a
+11. Requested diagnostics claim only what an owner returned. Unavailable measurements carry a
     reason — never as a healthy result, and never as a problem. A finding that cannot name an action or a
     deep link says which external action is required instead.
 
@@ -170,7 +211,7 @@ Typed confirmation is reserved for six deletion operations:
 These are the only places the UI asks the operator to type a phrase. Other destructive operations,
 including table and collection deletion, data restores, Docker volume removal and pruning, account and
 board deletion, Git discard/reset and discard-and-pull, firewall and SSH changes, package changes, certificate export and
-revocation, self-update, and an uninstall that keeps the data, use an ordinary confirmation in the UI. Read-only actions and routine
+revocation, exporting the backup key (`POST /backups/key/export`), self-update, and an uninstall that keeps the data, use an ordinary confirmation in the UI. Read-only actions and routine
 mutations may need no dialog. The absence of a typed phrase does not relax capability checks, the
 `destrLim` rate budget, audit entries, path containment, or host command rules.
 

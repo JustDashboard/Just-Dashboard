@@ -21,6 +21,11 @@ export function isBare(user: Pick<SystemUser, "noPassword" | "locked">) {
   return user.noPassword && !user.locked
 }
 
+/** A login shell is only an available route, not proof sshd/PAM will admit it. */
+export function hasSignInRoute(user: Pick<SystemUser, "canLogin" | "locked" | "sshKeyCount">) {
+  return user.canLogin && (!user.locked || user.sshKeyCount > 0)
+}
+
 /**
  * What the line's verdict says: how many accounts can be signed into with no
  * password, and how many of those are administrators — root for anyone who
@@ -63,7 +68,8 @@ export function rootRoutes(user: Pick<SystemUser, "groups" | "uid">): RootRoute[
 
 /**
  * Everyone who can reach root, the accounts that need no password first and
- * the locked ones last — a locked account holds the power but cannot use it.
+ * the password-locked ones last. Keys and other authentication routes may
+ * still admit a password-locked account, depending on sshd/PAM policy.
  */
 export function rootReach(users: SystemUser[]) {
   const rank = (u: SystemUser) => (isBare(u) ? 0 : u.locked ? 2 : 1)

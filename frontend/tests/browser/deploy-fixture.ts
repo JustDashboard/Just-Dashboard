@@ -99,6 +99,7 @@ export const releaseOwner = {
  */
 export function backupJob(fields: { id: number; name: string } & Record<string, unknown>) {
   return {
+    revision: 1,
     sources: ["/srv/app"],
     excludes: [],
     targetKind: "local",
@@ -109,7 +110,6 @@ export function backupJob(fields: { id: number; name: string } & Record<string, 
     enabled: true,
     createdAt: now,
     hasCredentials: false,
-    overdue: false,
     stored: { runs: 3, bytes: 1024 },
     databaseDumps: [],
     ...fields,
@@ -319,7 +319,6 @@ export const healthyOperations: DeploymentOperations = {
     ],
   },
   dependencies: { status: "available", items: [] },
-  diagnosis: { status: "assessed", findings: [], silences: [] },
 }
 
 /**
@@ -1179,22 +1178,6 @@ export const showcaseOperations: DeploymentOperations = {
       },
     ],
   },
-  diagnosis: {
-    status: "assessed",
-    findings: [
-      {
-        code: "certificate.expiring",
-        severity: "warning",
-        title: "A certificate expires in 9 days",
-        measured: "www.example.test · Let's Encrypt E5 · 9 days left",
-        means: "Visitors see a certificate warning once it lapses.",
-        action: "Renew it from the proxy's certificates.",
-        owner: "domains",
-        deepLink: "/proxy/certificates",
-      },
-    ],
-    silences: [],
-  },
 }
 
 /** Eight variables: secrets, plain values, two database references and a build token. */
@@ -1842,12 +1825,17 @@ const showcaseConnections: DbConnection[] = [
   },
 ]
 
+const provisionOption = (engine: string, label: string, image: string, driver: string) => {
+  const version = image.split(":")[1].replace(/-alpine$/, "")
+  return { engine, label, image, driver, versions: [{ version }], defaultVersion: version }
+}
+
 const showcaseProvisionOptions: DbProvisionOption[] = [
-  { engine: "postgres", label: "PostgreSQL", image: "postgres:17-alpine", driver: "postgres" },
-  { engine: "mysql", label: "MySQL", image: "mysql:8.4", driver: "mysql" },
-  { engine: "mariadb", label: "MariaDB", image: "mariadb:11", driver: "mysql" },
-  { engine: "redis", label: "Redis", image: "redis:7-alpine", driver: "redis" },
-  { engine: "mongodb", label: "MongoDB", image: "mongo:8", driver: "mongodb" },
+  provisionOption("postgres", "PostgreSQL", "postgres:17-alpine", "postgres"),
+  provisionOption("mysql", "MySQL", "mysql:8.4", "mysql"),
+  provisionOption("mariadb", "MariaDB", "mariadb:11", "mysql"),
+  provisionOption("redis", "Redis", "redis:7-alpine", "redis"),
+  provisionOption("mongodb", "MongoDB", "mongo:8", "mongodb"),
 ]
 
 /** Fourteen nightly runs of the job the release gates on, newest first, one failed. */
@@ -1867,6 +1855,7 @@ const showcaseBackupRuns: BackupRun[] = Array.from({ length: 14 }, (_, index) =>
 const showcaseBackupJobs: BackupJob[] = [
   {
     id: 4,
+    revision: 1,
     name: "api-nightly",
     sources: ["/var/lib/docker/volumes/api-data/_data"],
     excludes: [],
@@ -1878,7 +1867,6 @@ const showcaseBackupJobs: BackupJob[] = [
     enabled: true,
     createdAt: ago(900),
     hasCredentials: false,
-    overdue: false,
     databaseDumps: [11],
     lastSuccessAt: ago(9),
     nextRun: ago(-15),
@@ -1887,6 +1875,7 @@ const showcaseBackupJobs: BackupJob[] = [
   },
   {
     id: 5,
+    revision: 1,
     name: "uploads-offsite",
     sources: ["/srv/uploads"],
     excludes: [],
@@ -1898,7 +1887,6 @@ const showcaseBackupJobs: BackupJob[] = [
     enabled: true,
     createdAt: ago(600),
     hasCredentials: true,
-    overdue: false,
     databaseDumps: [],
     stored: { runs: 8, bytes: 8 * 1024 * 1024 * 1024 },
   },

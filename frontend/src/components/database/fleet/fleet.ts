@@ -8,7 +8,7 @@ import type { DbBackupSummary, DbPowerAction } from "@/components/database/fleet
  * feed is split into its two lanes.
  */
 
-/** A backup older than this is stale: amber on the runway, the card and the table. */
+/** A backup older than this is stale: amber under Backups, on the card and in the table. */
 export const STALE_BACKUP_MS = 7 * 24 * 60 * 60 * 1000
 
 /** "Backed up" on the readings means a dump taken inside this window. */
@@ -25,18 +25,27 @@ export type Concern = {
   reason: string
 }
 
-/** What the fleet's reading of a database says about its dumps. */
+/** What the fleet's reading of a database says about its backups. */
 export type BackupReading = {
-  /** When the newest dump was taken; undefined when there is none. */
+  /** When it was last backed up, by hand or by a backup job; undefined for never. */
   newest: string | undefined
   /** A dump, restore or copy is running against it now. */
   running: boolean
 }
 
+/** The later of two instants, either of which may be missing. */
+function later(a: string | undefined, b: string | undefined): string | undefined {
+  if (!a || !b) return a ?? b
+  return Date.parse(b) > Date.parse(a) ? b : a
+}
+
 /**
- * The newest dump of each connection. The summary is the dump directories'
- * own listing and wins; where it could not be read the fleet's `lastBackup`
- * still says when the newest one was written.
+ * When each connection was last backed up. The fleet's `lastBackup` counts
+ * the backup jobs' runs as well as the dump directory; the summary is the
+ * directories' own listing, read every few seconds while a dump runs, so it
+ * learns of a new dump first. The later of the two is the answer: were the
+ * summary to win, a database a nightly job protects would be as old as the
+ * last dump somebody took by hand.
  */
 export function backupReadings(
   fleet: DbFleet | undefined,
@@ -48,7 +57,7 @@ export function backupReadings(
   }
   for (const row of summary?.connections ?? []) {
     out.set(row.id, {
-      newest: row.newest?.takenAt ?? out.get(row.id)?.newest,
+      newest: later(row.newest?.takenAt, out.get(row.id)?.newest),
       running: row.job?.status === "running",
     })
   }
@@ -300,6 +309,8 @@ export function reachWord(exposure: DbFleetEntry["exposure"]): string {
       return "this server only"
     case "private":
       return "a private network"
+    case "allowlist":
+      return "listed addresses"
     case "public":
       return "the internet"
     case "remote":
@@ -459,6 +470,29 @@ export function edgeRank(status: string) {
   return 0
 }
 
+/**
+ * The lanes in the order that crosses fewest wires: databases that feed
+ * something first, then each reader at the mean position of the databases
+ * that reach it. Ties keep the order the split gave — the worst link first.
+ */
+export function wiredOrder(split: ReturnType<typeof splitTopology>) {
+  const databases = [
+    ...split.databases.filter((node) => split.feeds.has(node.id)),
+    ...split.databases.filter((node) => !split.feeds.has(node.id)),
+  ]
+  const at = new Map(databases.map((node, index) => [node.id, index]))
+  const mean = (node: DbTopoNode) => {
+    const sources = split.fedBy.get(node.id) ?? []
+    if (sources.length === 0) return Number.POSITIVE_INFINITY
+    return sources.reduce((sum, source) => sum + (at.get(source.from.id) ?? 0), 0) / sources.length
+  }
+  const consumers = split.consumers
+    .map((node, index) => ({ node, index, mean: mean(node) }))
+    .sort((a, b) => a.mean - b.mean || a.index - b.index)
+    .map((one) => one.node)
+  return { ...split, databases, consumers }
+}
+
 /** The worst link among several, as the word the map says it with. */
 export function worstStatus(edges: DbTopoEdge[]): string {
   return edges.reduce(
@@ -489,14 +523,4 @@ export function describeEdge(edge: DbTopoEdge): string {
     parts.push(edge.sessions === 1 ? "1 open session" : `${edge.sessions} open sessions`)
   else if (edge.via.includes("session")) parts.push("seen connected")
   return parts.join(" · ")
-}
-
-/** The same in the two words a small card has room for. */
-export function shortEdge(edge: DbTopoEdge): string {
-  if (edge.sessions > 0) return `${edge.sessions} open`
-  if (edge.via.includes("binding")) return "linked"
-  if (edge.via.includes("env")) return "configured"
-  if (edge.via.includes("stack")) return "same stack"
-  if (edge.via.includes("network")) return "same network"
-  return "seen"
 }

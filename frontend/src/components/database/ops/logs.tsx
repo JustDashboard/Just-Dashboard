@@ -44,7 +44,10 @@ import { useDatabase } from "@/components/database/shell/database-context"
  * The lens's readings are figures over its window — restarts, persistence
  * failures, memory limits in the last hour — drawn as the counts on the lens
  * row's chips, each a press from the lines it counts, since a workbench has
- * no room above it for a row of tiles.
+ * no room above it for a row of tiles. Insights draws none either: its
+ * cards repeated the level chips, the chart's busiest column and the
+ * statement-time ladder under them, and on a phone they were the first
+ * screen.
  */
 export function Logs() {
   const { conn, engine, goto } = useDatabase()
@@ -166,6 +169,7 @@ function ServerLogs({
         storageKey={`databases.${conn.id}.logs`}
         views={views}
         readings="chips"
+        insightTiles={false}
         pickerLabel="Server log"
         className="min-h-0 flex-1"
       />

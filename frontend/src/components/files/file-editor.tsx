@@ -18,7 +18,7 @@ import {
   CornerUpRight,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { get, post, put } from "@/lib/api"
+import { ApiError, get, post, put } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileContent } from "@/lib/types"
@@ -29,6 +29,7 @@ import { DiffView } from "@/components/files/diff-view"
 import { unifiedDiff } from "@/components/files/diff"
 import { isImage, rawUrl } from "@/components/files/media"
 import { EditorSurface } from "./editor-surface"
+import { ContentConflict } from "./content-conflict"
 import { FileIcon } from "./file-icon"
 import { handoffDraft, takeDraft } from "./editor-handoff"
 import { editorHref } from "./search"
@@ -138,15 +139,17 @@ function FileEditorPanel({
   const [commands, setCommands] = useState<EditorCommands>()
   const [indent, setIndent] = useViewState("files.editor.indent", "2")
   const { confirm, dialog } = useConfirm()
-  const [file, setFile] = useState<FileContent>()
-  const [draft, setDraft] = useState("")
+  const [file, setFile] = useState<FileContent | undefined>(handoff?.original)
+  const [draft, setDraft] = useState(handoff?.content ?? "")
   const [error, setError] = useState<Error>()
   const [saving, setSaving] = useState(false)
+  const [conflict, setConflict] = useState(false)
   const [mode, setMode] = useState("")
   const [language, setLanguage] = useState<string>()
   const [cursor, setCursor] = useState({ line: 1, column: 1, selected: 0 })
   const [format, setFormat] = useState<(() => void) | null>(null)
-  // Reviewing swaps the editor for a diff of the draft against the disk. It
+  // Reviewing compares with the version opened or explicitly refreshed after
+  // a conflict. Saving still checks that revision against disk. This
   // is the last look before Save on a file that keeps a server up, and it is
   // not remembered: it is a question about this edit, not about the editor.
   const [reviewing, setReviewing] = useState(false)
@@ -164,7 +167,8 @@ function FileEditorPanel({
       get<FileContent>("/files/read", { path }, signal)
         .then((f) => {
           if (signal?.aborted) return
-          setFile(f)
+          setFile(handoff?.original ?? f)
+          if (handoff?.original && handoff.original.revision !== f.revision) setConflict(true)
           setDraft(handoff?.content ?? f.content)
           setMode(f.modeOctal)
           setLanguage(handoff?.language ?? (nameLanguage(path) || f.language))
@@ -194,12 +198,21 @@ function FileEditorPanel({
       const destination = target ?? path
       setSaving(true)
       try {
-        await put("/files/write", { path: destination, content: draft })
+        const result = await put<{ revision?: string }>("/files/write", {
+          path: destination,
+          content: draft,
+          expectedRevision: destination === path ? file.revision : "",
+        })
         notify.success("Saved", { description: destination })
-        if (destination === path) setFile((f) => (f ? { ...f, content: draft } : f))
+        if (destination === path) {
+          setFile((f) => (f ? { ...f, content: draft, revision: result.revision } : f))
+          setConflict(false)
+        }
         onSaved?.(destination)
       } catch (err) {
-        notify.error("Could not save", err)
+        if (err instanceof ApiError && err.code === "content_conflict" && destination === path)
+          setConflict(true)
+        else notify.error("Could not save", err)
       } finally {
         setSaving(false)
       }
@@ -231,6 +244,7 @@ function FileEditorPanel({
           get<FileContent>("/files/read", { path })
             .then((f) => {
               setFile(f)
+              setConflict(false)
               setDraft(f.content)
               setMode(f.modeOctal)
             })
@@ -396,7 +410,7 @@ function FileEditorPanel({
                 className="ml-auto"
                 onClick={() => {
                   if (!path) return
-                  handoffDraft(path, draft, language)
+                  handoffDraft(path, draft, language, file)
                   router.push(editorHref(path, root, revealLine))
                 }}
               >
@@ -471,6 +485,27 @@ function FileEditorPanel({
           {dirty ? "Unsaved changes" : canEdit ? "Saved to disk" : "Read only"}
         </span>
       </div>
+      {conflict && (
+        <ContentConflict
+          busy={saving}
+          onReload={revert}
+          onReview={async () => {
+            if (!path) return
+            try {
+              const current = await get<FileContent>("/files/read", { path })
+              if (current.binary)
+                throw new Error(
+                  "The file is now binary. Reload it or save your draft to another path.",
+                )
+              setFile(current)
+              setReviewing(true)
+              setConflict(false)
+            } catch (err) {
+              notify.error("Could not read the current file", err)
+            }
+          }}
+        />
+      )}
       {error && <ErrorState error={error} className="m-4" />}
       {!file && !error && <LoadingRows className="p-4" />}
 
@@ -499,12 +534,12 @@ function FileEditorPanel({
         <div className="flex min-h-0 flex-1 flex-col">
           {review === null ? (
             <Notice className="m-4" title="Too many changes to summarise">
-              The draft differs from the file on disk in more places than can be aligned here. Save
-              writes the whole draft; Discard goes back to the disk.
+              The draft differs from the opened version in more places than can be aligned here.
+              Save writes the whole draft; Discard goes back to the disk.
             </Notice>
           ) : review === "" ? (
             <Notice className="m-4" title="No changes">
-              The draft is identical to the file on disk.
+              The draft is identical to the opened version.
             </Notice>
           ) : (
             <DiffView body={review ?? ""} singleFile className="min-h-0 flex-1" />

@@ -532,7 +532,7 @@ export function readLogWindow(params: Pick<URLSearchParams, "get">) {
   const valid = (value: string) =>
     !value ||
     (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
-      Number.isFinite(Date.parse(value)))
+      !logWindowInstant(value).error)
   const error =
     !valid(since) || !valid(until) || (since && until && Date.parse(since) >= Date.parse(until))
       ? "The log link has an invalid time window. Choose a new window before searching."
@@ -545,7 +545,91 @@ export function logTimeInput(value: string) {
   if (!value || !/(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return value
   const date = new Date(value)
   if (!Number.isFinite(date.getTime())) return ""
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 23)
+  const year = date.getFullYear()
+  if (year < 1) return ""
+  const part = (value: number, width = 2) => String(value).padStart(width, "0")
+  return `${part(year, 4)}-${part(date.getMonth() + 1)}-${part(date.getDate())}T${part(date.getHours())}:${part(date.getMinutes())}:${part(date.getSeconds())}.${part(date.getMilliseconds(), 3)}`
+}
+
+/** HTML accepts unsigned extended years that Date's string parser does not. */
+export function parseLogTimeInput(value: string): Date | undefined {
+  const match = /^(\d{4,})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/.exec(
+    value,
+  )
+  if (!match) {
+    const zoned =
+      /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.exec(
+        value,
+      )
+    if (!zoned) return undefined
+    const [year, month, day, hour, minute, second] = zoned.slice(1).map(Number)
+    const calendar = new Date(0)
+    calendar.setUTCFullYear(year, month - 1, day)
+    if (
+      calendar.getUTCFullYear() !== year ||
+      calendar.getUTCMonth() !== month - 1 ||
+      calendar.getUTCDate() !== day ||
+      hour > 23 ||
+      minute > 59 ||
+      second > 59
+    )
+      return undefined
+    const date = new Date(value)
+    return Number.isFinite(date.getTime()) ? date : undefined
+  }
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText = "0", fraction = ""] =
+    match
+  const [year, month, day, hour, minute, second] = [
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText,
+  ].map(Number)
+  if (
+    year < 1 ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  )
+    return undefined
+  const date = new Date(0)
+  date.setFullYear(year, month - 1, day)
+  date.setHours(hour, minute, second, Number(fraction.padEnd(3, "0")))
+  if (
+    !Number.isFinite(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day ||
+    date.getHours() !== hour ||
+    date.getMinutes() !== minute ||
+    date.getSeconds() !== second
+  )
+    return undefined
+  return date
+}
+
+export type ResolvedLogRange = {
+  since?: string
+  until?: string
+  error?: string
+  sinceError?: string
+  untilError?: string
+}
+
+function logWindowInstant(value: string): { instant?: string; error?: string } {
+  if (!value) return {}
+  const date = parseLogTimeInput(value)
+  if (!date) return { error: "Enter a valid date and local time." }
+  if (date.getUTCFullYear() < 0 || date.getUTCFullYear() > 9999) {
+    return { error: "Log windows support years up to 9999." }
+  }
+  return { instant: date.toISOString() }
 }
 
 /**
@@ -558,12 +642,19 @@ export function resolveRange(
   range: LogTimeRange,
   customSince: string,
   customUntil: string,
-): { since?: string; until?: string } {
+): ResolvedLogRange {
   if (range === "custom") {
-    return {
-      since: customSince ? new Date(customSince).toISOString() : undefined,
-      until: customUntil ? new Date(customUntil).toISOString() : undefined,
+    const from = logWindowInstant(customSince)
+    const to = logWindowInstant(customUntil)
+    const error = from.error ?? to.error
+    if (error) return { error, sinceError: from.error, untilError: to.error }
+    if (!from.instant && !to.instant)
+      return { error: "Enter a start or end for the custom window." }
+    if (from.instant && to.instant && Date.parse(from.instant) >= Date.parse(to.instant)) {
+      const error = "The start of the log window must be before its end."
+      return { error, untilError: error }
     }
+    return { since: from.instant, until: to.instant }
   }
   const preset = TIME_RANGES.find((r) => r.id === range)
   if (!preset?.minutes) return {}

@@ -2,19 +2,12 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import { ArrowRight, Bell, Globe, RefreshClockwise } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
-import type {
-  CertbotState,
-  DefaultSite,
-  ErrorReport,
-  SiteTrafficSummary,
-  UpstreamReport,
-} from "@/lib/types"
+import type { CertbotState, ErrorReport, SiteTrafficSummary, UpstreamReport } from "@/lib/types"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext, PageState } from "@/components/page"
@@ -39,19 +32,9 @@ import { useEngineControl } from "@/components/proxy/engine-control"
 import { EngineFailure } from "@/components/proxy/engine-failure"
 import { PARTICIPLE, engineRun } from "@/components/proxy/engine-lifecycle"
 import { LiveTraffic } from "@/components/proxy/live-metrics"
-import { useServedDrift } from "@/components/proxy/served-drift"
 import { engineProduct } from "@/components/proxy/marks"
 import { RouteMark, ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import { isParked } from "@/components/proxy/site-order"
-import {
-  CONFIG_TEST,
-  SERVED_STALE,
-  findingAction,
-  foldProxyFindings,
-  unreadableSource,
-  type ProxySource,
-  type UnreadableSource,
-} from "@/components/proxy/attention"
 import {
   noAnswerLabel,
   oldestReading,
@@ -66,10 +49,8 @@ import { overviewRoutes, routeKind, routeTarget } from "@/components/proxy/overv
 import { upstreamLabel, upstreamsOf, upstreamTone } from "@/components/proxy/upstream-health"
 import { trafficLabel } from "@/components/proxy/site-traffic"
 import { AlertsPanel } from "@/components/proxy/alerts-panel"
-import { ProxyFindings } from "@/components/proxy/finding-triage"
 import { RecentChanges } from "@/components/proxy/activity"
 import { frontDoorLine, frontDoors } from "@/components/proxy/front-door"
-import { unproxiedApps } from "@/components/proxy/suggest"
 import { foldDualStack, privateNetworksHint, tallyReach } from "@/components/proxy/ports"
 import { portsHref } from "@/components/proxy/ports-list"
 import { routeMap, routeVerdict, siteBackend } from "@/components/proxy/route-map"
@@ -108,8 +89,7 @@ const RUN_TONE: Record<ReturnType<typeof engineRun>, DotTone> = {
  * applications behind them, each the product it is, the wires carrying the
  * hour's traffic. Under the picture the readings — where the hour's requests
  * went, how long every certificate has left, what nginx complained about, and
- * nginx's own counters — then the routes in the wide column with what needs
- * attention in the rail. The engine's own log closes the page, read here
+ * nginx's own counters — then the configured routes. The engine's own log closes the page, read here
  * rather than on the Logs page, because this is where "why is the proxy
  * unhappy" is asked.
  *
@@ -119,14 +99,12 @@ const RUN_TONE: Record<ReturnType<typeof engineRun>, DotTone> = {
  * pass 2): all four are facts in the engine's line, each a link to its page
  * and each saying "couldn't read" with the reason when its source failed;
  * the sites are the picture's Domains lane and the Routes head's count, the
- * certificates the Certificates block's runway and its count of those that
- * need attention, and the internet-facing ports the front door under the
+ * certificates the Certificates block's runway, and the internet-facing ports the front door under the
  * engine in the picture.
  */
 export default function ProxyOverviewPage() {
   const {
     status,
-    hasNginx,
     updatedAt: statusAt,
     error: statusError,
     refresh: refreshStatus,
@@ -134,7 +112,6 @@ export default function ProxyOverviewPage() {
     configTest,
   } = useProxy()
   const { can } = useAuth()
-  const router = useRouter()
   const admin = can("system.admin")
   const engine = useEngineUnit(status)
   const [alertsOpen, setAlertsOpen] = useState(false)
@@ -184,9 +161,6 @@ export default function ProxyOverviewPage() {
       setChecking(false)
     }
   }
-  // The engine's last config test (the layout's, which `t` runs), for an
-  // account that may run one: its warnings stay in Needs attention until a
-  // test is clean.
   // A reload or a service verb changes what the engine line, the status and
   // the sites say, and runs a config test; each reads them again once it lands.
   const refreshAll = () => {
@@ -196,13 +170,6 @@ export default function ProxyOverviewPage() {
     configTest.refreshLast()
   }
   const control = useEngineControl({ status, unit: engine, onChanged: refreshAll })
-  const defaultSite = usePoll<DefaultSite>(
-    (signal) => get("/proxy/default-site", undefined, signal),
-    300_000,
-    [],
-    { enabled: hasNginx },
-  )
-  const drift = useServedDrift({ onReloaded: refreshAll })
 
   // certbot being absent is a fact about the host, not a failure to report.
   const certbotGone =
@@ -267,10 +234,6 @@ export default function ProxyOverviewPage() {
   const sites = readable(vhosts)?.value
   const certificates = readable(certs)?.value
   const streamStatus = readable(streams)?.value
-  const streamDirError =
-    streams.error instanceof ApiError && streams.error.code === "stream_dir_unreadable"
-      ? streams.error
-      : undefined
   const listeners = readable(ports)?.value
   const upstreamReport = upstreams.error ? undefined : upstreams.data
   const siteTraffic = traffic.error ? undefined : traffic.data?.sites
@@ -281,15 +244,6 @@ export default function ProxyOverviewPage() {
   const hosts = sites ?? []
   const routes = useMemo(() => overviewRoutes(sites ?? []), [sites])
   const doors = useMemo(() => (listeners ? frontDoors(listeners) : undefined), [listeners])
-  // Only once every list it compares has answered: an app judged against a
-  // sites list that failed would be offered a domain it already has.
-  const suggestions = useMemo(
-    () =>
-      listeners && sites && streamStatus
-        ? unproxiedApps({ ports: listeners, vhosts: sites, streams: streamStatus })
-        : [],
-    [listeners, sites, streamStatus],
-  )
   const onTls = hosts.filter((v) => v.tls).length
   const disabled = hosts.filter(isParked).length
   // The ports page's own split, so the figure clicked through is on that page.
@@ -317,77 +271,6 @@ export default function ProxyOverviewPage() {
   )
   const verdict = useMemo(() => routeVerdict(sites ?? [], upstreamReport), [sites, upstreamReport])
   const renewal = readable(certbot)?.value
-  const unreadable = useMemo(() => {
-    const failed: [ProxySource, Error | undefined][] = [
-      // A status that never answered is the page's own error; one that
-      // answered before goes on drawing the engine from that answer.
-      ["status", status ? statusError : undefined],
-      ["sites", vhosts.error],
-      ["certificates", certs.error],
-      ["renewal", certbotGone ? undefined : certbot.error],
-      ["streams", streamDirError ? undefined : streams.error],
-      ["ports", ports.error],
-    ]
-    return failed.flatMap(([source, error]): UnreadableSource[] =>
-      error ? [{ source, message: errorMessage(error) }] : [],
-    )
-  }, [
-    status,
-    statusError,
-    vhosts.error,
-    certs.error,
-    certbot.error,
-    certbotGone,
-    streams.error,
-    streamDirError,
-    ports.error,
-  ])
-  const lastTest = configTest.last
-  const testEngine = configTest.engine
-  const findings = useMemo(
-    () =>
-      foldProxyFindings({
-        certs: certificates,
-        certbot: certbotGone ? null : renewal,
-        vhosts: sites,
-        streams: streamStatus,
-        // A failed read of the streams is already an unreadable source
-        // below; only a directory nginx cannot be read from has a finding
-        // of its own, since its fix is on the Streams page.
-        streamsError: streamDirError,
-        ports: listeners,
-        unreadable,
-        lastTest: lastTest && { engine: testEngine, record: lastTest },
-        defaultSite: defaultSite.data,
-        drift: drift.report,
-        upstreams: upstreamReport,
-      }),
-    [
-      certificates,
-      renewal,
-      certbotGone,
-      sites,
-      streamStatus,
-      streamDirError,
-      listeners,
-      unreadable,
-      lastTest,
-      testEngine,
-      defaultSite.data,
-      drift.report,
-      upstreamReport,
-    ],
-  )
-  const retry: Record<ProxySource, () => void> = {
-    status: refreshStatus,
-    sites: vhosts.refresh,
-    certificates: certs.refresh,
-    renewal: certbot.refresh,
-    streams: streams.refresh,
-    ports: ports.refresh,
-  }
-  const settled =
-    !vhosts.loading && !certs.loading && !certbot.loading && !streams.loading && !ports.loading
 
   // Loading until the status first answers, and its error once it fails —
   // the page used to render nothing at all.
@@ -449,7 +332,7 @@ export default function ProxyOverviewPage() {
       text:
         certificates &&
         (badCerts.length > 0
-          ? `${plural(certificates.length, "certificate")}, ${badCerts.length} ${badCerts.length === 1 ? "needs" : "need"} attention`
+          ? `${plural(certificates.length, "certificate")}, ${badCerts.length} not valid`
           : plural(certificates.length, "certificate")),
       tone: certTone,
     },
@@ -503,6 +386,7 @@ export default function ProxyOverviewPage() {
           </>
         }
       />
+      {statusError && <ErrorState error={statusError} onRetry={refreshStatus} />}
       {admin && <AlertsPanel open={alertsOpen} onOpenChange={setAlertsOpen} />}
 
       <EngineIdentity
@@ -724,70 +608,6 @@ export default function ProxyOverviewPage() {
           {/* A titled list on the page, not a box, for the reason the host
           overview's health list is: a frame around it would open the rail
           with a container. */}
-          <Panel plain>
-            <PanelHeader title="Needs attention" />
-            <PanelBody>
-              {!settled ? (
-                <div className="space-y-2">
-                  <Skeleton className="h-4 w-56" />
-                  <Skeleton className="h-4 w-40" />
-                </div>
-              ) : (
-                <div className="animate-rise">
-                  <ProxyFindings
-                    findings={findings.map((f) => {
-                      const source = unreadableSource(f)
-                      const label = findingAction(f)
-                      return {
-                        ...f,
-                        action: source
-                          ? { label: "Try again", onClick: retry[source] }
-                          : f.id === CONFIG_TEST
-                            ? { label: "Open test", onClick: configTest.showLast }
-                            : admin && f.id.startsWith(SERVED_STALE)
-                              ? {
-                                  label: drift.reloading ? "Reloading nginx…" : "Reload nginx",
-                                  onClick: drift.reload,
-                                }
-                              : label
-                                ? { label, onClick: () => router.push(f.href) }
-                                : undefined,
-                      }
-                    })}
-                    emptyLabel="No priority problems found in the completed proxy checks"
-                    onRemedied={(remedy) =>
-                      remedy.kind === "enable-site" ? refreshAll() : certbot.refresh()
-                    }
-                  />
-                </div>
-              )}
-            </PanelBody>
-          </Panel>
-
-          {admin && status.nginx && suggestions.length > 0 && (
-            <Panel plain>
-              <PanelHeader title="Not behind a domain" />
-              <PanelBody flush>
-                <ul aria-label="Apps on loopback" className="animate-rise space-y-2 pt-1">
-                  {suggestions.slice(0, 5).map((app) => (
-                    <li key={app.port} className="flex min-w-0 items-center justify-between gap-3">
-                      <span className="min-w-0 truncate text-body">
-                        <span className="numeric font-mono">:{app.port}</span>{" "}
-                        <span className="text-muted-foreground">{app.process || "unknown"}</span>
-                      </span>
-                      <Button size="xs" variant="outline" asChild>
-                        <Link
-                          href={`/proxy/sites?new=1&upstream=${encodeURIComponent(app.upstream)}`}
-                        >
-                          Put a domain in front of this
-                        </Link>
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              </PanelBody>
-            </Panel>
-          )}
 
           {admin && <RecentChanges />}
         </div>

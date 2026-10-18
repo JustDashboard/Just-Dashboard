@@ -182,6 +182,8 @@ describe("which pages an engine has", () => {
       "logs",
       "access",
       "backups",
+      "import",
+      "alerts",
       "settings",
     ])
     expect(titles(redis).slice(1, 3)).toEqual(["Keys", "Console"])
@@ -200,9 +202,30 @@ describe("which pages an engine has", () => {
       "logs",
       "access",
       "backups",
+      "import",
+      "alerts",
       "settings",
     ])
     expect(titles(mongo).slice(1, 3)).toEqual(["Documents", "Aggregations"])
+  })
+
+  test("Import is a page of the engines that can restore under another name, and nobody else", () => {
+    for (const id of ["postgres", "mysql", "sqlserver", "mongodb", "redis"])
+      expect(engineOf(id, CATALOGUE).has("import")).toBe(true)
+    for (const id of ["sqlite", "clickhouse", "oracle"]) {
+      const engine = engineOf(id, CATALOGUE)
+      expect(engine.has("import")).toBe(false)
+      expect(engine.missing("import")).toMatchObject({ thing: "imports from another server" })
+    }
+  })
+
+  test("only PostgreSQL itself keeps the target current until a cutover", () => {
+    expect(engineOf("postgres", CATALOGUE).capabilities.onlineImport).toBe("replication")
+    expect(engineOf("mysql", CATALOGUE).capabilities.onlineImport).toBe("stream")
+    expect(engineOf("sqlite", CATALOGUE).capabilities.onlineImport).toBe(false)
+    // Its wire protocol is PostgreSQL's and it has no publications.
+    expect(engineOf("cockroachdb", CATALOGUE).capabilities.onlineImport).toBe("stream")
+    expect(engineOf("mariadb", CATALOGUE).capabilities.onlineImport).toBe("stream")
   })
 
   test("a page a capability denies is gone, with the reason its address shows", () => {
@@ -437,5 +460,21 @@ describe("how a program connects", () => {
         expect(code.includes("URL") || code.includes("DATABASE")).toBe(true)
       }
     }
+  })
+})
+
+describe("asking for an engine", () => {
+  test("is answered once per question, so a page that asks hundreds of times builds a few", () => {
+    const catalogue = []
+    expect(engineOf("postgres", catalogue)).toBe(engineOf("postgres", catalogue))
+    expect(engineOf("mariadb")).toBe(engineOf("mariadb"))
+    // A different catalogue or different capabilities is a different question.
+    expect(engineOf("postgres", [])).not.toBe(engineOf("postgres", catalogue))
+    const given = { kill: false }
+    expect(engineFor({ driver: "postgres", capabilities: given })).toBe(
+      engineFor({ driver: "postgres", capabilities: given }),
+    )
+    expect(engineFor({ driver: "postgres", capabilities: given }).can("kill")).toBe(false)
+    expect(engineFor({ driver: "postgres", capabilities: { kill: true } }).can("kill")).toBe(true)
   })
 })

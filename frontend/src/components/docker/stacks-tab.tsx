@@ -34,7 +34,6 @@ import { useContainerControl } from "@/components/docker/container-actions"
 import { StackBand } from "@/components/docker/stack-band"
 import { StackRows } from "@/components/docker/stack-table"
 import {
-  exitCode,
   stackChanges,
   stackLines,
   type StackBucket,
@@ -47,12 +46,6 @@ import { Input } from "@/components/ui/input"
 /** The state chips, in the order they are asked about; the toned one only while there is one. */
 const STATES: { value: StackBucket; label: string; dot: string; title: string }[] = [
   { value: "running", label: "Running", dot: "bg-success", title: "Up, and nothing to act on" },
-  {
-    value: "attention",
-    label: "Needs attention",
-    dot: "bg-warning",
-    title: "A service down or failing its check, or a container the file no longer declares",
-  },
   {
     value: "stopped",
     label: "Stopped",
@@ -80,9 +73,7 @@ const BUCKETS = new Set<string>(STATES.map((s) => s.value))
  *
  * The server first, as the identity line Services and Live open on — the
  * Compose mark, Docker's version, how many stacks are deployed and how many
- * of their services run, how many ports they publish — with the verdict at
- * its right end: the stacks that need attention, which narrows the table to
- * them, or that nothing does.
+ * of their services run and how many ports they publish.
  *
  * Then `StackBand`: the stacks using the most processor and memory as spans
  * of one bar the size of the machine, summed over each one's containers from
@@ -92,8 +83,7 @@ const BUCKETS = new Set<string>(STATES.map((s) => s.value))
  * Then the table, which is the stacks with their containers under them
  * (`stack-table.tsx`): each stack a row with its state and its sums, each
  * container a row of the containers page's own readings. The state chips in
- * its head count *and* narrow, Needs attention in its tone and first in the
- * table as it always was. A container's state moves the moment Docker's does,
+ * its head count and narrow by native running, stopped and undeployed states. A container's state moves the moment Docker's does,
  * because it is read off the socket, and the stack list is read again when
  * one does so a stack's own state follows within the second.
  */
@@ -116,7 +106,7 @@ export function StacksTab() {
 
   const [creating, setCreating] = useState(false)
   const [query, setQuery] = useSessionState("docker.stacks.query", "")
-  const [remembered, setState] = useSessionState("docker.stacks.state", "")
+  const [remembered, setState] = useSessionState("docker.stacks.state.075", "")
   // The chips were All / Running / Not running / Needs attention until the
   // overhaul; a remembered "all" or "stopped" is no filter now.
   const state = (BUCKETS.has(remembered) ? remembered : "") as StackBucket | ""
@@ -184,7 +174,6 @@ export function StacksTab() {
 
   const counts = useMemo(() => {
     const bucket: Record<StackBucket, number> = {
-      attention: 0,
       running: 0,
       stopped: 0,
       undeployed: 0,
@@ -314,19 +303,6 @@ export function StacksTab() {
       ),
     0,
   )
-  // Red when one of them has a service failing its check or one that exited
-  // on an error; amber for the rest — a part stopped, a leftover running.
-  const failing = lines.some(
-    (l) =>
-      l.bucket === "attention" &&
-      l.lines.some(
-        (s) =>
-          s.health === "unhealthy" ||
-          (s.state !== "running" &&
-            !s.service.missing &&
-            (exitCode(s.container?.status ?? s.service.status) ?? 0) !== 0),
-      ),
-  )
   const shown = visible.reduce((n, l) => n + l.lines.length, 0)
   const filtered = query.trim().length > 0 || state !== "" || focus !== ""
 
@@ -349,13 +325,6 @@ export function StacksTab() {
         }
         return false
       }}
-      commands={[
-        {
-          id: "attention",
-          label: state === "attention" ? "Show every stack" : "Show stacks that need attention",
-          run: () => toggleState("attention"),
-        },
-      ]}
     >
       <Page className="animate-rise">
         {header}
@@ -389,23 +358,10 @@ export function StacksTab() {
           }
           aside={
             <div className="flex flex-wrap items-center gap-3">
-              {counts.attention > 0 ? (
-                <button
-                  type="button"
-                  aria-pressed={state === "attention"}
-                  onClick={() => toggleState("attention")}
-                  className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
-                >
-                  <Status
-                    tone={failing ? "danger" : "warning"}
-                    label={`${plural(counts.attention, "stack")} need${counts.attention === 1 ? "s" : ""} attention`}
-                  />
-                </button>
-              ) : counts.running > 0 ? (
-                <Status tone="running" label="Nothing needs attention" />
-              ) : (
-                <Status tone="stopped" label="Nothing running" />
-              )}
+              <Status
+                tone={counts.running > 0 ? "running" : "stopped"}
+                label={`${plural(counts.running, "stack")} running`}
+              />
               <WorkspaceHelp compact />
             </div>
           }
@@ -445,7 +401,6 @@ export function StacksTab() {
               {STATES.map(({ value, label, dot, title }) => {
                 const count = counts[value]
                 if (value !== "running" && count === 0 && state !== value) return null
-                const attention = value === "attention"
                 return (
                   <FilterChip
                     key={value}
@@ -455,9 +410,7 @@ export function StacksTab() {
                   >
                     <span aria-hidden className={cn("size-1.5 rounded-full", dot)} />
                     {label}
-                    <ChipCount className={cn(attention && "text-warning opacity-100")}>
-                      {count}
-                    </ChipCount>
+                    <ChipCount>{count}</ChipCount>
                   </FilterChip>
                 )
               })}
@@ -537,7 +490,7 @@ export function StacksTab() {
                 : `${plural(stacks.length, "stack")} · ${plural(services, "container")}`}
             </span>
             <span className="text-muted-foreground/40">·</span>
-            <span>needs attention first, then by name</span>
+            <span>running first, then by name</span>
           </PanelFooter>
         </Panel>
 

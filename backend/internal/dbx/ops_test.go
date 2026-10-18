@@ -3,7 +3,6 @@ package dbx
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 // The pure halves of the operations surface: what a statement is rendered
@@ -150,6 +149,68 @@ func TestPrivilegeStatementsPerEngine(t *testing.T) {
 	got, err := PrivilegeStatements(DriverMSSQL, PrivilegeChange{Role: "o'brien", Level: GrantOnTable, Schema: "dbo", Table: "t", Privileges: []string{"SELECT"}})
 	if err != nil || len(got) != 2 || !strings.Contains(got[0], "N'o''brien'") || got[1] != "GRANT SELECT ON OBJECT::[dbo].[t] TO [o'brien]" {
 		t.Errorf("SQL Server grant: %v %v", got, err)
+	}
+}
+
+// EXECUTE on a function and a privilege on some of a table's columns are
+// PostgreSQL's alone, and each is a statement of its own shape.
+func TestFunctionAndColumnPrivilegeStatements(t *testing.T) {
+	args := func(s string) *string { return &s }
+	for _, c := range []struct {
+		name   string
+		change PrivilegeChange
+		want   []string
+	}{
+		{"one function", PrivilegeChange{Role: "app", Level: GrantOnFunction, Schema: "billing", Routine: "total", Arguments: args("integer, text"), Privileges: []string{"execute"}},
+			[]string{`GRANT EXECUTE ON ROUTINE "billing"."total"(integer, text) TO "app"`}},
+		{"a function by its name alone", PrivilegeChange{Role: "app", Level: GrantOnFunction, Schema: "billing", Routine: "total", Privileges: []string{"EXECUTE"}, GrantOption: true},
+			[]string{`GRANT EXECUTE ON ROUTINE "billing"."total" TO "app" WITH GRANT OPTION`}},
+		{"a function that takes nothing", PrivilegeChange{Role: "app", Level: GrantOnFunction, Schema: "billing", Routine: "now_utc", Arguments: args(""), Privileges: []string{"EXECUTE"}, Revoke: true},
+			[]string{`REVOKE EXECUTE ON ROUTINE "billing"."now_utc"() FROM "app"`}},
+		{"every function and the ones made later", PrivilegeChange{Role: "app", Level: GrantOnFunction, Schema: "billing", Privileges: []string{"EXECUTE"}, Future: true},
+			[]string{`GRANT EXECUTE ON ALL ROUTINES IN SCHEMA "billing" TO "app"`,
+				`ALTER DEFAULT PRIVILEGES IN SCHEMA "billing" GRANT EXECUTE ON FUNCTIONS TO "app"`}},
+		{"columns", PrivilegeChange{Role: "app", Level: GrantOnColumn, Schema: "billing", Table: "invoices", Columns: []string{"id", "to\"tal"}, Privileges: []string{"select", "UPDATE"}},
+			[]string{`GRANT SELECT ("id", "to""tal"), UPDATE ("id", "to""tal") ON TABLE "billing"."invoices" TO "app"`}},
+		{"every privilege on a column", PrivilegeChange{Role: "app", Level: GrantOnColumn, Schema: "billing", Table: "invoices", Columns: []string{"id"}, Privileges: []string{"ALL"}, GrantOption: true},
+			[]string{`GRANT ALL PRIVILEGES ("id") ON TABLE "billing"."invoices" TO "app" WITH GRANT OPTION`}},
+		{"taking a column privilege away", PrivilegeChange{Role: "app", Level: GrantOnColumn, Schema: "billing", Table: "invoices", Columns: []string{"id"}, Privileges: []string{"SELECT"}, Revoke: true, GrantOption: true},
+			[]string{`REVOKE GRANT OPTION FOR SELECT ("id") ON TABLE "billing"."invoices" FROM "app"`}},
+	} {
+		got, err := PrivilegeStatements(DriverPostgres, c.change)
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		if strings.Join(got, "\n") != strings.Join(c.want, "\n") {
+			t.Errorf("%s:\n got %s\nwant %s", c.name, strings.Join(got, "\n"), strings.Join(c.want, "\n"))
+		}
+	}
+	for _, bad := range []PrivilegeChange{
+		{Role: "app", Level: GrantOnFunction, Schema: "s", Routine: "f", Arguments: args("integer) TO PUBLIC; DROP TABLE t; --"), Privileges: []string{"EXECUTE"}},
+		{Role: "app", Level: GrantOnFunction, Schema: "s", Routine: "f", Arguments: args("integer))"), Privileges: []string{"EXECUTE"}},
+		{Role: "app", Level: GrantOnFunction, Schema: "s", Routine: "f", Arguments: args("a int /* x */"), Privileges: []string{"EXECUTE"}},
+		{Role: "app", Level: GrantOnFunction, Schema: "s", Routine: "f", Arguments: args("a int, b\\n int"), Privileges: []string{"EXECUTE"}},
+		{Role: "app", Level: GrantOnFunction, Schema: "s", Routine: "f", Privileges: []string{"SELECT"}},
+		{Role: "app", Level: GrantOnFunction, Schema: "s", Routine: "f", Privileges: []string{"EXECUTE"}, Future: true},
+		{Role: "app", Level: GrantOnColumn, Schema: "s", Table: "t", Privileges: []string{"SELECT"}},
+		{Role: "app", Level: GrantOnColumn, Schema: "s", Table: "t", Columns: []string{"a"}, Privileges: []string{"DELETE"}},
+		{Role: "app", Level: GrantOnColumn, Schema: "s", Table: "t", Columns: []string{"a"}, Privileges: []string{"SELECT"}, Future: true},
+		{Role: "app", Level: GrantOnColumn, Schema: "s", Columns: []string{"a"}, Privileges: []string{"SELECT"}},
+	} {
+		if got, err := PrivilegeStatements(DriverPostgres, bad); err == nil {
+			t.Errorf("%+v rendered %v", bad, got)
+		} else if _, ok := err.(ErrPrivilegeRequest); !ok {
+			t.Errorf("%+v: %v is not a request refusal", bad, err)
+		}
+	}
+	// No other engine offers either level.
+	for _, driver := range []Driver{DriverMySQL, DriverMSSQL, DriverClickHouse} {
+		for _, level := range PrivilegeLevelsFor(driver) {
+			if level.Level == GrantOnFunction || level.Level == GrantOnColumn {
+				t.Errorf("%s offers the %s level", driver, level.Level)
+			}
+		}
 	}
 }
 
@@ -633,81 +694,6 @@ func TestHeapBloatEstimate(t *testing.T) {
 	}
 }
 
-func TestVersionEndOfLife(t *testing.T) {
-	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	for _, c := range []struct {
-		driver  Driver
-		version string
-		release string
-		past    bool
-		known   bool
-	}{
-		{DriverPostgres, "PostgreSQL 13.14 on x86_64-pc-linux-gnu", "13", true, true},
-		{DriverPostgres, "PostgreSQL 14.11 (Debian 14.11-1)", "14", false, true},
-		{DriverPostgres, "PostgreSQL 16.15 on x86_64-pc-linux-musl", "16", false, true},
-		{DriverPostgres, "PostgreSQL 9.6.24 on x86_64", "9.6", true, true},
-		{DriverPostgres, "PostgreSQL 99.1", "", false, false},
-		{DriverMySQL, "8.0.36-0ubuntu0.22.04.1", "8.0", true, true},
-		{DriverMySQL, "8.4.11", "8.4", false, true},
-		{DriverMySQL, "5.7.44-log", "5.7", true, true},
-		{DriverMySQL, "11.8.9-MariaDB-ubu2404", "11.8", false, true},
-		{DriverMySQL, "10.5.23-MariaDB", "10.5", true, true},
-		{DriverMySQL, "10.11.6-MariaDB-0+deb12u1", "10.11", false, true},
-		{DriverMSSQL, "Microsoft SQL Server 2016 (SP3) - 13.0.6300.2 (X64)", "2016", true, true},
-		{DriverMSSQL, "Microsoft SQL Server 2022 (RTM-CU12) - 16.0.4115.5", "2022", false, true},
-		{DriverOracle, "Oracle Database 19c Enterprise Edition Release 19.0.0.0.0 - Production", "19", false, true},
-		{DriverOracle, "Oracle Database 11g Enterprise Edition Release 11.2.0.4.0", "11", true, true},
-		{DriverClickHouse, "ClickHouse 24.8.14.39", "24.8", true, true},
-		{DriverClickHouse, "ClickHouse 26.8.1.1", "26.8", false, true},
-		{DriverSQLite, "SQLite 3.46.0", "", false, false},
-		{DriverMySQL, "something else", "", false, false},
-		// The release is read where the engine's own number stands. A beta has
-		// no minor, and the first pair of numbers in its banner is the
-		// compiler's.
-		{DriverPostgres, "PostgreSQL 18beta1 on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14) 12.2.0, 64-bit", "18", false, true},
-		{DriverPostgres, "PostgreSQL 17rc1 on aarch64-unknown-linux-gnu, compiled by gcc (GCC) 11.4.1", "17", false, true},
-		{DriverPostgres, "EnterpriseDB 12.2.0 compiled by gcc 12.2", "", false, false},
-		// A fork answers with the version of the engine it is compatible with,
-		// which says nothing about the fork's own maintenance.
-		{DriverPostgres, "PostgreSQL 11.2-YB-2.20.1.3-b0 on x86_64-pc-linux-gnu", "", false, false},
-		{DriverPostgres, "CockroachDB CCL v23.2.4 (x86_64-pc-linux-gnu, built 2024/04/08)", "", false, false},
-		{DriverPostgres, "PostgreSQL 12.12 (Greenplum Database 7.0.0 build commit:abc) on x86_64", "", false, false},
-		{DriverMySQL, "8.0.11-TiDB-v7.5.0", "", false, false},
-		{DriverMySQL, "5.7.25-TiDB-v6.1.0", "", false, false},
-		{DriverMySQL, "8.0.30-Vitess", "", false, false},
-		// MariaDB's replication-compatible prefix is not its version.
-		{DriverMySQL, "5.5.5-10.6.12-MariaDB-log", "10.6", true, true},
-	} {
-		got, ok := VersionEndOfLife(c.driver, c.version, now)
-		if ok != c.known {
-			t.Errorf("%s %q: known %v, want %v", c.driver, c.version, ok, c.known)
-			continue
-		}
-		if !ok {
-			continue
-		}
-		if got.Release != c.release || got.Past != c.past {
-			t.Errorf("%s %q: release %q past %v (date %s), want %q %v", c.driver, c.version, got.Release, got.Past, got.Date.Format("2006-01-02"), c.release, c.past)
-		}
-		if got.Past != (got.DaysLeft < 0) && got.DaysLeft != 0 {
-			t.Errorf("%s %q: past %v with %d days left", c.driver, c.version, got.Past, got.DaysLeft)
-		}
-	}
-	// Past its date is a warning; within half a year of it, a notice.
-	eol, _ := VersionEndOfLife(DriverPostgres, "PostgreSQL 14.11", now)
-	if finding, ok := adviseEndOfLife(eol); !ok || finding.ID != "version-end-of-life-soon" || finding.Level != "notice" {
-		t.Errorf("42 days before the date: %+v %v", finding, ok)
-	}
-	eol, _ = VersionEndOfLife(DriverPostgres, "PostgreSQL 13.14", now)
-	if finding, ok := adviseEndOfLife(eol); !ok || finding.ID != "version-end-of-life" || finding.Level != "warning" || finding.Category != AdviceSecurity {
-		t.Errorf("a year after the date: %+v %v", finding, ok)
-	}
-	eol, _ = VersionEndOfLife(DriverPostgres, "PostgreSQL 16.15", now)
-	if finding, ok := adviseEndOfLife(eol); ok {
-		t.Errorf("two years before the date produced %+v", finding)
-	}
-}
-
 func TestSessionRowsAreFinishedTheSameWay(t *testing.T) {
 	// Oracle's handle has a comma in it, so the joined string cannot be split.
 	oracle := Activity{PID: "12,345", BlockedBy: "67,890", BlockedByPIDs: []string{"67,890"}, Status: SessionActive}
@@ -792,12 +778,7 @@ func TestOracleSessionHandles(t *testing.T) {
 			t.Errorf("cancel accepted the handle %q", bad)
 		}
 	}
-	if stmt, ok := oracleCompileSQL(d, "APP", "PACKAGE BODY", "BILLING"); !ok || stmt != `ALTER PACKAGE "APP"."BILLING" COMPILE BODY;` {
-		t.Errorf("compile: %q %v", stmt, ok)
-	}
-	if _, ok := oracleCompileSQL(d, "APP", "SYNONYM", "S"); ok {
-		t.Error("a synonym was given a COMPILE statement")
-	}
+
 }
 
 // What each engine offers is read off the interfaces it implements, so the
@@ -814,18 +795,17 @@ func TestOpsCapabilitiesPerEngine(t *testing.T) {
 	want := map[Driver]map[string]bool{
 		DriverPostgres: on("stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats",
 			"maintenance", "settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset",
-			"advisor", "engineAdvisor"),
+			"statementsSetup"),
 		DriverMySQL: on("stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats",
-			"maintenance", "settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset",
-			"advisor", "engineAdvisor"),
+			"maintenance", "settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset"),
 		DriverSQLite: on("stats", "tableStats", "indexStats", "maintenance", "settings", "settingsWrite",
-			"advisor", "engineAdvisor", "sqliteFile"),
+			"sqliteFile"),
 		DriverClickHouse: on("stats", "sessions", "kill", "tableStats", "indexStats", "maintenance", "settings",
-			"roles", "privileges", "statements", "advisor", "engineAdvisor", "clickhouseViews"),
+			"roles", "privileges", "statements", "clickhouseViews"),
 		DriverMSSQL: on("stats", "sessions", "kill", "locks", "tableStats", "indexStats", "maintenance", "settings",
-			"settingsWrite", "roles", "privileges", "statements", "advisor", "engineAdvisor"),
+			"settingsWrite", "roles", "privileges", "statements"),
 		DriverOracle: on("stats", "sessions", "kill", "cancel", "locks", "tableStats", "indexStats", "maintenance",
-			"settings", "settingsWrite", "statements", "advisor", "engineAdvisor"),
+			"settings", "settingsWrite", "statements"),
 	}
 	for driver, expected := range want {
 		got := OpsCapabilities(driver, "")
@@ -1040,8 +1020,8 @@ func TestStatementShapeDropsLiteralsAndNothingElse(t *testing.T) {
 		// Names keep their digits; bind markers keep theirs.
 		{`SELECT c1, "col 2", t1.x FROM t1 WHERE a = :1 AND b = @p2 AND c = :B3`, `SELECT c1, "col 2", t1.x FROM t1 WHERE a = :1 AND b = @p2 AND c = :B3`, false},
 		{`SELECT [order 66], [a]]b] FROM [dbo].[t2] WHERE x = 0x1F`, `SELECT [order 66], [a]]b] FROM [dbo].[t2] WHERE x = ?`, true},
-		// An apostrophe in a comment starts no string.
-		{"SELECT 1 -- don't stop\nFROM t WHERE s = 'x' /* it's 5 */ AND n = 7", "SELECT ? -- don't stop\nFROM t WHERE s = ? /* it's 5 */ AND n = ?", false},
+		// An apostrophe in a comment starts no string, and a comment goes with what is in it.
+		{"SELECT 1 -- don't stop\nFROM t WHERE s = 'x' /* it's 5 */ AND n = 7", "SELECT ? \nFROM t WHERE s = ? AND n = ?", false},
 		// Text the engine cut short: the open string is dropped with its end.
 		{`INSERT INTO sessions (token) VALUES ('eyJhbGciOiJIUzI1NiIsInR5`, `INSERT INTO sessions (token) VALUES (?`, false},
 		{`SELECT TOP (10) name FROM sys.objects`, `SELECT TOP (?) name FROM sys.objects`, true},
@@ -1067,86 +1047,5 @@ func TestStatementShapeDropsLiteralsAndNothingElse(t *testing.T) {
 		t.Error("Oracle sorted by a maximum it does not keep")
 	} else if _, ok := err.(ErrBadStatementsOption); !ok {
 		t.Errorf("%v is not an option refusal", err)
-	}
-}
-
-// A finding carries the statement that fixes it wherever one can be written
-// without a decision only the operator can make.
-func TestAdvisorFixStatements(t *testing.T) {
-	pg, my, ms, ora := postgresDialect{}, mysqlDialect{}, mssqlDialect{}, oracleDialect{}
-	columns := []Column{{Name: "code", Nullable: false}, {Name: "tenant", Nullable: false}, {Name: "note", Nullable: true}}
-	unique := []Index{{Name: "t_note", Columns: []string{"note"}, Unique: true},
-		{Name: "t_plain", Columns: []string{"code"}},
-		{Name: "t_code", Columns: []string{"tenant", "code"}, Unique: true}}
-	for _, c := range []struct {
-		d    Dialect
-		rel  string
-		want string
-	}{
-		{pg, `"s"."t"`, `ALTER TABLE "s"."t" ADD CONSTRAINT "t_pkey" PRIMARY KEY USING INDEX "t_code";`},
-		{my, "`s`.`t`", "ALTER TABLE `s`.`t` ADD PRIMARY KEY (`tenant`, `code`);"},
-		{ms, `[s].[t]`, `ALTER TABLE [s].[t] ADD PRIMARY KEY ([tenant], [code]);`},
-		{ora, `"S"."T"`, `ALTER TABLE "S"."T" ADD PRIMARY KEY ("tenant", "code");`},
-	} {
-		got, detail := primaryKeyStatement(c.d, c.rel, "t", columns, unique)
-		if got != c.want || !strings.Contains(detail, "t_code") {
-			t.Errorf("%s: %q (%s), want %q", c.d.Driver(), got, detail, c.want)
-		}
-	}
-	// No unique index that can be a key: a new column, where adding one does
-	// not break an INSERT that names no columns — and never a second "id".
-	nullable := []Index{{Name: "t_note", Columns: []string{"note"}, Unique: true}, {Name: "t_expr", Columns: []string{"lower(code)"}, Unique: true}}
-	if got, _ := primaryKeyStatement(pg, `"s"."t"`, "t", columns, nullable); got != `ALTER TABLE "s"."t" ADD COLUMN id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY;` {
-		t.Errorf("postgres identity: %q", got)
-	}
-	if got, _ := primaryKeyStatement(ms, `[s].[t]`, "t", columns, nil); got != `ALTER TABLE [s].[t] ADD id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY;` {
-		t.Errorf("sql server identity: %q", got)
-	}
-	for _, d := range []Dialect{my, ora} {
-		if got, _ := primaryKeyStatement(d, "t", "t", columns, nullable); got != "" {
-			t.Errorf("%s was offered %q", d.Driver(), got)
-		}
-	}
-	if got, _ := primaryKeyStatement(pg, `"t"`, "t", append(columns, Column{Name: "ID", Nullable: true}), nil); got != "" {
-		t.Errorf("a table that has an id column was offered %q", got)
-	}
-
-	// A sequence and the column it feeds are widened together; a bigint
-	// sequence with a ceiling set by hand loses the ceiling; one at bigint's
-	// own maximum has no fix.
-	if got := pgSequenceFix(pg, "public", "orders_id_seq", "integer", 2147483647, "orders", "id", "integer"); got !=
-		"ALTER TABLE \"public\".\"orders\" ALTER COLUMN \"id\" TYPE bigint;\nALTER SEQUENCE \"public\".\"orders_id_seq\" AS bigint;" {
-		t.Errorf("serial: %q", got)
-	}
-	if got := pgSequenceFix(pg, "public", "s", "integer", 2147483647, "orders", "id", "bigint"); got != `ALTER SEQUENCE "public"."s" AS bigint;` {
-		t.Errorf("a sequence narrower than its column: %q", got)
-	}
-	if got := pgSequenceFix(pg, "public", "loose", "smallint", 32767, "", "", ""); got != `ALTER SEQUENCE "public"."loose" AS bigint;` {
-		t.Errorf("a sequence no column owns: %q", got)
-	}
-	if got := pgSequenceFix(pg, "public", "capped", "bigint", 1000, "", "", ""); got != `ALTER SEQUENCE "public"."capped" NO MAXVALUE;` {
-		t.Errorf("a capped bigint sequence: %q", got)
-	}
-	if got := pgSequenceFix(pg, "public", "full", "bigint", 1<<63-1, "t", "id", "bigint"); got != "" {
-		t.Errorf("a bigint sequence at its ceiling was offered %q", got)
-	}
-
-	for current, want := range map[int]int{100: 150, 20: 50, 151: 250, 500: 750, 1: 50} {
-		if got := raisedConnectionLimit(current); got != want {
-			t.Errorf("raisedConnectionLimit(%d) = %d, want %d", current, got, want)
-		}
-	}
-	if got := mysqlConnectionLimitFix(false, 151); got != "SET PERSIST max_connections = 250;" {
-		t.Errorf("mysql: %q", got)
-	}
-	if got := mysqlConnectionLimitFix(true, 151); got != "SET GLOBAL max_connections = 250;" {
-		t.Errorf("mariadb: %q", got)
-	}
-	if got := oracleAutoextendSQL([]string{"/u01/app/users01.dbf", "/u01/it's.dbf"}); got !=
-		"ALTER DATABASE DATAFILE '/u01/app/users01.dbf' AUTOEXTEND ON;\nALTER DATABASE DATAFILE '/u01/it''s.dbf' AUTOEXTEND ON;" {
-		t.Errorf("autoextend: %q", got)
-	}
-	if got := oracleAutoextendSQL(nil); got != "" {
-		t.Errorf("a tablespace with no fixed-size file was offered %q", got)
 	}
 }

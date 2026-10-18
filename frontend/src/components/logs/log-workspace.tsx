@@ -53,6 +53,7 @@ import { LineDetail } from "@/components/logs/line-detail"
 import { LogConsole } from "@/components/logs/log-console"
 import { oneService, unitJournalLens } from "@/components/logs/logs-model"
 import { RetentionNote } from "@/components/logs/retention-note"
+import { resumeFrom, unseen, type Resume } from "@/components/logs/resume"
 import { TimeWindow } from "@/components/logs/time-window"
 import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
@@ -138,6 +139,8 @@ type WorkspaceProps = {
    * them answers carries no count, since the tile says it over its window.
    */
   answered?: LensReadingsState
+  /** Insights without its row of figures, for a section that draws no tiles. */
+  insightTiles?: false
   /** A page's verbs for one line — "Block this address" on an auth line. */
   lineVerbs?: (line: LogLine) => Verb[]
   /** One column of a workbench that draws the frame: no frame of its own. */
@@ -641,6 +644,7 @@ export function LogWorkspace(props: WorkspaceProps) {
       ) : mode === "insights" ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-auto">
           <Insights
+            tiles={props.insightTiles}
             sourceId={sourceId}
             lens={lens}
             lensId={lensId}
@@ -787,45 +791,6 @@ function useDebounced<T>(value: T, delay: number): T {
 }
 
 /**
- * Where a reconnect resumes: the newest instant already on screen and the
- * texts of the window the server is about to replay. The server opens every
- * connection with the last few hundred lines, so a tunnel that dropped for a
- * second used to append those hundreds again under themselves.
- */
-type Resume = { stamp: number; texts: Set<string> }
-
-function resumeFrom(lines: LogLine[]): Resume | null {
-  if (lines.length === 0) return null
-  let stamp = -Infinity
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const at = lines[i].timestamp ? Date.parse(lines[i].timestamp!) : NaN
-    if (!Number.isNaN(at)) {
-      stamp = at
-      break
-    }
-  }
-  return { stamp, texts: new Set(lines.slice(-TAIL_LINES).map((l) => l.text)) }
-}
-
-/**
- * The lines of a replayed batch that are new. Once one line is new, every
- * line after it is too: the replay is contiguous, and a line that merely
- * repeats an old text after that point is a line that was written again.
- */
-function unseen(batch: LogLine[], resume: Resume): { lines: LogLine[]; caughtUp: boolean } {
-  for (let i = 0; i < batch.length; i++) {
-    const line = batch[i]
-    const at = line.timestamp ? Date.parse(line.timestamp) : NaN
-    const stamped = !Number.isNaN(at)
-    const old = stamped
-      ? at < resume.stamp || (at === resume.stamp && resume.texts.has(line.text))
-      : resume.texts.has(line.text)
-    if (!old) return { lines: batch.slice(i), caughtUp: true }
-  }
-  return { lines: [], caughtUp: false }
-}
-
-/**
  * The live tail.
  *
  * Pausing holds what arrives rather than dropping it, which is the difference
@@ -891,7 +856,7 @@ function useLiveTail(sourceId: string, filter: LogFilterState | null, boot: bool
       setMeta(envelope.data as LogStreamMeta)
       // The same question on a new connection: keep what is on screen and
       // take only what is newer from the replay that follows.
-      resume.current = resumeFrom(onScreen.current)
+      resume.current = resumeFrom(onScreen.current, TAIL_LINES)
       return
     }
     if (envelope.type === "eof") {
@@ -1019,6 +984,7 @@ function useHistorySearch(
       setError(null)
       try {
         const window = resolveRange(range, overrides.since ?? p.since, overrides.until ?? p.until)
+        if (window.error) throw new Error(window.error)
         if (window.since && window.until && Date.parse(window.since) >= Date.parse(window.until)) {
           throw new Error("The start of the log window must be before its end.")
         }

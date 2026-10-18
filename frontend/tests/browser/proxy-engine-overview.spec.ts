@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
 import { availability, json, mockProxy, user, vhosts } from "./proxy-fixtures"
 import {
@@ -16,6 +17,11 @@ import {
  * the host's caddy for a Docker ingress, and a Caddy "running as a container"
  * that had not been started yet.
  */
+
+const configRevision = (content: string) => createHash("sha256").update(content).digest("hex")
+const configRead = (content: string) => ({ content, revision: configRevision(content) })
+const configContents = (path: string) =>
+  `# ${path}\nserver {\n    listen 80;\n    server_name app.example.com;\n    location / {\n        proxy_pass http://127.0.0.1:3000;\n    }\n}\n`
 
 function failWith(status: number, error: Record<string, unknown>) {
   return (route: Route) =>
@@ -54,8 +60,8 @@ test("a source the overview cannot read is reported, never cleared", async ({ pa
   await page.goto("/proxy")
 
   // The list says what it could not see, and never the all-clear.
-  await expect(page.getByText("Sites could not be read")).toBeVisible()
-  await expect(page.getByText("Certificates could not be read")).toBeVisible()
+  await expect(page.getByText("Sites could not be read")).toHaveCount(0)
+  await expect(page.getByText("Certificates could not be read")).toHaveCount(0)
   await expect(page.getByText(/all within limits/)).toHaveCount(0)
   // The engine line's facts say so rather than counting nothing, with the
   // reason for a pointer resting on the fact.
@@ -73,10 +79,8 @@ test("a source the overview cannot read is reported, never cleared", async ({ pa
   await expect(page.getByText("Nothing configured yet")).toHaveCount(0)
   await expect(page.getByText("No certificates were found on this host.")).toHaveCount(0)
 
-  // The finding's own button reads the source again.
   sitesFail = false
-  const source = page.locator("[data-finding]").filter({ hasText: "Sites could not be read" })
-  await source.getByRole("button", { name: "Try again" }).click()
+  await page.locator("[data-slot=page-context]").getByRole("button", { name: "Refresh" }).click()
   await expect(
     page.getByRole("list", { name: "Sites" }).locator("[data-slot='choice-row']"),
   ).toHaveCount(3)
@@ -103,7 +107,7 @@ test("a source that fails after answering is not judged from its last answer", a
   const identity = page.locator("[data-slot='host-identity']")
   const sitesFact = identity.getByRole("link", { name: "3 sites, 2 on TLS" })
   const plainText = page.getByText("legacy.example.com serves an application in plain text")
-  await expect(plainText).toBeVisible()
+  await expect(plainText).toHaveCount(0)
   await expect(sitesFact).toBeVisible()
 
   // Reload reads the sites again, and this time they fail. The poll keeps its
@@ -112,7 +116,7 @@ test("a source that fails after answering is not judged from its last answer", a
   sitesFail = true
   await identity.getByRole("button", { name: "Reload" }).click()
   await expect(page.getByText("nginx reloaded")).toBeVisible()
-  await expect(page.getByText("Sites could not be read")).toBeVisible()
+  await expect(page.getByText("Sites could not be read")).toHaveCount(0)
   await expect(plainText).toHaveCount(0)
   await expect(identity.getByText("couldn't read sites")).toBeVisible()
   await expect(sitesFact).toHaveCount(0)
@@ -149,32 +153,6 @@ test("the overview says why when the proxy status cannot be read", async ({ page
   await expect(
     page.getByRole("alert").filter({ hasText: "The proxy status could not be read" }),
   ).toHaveCount(0)
-})
-
-test("a finding's button names where it leads", async ({ page }) => {
-  await mockProxy(page, { included: true })
-  await page.goto("/proxy")
-
-  // Actions remain available while the measured evidence is folded away.
-  const open = async (title: string, label: string) => {
-    const finding = page.locator("[data-finding]").filter({ hasText: title })
-    const trigger = finding.getByRole("button", { name: title, exact: true })
-    const button = finding.getByRole("button", { name: label, exact: true })
-    await expect(button).toBeVisible()
-    // It was `Open ${meta}`: "Open renewal", "Open stream" for a list. "Open
-    // certificate" is kept for a finding that links to one certificate.
-    await expect(page.getByRole("button", { name: /^Open (renewal|stream)$/ })).toHaveCount(0)
-    await trigger.click()
-    await expect(trigger).toHaveAttribute("aria-expanded", "true")
-    await trigger.click()
-    await expect(trigger).toHaveAttribute("aria-expanded", "false")
-    await expect(button).toBeVisible()
-  }
-  await open("old.example.com has expired", "Open certificate")
-  await open("Nothing is scheduled to renew certbot's certificates", "Enable automatic renewal")
-  await open("PostgreSQL answers on every interface", "Open ports")
-
-  await open("legacy.example.com serves an application in plain text", "Open site")
 })
 
 /** What nginx 1.26 prints for a directive it does not know, and the test's reading of it. */
@@ -262,7 +240,7 @@ test("restart is refused with nginx's own reason when its configuration fails", 
   const reads: string[] = []
   await page.route("**/api/v1/proxy/config?**", (route) => {
     reads.push(new URL(route.request().url()).searchParams.get("path") ?? "")
-    return json(route, { content: "server {\n    listen 80;\n    frobnicate on;\n}\n" })
+    return json(route, configRead("server {\n    listen 80;\n    frobnicate on;\n}\n"))
   })
   await page.goto("/proxy")
 
@@ -396,7 +374,7 @@ test("a file opened from a refusal closes back into it, with the keyboard on its
   const reads: string[] = []
   await page.route("**/api/v1/proxy/config?**", (route) => {
     reads.push(new URL(route.request().url()).searchParams.get("path") ?? "")
-    return json(route, { content: "server {\n    listen 80;\n    frobnicate on;\n}\n" })
+    return json(route, configRead("server {\n    listen 80;\n    frobnicate on;\n}\n"))
   })
   await page.goto("/proxy")
 
@@ -437,18 +415,25 @@ test("a fix saved while nginx is stopped is saved, and says it was not reloaded"
   await mockUnit(page, stopped)
   await page.route("**/api/v1/proxy/engine/start", refusedBy("started"))
   await page.route("**/api/v1/proxy/config?**", (route) =>
-    json(route, { content: "server {\n    listen 80;\n    frobnicate on;\n}\n" }),
+    json(route, configRead("server {\n    listen 80;\n    frobnicate on;\n}\n")),
   )
   const saved: { reload: boolean; content: string }[] = []
   await page.route("**/api/v1/proxy/config", (route) => {
     if (route.request().method() !== "PUT") return route.fallback()
     saved.push(route.request().postDataJSON())
     // The file passed its test and was written; the reload had no nginx to signal.
-    return failWith(502, {
-      code: "reload_failed",
-      message:
-        'reload failed: nginx: [error] open() "/run/nginx.pid" failed (2: No such file or directory)',
-    })(route)
+    return route.fulfill({
+      status: 502,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: {
+          code: "reload_failed",
+          message:
+            'reload failed: nginx: [error] open() "/run/nginx.pid" failed (2: No such file or directory)',
+        },
+        revision: configRevision(route.request().postDataJSON().content),
+      }),
+    })
   })
   await page.goto("/proxy")
 
@@ -1194,8 +1179,7 @@ test("a status that fails after answering is reported rather than drawn as curre
   await expect(header.getByText("Updated just now")).toHaveCount(0)
 
   statusFails = false
-  await page.getByText("The proxy status could not be read").click()
-  await page.getByRole("button", { name: "Try again" }).click()
+  await header.getByRole("button", { name: "Refresh" }).click()
   await expect(page.getByText("The proxy status could not be read")).toHaveCount(0)
 })
 
@@ -1252,7 +1236,7 @@ async function watchConfigReads(page: Page) {
   const reads: string[] = []
   await page.route("**/api/v1/proxy/config?**", (route) => {
     reads.push(new URL(route.request().url()).searchParams.get("path") ?? "")
-    return json(route, { content: siteFile })
+    return json(route, configRead(siteFile))
   })
   return reads
 }
@@ -1444,81 +1428,6 @@ test("a reload whose test does not finish says nothing was reloaded, not that ng
   await expect(page.getByText("nginx's configuration fails its test")).toHaveCount(0)
 })
 
-test("the last test's warning stays in Needs attention until a test comes back clean", async ({
-  page,
-}) => {
-  await mockProxy(page, { included: true })
-  let last: unknown = {
-    kind: "nginx",
-    checkedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
-    validation: claimedTwice,
-  }
-  const asked: string[] = []
-  await page.route("**/api/v1/proxy/test/last?**", (route) => {
-    asked.push(new URL(route.request().url()).searchParams.get("kind") ?? "")
-    return json(route, last)
-  })
-  const runs: string[] = []
-  await page.route("**/api/v1/proxy/test", (route) => {
-    runs.push("POST")
-    // The server keeps the test it just ran as the last one.
-    last = { kind: "nginx", checkedAt: new Date().toISOString(), validation: passingTest }
-    return json(route, passingTest)
-  })
-  await page.goto("/proxy")
-
-  const finding = page.getByText("nginx's config test has a warning")
-  await expect(finding).toBeVisible()
-  await finding.click()
-  await expect(
-    page.getByText('conflicting server name "app.example.com" on 0.0.0.0:80, ignored'),
-  ).toBeVisible()
-  await expect(page.getByText(/This stays until a test comes back clean/)).toBeVisible()
-
-  // The kept test, as it was and when: not run again by opening it.
-  await page.getByRole("button", { name: "Open test" }).click()
-  const panel = page.getByRole("dialog", { name: "nginx config test" })
-  await expect(panel.getByText("Valid with 1 warning")).toBeVisible()
-  await expect(panel.getByText("tested 3h ago")).toBeVisible()
-  await expect(panel.getByRole("button", { name: "Open at line 3 of app-copy" })).toBeVisible()
-  expect(runs).toEqual([])
-
-  await panel.getByRole("button", { name: "Test again" }).click()
-  await expect(panel.getByText("Valid", { exact: true })).toBeVisible()
-  await expect(panel.getByText("tested just now")).toBeVisible()
-  await panel.getByRole("button", { name: "Close" }).click()
-  await expect(finding).toHaveCount(0)
-  expect(runs).toEqual(["POST"])
-  expect(new Set(asked)).toEqual(new Set(["nginx"]))
-})
-
-test("a failed last test is critical until a test comes back clean", async ({ page }) => {
-  await mockProxy(page, { included: true })
-  await page.route("**/api/v1/proxy/test/last?**", (route) =>
-    json(route, { kind: "nginx", checkedAt: new Date().toISOString(), validation: brokenTest }),
-  )
-  await page.goto("/proxy")
-
-  const finding = page.getByRole("button", { name: /nginx's configuration fails its test/ })
-  await expect(finding).toBeVisible()
-  // Worst first: above the plain-text site the fixtures warn about.
-  const titles = await page.locator("[data-slot='accordion-trigger']").allInnerTexts()
-  const failing = titles.findIndex((title) =>
-    title.includes("nginx's configuration fails its test"),
-  )
-  const plainText = titles.findIndex((title) => title.includes("in plain text"))
-  expect(failing).toBeGreaterThanOrEqual(0)
-  expect(plainText).toBeGreaterThan(failing)
-  await finding.click()
-  await expect(
-    page.getByText('unknown directive "frobnicate" in /etc/nginx/sites-available/app:3'),
-  ).toBeVisible()
-  await page.getByRole("button", { name: "Open test" }).click()
-  await expect(
-    page.getByRole("dialog", { name: "nginx config test" }).getByText("Fails", { exact: true }),
-  ).toBeVisible()
-})
-
 test("a reader is not asked about the config test and has no way to run one", async ({ page }) => {
   await mockProxy(page, { included: true })
   await page.route("**/api/v1/auth/session", (route) =>
@@ -1669,7 +1578,10 @@ test("a file saved from the test's editor is tested again when it closes", async
   await page.route("**/api/v1/proxy/config", (route) => {
     if (route.request().method() !== "PUT") return route.fallback()
     saved.push(route.request().postDataJSON())
-    return json(route, { validation: passingTest })
+    return json(route, {
+      validation: passingTest,
+      revision: configRevision(route.request().postDataJSON().content),
+    })
   })
   await page.goto("/proxy")
 
@@ -1739,9 +1651,7 @@ async function watchConfigFiles(page: Page) {
   await page.route("**/api/v1/proxy/config?**", (route) => {
     const path = new URL(route.request().url()).searchParams.get("path") ?? ""
     reads.push(path)
-    return json(route, {
-      content: `# ${path}\nserver {\n    listen 80;\n    server_name app.example.com;\n    location / {\n        proxy_pass http://127.0.0.1:3000;\n    }\n}\n`,
-    })
+    return json(route, configRead(configContents(path)))
   })
   return reads
 }
@@ -1955,7 +1865,11 @@ test("the config editor shows the change before it saves, places a refusal in th
   await page.route("**/api/v1/proxy/config", (route) => {
     if (route.request().method() !== "PUT") return route.fallback()
     saves.push(route.request().postDataJSON())
-    if (!refuse) return json(route, { validation: passingTest })
+    if (!refuse)
+      return json(route, {
+        validation: passingTest,
+        revision: configRevision(route.request().postDataJSON().content),
+      })
     return route.fulfill({
       status: 422,
       contentType: "application/json",
@@ -2074,4 +1988,180 @@ test("the configuration page and its editor's diff fit a phone", async ({ page }
     ),
   )
   expect(wide).toBe(false)
+})
+
+test("raw config drafts survive Back and Forward with an unload guard while closed", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await watchConfigFiles(page)
+  const file = "/etc/nginx/nginx.conf"
+  const saves: { expectedRevision: string; content: string }[] = []
+  await page.route("**/api/v1/proxy/config", (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    saves.push(route.request().postDataJSON())
+    return route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "unavailable", message: "Save temporarily unavailable" },
+      }),
+    })
+  })
+  await page.goto("/proxy/config")
+  await page.getByRole("button", { name: "Edit nginx.conf", exact: true }).click()
+  const editor = page.getByRole("dialog", { name: /nginx\.conf/ })
+  await typeInEditor(page, editor, "# retained through history")
+  await page.goBack()
+  await expect(editor).toHaveCount(0)
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(true)
+  await page.goForward()
+  await expect(page).toHaveURL(new RegExp(`file=${encodeURIComponent(file)}`))
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText(
+    "# retained through history",
+  )
+  await editor.getByRole("button", { name: "Save only", exact: true }).click()
+  await editor.getByRole("button", { name: "Save only", exact: true }).click()
+  await expect.poll(() => saves.length).toBe(1)
+  expect(saves[0].expectedRevision).toBe(configRevision(configContents(file)))
+  expect(saves[0].content).toContain("# retained through history")
+  await editor.getByRole("button", { name: "Back to editing", exact: true }).click()
+  await editor.locator(".monaco-editor .view-lines").click()
+  await expect(editor.locator(".monaco-editor.focused")).toBeVisible()
+  await page.keyboard.press("Control+End")
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText(
+    "# retained through history",
+  )
+  await editor.getByRole("button", { name: "Discard", exact: true }).click()
+  await page
+    .getByRole("dialog", { name: "Discard changes?" })
+    .getByRole("button", { name: "Discard", exact: true })
+    .click()
+  await expect(editor.locator(".monaco-editor .view-lines")).not.toContainText(
+    "# retained through history",
+  )
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(false)
+})
+
+test("raw config stale saves retain drafts and require review against the newer revision", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const file = "/etc/nginx/nginx.conf"
+  let content = "server { server_name original.example.com; }\n"
+  const originalRevision = configRevision(content)
+  let revision = originalRevision
+  const saves: { content: string; expectedRevision: string }[] = []
+  await page.route("**/api/v1/proxy/config?**", (route) => json(route, { content, revision }))
+  await page.route("**/api/v1/proxy/config", (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    const body = route.request().postDataJSON()
+    saves.push(body)
+    if (body.expectedRevision !== revision)
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "config_conflict", message: "File changed" } }),
+      })
+    content = body.content
+    revision = configRevision(content)
+    return json(route, { revision, validation: passingTest })
+  })
+  await page.goto(`/proxy/config?file=${encodeURIComponent(file)}`)
+  const editor = page.getByRole("dialog", { name: /nginx\.conf/ })
+  await typeInEditor(page, editor, "# my retained draft")
+  content = "server { server_name newer.example.com; }\n"
+  const newerRevision = configRevision(content)
+  revision = newerRevision
+  await editor.getByRole("button", { name: "Save only", exact: true }).click()
+  await editor.getByRole("button", { name: "Save only", exact: true }).click()
+  await expect(editor.getByText("File changed — draft retained", { exact: true })).toBeVisible()
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText("# my retained draft")
+  expect(content).toContain("newer.example.com")
+  expect(saves[0].expectedRevision).toBe(originalRevision)
+  await expect(editor.getByRole("button", { name: "Save and reload", exact: true })).toBeDisabled()
+  await editor.getByText("Compare current file with your draft", { exact: true }).click()
+  await editor.getByText("Current file on disk", { exact: true }).click()
+  await expect(
+    editor.getByText("server { server_name newer.example.com; }", { exact: true }).first(),
+  ).toBeVisible()
+  await editor.getByRole("button", { name: "Review draft against current file" }).click()
+  await expect(editor.getByRole("button", { name: "Back to editing" })).toBeVisible()
+  await editor.getByRole("button", { name: "Save only", exact: true }).click()
+  await expect(editor.getByText("unsaved", { exact: true })).toHaveCount(0)
+  expect(saves[1].expectedRevision).toBe(newerRevision)
+  expect(content).toContain("# my retained draft")
+})
+
+test("raw config test conflicts retain the draft and expose the native newer file", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const file = "/etc/nginx/nginx.conf"
+  let content = "server { server_name original.example.com; }\n"
+  await page.route("**/api/v1/proxy/config?**", (route) => json(route, configRead(content)))
+  await page.route("**/api/v1/proxy/validate", (route) => {
+    content = "server { server_name native.example.com; }\n"
+    return route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "config_conflict", message: "Native file changed during test" },
+      }),
+    })
+  })
+  await page.goto(`/proxy/config?file=${encodeURIComponent(file)}`)
+  const editor = page.getByRole("dialog", { name: /nginx\.conf/ })
+  await typeInEditor(page, editor, "# retain my test draft")
+  await editor.getByRole("button", { name: "Test config", exact: true }).click()
+  await expect(editor.getByText("File changed — draft retained", { exact: true })).toBeVisible()
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText("# retain my test draft")
+  await expect(editor.getByRole("button", { name: "Save only", exact: true })).toBeDisabled()
+  await editor.getByText("Compare current file with your draft", { exact: true }).click()
+  await editor.getByText("Current file on disk", { exact: true }).click()
+  await expect(
+    editor.getByText("server { server_name native.example.com; }", { exact: true }).last(),
+  ).toBeVisible()
+})
+
+test("a raw editor cannot test or publish its buffer after working-state cleanup", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await watchConfigFiles(page)
+  let tests = 0
+  let writes = 0
+  await page.route("**/api/v1/proxy/validate", (route) => {
+    tests += 1
+    return json(route, passingTest)
+  })
+  await page.route("**/api/v1/proxy/config", (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    writes += 1
+    return json(route, { revision: "b".repeat(64), validation: passingTest })
+  })
+  await page.goto(`/proxy/config?file=${encodeURIComponent("/etc/nginx/nginx.conf")}`)
+  const editor = page.getByRole("dialog", { name: /nginx\.conf/ })
+  await typeInEditor(page, editor, "# prior account buffer")
+  // Keep the old mount to exercise the interval before an account-keyed
+  // workspace remount. Its controls must refuse the cleared owner's buffer.
+  await page.evaluate(() => window.dispatchEvent(new Event("jd-working-state-cleared")))
+  await editor.getByRole("button", { name: "Test config", exact: true }).click()
+  await editor.getByRole("button", { name: "Save only", exact: true }).click()
+  await editor.getByRole("button", { name: "Save only", exact: true }).click()
+  await page.keyboard.press("Control+s")
+  expect(tests).toBe(0)
+  expect(writes).toBe(0)
 })

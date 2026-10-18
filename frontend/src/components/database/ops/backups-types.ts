@@ -80,7 +80,12 @@ export type DbRestoreRequest = {
   dumpFirst?: boolean
 }
 
-export type DbCopyRequest = { name: string; structureOnly?: boolean }
+export type DbCopyRequest = {
+  name: string
+  structureOnly?: boolean
+  /** Another saved connection of the same engine, whose server receives the copy. */
+  to?: number
+}
 
 /** The last `result` line of a transfer job, parsed. */
 export type DbTransferResult = {
@@ -95,6 +100,9 @@ export type DbTransferResult = {
   safetyDump?: string
   /** The end of what the restoring tool said. */
   output?: string
+  /** The connection whose server holds `database`, when it is not the one the job ran against. */
+  connection?: number
+  connectionName?: string
 }
 
 /** One table or collection of `GET /databases/{id}/tables`, as far as a dump's picker reads it. */

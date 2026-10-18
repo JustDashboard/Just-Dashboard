@@ -293,14 +293,6 @@ export function EgressGroupPanel({
       {group.automationBlock && !group.automation && (
         <p className="text-hint text-muted-foreground">{group.automationBlock}</p>
       )}
-      {group.advice && group.advice.action !== "none" && (
-        <Notice
-          tone={group.advice.action === "hold" ? "default" : "warning"}
-          title={adviceTitle(group)}
-        >
-          {group.advice.reason}
-        </Notice>
-      )}
       {group.runtime && group.runtime.status !== "verified" && (
         <Notice tone="danger" title="The kernel does not hold the decided route">
           {group.runtime.status === "drift"
@@ -316,24 +308,6 @@ export function EgressGroupPanel({
       {dialog}
     </section>
   )
-}
-
-function adviceTitle(group: EgressGroup): string {
-  const advice = group.advice!
-  const target = egressNames(group, advice.target)
-  switch (advice.action) {
-    case "failover":
-    case "rebalance":
-      return group.automation
-        ? `Failing over to ${target}`
-        : `The rules call for failover to ${target}`
-    case "failback":
-      return group.automation
-        ? `Failing back to ${target}`
-        : `The rules call for failback to ${target}`
-    default:
-      return "Holding"
-  }
 }
 
 /** Every member measured through its own mark, source and device. */

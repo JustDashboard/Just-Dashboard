@@ -59,6 +59,8 @@ func withProxyActor(next http.Handler) http.Handler {
 func mapProxyError(err error) error {
 	var unfinished *proxysvc.UnfinishedTestError
 	switch {
+	case errors.Is(err, proxysvc.ErrConfigChanged):
+		return httpx.Err(http.StatusConflict, "config_conflict", "The file or its directory changed. Your draft is retained; review the current file before trying again.")
 	case errors.Is(err, proxysvc.ErrUnsafePath):
 		return httpx.Err(http.StatusForbidden, "outside_root", err.Error())
 	case errors.Is(err, proxysvc.ErrProtectedFile):

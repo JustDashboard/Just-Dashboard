@@ -8,7 +8,6 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
@@ -16,22 +15,16 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
 )
 
-// The second half of the Security page: the verdict, SSH, the connection
+// The Security operations: SSH, the connection
 // table and the diagnostic tools.
 //
 // Mounted from mountNetSecRoutes rather than from Routes, so the whole
 // security surface still has one place to be read — the same arrangement
 // handlers_docker_manage.go has with Docker.
 func (s *Server) mountSecurityRoutes(r chi.Router) {
-	// The posture verdict and the service catalogue are readable by any
-	// signed-in principal, for the reason the exposure grade is: knowing the
-	// machine is badly configured is not privileged information, and hiding
-	// it from a limited role only delays somebody noticing.
-	r.Method(http.MethodGet, "/security/posture", s.handle(s.handleSecurityPosture))
 	r.Method(http.MethodGet, "/security/services", s.handle(s.handleServiceCatalogue))
 	r.Method(http.MethodGet, "/connections", s.handle(s.handleConnections))
 	s.mountConnectionDetailRoutes(r)
@@ -78,126 +71,6 @@ func (s *Server) mountSecurityRoutes(r chi.Router) {
 	s.mountSecurityIntrusionRoutes(r)
 	s.mountSecurityBoundaryRoutes(r)
 }
-
-// handleSecurityPosture gathers every input and grades the host.
-//
-// The gathering is concurrent because each piece is a subprocess or a file
-// read on a host that may be busy, and seven of them in sequence is the
-// difference between a page that fills in and one that appears to hang. The
-// grading itself is a pure function of what came back, which is what makes the
-// rules testable without a firewall or an sshd.
-func (s *Server) handleSecurityPosture(w http.ResponseWriter, r *http.Request) error {
-	ctx, cancel := timeoutCtx(r, 30*time.Second)
-	defer cancel()
-
-	in := netsec.AssessInput{Now: time.Now()}
-	in.Exposure = ptr(netsec.DescribeExposure(s.Cfg.AllowedCIDRs))
-
-	var wg sync.WaitGroup
-	run := func(fn func()) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			fn()
-		}()
-	}
-	run(func() {
-		if st, err := s.modules.netsec.Status(ctx); err == nil {
-			in.Firewall = st
-		}
-	})
-	run(func() {
-		if st, err := s.modules.netsec.Fail2banStatus(ctx); err == nil {
-			in.Fail2ban = st
-		}
-	})
-	run(func() {
-		if view, err := s.modules.netsec.CrowdSec(ctx); err == nil {
-			in.CrowdSec = view
-		}
-	})
-	run(func() { in.SSH = s.modules.netsec.SSHDStatus(ctx) })
-	run(func() { in.Network = netsec.ReadHostNetwork(ctx) })
-	run(func() {
-		address, err := publicHostAddress()
-		in.PublicAddress, in.PublicAddressRead = address, err == nil
-	})
-	run(func() {
-		// The gateway's reading of the nftables ruleset already classifies
-		// every filtering base chain; the posture names the ones no adapter
-		// models as unknown rather than reading the ruleset a second way.
-		if s.modules.network == nil {
-			return
-		}
-		in.Policy = policyCoverage(s.modules.network.GatewayCapability(ctx))
-	})
-	run(func() {
-		// The containers are read beside the walk, as the ports page reads
-		// them, so a port Docker publishes is graded as the page grades it —
-		// NAT-only ones included, which have no socket to walk.
-		owners := make(chan proxysvc.OwnerInput, 1)
-		go func() { owners <- s.ownerInput(ctx, false) }()
-		listeners, err := proxysvc.ListListeners(ctx)
-		if err != nil {
-			return
-		}
-		for _, l := range proxysvc.AttributeOwners(listeners, <-owners) {
-			in.Listeners = append(in.Listeners, exposedPort(l))
-		}
-	})
-	run(func() {
-		certs, err := s.modules.proxy.CertificateInventory(ctx)
-		if err != nil {
-			return
-		}
-		for _, c := range certs {
-			if c.Error != "" {
-				continue
-			}
-			in.Certificates = append(in.Certificates, netsec.CertSummary{
-				Name: c.Name, DaysLeft: c.DaysLeft, Expired: c.Expired,
-			})
-		}
-	})
-	run(func() {
-		// Failed logins are the volume of attempts, not their content, so the
-		// count is fine to feed a verdict every role can read even though the
-		// btmp listing itself is admin-only.
-		//
-		// Counted over a window rather than taken as the length of a capped
-		// listing: the old figure was len() of 500 records covering the whole
-		// of btmp, which made the 2000-attempt threshold unreachable and the
-		// 200-attempt one permanent on every host with a public SSH port.
-		if vol, err := s.modules.netsec.FailedLoginVolume(ctx, failedLoginWindow); err == nil {
-			in.FailedLogins = vol.Count
-			in.FailedLoginsCapped = vol.Capped
-			in.FailedLoginWindow = vol.Window
-			in.LoginRecordRead = true
-		}
-	})
-	run(func() {
-		if events, err := s.modules.netsec.BanHistory(ctx, 500); err == nil {
-			in.RecentBans = len(events)
-		}
-	})
-	run(func() {
-		if report, err := s.modules.updates.Check(ctx); err == nil {
-			in.SecurityUpdates = report.SecurityCount
-			in.RebootRequired = report.RebootRequired
-			in.PackageManager = report.Manager
-			in.SecurityFiltering = report.SecurityFiltering
-		}
-	})
-	wg.Wait()
-
-	httpx.JSON(w, http.StatusOK, netsec.Assess(in))
-	return nil
-}
-
-// failedLoginWindow is how far back the verdict counts attempts. A week is
-// long enough that a weekend campaign is not missed and short enough that a
-// server which was scanned last spring is not still being warned about it.
-const failedLoginWindow = 7 * 24 * time.Hour
 
 func ptr[T any](v T) *T { return &v }
 
@@ -624,19 +497,4 @@ func (s *Server) handleBanOffenders(w http.ResponseWriter, r *http.Request) erro
 	}
 	httpx.JSON(w, http.StatusOK, netsec.SummariseBans(events, top))
 	return nil
-}
-
-// policyCoverage is the gateway's classification of the filtering base
-// chains, as the posture reads it. A capability with no layers and a reason
-// is a ruleset that could not be read — nft missing, unreadable or printed in
-// a form not understood — which the posture names as an unknown.
-func policyCoverage(capability netx.Capability) *netsec.PolicyCoverage {
-	coverage := &netsec.PolicyCoverage{}
-	if len(capability.Layers) == 0 && capability.Reason != "" && !capability.Writable {
-		coverage.Error = capability.Reason
-	}
-	for _, l := range capability.Layers {
-		coverage.Layers = append(coverage.Layers, netsec.PolicyLayer{Family: l.Family, Table: l.Table, Chain: l.Chain, Hook: l.Hook, Policy: l.Policy, Status: l.Status})
-	}
-	return coverage
 }

@@ -220,6 +220,252 @@ const STATEMENTS_OFF = {
   },
 }
 
+// ---- the statement history ------------------------------------------------
+
+const MINUTE = 60_000
+const iso = (ms: number) => new Date(ms).toISOString()
+
+/** Where each point of a window ending now ends, cut as the server cuts it: on whole multiples of its width. */
+function windowBuckets(now: number, hours: number, seconds: number) {
+  const width = seconds * 1000
+  const first = Math.floor((now - hours * 3_600_000) / width)
+  const last = Math.floor(now / width)
+  return Array.from({ length: last - first + 1 }, (_, index) =>
+    Math.min((first + index + 1) * width, now),
+  )
+}
+
+type Recorded = {
+  id: string
+  query: string
+  calls: number
+  totalMs: number
+  rows: number
+  rowsRead?: number
+  p50Ms?: number
+  p95Ms?: number
+  p99Ms?: number
+  /** Its time across the window, 0 to 1 of the way through. */
+  curve: (x: number) => number
+}
+
+/** A web shop's PostgreSQL over the last hour: one lookup is half the work, and a stock update has just begun to cost. */
+const SHOP_HISTORY: Recorded[] = [
+  {
+    id: "-4520113301",
+    query:
+      "SELECT o.id, o.total, o.status FROM orders o WHERE o.customer_id = $1 ORDER BY o.created_at DESC LIMIT $2",
+    calls: 18_412,
+    totalMs: 22_094,
+    rows: 183_920,
+    curve: (x) => 0.6 + 0.8 * x,
+  },
+  {
+    id: "7731904",
+    query: "UPDATE inventory SET reserved = reserved + $1 WHERE sku = $2",
+    calls: 2_911,
+    totalMs: 12_540,
+    rows: 2_911,
+    curve: (x) => (x > 0.7 ? 2.6 : 0.35),
+  },
+  {
+    id: "193377",
+    query: "INSERT INTO page_views (path, referrer, viewed_at) VALUES ($1, $2, $3)",
+    calls: 40_220,
+    totalMs: 6_830,
+    rows: 40_220,
+    curve: (x) => 1 + 0.25 * Math.sin(x * 12),
+  },
+  {
+    id: "-88120045",
+    query: "SELECT count(*) FROM order_items WHERE order_id = ANY($1)",
+    calls: 96,
+    totalMs: 4_420,
+    rows: 96,
+    curve: (x) => (Math.round(x * 10) % 3 === 0 ? 1.8 : 0.3),
+  },
+  {
+    id: "5501",
+    query: "DELETE FROM sessions WHERE expires_at < $1",
+    calls: 12,
+    totalMs: 1_310,
+    rows: 4_380,
+    curve: (x) => (Math.round(x * 12) % 4 === 0 ? 1 : 0),
+  },
+]
+
+/** An analytics ClickHouse: real run times, so percentiles, and the rows each query read. */
+const ANALYTICS_HISTORY: Recorded[] = [
+  {
+    id: "14227355820374926633",
+    query:
+      "SELECT path, count() AS views FROM page_views WHERE viewed_at > now() - INTERVAL ? HOUR GROUP BY path ORDER BY views DESC LIMIT ?",
+    calls: 1_204,
+    totalMs: 96_320,
+    rows: 120_400,
+    rowsRead: 4_816_000_000,
+    p50Ms: 61,
+    p95Ms: 212,
+    p99Ms: 487,
+    curve: (x) => 0.8 + 0.4 * x,
+  },
+  {
+    id: "3390412281605321",
+    query: "INSERT INTO page_views (path, referrer, viewed_at, session_id) VALUES",
+    calls: 3_610,
+    totalMs: 21_660,
+    rows: 0,
+    rowsRead: 0,
+    p50Ms: 5,
+    p95Ms: 13,
+    p99Ms: 22.6,
+    curve: () => 1,
+  },
+  {
+    id: "902211873340115",
+    query: "SELECT uniqExact(session_id) FROM events WHERE event_date = today() AND kind = ?",
+    calls: 58,
+    totalMs: 14_790,
+    rows: 58,
+    rowsRead: 812_000_000,
+    p50Ms: 241,
+    p95Ms: 402,
+    p99Ms: 431,
+    curve: (x) => (x > 0.5 ? 1.5 : 0.5),
+  },
+]
+
+const historyBucket = (hours: number) =>
+  hours === 1 ? 300 : hours === 6 ? 900 : hours === 24 ? 3600 : 25_200
+const chartBucket = (hours: number) => (hours <= 6 ? 300 : hours === 24 ? 600 : 3600)
+/** A longer window holds more of the same work. */
+const scaleOf = (hours: number) => (hours === 1 ? 1 : hours * 0.8)
+
+function historyFacts(hours: number, bucketSeconds: number, recorded: Recorded[], now: number) {
+  const scale = scaleOf(hours)
+  const intervals = hours * 12 - 1
+  return {
+    supported: true,
+    hours,
+    everySeconds: 300,
+    retentionHours: 168,
+    keptPerInterval: 50,
+    bucketSeconds,
+    from: iso(now - hours * 3_600_000),
+    until: iso(now),
+    intervals,
+    recordedSeconds: intervals * 300,
+    firstAt: iso(now - (hours * 60 - 3) * MINUTE),
+    totalMs: Math.round(recorded.reduce((sum, r) => sum + r.totalMs, 0) * 1.02 * scale),
+    rowsRead: recorded.some((r) => r.rowsRead !== undefined),
+    percentiles: recorded.some((r) => r.p95Ms !== undefined),
+    resets: [],
+    reading: { at: iso(now - 2 * MINUTE - 13_000), supported: true },
+    nextAt: iso(now + 2 * MINUTE + 47_000),
+  }
+}
+
+function historyEntry(r: Recorded, hours: number, total: number) {
+  const scale = scaleOf(hours)
+  const { curve, ...figures } = r
+  void curve
+  return {
+    ...figures,
+    calls: Math.round(r.calls * scale),
+    totalMs: r.totalMs * scale,
+    meanMs: r.totalMs / r.calls,
+    rows: Math.round(r.rows * scale),
+    ...(r.rowsRead === undefined ? {} : { rowsRead: Math.round(r.rowsRead * scale) }),
+    share: (r.totalMs * scale) / total,
+  }
+}
+
+const HISTORY_ORDER: Record<string, (r: ReturnType<typeof historyEntry>) => number> = {
+  total: (r) => r.totalMs,
+  calls: (r) => r.calls,
+  mean: (r) => r.meanMs,
+  rows: (r) => r.rows,
+  rowsRead: (r) => r.rowsRead ?? -1,
+  p95: (r) => r.p95Ms ?? -1,
+}
+
+/** `GET /{id}/statements/history`, ordered as asked, over the window asked for. */
+const statementHistory =
+  (recorded: Recorded[], over: Record<string, unknown> = {}) =>
+  (_call: number, url: URL) => {
+    const now = Date.now()
+    const hours = Number(url.searchParams.get("hours") ?? 1)
+    const sort = url.searchParams.get("sort") ?? "total"
+    const facts = historyFacts(hours, historyBucket(hours), recorded, now)
+    const buckets = windowBuckets(now, hours, facts.bucketSeconds)
+    const statements = recorded
+      .map((r) => ({
+        ...historyEntry(r, hours, facts.totalMs),
+        trend: buckets.map((_, index) =>
+          index === 0
+            ? null
+            : Math.round(
+                ((r.totalMs * scaleOf(hours)) / buckets.length) * r.curve(index / buckets.length),
+              ),
+        ),
+      }))
+      .sort((a, b) => HISTORY_ORDER[sort](b) - HISTORY_ORDER[sort](a))
+    return { ...facts, sort, buckets, statements, ...over }
+  }
+
+/**
+ * `GET /{id}/statements/history/{statement}`: its points, the first before
+ * recording began. `gap` is a point a third of the way through that no
+ * reading fell in, and `reset` the counters started again two thirds of the
+ * way through.
+ */
+const statementHistoryOf =
+  (recorded: Recorded[], r: Recorded, marks: { gap?: boolean; reset?: boolean } = {}) =>
+  (_call: number, url: URL) => {
+    const now = Date.now()
+    const hours = Number(url.searchParams.get("hours") ?? 1)
+    const facts = historyFacts(hours, chartBucket(hours), recorded, now)
+    const at = windowBuckets(now, hours, facts.bucketSeconds)
+    const entry = historyEntry(r, hours, facts.totalMs)
+    const gap = marks.gap ? Math.round(at.length / 3) : -1
+    const resets = marks.reset ? [iso(at[Math.round((at.length * 2) / 3)])] : []
+    const points = at.map((ts, index) => {
+      if (index === 0 || index === gap)
+        return { at: ts, recorded: false, calls: 0, totalMs: 0, rows: 0 }
+      const weight = r.curve(index / at.length) / at.length
+      const calls = Math.max(1, Math.round(entry.calls * weight))
+      const totalMs = entry.totalMs * weight
+      return {
+        at: ts,
+        recorded: true,
+        calls,
+        totalMs,
+        meanMs: totalMs / calls,
+        rows: Math.round(entry.rows * weight),
+        ...(r.rowsRead === undefined
+          ? {}
+          : { rowsRead: Math.round((entry.rowsRead ?? 0) * weight) }),
+        ...(r.p95Ms === undefined
+          ? {}
+          : {
+              p50Ms: r.p50Ms! * (0.9 + 0.2 * weight * at.length),
+              p95Ms: r.p95Ms * (0.9 + 0.2 * weight * at.length),
+              p99Ms: r.p99Ms! * (0.9 + 0.2 * weight * at.length),
+            }),
+      }
+    })
+    return { ...facts, resets, statement: entry, points }
+  }
+
+const NO_HISTORY_YET = (_call: number, url: URL) => ({
+  ...statementHistory(SHOP_HISTORY)(0, url),
+  intervals: 0,
+  recordedSeconds: 0,
+  firstAt: undefined,
+  totalMs: 0,
+  statements: [],
+})
+
 const table = (schema: string, name: string, extra: Record<string, unknown> = {}) => ({
   schema,
   table: name,
@@ -761,6 +1007,14 @@ const ANSWERS: Record<string, unknown> = {
   "GET 1/activity": ACTIVITY,
   "GET 1/locks": LOCKS,
   "GET 1/statements": STATEMENTS,
+  "GET 1/statements/history": statementHistory(SHOP_HISTORY),
+  ...Object.fromEntries(
+    SHOP_HISTORY.map((r, index) => [
+      `GET 1/statements/history/${r.id}`,
+      // The stock update's history has a reading missed and a reset in it.
+      statementHistoryOf(SHOP_HISTORY, r, index === 1 ? { gap: true, reset: true } : {}),
+    ]),
+  ),
   "GET 1/tablestats": TABLESTATS,
   "GET 1/indexstats": INDEXSTATS,
   "GET 1/maintenance": POSTGRES_ACTIONS,
@@ -835,6 +1089,13 @@ const ANSWERS: Record<string, unknown> = {
   "GET 7/advisor": { ...ADVISOR, silences: [], endOfLife: undefined, findings: [] },
   "GET 2/stats": CLICKHOUSE_STATS,
   "GET 2/clickhouse/queries": CH_QUERIES,
+  "GET 2/statements/history": statementHistory(ANALYTICS_HISTORY),
+  ...Object.fromEntries(
+    ANALYTICS_HISTORY.map((r) => [
+      `GET 2/statements/history/${r.id}`,
+      statementHistoryOf(ANALYTICS_HISTORY, r),
+    ]),
+  ),
   "GET 2/clickhouse/parts": CH_PARTS,
   "GET 2/clickhouse/merges": CH_MERGES,
   "GET 2/clickhouse/mutations": CH_MUTATIONS,
@@ -979,6 +1240,7 @@ test("the page opens on recorded activity and offers the views its engine has", 
     /^Sessions/,
     /^Locks/,
     /^Statements$/,
+    /^Statement history$/,
     /^Tables$/,
     /^Indexes$/,
     /^Replication$/,
@@ -990,10 +1252,66 @@ test("the page opens on recorded activity and offers the views its engine has", 
   // A chart with nothing above zero in the window is named, not drawn flat.
   await expect(page.getByText(/Nothing else has moved\./)).toBeVisible()
   await expect(page.getByRole("heading", { name: "Lock waits and deadlocks" })).toHaveCount(0)
-  // The snapshot and the session list are the page's; a view's own read waits for the view.
-  expect(ops.seen.filter((request) => !/\/(stats|stats\/history|activity)$/.test(request))).toEqual(
-    [],
+  // The snapshot and the session list are the page's, and what uses the database, which draws
+  // each client as itself; a view's own read waits for the view.
+  expect(
+    ops.seen.filter((request) => !/\/(stats|stats\/history|activity|consumers)$/.test(request)),
+  ).toEqual([])
+})
+
+test("the Overview draws who is connected right now as their programs, and a state opens its sessions", async ({
+  page,
+}) => {
+  await mockOps(page, {
+    answers: {
+      "GET 1/consumers": {
+        checkedAt: NOW,
+        nodes: [
+          { id: "db:1", kind: "database", name: "shop", product: "postgres", connId: 1 },
+          {
+            id: "deploy:7",
+            kind: "deployment",
+            name: "checkout-api",
+            product: "nodejs",
+            href: "/deploy/7",
+          },
+        ],
+        edges: [
+          { from: "db:1", to: "deploy:7", via: ["binding"], sessions: 1, status: "connected" },
+        ],
+      },
+    },
+  })
+  await visit(page, "/databases/1/performance")
+  const now = region(page, "Right now")
+  const clients = now.getByRole("list", { name: "Connected" }).getByRole("listitem")
+  // What is wrong first — a session stuck behind a lock, then one holding a transaction open —
+  // then the busiest, and the dashboard's own connection last, with its pool.
+  await expect(clients).toHaveCount(5)
+  await expect(clients.nth(0)).toContainText("billing-worker")
+  await expect(clients.nth(0)).toContainText("1 waiting on a lock")
+  await expect(clients.nth(1)).toContainText("Deployment")
+  await expect(clients.nth(1).getByRole("link", { name: "Open checkout-api" })).toHaveAttribute(
+    "href",
+    "/deploy/7",
   )
+  await expect(clients.nth(1)).toContainText("1 in a transaction")
+  await expect(clients.nth(2)).toContainText("reports")
+  await expect(clients.nth(4)).toContainText("This dashboard")
+  await expect(clients.nth(4)).toContainText("1 of 5 pooled open")
+  // The four states, each counted, and the dashboard's own read is none of them.
+  const doing = now.getByRole("list", { name: "Doing" }).getByRole("link")
+  await expect(doing).toHaveText([
+    /1\s*Running a statement/,
+    /1\s*Waiting on a lock/,
+    /1\s*Holding a transaction/,
+    /1\s*Connected, idle/,
+  ])
+  await now.getByRole("link", { name: "1 session waiting on a lock: open them" }).click()
+  await expect(view(page, /^Sessions/)).toHaveAttribute("aria-pressed", "true")
+  await expect(page).toHaveURL(/state=blocked/)
+  await expect(sessionRow(page, "40,77")).toBeVisible()
+  await expect(sessionRow(page, "52")).toHaveCount(0)
 })
 
 test("a file-based engine is read as its file, and is asked nothing a server would be", async ({
@@ -1337,6 +1655,237 @@ test("resetting the statistics is confirmed as the whole server's", async ({ pag
   await expect.poll(() => ops.sent.map((sent) => sent.request)).toEqual(["POST 1/statements/reset"])
 })
 
+// ---- a PostgreSQL server's statements, as shapes ------------------------------
+
+const SHAPES_TOTAL_MS = 842_000
+const shaped = (
+  id: string,
+  query: string,
+  totalMs: number,
+  calls: number,
+  extra: Record<string, unknown> = {},
+) =>
+  statement(id, query, totalMs / SHAPES_TOTAL_MS, {
+    totalMs,
+    calls,
+    meanMs: totalMs / calls,
+    maxMs: calls === 1 ? totalMs : (totalMs / calls) * 6,
+    rows: 0,
+    hitRatio: -1,
+    ...extra,
+  })
+
+/**
+ * What the list holds of a PostgreSQL server's statements: the extension's
+ * `$n` where it took a value out of a statement it planned, and a `?` wherever
+ * the backend took one out of a statement the extension keeps as it was sent
+ * — a role's password, a setting, a comment.
+ */
+const PG_SHAPES = {
+  ...STATEMENTS,
+  totalMs: SHAPES_TOTAL_MS,
+  statements: [
+    shaped(
+      "p1",
+      "SELECT id, total\n  FROM orders\n WHERE customer_id = $1\n ORDER BY ?",
+      438_000,
+      18_400,
+      {
+        rows: 220_800,
+        hitRatio: 0.97,
+      },
+    ),
+    shaped("p2", "UPDATE carts SET total = $1, updated_at = now() WHERE id = $2", 227_000, 6_120, {
+      rows: 6_120,
+      hitRatio: 0.99,
+    }),
+    shaped("p5", "SET statement_timeout = ?", 101_000, 24_800),
+    shaped("p4", "ALTER ROLE app_reader IN DATABASE shop_main SET search_path = ?, ?", 42_000, 3),
+    shaped(
+      "p3",
+      "CREATE ROLE app_reader WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD ?",
+      25_000,
+      1,
+    ),
+    shaped("p6", "COMMENT ON TABLE orders IS ?", 9_000, 1),
+  ],
+}
+
+const shapeRow = (page: Page, text: RegExp) =>
+  region(page, "Statements").getByRole("row", { name: text })
+
+/** What the engine plans the first of those, with its values put back, as. */
+const ORDERS_PLAN = {
+  result: {
+    columns: ["QUERY PLAN"],
+    rows: [
+      ["Sort  (cost=48.21..48.29 rows=31 width=16)"],
+      ["  Sort Key: total"],
+      [
+        "  ->  Index Scan using orders_customer_id_idx on orders  (cost=0.29..47.44 rows=31 width=16)",
+      ],
+      ["        Index Cond: (customer_id = 42)"],
+    ],
+  },
+  format: "text",
+  analyzed: false,
+  rolledBack: false,
+}
+
+/**
+ * The statement's panel once it has slid in and its editor holds the text.
+ * Caught on the way in, the panel stood half off the window's edge with an
+ * empty editor in it.
+ */
+async function openedStatement(page: Page, text: string) {
+  const panel = dialog(page)
+  await expect(panel.locator("[data-slot=code-view]")).toContainText(text, { timeout: 15_000 })
+  await panel.evaluate(async (el) => {
+    await Promise.all(el.getAnimations().map((animation) => animation.finished))
+  })
+  await expect(panel).toBeInViewport({ ratio: 1 })
+  return panel
+}
+
+test("a PostgreSQL statement is listed as its shape, with a ? where a password or a setting was", async ({
+  page,
+}) => {
+  const ops = await mockOps(page, {
+    answers: { "GET 1/statements": PG_SHAPES, "POST 1/explain": ORDERS_PLAN },
+  })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(region(page, "Statements").getByRole("row")).toHaveCount(7)
+  await expect(shapeRow(page, /CREATE ROLE app_reader/)).toContainText("NOCREATEROLE PASSWORD ?")
+  await expect(shapeRow(page, /SET statement_timeout/)).toContainText("SET statement_timeout = ?")
+  await expect(region(page, "Statements")).toContainText(
+    "every value in it is replaced before it leaves the server",
+  )
+
+  // A statement the extension kept whole is still a shape, and has no plan.
+  await shapeRow(page, /CREATE ROLE app_reader/).click()
+  const panel = await openedStatement(page, "NOCREATEROLE PASSWORD ?")
+  await expect(panel).toContainText("The statement, as a shape")
+  await expect(panel).toContainText("Only a statement that reads or changes rows has a plan")
+  // The editor's own input is a textbox too; what counts is that no value is asked for.
+  await expect(panel.getByRole("textbox", { name: /^The value for/ })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await expect(page).not.toHaveURL(/statement=/)
+
+  // One that was planned asks for the extension's $1 and for the ? beside it.
+  await shapeRow(page, /SELECT id, total/).click()
+  await openedStatement(page, "customer_id = $1")
+  await panel.getByRole("textbox", { name: "The value for $1, after customer_id =" }).fill("42")
+  await panel.getByRole("textbox", { name: "The value for ?, after ORDER BY" }).fill("2")
+  await panel.getByRole("button", { name: "Explain with these values" }).click()
+  await expect(panel).toContainText("Index Scan using orders_customer_id_idx on orders")
+  expect(ops.sent.find((sent) => sent.request === "POST 1/explain")?.body).toEqual({
+    query: "SELECT id, total\n  FROM orders\n WHERE customer_id = 42\n ORDER BY 2",
+    format: "text",
+  })
+})
+
+test("an account that may only read is shown the shapes and offered nothing that runs one", async ({
+  page,
+}) => {
+  await mockOps(page, { viewer: true, answers: { "GET 1/statements": PG_SHAPES } })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(shapeRow(page, /CREATE ROLE app_reader/)).toContainText("PASSWORD ?")
+  await expect(page.getByRole("button", { name: "Reset statistics" })).toHaveCount(0)
+  await shapeRow(page, /ALTER ROLE app_reader/).click()
+  const panel = await openedStatement(page, "SET search_path = ?, ?")
+  await expect(panel).toContainText("The statement, as a shape")
+  await expect(panel.getByRole("button", { name: "Open in Query" })).toHaveCount(0)
+})
+
+test("a PostgreSQL list with nothing counted yet says so", async ({ page }) => {
+  await mockOps(page, {
+    answers: { "GET 1/statements": { ...PG_SHAPES, totalMs: 0, statements: [] } },
+  })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(
+    page.getByText("No statement has been counted yet. The list fills as they run."),
+  ).toBeVisible()
+  await expect(region(page, "Statements").getByRole("row")).toHaveCount(0)
+})
+
+test("a PostgreSQL list that cannot be read says why, and can be asked for again", async ({
+  page,
+}) => {
+  let refused = true
+  await mockOps(page, {
+    answers: {
+      "GET 1/statements": () =>
+        refused ? failing("pq: permission denied for view pg_stat_statements") : PG_SHAPES,
+    },
+  })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(page.getByText("Could not read the statements")).toBeVisible()
+  await expect(page.getByText(/permission denied for view pg_stat_statements/)).toBeVisible()
+  refused = false
+  await page.getByRole("button", { name: "Try again" }).click()
+  await expect(shapeRow(page, /CREATE ROLE app_reader/)).toContainText("PASSWORD ?")
+})
+
+test("the shapes keep to a phone's width, with a statement open over them", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockOps(page, { answers: { "GET 1/statements": PG_SHAPES } })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(region(page, "Statements").getByRole("row")).toHaveCount(7)
+  await keepsTheRules(page, "a PostgreSQL server's statements at a phone's width")
+  await visit(page, "/databases/1/performance?view=statements&statement=p3")
+  await expect(dialog(page)).toContainText("The statement, as a shape")
+  await keepsTheRules(page, "a statement's shape open at a phone's width", true)
+})
+
+test("a PostgreSQL server's statements as shapes, for the record @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "JD_SHOTS names the directory the screenshots go to")
+  const shots = process.env.JD_SHOTS
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockOps(page, {
+    answers: { "GET 1/statements": PG_SHAPES, "POST 1/explain": ORDERS_PLAN },
+  })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(region(page, "Statements").getByRole("row")).toHaveCount(7)
+  await page.screenshot({ path: `${shots}/statements-shapes-1440.png` })
+
+  await shapeRow(page, /CREATE ROLE app_reader/).click()
+  const password = await openedStatement(page, "NOCREATEROLE PASSWORD ?")
+  await expect(password).toContainText("Only a statement that reads or changes rows has a plan")
+  await page.screenshot({ path: `${shots}/statement-password-1440.png` })
+  await page.keyboard.press("Escape")
+  await expect(page).not.toHaveURL(/statement=/)
+
+  await shapeRow(page, /SELECT id, total/).click()
+  const panel = await openedStatement(page, "customer_id = $1")
+  await panel.getByRole("textbox", { name: "The value for $1, after customer_id =" }).fill("42")
+  await panel.getByRole("textbox", { name: "The value for ?, after ORDER BY" }).fill("2")
+  await panel.getByRole("button", { name: "Explain with these values" }).click()
+  await expect(panel).toContainText("Index Scan using orders_customer_id_idx on orders")
+  await page.screenshot({ path: `${shots}/statement-planned-1440.png` })
+
+  await page.unrouteAll({ behavior: "ignoreErrors" })
+  await mockOps(page, { viewer: true, answers: { "GET 1/statements": PG_SHAPES } })
+  await visit(page, "/databases/1/performance?view=statements&statement=p4")
+  const viewer = await openedStatement(page, "SET search_path = ?, ?")
+  await expect(viewer).toContainText("The statement, as a shape")
+  await page.screenshot({ path: `${shots}/statements-viewer-1440.png` })
+
+  await page.unrouteAll({ behavior: "ignoreErrors" })
+  await mockOps(page, {
+    answers: { "GET 1/statements": { ...PG_SHAPES, totalMs: 0, statements: [] } },
+  })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(page.getByText("No statement has been counted yet.", { exact: false })).toBeVisible()
+  await page.screenshot({ path: `${shots}/statements-empty-1440.png` })
+
+  await page.unrouteAll({ behavior: "ignoreErrors" })
+  await mockOps(page, { answers: { "GET 1/statements": PG_SHAPES } })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(region(page, "Statements").getByRole("row")).toHaveCount(7)
+  await page.screenshot({ path: `${shots}/statements-shapes-390.png` })
+})
+
 test("a view that could not be read says so and is tried again; one that stops updating keeps what it had", async ({
   page,
 }) => {
@@ -1616,6 +2165,7 @@ test("an analytic engine is read by its queries, parts and merges", async ({ pag
     /^Overview$/,
     /^Running queries/,
     /^Statements$/,
+    /^Statement history$/,
     /^Tables$/,
     /^Indexes$/,
     /^Parts$/,
@@ -1650,21 +2200,6 @@ test("an analytic engine is read by its queries, parts and merges", async ({ pag
   await expect(region(page, "Mutations")).toContainText("Code: 341. Unfinished")
   // It has no session list, no lock table: neither is asked.
   expect(ops.seen.filter((request) => /\/(activity|locks)$/.test(request))).toEqual([])
-})
-
-test("a stopped server keeps its pages and is asked nothing", async ({ page }) => {
-  const ops = await mockOps(page, {
-    summaries: { 1: { state: "stopped", ok: false, latencyMs: 0 } },
-  })
-  await visit(page, "/databases/1/performance?view=sessions")
-  await expect(page.getByText("shop is stopped")).toBeVisible()
-  await expect(page.getByRole("link", { name: "Open Home" })).toHaveAttribute(
-    "href",
-    "/databases/1",
-  )
-  await visit(page, "/databases/1/advisor")
-  await expect(page.getByText("shop is stopped")).toBeVisible()
-  expect(ops.seen).toEqual([])
 })
 
 // ---------------------------------------------------------------------------
@@ -1864,6 +2399,256 @@ test("a statement with more placeholders than a form is quick for is handed to Q
   await expect(dialog(page)).toContainText("This shape has 20 placeholders")
   await expect(dialog(page).getByRole("textbox")).toHaveCount(0)
   await expect(dialog(page).getByRole("button", { name: "Open in Query" })).toBeVisible()
+})
+
+// ---------------------------------------------------------------------------
+// Statement history
+// ---------------------------------------------------------------------------
+
+const historyView = (page: Page) => region(page, "Statement history")
+
+/** Waits for a sheet to finish opening, so what is read or drawn is the sheet at rest. */
+async function settled(page: Page) {
+  const sheet = dialog(page)
+  await expect(sheet).toBeVisible()
+  await sheet.evaluate((el) =>
+    Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+  )
+}
+
+test("statement history ranks a window's statements by the column pressed, each with its trend, and one opens its charts", async ({
+  page,
+}) => {
+  await mockOps(page)
+  await visit(page, "/databases/1/performance?view=history")
+  const history = historyView(page)
+  const rows = history.getByRole("row")
+  await expect(rows).toHaveCount(SHOP_HISTORY.length + 1)
+  await expect(rows.nth(1)).toContainText("SELECT o.id, o.total, o.status FROM orders o")
+  await expect(rows.nth(1)).toContainText("46%")
+  // Each row draws its time across the window.
+  await expect(history.getByRole("img", { name: "Its time over the last hour" })).toHaveCount(
+    SHOP_HISTORY.length,
+  )
+  await expect(history).toContainText("of statement time recorded over the last hour")
+  // What the figures are made from, in the engine's own terms.
+  await expect(history).toContainText("pg_stat_statements keeps running totals for each statement")
+  await expect(history).toContainText("so there are no percentiles")
+  // PostgreSQL keeps no run times and counts no rows read: neither column is drawn.
+  await expect(history.getByRole("columnheader", { name: "p95" })).toHaveCount(0)
+  await expect(history.getByRole("columnheader", { name: "Examined" })).toHaveCount(0)
+  await expect(history.getByRole("columnheader", { name: "Share" })).toHaveAttribute(
+    "aria-sort",
+    "descending",
+  )
+
+  // Another order is asked of the server, which ranks the whole window.
+  const asked = page.waitForRequest((request) =>
+    /\/statements\/history\?.*sort=calls/.test(request.url()),
+  )
+  await history.getByRole("button", { name: "Calls" }).click()
+  await asked
+  await expect(page).toHaveURL(/sort=calls/)
+  await expect(history.getByRole("columnheader", { name: "Calls" })).toHaveAttribute(
+    "aria-sort",
+    "descending",
+  )
+  await expect(rows.nth(1)).toContainText("INSERT INTO page_views")
+
+  await history.getByRole("textbox", { name: "Filter the statement history" }).fill("inventory")
+  await expect(rows).toHaveCount(2)
+  await history.getByRole("textbox", { name: "Filter the statement history" }).fill("")
+
+  await history.getByRole("row", { name: /UPDATE inventory/ }).click()
+  await expect(page).toHaveURL(/statement=7731904/)
+  await settled(page)
+  const panel = dialog(page)
+  for (const chart of ["Time spent", "Calls", "Time per call", "Rows"]) {
+    await expect(panel.getByRole("heading", { name: chart, exact: true })).toBeVisible()
+  }
+  await expect(panel).toContainText("A point for every 5 minutes.")
+  await expect(panel).toContainText("A mark on the time axis is where the statistics were reset.")
+  await expect(panel).toContainText("UPDATE inventory SET reserved = reserved + $1 WHERE sku = $2")
+  await expect(panel.getByRole("button", { name: "Open in Query" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page).not.toHaveURL(/statement=/)
+  await expect(history.getByRole("row", { name: /UPDATE inventory/ })).toBeFocused()
+})
+
+test("statement history is read over the Overview's window, and a range pressed in it is asked for", async ({
+  page,
+}) => {
+  await mockOps(page)
+  await visit(page, "/databases/1/performance?view=history")
+  const history = historyView(page)
+  await expect(history.getByRole("row")).toHaveCount(SHOP_HISTORY.length + 1)
+  const asked = page.waitForRequest((request) =>
+    /\/statements\/history\?.*hours=24/.test(request.url()),
+  )
+  await history.getByRole("radio", { name: "24 hours" }).click()
+  await asked
+  await expect(history).toContainText("of statement time recorded over the last 24 hours")
+  await view(page, /^Overview$/).click()
+  await expect(page.getByRole("radio", { name: "24 hours" })).toBeChecked()
+})
+
+test("statement history before its second reading says when the first point comes", async ({
+  page,
+}) => {
+  await mockOps(page, { answers: { "GET 1/statements/history": NO_HISTORY_YET } })
+  await visit(page, "/databases/1/performance?view=history")
+  await expect(page.getByText("No statement history yet")).toBeVisible()
+  await expect(page.getByText(/the next is in about 3 minutes/)).toBeVisible()
+  await expect(page.getByText(/kept for 7 days/)).toBeVisible()
+})
+
+test("statement history a server cannot give says why, with the way to the view that turns it on", async ({
+  page,
+}) => {
+  await mockOps(page, {
+    answers: {
+      "GET 1/statements/history": (call: number, url: URL) => ({
+        ...NO_HISTORY_YET(call, url),
+        reading: {
+          at: iso(Date.now() - 3 * MINUTE),
+          supported: false,
+          reason: "pg_stat_statements is not enabled in this database",
+        },
+      }),
+    },
+  })
+  await visit(page, "/databases/1/performance?view=history")
+  await expect(page.getByText("The statements this server runs cannot be recorded")).toBeVisible()
+  await expect(page.getByText("pg_stat_statements is not enabled in this database")).toBeVisible()
+  await page.getByRole("button", { name: "Open Statements" }).click()
+  await expect(page).toHaveURL(/view=statements/)
+  await expect(page.getByText("This server is not counting its statements")).toHaveCount(0)
+})
+
+test("statement history that could not be read says so and is tried again", async ({ page }) => {
+  let down = true
+  await mockOps(page, {
+    answers: {
+      "GET 1/statements/history": (call: number, url: URL) =>
+        down ? failing("database is locked", 500) : statementHistory(SHOP_HISTORY)(call, url),
+    },
+  })
+  await visit(page, "/databases/1/performance?view=history")
+  await expect(page.getByText("Could not read the statement history")).toBeVisible()
+  down = false
+  await page.getByRole("button", { name: "Try again" }).click()
+  await expect(historyView(page).getByRole("row")).toHaveCount(SHOP_HISTORY.length + 1)
+})
+
+test("a role that may only read reads the statement history and is offered nothing to run", async ({
+  page,
+}) => {
+  await mockOps(page, { viewer: true })
+  await visit(page, `/databases/1/performance?view=history&statement=${SHOP_HISTORY[0].id}`)
+  await settled(page)
+  await expect(dialog(page).getByRole("heading", { name: "Time spent", exact: true })).toBeVisible()
+  await expect(dialog(page)).toContainText("SELECT o.id, o.total, o.status FROM orders o")
+  await expect(dialog(page).getByRole("button", { name: "Open in Query" })).toHaveCount(0)
+})
+
+test("an engine that keeps run times gives the history its percentiles and the rows each query read", async ({
+  page,
+}) => {
+  await mockOps(page, AS_CLICKHOUSE)
+  await visit(page, "/databases/2/performance?view=history")
+  const history = historyView(page)
+  await expect(history.getByRole("row")).toHaveCount(ANALYTICS_HISTORY.length + 1)
+  await expect(history.getByRole("columnheader", { name: "p95" })).toBeVisible()
+  await expect(history.getByRole("columnheader", { name: "Examined" })).toBeVisible()
+  await expect(history.getByRole("row").nth(1)).toContainText("212 ms")
+  await expect(history).toContainText("ClickHouse's query log holds every finished query")
+  await history.getByRole("row").nth(1).click()
+  await settled(page)
+  const panel = dialog(page)
+  await expect(panel.getByText("p99", { exact: true }).first()).toBeVisible()
+  await expect(panel).toContainText("487 ms")
+  await expect(panel).toContainText("40K for each returned")
+})
+
+test("a file has no statement history to offer", async ({ page }) => {
+  const ops = await mockOps(page)
+  await visit(page, "/databases/7/performance")
+  await expect(view(page, /^File$/)).toBeVisible()
+  await expect(view(page, /^Statement history$/)).toHaveCount(0)
+  expect(ops.seen.filter((request) => request.includes("/statements/history"))).toEqual([])
+})
+
+test("statement history fits a phone, its list and its charts", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockOps(page)
+  await visit(page, "/databases/1/performance?view=history")
+  await expect(historyView(page).getByRole("row")).toHaveCount(SHOP_HISTORY.length + 1)
+  const sideways = () =>
+    page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
+  expect(await sideways()).toBe(false)
+  await historyView(page).getByRole("row").nth(1).click()
+  await settled(page)
+  await expect(dialog(page).getByRole("heading", { name: "Rows", exact: true })).toBeVisible()
+  expect(await sideways()).toBe(false)
+  const wide = await dialog(page).evaluate((el) => el.scrollWidth > el.clientWidth + 1)
+  expect(wide).toBe(false)
+})
+
+test("statement history screenshots @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "JD_SHOTS names where the screenshots go")
+  test.setTimeout(120_000)
+  const dir = process.env.JD_SHOTS
+  const shot = (name: string) => page.screenshot({ path: `${dir}/${name}.png` })
+  let empty = false
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockOps(page, {
+    ...AS_CLICKHOUSE,
+    answers: {
+      "GET 1/statements/history": (call: number, url: URL) =>
+        empty ? NO_HISTORY_YET(call, url) : statementHistory(SHOP_HISTORY)(call, url),
+    },
+  })
+
+  await visit(page, "/databases/1/performance?view=history")
+  await expect(historyView(page).getByRole("row")).toHaveCount(SHOP_HISTORY.length + 1)
+  await page.waitForLoadState("networkidle")
+  await shot("history-list-1440")
+
+  await historyView(page)
+    .getByRole("row", { name: /UPDATE inventory/ })
+    .click()
+  await settled(page)
+  await expect(
+    dialog(page).getByRole("heading", { name: "Time per call", exact: true }),
+  ).toBeVisible()
+  await shot("history-statement-1440")
+  await dialog(page).getByRole("heading", { name: "Rows", exact: true }).scrollIntoViewIfNeeded()
+  await shot("history-statement-charts-1440")
+  await page.keyboard.press("Escape")
+
+  await visit(page, "/databases/2/performance?view=history")
+  await expect(historyView(page).getByRole("columnheader", { name: "p95" })).toBeVisible()
+  await page.waitForLoadState("networkidle")
+  await shot("history-percentiles-1440")
+  await historyView(page).getByRole("row").nth(1).click()
+  await settled(page)
+  await dialog(page)
+    .getByRole("heading", { name: "Time per call", exact: true })
+    .scrollIntoViewIfNeeded()
+  await shot("history-percentiles-statement-1440")
+  await page.keyboard.press("Escape")
+
+  empty = true
+  await visit(page, "/databases/1/performance?view=history")
+  await expect(page.getByText("No statement history yet")).toBeVisible()
+  await shot("history-empty-1440")
+
+  empty = false
+  await page.setViewportSize({ width: 390, height: 844 })
+  await visit(page, "/databases/1/performance?view=history")
+  await expect(historyView(page).getByRole("row")).toHaveCount(SHOP_HISTORY.length + 1)
+  await page.waitForLoadState("networkidle")
+  await shot("history-list-390")
 })
 
 test("a read that does not come back says what it is waiting for, and a failure after a long silence says it was one", async ({
@@ -2141,397 +2926,13 @@ test("an analytic engine's charts leave out what it has no notion of", async ({ 
   await visit(page, "/databases/2/performance")
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await tick(page)
-  const sessions = page
-    .locator("[data-slot=panel]")
-    .filter({ has: page.getByRole("heading", { name: "Sessions", level: 2 }) })
+  // Each chart is found by its name, as the database home's are.
+  const sessions = page.getByRole("group", { name: "Sessions", exact: true })
   await expect(sessions.getByRole("row", { name: /Open/ })).toBeVisible()
   // It has no transactions to sit idle in and no lock waits: neither is a line at zero.
   await expect(sessions).not.toContainText("Idle in a transaction")
   await expect(sessions).not.toContainText("Waiting on a lock")
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-})
-
-// ---------------------------------------------------------------------------
-// Advisor
-// ---------------------------------------------------------------------------
-
-const findings = (page: Page) => region(page, "Findings")
-const finding = (page: Page, title: string | RegExp) =>
-  findings(page).getByRole("button", { name: title })
-
-async function openFindingEvidence(page: Page) {
-  await findings(page).locator("[data-finding]").first().waitFor()
-  for (const row of await findings(page).locator("[data-slot=accordion-trigger]").all())
-    if ((await row.getAttribute("aria-expanded")) === "false") await row.click()
-}
-
-test("the advisor counts its findings by severity and by category, and each narrows the list", async ({
-  page,
-}) => {
-  await mockOps(page)
-  await visit(page, "/databases/1/advisor")
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-
-  const chips = findings(page).getByRole("group", { name: "Findings by category" })
-  await expect(chips.getByRole("button")).toHaveText([
-    /All\s*5/,
-    /Reliability\s*2/,
-    /Performance\s*2/,
-    /Maintenance\s*1/,
-  ])
-  // A row names what it is about.
-  await expect(finding(page, /1 table with no primary key/)).toContainText("public.audit_log")
-  await expect(finding(page, /2 foreign keys with no index/)).toContainText("2 tables")
-
-  await page.getByRole("button", { name: "Warnings" }).click()
-  await expect(page).toHaveURL(/level=warning/)
-  await expect(findings(page).locator("[data-slot=accordion-item]")).toHaveCount(4)
-  // The chips count what the severity leaves.
-  await expect(chips.getByRole("button")).toHaveText([
-    /All\s*4/,
-    /Reliability\s*2/,
-    /Performance\s*1/,
-    /Maintenance\s*1/,
-  ])
-  await chips.getByRole("button", { name: /Performance/ }).click()
-  await expect(page).toHaveURL(/category=performance/)
-  await expect(findings(page).locator("[data-slot=accordion-item]")).toHaveCount(1)
-
-  // What the report could not assess is said, and what the release has left.
-  const rests = region(page, "What the report rests on")
-  await expect(rests).toContainText("Accounts could not be assessed")
-  await expect(rests).toContainText("PostgreSQL 16")
-  await expect(rests).toContainText("Maintained")
-  await expect(rests).toContainText("768 days from now")
-})
-
-test("a report exposes priority actions and opens evidence only on request", async ({ page }) => {
-  await mockOps(page)
-  await visit(page, "/databases/1/advisor")
-  const open = findings(page).locator("[data-slot=accordion-item][data-state=open]")
-  await expect(open).toHaveCount(0)
-  await expect(findings(page).locator("[data-slot=accordion-item]")).toHaveCount(5)
-  await expect(findings(page).getByRole("button", { name: "Notices", exact: true })).toHaveCount(0)
-  await expect(
-    findings(page).getByRole("button", { name: "Open Backups", exact: true }),
-  ).toBeVisible()
-  await finding(page, /2 foreign keys with no index/).click()
-  await expect(open).toHaveCount(1)
-  await expect(findings(page)).toContainText('CREATE INDEX "orders_customer_id_idx"')
-
-  // Hiding a row with a filter preserves the evidence the operator already opened.
-  const chips = findings(page).getByRole("group", { name: "Findings by category" })
-  await chips.getByRole("button", { name: /Reliability/ }).click()
-  await expect(open).toHaveCount(0)
-  await chips.getByRole("button", { name: /^All/ }).click()
-  await expect(open).toHaveCount(1)
-  await expect(finding(page, /No dashboard backup/)).toHaveAttribute("aria-expanded", "false")
-
-  const many = Array.from({ length: 9 }, (_, n) =>
-    advice(`check-${n}`, n === 0 ? "critical" : "warning", "performance", {
-      title: `Finding number ${n}`,
-    }),
-  )
-  await mockOps(page, { answers: { "GET 1/advisor": { ...ADVISOR, findings: many } } })
-  await visit(page, "/databases/1/advisor")
-  await expect(findings(page).locator("[data-slot=accordion-item]")).toHaveCount(9)
-  await expect(open).toHaveCount(0)
-  await expect(finding(page, "Finding number 0")).toHaveAttribute("aria-expanded", "false")
-  await visit(page, "/databases/1/advisor?finding=check-7")
-  await expect(open).toHaveCount(1)
-  await expect(finding(page, "Finding number 7")).toHaveAttribute("aria-expanded", "true")
-})
-
-test("a fix the server classes as safe is applied behind a confirmation that names its object", async ({
-  page,
-}) => {
-  let fixed = false
-  const ops = await mockOps(page, {
-    answers: {
-      "GET 1/advisor": () =>
-        fixed
-          ? {
-              ...ADVISOR,
-              findings: ADVISOR.findings.filter((f) => f.id !== "unindexed-foreign-key"),
-            }
-          : ADVISOR,
-      "POST 1/script": () => {
-        fixed = true
-        return {
-          statements: [
-            { index: 0, sql: "", status: "ok" },
-            { index: 1, sql: "", status: "ok" },
-          ],
-          failed: -1,
-        }
-      },
-    },
-  })
-  await visit(page, "/databases/1/advisor")
-  await openFindingEvidence(page)
-
-  const body = findings(page)
-  const about = body
-    .locator("[data-slot=accordion-item]")
-    .filter({ hasText: "2 foreign keys with no index" })
-  await expect(
-    about.getByRole("list", { name: "What it is about" }).getByRole("listitem"),
-  ).toHaveCount(2)
-  await expect(about).toContainText('CREATE INDEX "orders_customer_id_idx"')
-  // The server was asked what it makes of the statement.
-  await expect.poll(() => ops.sent.map((sent) => sent.request)).toContain("POST 1/classify")
-
-  const apply = body.getByRole("button", { name: "Apply all 2" })
-  await apply.click()
-  const confirm = dialog(page)
-  await expect(confirm).toContainText("2 tables")
-  await expect(confirm).toContainText("Statements, run in this order")
-  // It creates indexes and destroys nothing: the command wears the brand, not the red.
-  const command = confirm.getByRole("button", { name: "Apply 2 statements" })
-  await expect(command).not.toHaveAttribute("data-variant", "destructive")
-  // An index is built alongside the table's writes unless the reader says
-  // otherwise, and the statement shown is the one that will run.
-  await expect(confirm.getByRole("radio", { name: "Concurrently" })).toHaveAttribute(
-    "aria-checked",
-    "true",
-  )
-  await expect(confirm).toContainText('CREATE INDEX CONCURRENTLY "order_items_product_id_idx"')
-  await confirm.getByRole("radio", { name: "Blocking writes" }).click()
-  await expect(confirm).toContainText("The table takes no writes until the index is built")
-  await expect(confirm).toContainText('CREATE INDEX "order_items_product_id_idx"')
-  await confirm.getByRole("radio", { name: "Concurrently" }).click()
-  // Refused, the keyboard is back on the button that asked.
-  await confirm.getByRole("button", { name: "Cancel" }).click()
-  await expect(apply).toBeFocused()
-  expect(ops.sent.filter((sent) => sent.request === "POST 1/script")).toEqual([])
-
-  await apply.click()
-  await dialog(page).getByRole("button", { name: "Apply 2 statements" }).click()
-  await expect
-    .poll(() => ops.sent.find((sent) => sent.request === "POST 1/script")?.body)
-    .toEqual({
-      script: (ADVISOR.findings[2].sql ?? "").replaceAll(
-        "CREATE INDEX",
-        "CREATE INDEX CONCURRENTLY",
-      ),
-    })
-  // The report is read again, and the finding is gone.
-  await expect(finding(page, /2 foreign keys with no index/)).toHaveCount(0)
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-  // The button that asked went with it: the keyboard is left in the list, not on the page's body.
-  await expect(findings(page)).toBeFocused()
-})
-
-test("one object's fix is applied on its own, from its row", async ({ page }) => {
-  const ops = await mockOps(page)
-  await visit(page, "/databases/1/advisor")
-  await openFindingEvidence(page)
-  await page.getByRole("button", { name: "Apply the fix to public.order_items" }).click()
-  await expect(dialog(page)).toContainText("public.order_items")
-  // The plain build is the reader's to choose, with what it costs said first.
-  await dialog(page).getByRole("radio", { name: "Blocking writes" }).click()
-  await dialog(page).getByRole("button", { name: "Apply", exact: true }).click()
-  await expect
-    .poll(() => ops.sent.find((sent) => sent.request === "POST 1/script")?.body)
-    .toEqual({
-      script: 'CREATE INDEX "order_items_product_id_idx" ON "public"."order_items" ("product_id");',
-    })
-})
-
-test("an engine with one way of building an index is offered no choice of two", async ({
-  page,
-}) => {
-  // The file-based engine has no concurrent build: its statement runs as the server wrote it.
-  const ops = await mockOps(page, {
-    answers: {
-      "GET 7/advisor": {
-        ...ADVISOR,
-        silences: [],
-        endOfLife: undefined,
-        findings: [
-          advice("unindexed-foreign-key", "warning", "performance", {
-            title: "1 foreign key with no index",
-            targets: [
-              {
-                kind: "table",
-                name: "notes",
-                detail: "notebook_id",
-                sql: 'CREATE INDEX "notes_notebook_id_idx" ON "notes" ("notebook_id");',
-              },
-            ],
-            sql: 'CREATE INDEX "notes_notebook_id_idx" ON "notes" ("notebook_id");',
-          }),
-        ],
-      },
-      "POST 7/classify": classify,
-      "POST 7/script": { statements: [{ index: 0, sql: "", status: "ok" }], failed: -1 },
-    },
-  })
-  await visit(page, "/databases/7/advisor")
-  await openFindingEvidence(page)
-  await findings(page).getByRole("button", { name: "Apply", exact: true }).click()
-  await expect(dialog(page)).toContainText("Building an index reads the whole table")
-  await expect(dialog(page).getByRole("radio")).toHaveCount(0)
-  await dialog(page).getByRole("button", { name: "Apply", exact: true }).click()
-  await expect
-    .poll(() => ops.sent.find((sent) => sent.request === "POST 7/script")?.body)
-    .toEqual({ script: 'CREATE INDEX "notes_notebook_id_idx" ON "notes" ("notebook_id");' })
-})
-
-test("a fix the server classes as destructive is only handed to Query, and says why", async ({
-  page,
-}) => {
-  await mockOps(page)
-  await visit(page, "/databases/1/advisor")
-  await openFindingEvidence(page)
-  const body = findings(page)
-    .locator("[data-slot=accordion-item]")
-    .filter({ hasText: "1 table with no primary key" })
-  await expect(body).toContainText("ALTER TABLE")
-  await expect(body).toContainText("it is reviewed and run on the Query page")
-  await expect(body.getByRole("button", { name: /^Apply/ })).toHaveCount(0)
-
-  await body.getByRole("button", { name: "Open in Query" }).click()
-  await expect(page).toHaveURL(/\/databases\/1\/query\?/)
-  expect(new URL(page.url()).searchParams.get("sql")).toBe(ADVISOR.findings[3].sql)
-})
-
-test("a fix that is the engine's own maintenance is run as maintenance, with its output", async ({
-  page,
-}) => {
-  const ops = await mockOps(page)
-  await visit(page, "/databases/1/advisor")
-  await openFindingEvidence(page)
-  const apply = findings(page).getByRole("button", { name: "Apply: vacuum and analyze" })
-  await apply.click()
-  // The question names the table and the engine's action. It prints no
-  // statement: the one the server runs is its own to write, and is shown,
-  // with what the engine said, by the run.
-  await expect(dialog(page)).toContainText("public.sessions_log")
-  await expect(dialog(page)).toContainText("refreshes the planner's statistics in the same pass")
-  await expect(dialog(page)).not.toContainText("VACUUM ANALYZE")
-  const command = dialog(page).getByRole("button", { name: "Vacuum and analyze" })
-  await expect(command).not.toHaveAttribute("data-variant", "destructive")
-  await command.click()
-  await expect(dialog(page)).toContainText('VACUUM (VERBOSE, ANALYZE) "public"."sessions_log"')
-  await expect(dialog(page)).toContainText("tuples: 40000 removed")
-  // It is not put to the classifier: the engine's list already marks it safe.
-  const changes = ops.sent.filter((sent) => sent.request !== "POST 1/classify")
-  expect(changes.map((sent) => sent.request)).toEqual(["POST 1/maintenance"])
-  expect(changes[0].body).toEqual({
-    action: "vacuum_analyze",
-    schema: "public",
-    table: "sessions_log",
-  })
-  expect(
-    ops.sent
-      .filter((sent) => sent.request === "POST 1/classify")
-      .some((sent) => /VACUUM/.test((sent.body as { query: string }).query)),
-  ).toBe(false)
-  // When the run's dialog closes the keyboard is back on the button that asked.
-  await dialog(page).getByRole("button", { name: "Close" }).first().click()
-  await expect(apply).toBeFocused()
-})
-
-test("a finding with a page of this database to act on opens it, and no other", async ({
-  page,
-}) => {
-  await mockOps(page, {
-    answers: {
-      "GET 1/advisor": {
-        ...ADVISOR,
-        findings: [
-          ADVISOR.findings[1],
-          advice("elsewhere", "warning", "security", {
-            title: "Somewhere else",
-            link: "/databases/2/settings",
-          }),
-          advice("outside", "warning", "security", {
-            title: "Outside",
-            link: "https://example.com/x",
-          }),
-        ],
-      },
-    },
-  })
-  await visit(page, "/databases/1/advisor")
-  await openFindingEvidence(page)
-  // Reviewed evidence stays readable; only the connection-local destination gets an action.
-  await expect(findings(page).getByText("What to do about elsewhere.")).toBeVisible()
-  await expect(findings(page).getByText("What to do about outside.")).toBeVisible()
-  await expect(findings(page).getByRole("button", { name: /^Open / })).toHaveCount(1)
-  await findings(page).getByRole("button", { name: "Open Backups" }).click()
-  await expect(page).toHaveURL(/\/databases\/1\/backups$/)
-})
-
-test("a report that did not cover everything says how far it got", async ({ page }) => {
-  await mockOps(page, {
-    answers: { "GET 1/advisor": { ...ADVISOR, truncated: true, tablesChecked: 300, findings: [] } },
-  })
-  await visit(page, "/databases/1/advisor")
-  await expect(page.getByText("Part of this database was not checked")).toBeVisible()
-  await expect(page.getByText(/the structure checks covered the first 300/)).toBeVisible()
-  await expect(page.getByText(/No priority issues found/)).toBeVisible()
-})
-
-test("no fix is applied on a protected connection, or by a role that may not", async ({ page }) => {
-  const ops = await mockOps(page, { rows: { 1: { readOnly: true } } })
-  await visit(page, "/databases/1/advisor")
-  await openFindingEvidence(page)
-  await expect(findings(page)).toContainText("This connection is protected")
-  await expect(findings(page).getByRole("button", { name: /^Apply/ })).toHaveCount(0)
-  // Nothing was asked of the classifier either.
-  expect(ops.sent).toEqual([])
-
-  await mockOps(page, { viewer: true })
-  await visit(page, "/databases/1/advisor")
-  await openFindingEvidence(page)
-  await expect(findings(page)).toContainText("Your role may read the fix and not run it")
-  await expect(findings(page).getByRole("button", { name: /^(Apply|Open in Query)/ })).toHaveCount(
-    0,
-  )
-  // It can always be taken away.
-  await expect(findings(page).getByRole("button", { name: "Copy" }).first()).toBeVisible()
-})
-
-test("a report that could not be read says so, and is read again on request", async ({ page }) => {
-  let down = true
-  await mockOps(page, {
-    answers: {
-      "GET 1/advisor": () => (down ? failing("pq: too many connections") : ADVISOR),
-    },
-  })
-  await visit(page, "/databases/1/advisor")
-  await expect(page.getByText("Could not read the advisor's report")).toBeVisible()
-  await expect(page.getByText("pq: too many connections")).toBeVisible()
-  down = false
-  await page.getByRole("button", { name: "Try again" }).click()
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-})
-
-test("a statement fix that fails part way says where it stopped", async ({ page }) => {
-  await mockOps(page, {
-    answers: {
-      "POST 1/script": {
-        statements: [
-          { index: 0, sql: "", status: "ok" },
-          {
-            index: 1,
-            sql: "",
-            status: "error",
-            error: 'pq: relation "order_items_product_id_idx" already exists',
-          },
-        ],
-        failed: 1,
-      },
-    },
-  })
-  await visit(page, "/databases/1/advisor")
-  await openFindingEvidence(page)
-  await findings(page).getByRole("button", { name: "Apply all 2" }).click()
-  await dialog(page).getByRole("button", { name: "Apply 2 statements" }).click()
-  await expect(page.getByText("The fix stopped after 1 statement")).toBeVisible()
-  await expect(page.getByText(/already exists/)).toBeVisible()
 })
 
 // ---------------------------------------------------------------------------
@@ -2574,6 +2975,60 @@ test("the queries are named in the engine's words, from the registry and from wh
   await visit(page, "/databases/2/logs")
   await expect(page.getByText("Slow queries", { exact: true })).toBeVisible()
   await expect(page.getByText("1 query", { exact: true })).toBeVisible()
+})
+
+test("the server's log is drawn from each message, and Insights draws no cards", async ({
+  page,
+}) => {
+  const prefix = "2026-10-16 03:12:01.000 UTC [7002] app@shop "
+  const at = "2026-10-16T03:12:01Z"
+  await mockOps(page, {
+    logSources: {
+      sources: [
+        {
+          id: "docker:shop-db",
+          label: "shop-db",
+          kind: "container",
+          lens: "postgres",
+          primary: true,
+        },
+      ],
+    },
+    logLines: [
+      {
+        text: `${prefix}FATAL:  password authentication failed for user "app"`,
+        level: "error",
+        timestamp: at,
+        stream: "stderr",
+        event: "auth_failed",
+        attrs: { user: "app", db: "shop", error_class: "auth" },
+        body: prefix.length + "FATAL:  ".length,
+      },
+      {
+        text: `${prefix}DETAIL:  Role "app" does not exist.`,
+        level: "error",
+        timestamp: at,
+        stream: "stderr",
+        cont: true,
+        body: prefix.length,
+      },
+    ],
+  })
+  await visit(page, "/databases/1/logs?view=search")
+  const pane = page.getByLabel("Log lines")
+  await expect(pane.getByText('password authentication failed for user "app"')).toBeVisible()
+  // The pid, user@db and severity are the columns and the event word: the
+  // row does not say them twice, and a lens-read line carries no stderr mark.
+  await expect(pane).not.toContainText("[7002]")
+  await expect(pane).not.toContainText("FATAL:")
+  await expect(pane).toContainText('DETAIL:  Role "app" does not exist.')
+  await expect(pane).not.toContainText("stderr")
+
+  await page.getByRole("button", { name: "Insights", exact: true }).click()
+  await expect(page.getByText("Events over time")).toBeVisible()
+  for (const tile of ["Lines", "Busiest", "Warnings"]) {
+    await expect(page.getByText(tile, { exact: true })).toHaveCount(0)
+  }
 })
 
 test("a file has no server keeping a log: its list is what was run from here", async ({ page }) => {
@@ -2754,6 +3209,7 @@ for (const [label, viewport] of [
       "sessions",
       "locks",
       "statements",
+      "history",
       "tables",
       "indexes",
       "replication",
@@ -2772,7 +3228,7 @@ for (const [label, viewport] of [
     await visit(page, "/databases/7/performance")
     await expect(region(page, "Maintenance").getByRole("button").first()).toBeVisible()
     await keepsTheRules(page, "a file's performance page")
-    for (const name of ["", "sessions", "parts", "merges"]) {
+    for (const name of ["", "sessions", "history", "parts", "merges"]) {
       await visit(page, `/databases/2/performance${name ? `?view=${name}` : ""}`)
       await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
       await page.waitForLoadState("networkidle")
@@ -2796,60 +3252,11 @@ for (const [label, viewport] of [
     await expect(dialog(page)).toContainText("Of runtime")
     await expect(dialog(page).getByRole("textbox")).toHaveCount(2)
     await keepsTheRules(page, "a statement's panel", true)
+    await visit(page, `/databases/1/performance?view=history&statement=${SHOP_HISTORY[1].id}`)
+    await expect(dialog(page)).toContainText("Time per call")
+    await keepsTheRules(page, "a statement's history", true)
     await visit(page, "/databases/1/performance?view=sessions&session=40%2C77")
     await expect(dialog(page)).toContainText("Session 40,77")
     await keepsTheRules(page, "a session's panel", true)
-  })
-
-  test(`the Advisor and what could not be read keep the rules${label}`, async ({ page }) => {
-    test.setTimeout(90_000)
-    await page.setViewportSize(viewport)
-    await mockOps(page)
-    await visit(page, "/databases/1/advisor")
-    await openFindingEvidence(page)
-    await expect(findings(page).getByRole("button", { name: "Open Backups" })).toBeVisible()
-    await expect(findings(page).getByRole("button", { name: "Apply all 2" })).toBeVisible()
-    await page.waitForLoadState("networkidle")
-    await keepsTheRules(page, "the advisor with findings open")
-    await findings(page).getByRole("button", { name: "Apply all 2" }).click()
-    await expect(dialog(page)).toContainText("Statements, run in this order")
-    await keepsTheRules(page, "the advisor's question before a fix", true)
-    await page.keyboard.press("Escape")
-
-    await visit(page, "/databases/7/advisor")
-    await expect(page.getByText(/No priority issues found/)).toBeVisible()
-    await keepsTheRules(page, "an advisor with nothing to say")
-
-    const failure = failing("pq: canceling statement due to statement timeout")
-    await mockOps(page, {
-      summaries: { 2: { state: "stopped", ok: false, latencyMs: 0 } },
-      answers: Object.fromEntries(
-        [
-          "stats",
-          "activity",
-          "locks",
-          "statements",
-          "tablestats",
-          "indexstats",
-          "replication",
-          "advisor",
-        ].map((name) => [`GET 1/${name}`, failure]),
-      ),
-    })
-    for (const name of ["sessions", "locks", "statements", "tables", "indexes", "replication"]) {
-      await visit(page, `/databases/1/performance?view=${name}`)
-      await expect(page.getByText(/^Could not read the (?!server)/)).toBeVisible()
-      await keepsTheRules(page, `the ${name} view that could not be read`)
-    }
-    await visit(page, "/databases/1/advisor")
-    await expect(page.getByText("Could not read the advisor's report")).toBeVisible()
-    await keepsTheRules(page, "an advisor that could not be read")
-    await visit(page, "/databases/2/performance")
-    await expect(page.getByText("blog is stopped")).toBeVisible()
-    await keepsTheRules(page, "a stopped server's performance page")
-
-    await visit(page, "/databases/7/logs")
-    await expect(page.getByText("Statements run from here", { exact: true })).toBeVisible()
-    await keepsTheRules(page, "a file's queries")
   })
 }

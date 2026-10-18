@@ -1,10 +1,10 @@
 "use client"
 
 import { Fragment } from "react"
-import { Copy, Information, Layers, Warning } from "@/components/icons"
+import { Copy, Layers } from "@/components/icons"
 import { bytes, duration, percent } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type { Container, ContainerStats, DockerDiagnosis, DockerFinding } from "@/lib/types"
+import type { Container, ContainerStats } from "@/lib/types"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { Meter, utilisationTone } from "@/components/meter"
 import { Sparkline } from "@/components/metrics/sparkline"
@@ -445,89 +445,6 @@ export function MemoryReading({
         )}
       </HoverCardContent>
     </HoverCard>
-  )
-}
-
-/**
- * The diagnostics column: a count, not a sentence.
- *
- * Status says what Docker is doing. This says what the dashboard thinks about
- * it, which is a different question and belongs in a different column — the
- * full explanation is in the Attention panel and the detail view, where there
- * is room for the reasoning.
- */
-export function IssuesCell({
-  diagnosis,
-  containerId,
-  onOpen,
-}: {
-  diagnosis: DockerDiagnosis | undefined
-  containerId: string
-  onOpen: () => void
-}) {
-  const mine = (diagnosis?.findings ?? []).filter((f) => f.targetId === containerId)
-  const issues = mine.filter((f) => f.severity === "critical" || f.severity === "warning")
-  // Everything that is not an issue is a note (recommendations and info).
-  // Counting only `recommendation` left info-only containers rendering "0·".
-  const notes = mine.filter((f) => f.severity !== "critical" && f.severity !== "warning")
-
-  if (mine.length === 0) {
-    return <span className="block text-hint text-muted-foreground">—</span>
-  }
-
-  const worst = issues[0] ?? notes[0]
-  const hasIssues = issues.length > 0
-  const tone = issues.some((f) => f.severity === "critical")
-    ? "text-destructive"
-    : hasIssues
-      ? "text-warning"
-      : "text-muted-foreground"
-
-  // Every state carries an icon now. Recommendation-only rows used to render a
-  // bare "3·" with no glyph beside rows that had a warning triangle, which is
-  // what made the column look broken.
-  const Icon = hasIssues ? Warning : Information
-  const count = hasIssues ? issues.length : notes.length
-
-  return (
-    <HoverCard openDelay={150}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation()
-            onOpen()
-          }}
-          className={cn(
-            "flex items-center gap-1 rounded-sm px-1 text-hint font-medium focus-ring",
-            tone,
-          )}
-        >
-          <Icon className="size-3 shrink-0" />
-          {count}
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent className="w-80 space-y-1.5 text-xs leading-relaxed">
-        <p className="text-body font-medium">{worst?.title}</p>
-        <p className="text-muted-foreground">{worst?.detail}</p>
-        {mine.length > 1 && (
-          <p className="text-hint text-muted-foreground">
-            {issues.length} issue{issues.length === 1 ? "" : "s"} and {notes.length} recommendation
-            {notes.length === 1 ? "" : "s"} — open the container for all of them.
-          </p>
-        )}
-      </HoverCardContent>
-    </HoverCard>
-  )
-}
-
-/** The worst thing said about one container, for a compact header. */
-export function worstFinding(
-  diagnosis: DockerDiagnosis | undefined,
-  id: string,
-): DockerFinding | undefined {
-  return (diagnosis?.findings ?? []).find(
-    (f) => f.targetId === id && (f.severity === "critical" || f.severity === "warning"),
   )
 }
 

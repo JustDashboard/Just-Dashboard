@@ -14,8 +14,6 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { FindingList } from "@/components/finding-list"
-import { findingNavigation } from "@/lib/finding-destinations"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { HostIdentity, HostFact, FactDot } from "@/components/metrics/host-identity"
@@ -27,7 +25,6 @@ import { Topology as TopologyPicture } from "@/components/network/topology"
 import { linkProduct } from "@/components/network/marks"
 import { EgressIdentityTable } from "@/components/network/egress-identity"
 import { FlowPaths, type FlowNode } from "@/components/network/flow-paths"
-import { IncidentHistory } from "@/components/network/incident-history"
 import {
   ageWords,
   identityVerdict,
@@ -104,9 +101,6 @@ export default function NetworkOverviewPage() {
     )
   }
   const data = overview.data
-  const findings = data.findings.filter(
-    (finding) => finding.level === "critical" || finding.level === "warning",
-  )
   const nodeOf = (id: string) => flowNode(id, data, links)
   return (
     <Page className="animate-rise">
@@ -125,6 +119,15 @@ export default function NetworkOverviewPage() {
           reading="live throughput"
         />
       )}
+      {(data.observations ?? [])
+        .filter((source) => source.state === "failed")
+        .map((source) => (
+          <ErrorState
+            key={source.source}
+            error={new Error(`${source.label}: ${source.error || "Could not read this source"}`)}
+            onRetry={overview.refresh}
+          />
+        ))}
       {data.persistence.change && <NetworkChange change={data.persistence.change} />}
 
       <Panel plain>
@@ -153,41 +156,6 @@ export default function NetworkOverviewPage() {
       <TrafficChart links={links} live={live} />
 
       <EgressIdentityTable identity={data.identity} />
-
-      <Panel plain>
-        <PanelHeader
-          title="Attention"
-          actions={
-            findings.length > 0 ? (
-              <span className="text-hint text-muted-foreground">
-                {plural(findings.length, "finding")}
-              </span>
-            ) : undefined
-          }
-        />
-        <PanelBody>
-          <FindingList
-            emphasize
-            findings={findings.map((f) => ({
-              id: f.id,
-              level: f.level,
-              title: f.title,
-              detail: f.detail,
-              action:
-                f.id === "persistence.unit"
-                  ? {
-                      label: "Review network restore service",
-                      href: "/processes/services?unit=just-dashboard-network.service",
-                    }
-                  : f.href !== "/network"
-                    ? findingNavigation(f.href)
-                    : undefined,
-            }))}
-            emptyLabel="No priority issues found in the completed network checks"
-          />
-          <IncidentHistory incidents={data.incidents} error={data.incidentsError} />
-        </PanelBody>
-      </Panel>
     </Page>
   )
 }
@@ -231,7 +199,6 @@ function NetworkIdentity({ overview, links }: { overview: NetworkOverview; links
   const v6 = overview.publicAddresses.find((a) => a.includes(":"))
   const primary = overview.defaults[0]
   const uplink = links.find((l) => l.name === primary?.device)
-  const worst = overview.findings[0]?.level
   const family = (name: "inet" | "inet6") => overview.identity.find((id) => id.family === name)
   const way = family(primary?.family === "inet6" ? "inet6" : "inet")
   return (
@@ -313,17 +280,6 @@ function NetworkIdentity({ overview, links }: { overview: NetworkOverview; links
             </>
           )}
         </>
-      }
-      aside={
-        worst ? (
-          <Status
-            tone={worst === "critical" ? "danger" : worst === "warning" ? "warning" : "notice"}
-            label={worst === "notice" ? "Worth a look" : "Needs attention"}
-            className="text-body"
-          />
-        ) : (
-          <Status tone="running" label="All clear" className="text-body" />
-        )
       }
     />
   )

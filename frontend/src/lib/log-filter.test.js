@@ -14,9 +14,57 @@ import {
   matchFields,
   onlyField,
   parseFieldTokens,
+  parseLogTimeInput,
+  logTimeInput,
+  resolveRange,
   toggleField,
   withFieldTokens,
 } from "./log-filter"
+
+describe("log time windows", () => {
+  test("HTML extended years parse safely and unsupported API years return field validation", () => {
+    expect(parseLogTimeInput("10000-01-01T00:00").getFullYear()).toBe(10000)
+    expect(logTimeInput("+010000-01-01T00:00:00.000Z")).toMatch(/^\d{4,}-\d{2}-\d{2}T/)
+    const window = resolveRange("custom", "10000-01-01T00:00", "")
+    expect(window.error).toBe("Log windows support years up to 9999.")
+    expect(window.sinceError).toBe(window.error)
+    expect(window.since).toBeUndefined()
+  })
+
+  test("invalid, overflowing and impossible local dates never throw or widen the window", () => {
+    for (const input of [
+      "bad",
+      "2026-01",
+      "2026-02-30T12:00",
+      "2026-02-30T12:00:00Z",
+      "2026-01-01T24:00:00Z",
+      "2026-01-01T25:00",
+      "9999999-01-01T00:00",
+    ]) {
+      expect(() => resolveRange("custom", input, "")).not.toThrow()
+      expect(resolveRange("custom", input, "").sinceError).toBeDefined()
+    }
+    expect(resolveRange("custom", "", "").error).toBeDefined()
+  })
+
+  test("local years below 100 retain their year rather than inheriting the 1900 offset", () => {
+    expect(parseLogTimeInput("0001-07-01T12:00").getFullYear()).toBe(1)
+    expect(parseLogTimeInput("0099-07-01T12:00").getFullYear()).toBe(99)
+  })
+
+  test("custom bounds keep timezone instants and refuse reversed or equal times", () => {
+    expect(
+      resolveRange("custom", "2026-01-01T12:00:00+02:00", "2026-01-01T12:01:00+02:00"),
+    ).toEqual({ since: "2026-01-01T10:00:00.000Z", until: "2026-01-01T10:01:00.000Z" })
+    for (const until of ["2026-01-01T09:00:00Z", "2026-01-01T10:00:00Z"]) {
+      expect(resolveRange("custom", "2026-01-01T10:00:00Z", until).untilError).toBeDefined()
+    }
+    expect(resolveRange("custom", "", "2026-01-01T10:00:00Z")).toEqual({
+      since: undefined,
+      until: "2026-01-01T10:00:00.000Z",
+    })
+  })
+})
 
 // The server and this file answer "does this line pass `f=`" for the same
 // lines — the server for the lines it sends, this for the counts the live

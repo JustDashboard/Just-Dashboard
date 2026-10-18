@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test } from "@playwright/test"
 import { blueprintCatalogue, gotoStep, json, mockNewProject, now } from "./deploy-fixture"
 
 /**
@@ -305,82 +305,6 @@ test("unfinished drafts sit behind a counted button beside the question and link
   await expect(page.getByRole("heading", { name: "Import Git repository" })).toBeVisible()
 })
 
-test("a GitHub repository reaches a running release with a 44px Deploy target and no overflow", async ({
-  page,
-}, testInfo) => {
-  const quick = await mockNewProject(page)
-  // On a phone, because the first deploy is as likely to be started from one
-  // as from a desktop, and every primary action here is a 44px target.
-  await page.setViewportSize({ width: 375, height: 850 })
-  await page.goto("/deploy/new")
-
-  await expect(page.getByRole("heading", { name: "Import Git repository" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Import Wayy01/wesmokefish" })).toBeVisible()
-  await testInfo.attach("source-git-375", {
-    body: await page.screenshot({ fullPage: true }),
-    contentType: "image/png",
-  })
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
-
-  // Detection answered every question this repository asks, so the sequence
-  // opens on its last screen with the plan read back and Deploy under it: the
-  // two-press import survives being split into four steps.
-  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
-
-  // A node of the plan drawing is how the reader goes back to one answer —
-  // it opens the step that owns it, and the fold inside it.
-  await page.getByRole("button", { name: "Change the build settings" }).click()
-  await expect(page.getByRole("combobox", { name: "Branch" })).toContainText("main")
-  await expect(page.getByRole("textbox", { name: "Build command" })).toHaveValue("bun run build")
-  await expect(page.getByRole("textbox", { name: "Start command" })).toHaveValue("bun start")
-
-  await page.getByRole("button", { name: "Change the public address" }).click()
-  await expect(page.getByRole("spinbutton", { name: /Port/ })).toHaveValue("3000")
-  await expect(page.getByRole("textbox", { name: "Hostname" })).toHaveValue(
-    "wesmokefish-a1b2c3.203-0-113-7.sslip.io",
-  )
-  // Nothing to press: the certificate is the run's own work, before it starts
-  // anything, and the screen says so rather than offering a button.
-  await expect(page.getByText(/orders the certificate .*before the release starts/)).toBeVisible()
-  await expect(page.getByRole("button", { name: /certificate/i })).toHaveCount(0)
-
-  await gotoStep(page, "variables")
-  await page.getByText("Paste .env", { exact: true }).click()
-  await page
-    .getByRole("textbox", { name: "Environment variables" })
-    .fill("NEXT_PUBLIC_SITE_URL=https://example.test")
-  await gotoStep(page, "review")
-
-  const deployButton = page.getByRole("button", { name: "Deploy", exact: true })
-  expect((await deployButton.boundingBox())?.height).toBeGreaterThanOrEqual(44)
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
-    true,
-  )
-  await testInfo.attach("configure-375", {
-    body: await page.screenshot({ fullPage: true }),
-    contentType: "image/png",
-  })
-  await deployButton.click()
-
-  // One press: plan saved, preflight run, environment applied, release started.
-  await expect(page).toHaveURL(/\/deploy\/77\/runs\/84$/)
-  const savedChecks = quick.configuration()?.checks as Array<{ config: Record<string, unknown> }>
-  expect(savedChecks[0].config).not.toHaveProperty("port")
-  expect(quick.commits()).toBe(1)
-  expect(quick.runs()).toBe(1)
-  expect(quick.staged()).toMatchObject({
-    dotenv: "NEXT_PUBLIC_SITE_URL=https://example.test",
-  })
-  expect(quick.configuration()).toMatchObject({
-    build: { buildCommand: "bun run build", startCommand: "bun start" },
-    runtime: { internalPort: 3000 },
-    domains: [
-      { hostname: "wesmokefish-a1b2c3.203-0-113-7.sslip.io", https: true, ownership: "managed" },
-    ],
-    checks: [{ kind: "http", phase: "readiness", required: true }],
-  })
-})
-
 test("an invalid project name is flagged beside the field and clears once fixed", async ({
   page,
 }) => {
@@ -466,289 +390,6 @@ for (const stage of ["runs"]) {
     )
   })
 }
-
-test("a pasted Git URL with expert settings reaches a reviewed plan", async ({ page }) => {
-  const journey = await mockNewProject(page)
-  await page.route("**/api/v1/deploy/credentials", async (route) => {
-    if (route.request().method() !== "GET") return route.fallback()
-    await json(route, [
-      {
-        id: 12,
-        name: "Deploy token",
-        kind: "git_bearer",
-        target: "git.example.test",
-        createdAt: now,
-        updatedAt: now,
-        usedBy: 1,
-      },
-    ])
-  })
-  let selectedSource: unknown
-  page.on("request", (request) => {
-    if (request.method() !== "PUT" || !request.url().endsWith("/deploy/drafts/journey-draft"))
-      return
-    const body = request.postDataJSON()
-    if (body.step === "source") selectedSource = body.source
-  })
-  await page.goto("/deploy/new")
-  await page
-    .getByRole("textbox", { name: "Clone URL", exact: true })
-    .fill("https://git.example.test/team/service.git")
-  await page.getByText("Branch & authentication", { exact: true }).click()
-  await page.getByRole("textbox", { name: "Branch or tag", exact: true }).fill("release/next")
-  // The numeric "Saved credential ID" input is gone — a Select fed by
-  // GET /deploy/credentials sends the same field under the hood.
-  await page.getByRole("combobox", { name: "Credential" }).click()
-  await page.getByRole("option", { name: "Deploy token" }).click()
-  await page.getByRole("button", { name: "Import", exact: true }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
-
-  // The variable the plan declares comes first: a build secret and a release
-  // task may only name one that already carries the matching scope, and the
-  // step that refuses them is the step they are typed on.
-  await gotoStep(page, "variables")
-  const references = page.getByRole("button", { name: /Variable references & scopes/ })
-  await references.click()
-  await expect(references).toHaveAttribute("aria-expanded", "true")
-  await page.getByRole("button", { name: "Add variable reference" }).click()
-  await page.getByRole("textbox", { name: "Variable 1 name" }).fill("NPM_TOKEN")
-  await page.getByRole("checkbox", { name: "Build", exact: true }).check()
-  await page.getByRole("checkbox", { name: "Release Task", exact: true }).check()
-
-  await gotoStep(page, "project")
-  const extras = page.getByRole("button", { name: /Build secrets & release tasks/ })
-  await extras.click()
-  await expect(extras).toHaveAttribute("aria-expanded", "true")
-  await page.getByRole("textbox", { name: "Target platform" }).fill("linux/amd64")
-
-  await page.getByRole("button", { name: "Add build secret" }).click()
-  await page.getByRole("combobox", { name: "Build secret 1 variable" }).fill("NPM_TOKEN")
-
-  await page.getByRole("button", { name: "Add release task" }).click()
-  await page.getByRole("textbox", { name: "Release task 1 name" }).fill("Database migration")
-  await page.getByRole("textbox", { name: "Release task 1 working directory" }).fill("app")
-  await page.getByRole("textbox", { name: "Release task 1 command" }).fill("./bin/migrate")
-  await page.getByRole("checkbox", { name: "NPM_TOKEN", exact: true }).check()
-
-  await gotoStep(page, "review")
-  await page.getByRole("button", { name: "Save only", exact: true }).click()
-  await expect(page).toHaveURL(/\/deploy\/77$/)
-  expect(selectedSource).toMatchObject({
-    kind: "git",
-    mode: "git_url",
-    url: "https://git.example.test/team/service.git",
-    ref: "release/next",
-    credentialId: 12,
-  })
-  expect(journey.commits()).toBe(1)
-  expect(journey.configuration()).toMatchObject({
-    build: {
-      targetPlatform: "linux/amd64",
-      secrets: [{ variable: "NPM_TOKEN", step: "install" }],
-      releaseTasks: [
-        {
-          name: "Database migration",
-          command: "./bin/migrate",
-          workingDirectory: "app",
-          timeoutSeconds: 300,
-          env: ["NPM_TOKEN"],
-        },
-      ],
-    },
-  })
-})
-
-test("a private image reference sends the chosen registry credential", async ({ page }) => {
-  await mockNewProject(page)
-  await page.route("**/api/v1/docker/images", (route) => json(route, []))
-  await page.route("**/api/v1/deploy/credentials", async (route) => {
-    if (route.request().method() !== "GET") return route.fallback()
-    await json(route, [
-      {
-        id: 9,
-        name: "Registry login",
-        kind: "registry",
-        target: "ghcr.io",
-        username: "deploy",
-        createdAt: now,
-        updatedAt: now,
-        usedBy: 0,
-      },
-    ])
-  })
-  let selectedSource: unknown
-  page.on("request", (request) => {
-    if (request.method() !== "PUT" || !request.url().endsWith("/deploy/drafts/journey-draft"))
-      return
-    const body = request.postDataJSON()
-    if (body.step === "source") selectedSource = body.source
-  })
-
-  await page.goto("/deploy/new?source=image")
-  const reference = page.getByRole("textbox", { name: "Image reference", exact: true })
-  // The registry is read from the reference as it is typed: Docker Hub's
-  // whale for a bare name, GitHub's mark for ghcr.io.
-  const registry = page.getByRole("group").filter({ has: reference }).locator("img")
-  await expect(registry).toHaveAttribute("src", "/logos/docker.svg")
-  await reference.fill("ghcr.io/acme/private:1.0")
-  await expect(registry).toHaveAttribute("src", "/logos/github.svg")
-  await page.getByRole("combobox", { name: "Credential" }).click()
-  await page.getByRole("option", { name: "Registry login" }).click()
-  await page.getByRole("button", { name: "Continue", exact: true }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
-
-  expect(selectedSource).toMatchObject({
-    kind: "image",
-    mode: "image_reference",
-    image: "ghcr.io/acme/private:1.0",
-    credentialId: 9,
-  })
-})
-
-/** Two containers of one Compose project, the images they run, and a third image no one runs. */
-async function mockServerDocker(page: Page) {
-  const tracker = (service: string, imageId: string) => ({
-    id: service,
-    names: [service],
-    name: service,
-    image: `bet-bot-${service}:latest`,
-    imageId,
-    command: "python main.py",
-    state: "running",
-    status: "Up 2 hours",
-    createdAt: now,
-    uptimeSeconds: 7200,
-    ports: [],
-    labels: {
-      "com.docker.compose.project": "bet-bot",
-      "com.docker.compose.service": service,
-    },
-    networks: ["host"],
-    composeStack: "bet-bot",
-    composeService: service,
-    exposure: [],
-    hasHealthcheck: false,
-    inspected: true,
-  })
-  const image = (tag: string, id: string, containers: number) => ({
-    id,
-    repoTags: [tag],
-    repoDigests: [],
-    size: 210_000_000,
-    created: now,
-    containers,
-    labels: {},
-    dangling: false,
-  })
-  await page.route("**/api/v1/docker/images", (route) =>
-    json(route, [
-      image("bet-bot-high-market-tracker:latest", "sha256:high", 1),
-      image("bet-bot-doubles-games-tracker:latest", "sha256:doubles", 1),
-      image("postgres:16-alpine", "sha256:postgres", 0),
-    ]),
-  )
-  await page.route("**/api/v1/docker/containers/", (route) =>
-    json(route, [
-      tracker("high-market-tracker", "sha256:high"),
-      tracker("doubles-games-tracker", "sha256:doubles"),
-    ]),
-  )
-  await page.route("**/api/v1/docker/stacks/", (route) =>
-    json(route, [
-      {
-        name: "bet-bot",
-        workingDir: "/home/ubuntu/bet-bot",
-        configFiles: ["/home/ubuntu/bet-bot/docker-compose.yml"],
-        services: [],
-        running: 2,
-        total: 2,
-        managed: true,
-        declared: ["high-market-tracker", "doubles-games-tracker"],
-        containers: 2,
-        deployed: true,
-        orphans: [],
-        state: "running",
-        summary: "Running · 2/2 services",
-      },
-    ]),
-  )
-}
-
-function savedSource(page: Page) {
-  let source: unknown
-  page.on("request", (request) => {
-    if (request.method() !== "PUT" || !request.url().endsWith("/deploy/drafts/journey-draft"))
-      return
-    const body = request.postDataJSON()
-    if (body.step === "source") source = body.source
-  })
-  return () => source
-}
-
-test("a Compose stack running here is deployed from its own file", async ({ page }) => {
-  await mockNewProject(page)
-  await mockServerDocker(page)
-  const source = savedSource(page)
-
-  await page.goto("/deploy/new?source=image")
-  const stacks = page.getByRole("list", { name: "Compose stacks on this server" })
-  await expect(stacks.getByText("/home/ubuntu/bet-bot/docker-compose.yml")).toBeVisible()
-  // Each image says which container runs it — the name the reader knows it by.
-  await expect(page.getByText("Used by high-market-tracker", { exact: true })).toBeVisible()
-  await stacks.getByRole("button", { name: "Deploy the bet-bot stack" }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
-
-  expect(source()).toEqual({
-    kind: "compose",
-    mode: "compose_local",
-    localPath: "/home/ubuntu/bet-bot",
-    composeFiles: [{ path: "docker-compose.yml", content: "", order: 0 }],
-  })
-})
-
-test("images ticked together are deployed as one stack", async ({ page }) => {
-  const journey = await mockNewProject(page)
-  await mockServerDocker(page)
-  const source = savedSource(page)
-
-  await page.goto("/deploy/new?source=image")
-  const images = page.getByRole("list", { name: "Images on this server" })
-  await expect(images.getByRole("listitem")).toHaveCount(3)
-  // Nothing ticked, nothing to command: the rows are the advance.
-  await expect(page.getByRole("button", { name: /images together/ })).toHaveCount(0)
-
-  await images.getByRole("checkbox", { name: "Select bet-bot-high-market-tracker:latest" }).click()
-  await expect(page.getByRole("button", { name: "Deploy this image" })).toBeVisible()
-  await images
-    .getByRole("checkbox", { name: "Select bet-bot-doubles-games-tracker:latest" })
-    .click()
-  // Ticking is not choosing: no draft was started by either box.
-  expect(journey.started()).toBe(0)
-  await page.getByRole("button", { name: "Deploy 2 images together" }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
-
-  expect(journey.intent()).toMatchObject({ name: "bet-bot", profile: "compose" })
-  expect(source()).toEqual({
-    kind: "compose",
-    mode: "compose_paste",
-    composeFiles: [
-      {
-        path: "compose.yaml",
-        order: 0,
-        content: [
-          "services:",
-          "  high-market-tracker:",
-          '    image: "bet-bot-high-market-tracker:latest"',
-          "    restart: unless-stopped",
-          "  doubles-games-tracker:",
-          '    image: "bet-bot-doubles-games-tracker:latest"',
-          "    restart: unless-stopped",
-          "",
-        ].join("\n"),
-      },
-    ],
-  })
-})
 
 test("resuming a duplicated draft shows its copied variable needing a value, and Save works", async ({
   page,
@@ -854,7 +495,14 @@ test("Add database from Configure creates a database, retries after a failed con
     const path = new URL(route.request().url()).pathname.replace("/api/v1", "")
     if (path === "/databases/provision/options")
       return json(route, [
-        { engine: "postgres", label: "PostgreSQL", image: "postgres:17", driver: "postgres" },
+        {
+          engine: "postgres",
+          label: "PostgreSQL",
+          image: "postgres:17",
+          driver: "postgres",
+          versions: [{ version: "17", image: "postgres:17" }],
+          defaultVersion: "17",
+        },
       ])
     if (path === "/databases/provision") {
       provisioned++
@@ -918,62 +566,6 @@ test("Add database from Configure creates a database, retries after a failed con
   })
   expect(quick.staged()?.dotenv).toContain("${{database.42}}")
   expect(quick.staged()?.dotenv).toContain('API_KEY="another-secret"')
-})
-
-test("a template that needs its own public URL arrives with one this server can deliver", async ({
-  page,
-}) => {
-  const journey = await mockNewProject(page)
-  await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Template", exact: true }).click()
-  await page.getByRole("button", { name: "Use Vaultwarden", exact: true }).click()
-
-  // Eight reviewed definitions need their own public URL — n8n writes it into
-  // every webhook, Vaultwarden into its WebAuthn origin — and the panel used to
-  // send nothing, so choosing one ended in the server's own `"domain" is
-  // required` after a draft had already been created. `/deploy/hostname`
-  // always knew a name that resolves here with no DNS record to create.
-  const domain = page.getByRole("textbox", { name: "Public domain" })
-  await expect(domain).toHaveValue("wesmokefish-a1b2c3.203-0-113-7.sslip.io")
-  await expect(page.getByText(/Replace it with your own domain if you have one/)).toBeVisible()
-
-  await page.getByRole("button", { name: "Use this template", exact: true }).click()
-  // A blueprint's declared variables are review material, so the sequence
-  // opens there; the plan is what the last screen reads back.
-  await expect(
-    page.getByRole("heading", { level: 1, name: "What does it need to run?" }),
-  ).toBeVisible()
-  await gotoStep(page, "review")
-  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
-  expect(journey.source()).toMatchObject({
-    blueprintId: "vaultwarden",
-    blueprintInputs: { domain: "wesmokefish-a1b2c3.203-0-113-7.sslip.io" },
-  })
-
-  // Review used to be one section of four facts under the irreversible
-  // button: no finding is drawn until preflight has run, and preflight ran
-  // inside the press. It runs on arrival now, and the plan is read back.
-  await expect(page.getByRole("heading", { name: "Checked against this server" })).toBeVisible()
-  await expect(page.getByText("Runtime plan is valid")).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Data it keeps" })).toBeVisible()
-  // The rail reads the mount back too, so the path is looked for on Review's
-  // own surface.
-  const review = page.locator("[data-slot=flow-panel]")
-  await expect(review.getByText("/data", { exact: true })).toBeVisible()
-  await expect(page.getByText(/Everything this vault holds/)).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Secrets made on this server" })).toBeVisible()
-  await expect(page.getByText(/48 characters, made when this plan is saved/)).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Before it takes traffic" })).toBeVisible()
-  await expect(page.getByText(/GET \/alive · up to 60s to answer/)).toBeVisible()
-  await expect(page.getByRole("heading", { name: "At the cutover" })).toBeVisible()
-  await expect(page.getByText(/unreachable for a few seconds/)).toBeVisible()
-  // The count is what reaches the container, not the rows somebody typed.
-  await expect(page.getByText("3 declared", { exact: true })).toBeVisible()
-  // The name the application was told is the route the release publishes —
-  // both come from this one input, so the two leave this screen agreeing.
-  expect(journey.configuration()).toMatchObject({
-    domains: [{ hostname: "wesmokefish-a1b2c3.203-0-113-7.sslip.io", https: true }],
-  })
 })
 
 test("a template input the page cannot answer is named before the press, not after it", async ({
@@ -1341,7 +933,7 @@ test("quick deploy shows the actual HTTPS blocker instead of assuming Certbot is
   await page.goto("/deploy/new")
   await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
   await gotoStep(page, "runtime")
-  await expect(page.getByText("Automatic HTTPS needs attention")).toBeVisible()
+  await expect(page.getByText("Automatic HTTPS unavailable")).toBeVisible()
   await expect(page.getByText(reason, { exact: false }).last()).toBeVisible()
   await expect(page.getByText("Install certbot", { exact: false })).toHaveCount(0)
   await expect(page.getByRole("link", { name: "Certificates page" })).toBeVisible()
@@ -1366,7 +958,7 @@ test("quick deploy keeps HTTPS automatic when Docker Caddy owns the public ports
   await expect(
     page.getByText("The managed Caddy ingress orders the certificate", { exact: false }),
   ).toBeVisible()
-  await expect(page.getByText("Automatic HTTPS needs attention")).toHaveCount(0)
+  await expect(page.getByText("Automatic HTTPS unavailable")).toHaveCount(0)
   await expect(page.getByText("Install certbot", { exact: false })).toHaveCount(0)
 })
 
@@ -1442,8 +1034,17 @@ test("a detected site opens with its variables, its database and its single-page
         label: "PostgreSQL 16",
         image: "postgres:16-alpine",
         driver: "postgres",
+        versions: [{ version: "16", image: "postgres:16-alpine" }],
+        defaultVersion: "16",
       },
-      { engine: "redis", label: "Redis 7", image: "redis:7-alpine", driver: "redis" },
+      {
+        engine: "redis",
+        label: "Redis 7",
+        image: "redis:7-alpine",
+        driver: "redis",
+        versions: [{ version: "7", image: "redis:7-alpine" }],
+        defaultVersion: "7",
+      },
     ]),
   )
   await page.goto("/deploy/new")

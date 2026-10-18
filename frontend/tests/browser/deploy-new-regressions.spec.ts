@@ -1,54 +1,11 @@
 import { expect, test } from "@playwright/test"
 import {
-  blueprintCatalogue,
   gotoStep,
   json,
   minecraftBlueprint,
   mockNewProject,
   postgresBlueprint,
 } from "./deploy-fixture"
-
-test("a phone opens selected settings above a long catalogue and returns to the choices", async ({
-  page,
-}) => {
-  await mockNewProject(page)
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.emulateMedia({ reducedMotion: "reduce" })
-  await page.route("**/api/v1/deploy/blueprints/", (route) =>
-    json(route, [
-      ...blueprintCatalogue,
-      ...Array.from({ length: 40 }, (_, index) => ({
-        ...blueprintCatalogue[1],
-        id: `extra-${index}`,
-        name: `Extra template ${index}`,
-      })),
-    ]),
-  )
-  await page.goto("/deploy/new?source=template")
-  await page.getByRole("button", { name: "Use Vaultwarden", exact: true }).click()
-  const settings = page.getByRole("region", { name: "Selected template settings" })
-  await expect(settings).toBeFocused()
-  await expect(page.getByRole("textbox", { name: "Public domain" })).toBeInViewport()
-  expect((await settings.boundingBox())!.y).toBeLessThan(100)
-  await page.getByRole("button", { name: "Choose another template" }).click()
-  await expect(page.locator("#template-catalogue")).toBeFocused()
-  await expect(page.getByRole("heading", { name: "Application templates" })).toBeInViewport()
-  await page.getByRole("button", { name: "Use Vaultwarden", exact: true }).click()
-  await page.getByRole("textbox", { name: "Public domain" }).fill("vault.example.test")
-  await page.getByRole("button", { name: "Use this template", exact: true }).click()
-  const question = page.getByRole("heading", { level: 1, name: "What does it need to run?" })
-  await expect(question).toBeFocused()
-  await expect(question).toBeInViewport()
-  await gotoStep(page, "project")
-  await expect(
-    page.getByRole("heading", { level: 1, name: "What are you building?" }),
-  ).toBeInViewport()
-  await gotoStep(page, "review")
-  await expect(page.getByText("Runtime plan is valid")).toBeVisible()
-  const reviewQuestion = page.getByRole("heading", { level: 1, name: "Ready to deploy?" })
-  await expect(reviewQuestion).toBeFocused()
-  await expect(reviewQuestion).toBeInViewport()
-})
 
 test("switching templates keeps the catalogue width and each template's input", async ({
   page,
@@ -110,33 +67,6 @@ test("a failed template detail stays visible and can be retried", async ({ page 
   await expect(page.getByText("Template temporarily unavailable", { exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Try again" }).click()
   await expect(page.getByRole("textbox", { name: "Database name" })).toHaveValue("app")
-})
-
-test("a source inspection finishing after a tab change cannot reopen the abandoned source", async ({
-  page,
-}) => {
-  const journey = await mockNewProject(page)
-  let release!: () => void
-  let started!: () => void
-  const delayed = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  const requested = new Promise<void>((resolve) => {
-    started = resolve
-  })
-  await page.route("**/api/v1/deploy/drafts/journey-draft/detect", async (route) => {
-    started()
-    await delayed
-    return route.fallback()
-  })
-  await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
-  await requested
-  await page.getByRole("button", { name: "Template", exact: true }).click()
-  release()
-  await expect.poll(() => journey.discarded()).toContain("journey-draft")
-  await expect(page.getByRole("heading", { name: "Application templates" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Ready to deploy?" })).toHaveCount(0)
 })
 
 test("edited project intent reaches the server and invalidates the previous review", async ({

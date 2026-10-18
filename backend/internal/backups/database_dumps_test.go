@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
@@ -155,6 +157,72 @@ func TestBackupFailsWhenADatabaseDumpFails(t *testing.T) {
 	}
 }
 
+func TestNativeDumpOnlyJobRunsAndRestoresWithoutFilesystemSources(t *testing.T) {
+	db, err := storetest.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	root := t.TempDir()
+	dumper := &fakeDumper{
+		content:   map[int64]string{7: "PGDMP database-only canary"},
+		described: map[int64]DatabaseDescription{7: {ID: 7, Name: "shop", Driver: "postgres", Database: "shop"}},
+	}
+	s := NewStore(db, nil, files.New([]string{root})).WithDatabaseValidator(dumper.DescribeDatabase)
+	definition := &Job{Name: "database-only", DatabaseDumps: []int64{7},
+		TargetKind: TargetLocal, Target: TargetConfig{Path: filepath.Join(root, "archives")},
+		Enabled: true, Schedule: "0 3 * * *"}
+	job, err := s.Create(t.Context(), definition, nil)
+	if err != nil {
+		t.Fatalf("create a scheduled dump-only job: %v", err)
+	}
+	job.Name = "updated database-only"
+	if job, err = s.Update(t.Context(), job.ID, job, nil); err != nil {
+		t.Fatalf("edit a dump-only job: %v", err)
+	}
+	runner := NewRunner(s, filepath.Join(root, "staging"), slog.New(slog.NewTextHandler(io.Discard, nil))).WithDatabaseDumper(dumper)
+	run, err := runner.Execute(t.Context(), job.ID, "test")
+	if err != nil || run.Status != StatusSuccess {
+		t.Fatalf("dump-only run = %+v, %v", run, err)
+	}
+	if run.Manifest == nil || !run.Manifest.Complete || len(run.Manifest.Sources) != 0 || len(run.Manifest.DatabaseDumps) != 1 {
+		t.Fatalf("dump-only manifest = %+v", run.Manifest)
+	}
+	entries, err := runner.ListArchive(t.Context(), run.ID, 100)
+	if err != nil || len(entries) != 1 || entries[0].Name != "database-0001/app-7.dump" {
+		t.Fatalf("dump-only archive = %+v, %v", entries, err)
+	}
+	if err := runner.VerifyDatabaseCoverage(t.Context(), run.ID, []int64{7}); err != nil {
+		t.Fatalf("dump-only database coverage: %v", err)
+	}
+	destination := filepath.Join(root, "extracted")
+	if _, err := runner.Restore(t.Context(), run.ID, destination); err != nil {
+		t.Fatalf("extract dump-only archive: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(destination, "database-0001", "app-7.dump"))
+	if err != nil || string(data) != dumper.content[7] {
+		t.Fatalf("extracted dump = %q, %v", data, err)
+	}
+	if _, err := runner.RestoreDatabase(t.Context(), run.ID, 7, "shop_drill"); err != nil {
+		t.Fatalf("native dump-only restore: %v", err)
+	}
+	if len(dumper.restored) != 1 || dumper.restored[0] != (restoredDump{connectionID: 7, database: "shop_drill", content: dumper.content[7]}) {
+		t.Fatalf("native restore received %+v", dumper.restored)
+	}
+	if _, err := runner.Restore(t.Context(), run.ID, t.TempDir()); err == nil {
+		t.Fatal("dump-only restore bypassed configured file roots")
+	}
+	job.Target.Path = t.TempDir()
+	if _, err := s.Update(t.Context(), job.ID, job, nil); err == nil {
+		t.Fatal("dump-only target bypassed configured file roots")
+	}
+	job.Target.Path = filepath.Join(root, "archives")
+	job.DatabaseDumps = nil
+	if _, err := s.Update(t.Context(), job.ID, job, nil); err == nil {
+		t.Fatal("job with neither sources nor dumps was accepted")
+	}
+}
+
 func TestBackupJobRefusesUnknownOrDuplicateDatabaseDumps(t *testing.T) {
 	dumper := &fakeDumper{described: map[int64]DatabaseDescription{7: {ID: 7, Name: "shop"}}}
 	db, err := storetest.Open(t.TempDir())
@@ -182,5 +250,66 @@ func TestBackupJobRefusesUnknownOrDuplicateDatabaseDumps(t *testing.T) {
 	run, err := runner.Execute(t.Context(), created.ID, "test")
 	if err != nil || run.Status != StatusFailed || !strings.Contains(run.Log, "database dump owner is unavailable") {
 		t.Fatalf("run without a dump owner = %+v, %v", run, err)
+	}
+}
+
+// A database a job dumps was last backed up when the newest successful run
+// that holds its dump started: not by a run that failed with its dump staged,
+// not by an archive its manifest does not vouch for, and still by the runs
+// taken before the job stopped dumping it.
+func TestLastDatabaseDumpsIsTheNewestRunHoldingEachDump(t *testing.T) {
+	dumper := &fakeDumper{
+		content:   map[int64]string{7: "PGDMP shop rows", 9: "PGDMP crm rows"},
+		described: map[int64]DatabaseDescription{7: {ID: 7, Name: "shop", Driver: "postgres"}, 9: {ID: 9, Name: "crm", Driver: "mysql"}},
+	}
+	s, runner, job := dumpFixture(t, dumper, []int64{7, 9})
+	ctx := t.Context()
+	if got, err := s.LastDatabaseDumps(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("before any run = %v, %v", got, err)
+	}
+	monday := time.Date(2026, 10, 12, 3, 0, 0, 0, time.UTC)
+	day := 24 * time.Hour
+	ran := func(want RunStatus, at time.Time) *Run {
+		t.Helper()
+		run, err := runner.Execute(ctx, job.ID, "schedule")
+		if err != nil || run.Status != want {
+			t.Fatalf("run = %+v, %v; want %s", run, err, want)
+		}
+		if _, err := s.st.DB.Exec(`UPDATE backup_runs SET started_at = ? WHERE id = ?`, at.Unix(), run.ID); err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
+	ran(StatusSuccess, monday)
+	// Tuesday crm's dump fails, after shop's was staged: the run backs up
+	// neither of them.
+	dumper.failOn = 9
+	ran(StatusFailed, monday.Add(day))
+	// Wednesday crm leaves the job, and shop alone is dumped.
+	dumper.failOn = 0
+	job.DatabaseDumps = []int64{7}
+	job, err := s.Update(ctx, job.ID, job, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran(StatusSuccess, monday.Add(2*day))
+	// Thursday's row says it succeeded, but its manifest is incomplete, and
+	// Friday's cannot be read at all.
+	incomplete := `{"version":1,"complete":false,"artifactDigest":"sha256:` + strings.Repeat("ab", 32) +
+		`","databaseDumps":[{"connectionId":9,"digest":"sha256:` + strings.Repeat("cd", 32) + `","archivePath":"database-0001/crm.dump"}]}`
+	for i, manifest := range []string{incomplete, `{"databaseDumps":[`} {
+		if _, err := s.st.DB.Exec(`INSERT INTO backup_runs(job_id, started_at, ended_at, status, artifact, manifest_json) VALUES(?,?,?,?,?,?)`,
+			job.ID, monday.Add(time.Duration(3+i)*day).Unix(), monday.Add(time.Duration(3+i)*day).Unix(), string(StatusSuccess), "/archives/hand-made.tar.gz", manifest); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := s.LastDatabaseDumps(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int64]time.Time{7: monday.Add(2 * day), 9: monday}
+	if len(got) != len(want) || !got[7].Equal(want[7]) || !got[9].Equal(want[9]) {
+		t.Fatalf("last dumps = %v, want %v", got, want)
 	}
 }

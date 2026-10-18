@@ -1,4 +1,5 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
+import { heldResponse, recordProgress } from "./progress-recording"
 import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
 
 /**
@@ -961,7 +962,7 @@ test("staged edits are asked about before the table, its rows or the editor are 
   // A link out of the editor.
   await page
     .getByRole("navigation", { name: "Sidebar" })
-    .getByRole("link", { name: "Settings" })
+    .getByRole("link", { name: "General", exact: true })
     .click()
   await expect(guard).toContainText("Leaving the table editor")
   await expect.poll(() => where(page)).toContain("/data")
@@ -1878,3 +1879,69 @@ for (const [label, viewport] of [
     await keepsTheRules(page, "a key being added to a document")
   })
 }
+
+test("progress: a SQL import separates upload from database processing", async ({ page }) => {
+  await mockEditor(page)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto(ITEMS)
+  await expect(cell(page, 0, 1)).toHaveText("Item 1")
+  await page.getByRole("button", { name: "Import", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Import into items" })
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "items.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("Name,Quantity\nImported one,7\n,9\n"),
+  })
+  await expect(dialog.getByRole("combobox", { name: "Where Name goes" })).toContainText("name")
+  const held = await heldResponse(page, "/databases/1/import/upload", {
+    dryRun: false,
+    rowsRead: 2,
+    inserted: 2,
+    skipped: 0,
+    warnings: [],
+    errors: [],
+    atomic: true,
+    columns: [],
+  })
+  const before = await dialog.boundingBox()
+  await recordProgress(
+    page,
+    "database-sql-import",
+    async () => {
+      await dialog.getByRole("button", { name: "Import", exact: true }).click()
+      await expect.poll(() => dialog.boundingBox()).toEqual(before)
+    },
+    dialog.locator("[data-slot=operation-progress]"),
+    async () => {
+      held.release()
+      await expect(dialog.getByRole("button", { name: "Done", exact: true })).toBeVisible()
+    },
+  )
+})
+
+test("an expired streamed export rechecks once and returns to sign-in", async ({ page }) => {
+  let expired = false
+  let rechecks = 0
+  await mockEditor(page)
+  await page.goto(ITEMS)
+  await expect(cell(page, 0, 1)).toHaveText("Item 1")
+  await page.route("**/api/v1/auth/session", async (route) => {
+    if (!expired) return route.fallback()
+    rechecks += 1
+    return json(route, {
+      authenticated: false,
+      needsTotp: false,
+      needsEnrollment: false,
+      require2fa: false,
+    })
+  })
+  await page.route("**/api/v1/databases/1/export**", async (route) => {
+    expired = true
+    return json(route, { error: { code: "unauthorized", message: "Session expired" } }, 401)
+  })
+  await page.getByRole("button", { name: "Export", exact: true }).click()
+  await page.getByRole("menuitem", { name: /^CSV/ }).click()
+  await expect(page).toHaveURL(/\/login\?reason=session$/)
+  await expect(page.getByText("Your session ended. Sign in again to continue.")).toBeVisible()
+  expect(rechecks).toBe(1)
+})

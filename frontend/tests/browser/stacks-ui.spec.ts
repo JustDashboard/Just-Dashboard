@@ -19,18 +19,16 @@ async function open(page: Page) {
 /** A press that leaves the page loads the next route's code first. */
 const NAVIGATION = { timeout: 15_000 }
 
-test("the page opens on the server, the stacks needing attention and the table worst first", async ({
-  page,
-}) => {
+test("the page opens on the server and the native stack states", async ({ page }) => {
   await mockStacks(page)
   await open(page)
 
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity).toContainText("Docker 29.8.0")
   await expect(identity).toContainText("5 of 6 stacks deployed")
-  await expect(identity).toContainText("3 stacks need attention")
+  await expect(identity).not.toContainText("need attention")
 
-  // Attention first, then running, stopped and never deployed — each by name.
+  // Running, stopped and never deployed, each by name.
   await expect(page.locator("[data-stack-row]")).toHaveCount(6)
   const order = await page
     .locator("[data-stack-row]")
@@ -120,20 +118,11 @@ test("recent says what Docker did to the stacks, and a line opens its stack", as
   await expect(page).toHaveURL(/\/docker\/stacks\/monitoring$/, NAVIGATION)
 })
 
-test("the state chips count and narrow, and the verdict presses the attention chip", async ({
-  page,
-}) => {
+test("the native state chips count and narrow without an attention filter", async ({ page }) => {
   await mockStacks(page)
   await open(page)
 
-  const chip = page.getByRole("button", { name: /^Needs attention/ })
-  await expect(chip).toContainText("3")
-  await page
-    .locator("[data-slot='host-identity']")
-    .getByRole("button", { name: "3 stacks need attention" })
-    .click()
-  await expect(chip).toHaveAttribute("aria-pressed", "true")
-  await expect(page.locator("[data-stack-row]")).toHaveCount(3)
+  await expect(page.getByRole("button", { name: /^Needs attention/ })).toHaveCount(0)
 
   await page.getByRole("button", { name: /^Not deployed/ }).click()
   await expect(page.locator("[data-stack-row]")).toHaveCount(1)

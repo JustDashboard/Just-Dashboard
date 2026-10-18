@@ -27,7 +27,8 @@ export type DbRole = {
 
 export type DbRoles = { roles: DbRole[]; supported: boolean; reason?: string }
 
-export type DbGrantLevel = "server" | "database" | "schema" | "table" | "sequence"
+export type DbGrantLevel =
+  "server" | "database" | "schema" | "table" | "sequence" | "function" | "column"
 
 export type DbGrant = {
   /** A role's name, or PUBLIC. */
@@ -36,8 +37,14 @@ export type DbGrant = {
   level: DbGrantLevel
   database?: string
   schema?: string
-  /** A table or a sequence; empty with `future`. */
+  /** A table or a sequence, or the table of a column; empty with `future`. */
   table?: string
+  /** A function's name, at the function level. */
+  routine?: string
+  /** The types it takes, as the catalogue lists them: told apart from its namesakes by them. */
+  arguments?: string
+  /** The column, at the column level. */
+  column?: string
   privileges: string[]
   grantable?: boolean
   grantor?: string
@@ -111,11 +118,11 @@ export type DbDatabaseGrantResult = {
 export type DbRoleCreated = DbDatabaseGrantResult & { ok: true }
 
 export type DbPrivilegeLevel = {
-  level: "database" | "schema" | "table" | "sequence" | "role"
+  level: "database" | "schema" | "table" | "sequence" | "function" | "column" | "role"
   /** The only values a request may carry at this level. */
   privileges: string[]
   /** The request fields that name the object. */
-  needs: ("database" | "schema" | "table" | "memberOf")[]
+  needs: ("database" | "schema" | "table" | "routine" | "columns" | "memberOf")[]
   /** The last of `needs` may be empty: every object in the schema. */
   allObjects?: boolean
   /** Also for objects created later. */
@@ -131,6 +138,9 @@ export type DbPrivilegeRequest = {
   database?: string
   schema?: string
   table?: string
+  routine?: string
+  arguments?: string
+  columns?: string[]
   privileges?: string[]
   memberOf?: string
   grantOption?: boolean
@@ -149,7 +159,12 @@ export type DbPrivilegeResult = {
 export type DbCatalog = {
   schema: string
   schemas: { name: string; system?: boolean }[]
-  objects: Record<string, { name: string; schema?: string }[] | undefined>
+  objects: Record<
+    string,
+    { name: string; schema?: string; signature?: string; extension?: string }[] | undefined
+  >
+  /** The groups cut off at the catalogue's limit. */
+  truncated?: string[]
 }
 
 /** One user of `GET /databases/{id}/redis/acl`. */

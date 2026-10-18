@@ -374,7 +374,7 @@ test("the local CA panel reads its root, what it issued and its renewal", async 
   await expect(leaves.getByText(/^renews /)).toBeVisible()
   await expect(leaves).toContainText("nas.lan, 192.168.1.10")
   await expect(leaves).toContainText("Used by nas.lan")
-  await expect(panel.getByText(/Checked just now: nothing was due\. Next check/)).toBeVisible()
+  await expect(panel.getByText(/Checked .+: nothing was due\. Next check/)).toBeVisible()
   await expect(panel.getByRole("link", { name: "Download root" })).toHaveAttribute(
     "href",
     "/api/v1/certificates/local-ca/root.pem",

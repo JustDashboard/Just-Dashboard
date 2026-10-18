@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
+import { heldResponse, recordProgress } from "./progress-recording"
 import { mockDatabases, type DatabaseMock } from "./database-fixture"
 
 /**
@@ -2662,3 +2663,83 @@ for (const [label, viewport] of [
     }
   })
 }
+
+test("progress: MongoDB import waits for document writes after sending the file", async ({
+  page,
+}) => {
+  await mockMongo(page)
+  const report = {
+    dryRun: true,
+    schema: DB,
+    table: "orders",
+    format: "ndjson",
+    mode: "insert",
+    columns: [],
+    rowsRead: 1,
+    inserted: 0,
+    skipped: 0,
+    errors: [],
+    errorsTruncated: false,
+    preview: { columns: ["id"], rows: [["1"]] },
+    atomic: false,
+    warnings: [],
+  }
+  await page.route("**/api/v1/databases/5/import/upload", (route) =>
+    route.fulfill({ json: report }),
+  )
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto(collection("orders"))
+  await page.getByRole("button", { name: "Import", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Import into orders" })
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "orders.ndjson",
+    mimeType: "application/x-ndjson",
+    buffer: Buffer.from('{"id":1}\n'),
+  })
+  await expect(dialog.getByRole("button", { name: "Import", exact: true })).toBeEnabled()
+  const held = await heldResponse(page, "/databases/5/import/upload", {
+    ...report,
+    dryRun: false,
+    inserted: 1,
+  })
+  await recordProgress(
+    page,
+    "database-mongo-import",
+    () => dialog.getByRole("button", { name: "Import", exact: true }).click(),
+    dialog.locator("[data-slot=operation-progress]"),
+    async () => {
+      held.release()
+      await expect(dialog.getByRole("button", { name: "Done", exact: true })).toBeVisible()
+    },
+  )
+})
+
+test("an expired streamed export rechecks once and returns to sign-in", async ({ page }) => {
+  let expired = false
+  let rechecks = 0
+  await mockMongo(page)
+  await page.goto(collection("orders"))
+  await expect(page.getByRole("button", { name: "Export", exact: true })).toBeVisible()
+  await page.route("**/api/v1/auth/session", async (route) => {
+    if (!expired) return route.fallback()
+    rechecks += 1
+    return json(route, {
+      authenticated: false,
+      needsTotp: false,
+      needsEnrollment: false,
+      require2fa: false,
+    })
+  })
+  await page.route("**/api/v1/databases/5/mongo/export**", async (route) => {
+    expired = true
+    return json(route, { error: { code: "unauthorized", message: "Session expired" } }, 401)
+  })
+  await page.getByRole("button", { name: "Export", exact: true }).click()
+  await page
+    .getByRole("dialog", { name: "Export orders" })
+    .getByRole("button", { name: "Export", exact: true })
+    .click()
+  await expect(page).toHaveURL(/\/login\?reason=session$/)
+  await expect(page.getByText("Your session ended. Sign in again to continue.")).toBeVisible()
+  expect(rechecks).toBe(1)
+})

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -232,16 +233,24 @@ func (s *Server) searchStack(ctx context.Context, project string, opts logsx.Sea
 	logOpts := containerSearchOptions(opts)
 	streams := make([]*logsx.Stream, len(members))
 	ins := make([]<-chan dockerx.LogLine, len(members))
+	readers := make([]io.Closer, len(members))
+	var failures []logsx.SearchedFile
+	unavailable := func(i int, err error) {
+		member := members[i].container
+		failures = append(failures, logsx.SearchedFile{Path: member.ID, Name: member.Name, Error: err.Error()})
+	}
+	readable := 0
 	for i, m := range members {
 		streams[i] = c.NewStream(m.lens)
 		ch, closer, err := s.modules.docker.Logs(ctx, m.container.ID, logOpts)
 		if err != nil {
-			// A container removed since the list was read has nothing to
-			// add; the rest of the stack still answers.
+			unavailable(i, err)
 			continue
 		}
 		defer closer.Close()
+		readers[i] = closer
 		ins[i] = ch
+		readable++
 	}
 	n := 0
 	var line logsx.Line
@@ -256,8 +265,28 @@ func (s *Server) searchStack(ctx context.Context, project string, opts logsx.Sea
 	})
 	if ctx.Err() != nil {
 		c.Incomplete()
+	} else {
+		for i, reader := range readers {
+			if err := dockerx.LogReadError(reader); err != nil {
+				unavailable(i, err)
+				readable--
+			}
+		}
 	}
-	return c.Result(), nil
+	if readable == 0 && len(failures) > 0 {
+		var detail strings.Builder
+		for _, failure := range failures[:min(len(failures), 8)] {
+			fmt.Fprintf(&detail, "%s: %.512s\n", failure.Name, failure.Error)
+		}
+		return nil, httpx.Err(http.StatusServiceUnavailable, "logs_unavailable", "No container logs in this stack could be read completely.").
+			Because("Every Docker log reader failed. Check the source errors and retry.", detail.String()).Retry()
+	}
+	res := c.Result()
+	if len(failures) > 0 {
+		res.Complete = false
+		res.Files = append(res.Files, failures...)
+	}
+	return res, nil
 }
 
 // stackRejoin is how often a stack's live tail looks again at which of its

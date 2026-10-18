@@ -23,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { statementVerb } from "@/components/database/home/kinds"
 import { compact } from "@/components/database/home/readings"
 import { CodeView, EngineMark } from "@/components/database/kit"
 import { oneLine } from "@/components/database/ops/queries"
@@ -32,9 +33,9 @@ import {
   resetStatements,
 } from "@/components/database/ops/performance-api"
 import {
+  hasPlaceholder,
   isStatementSort,
   millis,
-  planFor,
   rowsPerCall,
   shareWords,
   statementKeys,
@@ -51,6 +52,8 @@ import {
   RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import { StatementPlan } from "@/components/database/ops/performance-plan"
+import { useStatementsSetup } from "@/components/database/ops/statements-setup"
+import { setupStart } from "@/components/database/ops/statements-setup-model"
 import type {
   DbStatement,
   DbStatementSort,
@@ -74,10 +77,11 @@ const MORE = 200
  * reader chooses, since "slowest on average" and "called most" are different
  * lists and the server ranks each over everything it tracked.
  *
- * The text is a shape — the server replaces every value before it leaves — so
- * a row is something to recognise. It opens on the whole statement and its
- * figures, and on its plan: asked as it stands where it has no placeholder,
- * and with the values the reader puts in where it has.
+ * The text is a shape — every value in it is replaced before it leaves the
+ * server, by the engine or by the dashboard where the engine keeps a statement
+ * as it was sent — so a row is something to recognise. It opens on the whole
+ * statement and its figures, and on its plan: asked as it stands where it has
+ * no placeholder, and with the values the reader puts in where it has.
  *
  * Where the statistics are off, the view says what turns them on, and offers
  * it where one press does.
@@ -99,6 +103,7 @@ export function StatementsView() {
     limit,
   ])
   const data = statements.data
+  const openSetup = useStatementsSetup(statements.refresh)
   // A row is addressed by a key no other row has: the engine's digest names
   // a statement twice when it ran in two schemas.
   const keyed = useMemo(() => {
@@ -171,6 +176,19 @@ export function StatementsView() {
     engine.can("statementsReset") &&
     can("destructive") &&
     !readOnly
+  // Where the header's controls wrap under its title, the filter is a row of
+  // its own as wide as the list it filters, below the title and the reset.
+  const narrow = width < 520
+  const filterBox = data?.supported && (
+    <SearchInput
+      dense
+      aria-label="Filter the statements"
+      placeholder="Filter by text"
+      value={filter}
+      containerClassName={narrow ? "order-last basis-full" : "sm:w-56"}
+      onChange={(event) => setFilter(event.target.value)}
+    />
+  )
 
   return (
     <Panel plain aria-label="Statements" ref={frame} className="focus-ring" {...RETURNS_FOCUS}>
@@ -180,16 +198,7 @@ export function StatementsView() {
         actions={
           <>
             <Stale poll={statements} />
-            {data?.supported && (
-              <SearchInput
-                dense
-                aria-label="Filter the statements"
-                placeholder="Filter by text"
-                value={filter}
-                containerClassName="sm:w-56"
-                onChange={(event) => setFilter(event.target.value)}
-              />
-            )}
+            {!narrow && filterBox}
             {mayReset && (
               <Button size="sm" variant="outline" onClick={reset}>
                 Reset statistics
@@ -197,7 +206,9 @@ export function StatementsView() {
             )}
           </>
         }
-      />
+      >
+        {narrow && filterBox}
+      </PanelHeader>
       <ViewRead poll={statements} what="the statements" skeleton={<LoadingPanel plain rows={8} />}>
         {(answer) =>
           !answer.supported ? (
@@ -206,6 +217,15 @@ export function StatementsView() {
                 data={answer}
                 enabling={enabling}
                 onEnable={can("system.admin") && !readOnly ? enable : undefined}
+                onSetup={
+                  openSetup && engine.can("statementsSetup") && can("system.admin") && !readOnly
+                    ? () => {
+                        if (!answer.enable) return
+                        focus.remember()
+                        openSetup({ enable: answer.enable, onClose: focus.restore })
+                      }
+                    : undefined
+                }
               />
             </div>
           ) : (
@@ -226,7 +246,7 @@ export function StatementsView() {
                   </span>{" "}
                   of statement time counted
                   {answer.since && (
-                    <span title={timestamp(answer.since)}> since {relativeTime(answer.since)}</span>
+                    <span title={timestamp(answer.since)}> from {relativeTime(answer.since)}</span>
                   )}
                 </p>
               </div>
@@ -271,6 +291,10 @@ export function StatementsView() {
                                 className="block h-full rounded-full bg-primary"
                                 style={{
                                   width: `${Math.max(longest > 0 ? (statement.share / longest) * 100 : 0, 1)}%`,
+                                  // In the hue of what the statement does, the
+                                  // home's ranking's: one heavy write among
+                                  // reads shows before it is read.
+                                  background: statementVerb(statement.query)?.color,
                                 }}
                               />
                             </span>
@@ -323,8 +347,8 @@ export function StatementsView() {
               <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
                 <FormNote>
                   The bar is a statement&apos;s share of all the time counted. The text is a shape:
-                  the server replaces every value before it leaves, and a row&apos;s plan is asked
-                  for with values put back in.
+                  every value in it is replaced before it leaves the server, and a row&apos;s plan
+                  is asked for with values put back in.
                 </FormNote>
                 {answer.statements.length >= limit && limit < MORE && (
                   <Button size="xs" variant="ghost" onClick={() => setLimit(MORE)}>
@@ -363,20 +387,32 @@ function sentence(text: string | undefined): string {
 /**
  * The statistics are off, or closed to this account. What would turn them on
  * is said in the server's own words, and where one statement is enough — an
- * extension to create — an administrator is offered it.
+ * extension to create — an administrator is offered it. Where the module is
+ * not loaded yet, the same words open the guided setup (`StatementsSetup`):
+ * the library, the restart, the extension. Where the library list cannot be
+ * changed from here, the server's reason is said beside what to do.
  */
 function NotCounting({
   data,
   enabling,
   onEnable,
+  onSetup,
 }: {
   data: DbStatements
   enabling: boolean
   onEnable?: (extension: string) => void
+  onSetup?: () => void
 }) {
   const { engine } = useDatabase()
   const enable = data.enable
   const extension = enable?.sql ? enable.extension : undefined
+  const guided = setupStart(enable) !== undefined
+  const reason = [
+    sentence(enable?.note ?? data.reason),
+    enable?.blocked ? sentence(enable.blocked) : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
   return (
     <NotAvailable
       title={
@@ -384,13 +420,19 @@ function NotCounting({
           ? `This server is not counting its ${engine.nouns.statements}`
           : `The ${engine.nouns.statements} this server has run cannot be read`
       }
-      reason={sentence(enable?.note ?? data.reason)}
+      reason={reason}
       action={
-        extension &&
-        onEnable && (
+        extension && onEnable ? (
           <Button size="sm" pending={enabling} onClick={() => onEnable(extension)}>
             Turn on statement statistics
           </Button>
+        ) : (
+          guided &&
+          onSetup && (
+            <Button size="sm" onClick={onSetup}>
+              Turn on statement statistics
+            </Button>
+          )
         )
       }
     />
@@ -413,7 +455,9 @@ function StatementPanel({
 }) {
   const { engine, goto } = useDatabase()
   const { can } = useAuth()
-  const shape = planFor(statement.query) === "shape"
+  // Labelled by what the text holds, not by whether it plans: a CREATE ROLE
+  // with a ? where its password was is a shape too.
+  const shape = hasPlaceholder(statement.query)
   const lines = statement.query.split("\n").length
   const each = rowsPerCall(statement)
   const mayQuery = engine.has("query") && can("service.control")

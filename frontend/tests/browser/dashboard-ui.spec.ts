@@ -200,11 +200,11 @@ const uninstallRun = {
   updatedAt: now,
 }
 
-async function mockApi(page: Page) {
+async function mockApi(page: Page, report: unknown = update) {
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
     if (path === "/auth/session") return json(route, user)
-    if (path === "/dashboard/update") return json(route, update)
+    if (path === "/dashboard/update") return json(route, report)
     if (path === "/dashboard/config") return json(route, config)
     if (path === "/dashboard/uninstall") return json(route, { supported: true })
     if (path === "/dashboard/uninstall/plan") return json(route, uninstallPlan)
@@ -256,6 +256,79 @@ test("the version page is the history, with the update in the header", async ({ 
   await expect(history.getByRole("heading", { name: "0.7.0" })).toHaveCount(0)
 
   expect(await framedPanels(page)).toEqual([])
+})
+
+test("the sidebar's update notice leads to the Version page and installs through its own dialog", async ({
+  page,
+}) => {
+  await mockApi(page)
+  await page.goto("/dashboard/configuration")
+
+  const notice = page.getByRole("region", { name: "Dashboard update" })
+  await expect(notice.getByText("New version")).toBeVisible()
+  await expect(notice.getByText("Give the dashboard pages the design system")).toBeVisible()
+  // What the releases bring, by kind, in the kinds' own words.
+  await expect(notice.getByText("security", { exact: true })).toBeVisible()
+
+  // The patch notes are the Version page, not a panel over this one.
+  await notice.getByRole("link", { name: "View patch notes" }).click()
+  await expect(page).toHaveURL(/\/dashboard$/)
+  await expect(page.getByRole("heading", { name: "Version", exact: true })).toBeVisible()
+  await expect(page.locator("[data-slot=sheet-content]")).toHaveCount(0)
+
+  // Installing is taking something, not deleting it: the command is the brand
+  // face, and nothing in the dialog is drawn in destructive red.
+  await notice.getByRole("button", { name: "Update now" }).click()
+  const dialog = page.getByRole("dialog", { name: "Update to 0.7.0" })
+  await expect(dialog).toBeVisible()
+  const command = dialog.getByRole("button", { name: "Update", exact: true })
+  await expect(command).toHaveAttribute("data-variant", "default")
+  await expect(dialog.locator("[data-variant=destructive]")).toHaveCount(0)
+  // A yes or a no: the notes and what the updater does are on the Version page.
+  await expect(dialog.getByText("Before you update")).toHaveCount(0)
+
+  const install = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" && request.url().endsWith("/api/v1/dashboard/update/install"),
+  )
+  await command.click()
+  expect((await install).postDataJSON()).toEqual({ version: "0.7.0" })
+  await expect(dialog).toHaveCount(0)
+
+  // The page's own command opens the same dialog.
+  await page.getByRole("button", { name: "Update to 0.7.0" }).click()
+  await expect(page.getByRole("dialog", { name: "Update to 0.7.0" })).toBeVisible()
+})
+
+test("an update in flight lights the notice and points at its progress", async ({ page }) => {
+  await mockApi(page, {
+    ...update,
+    run: {
+      id: "run-1",
+      status: "running",
+      phase: "building",
+      fromVersion: "0.6.7",
+      toVersion: "0.7.0",
+      ref: "main",
+      dir,
+      compose: `${dir}/docker-compose.yml`,
+      image: "just-dashboard-updater",
+      container: "just-dashboard-updater",
+      actor: "operator",
+      startedAt: earlier,
+      updatedAt: now,
+    },
+  })
+  await page.goto("/dashboard/configuration")
+
+  const notice = page.getByRole("region", { name: "Dashboard update" })
+  await expect(notice.getByText("Updating", { exact: true })).toBeVisible()
+  await expect(notice.getByText("Building and restarting")).toBeVisible()
+  await expect(notice.getByRole("button", { name: "Update now" })).toHaveCount(0)
+  await expect(notice.getByRole("link", { name: "View progress" })).toHaveAttribute(
+    "href",
+    "/dashboard",
+  )
 })
 
 test("the allowlist destination lands on Access after the configuration loads", async ({

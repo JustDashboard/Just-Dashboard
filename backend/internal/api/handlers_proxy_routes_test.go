@@ -187,12 +187,20 @@ func TestProxyChangesAreRecordedAsTheSignedInAccount(t *testing.T) {
 	t.Setenv("PATH", filepath.Join(dir, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
 	s.Cfg.NginxDir = dir
 	s.initModules()
+	file := filepath.Join(dir, "sites-available", "app")
+	if err := os.WriteFile(file, []byte("server {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := s.modules.proxy.ReadConfigSnapshot(file)
+	if err != nil {
+		t.Fatal(err)
+	}
 	log := &actorLog{}
 	s.modules.proxy.SetRecorder(log)
 
 	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
 	body, _ := json.Marshal(map[string]any{
-		"kind": "nginx", "path": filepath.Join(dir, "sites-available", "app"), "content": "server {}\n",
+		"expectedRevision": snapshot.Revision, "kind": "nginx", "path": file, "content": "server {}\n",
 	})
 	if w := c.do(http.MethodPut, "/api/v1/proxy/config", string(body), nil); w.Code != http.StatusOK {
 		t.Fatalf("got %d: %s", w.Code, w.Body.String())

@@ -264,7 +264,7 @@ function CaptureInspector({
         </div>
         {error && <ErrorState error={error} />}
         {run.error && (
-          <Notice tone="warning" title="Capture needs attention">
+          <Notice tone="warning" title="Capture incomplete">
             {run.error}
           </Notice>
         )}

@@ -261,6 +261,13 @@ test("a failed save lets the operator leave on purpose, and a board deleted else
   await page.getByRole("button", { name: "Save", exact: true }).click()
   await expect(status).toContainText("Saved on this server")
   await expect(failure).toBeHidden()
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(false)
 
   board.refuse = { status: 404, code: "board_not_found", message: "board not found" }
   await name.fill("Rack layout 2")
@@ -269,6 +276,13 @@ test("a failed save lets the operator leave on purpose, and a board deleted else
   await name.fill("Rack layout 3")
   await page.waitForTimeout(1500)
   expect(board.puts).toHaveLength(attempts)
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(true)
 
   await page.getByRole("button", { name: "Back to Excalidraw" }).click()
   await page.getByRole("dialog").getByRole("button", { name: "Leave without saving" }).click()
@@ -319,4 +333,133 @@ test("the list draws each drawing, names what it links to, and the old address l
 
   await card.getByRole("button", { name: "Production map", exact: true }).click()
   await expect(page).toHaveURL(/\/excalidraw\/1$/)
+})
+
+test("drawing navigation keeps later edits when a drained save fails", async ({ page }) => {
+  await mockBoards(page)
+  const writes: Put[] = []
+  let release = () => {}
+  const pending = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route("**/api/v1/boards/1", async (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    writes.push(route.request().postDataJSON() as Put)
+    if (writes.length === 1) {
+      await pending
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ name: writes[0].name, revision: 2 }),
+      })
+    }
+    return route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable", message: "Second save failed" } }),
+    })
+  })
+  await page.goto("/excalidraw/1")
+  const name = page.getByLabel("Drawing name")
+  await expect(name).toHaveValue("Untitled board")
+  await name.fill("First revision")
+  await page.getByRole("button", { name: "Back to Excalidraw" }).click()
+  await expect.poll(() => writes.length).toBe(1)
+  await name.fill("Latest revision")
+  release()
+  await expect(page.getByRole("dialog", { name: "Leave without saving?" })).toBeVisible()
+  expect(writes[1].name).toBe("Latest revision")
+  await expect(page).toHaveURL(/\/excalidraw\/1$/)
+  await page.getByRole("button", { name: "Stay", exact: true }).click()
+  await expect(name).toHaveValue("Latest revision")
+})
+
+test("drawing drafts survive failed saves, sidebar and palette exits, and history traversal", async ({
+  page,
+}) => {
+  const board = await mockBoards(page)
+  board.refuse = { status: 503, code: "unavailable", message: "Save temporarily unavailable" }
+  await openBoard(page)
+  await page.getByLabel("Drawing name").fill("Retained drawing draft")
+  await expect(page.getByRole("status")).toContainText("Save failed")
+  await page.locator('a[href="/stickyboard"]').first().click()
+  await expect(page).toHaveURL(/\/stickyboard$/)
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(true)
+  await page.goBack()
+  await expect(page.getByLabel("Drawing name")).toHaveValue("Retained drawing draft")
+  expect(board.name).toBe("Untitled board")
+  await page
+    .locator('[data-slot="sidebar-header"]')
+    .getByRole("button", { name: /Search/ })
+    .focus()
+  await page.keyboard.press("Control+k")
+  const palette = page.getByRole("dialog", { name: "Command palette" })
+  await palette.getByRole("combobox").fill("page: stickyboard")
+  await palette
+    .getByRole("option", { name: /Stickyboard/i })
+    .first()
+    .click()
+  await expect(page).toHaveURL(/\/stickyboard$/)
+  await page.goBack()
+  await expect(page.getByLabel("Drawing name")).toHaveValue("Retained drawing draft")
+  board.refuse = null
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(page.getByRole("status")).toContainText("Saved on this server")
+  expect(board.name).toBe("Retained drawing draft")
+})
+
+test("returning to a drawing waits for departing saves and keeps the acknowledged revision", async ({
+  page,
+}) => {
+  const board = await mockBoards(page)
+  let release = () => {}
+  const firstResponse = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let writes = 0
+  await page.route("**/api/v1/boards/1", async (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    writes++
+    if (writes === 1) {
+      const body = route.request().postDataJSON() as Put
+      await firstResponse
+      board.name = body.name
+      board.scene = body.scene
+      board.revision = 2
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ id: 1, name: body.name, revision: 2 }),
+      })
+    }
+    if (writes === 2)
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "unavailable", message: "Later save failed" } }),
+      })
+    return route.fallback()
+  })
+  await openBoard(page)
+  await page.getByLabel("Drawing name").fill("First snapshot")
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect.poll(() => writes).toBe(1)
+  await page.getByLabel("Drawing name").fill("Newer retained snapshot")
+  await page.locator('a[href="/stickyboard"]').first().click()
+  await expect(page).toHaveURL(/\/stickyboard$/)
+  await page.goBack()
+  await expect(page.getByLabel("Drawing name")).toHaveCount(0)
+  release()
+  await expect(page.getByLabel("Drawing name")).toHaveValue("Newer retained snapshot")
+  await expect(page.getByRole("status")).toContainText("Save failed")
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(page.getByRole("status")).toContainText("Saved on this server")
+  expect(board.name).toBe("Newer retained snapshot")
+  expect(board.puts.at(-1)?.revision).toBe(2)
 })

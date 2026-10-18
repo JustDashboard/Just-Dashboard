@@ -339,7 +339,13 @@ function FoundRow({
           </span>
         </>
       }
-      description={<span className="font-mono">{where.text}</span>}
+      description={
+        instance.kind === "file" ? (
+          <FolderOf path={where.text} />
+        ) : (
+          <span className="font-mono">{where.text}</span>
+        )
+      }
       trailing={
         <span className="flex shrink-0 items-center gap-3">
           {instance.driver === "" && instance.kind === "server" && (
@@ -392,5 +398,20 @@ function FoundRow({
         </p>
       )}
     </ChoiceRow>
+  )
+}
+
+/**
+ * The folder a file is in, under its name. The name is the row's title, so
+ * the whole path said it twice; and where the folder is too long for the
+ * row, it is cut from its start, because the folder nearest the file is what
+ * tells two files of one name apart.
+ */
+function FolderOf({ path }: { path: string }) {
+  const cut = path.lastIndexOf("/")
+  return (
+    <span dir="rtl" title={path} className="block truncate text-left font-mono">
+      <bdi dir="ltr">{cut > 0 ? path.slice(0, cut) : "/"}</bdi>
+    </span>
   )
 }

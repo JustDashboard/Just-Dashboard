@@ -38,6 +38,10 @@ type Server struct {
 	loginLim *httpx.Limiter
 	apiLim   *httpx.Limiter
 	destrLim *httpx.Limiter
+	// streamLim is Remote Desktop's stream bridge, whose page loads a
+	// hundred of its own files at once; on apiLim that one page would spend
+	// the whole dashboard's burst.
+	streamLim *httpx.Limiter
 	// Disk usage recursively visits client-selected trees. Two concurrent
 	// scans are enough for the UI without letting requests multiply host I/O.
 	diskScans chan struct{}
@@ -84,10 +88,30 @@ type Server struct {
 	// (handlers_procs.go).
 	procContainers containerNames
 
-	dbConns        dbConnState
+	dbConns dbConnState
+	// Certificates for the databases this dashboard started
+	// (database_tls.go).
+	dbTLS dbTLSState
+	// Point-in-time recovery's readings and base backup schedule
+	// (database_pitr.go).
+	pitr           pitrState
 	dbMetricsStop  context.CancelFunc
 	dbMetricsDone  chan struct{}
 	dbMetricOffset int
+	// dbMetricThinnedAt is when thinning the history past its raw window was
+	// last tried, and dbMetricThinnedTo how far back it has completed; only
+	// the recorder's pass reads or writes them.
+	dbMetricThinnedAt time.Time
+	dbMetricThinnedTo int64
+	// The statement recorder's readings between one and the next
+	// (database_statements.go).
+	dbStatements statementHistory
+
+	// The SQL editor's assistant: its conversations, its install-wide budget
+	// and how it reaches its provider (handlers_db_assistant.go).
+	assistant *assistantState
+	// The tool calls each MCP key has in flight (handlers_mcp.go).
+	mcp mcpState
 
 	modules moduleSet
 }
@@ -117,7 +141,9 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, svc *auth.Servic
 		// Destructive routes get their own budget so a scripted delete loop
 		// cannot run away even with a valid admin token.
 		destrLim:  httpx.NewLimiter(30, 10),
+		streamLim: httpx.NewLimiter(3000, 600),
 		diskScans: make(chan struct{}, 2),
+		assistant: newAssistantState(),
 	}
 	s.initModules()
 	return s
@@ -139,6 +165,29 @@ func (s *Server) Start(ctx context.Context) error {
 		s.Log.Warn("interrupted native DNS changes could not be reconciled", "err", err)
 	}
 	dnsServicesCancel()
+	remoteCtx, remoteCancel := context.WithTimeout(ctx, 5*time.Second)
+	if err := s.modules.remoteDesktop.Reconcile(remoteCtx); err != nil {
+		s.Log.Warn("interrupted remote desktop sessions could not be closed in the history", "err", err)
+	}
+	remoteCancel()
+	// An engine or a stream bridge made by an older dashboard is made again
+	// in the background, its volume kept; a current one is left alone.
+	go func() {
+		upgradeCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		defer cancel()
+		err := s.modules.remoteDesktop.UpgradeEngine(upgradeCtx, func(line string) {
+			s.Log.Info("remote desktop engine", "step", line)
+		})
+		if err != nil {
+			s.Log.Warn("the remote desktop engine could not be brought up to date", "err", err)
+		}
+		err = s.modules.remoteDesktop.UpgradeBridge(upgradeCtx, func(line string) {
+			s.Log.Info("remote desktop stream bridge", "step", line)
+		})
+		if err != nil {
+			s.Log.Warn("the remote desktop stream bridge could not be brought up to date", "err", err)
+		}
+	}()
 	if err := s.modules.flowAccounting.Start(ctx); err != nil && s.Log != nil {
 		s.Log.Warn("network socket history is unavailable", "err", err)
 	}
@@ -155,12 +204,21 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.modules.backupRunner.RecoverRestoreChecks(cleanupCtx); err != nil {
 		s.Log.Warn("backup restore verification cleanup needs attention", "err", err)
 	}
+	s.sweepPITR(cleanupCtx)
 	// Before the engine resumes any run: a release task this process's
 	// predecessor was running has nobody reading its output or its exit.
 	if err := s.modules.deployRuntime.RemoveOrphanedReleaseTasks(cleanupCtx); err != nil {
 		s.Log.Warn("release task containers left by a previous start could not be removed", "err", err)
 	}
 	cleanupCancel()
+	// A database upgrade this process's predecessor was carrying out has
+	// nobody left to finish it or undo it: the old server is put back in the
+	// background, since it may have to be started and waited for.
+	go func() {
+		upgradeCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		defer cancel()
+		s.recoverDatabaseUpgrades(upgradeCtx)
+	}()
 	// The metrics recorder is started here rather than lazily on the first
 	// request precisely because nothing may ever request it: its whole
 	// purpose is to have been running while nobody was looking.
@@ -176,9 +234,6 @@ func (s *Server) Start(ctx context.Context) error {
 	// traffic chart for three this morning exists only if something was
 	// reading the counters at three.
 	s.modules.network.Start(ctx)
-	// The attention list is judged on a schedule too, so its history holds
-	// what happened while nobody had the Overview open.
-	s.startNetworkIncidents(ctx)
 	// A block made from the connection table with an end is lifted when it
 	// ends, whether or not anybody has the page open.
 	go s.expireBlocks(ctx)
@@ -189,6 +244,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// happen, whether or not anybody has the Routing page open.
 	s.modules.network.StartRouteHistory(ctx)
 	s.startDatabaseMetrics(ctx)
+	s.startDatabaseTLS(ctx)
 	// Two things, both of which have to happen at boot rather than on request.
 	// An upgrade that was in flight when this process started is settled here,
 	// because after a successful one *this* process is the evidence it worked
@@ -212,6 +268,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.modules.backupSched.Start(ctx); err != nil {
 		return err
 	}
+	s.startPITRSchedule(ctx)
 	ingressCtx, stopIngress := context.WithCancel(ctx)
 	s.ingressStop, s.ingressDone = stopIngress, make(chan struct{})
 	go func() {
@@ -234,6 +291,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.modules.deployGit.Start(ctx)
 	s.modules.previewReconciler.Start(ctx)
 	s.modules.deployDatabases.Start(ctx)
+	s.modules.poolers.Start(ctx)
 	return nil
 }
 
@@ -264,6 +322,7 @@ func (s *Server) Shutdown() {
 	s.modules.deployGit.Stop()
 	s.modules.previewReconciler.Stop()
 	s.modules.deployDatabases.Stop()
+	s.modules.poolers.Stop()
 	// Stop fresh claims first. Active work is given a bounded grace to reach a
 	// persisted boundary; Engine.Shutdown never injects a cancellation into an
 	// activation or restoration.
@@ -278,12 +337,17 @@ func (s *Server) Shutdown() {
 	}
 	s.stopProxyExtras()
 	s.stopDatabaseMetrics()
+	s.stopDatabaseTLS()
 	s.modules.metrics.Stop()
 	s.modules.network.Stop()
 	if err := s.modules.dnsServices.Close(); err != nil && s.Log != nil {
 		s.Log.Warn("native DNS runtime client shutdown failed", "err", err)
 	}
+	if err := s.modules.remoteDesktop.Close(); err != nil && s.Log != nil {
+		s.Log.Warn("remote desktop runtime client shutdown failed", "err", err)
+	}
 	s.modules.backupSched.Stop()
+	s.stopPITRSchedule()
 	s.modules.deploySchedule.Stop()
 	s.modules.selfUpdate.Stop()
 	s.modules.certKeeper.Stop()

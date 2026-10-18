@@ -1,4 +1,4 @@
-import { API_BASE, ApiError, mutationHeaders, type ApiErrorBody } from "@/lib/api"
+import { API_BASE, ApiError, errorFromResponse, mutationHeaders } from "@/lib/api"
 
 /**
  * A multipart POST that says how much of the file has left the browser.
@@ -39,7 +39,7 @@ export function uploadForm<T>(
     }
     xhr.onload = () => {
       settle()
-      const answer = readAnswer(xhr)
+      const answer = readAnswer(xhr, path)
       if (answer instanceof ApiError) reject(answer)
       else resolve(answer as T)
     }
@@ -56,7 +56,10 @@ export function uploadForm<T>(
 }
 
 /** The answer of a finished request: its JSON, or the refusal it carries. */
-export function readAnswer(xhr: Pick<XMLHttpRequest, "status" | "statusText" | "responseText">) {
+export function readAnswer(
+  xhr: Pick<XMLHttpRequest, "status" | "statusText" | "responseText">,
+  path: string,
+) {
   let parsed: unknown
   try {
     parsed = xhr.responseText ? JSON.parse(xhr.responseText) : undefined
@@ -64,20 +67,5 @@ export function readAnswer(xhr: Pick<XMLHttpRequest, "status" | "statusText" | "
     parsed = undefined
   }
   if (xhr.status >= 200 && xhr.status < 300) return parsed
-  const error = (parsed as ApiErrorBody | undefined)?.error
-  return new ApiError(
-    xhr.status,
-    error?.code ?? "unknown",
-    error?.message ?? (xhr.responseText.slice(0, 300) || xhr.statusText || `HTTP ${xhr.status}`),
-    undefined,
-    {
-      resource: error?.resource,
-      operation: error?.operation,
-      reason: error?.reason,
-      raw: error?.raw,
-      retryable: error?.retryable,
-      field: error?.field,
-      body: parsed,
-    },
-  )
+  return errorFromResponse(xhr.status, xhr.responseText, path, xhr.statusText)
 }

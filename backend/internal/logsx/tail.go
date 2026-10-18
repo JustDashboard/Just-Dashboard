@@ -365,6 +365,12 @@ type Line struct {
 	// or STATEMENT, a stack frame, an indented SQL line. It takes its head's
 	// verdict under a filter and is folded under it in the viewer.
 	Cont bool `json:"cont,omitempty"`
+	// Body is where the message starts in Text, past a prefix the lens read
+	// into the line's time, level and attrs — Postgres's "[812] app@shop
+	// FATAL:  ". The viewer draws the line from there, since the columns
+	// beside it already say the rest; Text keeps every byte for the search,
+	// the export and Copy.
+	Body int `json:"body,omitempty"`
 	// Lens names the lens that set Event when it is not the stream's own — a
 	// stack mixes a database's lines with an app's, and the whole journal
 	// hands sshd's lines to the auth lens.

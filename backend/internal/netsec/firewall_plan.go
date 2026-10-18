@@ -41,7 +41,9 @@ type PlanReview struct {
 	Steps []PlanStep `json:"steps"`
 }
 
-const maxPlanOperations = 20
+// MaxPlanOperations bounds one plan, which is reviewed and taken back as a
+// whole; a caller with more changes applies them as several plans.
+const MaxPlanOperations = 20
 
 type preparedStep struct {
 	op    PlanOperation
@@ -55,8 +57,8 @@ func (s *Service) preparePlan(ctx context.Context, b fwBackend, plan FirewallPla
 	if len(plan.Operations) == 0 {
 		return nil, nil, nil, fmt.Errorf("a plan holds at least one change")
 	}
-	if len(plan.Operations) > maxPlanOperations {
-		return nil, nil, nil, fmt.Errorf("a plan holds at most %d changes", maxPlanOperations)
+	if len(plan.Operations) > MaxPlanOperations {
+		return nil, nil, nil, fmt.Errorf("a plan holds at most %d changes", MaxPlanOperations)
 	}
 	before, err := s.statusOf(ctx, b)
 	if err != nil {

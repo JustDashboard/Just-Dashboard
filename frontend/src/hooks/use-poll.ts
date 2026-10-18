@@ -11,7 +11,7 @@ export type PollState<T> = {
   refresh: () => void
 }
 
-type PollOptions = {
+type PollOptions<T> = {
   /**
    * Whether to fetch at all. False leaves the last result in place and makes
    * no request.
@@ -25,6 +25,13 @@ type PollOptions = {
    * the version the next panel gets for free.
    */
   enabled?: boolean
+  /**
+   * A reading to draw until the first answer lands: what the same read said
+   * the last time the page was open. A page the reader comes back to is drawn
+   * at once rather than as its skeleton, and `loading` stays true until the
+   * new answer replaces it.
+   */
+  seed?: T
 }
 
 /**
@@ -37,7 +44,7 @@ export function usePoll<T>(
   fetcher: (signal: AbortSignal) => Promise<T>,
   intervalMs = 5000,
   deps: unknown[] = [],
-  { enabled = true }: PollOptions = {},
+  { enabled = true, seed }: PollOptions<T> = {},
 ): PollState<T> {
   // A different resource must never borrow the previous resource's rows or
   // permissions while it loads. Refreshes of the same resource retain data.
@@ -106,7 +113,7 @@ export function usePoll<T>(
   // otherwise would leave a caller showing a skeleton forever.
   const current = result?.resource === resource ? result : undefined
   return {
-    data: current?.data,
+    data: current ? current.data : seed,
     error: current?.error,
     lastSuccess: current?.lastSuccess,
     loading: enabled && !current,

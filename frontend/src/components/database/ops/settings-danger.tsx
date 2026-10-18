@@ -8,8 +8,11 @@ import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
-import { FormFact, FormSection } from "@/components/form"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { FormFact } from "@/components/form"
+import { LogoGlyph } from "@/components/logo"
 import { Panel } from "@/components/panel"
+import { ProductLogo } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { EngineMark } from "@/components/database/kit"
 import {
@@ -19,7 +22,6 @@ import {
   useForgetConnection,
 } from "@/components/database/ops/settings-forget"
 import { dropEffect, dropPhrase, type DropKind } from "@/components/database/ops/settings-model"
-import { UNDER_STRIP } from "@/components/database/ops/settings-nav"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { DATABASES_HREF } from "@/components/database/shell/routes"
@@ -34,16 +36,19 @@ type Dropped = {
 }
 
 /**
- * One act: its name, one sentence, what it touches, and its button beside
- * them. With no button it is an act that cannot be taken, and its title goes
- * quiet.
+ * One act: what it is done to, drawn as itself — the dashboard's own record,
+ * the database as its engine, the container as Docker's — then its name, one
+ * sentence, and its button beside them. With no button it is an act that
+ * cannot be taken, and its title goes quiet.
  */
 function DangerRow({
+  mark,
   title,
   sentence,
   facts,
   action,
 }: {
+  mark: React.ReactNode
   title: string
   sentence: React.ReactNode
   facts?: React.ReactNode
@@ -51,17 +56,27 @@ function DangerRow({
 }) {
   return (
     <div className="min-w-0 px-5 py-4">
-      <div className="grid min-w-0 gap-x-8 gap-y-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+      <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center">
+        {mark}
         <div className="min-w-0 space-y-1">
           {/* Under the section's own "Danger zone" heading, not beside it. */}
           <h4 className={cn("text-sm font-medium", !action && "text-muted-foreground")}>{title}</h4>
-          <p className="max-w-prose text-hint leading-relaxed text-muted-foreground">{sentence}</p>
-          {facts && <p className="pt-1 text-hint leading-relaxed text-muted-foreground">{facts}</p>}
+          <p className="max-w-prose text-xs leading-relaxed text-muted-foreground">{sentence}</p>
+          {facts && (
+            <p className="pt-0.5 text-hint leading-relaxed text-muted-foreground">{facts}</p>
+          )}
         </div>
-        {action && <div className="flex max-sm:[&>*]:w-full">{action}</div>}
+        {action && (
+          <div className="col-span-2 flex sm:col-span-1 max-sm:[&>*]:w-full">{action}</div>
+        )}
       </div>
     </div>
   )
+}
+
+/** The dashboard's own mark, for the one act that touches only what the dashboard keeps. */
+function DashboardGlyph({ className }: { className?: string }) {
+  return <LogoGlyph className={cn(className, "w-auto text-brand")} />
 }
 
 /**
@@ -191,6 +206,7 @@ export function DangerSection({ confirm }: { confirm: (request: ConfirmRequest) 
     mayDestroy && (
       <DangerRow
         key="forget"
+        mark={<ProductLogo size="sm" fallback={DashboardGlyph} />}
         title="Forget this connection"
         sentence="Removes the saved address, its password and its saved queries from the dashboard. The database and its data are not touched."
         action={
@@ -204,10 +220,11 @@ export function DangerSection({ confirm }: { confirm: (request: ConfirmRequest) 
     mayDestroy && (
       <DangerRow
         key="drop"
+        mark={<EngineMark engine={engine} size="sm" />}
         title="Delete the database"
         sentence={
           readOnly
-            ? "This connection is protected, so nothing in it is deleted from here. Take the protection off under Connection first."
+            ? "This connection is protected, so nothing in it is deleted from here. Turn Protection off on General first."
             : phrase
               ? dropEffect(kind, engine.nouns.row)
               : "This connection names no database, so there is nothing here to delete by name."
@@ -232,6 +249,7 @@ export function DangerSection({ confirm }: { confirm: (request: ConfirmRequest) 
     mayDestroy && container && (
       <DangerRow
         key="container"
+        mark={<ProductLogo id="docker" size="sm" />}
         title="Remove its container"
         sentence={
           readOnly
@@ -257,14 +275,14 @@ export function DangerSection({ confirm }: { confirm: (request: ConfirmRequest) 
 
   if (rows.length === 0) return null
   return (
-    <FormSection
-      aside
+    <SettingSection
       id="danger"
-      className={UNDER_STRIP}
-      title={<span className="text-destructive">Danger zone</span>}
+      tone="danger"
+      title="Danger zone"
+      state="Nothing here can be undone from the dashboard."
     >
       {/* Framed in the danger rule: the one edge on the page, around what cannot be undone. */}
       <Panel className="divide-y divide-hairline border-rule-danger">{rows}</Panel>
-    </FormSection>
+    </SettingSection>
   )
 }

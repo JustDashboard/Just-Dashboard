@@ -3,7 +3,6 @@ import {
   ageWords,
   flowNeighbours,
   identityVerdict,
-  incidentSpan,
   newestPoint,
   nodeFlows,
   observationAge,
@@ -61,10 +60,4 @@ test("a chart window drills into the devices that carried it, busiest first", ()
     { name: "wg0", role: "tunnel", bytes: 800 },
     { name: "ens3", role: "uplink", bytes: 600 },
   ])
-})
-
-test("an incident's span runs to its resolution or to now", () => {
-  const openedAt = "2026-10-09T10:00:00Z"
-  expect(incidentSpan({ openedAt, resolvedAt: "2026-10-09T10:05:00Z" }, 0)).toBe("5 min")
-  expect(incidentSpan({ openedAt }, Date.parse("2026-10-09T12:00:30Z"))).toBe("2 h")
 })

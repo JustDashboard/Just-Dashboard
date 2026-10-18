@@ -1,9 +1,9 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { useMemoryState } from "@/lib/view-state"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { forgetMemoryState, useMemoryState } from "@/lib/view-state"
 import { notify } from "@/lib/toast"
-import { get, post, put } from "@/lib/api"
+import { ApiError, get, post, put } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { unusableReason } from "@/lib/db-connections"
 import { cn } from "@/lib/utils"
@@ -12,7 +12,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { Modal } from "@/components/modal"
 import { Group } from "@/components/panel"
 import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
-import { ErrorState } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -28,6 +28,15 @@ import {
 } from "@/components/ui/select"
 import { SearchInput } from "@/components/page"
 import { RESOURCE_KIND_LABEL, lines } from "@/components/backups/shared"
+import { encrypts } from "@/components/backups/encryption"
+import {
+  backupInputs,
+  editPickedInput,
+  pickedInputs,
+  startResourcePicks,
+  toggleResourcePick,
+  type BackupInputField,
+} from "@/components/backups/resource-picks"
 import {
   ScheduleBuilder,
   scheduleExpression,
@@ -37,6 +46,7 @@ import {
 
 /** What a job starts out as when it is opened for something in particular. */
 export type JobPrefill = {
+  resourceKey?: string
   name?: string
   sources?: string[]
   excludes?: string[]
@@ -72,74 +82,121 @@ export function JobDialog({
   // memory rather than storage, because the destination's keys are typed
   // here too — so checking a path or a volume does not mean starting over.
   const draft = `backups.job.${job?.id ?? "new"}`
-  const [name, setName] = useMemoryState(`${draft}.name`, job?.name ?? prefill?.name ?? "")
+  // The revision belongs to the held draft, including after leaving the page;
+  // adopting a newer poll while keeping old fields would bypass the guard.
+  const [baseline, setBaseline] = useMemoryState<BackupJob | null>(`${draft}.baseline`, null)
+  const openedJob = baseline ?? job
+  const [conflict, setConflict] = useMemoryState(`${draft}.conflict`, false)
+  const [reviewed, setReviewed] = useMemoryState<BackupJob | null>(`${draft}.reviewed`, null)
+  const active = useRef(true)
+  useEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
+    }
+  }, [])
+  useEffect(() => {
+    if (job && !baseline) setBaseline(job)
+  }, [job, baseline, setBaseline])
+  useEffect(() => {
+    const clear = () => {
+      active.current = false
+      forgetMemoryState(`${draft}.`)
+      onOpenChange(false)
+    }
+    window.addEventListener("jd-working-state-cleared", clear)
+    return () => window.removeEventListener("jd-working-state-cleared", clear)
+  }, [draft, onOpenChange])
+  const [name, setName] = useMemoryState(`${draft}.name`, openedJob?.name ?? prefill?.name ?? "")
   const [sources, setSources] = useMemoryState(
     `${draft}.sources`,
-    (job?.sources ?? prefill?.sources ?? []).join("\n"),
+    (openedJob?.sources ?? prefill?.sources ?? []).join("\n"),
   )
   const [excludes, setExcludes] = useMemoryState(
     `${draft}.excludes`,
-    (job?.excludes ?? prefill?.excludes ?? []).join("\n"),
+    (openedJob?.excludes ?? prefill?.excludes ?? []).join("\n"),
   )
   const [targetKind, setTargetKind] = useMemoryState<BackupJob["targetKind"]>(
     `${draft}.targetKind`,
-    job?.targetKind ?? "local",
+    openedJob?.targetKind ?? "local",
   )
   const [path, setPath] = useMemoryState(
     `${draft}.path`,
-    job?.target.path ?? "/var/backups/just-dashboard",
+    openedJob?.target.path ?? "/var/backups/just-dashboard",
   )
-  const [bucket, setBucket] = useMemoryState(`${draft}.bucket`, job?.target.bucket ?? "")
-  const [region, setRegion] = useMemoryState(`${draft}.region`, job?.target.region ?? "")
-  const [endpoint, setEndpoint] = useMemoryState(`${draft}.endpoint`, job?.target.endpoint ?? "")
-  const [prefix, setPrefix] = useMemoryState(`${draft}.prefix`, job?.target.prefix ?? "")
+  const [bucket, setBucket] = useMemoryState(`${draft}.bucket`, openedJob?.target.bucket ?? "")
+  const [region, setRegion] = useMemoryState(`${draft}.region`, openedJob?.target.region ?? "")
+  const [endpoint, setEndpoint] = useMemoryState(
+    `${draft}.endpoint`,
+    openedJob?.target.endpoint ?? "",
+  )
+  const [prefix, setPrefix] = useMemoryState(`${draft}.prefix`, openedJob?.target.prefix ?? "")
   const [accessKey, setAccessKey] = useMemoryState(`${draft}.accessKey`, "")
   const [secretKey, setSecretKey] = useMemoryState(`${draft}.secretKey`, "")
+  // Unset follows the destination until the operator turns it either way.
+  const [encryptChoice, setEncrypt] = useMemoryState<boolean | null>(
+    `${draft}.encrypt`,
+    openedJob?.encrypt ?? null,
+  )
+  const encrypt = encrypts(encryptChoice, targetKind)
   const [schedule, setSchedule] = useMemoryState(
     `${draft}.schedule`,
-    scheduleFields(job?.schedule ?? "0 3 * * *"),
+    scheduleFields(openedJob?.schedule ?? "0 3 * * *"),
   )
   const [retention, setRetention] = useMemoryState(
     `${draft}.retention`,
-    String(job?.retention ?? 7),
+    String(openedJob?.retention ?? 7),
   )
   const [retentionDays, setRetentionDays] = useMemoryState(
     `${draft}.retentionDays`,
-    String(job?.retentionDays ?? 0),
+    String(openedJob?.retentionDays ?? 0),
   )
-  const [enabled, setEnabled] = useMemoryState(`${draft}.enabled`, job?.enabled ?? true)
+  const [enabled, setEnabled] = useMemoryState(`${draft}.enabled`, openedJob?.enabled ?? true)
   const [sqlitePaths, setSQLitePaths] = useMemoryState(
     `${draft}.sqlitePaths`,
-    (job?.sqlitePaths ?? prefill?.sqlitePaths ?? []).join("\n"),
+    (openedJob?.sqlitePaths ?? prefill?.sqlitePaths ?? []).join("\n"),
   )
   const [databaseDumps, setDatabaseDumps] = useMemoryState<number[]>(
     `${draft}.databaseDumps`,
-    job?.databaseDumps ?? prefill?.databaseDumps ?? [],
+    openedJob?.databaseDumps ?? prefill?.databaseDumps ?? [],
   )
   const [pauseContainers, setPauseContainers] = useMemoryState<string[]>(
     `${draft}.pauseContainers`,
-    job?.pauseContainers ?? prefill?.pauseContainers ?? [],
+    openedJob?.pauseContainers ?? prefill?.pauseContainers ?? [],
+  )
+  const [resourcePicks, setResourcePicks] = useMemoryState(
+    `${draft}.resourcePicks`,
+    startResourcePicks(
+      backupInputs({
+        sources: lines(sources),
+        excludes: lines(excludes),
+        sqlitePaths: lines(sqlitePaths),
+        databaseDumps,
+        pauseContainers,
+      }),
+      job ? undefined : prefill?.resourceKey,
+    ),
   )
   const [recoveryEnabled, setRecoveryEnabled] = useMemoryState(
     `${draft}.recoveryEnabled`,
-    Boolean(job?.recovery),
+    Boolean(openedJob?.recovery),
   )
   const [recoveryImage, setRecoveryImage] = useMemoryState(
     `${draft}.recoveryImage`,
-    job?.recovery?.image ?? "",
+    openedJob?.recovery?.image ?? "",
   )
   const [recoveryCommand, setRecoveryCommand] = useMemoryState(
     `${draft}.recoveryCommand`,
-    (job?.recovery?.command ?? []).join("\n"),
+    (openedJob?.recovery?.command ?? []).join("\n"),
   )
   const [recoverySchema, setRecoverySchema] = useMemoryState(
     `${draft}.recoverySchema`,
-    job?.recovery?.schemaVersion ?? "",
+    openedJob?.recovery?.schemaVersion ?? "",
   )
   const [expectedOutput, setExpectedOutput] = useMemoryState(`${draft}.expectedOutput`, "")
   const [recoveryAutomatic, setRecoveryAutomatic] = useMemoryState(
     `${draft}.recoveryAutomatic`,
-    job?.recovery?.automatic ?? false,
+    openedJob?.recovery?.automatic ?? false,
   )
   const [busy, setBusy] = useState(false)
 
@@ -158,101 +215,171 @@ export function JobDialog({
   const valid = scheduleValid(expression)
 
   const sourceList = lines(sources)
-  const canSave = name.trim().length > 0 && sourceList.length > 0 && valid && !busy
+  const canSave =
+    name.trim().length > 0 &&
+    (sourceList.length > 0 || databaseDumps.length > 0) &&
+    valid &&
+    !busy &&
+    (!job || (openedJob?.revision ?? 0) > 0)
 
-  const submit = async () => {
-    setBusy(true)
-    const body = {
-      name: name.trim(),
-      sources: sourceList,
-      excludes: lines(excludes),
-      targetKind,
-      target: targetKind === "local" ? { path } : { bucket, region, endpoint, prefix },
-      schedule: expression,
-      retention: Math.max(0, Number(retention) || 0),
-      retentionDays: Math.max(0, Number(retentionDays) || 0),
-      enabled,
-      sqlitePaths: lines(sqlitePaths),
-      databaseDumps,
-      pauseContainers,
-      recovery: recoveryEnabled
-        ? {
-            image: recoveryImage.trim(),
-            command: recoveryCommand.split("\n").filter((arg) => arg.length > 0),
-            schemaVersion: recoverySchema.trim(),
-            expectedOutputDigest: job?.recovery?.expectedOutputDigest ?? "",
-            timeoutSeconds: job?.recovery?.timeoutSeconds ?? 60,
-            maxBytes: job?.recovery?.maxBytes ?? 16 * 1024 ** 3,
-            automatic: recoveryAutomatic,
-          }
-        : null,
-      expectedRecoveryOutput: expectedOutput.trim() || undefined,
-      // Omitted when blank so editing a schedule does not wipe stored keys.
-      secrets:
-        accessKey || secretKey ? { accessKeyId: accessKey, secretAccessKey: secretKey } : undefined,
+  const changeOpen = (open: boolean) => {
+    if (!open) {
+      active.current = false
+      forgetMemoryState(`${draft}.`)
     }
+    onOpenChange(open)
+  }
+
+  const body = {
+    name: name.trim(),
+    sources: sourceList,
+    excludes: lines(excludes),
+    targetKind,
+    target: targetKind === "local" ? { path } : { bucket, region, endpoint, prefix },
+    schedule: expression,
+    retention: Math.max(0, Number(retention) || 0),
+    retentionDays: Math.max(0, Number(retentionDays) || 0),
+    enabled,
+    sqlitePaths: lines(sqlitePaths),
+    databaseDumps,
+    pauseContainers,
+    encrypt,
+    recovery: recoveryEnabled
+      ? {
+          image: recoveryImage.trim(),
+          command: recoveryCommand.split("\n").filter((arg) => arg.length > 0),
+          schemaVersion: recoverySchema.trim(),
+          expectedOutputDigest: openedJob?.recovery?.expectedOutputDigest ?? "",
+          timeoutSeconds: openedJob?.recovery?.timeoutSeconds ?? 60,
+          maxBytes: openedJob?.recovery?.maxBytes ?? 16 * 1024 ** 3,
+          automatic: recoveryAutomatic,
+        }
+      : null,
+    expectedRecoveryOutput: expectedOutput.trim() || undefined,
+    // Omitted when blank so editing a schedule does not wipe stored keys.
+    secrets:
+      accessKey || secretKey ? { accessKeyId: accessKey, secretAccessKey: secretKey } : undefined,
+  }
+  const submit = async (expectedRevision = openedJob?.revision) => {
+    if (!canSave) return
+    setBusy(true)
     try {
-      if (job) await put(`/backups/${job.id}`, body)
+      if (job) await put(`/backups/${job.id}`, { ...body, expectedRevision })
       else await post("/backups/", body)
+      if (!active.current) return
       notify.success(job ? "Job updated" : "Job created")
-      onOpenChange(false)
+      changeOpen(false)
       onDone()
     } catch (err) {
-      notify.error("Could not save", err)
+      if (!active.current) return
+      if (err instanceof ApiError && err.code === "backup_job_conflict") {
+        setConflict(true)
+        setReviewed(null)
+      } else notify.error("Could not save", err)
     } finally {
-      setBusy(false)
+      if (active.current) setBusy(false)
     }
   }
 
-  /**
-   * Adds or removes everything a resource suggests. Removal takes away only
-   * what the pick added, so a path typed by hand that happens to match a
-   * volume survives unpicking the volume.
-   */
-  const picked = (res: BackupResource) => {
-    if (res.suggest.databaseDumps?.length) {
-      return res.suggest.databaseDumps.every((id) => databaseDumps.includes(id))
+  const reviewCurrent = async () => {
+    if (!job) return
+    setBusy(true)
+    try {
+      const current = await get<BackupJob>(`/backups/${job.id}`)
+      if (active.current) setReviewed(current)
+    } catch (err) {
+      if (active.current) notify.error("Could not read the current job", err)
+    } finally {
+      if (active.current) setBusy(false)
     }
-    return (
-      res.suggest.sources.length > 0 && res.suggest.sources.every((s) => sourceList.includes(s))
-    )
   }
+
+  const picked = (res: BackupResource) => Boolean(resourcePicks.picks[`${res.kind}:${res.id}`])
   const togglePick = (res: BackupResource, on: boolean) => {
-    const merge = (current: string[], extra: string[] | undefined) =>
-      on
-        ? [...current, ...(extra ?? []).filter((v) => !current.includes(v))]
-        : current.filter((v) => !(extra ?? []).includes(v))
-    setSources(merge(lines(sources), res.suggest.sources).join("\n"))
-    setExcludes(merge(lines(excludes), res.suggest.excludes).join("\n"))
-    setSQLitePaths(merge(lines(sqlitePaths), res.suggest.sqlitePaths).join("\n"))
-    setPauseContainers((current) => merge(current, res.suggest.pauseContainers))
-    setDatabaseDumps((current) =>
-      on
-        ? [...new Set([...current, ...(res.suggest.databaseDumps ?? [])])].sort((a, b) => a - b)
-        : current.filter((id) => !(res.suggest.databaseDumps ?? []).includes(id)),
+    const next = toggleResourcePick(
+      resourcePicks,
+      `${res.kind}:${res.id}`,
+      backupInputs(res.suggest),
+      on,
     )
+    setResourcePicks(next)
+    const inputs = pickedInputs(next)
+    setSources(inputs.sources.join("\n"))
+    setExcludes(inputs.excludes.join("\n"))
+    setSQLitePaths(inputs.sqlitePaths.join("\n"))
+    setPauseContainers(inputs.pauseContainers)
+    setDatabaseDumps(inputs.databaseDumps.map(Number).sort((a, b) => a - b))
     if (on && !name.trim() && !job) setName(res.suggest.name)
   }
+  const rememberManual = (field: BackupInputField, values: string[]) =>
+    setResourcePicks((current) => editPickedInput(current, field, values))
 
   return (
     <Modal
       open
-      onOpenChange={onOpenChange}
+      onOpenChange={changeOpen}
       size="lg"
       title={job ? `Edit ${job.name}` : "New backup"}
       description="Choose what to back up, where the archives go, when the job runs, and how the copy is kept consistent."
       footer={
-        <Button onClick={submit} disabled={!canSave}>
+        <Button onClick={() => void submit()} disabled={!canSave || conflict}>
           {job ? "Save" : "Create"}
         </Button>
       }
     >
       <div className="space-y-6">
+        {conflict && (
+          <Notice
+            tone="warning"
+            title={<span role="alert">This job changed while you were editing</span>}
+          >
+            <div className="space-y-3">
+              <p>Your draft and entered keys are kept. Review the saved job before trying again.</p>
+              <Button variant="outline" onClick={reviewCurrent} disabled={busy}>
+                Review current job
+              </Button>
+              {reviewed && (
+                <>
+                  <JobSaveReview current={reviewed} draft={body} />
+                  <p>
+                    Saving this draft replaces the reviewed settings.
+                    {body.secrets && " Your newly entered destination keys will also be saved."}
+                    {body.expectedRecoveryOutput &&
+                      " Your new expected recovery output will also be saved."}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      onClick={() => void submit(reviewed.revision)}
+                      disabled={!canSave || reviewed.revision <= 0}
+                    >
+                      Save draft over reviewed job
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => {
+                        changeOpen(false)
+                        onDone()
+                      }}
+                    >
+                      Discard draft and close
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          </Notice>
+        )}
         <FormSection title="What to back up">
           <Field label="Name" htmlFor="job-name">
             <Input id="job-name" value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
           <ResourcePicker resources={resources} picked={picked} onToggle={togglePick} />
+          <FormNote>
+            Pick resources to add their suggested paths and consistency settings. Unpicking keeps
+            values entered manually or used by another pick. A job needs a source path or a database
+            dump.
+          </FormNote>
           <FieldRow>
             <Field
               label="Sources (one per line)"
@@ -262,7 +389,10 @@ export function JobDialog({
               <Textarea
                 id="job-sources"
                 value={sources}
-                onChange={(e) => setSources(e.target.value)}
+                onChange={(e) => {
+                  setSources(e.target.value)
+                  rememberManual("sources", lines(e.target.value))
+                }}
                 rows={4}
                 className="font-mono text-xs"
                 placeholder="/srv/app&#10;/etc/nginx"
@@ -276,7 +406,10 @@ export function JobDialog({
               <Textarea
                 id="job-excludes"
                 value={excludes}
-                onChange={(e) => setExcludes(e.target.value)}
+                onChange={(e) => {
+                  setExcludes(e.target.value)
+                  rememberManual("excludes", lines(e.target.value))
+                }}
                 rows={4}
                 className="font-mono text-xs"
                 placeholder="node_modules&#10;*.log"
@@ -376,6 +509,14 @@ export function JobDialog({
               </FieldRow>
             </>
           )}
+          <OptionList>
+            <OptionRow
+              title="Encrypt archives with this server's backup key"
+              hint="Restores, recovery checks and downloads here decrypt as they read. Export the key from Backups to open an archive anywhere else. Archives already taken stay as they were written."
+              checked={encrypt}
+              onCheckedChange={setEncrypt}
+            />
+          </OptionList>
         </FormSection>
 
         <FormSection title="When it runs">
@@ -436,7 +577,10 @@ export function JobDialog({
             <Textarea
               id="job-sqlite"
               value={sqlitePaths}
-              onChange={(e) => setSQLitePaths(e.target.value)}
+              onChange={(e) => {
+                setSQLitePaths(e.target.value)
+                rememberManual("sqlitePaths", lines(e.target.value))
+              }}
               rows={2}
               className="font-mono text-xs"
             />
@@ -445,8 +589,9 @@ export function JobDialog({
             <legend className="text-body font-medium">Database dumps</legend>
             <FormNote>
               Each saved connection is dumped with its engine&apos;s own tool — pg_dump, mysqldump,
-              mongodump, a Redis snapshot — or the built-in dump, and stored in the archive. A
-              deployment linked to the database accepts this as its backup coverage.
+              mongodump — or the dashboard&apos;s built-in dump, and stored in the archive. Redis is
+              always the built-in one: its keys as JSON Lines that the dashboard restores, not an
+              RDB file. A deployment linked to the database accepts this as its backup coverage.
             </FormNote>
             {connections.error && <ErrorState error={connections.error} />}
             {(connections.data?.length ?? 0) === 0 &&
@@ -470,13 +615,13 @@ export function JobDialog({
                     <Checkbox
                       checked={chosen}
                       disabled={Boolean(unusable) && !chosen}
-                      onCheckedChange={(checked) =>
-                        setDatabaseDumps((current) =>
-                          checked
-                            ? [...current, connection.id].sort((a, b) => a - b)
-                            : current.filter((id) => id !== connection.id),
-                        )
-                      }
+                      onCheckedChange={(checked) => {
+                        const next = checked
+                          ? [...new Set([...databaseDumps, connection.id])].sort((a, b) => a - b)
+                          : databaseDumps.filter((id) => id !== connection.id)
+                        setDatabaseDumps(next)
+                        rememberManual("databaseDumps", next.map(String))
+                      }}
                       aria-label={`Dump ${connection.name}`}
                     />
                     <span
@@ -525,13 +670,13 @@ export function JobDialog({
                 >
                   <Checkbox
                     checked={pauseContainers.includes(container.name)}
-                    onCheckedChange={(checked) =>
-                      setPauseContainers((current) =>
-                        checked
-                          ? [...current, container.name]
-                          : current.filter((name) => name !== container.name),
-                      )
-                    }
+                    onCheckedChange={(checked) => {
+                      const next = checked
+                        ? [...new Set([...pauseContainers, container.name])]
+                        : pauseContainers.filter((name) => name !== container.name)
+                      setPauseContainers(next)
+                      rememberManual("pauseContainers", next)
+                    }}
                     aria-label={`Pause ${container.name}`}
                   />
                   <span className="min-w-0 truncate">
@@ -630,6 +775,63 @@ export function JobDialog({
  * volume brings the container that writes to it, and backing up a database
  * connection brings its native dump rather than a copy of its files.
  */
+function JobSaveReview({ current, draft }: { current: BackupJob; draft: Record<string, unknown> }) {
+  const fields = [
+    ["name", "Name"],
+    ["sources", "Sources"],
+    ["excludes", "Excludes"],
+    ["targetKind", "Destination kind"],
+    ["target", "Destination settings"],
+    ["schedule", "Schedule"],
+    ["retention", "Archives to keep"],
+    ["retentionDays", "Retention days"],
+    ["enabled", "Schedule enabled"],
+    ["sqlitePaths", "SQLite snapshots"],
+    ["databaseDumps", "Database dumps"],
+    ["pauseContainers", "Containers to pause"],
+    ["encrypt", "Encrypt archives"],
+    ["recovery", "Recovery check"],
+  ] as const
+  const shown = (value: unknown, key: string) =>
+    JSON.stringify(
+      value ?? (key === "recovery" ? null : []),
+      (_key, part) =>
+        part && typeof part === "object" && !Array.isArray(part)
+          ? Object.fromEntries(Object.entries(part).sort(([a], [b]) => a.localeCompare(b)))
+          : part,
+      2,
+    )
+  const changes = fields.filter(([key]) => shown(current[key], key) !== shown(draft[key], key))
+  if (changes.length === 0) return <p>The saved settings match your draft.</p>
+  return (
+    <div className="max-h-72 overflow-auto rounded-md border border-hairline">
+      <table className="w-full text-left text-xs">
+        <caption className="sr-only">Differences from the current saved backup job</caption>
+        <thead>
+          <tr className="border-b border-hairline">
+            <th className="p-2">Setting</th>
+            <th className="p-2">Current saved value</th>
+            <th className="p-2">Your draft</th>
+          </tr>
+        </thead>
+        <tbody>
+          {changes.map(([key, label]) => (
+            <tr key={key} className="border-b border-hairline last:border-b-0">
+              <th className="p-2 align-top font-medium">{label}</th>
+              <td className="p-2 align-top">
+                <pre className="break-all whitespace-pre-wrap">{shown(current[key], key)}</pre>
+              </td>
+              <td className="p-2 align-top">
+                <pre className="break-all whitespace-pre-wrap">{shown(draft[key], key)}</pre>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function ResourcePicker({
   resources,
   picked,

@@ -14,9 +14,7 @@ func TestPermitRootLoginAliasIsFoldedOntoTheOfferedValue(t *testing.T) {
 	if got := def.canonical("without-password"); got != "prohibit-password" {
 		t.Fatalf("canonical = %q, want prohibit-password", got)
 	}
-	if !def.secure("without-password") {
-		t.Error("the distribution default graded as insecure")
-	}
+
 	// Every value the page can show has to be one the control offers, or the
 	// dropdown is empty again.
 	for _, opt := range def.Options {

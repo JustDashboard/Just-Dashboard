@@ -61,7 +61,6 @@ import { RollbackDialog } from "@/components/deploy/rollback-dialog"
 import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-sheet"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { RunRow } from "@/components/deploy/run-row"
-import { useCheckedDeploy } from "@/components/deploy/deploy-check"
 import { RunStrip } from "@/components/deploy/run-marks"
 import { releaseVerbs, runVerbs, type RunVerbKey } from "@/components/deploy/run-verbs"
 
@@ -182,7 +181,6 @@ export function ProjectDeployments() {
   const project = useProject()
   const router = useRouter()
   const { can } = useAuth()
-  const checkedDeploy = useCheckedDeploy(project.projectId)
   const { deployment, project: record } = project.detail
   const [filter, setFilter] = useSessionState<StatusFilter>(
     `deploy.${project.projectId}.deployments.filter`,
@@ -398,13 +396,7 @@ export function ProjectDeployments() {
         settle(run.id)
       }
     }
-    const asked = await checkedDeploy.start(
-      run.environmentId,
-      "sourceRevision" in request ? { sourceRevision: request.sourceRevision } : {},
-      deploy,
-    )
-    // A check that asks leaves the press to its dialog.
-    if (asked) settle(run.id)
+    await deploy()
   }
 
   const act = async (run: DeploymentEngineRun, verb: "cancel" | "retry") => {
@@ -493,7 +485,6 @@ export function ProjectDeployments() {
 
   return (
     <div className="space-y-8">
-      {checkedDeploy.gate}
       {project.normalized && (
         <Insights
           projectId={project.projectId}

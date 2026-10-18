@@ -699,12 +699,12 @@ test.describe("Databases & backups evidence", () => {
     await page.route("**/api/v1/backups/", (route) =>
       json(route, [backupJob({ id: 4, name: "Nightly snapshot", databaseDumps: dumps })]),
     )
-    const jobPuts: Record<string, unknown>[] = []
-    await page.route("**/api/v1/backups/4", async (route) => {
-      if (route.request().method() !== "PUT") return route.fallback()
+    const dumpAdds: Record<string, unknown>[] = []
+    await page.route("**/api/v1/backups/4/database-dumps", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback()
       const body = route.request().postDataJSON() as Record<string, unknown>
-      jobPuts.push(body)
-      dumps = body.databaseDumps as number[]
+      dumpAdds.push(body)
+      dumps = [...dumps, Number(body.connectionId)]
       await json(route, backupJob({ id: 4, name: "Nightly snapshot", databaseDumps: dumps }))
     })
     await page.goto("/deploy/7/settings/databases")
@@ -713,11 +713,9 @@ test.describe("Databases & backups evidence", () => {
 
     await page.getByRole("button", { name: "Add the dump to Nightly snapshot" }).click()
     await expect(page.getByText("Nightly snapshot now dumps this database")).toBeVisible()
-    await expect.poll(() => jobPuts.length).toBe(1)
-    expect(jobPuts[0].databaseDumps).toEqual([9])
-    // The destination's keys are preserved precisely by not being sent.
-    expect(jobPuts[0]).not.toHaveProperty("secrets")
-    expect(jobPuts[0]).toMatchObject({ name: "Nightly snapshot", schedule: "0 3 * * *" })
+    await expect.poll(() => dumpAdds.length).toBe(1)
+    // A stale job poll cannot send retention, sources, recovery or keys.
+    expect(dumpAdds[0]).toEqual({ connectionId: 9 })
 
     await expect(page.getByText("Nightly snapshot takes no native dump of orders-db")).toHaveCount(
       0,

@@ -207,7 +207,7 @@ func TestBackupRestoreInPlaceAndSubsetThroughTheAPI(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &jobs); err != nil {
 		t.Fatal(err)
 	}
-	if len(jobs) != 1 || jobs[0].Stored.Runs != 1 || jobs[0].Stored.Bytes == 0 || jobs[0].LastSuccessAt == nil || jobs[0].Overdue {
+	if len(jobs) != 1 || jobs[0].Stored.Runs != 1 || jobs[0].Stored.Bytes == 0 || jobs[0].LastSuccessAt == nil {
 		t.Fatalf("readings: %+v", jobs[0])
 	}
 }

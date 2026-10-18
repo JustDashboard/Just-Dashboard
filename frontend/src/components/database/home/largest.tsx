@@ -105,6 +105,8 @@ export function LargestTablesBlock({
         title: `Open ${named} in ${place}`,
         value: data.sizesKnown ? bytes(entry.bytes) : entry.rows >= 0 ? compact(entry.rows) : "—",
         share: longest > 0 ? weigh(entry) / longest : 0,
+        // The bar in its schema's hue, the one the picture above draws it in.
+        color: entry.schema ? nameHue(entry.schema) : undefined,
         hint: data.sizesKnown ? counted : undefined,
         onClick: () => goto("data", { schema: entry.schema, table: entry.table }),
       }
@@ -165,6 +167,7 @@ export function LargestCollectionsBlock({
       key: collection.name,
       mark: partMark(parts, collection.name),
       label: collection.name,
+      color: nameHue(collection.name),
       title: `Open ${collection.name} in ${place}`,
       value: collection.statsKnown ? bytes(collection.size) : "—",
       share: longest > 0 ? collection.size / longest : 0,

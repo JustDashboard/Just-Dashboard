@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Fingerprint, Pencil, Trash, UserPlus, Users } from "@/components/icons"
 import { del, get, patch, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -15,7 +15,6 @@ import { Field, FieldRow, FormNote } from "@/components/form"
 import { DimActions } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -30,9 +29,19 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { ROLE_MARK } from "@/components/account/capabilities"
+import { ROLE_HUE, ROLE_MARK } from "@/components/account/capabilities"
+import {
+  ROLES,
+  inUserScope,
+  neverSignedIn,
+  peopleVerdict,
+  type UserScope,
+} from "@/components/account/access"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { cn } from "@/lib/utils"
 import { RoleChoice } from "@/components/account/role-choice"
-import { UserAvatar, displayNameOf } from "@/components/account/user-avatar"
+import { AvatarRun, UserAvatar, displayNameOf } from "@/components/account/user-avatar"
 
 export function useDashboardUsers(enabled = true) {
   return usePoll(
@@ -41,16 +50,6 @@ export function useDashboardUsers(enabled = true) {
     [],
     { enabled },
   )
-}
-
-const ROLES: Role[] = ["admin", "limited", "readonly"]
-
-function neverSignedIn(user: DashboardUser) {
-  return user.lastLoginAt.startsWith("0001")
-}
-
-function signedInThisWeek(user: DashboardUser) {
-  return !neverSignedIn(user) && Date.now() - new Date(user.lastLoginAt).getTime() < 7 * 86_400_000
 }
 
 /** The role, changed where it is read: each option drawn with its mark. */
@@ -67,7 +66,7 @@ function RolePicker({
   return (
     <Select value={value} onValueChange={(v) => onChange(v as Role)}>
       <SelectTrigger size="sm" className="w-32 text-xs" aria-label={label}>
-        <Mark aria-hidden className="size-3.5 text-muted-foreground" />
+        <Mark aria-hidden className="size-3.5" style={{ color: ROLE_HUE[value] }} />
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -78,92 +77,6 @@ function RolePicker({
         ))}
       </SelectContent>
     </Select>
-  )
-}
-
-/**
- * The accounts in four readings: how many there are and how many of them can
- * get in, who holds everything, how many of them a stolen password alone
- * would open — amber while an administrator is one of those — and who has
- * been here this week.
- */
-function UserReadings({ users }: { users: DashboardUser[] }) {
-  const active = users.filter((u) => !u.disabled)
-  const admins = active.filter((u) => u.role === "admin")
-  const enrolled = active.filter((u) => u.totpEnabled)
-  const bareAdmins = admins.filter((u) => !u.totpEnabled)
-  const week = users
-    .filter(signedInThisWeek)
-    .sort((a, b) => b.lastLoginAt.localeCompare(a.lastLoginAt))
-
-  return (
-    <StatGrid columns={4}>
-      <StatTile
-        label="Accounts"
-        value={users.length}
-        hint={
-          users.length === active.length
-            ? "every one can sign in"
-            : `${active.length} can sign in · ${users.length - active.length} disabled`
-        }
-      />
-      <StatTile
-        label="Administrators"
-        value={admins.length}
-        hint={
-          <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-            <AvatarRun users={admins} />
-            <span className="truncate">
-              {admins.length === 1 ? displayNameOf(admins[0]) : "hold every capability"}
-            </span>
-          </span>
-        }
-      />
-      <StatTile
-        label="Two-factor"
-        value={`${enrolled.length} of ${active.length}`}
-        tone={
-          bareAdmins.length > 0
-            ? "warning"
-            : enrolled.length === active.length
-              ? "success"
-              : "default"
-        }
-        hint={
-          bareAdmins.length > 0
-            ? `${plural(bareAdmins.length, "administrator")} on a password alone`
-            : enrolled.length === active.length
-              ? "every account asks for a code"
-              : `${active.length - enrolled.length} on a password alone`
-        }
-      />
-      <StatTile
-        label="Signed in this week"
-        value={week.length}
-        hint={
-          week.length > 0
-            ? `${displayNameOf(week[0])} ${relativeTime(week[0].lastLoginAt)}`
-            : "nobody yet"
-        }
-      />
-    </StatGrid>
-  )
-}
-
-/** Who a reading counts, drawn as them: a few faces in a row, then how many more. */
-export function AvatarRun({ users, max = 4 }: { users: DashboardUser[]; max?: number }) {
-  if (users.length === 0) return null
-  return (
-    <span aria-hidden className="flex shrink-0 items-center gap-0.5">
-      {users.slice(0, max).map((user) => (
-        <UserAvatar key={user.id} user={user} scope="admin" size="xs" />
-      ))}
-      {users.length > max && (
-        <span className="numeric ml-0.5 text-micro text-muted-foreground">
-          +{users.length - max}
-        </span>
-      )}
-    </span>
   )
 }
 
@@ -183,12 +96,14 @@ export function AvatarRun({ users, max = 4 }: { users: DashboardUser[]; max?: nu
 function UserCard({
   user,
   me,
+  require2fa,
   onEdit,
   onUpdate,
   verbs,
 }: {
   user: DashboardUser
   me: boolean
+  require2fa: boolean
   onEdit: () => void
   onUpdate: (body: Record<string, unknown>) => void
   verbs: Verb[]
@@ -206,10 +121,12 @@ function UserCard({
           onChange={(role) => onUpdate({ role })}
         />
       </span>
-      <span className="flex w-28">
+      <span className="flex w-36">
         <Status
           tone={user.totpEnabled ? "running" : user.role === "admin" ? "warning" : "notice"}
-          label={user.totpEnabled ? "two-factor on" : "password only"}
+          label={
+            user.totpEnabled ? "two-factor on" : require2fa ? "enrolment required" : "password only"
+          }
         />
       </span>
       <span className="w-36 truncate text-xs text-muted-foreground">
@@ -255,6 +172,125 @@ function UserCard({
   )
 }
 
+/** The chips over the cards, each a narrowing and the tone its count takes while it is not zero. */
+const SCOPES: { key: UserScope; label: string; warn?: boolean }[] = [
+  { key: "all", label: "All" },
+  { key: "admin", label: "Administrators" },
+  { key: "limited", label: "Limited" },
+  { key: "readonly", label: "Read-only" },
+  { key: "bare", label: "Password only", warn: true },
+  { key: "never", label: "Never signed in" },
+  { key: "disabled", label: "Disabled" },
+]
+
+/**
+ * The accounts as one identity line, the shape the Overview gives the machine
+ * and System users gives the host's people: their faces where the tile would
+ * be, how many, who can sign in and who administers, and the last sign-in
+ * among the facts; at the right end the verdict — how many accounts a
+ * password alone opens and whether an administrator is one of them, a press
+ * of which narrows the cards to exactly those — beside New user.
+ */
+function PeopleIdentity({
+  users,
+  require2fa,
+  onScope,
+  action,
+}: {
+  users: DashboardUser[]
+  require2fa: boolean
+  onScope: (scope: UserScope) => void
+  action: React.ReactNode
+}) {
+  const active = users.filter((u) => !u.disabled)
+  const admins = active.filter((u) => u.role === "admin")
+  const latest = users
+    .filter((u) => !neverSignedIn(u))
+    .sort((a, b) => b.lastLoginAt.localeCompare(a.lastLoginAt))[0]
+  const verdict = peopleVerdict(users, require2fa)
+  return (
+    <HostIdentity
+      logo={<FaceStack users={[...admins, ...active.filter((u) => u.role !== "admin")]} />}
+      title={plural(users.length, "account")}
+      facts={
+        <>
+          <span>
+            {require2fa
+              ? plural(active.length, "enabled account")
+              : active.length === users.length
+                ? "every one can sign in"
+                : `${active.length} can sign in`}
+          </span>
+          <FactDot />
+          <span className="inline-flex items-center gap-1.5">
+            <AvatarRun users={admins} />
+            {plural(admins.length, "administrator")}
+          </span>
+          {latest && (
+            <>
+              <FactDot />
+              <span>
+                last sign-in {displayNameOf(latest)} {relativeTime(latest.lastLoginAt)}
+              </span>
+            </>
+          )}
+        </>
+      }
+      aside={
+        <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {verdict.bare > 0 ? (
+            <button
+              type="button"
+              onClick={() => onScope("bare")}
+              className="rounded-sm focus-ring"
+              aria-label={
+                require2fa
+                  ? "Only accounts requiring enrollment"
+                  : "Only the accounts a password alone opens"
+              }
+            >
+              <Status
+                className="text-body"
+                tone={verdict.tone}
+                label={`${plural(verdict.admins > 0 ? verdict.admins : verdict.bare, verdict.admins > 0 ? "administrator" : "account")} ${require2fa ? "must enrol before signing in" : "on a password alone"}`}
+              />
+            </button>
+          ) : (
+            <Status
+              className="text-body"
+              verdict="ok"
+              label="every enabled account asks for a code"
+            />
+          )}
+          {action}
+        </span>
+      }
+    />
+  )
+}
+
+/**
+ * The people a line is about, as their faces overlapping on the identity
+ * line's tile — the first whole, each after it tucked under — so the users
+ * page opens on who rather than on a glyph for "users".
+ */
+function FaceStack({ users }: { users: DashboardUser[] }) {
+  const shown = users.slice(0, 3)
+  return (
+    <span aria-hidden className="flex h-12 shrink-0 items-center">
+      {shown.map((user, index) => (
+        <span
+          key={user.id}
+          className={cn("relative flex rounded-full ring-2 ring-background", index > 0 && "-ml-3")}
+          style={{ zIndex: shown.length - index }}
+        >
+          <UserAvatar user={user} scope="admin" size="md" />
+        </span>
+      ))}
+    </span>
+  )
+}
+
 /**
  * Every dashboard account, with the two things an admin changes daily — the
  * role and whether it can sign in — on each card, and everything rarer
@@ -263,9 +299,19 @@ function UserCard({
  */
 export function DashboardUsersView({ users }: { users: ReturnType<typeof useDashboardUsers> }) {
   const { status, refresh: refreshAuth } = useAuth()
+  const require2fa = Boolean(status?.require2fa)
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useState<DashboardUser | null>(null)
+  const [scope, setScope] = useState<UserScope>("all")
+  const list = useRef<HTMLDivElement>(null)
   const { data, error, loading, refresh } = users
+
+  // A press on the verdict narrows the cards and brings them into view, as
+  // it does on the System users page.
+  const narrow = (next: UserScope) => {
+    setScope(next)
+    list.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
 
   const update = async (user: DashboardUser, body: Record<string, unknown>) => {
     try {
@@ -300,8 +346,11 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
                   confirmLabel: "Reset",
                   description: (
                     <p>
-                      <b>{name}</b> signs in with a password alone until they enrol an authenticator
-                      again. Do this when they have lost theirs and their recovery codes.
+                      <b>{name}</b>{" "}
+                      {require2fa
+                        ? "must enrol an authenticator again before completing sign-in."
+                        : "signs in with a password alone until they enrol an authenticator again."}{" "}
+                      Do this when they have lost theirs and their recovery codes.
                     </p>
                   ),
                   action: async () => {
@@ -362,28 +411,52 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
       displayNameOf(a).localeCompare(displayNameOf(b)),
   )
 
+  const shown = ordered.filter((u) => inUserScope(u, scope))
+  const chips = SCOPES.map((chip) => ({
+    ...chip,
+    label: chip.key === "bare" && require2fa ? "Enrollment required" : chip.label,
+    count: data.filter((u) => inUserScope(u, chip.key)).length,
+  })).filter((chip) => chip.key === "all" || chip.count > 0)
+
   return (
     <>
-      <UserReadings users={data} />
-      <Panel plain>
+      <PeopleIdentity
+        users={data}
+        require2fa={require2fa}
+        onScope={narrow}
+        action={<CreateDashboardUserDialog onDone={refresh} />}
+      />
+      <Panel plain ref={list} className="scroll-mt-6">
         <PanelHeader
           title="Accounts"
           actions={
-            <span className="flex items-center gap-3">
-              <span className="numeric text-hint text-muted-foreground">
-                {plural(data.length, "account")}
-              </span>
-              <CreateDashboardUserDialog onDone={refresh} />
+            <span className="numeric text-hint text-muted-foreground">
+              {shown.length === data.length
+                ? plural(data.length, "account")
+                : `${shown.length} of ${data.length}`}
             </span>
           }
         />
-        <PanelBody flush className="pt-3">
+        <PanelBody flush className="space-y-3 pt-3">
+          <ChipStrip role="group" aria-label="Show">
+            {chips.map(({ key, label, warn, count }) => (
+              <FilterChip
+                key={key}
+                selected={scope === key}
+                onClick={() => setScope(scope === key && key !== "all" ? "all" : key)}
+              >
+                {label}
+                <ChipCount className={cn(warn && "text-warning opacity-100")}>{count}</ChipCount>
+              </FilterChip>
+            ))}
+          </ChipStrip>
           <ChoiceList className="animate-rise">
-            {ordered.map((user) => (
+            {shown.map((user) => (
               <UserCard
                 key={user.id}
                 user={user}
                 me={user.id === status?.user?.id}
+                require2fa={require2fa}
                 onEdit={() => setEditing(user)}
                 onUpdate={(body) => update(user, body)}
                 verbs={verbsFor(user)}

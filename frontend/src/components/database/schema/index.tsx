@@ -2,7 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { Eye, FolderPlus, Puzzle, SidebarLeftOpen, Table, Trash } from "@/components/icons"
+import {
+  Code,
+  Eye,
+  FolderPlus,
+  Lightning,
+  ListOrdered,
+  Puzzle,
+  SidebarLeftOpen,
+  Table,
+  Trash,
+} from "@/components/icons"
 import { usePanelSize } from "@/lib/panel-size"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
@@ -32,12 +42,15 @@ import { SchemaLanding } from "@/components/database/schema/landing"
 import { NewTablePanel } from "@/components/database/schema/new-table"
 import { EnumDialog, SchemaDialog, ViewDialog } from "@/components/database/schema/object-forms"
 import { ObjectView } from "@/components/database/schema/object-view"
+import { RoutineDialog, TriggerDialog } from "@/components/database/schema/program-forms"
+import { triggerFunctions, triggerTables } from "@/components/database/schema/programs"
 import { SchemaRail } from "@/components/database/schema/rail"
 import { TableView } from "@/components/database/schema/table-view"
 import { useDestroy } from "@/components/database/schema/use-destroy"
 import { useSettledAddress } from "@/components/database/schema/use-settled-address"
 
-const RAIL = { min: 200, max: 480, fallback: 272 }
+// The Data page's rail width, so moving between the two pages does not move it.
+const RAIL = { min: 200, max: 480, fallback: 256 }
 const NO_VERBS: Verb[] = []
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
@@ -107,6 +120,9 @@ export function SqlSchema() {
     (engine.can("schemas") || listed === data.defaultSchema)
   const mayWrite = can("service.control") && !readOnly
   const mayDestroy = can("destructive") && !readOnly
+  // A function, a procedure and a trigger are code the engine runs later; the
+  // console asks for the destructive capability to write one, and so does a form.
+  const mayAuthor = mayWrite && mayDestroy
 
   const creations = useMemo<Verb[]>(() => {
     if (!mayWrite) return []
@@ -121,6 +137,15 @@ export function SqlSchema() {
       ...(changeable && operations.includes("enumTypes")
         ? [{ key: "type", label: "New enum type", icon: Puzzle, run: open("type") }]
         : []),
+      ...(changeable && mayAuthor && operations.includes("functions")
+        ? [{ key: "function", label: "New function", icon: Code, run: open("function") }]
+        : []),
+      ...(changeable && mayAuthor && operations.includes("procedures")
+        ? [{ key: "procedure", label: "New procedure", icon: ListOrdered, run: open("procedure") }]
+        : []),
+      ...(changeable && mayAuthor && operations.includes("triggers")
+        ? [{ key: "trigger", label: "New trigger", icon: Lightning, run: open("trigger") }]
+        : []),
       ...(operations.includes("schemas")
         ? [
             {
@@ -132,7 +157,7 @@ export function SqlSchema() {
           ]
         : []),
     ]
-  }, [mayWrite, changeable, operations, engine, select])
+  }, [mayWrite, mayAuthor, changeable, operations, engine, select])
   const may = (what: string) => creations.some((verb) => verb.key === what)
 
   const refreshCatalog = catalog.refresh
@@ -308,6 +333,11 @@ export function SqlSchema() {
               railOpen={railShown}
               onToggleRail={toggleRail}
               onChanged={refreshCatalog}
+              catalog={data}
+              onDropped={() => {
+                refreshCatalog()
+                select(schemaParams(selected.schema))
+              }}
             />
           ) : data && !unknown ? (
             <SchemaLanding
@@ -423,6 +453,27 @@ export function SqlSchema() {
           onClose={closeForm}
           onDone={() => undefined}
           onMade={(made) => openMade(objectParams({ kind: "enum", ...made }))}
+        />
+      )}
+      {(creating === "function" || creating === "procedure") && may(creating) && (
+        <RoutineDialog
+          kind={creating}
+          schemas={data?.schemas ?? []}
+          schema={listed}
+          onClose={closeForm}
+          onDone={() => undefined}
+          onMade={(made) => openMade(objectParams({ kind: creating, ...made }))}
+        />
+      )}
+      {creating === "trigger" && may("trigger") && (
+        <TriggerDialog
+          schemas={data?.schemas ?? []}
+          schema={listed}
+          tables={triggerTables(data)}
+          functions={triggerFunctions(data)}
+          onClose={closeForm}
+          onDone={() => undefined}
+          onMade={(made) => openMade(objectParams({ kind: "trigger", ...made }))}
         />
       )}
       {creating === "schema" && may("schema") && (

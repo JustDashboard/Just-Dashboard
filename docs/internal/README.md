@@ -55,7 +55,7 @@ strategy, and feature ownership behind those rules.
   telemetry, owned link recovery, durable batch acknowledgement, transport byte subtotals and quality.
 - [`backend/network-drift.md`](backend/network-drift.md) — owned render/runtime comparison,
   measured unit activation and generation-bound repair review.
-- [`backend/observability-security.md`](backend/observability-security.md) — metrics, exposure, posture, login history, sshd and its pending apply,
+- [`backend/observability-security.md`](backend/observability-security.md) — metrics, exposure, login history, sshd and its pending apply,
   firewall/fail2ban policy, merged blocks, CrowdSec enforcement, Suricata setup, the access boundary,
   and six package managers.
 - [`backend/docker-files-logs.md`](backend/docker-files-logs.md) — Docker, compose, file management,
@@ -78,6 +78,10 @@ strategy, and feature ownership behind those rules.
 - [`stickyboard.md`](stickyboard.md) — the sticky-note boards: the validated document, its routes and
   permissions, the list and templates, the canvas (notes, sections, links, formatting, clipboard,
   history, find) and saving with revision conflicts.
+- [`backend/remote-desktop.md`](backend/remote-desktop.md) — Remote Desktop: guacd as a container the
+  dashboard owns on loopback, the Guacamole handshake done server-side and the relay, sealed computer
+  sign-ins, the session history and the route table; Stream mode's Sunshine pairing and the Moonlight
+  Web bridge proxied under the dashboard's own sign-in.
 
 ## Deployments and frontend
 
@@ -105,6 +109,17 @@ strategy, and feature ownership behind those rules.
   confirmations, and self-update state.
 
 ## Contributor reference
+
+- [`../audits/2026-10-15-api-keys/README.md`](../audits/2026-10-15-api-keys/README.md)
+  — researched key lifecycle improvements, discovery filters, replacement handoff, inactive-record
+  deletion with retained audit, focused verification and before/after images.
+
+- [`../audits/2026-10-14-current-non-network-fixes/README.md`](../audits/2026-10-14-current-non-network-fixes/README.md)
+  — follow-up repairs for retained board/proxy drafts, image revisions, streamed authentication,
+  measured account/security wording and atomic concurrent backup edits.
+
+- [`../audits/2026-10-14-non-network-fixes/README.md`](../audits/2026-10-14-non-network-fixes/README.md)
+  — all 34 non-network audit findings, their fixes, focused regressions and operational limits.
 
 - [`../audits/2026-10-08-network-capability-report/README.md`](../audits/2026-10-08-network-capability-report/README.md)
   — scored networking feature map, current implementation gaps, official competitor research and

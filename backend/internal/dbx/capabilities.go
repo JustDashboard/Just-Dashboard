@@ -93,6 +93,9 @@ var (
 	redisEngines  = On(string(DriverRedis))
 	mongoEngines  = On(string(DriverMongo))
 	mongoDBProper = On(string(DriverMongo)).Except(FlavorFerretDB)
+	// replicationEngines are the products whose place in a replication
+	// topology is read: the replication view, and the alert on its lag.
+	replicationEngines = anyOf(opsFlag("replication"), redisEngines, mongoDBProper)
 )
 
 // capabilityTable is the reading the driver catalogue serves. It holds the
@@ -104,7 +107,6 @@ var (
 var capabilityTable = []Capability{
 	// A statement runner over database/sql, and the forms built on it.
 	{"sql", sqlEngines},
-	{"advisor", sqlEngines},
 	{"orm", sqlEngines},
 	// Something to type a statement or a command into: the SQL editor, the
 	// Redis console, MongoDB's command runner.
@@ -137,7 +139,7 @@ var capabilityTable = []Capability{
 	// The server's parameters, and changing one where the engine keeps it.
 	{"settings", everyEngine},
 	{"settingsWrite", anyOf(opsFlag("settingsWrite"), redisEngines)},
-	{"replication", anyOf(opsFlag("replication"), redisEngines, mongoDBProper)},
+	{"replication", replicationEngines},
 	// A plan as a tree, and a plan measured by running the statement.
 	{"explainJSON", anyOf(explainForm(false), mongoDBProper)},
 	{"explainAnalyze", anyOf(explainForm(true), mongoDBProper)},
@@ -151,6 +153,21 @@ var capabilityTable = []Capability{
 	// The dashboard can start one from its own closed list of images.
 	{"provision", On("postgres", "mysql", "redis", "mongodb", "clickhouse").
 		Except(FlavorCockroachDB, FlavorYugabyteDB, FlavorPercona, FlavorTiDB, FlavorFerretDB)},
+	// A server the dashboard started can speak TLS with a certificate from its
+	// own authority. The engines that are provisioned and can be told to: KeyDB
+	// and Dragonfly read their TLS settings in ways the template does not drive,
+	// ClickHouse's are an XML file, and the forks that cannot be provisioned have
+	// no container of the dashboard's to mount a certificate into.
+	{"serverTLS", On("postgres", "mysql", "redis", "mongodb").
+		Except(FlavorCockroachDB, FlavorYugabyteDB, FlavorPercona, FlavorTiDB, FlavorFerretDB, FlavorKeyDB, FlavorDragonfly)},
+	// The setting that holds the memory the engine keeps for itself, which
+	// the Resources page reads beside its container's memory limit.
+	{"memoryBuffer", func(d Driver, flavor string) any {
+		if setting := MemoryBufferSetting(d, flavor); setting != "" {
+			return setting
+		}
+		return false
+	}},
 }
 
 // listOf is the answer of a flag whose value is a list. Never nil: an engine

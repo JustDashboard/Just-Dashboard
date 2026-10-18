@@ -9,10 +9,10 @@ import { Status } from "@/components/status-dot"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { certificateProduct, siteProduct } from "@/components/proxy/marks"
 import {
-  certRunway,
+  certCounts,
+  certRows,
+  certTone,
   errorTone,
-  placeOnRunway,
-  runwayTone,
   siteHue,
   trafficShares,
   type SiteApp,
@@ -20,6 +20,7 @@ import {
 import type { SiteChip } from "@/components/proxy/site-filters"
 import { sitePath } from "@/components/proxy/site-verbs"
 import { upstreamLabel, upstreamTone } from "@/components/proxy/upstream-health"
+import { StandingBar } from "@/components/standing-bar"
 import { plural } from "@/lib/format"
 import type { Certificate, SiteUpstreamHealth, SitesTraffic, VHost } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -56,7 +57,7 @@ export function SiteMark({
  *
  * It replaced four tiles — sites, on TLS, plain HTTP, disabled — that each
  * gave one count and none of which said *which*. Here every site is drawn in
- * the hue its card's edge carries, every application as its own logo, and a
+ * its own hue, the one its hour bar carries, every application as its own logo, and a
  * row opens the site it is about.
  */
 export function SiteBand({
@@ -243,8 +244,9 @@ function CertificatesBlock({
   /** The block stands where Traffic would on a host without it. */
   wide: boolean
 }) {
-  const { rows, plain, unknown, tls } = certRunway(hosts, certs)
+  const { rows, plain, unknown, tls } = certRows(hosts, certs)
   const shown = rows.slice(0, SHOWN)
+  const counts = certCounts(rows)
   const enabled = hosts.filter((v) => v.enabled).length
   return (
     <Panel plain aria-label="Certificates" className={cn(wide && "lg:col-span-1")}>
@@ -252,19 +254,34 @@ function CertificatesBlock({
         title="Certificates"
         actions={<HeadFigure value={tls} word={`of ${enabled} on TLS`} />}
       />
-      <PanelBody className="pt-1">
+      <PanelBody className="space-y-3 pt-4">
         {shown.length === 0 ? (
-          <p className="py-3 text-body text-muted-foreground">
+          <p className="py-2 text-body text-muted-foreground">
             {tls === 0
               ? "No enabled site is on TLS."
               : "The certificate inventory has none of the certificates these sites name."}
           </p>
         ) : (
-          <ol aria-label="Certificate runway">
-            {shown.map(({ vhost, cert }, index) => (
-              <RunwayRow key={vhost.name} vhost={vhost} cert={cert} first={index === 0} />
-            ))}
-          </ol>
+          <>
+            <StandingBar
+              label="Certificates by days left"
+              parts={[
+                { key: "valid", count: counts.valid, color: "var(--success)", word: "valid" },
+                { key: "due", count: counts.due, color: "var(--warning)", word: "renewal due" },
+                {
+                  key: "expired",
+                  count: counts.expired,
+                  color: "var(--destructive)",
+                  word: "expired",
+                },
+              ]}
+            />
+            <ol aria-label="Certificates by expiry" className="-mx-2">
+              {shown.map(({ vhost, cert }) => (
+                <CertRow key={vhost.name} vhost={vhost} cert={cert} />
+              ))}
+            </ol>
+          </>
         )}
         <Remainder
           parts={[
@@ -286,16 +303,9 @@ function CertificatesBlock({
   )
 }
 
-/**
- * One certificate on an axis from "ends now" to a full ninety days: a dot in
- * the site's hue, the stretch it has left drawn back to the start, the last
- * fortnight tinted amber so a dot that has crossed into it reads before its
- * figure does.
- */
-function RunwayRow({ vhost, cert, first }: { vhost: VHost; cert: Certificate; first: boolean }) {
-  const tone = runwayTone(cert)
-  const left = placeOnRunway(cert.daysLeft)
-  const color = siteHue(vhost.name)
+/** One site's certificate: who issued it and how long it has left, amber in its last fortnight. */
+function CertRow({ vhost, cert }: { vhost: VHost; cert: Certificate }) {
+  const tone = certTone(cert)
   const issuer = certificateProduct(cert)
   const days =
     cert.expired || cert.daysLeft < 0
@@ -304,55 +314,29 @@ function RunwayRow({ vhost, cert, first }: { vhost: VHost; cert: Certificate; fi
         ? "ends today"
         : `${cert.daysLeft} d left`
   return (
-    <li className={cn("-mx-2", !first && "border-t border-hairline")}>
+    <li>
       <Link
         href={sitePath(vhost.name)}
         aria-label={`Open ${vhost.name}`}
-        className="block rounded-md px-2 py-2 focus-ring-inset transition-colors hover:bg-row-hover"
+        title={`${vhost.name}: ${days}`}
+        className={rowClass}
       >
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-body font-medium">{vhost.name}</span>
+        <HueKey name={vhost.name} />
+        <span className="flex size-4 shrink-0 items-center justify-center">
           {issuer && <ProductGlyph id={issuer} />}
-          <span
-            className={cn(
-              "numeric shrink-0 text-hint",
-              tone === "danger"
-                ? "text-destructive"
-                : tone === "warning"
-                  ? "text-warning"
-                  : "text-muted-foreground",
-            )}
-          >
-            {days}
-          </span>
         </span>
+        <span className="min-w-0 flex-1 truncate font-medium">{vhost.name}</span>
         <span
-          role="img"
-          aria-label={`${vhost.name}: ${days}`}
-          className="relative mt-1.5 block h-2.5"
+          className={cn(
+            "numeric shrink-0 text-hint",
+            tone === "danger"
+              ? "text-destructive"
+              : tone === "warning"
+                ? "text-warning"
+                : "text-muted-foreground",
+          )}
         >
-          <span
-            aria-hidden
-            className="absolute inset-y-0 left-0 rounded-sm bg-wash-warning"
-            style={{ width: `${placeOnRunway(14)}%` }}
-          />
-          <span aria-hidden className="absolute inset-x-0 top-1/2 h-px bg-hairline" />
-          <span
-            aria-hidden
-            className="absolute top-1/2 left-0 h-px -translate-y-1/2 transition-[width] duration-700 ease-out"
-            style={{
-              width: `${left}%`,
-              background: `color-mix(in oklab, ${color} 60%, transparent)`,
-            }}
-          />
-          <span
-            aria-hidden
-            className="absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full transition-[left] duration-700 ease-out"
-            style={{
-              left: `${left}%`,
-              background: tone === "danger" ? "var(--destructive)" : color,
-            }}
-          />
+          {days}
         </span>
       </Link>
     </li>

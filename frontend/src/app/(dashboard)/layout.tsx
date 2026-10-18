@@ -15,9 +15,10 @@ import { NavScopeProvider } from "@/components/nav-scope"
 import { SavedFolderColours } from "@/components/files/folder-colour"
 import { WorkspaceCommandsProvider } from "@/components/workspace/commands"
 import { NetworkChangeConfirmation } from "@/components/network/change-confirmation"
+import { HeldSessionsHost, HeldSessionsProvider } from "@/components/remote-desktop/held-sessions"
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { status, loading } = useAuth()
+  const { status, loading, sessionEnded } = useAuth()
   const router = useRouter()
 
   // Redirecting here is a convenience, not a security control: every API call
@@ -26,14 +27,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // wherever it was headed; answering or skipping ends that for good.
   const onboarding = Boolean(status?.user?.needsOnboarding)
   useEffect(() => {
-    if (!loading && !status?.authenticated) router.replace("/login")
+    if (!loading && !status?.authenticated)
+      router.replace(sessionEnded ? "/login?reason=session" : "/login")
     else if (onboarding) router.replace("/welcome")
-  }, [loading, status, onboarding, router])
+  }, [loading, status, sessionEnded, onboarding, router])
 
   if (loading || !status?.authenticated || onboarding) return <ShellSplash />
 
+  // A recovery probe can discover another tab's sign-in without leaving this
+  // route. Recreate mounted editors before the new account can reuse their buffers.
   return (
-    <WorkspaceCommandsProvider>
+    <WorkspaceCommandsProvider key={status.user?.id}>
       <CommandPaletteProvider>
         {/* One poll of the dashboard's own version for the whole shell: the
           sidebar notice and the Updates page are on screen together, and the
@@ -45,43 +49,48 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             here, so the rail never fetches a thing to draw a list the page
             below it already holds. */}
           <NavScopeProvider>
-            <SidebarProvider
-              desktopCollapsible={false}
-              style={{ "--sidebar-width": "15.5rem" } as React.CSSProperties}
-            >
-              {/* Owns the metrics socket for the whole shell, so the Overview and
+            {/* Remote Desktop's sessions outlive the page that shows them, so
+              a look at another page does not hang up on the computer. */}
+            <HeldSessionsProvider>
+              <SidebarProvider
+                desktopCollapsible={false}
+                style={{ "--sidebar-width": "15.5rem" } as React.CSSProperties}
+              >
+                {/* Owns the metrics socket for the whole shell, so the Overview and
               Metrics charts keep filling while you are on another page. Renders
               nothing. */}
-              <MetricsStream />
-              <AppSidebar />
-              <SidebarInset className="h-svh min-w-0 overflow-hidden">
-                {/* The bar that used to run across the top of every page is gone —
+                <MetricsStream />
+                <AppSidebar />
+                <SidebarInset className="h-svh min-w-0 overflow-hidden">
+                  {/* The bar that used to run across the top of every page is gone —
               `components/top-bar.tsx` is still there if it has to come back.
               It carried a breadcrumb every page already states in its own
               header. Below `md` the rail is a sheet with nothing left to open
               it, so this one strip stays: the trigger, and the name of the
               product it belongs to. */}
-                <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:hidden">
-                  <SidebarTrigger className="-ml-0.5 size-8 text-muted-foreground" />
-                  <Logo />
-                  {/* A phone has no ⌘K and the rail's search field is inside
+                  <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:hidden">
+                    <SidebarTrigger className="-ml-0.5 size-8 text-muted-foreground" />
+                    <Logo />
+                    {/* A phone has no ⌘K and the rail's search field is inside
                       a closed sheet, so search had no way in at all here. */}
-                  <MobileSearch />
-                </header>
-                {/* The scroll lives here rather than on the document, which lets a
+                    <MobileSearch />
+                  </header>
+                  {/* The scroll lives here rather than on the document, which lets a
               page ask for the remaining height (`<Page fill>`) instead of
               growing past the viewport. */}
-                <div
-                  data-workspace-shell-scroll
-                  className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto"
-                >
-                  {/* A folder coloured in Files is that colour on every page
+                  <div
+                    data-workspace-shell-scroll
+                    className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto"
+                  >
+                    {/* A folder coloured in Files is that colour on every page
                   that draws it, not only on the one that coloured it. */}
-                  <NetworkChangeConfirmation />
-                  <SavedFolderColours>{children}</SavedFolderColours>
-                </div>
-              </SidebarInset>
-            </SidebarProvider>
+                    <NetworkChangeConfirmation />
+                    <SavedFolderColours>{children}</SavedFolderColours>
+                    <HeldSessionsHost />
+                  </div>
+                </SidebarInset>
+              </SidebarProvider>
+            </HeldSessionsProvider>
           </NavScopeProvider>
         </SelfUpdateProvider>
       </CommandPaletteProvider>

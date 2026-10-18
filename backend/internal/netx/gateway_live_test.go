@@ -234,7 +234,7 @@ func TestLiveGoldenRulesetLoadsAndReadsBack(t *testing.T) {
 	}
 	for _, comment := range []string{
 		"forward:1", "forward:2", "forward:3", "forward-nat:1", "forward-nat:3", "nat:5", "nat:6", "nat:7",
-		"limit:8", "limit:9", "limit:10", "blocklist:12", "blocklist:13",
+		"limit:8", "limit:9", "limit:10", "blocklist:12", "blocklist:13", "port-allowlist:15",
 	} {
 		if _, ok := counters[comment]; !ok {
 			t.Errorf("no rule with the comment %q came back from nft", comment)

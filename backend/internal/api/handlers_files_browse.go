@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"mime"
@@ -337,6 +338,25 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) error {
 	if mediaType == "" {
 		return httpx.Err(http.StatusUnsupportedMediaType, "not_inline",
 			"this file is not one of the media types served inline; download it instead")
+	}
+	if r.URL.Query().Get("revision") == "true" {
+		if !strings.HasPrefix(mediaType, "image/") {
+			return httpx.BadRequest("content revisions are available for image editing only")
+		}
+		if r.Header.Get("Range") != "" {
+			return httpx.BadRequest("an image revision requires the complete file")
+		}
+		content, revision, err := s.modules.files.ImageSnapshot(path)
+		if err != nil {
+			return mapFileError(err)
+		}
+		w.Header().Set("Content-Type", mediaType)
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": filepath.Base(path)}))
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox; frame-ancestors 'none'")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-JD-Content-Revision", revision)
+		http.ServeContent(w, r, filepath.Base(path), time.Time{}, bytes.NewReader(content))
+		return nil
 	}
 	f, st, err := s.modules.files.Open(path)
 	if err != nil {

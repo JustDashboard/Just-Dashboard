@@ -141,10 +141,6 @@ export const GLOSSARY: Record<string, { title: string; body: string }> = {
     title: "Runtime health",
     body: "What Docker itself says about what is running right now: how many containers are up, how many are passing their own health check, how many are failing it. It clears itself — start a stopped container and this goes green again with nothing else to do.",
   },
-  attention: {
-    title: "Attention",
-    body: "Everything that is not a running-or-not fact: a container with no memory limit, a database published to the whole internet, an image pinned to a tag that moves under you. None of it stops a service today and none of it goes away on its own — this is the list that needs a decision rather than a restart.",
-  },
   containerState: {
     title: "Running, stopped, paused",
     body: '"Running" means the program inside is alive — not necessarily that it works, which is what a health check is for. "Exited" means it finished or crashed, and the exit code says which. "Paused" means it is frozen in place, still holding its memory. "Restarting" means it keeps stopping and Docker keeps starting it again, which is usually a crash loop rather than a recovery.',

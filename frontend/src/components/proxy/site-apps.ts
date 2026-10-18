@@ -9,7 +9,7 @@ import type {
   VHost,
 } from "@/lib/types"
 import { siteCert, type SiteChip } from "./site-filters"
-import { isBroken, isParked, isPlain } from "./site-order"
+import { isPlain } from "./site-order"
 
 /**
  * The Sites page's readings of the whole host, as pure functions of the
@@ -27,13 +27,10 @@ import { isBroken, isParked, isPlain } from "./site-order"
  */
 const SITE_HUES = LANES.filter((hue) => hue !== "var(--tag-slate)")
 
-/** The colour a site has everywhere on the page: its card's edge, its span, its dot. */
+/** The colour a site has everywhere on the page: its hour bar, its span, its dot. */
 export function siteHue(name: string): string {
   return hueFor(name.toLowerCase(), SITE_HUES)
 }
-
-/** How far ahead the certificate axis reaches: Let's Encrypt's whole lifetime. */
-export const RUNWAY_DAYS = 90
 
 /** Where nginx connects for an upstream URL, the port filled in from its scheme. */
 export function upstreamEndpoint(url: string): { host: string; port: number } | undefined {
@@ -192,19 +189,19 @@ export function errorTone(rate: number): "danger" | "warning" | undefined {
   return undefined
 }
 
-export type Runway = { vhost: VHost; cert: Certificate }
+export type CertRow = { vhost: VHost; cert: Certificate }
 
 /**
  * Every enabled site on TLS whose certificate the inventory read, soonest to
  * end first; the sites proxying an application in plain text; and those on
  * TLS whose certificate the inventory does not have — Caddy's own, or one
- * outside the directories it reads — which have no runway to draw.
+ * outside the directories it reads — which have no expiry to show.
  */
-export function certRunway(
+export function certRows(
   hosts: VHost[],
   certs: Certificate[] | undefined,
-): { rows: Runway[]; plain: VHost[]; unknown: number; tls: number } {
-  const rows: Runway[] = []
+): { rows: CertRow[]; plain: VHost[]; unknown: number; tls: number } {
+  const rows: CertRow[] = []
   let unknown = 0
   const tls = hosts.filter((v) => v.tls && v.enabled)
   for (const vhost of tls) {
@@ -216,16 +213,25 @@ export function certRunway(
   return { rows, plain: hosts.filter(isPlain), unknown, tls: tls.length }
 }
 
-/** Where a certificate sits on the runway, from 0 (ends now) to 100 (a full lifetime left). */
-export function placeOnRunway(daysLeft: number): number {
-  return Math.min(Math.max(daysLeft / RUNWAY_DAYS, 0), 1) * 100
-}
-
 /** How a certificate's days read: red once it has ended, amber in its last fortnight. */
-export function runwayTone(cert: Certificate): "danger" | "warning" | undefined {
+export function certTone(cert: Certificate): "danger" | "warning" | undefined {
   if (cert.expired || cert.daysLeft < 0) return "danger"
   if (cert.expiring || cert.daysLeft < 14) return "warning"
   return undefined
+}
+
+/** How many certificates are valid, due for renewal or expired: the spans of the block's bar. */
+export function certCounts(rows: readonly CertRow[]): {
+  valid: number
+  due: number
+  expired: number
+} {
+  const counts = { valid: 0, due: 0, expired: 0 }
+  for (const { cert } of rows) {
+    const tone = certTone(cert)
+    counts[tone === "danger" ? "expired" : tone === "warning" ? "due" : "valid"] += 1
+  }
+  return counts
 }
 
 export type SitesVerdict = {
@@ -244,58 +250,15 @@ export type SitesVerdict = {
  * not run, and only then that nothing needs anyone.
  */
 export function sitesVerdict({
-  attention,
-  isDown,
   stopped,
   engine,
   total,
 }: {
-  attention: VHost[]
-  /** The site's application refuses connections, by the last health check. */
-  isDown: (v: VHost) => boolean
   stopped: boolean
   engine: string
   total: number
 }): SitesVerdict {
-  if (attention.length > 0) {
-    // Each site is said once, by the worst thing about it.
-    const cause = (v: VHost) =>
-      isBroken(v)
-        ? "broken"
-        : isDown(v)
-          ? "down"
-          : isPlain(v)
-            ? "plain"
-            : isParked(v)
-              ? "parked"
-              : "notLive"
-    const count = (key: string) => attention.filter((v) => cause(v) === key).length
-    const broken = count("broken")
-    const down = count("down")
-    const plain = count("plain")
-    const parked = count("parked")
-    const notLive = count("notLive")
-    const detail = [
-      broken > 0 && (broken === 1 ? "1 broken link" : `${broken} broken links`),
-      down > 0 && (down === 1 ? "1 application refusing" : `${down} applications refusing`),
-      plain > 0 && `${plain} on plain HTTP`,
-      parked > 0 && `${parked} disabled`,
-      notLive > 0 && `${notLive} not live`,
-    ]
-      .filter(Boolean)
-      .join(" · ")
-    return {
-      tone: broken + down > 0 ? "danger" : "warning",
-      label:
-        attention.length === 1
-          ? "1 site needs attention"
-          : `${attention.length} sites need attention`,
-      detail,
-      chip: "attention",
-    }
-  }
-  // The notice above the line says why; the verdict says what it means.
   if (stopped) return { tone: "stopped", label: `No ${engine} site is served` }
   if (total === 0) return { tone: "stopped", label: "No sites yet" }
-  return { tone: "running", label: "Nothing needs attention" }
+  return { tone: "running", label: `${total} sites` }
 }

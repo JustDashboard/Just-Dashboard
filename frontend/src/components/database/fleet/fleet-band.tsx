@@ -10,14 +10,15 @@ import { ShareBar } from "@/components/procs/workloads"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { sectionHref, type Engine } from "@/components/database/engine"
 import {
-  backupRunway,
+  backupAges,
+  backupCounts,
   shares,
-  STALE_AT,
+  type BackupAge,
   type BackupStanding,
-  type RunwayRow,
 } from "@/components/database/fleet/band"
 import { sessionsWord } from "@/components/database/fleet/fleet-card"
 import { EngineGlyph } from "@/components/database/kit"
+import { StandingBar } from "@/components/standing-bar"
 
 /** How many databases a block names; the rest are counted under it. */
 const SHOWN = 5
@@ -32,14 +33,14 @@ const rowClass =
  * the cards answer only one database at a time: where the bytes are, who is
  * connected, and how old every database's newest dump is.
  *
- * Every database is drawn in its own hue — the same on its span, its dot, its
- * key in a row and the edge of its card — and as its engine's own mark, so
- * "the big orange one is analytics" holds from the bar to the card. A row
- * opens the database it is about; a row on the runway opens its dumps.
+ * Every database is drawn in its own hue — the same on its span, its key in a
+ * row and the size bar on its card — and as its engine's own mark, so "the big
+ * orange one is analytics" holds from the bar to the card. A row opens the
+ * database it is about; a row under Backups opens its dumps.
  *
  * The section's "Needs attention" list stood here and was removed at the
  * operator's request. What it said is still said where the thing is: a dump
- * that is over a week old or was never taken is amber on the runway and on
+ * that is over a week old or was never taken is amber under Backups and on
  * the card, a server that does not answer is the verdict at the identity
  * line's end and the first card on its shelf, and a server found running
  * that waits for a password is a row under *Found on this server*.
@@ -319,12 +320,22 @@ const AGE_TONE: Record<BackupStanding, string> = {
   never: "font-medium text-warning",
 }
 
+/** Each standing's span on the bar and its word under it, in order of age. */
+const STANDINGS: { standing: BackupStanding; color: string; word: string }[] = [
+  { standing: "fresh", color: "var(--success)", word: "today" },
+  { standing: "aging", color: "var(--muted-foreground)", word: "this week" },
+  {
+    standing: "stale",
+    color: "color-mix(in oklab, var(--warning) 50%, transparent)",
+    word: "over a week old",
+  },
+  { standing: "never", color: "var(--warning)", word: "never" },
+]
+
 /**
- * Every database that can be dumped from here on one runway from "now" to a
- * fortnight, each a dot in its hue where its newest dump's age puts it, with
- * the stretch past a week washed amber — the age every other reading of the
- * section calls stale. Never-dumped ones come first, a hollow amber ring at
- * the far end. A row opens the database's dumps.
+ * Every database that can be dumped from here: how many were backed up today,
+ * this week, longer ago or never, as one bar, and under it the worst five with
+ * their newest dump's age. A row opens the database's dumps.
  */
 function BackupsBlock({
   entries,
@@ -339,9 +350,9 @@ function BackupsBlock({
   newestOf: (entry: DbFleetEntry) => string | undefined
   dumps: (entry: DbFleetEntry) => boolean
 }) {
-  const rows = backupRunway(entries, { newestOf, dumps })
+  const rows = backupAges(entries, { newestOf, dumps })
   const shown = rows.slice(0, SHOWN)
-  const fresh = rows.filter((row) => row.standing === "fresh").length
+  const counts = backupCounts(rows)
   const cannot = entries.filter(
     (entry) => !entry.broken && entry.state !== "broken" && !dumps(entry),
   ).length
@@ -352,28 +363,38 @@ function BackupsBlock({
         actions={
           rows.length > 0 && (
             <HeadFigure word={`of ${rows.length} in the last day`}>
-              <NumberTicker value={fresh} />
+              <NumberTicker value={counts.fresh} />
             </HeadFigure>
           )
         }
       />
-      <PanelBody className="pt-1">
+      <PanelBody className="space-y-3 pt-4">
         {shown.length === 0 ? (
-          <p className="py-3 text-body text-muted-foreground">
+          <p className="py-2 text-body text-muted-foreground">
             No database here can be dumped from the dashboard.
           </p>
         ) : (
-          <ol aria-label="Backup runway">
-            {shown.map((row, index) => (
-              <Runway
-                key={row.entry.id}
-                row={row}
-                color={hueOf(row.entry)}
-                engine={engineOf(row.entry)}
-                first={index === 0}
-              />
-            ))}
-          </ol>
+          <>
+            <StandingBar
+              label="Databases by their newest backup"
+              parts={STANDINGS.map(({ standing, color, word }) => ({
+                key: standing,
+                count: counts[standing],
+                color,
+                word,
+              }))}
+            />
+            <ol aria-label="Databases by last backup" className="-mx-2">
+              {shown.map((row) => (
+                <BackupRow
+                  key={row.entry.id}
+                  row={row}
+                  color={hueOf(row.entry)}
+                  engine={engineOf(row.entry)}
+                />
+              ))}
+            </ol>
+          </>
         )}
         <Remainder
           parts={[
@@ -386,71 +407,23 @@ function BackupsBlock({
   )
 }
 
-function Runway({
-  row,
-  color,
-  engine,
-  first,
-}: {
-  row: RunwayRow
-  color: string
-  engine: Engine
-  first: boolean
-}) {
-  const { entry, standing, newest, position } = row
+function BackupRow({ row, color, engine }: { row: BackupAge; color: string; engine: Engine }) {
+  const { entry, standing, newest } = row
   const age = standing === "never" ? "never backed up" : `backed up ${relativeTime(newest)}`
-  const left = `${(position ?? 1) * 100}%`
   return (
-    // The hairline stays inside the block; only the press target bleeds, so
-    // its wash lines its text up with the title as every other row's does.
-    <li className={cn(!first && "border-t border-hairline")}>
+    <li>
       <Link
         href={sectionHref(entry.id, "backups")}
         aria-label={`Backups of ${entry.name}`}
-        className="-mx-2 block rounded-md px-2 py-2 focus-ring-inset transition-colors hover:bg-row-hover"
+        title={`${entry.name}: ${age}`}
+        className={rowClass}
       >
-        <span className="flex min-w-0 items-center gap-2">
-          <HueKey color={color} />
-          <span className="flex size-4 shrink-0 items-center justify-center">
-            <EngineGlyph engine={engine} />
-          </span>
-          <span className="min-w-0 flex-1 truncate text-body font-medium">{entry.name}</span>
-          <span className={cn("numeric shrink-0 text-hint", AGE_TONE[standing])}>{age}</span>
+        <HueKey color={color} />
+        <span className="flex size-4 shrink-0 items-center justify-center">
+          <EngineGlyph engine={engine} />
         </span>
-        <span
-          role="img"
-          aria-label={`${entry.name}: ${age}`}
-          className="relative mt-1.5 block h-2.5"
-        >
-          <span
-            aria-hidden
-            className="absolute inset-y-0 right-0 rounded-sm bg-wash-warning"
-            style={{ left: `${STALE_AT * 100}%` }}
-          />
-          <span aria-hidden className="absolute inset-x-0 top-1/2 h-px bg-hairline" />
-          {standing === "never" ? (
-            <span
-              aria-hidden
-              className="absolute top-1/2 right-0 size-2.5 -translate-y-1/2 rounded-full border-2 border-warning bg-background"
-            />
-          ) : (
-            <>
-              <span
-                aria-hidden
-                className="absolute top-1/2 left-0 h-px -translate-y-1/2 transition-[width] duration-700 ease-out"
-                style={{
-                  width: left,
-                  background: `color-mix(in oklab, ${color} 60%, transparent)`,
-                }}
-              />
-              <span
-                aria-hidden
-                className="absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full transition-[left] duration-700 ease-out"
-                style={{ left, background: color }}
-              />
-            </>
-          )}
-        </span>
+        <span className="min-w-0 flex-1 truncate font-medium">{entry.name}</span>
+        <span className={cn("numeric shrink-0 text-hint", AGE_TONE[standing])}>{age}</span>
       </Link>
     </li>
   )

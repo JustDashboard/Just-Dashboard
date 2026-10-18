@@ -7,12 +7,13 @@ import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { BarList, type BarListItem } from "@/components/bar-list"
-import { Detail, DetailList } from "@/components/page"
 import { Button } from "@/components/ui/button"
 import {
   BarsSkeleton,
   Block,
   BlockLink,
+  FactRow,
+  FactRows,
   FactsSkeleton,
   Quiet,
   Read,
@@ -28,6 +29,8 @@ import type {
   RedisCommandStats,
   SqliteFile,
 } from "@/components/database/home/types"
+import { useStatementsSetup } from "@/components/database/ops/statements-setup"
+import { setupStart } from "@/components/database/ops/statements-setup-model"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /** How many rows a ranked block shows. */
@@ -76,7 +79,8 @@ export function millis(value: number): string {
  * The text is a shape with its literals removed — the server never sends one
  * execution — so a row is something to recognise, and it opens the page that
  * has every figure about it. Where the statistics are off, the block says
- * what turns them on, and offers it where one statement does.
+ * what turns them on, and offers it where one statement does — or, where the
+ * module is not loaded yet, the guided setup the Statements view opens.
  */
 export function BusiestStatements() {
   const { id, engine, readOnly, href, goto } = useDatabase()
@@ -93,6 +97,7 @@ export function BusiestStatements() {
     60_000,
     [id],
   )
+  const openSetup = useStatementsSetup(statements.refresh)
 
   const enable = async (extension: string) => {
     setEnabling(true)
@@ -122,6 +127,9 @@ export function BusiestStatements() {
         title: `${opening(statement.query)} — ${share} of runtime. Open Performance`,
         value: share,
         share: longest > 0 ? statement.share / longest : 0,
+        // The bar in the hue of what the statement does, so a list of reads
+        // with one heavy write in it shows the write before it is read.
+        color: statementVerb(statement.query)?.color,
         hint: `${calls(statement.calls)} · ${millis(statement.meanMs)} each`,
         onClick: () => goto("performance", { view: "statements" }),
       }
@@ -159,9 +167,12 @@ export function BusiestStatements() {
                 {data.enable
                   ? `This server is not counting its ${words}.`
                   : `The ${words} this server has run could not be read.`}{" "}
-                <span className="wrap-anywhere">{sentence(data.enable?.note ?? data.reason)}</span>
+                <span className="wrap-anywhere">
+                  {sentence(data.enable?.note ?? data.reason)}
+                  {data.enable?.blocked && ` ${sentence(data.enable.blocked)}`}
+                </span>
               </Quiet>
-              {data.enable?.sql && data.enable.extension && can("system.admin") && !readOnly && (
+              {data.enable?.sql && data.enable.extension && can("system.admin") && !readOnly ? (
                 <Button
                   size="sm"
                   variant="outline"
@@ -170,6 +181,21 @@ export function BusiestStatements() {
                 >
                   Turn on statement statistics
                 </Button>
+              ) : (
+                data.enable &&
+                setupStart(data.enable) &&
+                openSetup &&
+                engine.can("statementsSetup") &&
+                can("system.admin") &&
+                !readOnly && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => data.enable && openSetup({ enable: data.enable })}
+                  >
+                    Turn on statement statistics
+                  </Button>
+                )
               )}
             </div>
           )
@@ -380,20 +406,20 @@ export function FileFacts() {
     >
       <Read poll={file} what="the file" skeleton={<FactsSkeleton rows={7} />}>
         {(data) => (
-          <DetailList>
-            <Detail label="Path" className="font-mono wrap-anywhere">
+          <FactRows>
+            <FactRow label="Path" className="font-mono wrap-anywhere">
               {data.path}
-            </Detail>
-            <Detail label="Size">
+            </FactRow>
+            <FactRow label="Size">
               {bytes(data.fileBytes)}
               {data.walBytes > 0 ? ` · ${bytes(data.walBytes)} write-ahead log` : ""}
-            </Detail>
+            </FactRow>
             {data.modified && (
-              <Detail label="Last written">
+              <FactRow label="Last written">
                 <span title={timestamp(data.modified)}>{relativeTime(data.modified)}</span>
-              </Detail>
+              </FactRow>
             )}
-            <Detail label="Holds">
+            <FactRow label="Holds">
               {(["table", "index", "view", "trigger"] as const)
                 .filter((kind) => data.objects[kind])
                 .map(
@@ -403,15 +429,15 @@ export function FileFacts() {
                     }`,
                 )
                 .join(" · ") || "nothing yet"}
-            </Detail>
-            <Detail label="Journal">
+            </FactRow>
+            <FactRow label="Journal">
               {data.journalMode} · synchronous {data.synchronous}
-            </Detail>
-            <Detail label="Foreign keys">{data.foreignKeys ? "enforced" : "not enforced"}</Detail>
-            <Detail label="Auto-vacuum">{data.autoVacuum}</Detail>
-            <Detail label="Text">{data.encoding}</Detail>
-            <Detail label="SQLite">{data.version}</Detail>
-          </DetailList>
+            </FactRow>
+            <FactRow label="Foreign keys">{data.foreignKeys ? "enforced" : "not enforced"}</FactRow>
+            <FactRow label="Auto-vacuum">{data.autoVacuum}</FactRow>
+            <FactRow label="Text">{data.encoding}</FactRow>
+            <FactRow label="SQLite">{data.version}</FactRow>
+          </FactRows>
         )}
       </Read>
     </Block>

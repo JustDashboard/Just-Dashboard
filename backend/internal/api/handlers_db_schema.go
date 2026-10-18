@@ -24,6 +24,10 @@ func (s *Server) mountDatabaseSchemaRoutes(r chi.Router) {
 	// trigger does — and any role that may open a table may read them.
 	r.Method(http.MethodGet, "/{id}/catalog", s.handle(s.handleDBCatalog))
 	r.Method(http.MethodGet, "/{id}/object", s.handle(s.handleDBObject))
+	r.Method(http.MethodGet, "/{id}/program", s.handle(s.handleDBProgram))
+	// Two schemas compared and the migration between them written out. It
+	// changes nothing: the statements are text for the Query tab.
+	r.Method(http.MethodGet, "/{id}/schema-diff", s.handle(s.handleDBSchemaDiff))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapServiceControl))
 		// Changes that add to a schema or adjust it without discarding
@@ -38,6 +42,13 @@ func (s *Server) mountDatabaseSchemaRoutes(r chi.Router) {
 		r.Method(http.MethodPost, "/{id}/ddl/comment", s.handle(s.handleDDLComment))
 		r.Method(http.MethodPost, "/{id}/ddl/enum", s.handle(s.handleDDLCreateEnum))
 		r.Method(http.MethodPost, "/{id}/ddl/enum/value", s.handle(s.handleDDLAddEnumValue))
+		// A function, procedure or trigger is code the engine runs later, which
+		// the query runner classifies as high risk. These routes sit at
+		// service.control only so a preview can be asked for as the form is
+		// filled in: the handler asks for the destructive capability on every
+		// request, a preview included, and spends the budget on a run.
+		r.Method(http.MethodPost, "/{id}/ddl/routine", s.handle(s.handleDDLSaveRoutine))
+		r.Method(http.MethodPost, "/{id}/ddl/trigger", s.handle(s.handleDDLSaveTrigger))
 	})
 	// Anything that removes an object. A dropped constraint or view holds no
 	// rows, and it is still a DROP: the query runner asks for the destructive
@@ -47,6 +58,8 @@ func (s *Server) mountDatabaseSchemaRoutes(r chi.Router) {
 		r.Method(http.MethodDelete, "/{id}/ddl/constraint", s.handle(s.handleDDLDropConstraint))
 		r.Method(http.MethodDelete, "/{id}/ddl/view", s.handle(s.handleDDLDropView))
 		r.Method(http.MethodDelete, "/{id}/ddl/schema", s.handle(s.handleDDLDropSchema))
+		r.Method(http.MethodDelete, "/{id}/ddl/routine", s.handle(s.handleDDLDropRoutine))
+		r.Method(http.MethodDelete, "/{id}/ddl/trigger", s.handle(s.handleDDLDropTrigger))
 	})
 }
 
@@ -109,18 +122,53 @@ func (s *Server) handleDBObject(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	def, err := dbx.ReadObjectDefinition(ctx, pool, conn.Driver, ref)
+	if err != nil {
+		return objectReadFailed(err)
+	}
+	httpx.JSON(w, http.StatusOK, def)
+	return nil
+}
+
+// objectReadFailed answers a refused read of one catalogue object.
+func objectReadFailed(err error) error {
 	switch {
-	case err == nil:
 	case errors.Is(err, dbx.ErrObjectNotFound):
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, dbx.ErrAmbiguousObject):
 		return httpx.Err(http.StatusConflict, "ambiguous_object", err.Error())
 	case errors.Is(err, dbx.ErrNoDefinition), errors.Is(err, dbx.ErrUnsupported), errors.Is(err, dbx.ErrInvalidObject):
 		return httpx.BadRequest("%v", err)
-	default:
-		return queryFailed(err)
 	}
-	httpx.JSON(w, http.StatusOK, def)
+	return queryFailed(err)
+}
+
+// handleDBProgram returns a function, procedure or trigger as the fields the
+// editor writes it with, or the reason it cannot be edited from a form.
+func (s *Server) handleDBProgram(w http.ResponseWriter, r *http.Request) error {
+	httpx.SkipAudit(r)
+	id, err := parseID(r)
+	if err != nil {
+		return err
+	}
+	q := r.URL.Query()
+	ref := dbx.ObjectRef{
+		Kind: strings.TrimSpace(q.Get("kind")), Schema: q.Get("schema"), Name: q.Get("name"),
+		Signature: q.Get("signature"), Table: q.Get("table"),
+	}
+	if ref.Kind == "" || ref.Name == "" {
+		return httpx.BadRequest("kind and name are required")
+	}
+	pool, conn, err := s.dbPool(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	program, err := dbx.ReadProgram(ctx, pool, conn.Driver, ref)
+	if err != nil {
+		return objectReadFailed(err)
+	}
+	httpx.JSON(w, http.StatusOK, program)
 	return nil
 }
 
@@ -261,6 +309,9 @@ func (s *Server) runDDL(w http.ResponseWriter, r *http.Request, conn *dbConnecti
 		// beyond the change itself.
 		reply["calls"] = p.Unvouched
 	}
+	if p.Note != "" {
+		reply["note"] = p.Note
+	}
 	if ddlPreview(r) {
 		httpx.SkipAudit(r)
 		reply["preview"] = true
@@ -275,6 +326,12 @@ func (s *Server) runDDL(w http.ResponseWriter, r *http.Request, conn *dbConnecti
 	httpx.SetAudit(r, action, conn.Name, detail)
 	if err := p.Exec(ctx, pool); err != nil {
 		return httpx.BadRequest("%v", err)
+	}
+	// A routine saved where the catalogue names overloads by signature is
+	// named in the reply, because a page that addressed the old one by its
+	// signature has to move to the new.
+	if signature := p.Signature(ctx, pool); signature != "" {
+		reply["signature"] = signature
 	}
 	httpx.JSON(w, http.StatusOK, reply)
 	return nil
@@ -589,5 +646,115 @@ func (s *Server) handleDDLAddEnumValue(w http.ResponseWriter, r *http.Request) e
 				Schema: req.Schema, Name: req.Name, Value: req.Value,
 				Before: req.Before, After: req.After, IfNotExists: req.IfNotExists,
 			})
+		})
+}
+
+// programRisk is why every stored-program change asks for the destructive
+// capability: the text it stores runs later, with its owner's rights, and the
+// query runner holds the same CREATE to the same standard.
+const programRisk = "defining a stored program stores code that runs later with its owner's rights"
+
+type routineRequest struct {
+	dbx.RoutineSpec
+	// Replaces names the routine being edited, by the signature the catalogue
+	// reported for it. Its schema and name are the request's own.
+	Replaces *struct {
+		Signature string `json:"signature"`
+	} `json:"replaces"`
+}
+
+// handleDDLSaveRoutine makes a function or procedure, or replaces one.
+func (s *Server) handleDDLSaveRoutine(w http.ResponseWriter, r *http.Request) error {
+	var req routineRequest
+	conn, err := s.ddlDecode(r, &req)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return ddlInvalid(r, "the routine's name is required")
+	}
+	// The form never states a comment; an edit carries the existing one over.
+	req.Comment = ""
+	var edit *dbx.RoutineRef
+	if req.Replaces != nil {
+		edit = &dbx.RoutineRef{Schema: req.Schema, Name: req.Name, Signature: req.Replaces.Signature}
+	}
+	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.save_routine",
+		map[string]any{"kind": req.Kind, "routine": req.Name, "replace": edit != nil}, programRisk,
+		func(ctx context.Context, pool *sql.DB) (*dbx.DDLPlan, error) {
+			return dbx.PlanSaveRoutine(ctx, pool, conn.Driver, req.RoutineSpec, edit)
+		})
+}
+
+type dropRoutineRequest struct {
+	Kind      string `json:"kind"`
+	Schema    string `json:"schema"`
+	Name      string `json:"name"`
+	Signature string `json:"signature"`
+}
+
+func (s *Server) handleDDLDropRoutine(w http.ResponseWriter, r *http.Request) error {
+	var req dropRoutineRequest
+	conn, err := s.ddlDecode(r, &req)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return ddlInvalid(r, "the routine's name is required")
+	}
+	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.drop_routine",
+		map[string]any{"kind": req.Kind, "routine": req.Name}, "",
+		func(ctx context.Context, pool *sql.DB) (*dbx.DDLPlan, error) {
+			return dbx.PlanDropRoutine(ctx, pool, conn.Driver, req.Kind, req.Schema, req.Name, req.Signature)
+		})
+}
+
+type triggerRequest struct {
+	dbx.TriggerSpec
+	// Replace edits the trigger of this name on this table.
+	Replace bool `json:"replace"`
+}
+
+// handleDDLSaveTrigger makes a trigger, or replaces one.
+func (s *Server) handleDDLSaveTrigger(w http.ResponseWriter, r *http.Request) error {
+	var req triggerRequest
+	conn, err := s.ddlDecode(r, &req)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Table) == "" {
+		return ddlInvalid(r, "the trigger's name and table are required")
+	}
+	req.Comment = ""
+	var edit *dbx.TriggerRef
+	if req.Replace {
+		edit = &dbx.TriggerRef{Schema: req.Schema, Name: req.Name, Table: req.Table}
+	}
+	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.save_trigger",
+		map[string]any{"trigger": req.Name, "table": req.Table, "replace": req.Replace}, programRisk,
+		func(ctx context.Context, pool *sql.DB) (*dbx.DDLPlan, error) {
+			return dbx.PlanSaveTrigger(ctx, pool, conn.Driver, req.TriggerSpec, edit)
+		})
+}
+
+type dropTriggerRequest struct {
+	Schema string `json:"schema"`
+	Name   string `json:"name"`
+	Table  string `json:"table"`
+}
+
+func (s *Server) handleDDLDropTrigger(w http.ResponseWriter, r *http.Request) error {
+	var req dropTriggerRequest
+	conn, err := s.ddlDecode(r, &req)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return ddlInvalid(r, "the trigger's name is required")
+	}
+	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.drop_trigger",
+		map[string]any{"trigger": req.Name, "table": req.Table}, "",
+		func(context.Context, *sql.DB) (*dbx.DDLPlan, error) {
+			return dbx.PlanDropTrigger(conn.Driver, req.Schema, req.Name, req.Table)
 		})
 }

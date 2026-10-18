@@ -63,6 +63,7 @@ export const LOG_FIELDS: Record<string, LogField> = {
   flags: { label: "flags", kind: "code" },
   len: { label: "length", kind: "bytes" },
   conn: { label: "connection", kind: "code" },
+  connections: { label: "open connections", kind: "text" },
   key: { label: "key", kind: "code" },
 
   // What ran it.
@@ -104,13 +105,34 @@ export const LOG_FIELDS: Record<string, LogField> = {
   rows_sent: { label: "rows sent", kind: "text" },
   docs_examined: { label: "documents examined", kind: "text" },
   keys_examined: { label: "keys examined", kind: "text" },
+  query_hash: { label: "query hash", kind: "code" },
+  cpu_ms: { label: "query cpu", kind: "duration" },
+  yields: { label: "yields", kind: "text" },
 
   // What went wrong.
+  reason: { label: "reason", kind: "text" },
   code: { label: "code", kind: "code" },
+  // A SQLSTATE's class in a word: constraint, syntax or access, auth.
+  error_class: { label: "error class", kind: "code" },
   severity: { label: "severity", kind: "code" },
   error: { label: "error", kind: "text", filterable: false },
 
+  // A session and what it waited on: kept apart from duration_ms, which is a
+  // statement's own time.
+  session_ms: { label: "session", kind: "duration" },
+  wait_ms: { label: "waited", kind: "duration" },
+  lock: { label: "lock", kind: "code" },
+  auth_method: { label: "auth method", kind: "code" },
+
+  // A replica set and a dataset.
+  state: { label: "state", kind: "code" },
+  prev_state: { label: "previous state", kind: "code" },
+  keys: { label: "keys", kind: "text" },
+  changes: { label: "changes", kind: "text" },
+  cmd: { label: "last command", kind: "code" },
+
   // A checkpoint.
+  interval_s: { label: "apart", kind: "text" },
   buffers: { label: "buffers", kind: "text" },
   write_s: { label: "write", kind: "text" },
   sync_s: { label: "sync", kind: "text" },

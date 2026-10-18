@@ -1,28 +1,46 @@
 import type { NavScope } from "@/components/nav-scope"
 import type { DbCapabilities, DbConnection, DbDriver, DbFlavor } from "@/lib/types"
-import { groupSections, type EngineSection, type SectionId } from "@/components/database/engine"
+import { groupSections, type Engine, type SectionId } from "@/components/database/engine"
+import { settingsPageHref, settingsPages } from "@/components/database/shell/settings-pages"
 
 /**
  * One database's pages as the rail's panel: Home alone, then Work, Schema,
  * Insights and Operate, each holding only what the engine has, in the
- * engine's own words.
+ * engine's own words — and Settings, a group of its own pages under them, the
+ * way a project's settings sit under its pages.
  *
  * It has two callers, which is why it is here and not in the hook: the
  * database's layout, publishing the panel once the connection is read, and
  * the rail itself, drawing the same panel from the address before that.
  */
 export function databaseNavGroups(
-  sections: EngineSection[],
+  engine: Engine,
   hrefOf: (section: SectionId) => string,
 ): NavScope["groups"] {
-  return groupSections(sections).map((group) => ({
+  const groups: NavScope["groups"] = groupSections(engine.sections).map((group) => ({
     label: group.label,
-    items: group.sections.map((section) => ({
-      title: section.title,
-      href: hrefOf(section.id),
-      icon: section.icon,
-    })),
+    items: group.sections
+      .filter((section) => section.id !== "settings")
+      .map((section) => ({
+        title: section.title,
+        href: hrefOf(section.id),
+        icon: section.icon,
+      })),
   }))
+  if (!engine.has("settings")) return groups.filter((group) => group.items.length > 0)
+  const settings = hrefOf("settings")
+  return [
+    ...groups.filter((group) => group.items.length > 0),
+    {
+      label: "Settings",
+      items: settingsPages(engine).map((page) => ({
+        title: page.title,
+        href: settingsPageHref(settings, page),
+        icon: page.icon,
+        capability: page.capability,
+      })),
+    },
+  ]
 }
 
 /**

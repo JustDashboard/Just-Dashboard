@@ -64,11 +64,16 @@ type protectedRoute struct {
 
 var protectedRoutesAllowed = []protectedRoute{
 	// The connection's own record. Editing it is how protection is taken off
-	// again; forgetting it and changing where its server is reachable from
-	// leave what is in the database alone, as starting and stopping it do.
+	// again; forgetting it, changing where its server is reachable from and
+	// what its container may use leave what is in the database alone, as
+	// starting and stopping it do.
 	{http.MethodPut, "", nil},
 	{http.MethodDelete, "", nil},
 	{http.MethodPut, "/access", nil},
+	{http.MethodPut, "/tls", nil},
+	{http.MethodPost, "/tls/renew", nil},
+	{http.MethodPut, "/resources", nil},
+	{http.MethodPost, "/access/preview", nil},
 	{http.MethodPost, "/power", nil},
 	// A dump reads the database and writes a file on this machine. One made
 	// elsewhere and added to the list, and one deleted from it, are files on
@@ -77,6 +82,24 @@ var protectedRoutesAllowed = []protectedRoute{
 	{http.MethodPost, "/backup", nil},
 	{http.MethodPost, "/backups/upload", nil},
 	{http.MethodDelete, "/backups", nil},
+	// An upgrade's check starts the new release beside the server and only
+	// reads the server; finishing one removes the old server it left behind,
+	// which is no longer the one the connection reaches. The upgrade and its
+	// revert replace what the connection reaches, and are not on this list.
+	{http.MethodPost, "/upgrade/check", nil},
+	{http.MethodPost, "/upgrade/complete", nil},
+	// Archiving the log, a base backup and a named moment in it leave what is
+	// in the database alone, as a dump does; so does recovering a copy into a
+	// container of its own, and deleting an archive the server no longer
+	// writes. Switching a copy in for the server replaces what the connection
+	// reaches, which is a restore, and is not on this list.
+	{http.MethodPost, "/pitr", nil},
+	{http.MethodPut, "/pitr", nil},
+	{http.MethodDelete, "/pitr", nil},
+	{http.MethodPost, "/pitr/backup", nil},
+	{http.MethodPost, "/pitr/restore-points", nil},
+	{http.MethodPost, "/pitr/restore", nil},
+	{http.MethodDelete, "/pitr/archives/{aid}", nil},
 	// The dashboard's own state about the connection.
 	{http.MethodPost, "/queries", nil},
 	{http.MethodPut, "/queries/{qid}", nil},
@@ -86,6 +109,9 @@ var protectedRoutesAllowed = []protectedRoute{
 	// Requests that are POSTs because they carry a body, and read.
 	{http.MethodPost, "/classify", nil},
 	{http.MethodPost, "/orm", nil},
+	{http.MethodPost, "/seed/plan", nil},
+	{http.MethodPost, "/explain/index-candidates", nil},
+	{http.MethodPost, "/explain/what-if", nil},
 	{http.MethodPost, "/rows/sql", nil},
 	{http.MethodPost, "/redis/classify", nil},
 	{http.MethodPost, "/mongo/find", nil},
@@ -109,6 +135,7 @@ var protectedRoutesAllowed = []protectedRoute{
 	{http.MethodPost, "/query", protectedStatements},
 	{http.MethodPost, "/script", protectedStatements},
 	{http.MethodPost, "/export/query", protectedExportQuery},
+	{http.MethodPost, "/rls/test", protectedRoleTest},
 	{http.MethodPost, "/changes", protectedChanges},
 	{http.MethodPost, "/maintenance", protectedMaintenance},
 	{http.MethodPost, "/redis/command", protectedRedis(redisCommandWrites)},
@@ -477,6 +504,24 @@ func protectedExportQuery(driver dbx.Driver, body []byte) error {
 		return protectedRefusal("this connection is protected, and the request carries no statement to check")
 	}
 	if why := protectedStatementRefusal(driver, req.SQL); why != "" {
+		return protectedRefusal("this connection is protected, and that statement is not a read: %s", why)
+	}
+	return nil
+}
+
+// protectedRoleTest allows a test of what a role sees when the statement it
+// runs is a read. The test runs in a read-only transaction it never commits;
+// that is the second line, and this is the first, asked of the same field by
+// the same classifier as the query runner.
+func protectedRoleTest(driver dbx.Driver, body []byte) error {
+	var req roleTestRequest
+	if err := protectedBody(body, &req, false); err != nil {
+		return protectedUnreadable()
+	}
+	if strings.TrimSpace(req.Query) == "" {
+		return protectedRefusal("this connection is protected, and the request carries no statement to check")
+	}
+	if why := protectedStatementRefusal(driver, req.Query); why != "" {
 		return protectedRefusal("this connection is protected, and that statement is not a read: %s", why)
 	}
 	return nil

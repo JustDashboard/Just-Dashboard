@@ -37,6 +37,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/remotedesk"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
@@ -83,8 +84,10 @@ type moduleSet struct {
 	// from it.
 	requests *accesslog.Store
 	// trafficAlerts watches the request record for the rules operators set,
-	// and tells the notification channels when one crosses its line.
+	// and tells the notification channels when one crosses its line;
+	// dbAlerts does the same for the databases' readings and their backups.
 	trafficAlerts *deploy.TrafficAlertEvaluator
+	dbAlerts      *dbAlerts
 	dbs           *dbx.Manager
 	linuxUsers    *linuxusers.Service
 	netsec        *netsec.Service
@@ -98,6 +101,9 @@ type moduleSet struct {
 	dnsServices     *dnsservice.Service
 	networkVantages *netvantage.Service
 	ipam            *netipam.Service
+	// remoteDesktop keeps the computers sessions open to and runs guacd,
+	// the container that speaks RDP and VNC on the browser's behalf.
+	remoteDesktop *remotedesk.Service
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
@@ -124,6 +130,7 @@ type moduleSet struct {
 	deploySchedule   *deploy.AutomationScheduler
 	deployGit        *deploy.GitWatcher
 	deployDatabases  *deploymentDatabaseNetworks
+	poolers          *poolerKeeper
 	deployPreviews   *deploy.PreviewQuarantineController
 	deployRuntime    *deploy.DockerRuntimeOwner
 	// deployExecutor is the normalized release path, kept for the tailnet
@@ -227,6 +234,7 @@ func (s *Server) initModules() {
 	s.modules.netsec = netsec.New()
 	s.modules.blocks = netsec.NewBlocks(s.Store.DB, s.modules.netsec)
 	s.modules.networkVantages = netvantage.New(s.Store, s.Sealer)
+	s.modules.remoteDesktop = remotedesk.New(remotedesk.Options{DB: s.Store.DB, Seal: s.Sealer.Seal, Open: s.Sealer.Open, Engine: remotedesk.NewDockerEngine(s.Cfg.DockerHost), Bridge: s.remoteDesktopBridge(), Tailnet: s.remoteDesktopTailnet, Warm: s.remoteDesktopWarm})
 	s.modules.dnsServices = dnsservice.New(dnsservice.Options{DB: s.Store.DB, Seal: s.Sealer.Seal, Open: s.Sealer.Open, Runtime: dnsservice.NewDockerRuntime(s.Cfg.DockerHost)})
 	s.modules.network = netx.New(netx.Options{
 		Paths:               netx.DefaultPaths(),
@@ -271,6 +279,7 @@ func (s *Server) initModules() {
 	s.modules.deployer = deploy.NewDeployer(s.modules.deployStore, s.Log)
 	s.modules.deployRuns = deploy.NewOrchestrationStore(s.Store)
 	s.modules.deployDatabases = &deploymentDatabaseNetworks{server: s}
+	s.modules.poolers = &poolerKeeper{server: s}
 	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots).WithDatabaseURLResolver(s.modules.deployDatabases.ResolveVariable)
 	s.modules.githubApp = githubapp.New(githubapp.NewStore(s.Store.DB, s.Sealer), s.modules.deployPlanning)
 	s.modules.deployPlanning.WithInstallationTokens(s.modules.githubApp)
@@ -356,6 +365,7 @@ func (s *Server) initModules() {
 			return s.modules.deployAutomation.DeliverNotification(ctx, nil, channelID, envelope)
 		},
 		s.trafficAlertNames, s.Log)
+	s.modules.dbAlerts = s.newDBAlerts()
 	s.modules.deployGit = deploy.NewGitWatcher(s.modules.deployRuns, s.modules.deploySources, s.dispatchGitDeployment)
 	s.modules.pullRequests = newPullRequests(s.modules.github, s.modules.githubApp, s.modules.git)
 	s.modules.previewReconciler = deploy.NewPreviewReconciler(s.modules.deployAutomation, s.modules.pullRequests, s.closePreviewTarget, s.Log)

@@ -28,6 +28,8 @@ import {
 import { FleetBand } from "@/components/database/fleet/fleet-band"
 import { FleetCard } from "@/components/database/fleet/fleet-card"
 import { FleetTable } from "@/components/database/fleet/fleet-table"
+import { McpServer } from "@/components/database/fleet/mcp-server-dialog"
+import { MetricsExport } from "@/components/database/fleet/metrics-export-dialog"
 import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { Shelves } from "@/components/database/fleet/shelves"
 import { useAddress, useTypedParam } from "@/components/database/fleet/use-address"
@@ -38,6 +40,7 @@ import { Wiring } from "@/components/database/fleet/wiring"
 import { EngineGlyph } from "@/components/database/kit"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { DATABASES_MAP_HREF } from "@/components/database/shell/routes"
+import { fleetStatus, statusTone } from "@/components/database/shell/status"
 import { Segments } from "@/components/deploy/settings/segments"
 import { IconAction } from "@/components/icon-action"
 import {
@@ -86,14 +89,15 @@ const OFFERED = ["postgres", "redis", "mongodb"]
  * edge. Then the fleet itself: every saved connection as a card you open,
  * drawn as its engine with its own readings on it, shelved by where it runs —
  * or laid across as a table when there are many to compare. Under it the
- * picture of what the databases feed, and what discovery found on this
+ * picture of what the databases feed — the ones nothing is seen reading named
+ * under it, each a way to its own page — and what discovery found on this
  * machine that is not connected yet.
  *
  * It opened on a "Needs attention" list until the operator asked for it to
  * go. Nothing it said was lost: every concern is still said, in its weight,
  * where the thing is — the verdict and the first card on a shelf for a server
- * that does not answer, the runway and the card's foot for a dump that is old
- * or missing, the card's foot for a port open to the internet, and *Found on
+ * that does not answer, the Backups block and the card's foot for a dump that
+ * is old or missing, the card's foot for a port open to the internet, and *Found on
  * this server* for a server that waits for a password. The cards are still
  * ordered worst first, so what needed a hand is still what is met first.
  *
@@ -139,7 +143,7 @@ export function ControlCenter() {
   const [query, setQuery] = useTypedParam("q")
   const { fleet, entries, backups, feeds, concernsOf, storedOf, topology, dumps } = data
   // Each database's hue, dealt once for the whole fleet so a filter never
-  // repaints one: the band's spans, the runway's dots, the cards' edges.
+  // repaints one: the band's spans and keys, the cards' size bars.
   const hues = useMemo(() => fleetHues(entries), [entries])
   const hueOf = useCallback(
     (entry: DbFleetEntry) => hues.get(entry.id) ?? "var(--tag-blue)",
@@ -181,11 +185,18 @@ export function ControlCenter() {
     [fleet.data],
   )
 
-  // A database node on the map is its connection: drawn as what answered.
+  // A database node on the map is its connection: drawn as what answered,
+  // with the card's own dot in its corner.
   const byId = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries])
+  const entryOf = (node: DbTopoNode) =>
+    node.connId === undefined ? undefined : byId.get(node.connId)
   const engineOfNode = (node: DbTopoNode) => {
-    const entry = node.connId === undefined ? undefined : byId.get(node.connId)
+    const entry = entryOf(node)
     return entry ? engineFor(entry) : engineOf(node.product ?? "")
+  }
+  const stateOfNode = (node: DbTopoNode) => {
+    const entry = entryOf(node)
+    return entry ? statusTone(fleetStatus(entry).state) : undefined
   }
 
   // The page's picture is of what is wired: a database nothing reads is on
@@ -376,12 +387,16 @@ export function ControlCenter() {
         aside={
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
             {verdict && <Status tone={verdict.tone} label={verdict.label} />}
-            {admin && (
-              <span className="flex items-center gap-2">
-                {scan}
-                {add}
-              </span>
-            )}
+            <span className="flex flex-wrap items-center gap-2">
+              <MetricsExport admin={admin} />
+              <McpServer />
+              {admin && (
+                <>
+                  {scan}
+                  {add}
+                </>
+              )}
+            </span>
           </div>
         }
       />
@@ -555,11 +570,29 @@ export function ControlCenter() {
         {topology.data ? (
           topology.data.edges.length > 0 ? (
             <>
-              <Wiring topology={topology.data} keep={feeding} engineOf={engineOfNode} compact />
+              <Wiring
+                topology={topology.data}
+                keep={feeding}
+                engineOf={engineOfNode}
+                stateOf={stateOfNode}
+              />
               {unread.length > 0 && (
-                <p className="text-hint text-muted-foreground">
-                  Nothing has been seen reading {unread.map((node) => node.name).join(", ")}.
-                </p>
+                <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 border-t border-hairline pt-4">
+                  <span className="text-hint text-muted-foreground">Nothing seen reading</span>
+                  <ul className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2">
+                    {unread.map((node) => (
+                      <li key={node.id} className="min-w-0">
+                        <Link
+                          href={node.href ?? DATABASES_MAP_HREF}
+                          className="flex min-w-0 items-center gap-2 rounded-sm text-body text-muted-foreground focus-ring transition-colors hover:text-foreground"
+                        >
+                          <EngineGlyph engine={engineOfNode(node)} className="size-4" />
+                          <span className="truncate">{node.name}</span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </>
           ) : (

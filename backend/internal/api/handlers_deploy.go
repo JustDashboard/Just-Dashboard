@@ -84,7 +84,6 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/{id}/run", s.handle(s.handleDeployRun))
 			r.Method(http.MethodPost, "/{id}/environments/{env}/runs", s.handle(s.handleDeploymentRunCreate))
-			r.Method(http.MethodPost, "/{id}/environments/{env}/check", s.handle(s.handleDeploymentCheck))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/cancel", s.handle(s.handleDeploymentRunCancel))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/retry", s.handle(s.handleDeploymentRunRetry))
 			// Merging and commenting speak on GitHub as the dashboard's own

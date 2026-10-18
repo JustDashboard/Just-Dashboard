@@ -1,14 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import {
-  backupRunway,
+  backupAges,
+  backupCounts,
   DATABASE_HUES,
   fleetHues,
   fleetMarks,
   fleetVerdict,
   readerCount,
-  RUNWAY_DAYS,
   shares,
-  STALE_AT,
 } from "./band"
 
 const NOW = Date.parse("2026-10-11T12:00:00Z")
@@ -96,7 +95,7 @@ describe("a figure shared across the fleet", () => {
   })
 })
 
-describe("the backup runway", () => {
+describe("the backups block", () => {
   const newest = new Map([
     [1, hoursAgo(2)],
     [2, hoursAgo(24 * 3)],
@@ -112,7 +111,7 @@ describe("the backup runway", () => {
     entry({ id: 6, name: "cache", driver: "redis" }),
     entry({ id: 7, name: "gone", state: "broken", broken: true }),
   ]
-  const rows = backupRunway(fleet, {
+  const rows = backupAges(fleet, {
     newestOf: (e) => newest.get(e.id),
     dumps: (e) => e.driver !== "redis",
     now: NOW,
@@ -133,12 +132,15 @@ describe("the backup runway", () => {
     })
   })
 
-  test("a dump sits where its age puts it on a fortnight, and an older one at the far end", () => {
-    const at = Object.fromEntries(rows.map((r) => [r.entry.name, r.position]))
-    expect(at.never).toBeUndefined()
-    expect(at.ancient).toBe(1)
-    expect(at.aging).toBeCloseTo(3 / RUNWAY_DAYS, 5)
-    expect(STALE_AT).toBeCloseTo(7 / RUNWAY_DAYS, 5)
+  test("a never-dumped database has no age, rather than the oldest one", () => {
+    const age = Object.fromEntries(rows.map((r) => [r.entry.name, r.age]))
+    expect(age.never).toBeUndefined()
+    expect(age.aging).toBe(3 * 24 * 3_600_000)
+  })
+
+  test("the bar counts each standing once, and a standing nobody holds as zero", () => {
+    expect(backupCounts(rows)).toEqual({ fresh: 1, aging: 1, stale: 2, never: 1 })
+    expect(backupCounts([])).toEqual({ fresh: 0, aging: 0, stale: 0, never: 0 })
   })
 })
 

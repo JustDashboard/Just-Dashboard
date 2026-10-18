@@ -38,6 +38,9 @@ func schemaRouter(t *testing.T, role auth.Role) (*Server, http.Handler, *sql.DB)
 	// The audit middleware is mounted as it is in the real router, so what a
 	// handler records — and what a preview does not — can be read back.
 	r.Use(httpx.AuditMutations(s.Audit))
+	// A preview of every structure route is more destructive requests than the
+	// budget's burst of ten, and the budget has tests of its own.
+	s.destrLim = httpx.NewLimiter(1<<20, 1<<20)
 	s.mountDatabaseRoutes(r)
 
 	path := filepath.Join(s.Cfg.FileRoots[0], "shop.db")
@@ -579,7 +582,15 @@ func TestEveryStructureRouteCanBeShownWithoutRunning(t *testing.T) {
 		"POST /ddl/comment":       `{"table":"orders","comment":"x"}`,
 		"POST /ddl/enum":          `{"name":"state","values":["new"]}`,
 		"POST /ddl/enum/value":    `{"name":"state","value":"done"}`,
+		"POST /ddl/policy":        `{"table":"orders","name":"mine","using":"true"}`,
+		"PATCH /ddl/policy":       `{"table":"orders","name":"mine","using":"true"}`,
+		"PATCH /ddl/row-security": `{"table":"orders","enabled":true}`,
+		"DELETE /ddl/policy":      `{"table":"orders","name":"mine"}`,
 		"POST /ddl/truncate":      `{"table":"customers"}`,
+		"POST /ddl/routine":       `{"kind":"function","name":"f","language":"sql","returns":"int","body":"SELECT 1"}`,
+		"POST /ddl/trigger":       `{"name":"orders_stamp","table":"orders","timing":"after","events":["insert"],"forEach":"row","body":"SELECT 1"}`,
+		"DELETE /ddl/routine":     `{"kind":"function","name":"f"}`,
+		"DELETE /ddl/trigger":     `{"name":"orders_touch","table":"orders"}`,
 		"DELETE /ddl/table":       `{"table":"orders"}`,
 		"DELETE /ddl/column":      `{"table":"customers","name":"name"}`,
 		"DELETE /ddl/index":       `{"table":"orders","name":"orders_customer"}`,
@@ -623,8 +634,8 @@ func TestEveryStructureRouteCanBeShownWithoutRunning(t *testing.T) {
 			t.Errorf("%q is in this test and is not a route", key)
 		}
 	}
-	if shown != 10 {
-		t.Errorf("%d routes showed a statement, want the ten SQLite has one for", shown)
+	if shown != 12 {
+		t.Errorf("%d routes showed a statement, want the twelve SQLite has one for", shown)
 	}
 	if after := schemaText(t, db); after != before {
 		t.Errorf("a preview changed the database:\n%s\n---\n%s", before, after)

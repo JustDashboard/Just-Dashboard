@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { heldResponse, recordProgress } from "./progress-recording"
 
 const now = "2026-09-22T12:00:00Z"
 const sha = "a".repeat(40)
@@ -1182,4 +1183,94 @@ test("open issues are listed under the pull requests and can be answered", async
   await expect
     .poll(() => seen.find((r) => r.path === "/git/github/pulls/9/comment")?.body)
     .toEqual({ body: "On it" })
+})
+
+test("inline file drafts survive another preview and retain their opened revision", async ({
+  page,
+}) => {
+  await fixture(page)
+  let revision = "opened"
+  let content = "one\n"
+  const writes: Record<string, unknown>[] = []
+  await page.route("**/api/v1/files/read**", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        path: "/srv/app/a.txt",
+        content,
+        revision,
+        size: content.length,
+        language: "plaintext",
+        binary: false,
+        modeOctal: "0644",
+      }),
+    }),
+  )
+  await page.route("**/api/v1/files/write", (route) => {
+    const body = route.request().postDataJSON()
+    writes.push(body)
+    return route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "content_conflict", message: "Changed on disk" } }),
+    })
+  })
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+  await page.getByRole("button", { name: "a.txt", exact: true }).click()
+  await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await page.locator(".monaco-editor").click()
+  await page.keyboard.press("Control+End")
+  await page.keyboard.insertText("UNSAVED DRAFT")
+  await page.getByRole("button", { name: "Blame", exact: true }).click()
+  revision = "external"
+  content = "native edit\n"
+  await page.getByRole("button", { name: "a.txt", exact: true }).first().click()
+  await expect(page.locator(".monaco-editor")).toContainText("UNSAVED DRAFT")
+  await expect(page.getByRole("alert").filter({ hasText: "Your draft is kept" })).toContainText(
+    "Your draft is kept",
+  )
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect.poll(() => writes.length).toBe(1)
+  expect(writes[0].expectedRevision).toBe("opened")
+  const storage = await page.evaluate(() =>
+    JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }),
+  )
+  expect(storage).not.toContain("UNSAVED DRAFT")
+  expect(
+    await page.evaluate(
+      () => !window.dispatchEvent(new Event("beforeunload", { cancelable: true })),
+    ),
+  ).toBe(true)
+  await page.getByRole("button", { name: "Discard draft and reload", exact: true }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "Discard", exact: true }).click()
+  await expect(page.getByRole("button", { name: "1 unsaved file", exact: true })).toHaveCount(0)
+  expect(
+    await page.evaluate(
+      () => !window.dispatchEvent(new Event("beforeunload", { cancelable: true })),
+    ),
+  ).toBe(false)
+})
+
+test("progress: cloning a repository keeps the task and elapsed time visible", async ({ page }) => {
+  await fixture(page)
+  const held = await heldResponse(page, "/git/clone", {
+    path: "/srv/new",
+    result: { command: "git clone", output: "Cloned", ok: true },
+  })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/git")
+  await page.getByRole("button", { name: "Add repository", exact: true }).click()
+  await page.getByLabel("Repository URL", { exact: true }).fill("https://github.com/acme/new.git")
+  const dialog = page.getByRole("dialog", { name: "Add a repository" })
+  await recordProgress(
+    page,
+    "git-clone",
+    () => dialog.getByRole("button", { name: "Clone", exact: true }).click(),
+    dialog.locator("[data-slot=operation-progress]"),
+    async () => {
+      held.release()
+      await expect(dialog).toHaveCount(0)
+    },
+  )
+  expect(held.calls()).toBe(1)
 })

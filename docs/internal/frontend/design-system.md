@@ -9,6 +9,11 @@ Two earlier documents and the lint plugin's own header pointed at
 `docs/plans/design-system-unification/reference.md`, which was never committed on any branch. This
 file replaces that reference.
 
+Current product behavior (0.7.5): automatic Attention/Needs attention sections, recommendation
+comparisons, Advisor and navigation attention marks have been removed. Historical layout examples
+below describe the earlier pages; their attention blocks are no longer part of those page passes.
+Requested diagnostic reports and operational validation remain.
+
 ## 1. One mode
 
 **The product is dark. There is no light palette, and there is no theme switch.**
@@ -83,7 +88,7 @@ taking a frame:
   `ChoiceList`, or on the fleet's grid a project's own `SpotlightBorder` card with the same lit
   edge (what kept a frame there was, first, a *picture*, on the argument that a picture needs an
   edge to read as one thing — the settings pages' four were framed until 0.7.1 and now stand
-  unframed over `wire-grid`, as below, each inside its section and drawn through
+  unframed on the page's own ground, as below, each inside its section and drawn through
   `settings/setting-picture.tsx` or, for Automation's, `settings/automation/wiring.tsx`: General's
   push to a deployment, Runtime's where it
   listens (the domain, this server, the container, with an amber *Anywhere* node when the port is
@@ -103,8 +108,11 @@ taking a frame:
   `WireMark` stands on the same rounded square whatever its tone, a thing's own glyph on the
   `logo` tone, and the only circle left in a picture is the dashed ring of a thing not added yet
   (`WirePlaceholder`). The Databases map, Configuration's request path, a site's route map and the
-  rollback dialog's picture took the page's own ground over `wire-grid` with the rest in 0.7.1,
-  the map giving up the frame it kept as the last picture with one. The rollback dialog holds a
+  rollback dialog's picture took the page's own ground with the rest in 0.7.1, the map giving up
+  the frame it kept as the last picture with one. Until 0.7.5 every picture stood over a dot grid
+  that faded out towards its edges (`wire-grid`); the Databases pictures gave it up first and then,
+  at the operator's request, every other picture did, and the class is gone: a picture stands on
+  the page's ground alone. The rollback dialog holds a
   small one of its own — your domains wired
   to the live release by a still line and to the release you are going back to by a dotted one,
   which is the line that carries once Roll back is pressed. The same vocabulary
@@ -116,10 +124,9 @@ taking a frame:
   Notifications — the projects on the left, this server in the middle, a mark per channel on the
   right, dashed rings for the kinds not yet added — and the GitHub App on Credentials — the
   accounts that installed it, the App and this server, with its setup path under it — stand on the
-  page's own ground over `wire-grid`, as does the map a project's Runtime opens on (its domains,
+  page's own ground, as does the map a project's Runtime opens on (its domains,
   the containers answering them, and the volumes, folders and databases those keep, in three lanes
-  with `shape="s"` wires, `deploy/runtime-map.tsx`) — the dot grid that fades out towards its edges, which gives a
-  picture a middle where a border gave it an outline. General's automatic deployment (the
+  with `shape="s"` wires, `deploy/runtime-map.tsx`). General's automatic deployment (the
   repository, the watch with when it last looked, the deploys, and the last check's decision on
   one line under them) took the same ground in 0.7.1 at the operator's request: its frame was the
   one box on a page of hairlines, and the decision's sentence had sat in the section head's status
@@ -163,7 +170,7 @@ taking a frame:
   `RowList`, beside Restart and Rebuild as two `ChoiceCard`s), the restart record, and the settings
   as `FormSection aside`s, each head over its fields — the framed things on those two pages are the
   transcript console, which is a `Pane`, and the cards you pick; the Backups page —
-  a picture of where the server's data goes, on the page's own ground over `wire-grid` (what it
+  a picture of where the server's data goes, on the page's own ground (what it
   has by kind, wired through this server to every directory and bucket a job writes to), an
   attention list of the jobs that failed or went quiet, the jobs as destination cards (a
   `ChoiceList`, each drawn as the products it covers, with its destination's mark and its last
@@ -171,9 +178,14 @@ taking a frame:
   much is covered — every thing on it is taken, opening the job that covers it or the form written
   for it — with a job's own page opening on an identity line and its own picture over its
   readings, and its runs one frame around a rail of the runs and an inspector of the picked one,
-  the run page's Details shape; the five account pages — the profile's identity line, readings and capability rows,
-  sessions and keys as rows under plain panels where a framed table used to be, the users as cards
-  in a `ChoiceList`, and Security as `FormSection aside`s; and the four views on
+  the run page's Details shape; the six account pages — no tiles on any of them: the profile's identity line over everything
+  signed in as the account wired into its face and the roles as a ladder, Sessions' identity line over
+  the path each session takes and rows that carry its life on a shared axis, the keys wired through
+  their roles into the API over rows under chips, the users' identity line and band over cards in a
+  `ChoiceList` under chips, Security's picture of what a sign-in passes over `FormSection aside`s two
+  to a row, and Workspace as the first-run purposes'
+  lit cards, the experimental one carrying its amber tag, beside the rail itself, the one frame, in the
+  sidebar's ground with a switch on each row it may hide; and the four views on
   Packages — the installed and updates tables, the software search and the package Log (its `Pane`
   on the page's ground, no panel around it), under one underlined strip
   (`tabClasses`) rather than a filled tab list, beneath the host's identity and the software-size
@@ -399,6 +411,10 @@ deleted.
 Reveal only where the controls share their space with something else. Where they have a column of
 their own — a container card's actions slot — use `DimActions` instead: always drawn, one step of opacity until
 the pointer is on the row. A reserved column left empty reads as a layout bug, not as an affordance.
+The Data page's rail is the shared case: a row's menu takes the place of its row count under the
+pointer, in the same grid cell, and the count's slot is at least the menu's width so the menu never
+covers the name. With a column of its own, every count stood a button's width short of the edge the
+rail's headings end on.
 
 ## 7. Which surface
 
@@ -419,6 +435,17 @@ Before these existed, fourteen pages read as fourteen products.
 
 `Modal`, `PaletteModal` and `SidePanel` are the only assemblers of raw `Dialog` and `Sheet`, and
 `no-restricted-imports` enforces it. A page never opens one itself.
+
+**A conversation is a column of the workbench, not a window over it.** The SQL editor's assistant
+(`database/query/assistant/`) is the editor's third column, on its right with a hairline and a resize
+handle, and lies over the editor like the rail where the frame cannot hold three columns. A question is
+a recessed block on `--surface-header` with what it carried as `Tag`s (*statement*, *result · 20
+rows*), never their values; an answer is the product's Markdown on the pane's own ground, and a
+statement in it is a sunken block with its verbs in words — *Open in a tab*, *Insert*, *Copy* —
+drawn only once the answer has finished, because a statement still arriving may not be whole. A
+request the model makes of the reader is a fence with the two answers as buttons (*Allow*, *Don't
+allow*) that becomes one word once answered. Where the question is written, one line says who it goes
+to and what of the database goes with it, and turns amber while rows are attached.
 
 **What goes inside a task surface is `components/form.tsx`.** A `Field` is a label at `text-body`,
 a control, and one line under it — a hint, or the error while there is one; `FieldRow` puts two or
@@ -453,7 +480,7 @@ keeps its name from that column, and now means a section of the page rather than
 
 **Where the column sits is the page's call.** A page that is only a form centres it: the nine
 project settings pages (`SettingsPage` centres its strip and readings with it, so they line up with
-the fields), a game server's settings, the account's Security and a database's Settings. A 48rem
+the fields), a game server's settings, the account's Security and each of a database's Settings pages. A 48rem
 column against the left edge of a wide page left the rest of it an empty band nothing explained. A
 form that is one block among full-width ones keeps their left edge instead — the proxy pages'
 password files, access lists, backups and watched domains, Security's findings and SSH — because
@@ -500,9 +527,35 @@ of the latest copy. A refused form keeps its edits and says why under the field,
 with what is left; when everything went through it says *Saved* and when it applies, then leaves —
 so the forms no longer toast their own success. A clean page has nothing to save and no button:
 re-checking an untouched Source means saving an edit to it. The game server's settings take the
-same bar, and hold its Save while a value is outside its declared range. Each form keeps its draft keyed on
+same bar, and hold its Save while a value is outside its declared range; so does Account → Workspace,
+whose purposes and rail switches are one draft of the sidebar, and the profile, whose display name
+and sign-in name are a draft beside the rail's card drawn from it (the picture still applies the
+moment it is chosen). Each form keeps its draft keyed on
 a digest of its own saved value (`useSettingDraft`): every save writes a new revision of the whole
 configuration, and a draft keyed on the revision was thrown away by a save of the section beside it.
+
+**A database's Settings are that shape too, as pages.** They were one page of six sections under a
+sticky strip of anchors, and the section a reader most often came for — the danger zone, one
+parameter — was the one at the foot of six screens. Since the 2026-10-16 pass each is a page of its
+own, listed under a *Settings* group in the database's rail the way a project's are
+(`database/shell/settings-pages.ts` beside `PROJECT_SETTINGS_NAV`): General, Network, Resources,
+Parameters, Extensions (a key–value server's *Modules*), Version and Danger zone, each
+listed only where the engine has it, Version only for an administrator and the danger zone only for a
+role that may destroy. What else
+the server holds is not among them: it changes nothing about the connection, and Home's *Databases on
+this server* already lists it with Connect and New database, so the old `#databases` anchor opens Home. Every page
+is one centred column of `SettingSection`s under the page's one save bar, and the labels and the
+protection switch are one `SettingForm` over two sections, saved there rather than by a button of
+their own. Two of them open on a `SettingPicture` on the page's ground, as the section's other
+pictures stand: General draws the address as the way the dashboard reaches it
+(this server, the account it signs in as, the server as its product, the database it opens), Network
+who can reach the port (this machine's programs and *Anywhere*, through the container as Docker's
+whale, to the server; amber while it is published on every interface, dashed while nothing outside
+reaches it). Access opens on who signs in, each account
+wired to the server and pulsing while it holds sessions, and Backups on where the dumps go — the
+database and its schedule, this server's dump tool, the directory — the line in the colour of how
+recent the newest dump is. An address from the one-page Settings (`#danger`, `#reachability`, a
+parameter search `?q=`) is sent on to the page that holds it.
 
 **A sheet is the same anatomy wherever it opens**, which is `SidePanel`'s doc comment and `Modal`'s
 too. The deployment section's sheets each put a different body in the one frame — a `Select` for a
@@ -672,6 +725,12 @@ loads both in `app/layout.tsx` at weights 200–900 and emits `--font-source-san
 `globals.css` puts it ahead of the system fallback. Nothing at build or run time reaches out to a
 font CDN. `--font-mono` stays fixed-width for terminals, source code, and technical identifiers.
 
+**Glyphs are laid out at their real widths.** Chromium on Linux hints a web font and rounds every
+glyph's advance to a whole pixel, and against the body's −0.02em tracking that broke the 11–13px
+lines into uneven pieces — "No tes", "Emp ty", a hint reading "Howitis listed" — at any device
+scale. `body` sets `text-rendering: geometricPrecision`, which lays glyphs out at their true
+advances there; macOS and Windows already did.
+
 The ladder is `text-micro` (10) → `text-hint` (11) → `text-xs` (12) → `text-body` (13) →
 `text-sm` (14) → `text-title` (15). An arbitrary `text-[Npx]` is a departure from it, and the linter
 says so.
@@ -702,7 +761,9 @@ menu rows are at least 32px on desktop and 44px on a phone, with the same hover 
 right-hand check for a selected option. Reduced motion removes the opening animation.
 
 `SelectTrigger` composes the shared outline `Button`, so its border, focus ring and press feedback
-are the button's. A select opens below its trigger with a 4px gap, aligned to its starting edge;
+are the button's. Its chevron turns on the trigger's own `data-state`: it keyed off
+`in-data-[state=open]`, which matches any open ancestor, so every select inside a dialog or a sheet
+pointed up while it was shut. A select opens below its trigger with a 4px gap, aligned to its starting edge;
 Radix can flip it above or constrain it to the viewport when space runs out. Its width accommodates
 the trigger and its options, without an ownership-specific minimum width. Arrow keys, typeahead,
 Home/End, Escape, focus restoration and scrolling remain the primitive's responsibility.
@@ -711,8 +772,13 @@ Home/End, Escape, focus restoration and scrolling remain the primitive's respons
 beneath it, never at the far end of a second column. `SelectItem` uses this for its `hint`, outside
 `ItemText`, so metadata is excluded from the option's accessible name and the value copied into the
 closed trigger. `CredentialSelect` keeps the host's glyph beside the name and the host and kind
-below it. File locations, terminal snippets, database switchers, saved queries, column pickers and
-export menus use the same text component. Keyboard shortcut hints retain their end alignment.
+below it. File locations, terminal snippets, database switchers, saved queries and export menus use
+the same text component. Keyboard shortcut hints retain their end alignment. A one-word property
+stays on the option's own line instead: a column picker's option (the Data page's Sort and Columns
+menus) is the column as its grid header names it, the name and then its type as a mono `Tag`, and a
+schema picker's option ends on the schema's count where the rail under it ends its rows' figures.
+Beneath the name, each was a few characters on a line of their own, which made every option twice
+the height of the rows it was chosen beside.
 
 `OwnershipSelect`, shared by deployment domains, mounts and volume dependencies, offers only
 Managed, Linked and (where supported) Observed in the menu. Its button shows the chosen word;
@@ -836,6 +902,11 @@ rather than assembling its own recharts tree — adding a measurement should mea
   along the axis — furthest from the line the reader is following — and two overlapping areas mix
   into a third colour belonging to neither series. Stacked series keep a solid fill: there the block
   *is* the quantity.
+- **A column of charts read against each other takes one gutter.** The y-axis gutter fits its labels,
+  which puts a chart's plot wherever its widest label ends; `axisWidth` on `ChartPanel` fixes it
+  instead, so the four charts of a statement's history (Performance → Statement history) start their
+  plots on one line. Fitted there, inside the sheet, the gutter came out narrower than its labels and
+  clipped them.
 - A chart's `height` is a **floor**, not a fixed size. Panels in a row stretch to the tallest of
   them, and a fixed plot puts the surplus between the chart and its legend as a band of nothing.
 - **A scale fitted a little above a limit splits into unround steps** (143 / 286 / 429 MB), so
@@ -859,6 +930,12 @@ rather than assembling its own recharts tree — adding a measurement should mea
   tile's trend band then collapses rather than leave a gap. With a fixed `max` a flat line sits at
   its level and says so. Its colour is a series colour, never a status one: a failing share is
   `--chart-3`, because `--destructive` on a line says the line itself is an error (§3).
+- **A part of a tree is one bar of two inks.** A measured plan step's time on the Query page
+  (`query/plan-view.tsx`) is drawn against the whole plan's: the step's own share in the time
+  series' colour and, behind it at a third of that ink, the share of the step with everything under
+  it. One bar says what the step took and what its branch took, and only the solid inks down the
+  plan add up to the whole. The figure beside it is the step's own, which is what "slowest first"
+  orders by.
 
 ## 11. Motion says one of four things
 
@@ -874,6 +951,18 @@ levels rather than between pages:
 | `animate-rise` | this was not here a moment ago | Opacity and four pixels, once, on arrival: a panel that appears, a disclosure that opens, a sparkline whose data landed. |
 | `animate-sweep` | this is working, and cannot say how far along | An indeterminate bar for a pull or a prune, where a spinner in the corner of a wide panel is too small to be the answer. |
 | `animate-drill` | you crossed a level | `rise` turned sideways, for the one place where a list is replaced by a list: the sidebar going into a section and back out. The direction *is* the message — in arrives from the right, out from the left — so the distance is `--drill-from` at the call site, not in the keyframe, and a panel that merely re-rendered does not move at all. |
+
+`OperationProgress` is a dialog's reading for an action in flight: its name, elapsed time and one
+thin track. It exists only inside `Modal`, which draws it as part of its footer rather than as a
+surface of its own — no border, ground or shadow (§2). The name and a hint line (elapsed time, a
+measured count, the latest detail) take the footer's free side beside the buttons, each cut to one
+line, and the footer's top hairline becomes the track. The footer keeps its height and the dialog its
+frame when work starts; where the buttons leave the words too little room, as on a phone, the words
+take the footer's first line. With no measured total the track spends `animate-sweep`; a reported
+item or byte count fills it instead. An upload reaching its total switches to an indeterminate
+processing reading until the server answers. Elapsed time is not a completion estimate or a server
+heartbeat. The timer is excluded from the live region, the track has a named `progressbar` role, and
+reduced motion leaves a static full track. Pages, workbenches and job consoles draw no working bar.
 
 **`rise` is expected wherever a fetch settles**, not reserved for special occasions. The Overview is
 the reference: the page rises once when its first snapshot lands; each sparkline when its hour of
@@ -933,8 +1022,9 @@ above:
   participles that stand for a wait — *Sending test…*, *Testing…*, *Pausing…*, *Candidate for
   release #14*, *deploying #14*, *running now*;
 - *once* — `Confetti` fires only when a release goes live in front of the reader — on the run page,
-  and on the Overview when a run watched there from start to finish ends in success — never on
-  arrival, and never for a Stop, which takes the release down.
+  on the Overview when a run watched there from start to finish ends in success, and from the
+  sidebar's update notice when an update of the dashboard itself finishes while the tab is open —
+  never on arrival, and never for a Stop, which takes the release down.
 
 `animate-sweep` is spent the same way, on the three waits in the section that cannot say how far
 along they are: a credential's test while the server tries it, the website preview while the site
@@ -966,6 +1056,16 @@ lines through the same painter and the same drip (`components/transcript-line.ts
 consoles cannot drift into two answers to what a live log looks like. The version history's
 timeline took its layout from Aceternity's and Magic UI's timelines — the sticky label, the rail —
 and not their scroll-driven gradient beam, which is a motion this section does not have.
+
+The sidebar's update notice (`components/update/update-notice.tsx`) says the same things at the
+rail's scale. Its row of two versions is a wire (`UpdateWire` in `components/update/update-art.tsx`)
+with `AnimatedBeam`'s pulse running from the installed version to the newest, drawn as a flex item
+rather than measured between two elements, so a dialog zooming in as it opens cannot leave it
+pointing at where its ends were; it goes still once the run has finished or failed. Under it, what
+the releases bring is a band of the change kinds' own hues whose spans draw out one after another
+as the notice lands (*arrived*, once). While an update runs, `BorderBeam` runs round the notice, the
+stage it is at is the update's own three `Segment`s with its name in `TextShimmer`, and an update
+that succeeds while the tab watches fires the confetti above.
 
 Magic UI's `animated-circular-progress-bar` was tried beside the release path and removed: a ring
 saying "100%" next to a header saying "Ready" was the same fact twice, and the timeline now shows how
@@ -1263,6 +1363,13 @@ sits beside a card's words rather than in front of a header's title — and the 
 stays muted, because four *kinds* are not four products. A repository row on the Git tab carries its
 owner's picture on the same reasoning: the face is the account, which a glyph could only guess at.
 
+An extension or a module on a database's Settings is drawn as the product it belongs to, on the
+same tile: what PostgreSQL ships in its contrib package and its own `plpgsql` as the elephant, a
+server's plugin catalogue as that server, a key–value server's loaded modules as it, TimescaleDB as
+its own mark, and anything else as a plain puzzle piece rather than a mark guessed from its name.
+They had no mark at all, on the argument that one glyph down sixty rows says nothing sixty times;
+drawn as their products they tell what came with the engine from what somebody added to it.
+
 The same marks carry into Docker and Databases, because they are the same products. A container,
 an image and a stack's service are drawn as the product their image is (`imageProduct` reads the
 last segment of the reference; anything it cannot name is Docker's whale). A container whose reference
@@ -1347,8 +1454,8 @@ the game can say — the address a player types, the edition, how full it is —
 game nor its name again.
 
 **The Security section draws what it watches.** All eight pages use the reading register, and
-since 0.7.1 the overview, Firewall and SSH each draw a wiring picture on the page's own ground over
-`wire-grid`, in the `WireNode`/`AnimatedBeam` vocabulary the deployment and Configuration pictures
+since 0.7.1 the overview, Firewall and SSH each draw a wiring picture on the page's own ground,
+in the `WireNode`/`AnimatedBeam` vocabulary the deployment and Configuration pictures
 speak, with the line as the state (dashed where a layer is missing, red where one is off, amber
 where it works but should not be relied on, moving where it carries). The overview's
 (`perimeter.tsx`) is the two ways onto the machine — the internet's through the firewall, fail2ban
@@ -2249,6 +2356,41 @@ The passes, in order. Each one is a diff you can review on its own.
    sessions are signed in sit in the heads of the sections that change them — and Sessions opens on
    the session it is read through, with the count of the rest on their header.
 
+   The account pages took the exit together in 0.7.5, at the operator's request — "no metric cards,
+   make them feel alive, real logos and colouring" — with the deploy pages and Configuration as the
+   reference: every figure the tiles gave became a wire, a chip or a verdict, and each page gained a
+   picture in the wiring vocabulary. The profile's four (two-factor, sessions, keys, users) are the
+   identity line's verdict and the shield on the account's face, the two sides of *Signed in as you*
+   (`components/account/access-picture.tsx`: the sessions as their browsers wired into the face, the
+   account's own keys as the products holding them wired out of it, each side counted and a way to
+   its page) and, for an administrator, the accounts' faces among the line's facts. The keys page's
+   four (in use, used this week, never used, expiring soon) are the list's count and three chips that
+   count and narrow, and wires in `key-map.tsx`, where each key reaches the API through the role it
+   carries: called today pulses, never called is dashed, about to stop is amber. The users page's four
+   (accounts, administrators, two-factor, signed in this week) are an identity line whose verdict is
+   how many accounts a password alone opens — a press narrowing the cards to exactly those — the
+   chips over the cards, and each card's own readings: its role, what guards it, when it last signed
+   in. A band of three blocks stood between the line and the cards for a while — last sign-ins as dots
+   on an axis ending now, two-factor and roles as share bars — and went at the operator's request ("I
+   don't need the metrics"): every figure in it was already on the cards under it. Sessions had no
+   tiles, and gained the path each session takes (`session-map.tsx`: browser, network, server). Its
+   rows carried each session's life as a bar on an axis every row shared, and that went too, at the
+   operator's request: a dot on a dashed line said less than the *seen 5h ago* beside it. Security gained
+   what a sign-in passes (`sign-in-path.tsx`), where an account with no second factor is a dashed ring
+   with an amber line bowed past it from the password to the server, and its sections went two to a
+   row as Configuration's are. The capability rows became a ladder of the three roles
+   (`role-ladder.tsx`), lit in each rung's hue up to the account's own, so the powers past it say why
+   a page is missing from the sidebar. A role's hue (`ROLE_HUE`: cyan, green, violet — none red or
+   amber) is the same on the ladder, the keys' role nodes and every role tag.
+   The three fan pictures — the profile's, Sessions' and the keys' — draw every node at Configuration's
+   scale, which the operator named as the picture to match: a full-size (`lg`) tile, a word over its
+   name in the eyebrow and a line of detail under it, with addresses in mono. A session's eyebrow is
+   what it is doing (*this device*, green while open; *seen 5h ago*), its detail its address and what
+   let it in; a key's eyebrow is its role; a network's is what it is to the server (*Tailnet*,
+   *Network*, *Loopback*); a role's is *Role*. The shared pieces are `SessionState` and `keyHint` in
+   `components/account/marks.tsx`. On a phone the fans keep only their marks, one size up from before.
+   The reads behind every wire, chip and verdict are `components/account/access.ts` (unit-tested).
+
    The Security section took a second pass in 0.7.1, because the operator found its pages grey and
    still. The overview's figures count up as they land (`NumberTicker`) and Intrusion's carries the
    bans per day as its `TileTrend`; over them, the posture is its seven checks as a coloured strip;
@@ -2322,14 +2464,15 @@ The passes, in order. Each one is a diff you can review on its own.
    press of which narrows the cards to exactly them through a *Needs attention* chip — beside
    Export all, Import and New site. Under it `components/proxy/site-band.tsx` answers what the
    tiles never did: **Traffic**, the hour's requests as spans of one bar in each site's hue with the
-   busiest five as rows and a 5xx share in amber from 1% and red from 5%; **Certificates**, each
-   enabled TLS site on an axis from "ends now" to ninety days, a dot in its hue, the last fortnight
-   washed amber; and **Applications**, what the sites stand in front of drawn as itself, each with
+   busiest five as rows and a 5xx share in amber from 1% and red from 5%; **Certificates**, the
+   enabled TLS sites' certificates counted valid, due for renewal and expired on one `StandingBar`
+   (`components/standing-bar.tsx`), over the five soonest to end with their days left, amber in
+   the last fortnight; and **Applications**, what the sites stand in front of drawn as itself, each with
    the health check's answer. A row opens its site. What a site fronts is read off the Ports page's
    sockets (`components/proxy/site-apps.ts`, unit-tested): the container's image, else the program,
    else its unit — never the port alone, so an upstream nothing on the list names keeps the
-   engine's mark. A site's hue is a lane hue without slate, the bar's muted "everything else", and
-   it runs down its card's left edge. The card leads with the application tucked over its engine
+   engine's mark. A site's hue is a lane hue without slate, the bar's muted "everything else"; the
+   card's edge carries none (0.7.5, at the operator's request: the stripe read as noise). The card leads with the application tucked over its engine
    (`ProductLogos`), names it in its second line and at the route's far end beside the address, and
    draws a static site's directory as *Files* and a redirect's target as *Redirects to* where both
    read "Served by configuration"; its hour is a short bar against the busiest site's. A site
@@ -2342,8 +2485,8 @@ The passes, in order. Each one is a diff you can review on its own.
    nothing on the page told one database from another but its words. It had no tiles to give up;
    what it gave up was the attention list, which the operator asked to go, and nothing it said was
    lost — each concern is said, in its tone, where the thing is: the verdict and the first card on
-   its shelf for a server that does not answer, the runway and the card's foot for a dump that is
-   old or missing, the card's foot for a port open to the internet, *Found on this server* for a
+   its shelf for a server that does not answer, the Backups block and the card's foot for a dump
+   that is old or missing, the card's foot for a port open to the internet, *Found on this server* for a
    server that waits for a password, and every fix it carried (Start, Back up now, Restrict to this
    server, Settings) a verb on the card. The page opens on `HostIdentity`: the server's engines as
    a stack of their own logos, the commonest and then the largest first, the host's name, how many
@@ -2355,15 +2498,31 @@ The passes, in order. Each one is a diff you can review on its own.
    three ways the cards cannot: **Storage**, what each database holds as spans of one bar with the
    five largest as rows; **Sessions**, the open sessions — a key–value store's clients — as one
    bar, a server that did not answer counted apart rather than drawn as zero, the busiest beside
-   the products that read them; and **Backups**, every database the dashboard can dump on a
-   fortnight's runway, never-dumped first as a hollow amber ring at its far end, the stretch past a
-   week washed amber because a week is where every other reading of the section calls a dump stale.
-   A row opens the database, or on the runway its Backups page. Each database keeps one hue
-   (`fleetHues`, a lane hue without slate dealt in the order the connections were saved, so five
-   databases are five hues and a new one moves nobody's) on its span, its dot, its key in a row,
-   its card's left edge and its table row; the card's Stored figure carries a short bar in that hue
+   the products that read them; and **Backups**, every database the dashboard can dump counted
+   backed up today, this week, over a week ago — the age every other reading of the section calls
+   stale — and never, on one `StandingBar`, over the worst five, never-dumped first, each with its
+   newest dump's age. A row opens the database, or under Backups its Backups page. This block and
+   the Sites page's Certificates drew a track under every row with a dot on it until 0.7.5, which
+   went at the operator's request: the track had no scale, so the dot said less than the age beside
+   it, a database never backed up was drawn at a place it did not have, and the track's hairline
+   under each row's own rule read as a double line. Each database keeps one hue (`fleetHues`, a
+   lane hue without slate dealt in the order the connections were saved, so five databases are
+   five hues and a new one moves nobody's) on its span, its key in a row and its table row; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
+   the operator's request), and its Stored figure carries a short bar in that hue
    against the largest database, as the table's Size cell does. The picture of what the databases
    feed moved above *Found on this server*, so the page's moving thing is not under a list of rows.
+   In 0.7.5, at the operator's request, it and the map are drawn the way Configuration draws the path
+   a request takes (`config/request-path.tsx`): every mark at the wiring vocabulary's full size (the
+   control center's smaller `compact` version went), the two lanes centred on each other with a wide
+   empty lane between them, no lane headings — each node's eyebrow says what it is — and whether a
+   database answers or a reader runs as the dot in its mark's corner, as on Configuration's services.
+   The lanes are ordered for the wires (`wiredOrder`):
+   databases that feed something first, each reader across from the mean of the databases that feed
+   it. The control center's picture is of what is wired, and the databases nothing is seen reading
+   are a line of their engine marks and names under it, each a link to the database, where a
+   sentence listed their names. *Found on this server* lists its servers in the order they can be
+   connected — one press, a password, a start, nothing this page can do — and a file row's second
+   line is the folder it is in, cut from its start, where it repeated the file's whole path.
 
    Three deployment pages took it in the same pass. A project's General settings did because the
    project identity line already is that page's reading line: each figure of the old Project
@@ -2503,8 +2662,8 @@ then a band of storage, sessions and backups, then the saved databases with sear
 layout controls. The attention findings it opened on were removed in 0.7.1; each fix they carried is a
 verb on the database's card. The former metric-card `?show=` filters no longer narrow the inventory.
 Individual database cards retain the facts needed to compare connections. A database home starts with its
-identity line and a `ChartPanel` of recorded activity, with 1-hour, 6-hour, 24-hour and 7-day windows,
-then attention, rankings and reference blocks. Activity is recorded by the backend every 30 seconds
+identity line, then a picture of how it is used, its recorded activity, its server log, its rankings
+and its reference blocks (below). Activity is recorded by the backend every 30 seconds
 while the dashboard runs, including when no database page is open. Performance opens on its view
 strip, Advisor on its findings with severity and category filters, Access on its accounts and list
 filters, and Backups on its schedule state, next run, action and dump list. These controls stay beside
@@ -2572,6 +2731,78 @@ pin a moment" caption and the shortcuts button that stood as two lines above the
 gone: the shortcuts are its last control, and the pinned moment's strip appears only while a
 moment is pinned, held at the top of the scroll because the chart it was pinned from is usually a
 screen down.
+
+**A database's home took the deploy pages' shape in 0.7.5**, at the operator's request — "more alive,
+more colouring, real logs", with the deploy pages as the reference — because it read as a grey page:
+one chart in the brand's near-white behind a strip of four tabs, a column of tall cards for what used
+the database, and three columns of 12px label-and-value pairs that ran into each other. It keeps its
+identity line and no tiles (the Databases rule above); what changed, block by block
+(`components/database/home/`):
+
+- **How it is used** (`picture.tsx`) is the Runtime map's three lanes on the page's own ground:
+  what reads the database on the left (the consumers route the cards listed, drawn with
+  the fleet map's `ConsumerMark`), the database in the middle as its engine with its sessions and
+  size, and on the right what it holds — a SQL engine's schemas summed from its table sizes
+  (`holdings.ts`, unit-tested), a key–value store's numbered databases, a document store's
+  collections, each in its name's hue and a way into Data — over where its copies go, the dumps. A
+  reader's wire pulses while it holds sessions, quicker the more it holds, dashed where it could only
+  reach the database, amber and red for a stale or broken link; a holding's wire is still, because
+  the record says how large a schema is, not which one a session reads; the dumps' wire is green
+  while the newest is under a day old, amber past a week, dashed when there is none, and pulses while
+  one is taken. Below `lg` the lanes stack and each node says in words how it is wired.
+- **Activity** draws every view the engine fills as a chart of its own, two to a row, each headed
+  by its newest reading through `ChartReading` (`metrics/chart-reading.tsx`, the Runtime page's head,
+  shared now) with a meter where the server states a ceiling — open sessions against the most it
+  accepts. Each line takes its measurement's hue (§10): sessions blue, transactions violet, rows read
+  green against written magenta, the cache hit rate a line in the brand's pale blue rather than an
+  area, which at 99% was one grey slab. The range is one row of presses (1h, 6h, 24h, 7d) over all
+  of them, where a select stood beside the tabs. Nothing here says Live: the record is polled.
+- **Server log** (`server-log.tsx`) follows the server's own log — the source the Logs page opens
+  on, read from Docker, the file or the journal, never by dialling the engine, so a stopped server's
+  home shows the lines that say why — over the same log socket, in a `Well`, each line in the console's
+  colours (`LogText`, the level's word, an error's row on the danger wash and a warning's on the
+  warning wash), held to the foot while the reader is there. Its head counts the errors and warnings it
+  holds and carries the socket's `Status live`. A reconnect keeps what is drawn and takes only what is
+  newer, through the console's own `resumeFrom`/`unseen` (`logs/resume.ts`). A server whose log is not
+  on this machine says why in the block's place.
+- **The rankings** keep their rows and gain colour that names a kind: a statement's bar in its verb's
+  `--tag-*` hue, a table's or a collection's in its name's hue, the one the picture draws it in.
+- **The reference blocks** — Runs as, Reachable from, Backups — and the file's facts are `FactRow`s
+  (`blocks.tsx`): the name on the left at the body's size, the value beside it, a hairline under each,
+  as a project's Runtime lists what a container may use.
+
+**A database's Performance took the home's shape in 0.7.5**, at the operator's request — "more
+alive, more real logos and colouring" — because beside the new home it read as the grey page of the
+two: the Overview drew the same activity in the brand's near-white with no reading in any head, the
+cache hit as one slab, and four figures of the dashboard's own pool under it; Redis and MongoDB
+opened on empty plots that said a rate would appear in six seconds, though the recorder had kept the
+last week; sessions, clients and operations were names in a column. It keeps its view strip (the
+Databases rule above); what changed, view by view:
+
+- **Right now** (`ops/performance-picture.tsx`) heads the SQL Overview: the session list grouped
+  by the name each client gave the server (`clientGroups`, unit-tested), each drawn as its program
+  (`database/clients.ts`, `DbClientMark`) — a deployment or container the consumers route found as
+  the product it runs, otherwise what the name says (`psql`, `pg_dump`, Grafana, Metabase, a JDBC or
+  Node driver), the dashboard's own connection as its J carrying the pool's words that the four
+  figures said — wired to the server and on to the four things a session can be doing, each counted
+  and a way into Sessions narrowed to it. A client's wire pulses while one of its sessions runs, red
+  while one waits on a lock, amber while one holds a transaction or runs too long; a state's wire is
+  dashed while nothing is in it. It moves with the five-second session poll.
+- **Activity** is the home's: each chart through `ViewChart` with its newest reading in the head
+  (sessions against the server's ceiling), every line in its measurement's hue, the cache a line,
+  and the range presses (`HistoryRange`) over all of them — the Overview had no range before.
+- **Redis and MongoDB** open on the recorder's last hour (`joinRecorded`, `recordedSamples`,
+  `recordedServers`, unit-tested) and carry on with the page's three-second samples; each chart is
+  headed by its readings (`ChartReadings`, `SeriesReading`), memory, the cache and connections with
+  a meter against their ceiling. MongoDB's latency is not recorded, so that one chart starts with the
+  page and its caption says so.
+- **Logos where a client is named**: SQL sessions, Redis clients (by name, else the library the
+  client reported) and MongoDB operations each lead with `DbClientMark`; the lock queue sets the
+  bare logo beside each session's application.
+- **Statements** take their verb's hue, as the home's ranking does.
+- **Replication** (`ops/replication-picture.tsx`) replaced its three figures with the picture of
+  where the data goes: the server it follows, this one by its role, the replicas streaming from it,
+  and the slots holding its log — a slot with no reader dashed amber, the one reading to act on.
 
 **The logs page took a deployment's Logs page in 0.7.1**, at the operator's request: its one strip
 held the source's name, its facts, an outlined Export box and the view tabs, the box and the
@@ -2670,7 +2901,7 @@ reading page, and what makes them alive is the sanctioned five, held hard:
   Ten marks arrived for it (WireGuard, AdGuard, Pi-hole, CrowdSec, Headscale, Mullvad, Quad9,
   Unbound, OpenVPN, ZeroTier), each lifted to the L 0.72 rung where its own colour vanished on the
   ground (`public/logos/NOTICE`).
-- **Pictures whose wires are traffic.** Six pictures stand unframed over `wire-grid` in the
+- **Pictures whose wires are traffic.** Six pictures stand unframed on the page's own ground in the
   deployment section's vocabulary: the Overview's topology (`network/topology.tsx`: the outside —
   the internet through the uplink, the tailnet, each tunnel — this server with its firewall and
   gateway as facts, and the inside — each Docker network with its containers' products, each bridge
@@ -2754,7 +2985,7 @@ already says it); what it is using (`container-readings.tsx`: the Overview's fou
 `LiveFigure` gliding to Docker's frame every second with its last hour as a `TileTrend` keyed by its
 series colour, memory as a `Meter` against a limit where it has one); what is wrong with it; a
 picture of how it is reached and what it keeps (`container-picture.tsx`, the runtime map's three
-lanes over `wire-grid`: each published port as where it is reached from and each network as the
+lanes: each published port as where it is reached from and each network as the
 name it is reached by, the container as its product, each volume, folder and tmpfs it mounts — the
 line amber where a port answers around the firewall, red where Docker's socket is mounted, dashed
 where a thing does not outlive it, pulsing while it moves traffic); the containers it runs beside
@@ -2888,14 +3119,18 @@ the reader through it.
 | Host Overview, metrics, Docker, Security, Network, proxy, Processes, System, Backups, Packages, audit, Git, files, terminal | Reading | The reader arrives to find out what is true. |
 | Deployments list, a project's overview, runtime, logs, deployments, requests | Reading | A project that exists is a thing you read. |
 | `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
-| Databases — the control center, the map, a database's home, Search, Generate, Performance, Advisor, Access, Backups, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
+| Databases — the control center, the map, a database's home, Search, Compare, Generate, Performance, Advisor, Access, Backups, Alerts, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
+| `/databases/[id]/import` — bring a database over from another server | **Flow** | A sequence with an outcome: which server it is on now, how it should come over, and — for a replication — when to cut over, ending in a database here. The spine is taken from the import the server keeps, so a reload, or the next day, finds it where it was. |
 | A database's Data, Query, Schema, Diagram and Logs | Reading, as a workbench | The reader works rather than scrolls, so the page is one frame held to the window (`<Page fill>` through `SectionFrame`, which takes the fact from the engine registry). A workbench is a layout of this register (§2), not a third one: same grounds, same type ladder, no flow panel. |
-| `/databases/new` — add a database | **Flow** | A question with an outcome: which database, started here or connected, ending in the one command that does it. The section's only flow page. |
+| `/databases/new` — add a database | **Flow** | A question with an outcome: which database, started here or connected, ending in the one command that does it. The section's other flow page is Import. |
 | Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with a picker on it — the generators on a database's Generate page — gets the edge on that picker and changes in no other way. |
 | `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. Each of its four screens is the run page's rail and inspector before the run: the plan read down a rail beside the one focused surface holding the step's fields. |
 | A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. The page opens on the project header's shape saying what the run is, its verbs — Cancel, Retry, Redeploy, Visit, the release's menu — at the far end beside its state, and nothing above it: the sequence on `/deploy/new` ended when the project was created, so a first run is read the same way as the fortieth, with no spine claiming the screens before it. |
 | Deploy settings, credentials, notifications | Reading | Editable readings of state, not a sequence with an end. |
 | Sign-in, first-run setup, `/welcome` — the first-run question | **Flow** | A sequence with an outcome: the account's sidebar. |
+| Remote Desktop — the computers (`/remote-desktop`) | Reading | The reader arrives to find out which computers can be opened now. |
+| A Remote Desktop session (`/remote-desktop/[id]`) | Reading, as a workbench | The terminal's frame held to the window around the live screen, drawn by guacd (Control) or streamed by Sunshine (Stream); what a stream waits on (its bridge, Sunshine, the PIN) is said in the screen's place, with Sunshine's own mark. |
+| `/remote-desktop/new` — add a computer | **Flow** | Which computer, is its remote desktop on, and the sign-in: ending in the one command that saves it and opens the screen. |
 
 A section does not pick a register — a *page* does. The deployment section has pages in both, which
 is correct: making a project is a flow and reading one is not.
@@ -3031,6 +3266,12 @@ half is the same lights closer (`.auth-art`), pooled behind the server it draws.
 these screens to have colour and life, and for the line grid that used to sit under the washes to go;
 the exception is the ground of those screens and nothing else — no page in either register takes a
 wash, and nothing on these screens takes a glow, a gradient fill or a pattern.
+
+The update notice above the account card was tried on `.auth-art`'s light at card scale and taken
+back off at the operator's request: in the shell the washes read as the sign-in screen pasted into a
+dashboard. It is the account card's own container (`border-sidebar-border`, `bg-card`), tinted with
+`bg-wash-success` or `bg-wash-danger` only once a run has finished, and its life is the wire, the
+kind band and the beam (§11) rather than a ground. Arrival's light stays on arrival's screens.
 
 ## 17. Redesigning a flow page
 

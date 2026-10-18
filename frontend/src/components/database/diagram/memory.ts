@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { API_BASE, del, get, mutationHeaders, put } from "@/lib/api"
+import { del, fetchResponse, get, put } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { useViewState } from "@/lib/view-state"
 import {
@@ -195,13 +195,17 @@ export function useDiagramMemory({
       const doc = pending.current ?? flying.current
       if (!doc || !canSave) return
       pending.current = null
-      void fetch(`${API_BASE}/databases/${connId}/diagram?schema=${encodeURIComponent(schema)}`, {
-        method: "PUT",
-        keepalive: true,
-        credentials: "include",
-        headers: { ...mutationHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ layout: doc }),
-      }).catch(() => undefined)
+      void fetchResponse(
+        `/databases/${connId}/diagram`,
+        {
+          method: "PUT",
+          keepalive: true,
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ layout: doc }),
+        },
+        { schema },
+      ).catch(() => undefined)
     }
     window.addEventListener("pagehide", leave)
     return () => {

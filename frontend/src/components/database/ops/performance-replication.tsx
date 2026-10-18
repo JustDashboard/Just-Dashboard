@@ -2,7 +2,7 @@
 
 import { bytes, duration, relativeTime, timestamp } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
-import { Detail, DetailList, Metric, MetricStrip } from "@/components/page"
+import { Detail, DetailList } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -26,17 +26,10 @@ import {
 } from "@/components/database/ops/performance-parts"
 import type {
   DbReplicaSource,
-  DbReplication,
   DbReplicationSlot,
 } from "@/components/database/ops/performance-types"
+import { ReplicationPicture } from "@/components/database/ops/replication-picture"
 import { useDatabase } from "@/components/database/shell/database-context"
-
-const ROLE: Record<DbReplication["role"], string> = {
-  primary: "Primary",
-  replica: "Replica",
-  standalone: "Standalone",
-  "": "Not reported",
-}
 
 /** How far behind something is. `-1` is the server's "unknown", which is not zero. */
 function Lag({ seconds, size }: { seconds?: number; size?: number }) {
@@ -53,8 +46,9 @@ function Lag({ seconds, size }: { seconds?: number; size?: number }) {
  * How this server's data reaches other servers, and how other servers' data
  * reaches it.
  *
- * It opens on what the server is — a primary others follow, a replica that
- * follows one, or standing alone — and then lists whichever sides it has:
+ * It opens on a picture of where its data goes (`ReplicationPicture`) — the
+ * server it follows, this one as a primary, a replica or standing alone, and
+ * the replicas and slots that follow it — and then lists whichever sides it has:
  * the replicas connected to it with how far behind each is, the slots that
  * hold its log back for a consumer, what it publishes and subscribes to, and,
  * for a replica, the server it follows and whether both of its threads run.
@@ -87,7 +81,6 @@ export function ReplicationView() {
               </div>
             )
           }
-          const idle = data.slots.filter((slot) => !slot.active).length
           const quiet =
             data.replicas.length === 0 &&
             data.slots.length === 0 &&
@@ -96,20 +89,7 @@ export function ReplicationView() {
             data.sources.length === 0
           return (
             <PanelBody className="animate-rise space-y-6">
-              <MetricStrip>
-                <Metric label="This server is" value={ROLE[data.role] ?? data.role} />
-                <Metric label="Replicas connected" value={data.replicas.length.toLocaleString()} />
-                {data.slots.length > 0 && (
-                  <Metric
-                    label="Slots"
-                    value={data.slots.length.toLocaleString()}
-                    hint={idle > 0 ? `${idle} with no reader` : "all being read"}
-                  />
-                )}
-                {data.sources.length > 0 && (
-                  <Metric label="Follows" value={data.sources[0].host ?? "another server"} />
-                )}
-              </MetricStrip>
+              {!quiet && <ReplicationPicture data={data} />}
 
               {quiet && (
                 <EmptyNote>

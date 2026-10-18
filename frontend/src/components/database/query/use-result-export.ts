@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ApiError, API_BASE, get, mutationHeaders, type ApiErrorBody } from "@/lib/api"
+import { fetchResponse, get } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { DbExportFormat } from "@/lib/types"
 import {
@@ -14,16 +14,6 @@ import {
 import type { DbExportState } from "@/components/database/data/types"
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-async function refused(response: Response): Promise<ApiError> {
-  const text = await response.text()
-  try {
-    const body = (JSON.parse(text) as ApiErrorBody).error
-    return new ApiError(response.status, body.code, body.message)
-  } catch {
-    return new ApiError(response.status, "unknown", text.slice(0, 300) || response.statusText)
-  }
-}
 
 /** The server's record of how an export went, once it has stopped running. */
 async function settled(id: number, exportId: string): Promise<DbExportState | null> {
@@ -67,14 +57,14 @@ export function useResultExport(id: number) {
         action: { label: "Cancel", onClick: () => controller.abort() },
       })
       try {
-        const response = await fetch(`${API_BASE}/databases/${id}/export/query`, {
+        const response = await fetchResponse(`/databases/${id}/export/query`, {
           method: "POST",
-          headers: { ...mutationHeaders(), "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json" },
           credentials: "include",
           signal: controller.signal,
           body: JSON.stringify({ sql, format, limit, exportId }),
         })
-        if (!response.ok || !response.body) throw await refused(response)
+        if (!response.body) throw new Error("The export response has no body")
         let cut = false
         let blob = new Blob([])
         try {

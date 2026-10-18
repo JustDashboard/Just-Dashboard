@@ -5,6 +5,7 @@ import Link from "next/link"
 import { bytes, duration, rate, relativeTime } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
 import { ChartPanel } from "@/components/metrics/chart-panel"
+import { ChartReadings, SeriesReading } from "@/components/metrics/chart-reading"
 import type { Series } from "@/components/metrics/metric-chart"
 import { RowLink } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -28,7 +29,9 @@ import type { Redis } from "@/components/database/redis/use-redis"
 
 // Module constants: `ChartPanel` is memoised on its props, and a series or a
 // formatter made fresh each render would redraw every chart on every sample.
-const OPS: Series[] = [{ key: "ops", label: "Commands", color: "var(--chart-1)", kind: "area" }]
+// Each line in its measurement's hue (§10), the database home's: work done
+// violet, what is held blue, hits green against misses magenta.
+const OPS: Series[] = [{ key: "ops", label: "Commands", color: "var(--chart-4)", kind: "area" }]
 const MEMORY: Series[] = [
   { key: "memory", label: "Used by data", color: "var(--chart-2)", kind: "area" },
   { key: "rss", label: "Held from the system", color: "var(--chart-4)", kind: "line" },
@@ -57,6 +60,16 @@ const rateLabel = (value: number) => rate(value)
 const countLabel = (value: number) =>
   Number.isInteger(value) ? value.toLocaleString() : value.toFixed(2)
 const wholeLabel = (value: number) => Math.round(value).toLocaleString()
+const percentLabel = (value: number) => `${value.toFixed(1)}%`
+
+/** The newest reading a series has in the rows on screen. */
+function latest(rows: readonly StatRow[], key: Exclude<keyof StatRow, "ts">): number | null {
+  for (let index = rows.length - 1; index >= 0; index--) {
+    const value = rows[index][key]
+    if (value !== null) return value
+  }
+  return null
+}
 
 /**
  * The page's own samples as charts, and the two readings that sit beside
@@ -71,10 +84,13 @@ export function OverviewView({
   redis,
   rows,
   everyMs,
+  recorded,
 }: {
   redis: Redis
   rows: StatRow[]
   everyMs: number
+  /** The rows open on the recorder's hour, before the page's own samples. */
+  recorded: boolean
 }) {
   const { id, server, href, engine } = redis
   const latency = usePoll((signal) => redisLatency(id, signal), 15_000, [id], {
@@ -86,6 +102,8 @@ export function OverviewView({
   // by that figure, so the chart's props stay the same from sample to sample.
   const most = rows.reduce((top, row) => Math.max(top, row.clients ?? 0, row.blocked ?? 0), 0)
   const clientScale = useMemo(() => countScale(most), [most])
+  const ceiling = server.data?.memory.max ?? 0
+  const memory = latest(rows, "memory")
 
   return (
     <div className="space-y-8">
@@ -93,6 +111,16 @@ export function OverviewView({
         <ChartPanel
           plain
           title="Throughput"
+          actions={
+            <ChartReadings>
+              <SeriesReading
+                series={OPS[0]}
+                value={latest(rows, "ops")}
+                format={perSecondLabel}
+                note="commands"
+              />
+            </ChartReadings>
+          }
           rows={rows}
           series={OPS}
           format={perSecondLabel}
@@ -101,6 +129,17 @@ export function OverviewView({
         <ChartPanel
           plain
           title="Memory"
+          actions={
+            <ChartReadings>
+              <SeriesReading
+                series={MEMORY[0]}
+                value={memory}
+                format={bytesLabel}
+                note={ceiling > 0 ? `of ${bytes(ceiling)}` : "used"}
+                meter={ceiling > 0 && memory !== null ? (memory / ceiling) * 100 : undefined}
+              />
+            </ChartReadings>
+          }
           rows={rows}
           series={MEMORY}
           format={bytesLabel}
@@ -110,6 +149,22 @@ export function OverviewView({
         <ChartPanel
           plain
           title="Lookups"
+          actions={
+            <ChartReadings>
+              <SeriesReading
+                series={LOOKUPS[0]}
+                value={latest(rows, "hitRate")}
+                format={percentLabel}
+                note="hit"
+              />
+              <SeriesReading
+                series={LOOKUPS[1]}
+                value={latest(rows, "misses")}
+                format={perSecondLabel}
+                note="misses"
+              />
+            </ChartReadings>
+          }
           rows={rows}
           series={LOOKUPS}
           format={perSecondLabel}
@@ -118,6 +173,22 @@ export function OverviewView({
         <ChartPanel
           plain
           title="Clients"
+          actions={
+            <ChartReadings>
+              <SeriesReading
+                series={CLIENTS[0]}
+                value={latest(rows, "clients")}
+                format={wholeLabel}
+                note="connected"
+              />
+              <SeriesReading
+                series={CLIENTS[1]}
+                value={latest(rows, "blocked")}
+                format={wholeLabel}
+                note="blocked"
+              />
+            </ChartReadings>
+          }
           rows={rows}
           series={CLIENTS}
           format={countLabel}
@@ -128,6 +199,22 @@ export function OverviewView({
         <ChartPanel
           plain
           title="Network"
+          actions={
+            <ChartReadings>
+              <SeriesReading
+                series={NETWORK[0]}
+                value={latest(rows, "netIn")}
+                format={rateLabel}
+                note="in"
+              />
+              <SeriesReading
+                series={NETWORK[1]}
+                value={latest(rows, "netOut")}
+                format={rateLabel}
+                note="out"
+              />
+            </ChartReadings>
+          }
           rows={rows}
           series={NETWORK}
           format={rateLabel}
@@ -136,6 +223,22 @@ export function OverviewView({
         <ChartPanel
           plain
           title="Keys leaving"
+          actions={
+            <ChartReadings>
+              <SeriesReading
+                series={EXPIRY[0]}
+                value={latest(rows, "expired")}
+                format={perSecondLabel}
+                note="expired"
+              />
+              <SeriesReading
+                series={EXPIRY[1]}
+                value={latest(rows, "evicted")}
+                format={perSecondLabel}
+                note="evicted"
+              />
+            </ChartReadings>
+          }
           rows={rows}
           series={EXPIRY}
           format={perSecondLabel}
@@ -143,8 +246,9 @@ export function OverviewView({
         />
       </div>
       <p className="text-hint text-muted-foreground">
-        Sampled every {Math.round(everyMs / 1000)} seconds since this page was opened. Nothing here
-        is recorded: the charts start again when the page does.
+        {recorded
+          ? `The last hour as the recorder kept it, every 30 seconds, then sampled every ${Math.round(everyMs / 1000)} seconds since this page was opened.`
+          : `Sampled every ${Math.round(everyMs / 1000)} seconds since this page was opened. The recorder has kept nothing for this server yet.`}
       </p>
 
       <div className="grid items-start gap-8 lg:grid-cols-2 [&>*]:min-w-0">

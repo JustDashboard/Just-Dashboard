@@ -8,7 +8,7 @@ holds the feature backends: `sys`, `metrics`, `docker`, `dockerStats`, `dockerEv
 `table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `forge`, `updates`, `selfUpdate`, `proxy`, `dbs`,
 `linuxUsers`, `netsec`, `captures` (`netcapture`), `flowAccounting` (`netflows`), `networkVantages` (`netvantage`),
 `dnsServices` (`dnsservice`, [native DNS connections and owned engines](../backend/network-dns-services.md)),
-`ipam` (`netipam`), `network` (`netx`, [the network module](../backend/network.md)), `jobs`, three backup pieces, and deployment components covering legacy
+`remoteDesktop` (`remotedesk`, [Remote Desktop](../backend/remote-desktop.md)), `ipam` (`netipam`), `network` (`netx`, [the network module](../backend/network.md)), `jobs`, three backup pieces, and deployment components covering legacy
 execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, Git branch
 monitoring and managed database networks. The backup runner delegates native SQLite snapshots to
 Databases and disposable application checks to a Docker adapter; Backups owns their evidence and cleanup.
@@ -22,9 +22,10 @@ rather than swallowed in construction. It starts the metrics recorder (here, not
 purpose is to have been running while nobody was looking), the database activity recorder, the Docker
 event log, the network module's interface sampler and its daily blocklist refresh, the self-update
 check, the backup scheduler, `selfupdate.Installer.Reconcile`,
-`selfcfg.Applier.Reconcile` and the Tailscale
-certificate keeper. `Shutdown` releases what outlives a request:
-samplers, scheduler, live PTYs, database pools, Docker client. A held terminal session is let go rather
+`selfcfg.Applier.Reconcile`, Remote Desktop's `Reconcile` (closing the history of sessions a restart cut
+off) and the Tailscale certificate keeper. `Shutdown` releases what outlives a request:
+samplers, scheduler, live PTYs, database pools, Docker clients (Remote Desktop's engine and stream bridge clients among them;
+both containers keep running). A held terminal session is let go rather
 than ended — its holder is a systemd unit of its own on the host — and module setup takes every
 running holder back before the first request, including when preparing new holders fails. New direct
 terminals require that protection; an unavailable holder returns a reason instead of silently opening
@@ -144,6 +145,22 @@ clears the counter with the account update.
 An account marked `must_change_pw` must finish its required factors before the password-change
 route becomes available, and cannot use feature routes or API tokens until the password is changed.
 API tokens may narrow their creator's role, never widen it, and are demoted with the account.
+The account keys page replaces an owned key through the existing create route, followed by an
+optional, separately confirmed revoke after the tool has switched credentials. The old key remains
+valid until revoked or expired; creating a replacement does not impersonate another owner.
+An MCP key's replacement is made on `POST /tokens/mcp` at the old key's role with the databases the
+old key reaches that are neither protected nor forgotten since, each narrowed to `read` where that
+role may not change a database. `PUT /tokens/{id}/connections`
+(session only, the owner's own active MCP key, `404` for another account's, `409 not_mcp_key` for any
+other key) replaces what a key reaches without a new secret; it is audited as
+`dashboard.token.connections` with the databases by name. Forgetting a connection removes its grants
+with it (`ON DELETE CASCADE`).
+`DELETE /tokens/{id}` revokes and retains the record. The session-only
+`DELETE /tokens/{id}/record` additionally requires `system.admin` and `s.destructive`; it deletes
+only revoked or expired metadata through `auth.DeleteInactiveAPIToken`'s conditional SQL write.
+An active record returns `409 token_active`, an absent record `404`, and a successful deletion is
+audited as `dashboard.token.delete` with its token ID. Removing a record never deletes the audit
+trail. No schema change or credential recovery is involved.
 The first admin is created by `cmd/server/main.go` from `JD_BOOTSTRAP_USER`/`JD_BOOTSTRAP_PASSWORD`;
 `must_change_pw` is set only when the password was *generated* there and printed to the log — a
 password the operator chose in the installer is theirs and is not demanded again at first sign-in.
@@ -164,7 +181,9 @@ as actor `cli`. See [terminal tools](../operations/terminal-tools.md) for comman
 privilege boundary.
 
 `auth.Sealer` (from the 64-hex `JD_MASTER_KEY`) encrypts every stored secret — TOTP seeds, connection
-strings, deploy env, backup credentials.
+strings, deploy env, backup credentials, the backup key encrypted archives are sealed to
+([archive encryption](../backend/git-backups-users.md#archive-encryption)), and the SQL editor
+assistant's provider and key (one sealed row of `settings`, `databases.assistant`).
 
 An account has two names. `username` is the sign-in key and the actor every audit entry and
 deployment record names: trimmed, lower-cased, one word, unique. `display_name` is what the account
@@ -197,8 +216,15 @@ nothing the account may do; every route still answers by role. See
 State is SQLite in `JD_DATA_DIR`, schema as one `CREATE TABLE IF NOT EXISTS` block in
 `internal/store/store.go` with no migration tool ([invariant 8](../security/invariants.md#invariants-that-must-not-regress)). The file is still named `vpsd.db`
 through the rename: moving it would strand every existing install's accounts, audit log and secrets.
+For as long as the store is open it holds open file description locks on SQLite's shared-lock range and
+on the `-shm` dead-man switch (`store/wal_guard.go`). SQLite's own locks belong to the process, so a
+close of the file anywhere in it — a scan reading its header, a download, an archive — releases them,
+and another SQLite closing its connection afterwards would believe it was the last one and delete the
+`-wal` and `-shm` the store is still writing through, corrupting the database. Inspect a live store
+read-only: `sqlite3 'file:/var/lib/just-dashboard/vpsd.db?mode=ro'`.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
-`api_tokens`, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`); boards (`boards`, `sticky_boards`); backups
+`api_tokens`, `api_token_connections` — the databases an MCP key reaches —, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`, the statement history's `db_statement_intervals`, `db_statement_shapes` and `db_statement_samples`, point-in-time recovery's `db_wal_archives` — with the destination's keys and the archive's private key sealed — `db_wal_restore_points` and `db_wal_restores`, `db_upgrades`, and `db_tls_ca` and `db_server_tls` for the certificate authority, whose key is sealed, and the certificates issued from it); boards (`boards`, `sticky_boards`); Remote Desktop (`remote_desktop_computers`, with sealed passwords and the stream bridge's id once paired, and
+`remote_desktop_sessions`); backups
 (`backup_jobs`, `backup_runs`, `backup_restore_tests`); legacy deployment compatibility (`deploy_projects`, `deploy_env`,
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,
 runtimes, steps, logs, dependencies, checks, triggers, delivery records, variable and plan snapshots,
@@ -229,3 +255,14 @@ cancellation (bounded at five seconds), so a client that disconnects once its mu
 leaves the row. An `Entry` records who (user, role, `Actor` = session or token), from
 where, what (action, target, method, path), and how it went. Local root account commands use
 `Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target.
+
+## Session authentication provenance
+
+`sessions.auth_method` is additive with default `unknown`; existing rows are never inferred to have
+entered a code. Fresh sessions record `password`, and successful factor completion records `totp` or
+`recovery`. This provenance is exposed as `authMethod` separately from `twoFactorPassed`, which is
+an access-policy/elevation flag. Optional two-factor policy can complete a password-only session;
+that does not make it a password-and-code session. Enrolment proves its code, while later policy-off
+elevation retains its recorded provenance, including unknown legacy provenance. Account session summaries use this distinction and display
+legacy/unknown authentication honestly. Migration and authentication tests cover existing rows and
+password/code/recovery completion; route authorization and per-account enforcement are unchanged.

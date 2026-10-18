@@ -15,25 +15,25 @@ import { Row, RowList } from "@/components/row-list"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
+import { useNow } from "@/components/deploy/vocabulary"
+import { activeNow } from "@/components/account/access"
+import { SessionMap } from "@/components/account/session-map"
 
 export function useSessions() {
   return usePoll((signal) => get<SessionInfo[]>("/account/sessions", undefined, signal), 20000)
 }
 
-/**
- * How recently a session has to have been seen to be "active now". The
- * server moves `lastSeenAt` at most every thirty seconds, and an open tab
- * polls well inside that, so two minutes is a tab that is open rather than
- * one that was.
- */
-const ACTIVE_MS = 2 * 60_000
-
-function activeNow(session: SessionInfo) {
-  return Date.now() - new Date(session.lastSeenAt).getTime() < ACTIVE_MS
-}
-
 function factorLabel(session: SessionInfo) {
-  return session.twoFactorPassed ? "password and code" : "password only"
+  switch (session.authMethod) {
+    case "password":
+      return session.twoFactorPassed ? "password only" : "password · second factor pending"
+    case "totp":
+      return "password and authenticator code"
+    case "recovery":
+      return "password and recovery code"
+    default:
+      return "authentication method not recorded"
+  }
 }
 
 /**
@@ -79,6 +79,7 @@ export function CurrentSession({ session }: { session: SessionInfo }) {
  */
 export function OtherSessions({ sessions }: { sessions: ReturnType<typeof useSessions> }) {
   const { data, refresh } = sessions
+  const now = useNow(15_000)
   const others = (data ?? [])
     .filter((s) => !s.current)
     .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt))
@@ -119,13 +120,15 @@ export function OtherSessions({ sessions }: { sessions: ReturnType<typeof useSes
                   </span>
                 }
                 trailing={
-                  activeNow(session) ? (
-                    <Status tone="running" label="active now" />
-                  ) : (
-                    <span className="hidden text-xs text-muted-foreground sm:inline">
-                      seen {relativeTime(session.lastSeenAt)}
-                    </span>
-                  )
+                  <span className="flex justify-end sm:w-24">
+                    {activeNow(session, now) ? (
+                      <Status tone="running" label="active now" />
+                    ) : (
+                      <span className="hidden text-xs text-muted-foreground sm:inline">
+                        seen {relativeTime(session.lastSeenAt)}
+                      </span>
+                    )}
+                  </span>
                 }
               >
                 <DimActions>
@@ -156,7 +159,7 @@ export function OtherSessions({ sessions }: { sessions: ReturnType<typeof useSes
   )
 }
 
-/** The sessions page's body: this device, then everywhere else. */
+/** The sessions page's body: this device, the picture of every way in, then everywhere else. */
 export function SessionsView({ sessions }: { sessions: ReturnType<typeof useSessions> }) {
   const { data, error, loading, refresh } = sessions
   if (loading && !data) return <LoadingRows rows={4} />
@@ -165,6 +168,7 @@ export function SessionsView({ sessions }: { sessions: ReturnType<typeof useSess
   return (
     <>
       {current && <CurrentSession session={current} />}
+      {data && data.length > 0 && <SessionMap sessions={data} />}
       <OtherSessions sessions={sessions} />
     </>
   )

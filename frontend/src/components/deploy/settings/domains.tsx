@@ -548,7 +548,7 @@ function certificateReading(suggestion: DeploymentHostnameSuggestion): {
 } {
   if (suggestion.covered) return { tone: "running", label: "HTTPS ready" }
   if (suggestion.certificateMethod) return { tone: "notice", label: "Certificate on deploy" }
-  return { tone: "warning", label: "HTTPS needs attention" }
+  return { tone: "warning", label: "HTTPS unavailable" }
 }
 
 /** The challenge a certificate would be issued over, as the product that answers it. */
@@ -769,7 +769,7 @@ function AddDomainPanel({
           <Notice
             tone="warning"
             icon={Warning}
-            title="Automatic HTTPS needs attention"
+            title="Automatic HTTPS unavailable"
             className="animate-rise"
           >
             {suggestion.certificateIssue ?? "Certificate readiness could not be confirmed."}

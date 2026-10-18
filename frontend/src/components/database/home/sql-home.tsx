@@ -1,15 +1,16 @@
 "use client"
 
 import { Activity } from "@/components/database/home/activity"
-import { placementConcerns } from "@/components/database/home/attention"
-import { AdvisorAttention, ConcernAttention } from "@/components/database/home/attention-block"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { BusiestStatements, FileFacts } from "@/components/database/home/busiest"
 import { CLICKHOUSE_VIEWS, SQL_VIEWS } from "@/components/database/home/charts"
 import { chartEvents } from "@/components/database/home/events"
 import { HomeIdentity } from "@/components/database/home/identity"
 import { LargestTablesBlock, type LargestTables } from "@/components/database/home/largest"
+import { bySchema, schemaDetail } from "@/components/database/home/holdings"
+import { nameHue } from "@/components/database/home/kinds"
 import { Columns, Pair } from "@/components/database/home/layout"
+import { HomePicture, type Holding } from "@/components/database/home/picture"
 import { read } from "@/components/database/home/read"
 import {
   BackupsBlock,
@@ -18,19 +19,20 @@ import {
   ServerDatabases,
   useBackups,
 } from "@/components/database/home/reference"
-import { sqlSample } from "@/components/database/home/samples"
+import { gauge, sqlSample } from "@/components/database/home/samples"
+import { ServerLog } from "@/components/database/home/server-log"
 import { StateRegion } from "@/components/database/home/state-region"
 import type { DbServerStats, DbTableStats } from "@/components/database/home/types"
 import { useSamples } from "@/components/database/home/use-samples"
-import { UsedBy } from "@/components/database/home/used-by"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Layers } from "@/components/icons"
 import { Notice } from "@/components/state"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import type { DbOverview } from "@/lib/types"
 import { useMemo } from "react"
 
 export function SqlHome() {
-  const { id, conn, engine, summary } = useDatabase()
+  const { id, engine, href } = useDatabase()
   const file = engine.can("fileBased")
   const analytic = engine.can("clickhouseViews")
   const stats = useSamples<DbServerStats>(
@@ -44,14 +46,26 @@ export function SqlHome() {
 
   const answer = stats.answer
   const samples = stats.samples
-  // Ages are measured against the newest reading the page holds — the
-  // server's, then the summary's — not against a clock read while drawing.
-  const now = samples[samples.length - 1]?.at ?? Date.parse(summary?.checkedAt ?? conn.createdAt)
   const unread = stats.error && samples.length === 0 ? stats.error : undefined
   const refused = answer && !answer.supported ? answer : undefined
 
   const dumps = backups.data?.files
   const events = useMemo(() => chartEvents(samples, "uptimeSeconds", dumps), [samples, dumps])
+  const tables = largest.data
+  const holdings = useMemo<Holding[] | undefined>(
+    () =>
+      tables &&
+      bySchema(tables.tables, tables.sizesKnown).map((share) => ({
+        key: share.schema,
+        name: share.schema,
+        kind: capital(engine.nouns.container),
+        detail: schemaDetail(share, tables.sizesKnown, engine.nouns.object),
+        color: nameHue(share.schema),
+        glyph: Layers,
+        href: href("data", { schema: share.schema, table: null }),
+      })),
+    [tables, engine.nouns, href],
+  )
 
   return (
     <>
@@ -65,11 +79,18 @@ export function SqlHome() {
       {unread && (
         <CouldNotRead what="the server's statistics" error={unread} onRetry={stats.refresh} />
       )}
+      <HomePicture
+        holdings={holdings}
+        holdingsWord={capital(engine.nouns.containers)}
+        sessions={gauge(samples, "sessions")}
+        size={answer?.databaseBytes ?? gauge(samples, "databaseBytes")}
+        backups={engine.can("dump") ? backups : undefined}
+      />
       {engine.can("stats") && !file && (
         <Activity
-          id={id}
           hours={stats.hours}
           onHours={stats.setHours}
+          retentionHours={stats.retentionHours}
           views={analytic ? CLICKHOUSE_VIEWS : SQL_VIEWS}
           samples={samples}
           loading={stats.loading}
@@ -77,26 +98,7 @@ export function SqlHome() {
           events={events}
         />
       )}
-      <Pair>
-        {engine.can("advisor") ? (
-          <AdvisorAttention />
-        ) : (
-          <ConcernAttention
-            pending={false}
-            concerns={placementConcerns(
-              {
-                name: conn.name,
-                exposure: summary?.exposure ?? "unknown",
-                lastBackup: summary?.lastBackup,
-                dumps: engine.can("dump"),
-                managed: Boolean(summary?.managed),
-              },
-              now,
-            )}
-          />
-        )}
-        <UsedBy />
-      </Pair>
+      {engine.has("logs") && <ServerLog />}
       <Pair>
         {engine.can("statements") ? (
           <BusiestStatements />
@@ -173,3 +175,5 @@ function useLargestTables(): PollState<LargestTables> {
     [id, ranked],
   )
 }
+
+const capital = (word: string) => word.charAt(0).toUpperCase() + word.slice(1)

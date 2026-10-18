@@ -3,7 +3,8 @@
 //
 // Provider credentials never touch the database in the clear: they are sealed
 // with the dashboard's master key and opened only for the duration of a
-// transfer.
+// transfer. So is the backup key a job encrypts its archives with
+// (encryption.go).
 package backups
 
 import (
@@ -47,6 +48,7 @@ type TargetSecrets struct {
 
 type Job struct {
 	ID         int64        `json:"id"`
+	Revision   int64        `json:"revision"`
 	Name       string       `json:"name"`
 	Sources    []string     `json:"sources"`
 	Excludes   []string     `json:"excludes"`
@@ -71,6 +73,10 @@ type Job struct {
 	// A pause is a SIGSTOP, not a stop: the process resumes where it was and
 	// no connection is dropped, which is what makes it safe to do nightly.
 	PauseContainers []string `json:"pauseContainers,omitempty"`
+	// Encrypt seals each new archive to the install's backup key before it
+	// is written to the destination. Archives already taken keep the form
+	// they were written in, so turning it on or off never orphans one.
+	Encrypt bool `json:"encrypt"`
 	// HasCredentials tells the UI whether keys are stored without revealing
 	// anything about them.
 	HasCredentials bool       `json:"hasCredentials"`
@@ -79,10 +85,6 @@ type Job struct {
 	// LastSuccessAt is when the newest successful artifact was taken, so a
 	// job whose last attempt failed still says when it was last protected.
 	LastSuccessAt *time.Time `json:"lastSuccessAt,omitempty"`
-	// Overdue says a scheduled job has gone two intervals without a
-	// successful run. It is computed by the API from the schedule and the
-	// run history; a job that only runs by hand is never overdue.
-	Overdue bool `json:"overdue"`
 	// Stored counts the successful artifacts retention has kept and their
 	// total size, which is what the destination is being charged for.
 	Stored StoredSummary `json:"stored"`
@@ -153,8 +155,8 @@ func (j *Job) Validate() error {
 	if strings.TrimSpace(j.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
-	if len(j.Sources) == 0 {
-		return fmt.Errorf("at least one source path is required")
+	if len(j.Sources) == 0 && len(j.DatabaseDumps) == 0 {
+		return fmt.Errorf("at least one source path or database dump is required")
 	}
 	if !j.TargetKind.Valid() {
 		return fmt.Errorf("target must be one of local, s3, b2")

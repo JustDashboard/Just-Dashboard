@@ -54,10 +54,12 @@ function SelectTrigger({
         )}
       >
         {children}
+        {/* Turned by its own trigger's state: `in-data-[state=open]` matched any
+            open ancestor, so every select in a dialog or a sheet pointed up shut. */}
         <SelectPrimitive.Icon asChild>
           <ChevronDown
             aria-hidden
-            className="size-4 transition-transform duration-150 in-data-[state=open]:rotate-180 motion-reduce:transition-none"
+            className="size-4 transition-transform duration-150 motion-reduce:transition-none [[data-state=open]>&]:rotate-180"
           />
         </SelectPrimitive.Icon>
       </Button>

@@ -27,10 +27,11 @@ import (
 
 type liveSummary struct {
 	summaryView
-	Version       string `json:"version"`
-	VersionNumber string `json:"versionNumber"`
-	FlavorLabel   string `json:"flavorLabel"`
-	LatencyMs     int64  `json:"latencyMs"`
+	Version       string         `json:"version"`
+	VersionNumber string         `json:"versionNumber"`
+	FlavorLabel   string         `json:"flavorLabel"`
+	LatencyMs     int64          `json:"latencyMs"`
+	EndOfLife     *dbx.EndOfLife `json:"endOfLife"`
 }
 
 func TestLiveConnectionSummaryAndFleet(t *testing.T) {
@@ -65,6 +66,13 @@ func TestLiveConnectionSummaryAndFleet(t *testing.T) {
 			if got.Capabilities["dump"] != true {
 				t.Errorf("capabilities = %v", got.Capabilities)
 			}
+			// The release the server said it runs, dated as the table dates
+			// it — and logged, so a run says what each fixture was read as.
+			want, dated := dbx.VersionEndOfLife(c.driver, got.Flavor, got.Version, time.Now())
+			if dated != (got.EndOfLife != nil) || (dated && got.EndOfLife.Release != want.Release) {
+				t.Errorf("%s %q: end of life %+v, the table says %+v", got.Flavor, got.Version, got.EndOfLife, want)
+			}
+			t.Logf("%s %q: end of life %+v", got.Flavor, got.Version, got.EndOfLife)
 			switch got.Source {
 			case "docker", "host", "remote":
 			default:
@@ -102,9 +110,10 @@ func TestLiveConnectionSummaryAndFleet(t *testing.T) {
 }
 
 // TestLiveProvisionAdoptAndPower starts a server from each template named in
-// JD_TEST_PROVISION_ENGINES ("redis,valkey,clickhouse:24.8" — an engine,
+// JD_TEST_PROVISION_ENGINES ("redis,valkey,clickhouse:26.3" — an engine,
 // optionally with one of its versions), connects it the way the page does,
-// and turns it off and on again.
+// and turns it off and on again. A template whose image is built here
+// ("postgres-full:18") is built first.
 //
 // It is the one test that proves a template end to end: that the image
 // starts, that the password it was handed is the one it enforces, that
@@ -140,6 +149,33 @@ func TestLiveProvisionAdoptAndPower(t *testing.T) {
 			}
 			remove()
 			t.Cleanup(remove)
+
+			// A template built here is built first, through the job the page
+			// starts, and the image is left for the next run to start from.
+			if tmpl.recipe != "" {
+				rec := do(t, router, http.MethodPost, "/databases/provision/build",
+					`{"engine":"`+engine+`","version":"`+version+`"}`)
+				if rec.Code != http.StatusAccepted {
+					t.Fatalf("build = %d %s", rec.Code, rec.Body.String())
+				}
+				job := readJSON[struct {
+					ID string `json:"id"`
+				}](t, rec)
+				deadline := time.Now().Add(recipeBuildTimeout)
+				for {
+					got, _, _ := h.s.modules.jobs.Get(job.ID)
+					if got.Status != "running" {
+						if got.Status != "succeeded" {
+							t.Fatalf("build %s: %s", got.Status, got.Error)
+						}
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("the build did not finish")
+					}
+					time.Sleep(2 * time.Second)
+				}
+			}
 
 			rec := do(t, router, http.MethodPost, "/databases/provision",
 				`{"engine":"`+engine+`","name":"`+name+`","version":"`+version+`"}`)
@@ -264,8 +300,8 @@ func TestLiveCapabilityFlagsAnswerOnRealServers(t *testing.T) {
 		"sessions":        {"sql": "/activity", "redis": "/redis/clients", "mongodb": "/mongo/ops"},
 		"replication":     {"sql": "/replication", "redis": "/redis/server", "mongodb": "/mongo/replication"},
 		"statements":      {"sql": "/statements"},
-		"advisor":         {"sql": "/advisor"},
 		"locks":           {"sql": "/locks"},
+		"missingIndexes":  {"sql": "/missing-indexes"},
 		"tableStats":      {"sql": "/tablestats"},
 		"indexStats":      {"sql": "/indexstats"},
 		"maintenance":     {"sql": "/maintenance"},
@@ -282,6 +318,8 @@ func TestLiveCapabilityFlagsAnswerOnRealServers(t *testing.T) {
 		"pubsub":          {"redis": "/redis/pubsub"},
 		"collections":     {"mongodb": "/mongo/collections"},
 		"profiler":        {"mongodb": "/mongo/profiler"},
+		// Read from the dashboard's own store, whatever the engine says.
+		"statementHistory": {"sql": "/statements/history"},
 	}
 	for _, c := range []struct {
 		driver dbx.Driver

@@ -12,6 +12,7 @@ var ErrSessionInvalid = errors.New("session invalid or expired")
 type Session struct {
 	ID          string    `json:"id"`
 	UserID      int64     `json:"userId"`
+	AuthMethod  string    `json:"authMethod"`
 	TwoFAPassed bool      `json:"twoFactorPassed"`
 	IP          string    `json:"ip"`
 	UserAgent   string    `json:"userAgent"`
@@ -26,6 +27,7 @@ func (s *Service) newSession(ctx context.Context, userID int64, ip, ua string, t
 	now := time.Now()
 	sess := &Session{
 		ID:          RandomToken(12),
+		AuthMethod:  "password",
 		UserID:      userID,
 		TwoFAPassed: twofaPassed,
 		IP:          ip,
@@ -39,9 +41,9 @@ func (s *Service) newSession(ctx context.Context, userID int64, ip, ua string, t
 		passed = 1
 	}
 	_, err := s.st.DB.ExecContext(ctx,
-		`INSERT INTO sessions(id, user_id, token_hash, twofa_passed, ip, user_agent, created_at, last_seen_at, expires_at)
-		 VALUES(?,?,?,?,?,?,?,?,?)`,
-		sess.ID, userID, HashToken(token), passed, sess.IP, sess.UserAgent,
+		`INSERT INTO sessions(id, user_id, token_hash, twofa_passed, auth_method, ip, user_agent, created_at, last_seen_at, expires_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		sess.ID, userID, HashToken(token), passed, sess.AuthMethod, sess.IP, sess.UserAgent,
 		now.Unix(), now.Unix(), sess.ExpiresAt.Unix())
 	if err != nil {
 		return nil, "", err
@@ -63,9 +65,9 @@ func (s *Service) ResolveSession(ctx context.Context, token string) (*Session, *
 		created, seen, exp int64
 	)
 	err := s.st.DB.QueryRowContext(ctx,
-		`SELECT id, user_id, twofa_passed, ip, user_agent, created_at, last_seen_at, expires_at
+		`SELECT id, user_id, twofa_passed, auth_method, ip, user_agent, created_at, last_seen_at, expires_at
 		 FROM sessions WHERE token_hash = ?`, HashToken(token)).
-		Scan(&sess.ID, &sess.UserID, &passed, &sess.IP, &sess.UserAgent, &created, &seen, &exp)
+		Scan(&sess.ID, &sess.UserID, &passed, &sess.AuthMethod, &sess.IP, &sess.UserAgent, &created, &seen, &exp)
 	if err == sql.ErrNoRows {
 		return nil, nil, ErrSessionInvalid
 	}
@@ -111,7 +113,7 @@ func (s *Service) ResolveSession(ctx context.Context, token string) (*Session, *
 
 func (s *Service) ListSessions(ctx context.Context, userID int64, currentID string) ([]*Session, error) {
 	rows, err := s.st.DB.QueryContext(ctx,
-		`SELECT id, user_id, twofa_passed, ip, user_agent, created_at, last_seen_at, expires_at
+		`SELECT id, user_id, twofa_passed, auth_method, ip, user_agent, created_at, last_seen_at, expires_at
 		 FROM sessions WHERE user_id = ? ORDER BY last_seen_at DESC`, userID)
 	if err != nil {
 		return nil, err
@@ -124,7 +126,7 @@ func (s *Service) ListSessions(ctx context.Context, userID int64, currentID stri
 			passed             int
 			created, seen, exp int64
 		)
-		if err := rows.Scan(&sess.ID, &sess.UserID, &passed, &sess.IP, &sess.UserAgent, &created, &seen, &exp); err != nil {
+		if err := rows.Scan(&sess.ID, &sess.UserID, &passed, &sess.AuthMethod, &sess.IP, &sess.UserAgent, &created, &seen, &exp); err != nil {
 			return nil, err
 		}
 		sess.TwoFAPassed = passed == 1

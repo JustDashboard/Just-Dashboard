@@ -75,9 +75,13 @@ export function SchemaLanding({
 
         {summary.largest.length > 0 && (
           <section aria-label={`Largest in ${name}`} className="min-w-0">
-            <h3 className="eyebrow pb-1">Largest in {name}</h3>
+            <h3 className="border-b border-hairline pb-2 text-title font-medium">
+              Largest in {name}
+            </h3>
+            {/* Bled on the left only, so the names start under the title and
+                the figures end on its hairline rather than past it. */}
             <BarList
-              className="-mx-2"
+              className="-ml-2 pt-1.5"
               items={summary.largest.map(({ object, group, share }) => {
                 const rows = object.estimatedRows
                 const counted = rows !== undefined && rows >= 0

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowRight, Check, Copy, Eye, EyeOff, Key, ShieldCheck } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, post } from "@/lib/api"
@@ -49,7 +49,8 @@ const HEADINGS: Record<Step, string> = {
  */
 export default function LoginPage() {
   const router = useRouter()
-  const { status, loading, login, verifyTotp, refresh, logout } = useAuth()
+  const endedInUrl = useSearchParams().get("reason") === "session"
+  const { status, loading, sessionEnded, login, verifyTotp, refresh, logout } = useAuth()
   // "auto" defers to whatever the session says; the explicit values are set
   // only once the user has moved the flow forward themselves.
   const [chosenStep, setChosenStep] = useState<Step | "auto">("auto")
@@ -244,6 +245,12 @@ export default function LoginPage() {
                 </div>
                 {steps.length > 1 && <FlowSteps steps={steps} current={here} />}
               </header>
+
+              {(sessionEnded || endedInUrl) && step === "credentials" && (
+                <Notice tone="warning" title="Session ended">
+                  Your session ended. Sign in again to continue.
+                </Notice>
+              )}
 
               {recoveryCodes ? (
                 <RecoveryCodes codes={recoveryCodes} onDone={finishEnrollment} busy={busy} />

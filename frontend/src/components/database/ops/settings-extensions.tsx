@@ -1,43 +1,56 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { del, post } from "@/lib/api"
+import { Puzzle } from "@/components/icons"
 import { plural } from "@/lib/format"
-import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
-import { FormFact, FormNote, FormSection } from "@/components/form"
+import { GroupRule } from "@/components/flow"
+import { FormNote } from "@/components/form"
 import { SearchInput } from "@/components/page"
+import { ProductLogo } from "@/components/product-logo"
 import { LoadingRows, Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { CouldNotRead } from "@/components/database/home/blocks"
+import { powerConfirmation } from "@/components/database/home/power-subject"
 import { read } from "@/components/database/home/read"
-import { EngineMark } from "@/components/database/kit"
+import { usePower } from "@/components/database/home/verbs"
+import {
+  DisableExtension,
+  EnableExtension,
+  UpdateExtension,
+} from "@/components/database/ops/extension-dialogs"
+import { PreloadExtension } from "@/components/database/ops/extension-preload"
+import {
+  extensionCategories,
+  extensionCounts,
+  extensionLogo,
+  groupExtensions,
+  hasUpdate,
+  listWords,
+  needsLoading,
+  OTHER,
+  shownExtensions,
+  waitingLibraries,
+  type DbExtension,
+  type DbExtensions,
+  type ExtensionShow,
+  type PreloadState,
+} from "@/components/database/ops/extensions-model"
 import { isDown } from "@/components/database/ops/performance-parts"
-import { UNDER_STRIP } from "@/components/database/ops/settings-nav"
 import { useDatabase } from "@/components/database/shell/database-context"
-
-/** One extension of `GET /databases/{id}/server/extensions`. */
-type DbExtension = {
-  name: string
-  version?: string
-  availableVersion?: string
-  installed: boolean
-  /** The schema it lives in; for a plugin catalogue, the kind of plugin. */
-  schema?: string
-  comment?: string
-}
-
-type DbExtensions = {
-  extensions: DbExtension[]
-  supported: boolean
-  /** Enabling and disabling work from here. */
-  editable?: boolean
-  reason?: string
-}
 
 /** A loaded module of a key–value server, from `GET /redis/server`. */
 type ServerModules = { modules: { name: string; version: number }[] }
@@ -45,73 +58,122 @@ type ServerModules = { modules: { name: string; version: number }[] }
 /** How many of a long catalogue are listed before the rest wait behind a press. */
 const LISTED = 12
 
+/** The value the category filter carries for every category, which Radix will not take as "". */
+const EVERY_CATEGORY = "__every_category__"
+
 /**
- * One extension or module as a row you read: its name as the engine spells
- * it, its version, the whole sentence that says what it is — that sentence is
- * what a reader chooses by — and its one command at the row's edge. No mark
- * leads it: nothing draws an extension as itself, and the same glyph down
- * sixty rows says nothing sixty times.
+ * One extension or module as a row you read: led by what it is — the
+ * engine's own mark for what ships with it, a project's logo where one is
+ * bundled — then its name as the engine spells it, its version, the sentence
+ * that says what it does, what it needs to work, and its commands at the
+ * row's edge.
  */
 function ExtensionRow({
   name,
+  logo,
   version,
   newer,
   where,
   about,
+  facts,
   action,
 }: {
   name: string
+  logo?: string
   version?: string | number
   /** A later version the server could update it to. */
   newer?: string
   /** The schema it lives in. */
   where?: string
   about?: string
+  /** What it needs before it works, or why it cannot be had here, as a line of hint. */
+  facts?: { text: string; tone?: "warning" }
   action?: React.ReactNode
 }) {
   return (
-    <li data-extension={name} className="flex min-w-0 items-start gap-3 py-2.5">
+    <li data-extension={name} className="flex min-w-0 items-center gap-3 py-2.5">
+      <ProductLogo id={logo} size="sm" fallback={Puzzle} />
       <div className="min-w-0 flex-1 space-y-0.5">
         <p className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5">
-          <span className="min-w-0 font-mono text-xs wrap-anywhere">{name}</span>
+          <span className="min-w-0 font-mono text-xs font-medium wrap-anywhere">{name}</span>
           {version !== undefined && version !== "" && <Tag mono>{version}</Tag>}
           {newer && <Tag tone="warning">{newer} available</Tag>}
           {where && <span className="text-hint text-muted-foreground">in {where}</span>}
         </p>
         {about && (
-          <p className="line-clamp-2 text-hint leading-relaxed text-muted-foreground">{about}</p>
+          <p className="line-clamp-2 text-hint leading-relaxed text-muted-foreground first-letter:uppercase">
+            {about}
+          </p>
+        )}
+        {facts && (
+          <FormNote tone={facts.tone} data-slot="extension-facts">
+            {facts.text}
+          </FormNote>
         )}
       </div>
-      {action && <div className="-my-0.5 flex shrink-0 items-center">{action}</div>}
+      {action && <div className="flex shrink-0 items-center gap-1">{action}</div>}
     </li>
   )
 }
 
 /**
  * What the server can be extended with: a SQL engine's extensions — each a
- * row, with the one command that enables or disables it where the engine
+ * row, with the commands that enable, update or disable it where the engine
  * lets the dashboard do that — or a key–value server's loaded modules.
  *
- * Enabled ones are listed first, as what the database has; the catalogue of
- * what could be enabled is one press and a search away. A catalogue the
- * engine does not change from a connection (its plugins) is read and says so.
+ * Enabled ones are listed first, as what the database has; what could be
+ * enabled, what has a newer version and what the server's image does not
+ * ship are each a chip away, grouped by what they are for, and searchable. A
+ * catalogue the engine does not change from a connection (its plugins) is
+ * read and says so.
  *
  * They are rows, not cards: nothing here is opened or taken, each is read and
- * has one command (§15 pass 3).
+ * has its commands (§15 pass 3).
  */
 export function ExtensionsSection({ confirm }: { confirm: (request: ConfirmRequest) => void }) {
   const { engine } = useDatabase()
   return engine.kind === "keyvalue" ? <Modules /> : <Extensions confirm={confirm} />
 }
 
+type Opened = { kind: "enable" | "update" | "disable" | "preload"; extension: DbExtension }
+
+/** What an extension needs before it works, read off what the server loads. */
+function libraryFacts(
+  extension: DbExtension,
+  preload: PreloadState | undefined,
+): { text: string; tone?: "warning" } | undefined {
+  if (extension.unavailable) return { text: "Not in this server's image." }
+  const library = extension.library
+  if (!library || !preload) return undefined
+  if (preload.loaded.includes(library)) {
+    return {
+      text: extension.module
+        ? "Loaded when the server starts."
+        : `The server loads ${library} when it starts.`,
+    }
+  }
+  if (preload.configured.includes(library)) {
+    return { text: `${library} is loaded once the server restarts.`, tone: "warning" }
+  }
+  if (extension.installed) {
+    return {
+      text: `Created, and idle: the server does not load ${library} when it starts.`,
+      tone: "warning",
+    }
+  }
+  return { text: `Needs ${library} loaded when the server starts, and a restart.` }
+}
+
 function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void }) {
-  const { id, conn, engine, readOnly, status } = useDatabase()
+  const { id, conn, engine, readOnly, status, summary } = useDatabase()
   const { can } = useAuth()
+  const power = usePower()
   const down = isDown(status.state)
-  const [show, setShow] = useState<"enabled" | "available">("enabled")
+  const [show, setShow] = useState<ExtensionShow>("enabled")
   const [search, setSearch] = useState("")
+  const [category, setCategory] = useState("")
   const [all, setAll] = useState(false)
-  const [busy, setBusy] = useState<string>()
+  const [opened, setOpened] = useState<Opened>()
   const list = usePoll(
     (signal) =>
       read<DbExtensions>(
@@ -126,85 +188,105 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
   )
 
   const data = list.data
-  const enabled = useMemo(() => (data?.extensions ?? []).filter((one) => one.installed), [data])
-  const available = useMemo(() => (data?.extensions ?? []).filter((one) => !one.installed), [data])
+  const preload = data?.preload
+  const extensions = useMemo(() => data?.extensions ?? [], [data])
+  const counts = useMemo(() => extensionCounts(extensions), [extensions])
+  const inView = useMemo(() => shownExtensions(extensions, show, "", ""), [extensions, show])
+  const categories = extensionCategories(inView)
+  // Whether the search and the category filter are drawn is the whole list's
+  // to say, not the chip's: the controls stay where they are from one chip
+  // to the next.
+  const searchable = extensions.length > 8
+  const categorised = useMemo(() => extensionCategories(extensions).length > 1, [extensions])
+  const shown = shownExtensions(extensions, show, search, category)
+  const narrowed = search.trim() !== "" || category !== ""
+  const listed = all || narrowed ? shown : shown.slice(0, LISTED)
   const mayEnable = can("system.admin") && !readOnly && Boolean(data?.editable)
   const mayDisable = mayEnable && can("destructive")
-  const words = search.trim().toLowerCase()
-  const shown = (show === "enabled" ? enabled : available).filter(
-    (one) =>
-      !words ||
-      one.name.toLowerCase().includes(words) ||
-      one.comment?.toLowerCase().includes(words),
-  )
+  const waiting = preload?.pendingRestart ? waitingLibraries(preload) : undefined
 
-  const enable = async (extension: DbExtension) => {
-    setBusy(extension.name)
-    try {
-      await post(`/databases/${id}/server/extensions`, { name: extension.name })
-      notify.success(`Enabled ${extension.name}`, {
-        description: `CREATE EXTENSION ran in ${conn.database || conn.name}.`,
-      })
-      list.refresh()
-    } catch (err) {
-      notify.error(`Could not enable ${extension.name}`, err)
-    } finally {
-      setBusy(undefined)
-    }
+  const choose = (next: ExtensionShow) => {
+    setShow(next)
+    setAll(false)
+    setCategory("")
   }
 
-  const disable = (extension: DbExtension) =>
+  const restartNow = () => {
+    if (!summary) return
     confirm({
-      title: `Disable ${extension.name}`,
-      confirmLabel: "Disable",
-      subject: {
-        mark: <EngineMark engine={engine} size="sm" />,
-        name: <span className="font-mono">{extension.name}</span>,
-        facts: (
-          <>
-            {extension.version && <FormFact label="Version">{extension.version}</FormFact>}
-            {extension.schema && (
-              <FormFact label="In" mono>
-                {extension.schema}
-              </FormFact>
-            )}
-          </>
-        ),
-      },
-      description: (
-        <>
-          <p>
-            Drops the extension from {conn.database || conn.name}, with the functions, types and
-            operators it added. Statistics it was collecting are lost.
-          </p>
-          <p>
-            The engine refuses, and changes nothing, while something in the database still depends
-            on it.
-          </p>
-        </>
-      ),
+      ...powerConfirmation("restart", engine, summary),
       action: async () => {
-        await del(`/databases/${id}/server/extensions/${encodeURIComponent(extension.name)}`)
-        notify.success(`Disabled ${extension.name}`)
+        await power.run("restart")
         list.refresh()
         return "reported"
       },
     })
+  }
+
+  const actions = (extension: DbExtension) => {
+    if (extension.unavailable) return undefined
+    if (!extension.installed) {
+      if (!mayEnable || (extension.library && !preload)) return undefined
+      return (
+        <Button
+          size="xs"
+          variant="outline"
+          aria-label={`Enable ${extension.name}`}
+          onClick={() =>
+            setOpened({
+              kind: needsLoading(extension, preload) ? "preload" : "enable",
+              extension,
+            })
+          }
+        >
+          Enable
+        </Button>
+      )
+    }
+    if (extension.module || !(mayDisable || (mayEnable && hasUpdate(extension)))) return undefined
+    return (
+      <>
+        {mayEnable && hasUpdate(extension) && (
+          <Button
+            size="xs"
+            variant="outline"
+            aria-label={`Update ${extension.name}`}
+            onClick={() => setOpened({ kind: "update", extension })}
+          >
+            Update
+          </Button>
+        )}
+        {mayDisable && (
+          <Button
+            size="xs"
+            variant="ghost"
+            aria-label={`Disable ${extension.name}`}
+            onClick={() => setOpened({ kind: "disable", extension })}
+          >
+            Disable
+          </Button>
+        )}
+      </>
+    )
+  }
+
+  const close = () => setOpened(undefined)
+  const changed = () => list.refresh()
 
   return (
-    <FormSection
-      aside
+    <SettingSection
       id="extensions"
-      className={UNDER_STRIP}
       title="Extensions"
-      hint={
+      state={
         data?.supported ? (
           <span className="numeric">
-            {enabled.length} enabled
-            {available.length > 0 ? ` · ${available.length} more available` : ""}
+            {counts.enabled} enabled
+            {counts.available > 0 ? ` · ${counts.available} more available` : ""}
+            {counts.updates > 0 ? ` · ${plural(counts.updates, "update")} available` : ""}
           </span>
         ) : undefined
       }
+      status={waiting && <Status verdict="warning" label="Waiting for a restart" />}
     >
       {down ? (
         <FormNote>
@@ -223,40 +305,98 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
         </Notice>
       ) : (
         <div className="animate-rise space-y-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-            <ChipStrip role="group" aria-label="Which extensions are listed">
-              <FilterChip
-                selected={show === "enabled"}
-                onClick={() => {
-                  setShow("enabled")
-                  setAll(false)
-                }}
-              >
-                Enabled
-                <ChipCount>{enabled.length}</ChipCount>
-              </FilterChip>
-              {available.length > 0 && (
-                <FilterChip
-                  selected={show === "available"}
-                  onClick={() => {
-                    setShow("available")
-                    setAll(false)
-                  }}
+          {waiting && (
+            <Notice
+              tone="warning"
+              title={
+                waiting.adding.length > 0
+                  ? `${listWords(waiting.adding)} ${waiting.adding.length === 1 ? "is" : "are"} loaded once ${conn.name} restarts`
+                  : `What ${conn.name} loads at start changes when it restarts`
+              }
+            >
+              <p>
+                {waiting.removing.length > 0 &&
+                  `It stops loading ${listWords(waiting.removing)} then. `}
+                The server reads shared_preload_libraries only when it starts.
+                {!power.can.restart &&
+                  (summary?.power.restart
+                    ? " Restarting it is for a role that may interrupt it."
+                    : ` ${summary?.power.reason ?? "Nothing here can restart it."}`)}
+              </p>
+              {power.can.restart && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  className="mt-2"
+                  disabled={Boolean(power.change)}
+                  onClick={restartNow}
                 >
+                  Restart {conn.name}
+                </Button>
+              )}
+            </Notice>
+          )}
+          <div className="space-y-2">
+            <ChipStrip role="group" aria-label="Which extensions are listed">
+              <FilterChip selected={show === "enabled"} onClick={() => choose("enabled")}>
+                Enabled
+                <ChipCount>{counts.enabled}</ChipCount>
+              </FilterChip>
+              {counts.available > 0 && (
+                <FilterChip selected={show === "available"} onClick={() => choose("available")}>
                   Available
-                  <ChipCount>{available.length}</ChipCount>
+                  <ChipCount>{counts.available}</ChipCount>
+                </FilterChip>
+              )}
+              {counts.updates > 0 && (
+                <FilterChip selected={show === "updates"} onClick={() => choose("updates")}>
+                  Update available
+                  <ChipCount>{counts.updates}</ChipCount>
+                </FilterChip>
+              )}
+              {counts.missing > 0 && (
+                <FilterChip selected={show === "missing"} onClick={() => choose("missing")}>
+                  Not in this image
+                  <ChipCount>{counts.missing}</ChipCount>
                 </FilterChip>
               )}
             </ChipStrip>
-            {(show === "available" ? available : enabled).length > 8 && (
-              <SearchInput
-                dense
-                aria-label="Filter the extensions"
-                placeholder="Filter by name or what it does"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                containerClassName="sm:w-64"
-              />
+            {(searchable || categorised) && (
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {searchable && (
+                  <SearchInput
+                    aria-label="Filter the extensions"
+                    placeholder="Filter by name or what it does"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                  />
+                )}
+                {categorised && (
+                  <Select
+                    value={category || EVERY_CATEGORY}
+                    onValueChange={(next) => {
+                      setCategory(next === EVERY_CATEGORY ? "" : next)
+                      setAll(false)
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      aria-label="Filter by category"
+                      className="w-auto min-w-44"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={EVERY_CATEGORY}>Every category</SelectItem>
+                      {categories.map((one) => (
+                        <SelectItem key={one} value={one}>
+                          {one}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
             )}
           </div>
           {!data.editable && (
@@ -265,61 +405,58 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
               from a connection.
             </FormNote>
           )}
+          {show === "missing" && (
+            <FormNote>
+              The dashboard knows these and this server&rsquo;s image does not ship them. One is
+              enabled here once the server runs an image that carries it.
+            </FormNote>
+          )}
           {shown.length === 0 ? (
             <p className="py-2 text-body text-muted-foreground">
-              {words
+              {narrowed
                 ? "No extension matches."
                 : show === "enabled"
                   ? "No extension is enabled in this database."
-                  : "Nothing more is available on this server."}
+                  : show === "updates"
+                    ? "Every extension is at the server's default version."
+                    : "Nothing more is available on this server."}
             </p>
           ) : (
             <>
-              <ul className="divide-y divide-hairline" aria-label="Extensions">
-                {(all || words ? shown : shown.slice(0, LISTED)).map((extension) => (
-                  <ExtensionRow
-                    // A plugin catalogue lists one name once per kind of plugin.
-                    key={`${extension.schema ?? ""}:${extension.name}`}
-                    name={extension.name}
-                    version={extension.version ?? extension.availableVersion}
-                    newer={
-                      extension.installed &&
-                      extension.availableVersion &&
-                      extension.availableVersion !== extension.version
-                        ? extension.availableVersion
-                        : undefined
-                    }
-                    where={extension.installed ? extension.schema : undefined}
-                    about={extension.comment}
-                    action={
-                      extension.installed ? (
-                        mayDisable && (
-                          <Button
-                            size="xs"
-                            variant="ghost"
-                            aria-label={`Disable ${extension.name}`}
-                            onClick={() => disable(extension)}
-                          >
-                            Disable
-                          </Button>
-                        )
-                      ) : mayEnable ? (
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          aria-label={`Enable ${extension.name}`}
-                          pending={busy === extension.name}
-                          disabled={busy !== undefined}
-                          onClick={() => void enable(extension)}
-                        >
-                          Enable
-                        </Button>
-                      ) : undefined
-                    }
-                  />
+              <div className="space-y-4">
+                {groupExtensions(listed).map((group, _, groups) => (
+                  <div key={group.category}>
+                    {groups.length > 1 && (
+                      <GroupRule
+                        label={group.category}
+                        count={
+                          shown.filter((one) => (one.category ?? OTHER) === group.category).length
+                        }
+                      />
+                    )}
+                    <ul
+                      className="divide-y divide-hairline"
+                      aria-label={groups.length > 1 ? group.category : "Extensions"}
+                    >
+                      {group.extensions.map((extension) => (
+                        <ExtensionRow
+                          // A plugin catalogue lists one name once per kind of plugin.
+                          key={`${extension.schema ?? ""}:${extension.name}`}
+                          name={extension.name}
+                          logo={extensionLogo(extension.name, engine.logo, !data.editable)}
+                          version={extension.version ?? extension.availableVersion}
+                          newer={hasUpdate(extension) ? extension.availableVersion : undefined}
+                          where={extension.installed ? extension.schema : undefined}
+                          about={extension.about ?? extension.comment}
+                          facts={libraryFacts(extension, preload)}
+                          action={actions(extension)}
+                        />
+                      ))}
+                    </ul>
+                  </div>
                 ))}
-              </ul>
-              {!words && shown.length > LISTED && (
+              </div>
+              {!narrowed && shown.length > LISTED && (
                 <Button
                   size="xs"
                   variant="ghost"
@@ -334,13 +471,33 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
           )}
         </div>
       )}
-    </FormSection>
+      {opened?.kind === "enable" && (
+        <EnableExtension extension={opened.extension} onClose={close} onDone={changed} />
+      )}
+      {opened?.kind === "update" && (
+        <UpdateExtension extension={opened.extension} onClose={close} onDone={changed} />
+      )}
+      {opened?.kind === "disable" && (
+        <DisableExtension extension={opened.extension} onClose={close} onDone={changed} />
+      )}
+      {opened?.kind === "preload" && preload && (
+        <PreloadExtension
+          // The row as the server last read it: a module is enabled once loaded.
+          extension={
+            extensions.find((one) => one.name === opened.extension.name) ?? opened.extension
+          }
+          preload={preload}
+          onClose={close}
+          onChanged={changed}
+        />
+      )}
+    </SettingSection>
   )
 }
 
 /** A key–value server's loaded modules. They are loaded by its configuration, so this is a reading. */
 function Modules() {
-  const { id, conn, status } = useDatabase()
+  const { id, conn, engine, status } = useDatabase()
   const down = isDown(status.state)
   const server = usePoll(
     (signal) =>
@@ -356,12 +513,10 @@ function Modules() {
   )
   const modules = server.data?.modules
   return (
-    <FormSection
-      aside
+    <SettingSection
       id="extensions"
-      className={UNDER_STRIP}
       title="Modules"
-      hint={
+      state={
         modules ? (
           <span className="numeric">{plural(modules.length, "module")} loaded</span>
         ) : undefined
@@ -387,7 +542,12 @@ function Modules() {
         <div className="animate-rise space-y-3">
           <ul className="divide-y divide-hairline" aria-label="Modules">
             {modules.map((module) => (
-              <ExtensionRow key={module.name} name={module.name} version={module.version} />
+              <ExtensionRow
+                key={module.name}
+                name={module.name}
+                logo={engine.logo}
+                version={module.version}
+              />
             ))}
           </ul>
           <FormNote>
@@ -395,6 +555,6 @@ function Modules() {
           </FormNote>
         </div>
       )}
-    </FormSection>
+    </SettingSection>
   )
 }

@@ -6,6 +6,16 @@ The frontend keeps a commit-message draft per checkout for the tab, walks change
 Alt+Up/Down, and returns focus to the selected file when Escape closes its preview. These read and
 navigation interactions are specified in [workspace interactions](../frontend/workspace-interactions.md).
 
+Inline file edits keep each draft and its opened content/revision in memory per checkout and path.
+Selecting another file or preview, History, Blame, Close and dashboard navigation preserve them;
+the workspace's unsaved-file count reopens a held draft. Contents never reach browser storage or the
+URL. Save uses the Files revision precondition, retains the draft on `409 content_conflict`, and
+offers **Review current file** or confirmed discard/reload. A successful save or confirmed discard
+clears that file's held draft. The unload guard remains active while any repository has a draft,
+including previews closed or left on another page; signing out clears the memory store and guard.
+A reload or closed tab still loses those in-memory drafts after the browser's confirmation.
+`git-features.spec.ts` checks preserved drafts, stale revisions, storage exclusion and unload cleanup.
+
 `internal/gitx` discovers repositories at most five levels below `JD_GIT_ROOTS`, skips generated and
 hidden trees, and stops descending once it finds `.git` — a `.git` *file* counts as much as a directory,
 because that is what a linked worktree and a submodule checkout carry. Hidden directories are where
@@ -166,11 +176,11 @@ days (`retention_days`, additive), and the containers to pause for the archive s
 additive; names are trimmed and refused when option-shaped). `POST /backups/{id}/enabled` pauses or
 resumes the schedule alone — audited as `backup.job.pause`/`backup.job.resume`, and never re-sending the
 definition or touching sealed keys. The list and single-job reads carry the figures the page draws:
-`stored` (retained successful artifacts and their bytes), `lastSuccessAt`, and `overdue`, which
-`Job.IsOverdue` sets when an enabled, scheduled job has gone two schedule intervals
-(`ScheduleInterval`) without a successful run — one missed firing is a transient, two is a job nobody
-would notice had stopped. Displayable target configuration is separate from access keys; credentials are sealed by
-`auth.Sealer` and never returned by the API. The target-test route checks local writability or object-store
+`stored` (retained successful artifacts and their bytes) and `lastSuccessAt`. The automatic overdue
+detector and its response field were removed in 0.7.5. Displayable target configuration is separate
+from access keys; credentials are sealed by
+`auth.Sealer` and never returned by the API. A job may also encrypt its archives (see
+[Archive encryption](#archive-encryption)). The target-test route checks local writability or object-store
 bucket access before the operator depends on a schedule.
 
 `Scheduler` rebuilds its in-memory robfig/cron entries from enabled jobs at start and after edits. Manual
@@ -196,10 +206,13 @@ artifact digest and use the run's original destination even after job edits. Leg
 but cannot prove deployment coverage. Jobs may explicitly select SQLite files for native `VACUUM INTO`
 capture, with snapshot digests in the manifest and live sidecars omitted. Jobs may also name saved
 database connections (`database_dumps`): each run asks the Databases owner for a native dump of every
-one (`dbx.Dump`: pg_dump, mysqldump, mongodump, Redis, or the built-in driver dump) into `database-NNNN/`
+one (`dbx.Dump`: pg_dump, mysqldump, mongodump, or the built-in driver dump, which for Redis is gzipped
+JSON Lines of each key's `DUMP` payload and not an RDB file) into `database-NNNN/`
 inside the archive and records connection, engine, method, file, digest and size in the manifest; a
-failed dump fails the run. `POST /backups/runs/{runID}/restore-database` (destructive, ordinary
-confirmation) extracts one recorded dump bounded by its manifest size,
+failed dump fails the run. The Databases fleet and a connection's summary read those manifests back
+(`Store.LastDatabaseDumps`): the start of the newest successful run whose manifest covers a
+connection's dump is when a job last backed it up. `POST /backups/runs/{runID}/restore-database`
+(destructive, ordinary confirmation) extracts one recorded dump bounded by its manifest size,
 verifies its digest and restores it through `dbx.Restore` into the connection or a named drill
 database. Other sources retain ordinary filesystem capture. See
 [`../deployments/backup-coverage.md`](../deployments/backup-coverage.md).
@@ -233,9 +246,9 @@ and creates missing parents as needed. An existing directory at a file's path is
 filtered-out source is not created. Database dumps are never
 written to disk by an in-place restore; they go back through the Databases owner as before.
 `GET /backups/runs/{runID}/download` streams the verified artifact (`Runner.OpenArtifact`: the local
-file, or a private download of a remote one, checksum proven first) as an attachment; it sits with the
-administrator routes, because an archive is the whole of what it covers, and is audited as
-`backup.download`.
+file, or a private download of a remote one, checksum proven first, decrypted when the run was
+encrypted) as an attachment; it sits with the administrator routes, because an archive is the whole of
+what it covers, and is audited as `backup.download`.
 
 The Backups page keeps failed job and resource-report reads visible even with older data. New
 protection actions are unavailable while coverage is stale; existing job logs, rerun, target tests,
@@ -252,6 +265,93 @@ job source, a database when a job dumps it or, for SQLite, snapshots its file; o
 job counts as protection. Owners that cannot answer are named in `unavailable` rather than read as
 empty, and unprotected resources sort first. Backup-before-deploy behavior and restore-evidence
 limits are covered in [`../deployments/implementation.md`](../deployments/implementation.md).
+
+## Archive encryption
+
+A job's `encrypt` setting (additive column, default 0, so a job that predates it keeps writing what
+it always wrote) seals each new archive before it is written to the destination. A new job takes
+`true` when its destination is S3 or B2 and `false` for a directory on this server, unless the request
+says otherwise; `PUT /backups/{id}` without the field keeps the stored value, so an older caller cannot
+turn encryption off by omission. Archives already taken keep the form they were written in, whichever
+way the setting is changed later.
+
+The format is [age](https://age-encryption.org/v1) (`filippo.io/age`): the gzip-compressed tar is
+streamed through ChaCha20-Poly1305 in 64 KiB chunks, each authenticated on its own, with a last-chunk
+flag that makes a truncated file an error rather than a shorter archive. Nothing plaintext reaches the
+staging directory — the tar, the gzip and the encryption are one stream into the staging file — and
+the artifact's name ends in `.tar.gz.age`, so a bucket listing says which objects need the key. age
+rather than a format of the dashboard's own, because the reason to export the key is to open an archive
+where this dashboard is not, and the `age` command is packaged for every system that archive is likely
+to end up on.
+
+**One key per install.** `backups/encryption.go` makes an X25519 identity the first time a job that
+encrypts is saved or run (or the key is exported), seals it with `auth.Sealer` and stores it under the
+`backups.archive-key` settings row beside its public half, its creation time and when it was last
+exported. The insert is `ON CONFLICT DO NOTHING` followed by a read, so two jobs encrypting for the first
+time at once share one key. One key rather than one per job, because deleting a job leaves its archives
+where they are and a key that went with the job would leave them unreadable, and because a recovery
+plan the operator keeps somewhere safe should be one file. A read never makes a key: an encrypted run on
+an install with no key answers `409 archive_key_unavailable` (`ErrNoArchiveKey`), and one sealed to
+another key answers the same code by name (`ErrArchiveKey`), checked against the manifest's recipient
+before anything is decrypted and again by age itself. The secret half is never written to a run log,
+the audit trail or the process log; the public half appears in manifests, the key's status and the
+export's audit entry, and a run log says only that the archive was encrypted.
+
+**What the manifest proves.** `artifactDigest` stays the SHA-256 of the bytes at the destination — the
+ciphertext for an encrypted archive — because that is what retention, every read and the recovery
+evidence (`RestoreVerification.ArtifactDigest`) bind to and check before a byte is decrypted.
+`manifest.encryption` (`format`, `recipient`, `plaintextDigest`, `plaintextBytes`) records the key the
+archive was sealed to and the digest of the `.tar.gz` inside, which is what a copy decrypted away from
+the dashboard is checked against with `sha256sum`. The field is a pointer and omitted for a clear
+archive, so a manifest written before encryption existed encodes, and digests for the recovery evidence
+bound to it, exactly as it did. An older dashboard reading an encrypted archive fails at the gzip
+header rather than misreading it.
+
+**Every read decrypts.** `Runner.localArtifact` verifies the stored digest, then pairs the file with
+the key its manifest names (`ArchiveFile`); listing, coverage checks, restore into a directory or in
+place, the database restore, the deployment gate's checks and verify-restore all read through
+`ArchiveFile.entries`, which decrypts as it streams. Verify-restore copies and re-hashes the ciphertext
+into its private workspace and decrypts only while extracting, so the workspace holds no second
+plaintext copy. A chunk that fails to authenticate is reported as an archive that is damaged or was
+altered. `GET /backups/runs/{runID}/download` hands an administrator the archive inside — named
+without `.age`, with `Content-Length` set to `plaintextBytes` so a transfer that stops short reads as
+incomplete, and aborted rather than finished when a chunk fails — and is recorded as `backup.download`
+with `decrypted: true` (a GET passes the audit middleware by, so the handler writes the entry itself
+through `recordRead`, for a clear archive as well).
+
+**The key's routes.** `GET /backups/key` (read) answers `exists`, `recipient`, `createdAt`,
+`exportedAt`, `encryptingJobs` and `encryptedArchives` — never the secret half. `POST
+/backups/key/export` (`system.admin`, inside `s.destructive`, because nothing can recall a copy that has
+left) answers the key as an age identity file, `just-dashboard-backup-key.txt`, `Cache-Control:
+no-store`, with its creation time, its public key and the command that opens an archive in its comment
+lines; it records `exportedAt` and is audited as `backup.key.export` with the public key as the target.
+The page confirms it with an ordinary confirmation. Job create and update audits carry `encrypt`.
+
+**Recovering without the dashboard.** With the exported file, on any machine with `age`:
+
+```bash
+age --decrypt --identity just-dashboard-backup-key.txt NAME.tar.gz.age > NAME.tar.gz
+sha256sum NAME.tar.gz      # the run's "Archive inside" digest, where the record survives
+tar -xzf NAME.tar.gz       # source-0001/, database-0001/<dump>, as the manifest lists them
+```
+
+A database dump inside is the engine's own format and is loaded with that engine's tool (or, on a new
+dashboard, uploaded on the database's Backups page). The dashboard's own data directory is the case the
+export exists for: its job's archive holds the database that holds the sealed key, and `install.env`
+holding `JD_MASTER_KEY` is excluded from it, so an exported key is the one way to open it once the
+server is gone.
+
+The Backups page shows the key as a panel under the jobs once a job encrypts or a key exists — its
+public key, what depends on it, and *not exported yet* in amber with a notice until a copy has left —
+with **Export key…** for an administrator. A job's card and identity line say *encrypted*; a run's rail
+row carries a lock and its inspector an Encryption block with the public key and the inside digest, and
+its download is named **Download decrypted archive**. `encryption_test.go` covers the round trip through
+every reader, tampering with the stored bytes, the payload, the header and the length, a missing and a
+different key, an 80 MiB stream, clear archives around encrypted ones, one shared key and an export
+that the age format itself opens; `backup_encryption_test.go` the defaults, older callers, the routes'
+roles and audits and the decrypted download; `backup_encryption_live_test.go` a PostgreSQL and a MariaDB
+dump restored from an encrypted archive; `encryption_live_test.go` a bucket; and
+`backup-encryption.spec.ts` the page.
 
 ## Host users and SSH keys
 
@@ -277,3 +377,60 @@ Removal matches a fingerprint and retains comments and unrecognised lines. Reads
 
 The current host-execution implementation and its relationship to the documented invariant are recorded in
 [`../reference/verification-findings.md`](../reference/verification-findings.md).
+
+A backup job's destination can also be given to a PostgreSQL server's point-in-time recovery
+(`fromJob` on `POST /databases/{id}/pitr`): its kind, configuration and sealed keys are copied into the
+archive's own record, and a directory gets a `wal` folder beside the job's archives. The archive is not
+a run of the job and is not pruned by its retention; see
+[Databases → Point-in-time recovery](databases-proxy-platform.md#point-in-time-recovery).
+
+## Backup presentation in 0.7.5
+
+Backups displays schedules, next runs, recorded outcomes, coverage and recovery controls. The automatic
+attention list and overdue recommendation detector are removed, including the `overdue` response field.
+The scheduler, retained run history, retention and restore safeguards are unchanged.
+
+## Backup form inputs and host account access
+
+Backup jobs expose a `revision`, migrated additively with default 1 on existing jobs.
+`PUT /backups/{id}` accepts `expectedRevision`: a positive value must match the stored revision,
+otherwise it returns `409 backup_job_conflict` without changing the definition or credentials.
+Validation and sealing happen before one SQL statement publishes both halves and advances the
+revision. Omitting `secrets` keeps the sealed keys. Legacy callers omitting `expectedRevision` (or
+sending zero) retain their unconditional-save contract, and their saves still advance the revision.
+Dashboard editors always send the revision captured with their held draft; polling and navigation
+never silently adopt a newer one. A conflict keeps fields and entered keys in memory and offers
+**Review current job**, a comparison of saved settings and draft, and an explicit
+**Save draft over reviewed job** or **Discard draft and close**. A second edit after review conflicts
+again. New keys and expected recovery output are called out before an explicit replacement. Successful
+save, explicit close/discard and working-state clearing remove the held draft and keys; nothing is
+persisted in browser storage. Pausing/resuming changes only `enabled` and advances the revision, so
+an older full-definition save cannot silently undo the pause.
+
+`POST /backups/{id}/database-dumps` accepts only `connectionId` and requires `system.admin`.
+It refuses malformed stored dump-list JSON, validates saved connections, idempotently adds the
+requested dump, and publishes only that list with a revision precondition. A concurrent publication
+retries against the latest list up to five attempts, then returns the same conflict; other definition
+fields and sealed keys are untouched.
+It audits as `backup.job.database_dump.add` and reloads the schedule like other job edits.
+The deployment Databases settings helper uses this route instead of a stale full-job save.
+`store_update_test.go`, `recovery_migration_test.go`, `backup_job_updates_test.go`,
+`backups-ui.spec.ts` and `deploy-settings-b.spec.ts` cover fault-injected publication, canceled saves,
+competing editors, pause conflicts, simultaneous dump additions, legacy migration, authorization,
+auditing, retained drafts, reviewed revisions and secret cleanup.
+
+A backup job requires at least one filesystem source **or** one native database dump. Native-only
+jobs use the existing manifest, retention, coverage, extraction and database-restore paths without
+inventing a host file source. The `?database=` handoff is consumed only when the resource report can
+open its suggested job. The picker tracks explicitly owned contributions: unselecting a resource
+removes only its exclusive inputs, preserving manual and shared inputs. Explicit close or successful save of the job
+editor clears its held draft; SPA navigation retains it. Failed run-history reads show an error/retry or an older-data warning;
+they never become a successful empty history. `database_dumps_test.go`, `resource-picks.test.js` and
+`backups-ui.spec.ts` exercise these behaviors.
+
+Host `locked` describes a **password lock**, and the dashboard action is labelled Lock password.
+It does not remove authorized keys or claim complete SSH/account disablement. A login shell plus
+an unlocked password or authorized key is a known sign-in route; sshd/PAM and account policy still
+decide actual acceptance. Administrator counts include UID 0 and sudo/wheel/admin/docker group routes.
+Direct sudoers rules are not inspected, so this is an inventory of known routes, not complete effective
+privilege analysis. `access.test.js` and `system-ui.spec.ts` cover key-only accounts and UID 0.

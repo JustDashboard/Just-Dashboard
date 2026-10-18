@@ -1,12 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { iso, json, mockHost, now } from "./host-fixture"
 
-/**
- * Docker findings carry their remedy on the overview, the list and a
- * container's page alike: a restart policy applied in place, a Compose-owned
- * container sent to its file, and a reviewed replacement that keeps its
- * credentials and asks before it runs.
- */
+/** Reviewed manual container configuration preserves the submitted data and confirms replacement. */
 
 async function mockDockerRemedies(page: Page, compose = false) {
   await mockHost(page)
@@ -125,74 +120,6 @@ async function mockDockerRemedies(page: Page, compose = false) {
   return mutations
 }
 
-test("Docker overview reviews log rotation and singleton dismissal works", async ({ page }) => {
-  const mutations = await mockDockerRemedies(page)
-  await page.goto("/docker")
-  await expect(
-    page.getByRole("button", { name: "web has no restart policy", exact: true }),
-  ).toHaveCount(0)
-  await page.getByRole("button", { name: "web has written 500 MB of logs", exact: true }).click()
-  await page.getByRole("button", { name: "Cap the log size", exact: true }).click()
-  const confirmation = page.getByRole("dialog", { name: "Cap the log size", exact: true })
-  await expect(confirmation.getByText(/writable layer are permanently lost/)).toBeVisible()
-  expect(mutations).toHaveLength(0)
-  await confirmation.getByRole("button", { name: "Replace container" }).click()
-  await expect.poll(() => mutations.length).toBe(1)
-  expect(mutations[0]).toEqual({
-    method: "POST",
-    path: "/docker/containers/web-id/recreate",
-    body: {
-      spec: {
-        name: "web",
-        image: "nginx:1.27",
-        start: true,
-        logging: { driver: "json-file", options: { "max-size": "10m", "max-file": "3" } },
-      },
-    },
-  })
-  await page.getByRole("button", { name: "Dismiss web has written 500 MB of logs" }).click()
-  await expect(
-    page.getByRole("button", { name: "web has written 500 MB of logs", exact: true }),
-  ).toHaveCount(0)
-  await page.getByRole("button", { name: "Rescan", exact: true }).click()
-  await expect(
-    page.getByRole("button", { name: "web has written 500 MB of logs", exact: true }),
-  ).toBeVisible()
-})
-
-test("routine restart advice stays in Configure and its in-place remedy remains available", async ({
-  page,
-}) => {
-  const mutations = await mockDockerRemedies(page)
-  await page.goto("/docker")
-  await expect(
-    page.getByRole("button", { name: "web has no restart policy", exact: true }),
-  ).toHaveCount(0)
-  await page.goto("/docker/containers/web-id?tab=configure")
-  await page.getByRole("button", { name: "web has no restart policy", exact: true }).click()
-  const confirmation = page.getByRole("dialog", { name: "Set a restart policy", exact: true })
-  await expect(
-    confirmation.getByText(/keeping its writable layer and current process/),
-  ).toBeVisible()
-  expect(mutations).toHaveLength(0)
-  await confirmation.getByRole("button", { name: "Apply policy", exact: true }).click()
-  await expect.poll(() => mutations.length).toBe(1)
-  expect(mutations[0]).toEqual({
-    method: "PATCH",
-    path: "/docker/containers/web-id/restart-policy",
-    body: { policy: "unless-stopped" },
-  })
-})
-
-test("Docker findings direct Compose configuration changes to their owner", async ({ page }) => {
-  const mutations = await mockDockerRemedies(page, true)
-  await page.goto("/docker")
-  await page.getByRole("button", { name: "web has written 500 MB of logs", exact: true }).click()
-  await page.getByRole("button", { name: "Cap the log size", exact: true }).click()
-  await expect(page).toHaveURL(/\/docker\/stacks\/website\?tab=compose&remedy=cap-logs$/)
-  expect(mutations).toHaveLength(0)
-})
-
 test("reviewed configuration replacement preserves credentials and needs explicit confirmation", async ({
   page,
 }) => {
@@ -266,4 +193,16 @@ test("reviewed configuration replacement preserves credentials and needs explici
     body: { spec: edited },
   })
   await expect(page).toHaveURL(/\/docker\/containers\/replacement-id$/)
+})
+
+test("Compose configuration opens its owning file without recommendation cards", async ({
+  page,
+}) => {
+  await mockDockerRemedies(page, true)
+  await page.goto("/docker/containers/web-id?tab=configure")
+  await expect(page.getByRole("link", { name: "Open Compose file" })).toHaveAttribute(
+    "href",
+    "/docker/stacks/website?tab=compose",
+  )
+  await expect(page.getByLabel("Replacement specification", { exact: true })).toHaveCount(0)
 })

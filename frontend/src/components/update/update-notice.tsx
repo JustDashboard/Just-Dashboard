@@ -1,14 +1,21 @@
 "use client"
 
-import { useState } from "react"
-import { ArrowCircleUp, CheckCircle, Cross, CrossCircle, Sparkles } from "@/components/icons"
+import { useEffect, useRef } from "react"
+import Link from "next/link"
+import { ArrowCircleUp, ArrowRight, Cross, CrossCircle, Sparkles } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import type { Tone } from "@/components/tone"
 import { useAuth } from "@/hooks/use-auth"
 import { phaseLabel, useSelfUpdate } from "@/hooks/use-self-update"
-import { useConfirm } from "@/components/confirm-dialog"
-import { ChangesSheet } from "@/components/update/changes-sheet"
+import { LogoGlyph } from "@/components/logo"
+import { Segment } from "@/components/deploy/run-pipeline"
+import { KindBand, UpdateWire } from "@/components/update/update-art"
+import { useUpdateDialog } from "@/components/update/update-dialog"
+import { updatePhases } from "@/components/update/update-progress"
+import { BlurFade } from "@/components/ui/blur-fade"
+import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
+import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/state"
 
@@ -26,65 +33,78 @@ import { Spinner } from "@/components/state"
  * would take the tuning-out with it on the day the row says something else.
  * The version an operator wants to know casually is already beside the
  * wordmark at the top of the same rail.
+ *
+ * When it does speak it is the account card's container — the same edge and
+ * ground as the card under it, tinted green or red only once a run has
+ * finished — and the life is in what it draws, not behind it: the installed
+ * version wired to the newest with a pulse running toward it, and a band of
+ * everything the releases between them bring, in the kinds' own colours.
+ * While it installs, the beam runs round the card and the stage is lit; when
+ * an install watched here succeeds, paper. The washes of the sign-in screens
+ * were tried here and read as out of place in the shell.
+ *
+ * The notes are the Version page's (`/dashboard`), not a panel of their own:
+ * that page already is the history, searchable, with the update in its
+ * header, and a second rendering of it over whatever the operator was doing
+ * was a second place for the two to disagree.
  */
 export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
   const { can } = useAuth()
-  const { report, restarting, install, dismiss, outcome } = useSelfUpdate()
-  const { confirm, dialog } = useConfirm()
-  const [sheet, setSheet] = useState(false)
+  const { report, restarting, dismiss, outcome } = useSelfUpdate()
+  const { openUpdate, dialog } = useUpdateDialog()
+  const confetti = useRef<ConfettiRef>(null)
 
   const run = report?.run
   const running = run?.status === "running" || run?.status === "pending"
   const available = Boolean(report?.available)
 
+  // An update that finishes while somebody is watching it is §11's *once*.
+  // Arriving at a page after it already succeeded is not the moment.
+  const status = run?.status
+  const wasRunning = useRef(running)
+  useEffect(() => {
+    if (wasRunning.current && !running && status === "success") confetti.current?.fire()
+    wasRunning.current = running
+  }, [running, status])
+
   // Nothing to say: no update, nothing running, and no outcome left unread.
   if (!report || (!available && !running && !outcome)) return null
 
-  const target = report.latest
-  const headline = report.releases[0]
-  const canInstall = can("system.admin") && report.install.supported && !running
-
-  const startInstall = () =>
-    confirm({
-      title: `Update to ${target}`,
-      confirmLabel: "Update now",
-      description: (
-        <>
-          <p>
-            Pulls {report.check.repo} at <b>{report.check.ref}</b>, rebuilds every image in this
-            stack and restarts it — the dashboard included.
-          </p>
-          <p className="text-muted-foreground">
-            It runs in its own container so it survives the restart, and takes a few minutes. Your
-            data, accounts and settings are untouched.
-          </p>
-        </>
-      ),
-      action: async (phrase) => {
-        await install(phrase)
-      },
-    })
-
-  // The shared union from components/tone.ts, not a fifth local vocabulary.
-  // An update in flight or waiting is a *notice*, which this palette draws in
-  // the brand hue rather than in the ink reserved for commands.
-  const tone: "brand" | Extract<Tone, "success" | "danger"> = running
-    ? "brand"
+  const mode = running
+    ? "running"
     : outcome?.status === "failed"
-      ? "danger"
+      ? "failed"
       : outcome?.status === "success"
         ? "success"
-        : "brand"
+        : "available"
+  const tone = mode === "failed" ? "danger" : mode === "success" ? "success" : "brand"
+  const target = report.latest
+  const canInstall = can("system.admin") && report.install.supported && !running
+
+  const label =
+    mode === "running"
+      ? restarting
+        ? "Restarting the dashboard"
+        : phaseLabel(run!)
+      : mode === "failed"
+        ? `Update to ${outcome!.toVersion} failed`
+        : mode === "success"
+          ? `Updated to ${outcome!.toVersion}`
+          : `Version ${target} is available`
+
+  const celebrate = (
+    <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-50 size-full" />
+  )
 
   if (collapsed) {
     return (
       <>
+        {celebrate}
         <Tooltip>
           <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={() => setSheet(true)}
-              aria-label={running ? "Update in progress" : `Version ${target} is available`}
+            <Link
+              href="/dashboard"
+              aria-label={label}
               className={cn(
                 "relative flex size-8 items-center justify-center rounded-lg focus-ring transition-colors",
                 tone === "brand" && "bg-plot-brand text-brand hover:bg-plot-brand-hover",
@@ -92,138 +112,176 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
                 tone === "danger" && "bg-plot-danger text-destructive hover:bg-plot-danger-hover",
               )}
             >
-              {running ? (
+              {mode === "running" && <BorderBeam size={24} duration={2.5} />}
+              {mode === "running" ? (
                 <Spinner className="size-4" />
-              ) : outcome?.status === "failed" ? (
+              ) : mode === "failed" ? (
                 <CrossCircle className="size-4" />
-              ) : outcome?.status === "success" ? (
+              ) : mode === "success" ? (
                 <Sparkles className="size-4" />
               ) : (
                 <ArrowCircleUp className="size-4" />
               )}
-            </button>
+            </Link>
           </TooltipTrigger>
-          <TooltipContent side="right">
-            {running
-              ? phaseLabel(run)
-              : outcome?.status === "failed"
-                ? "The last update failed"
-                : outcome?.status === "success"
-                  ? `Updated to ${outcome.toVersion}`
-                  : `${target} is available`}
-          </TooltipContent>
+          <TooltipContent side="right">{label}</TooltipContent>
         </Tooltip>
-        <ChangesSheet open={sheet} onOpenChange={setSheet} />
-        {dialog}
       </>
     )
   }
 
+  const headline =
+    mode === "success" || mode === "failed"
+      ? [...report.releases, ...report.history].find((r) => r.version === outcome!.toVersion)
+      : report.releases[0]
+  const delivered = mode === "available" ? report.releases : headline ? [headline] : []
+
   return (
     <>
-      <div
+      {celebrate}
+      <section
+        aria-label="Dashboard update"
         className={cn(
-          "min-w-0 space-y-2 rounded-lg border p-2.5",
-          tone === "brand" && "border-rule-brand bg-wash-brand",
+          "relative isolate min-w-0 animate-rise overflow-hidden rounded-lg border",
+          tone === "brand" && "border-sidebar-border bg-card",
           tone === "success" && "border-rule-success bg-wash-success",
           tone === "danger" && "border-rule-danger bg-wash-danger",
         )}
       >
-        <div className="flex min-w-0 items-start gap-2">
-          <span
-            className={cn(
-              "pt-px",
-              tone === "brand" && "text-brand",
-              tone === "success" && "text-success",
-              tone === "danger" && "text-destructive",
-            )}
-          >
-            {running ? (
-              <Spinner className="size-3.5" />
-            ) : outcome?.status === "failed" ? (
-              <CrossCircle className="size-3.5" />
-            ) : outcome?.status === "success" ? (
-              <CheckCircle className="size-3.5" />
-            ) : (
-              <ArrowCircleUp className="size-3.5" />
-            )}
-          </span>
-          <div className="min-w-0 flex-1">
-            {running ? (
-              <>
-                <p className="truncate text-xs leading-tight font-medium">
-                  {restarting ? "Restarting" : phaseLabel(run)}
-                </p>
-                <p className="numeric truncate text-hint leading-tight text-muted-foreground">
-                  {run.fromVersion} → {run.toVersion}
-                </p>
-              </>
-            ) : outcome ? (
-              <>
-                <p className="truncate text-xs leading-tight font-medium">
-                  {outcome.status === "success"
-                    ? `Updated to ${outcome.toVersion}`
-                    : "Update failed"}
-                </p>
-                <p className="truncate text-hint leading-tight text-muted-foreground">
-                  {outcome.status === "success" ? "See what changed" : "See what went wrong"}
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="truncate text-xs leading-tight font-medium">
-                  Version <span className="numeric">{target}</span> is out
-                </p>
-                <p className="truncate text-hint leading-tight text-muted-foreground">
-                  {headline?.title ?? "A new release is available"}
-                </p>
-              </>
-            )}
-          </div>
-          {/* Dismissal is for a run that has finished and been read. An update
-              that is merely available has nothing to dismiss — it is still
-              available tomorrow, and a notice that can be silenced is one an
-              install is silently three versions behind on. */}
-          {outcome && !running && (
-            <button
-              type="button"
-              aria-label="Dismiss"
-              onClick={() => dismiss().catch(() => {})}
-              className="-mt-0.5 -mr-0.5 shrink-0 rounded-sm p-0.5 text-muted-foreground focus-ring transition-colors hover:text-foreground"
-            >
-              <Cross className="size-3" />
-            </button>
-          )}
-        </div>
+        {mode === "running" && <BorderBeam size={72} duration={4} />}
 
-        <div className="flex flex-col gap-1.5">
-          {available && !running && !outcome && canInstall && (
-            <Button size="xs" className="w-full" onClick={startInstall}>
-              Update now
+        {/* Keyed on the mode so a notice that turns from "available" into
+            "updating" into "updated" arrives again each time it says
+            something new, rather than swapping its words in place. */}
+        <div key={mode} className="space-y-3 p-3">
+          <BlurFade className="flex min-w-0 items-center gap-2.5">
+            <Mark mode={mode} />
+            <div className="min-w-0 flex-1 space-y-1">
+              <p
+                className={cn(
+                  "eyebrow leading-none",
+                  tone === "brand" && "text-signal",
+                  tone === "success" && "text-success",
+                  tone === "danger" && "text-destructive",
+                )}
+              >
+                {mode === "running"
+                  ? "Updating"
+                  : mode === "failed"
+                    ? "Update failed"
+                    : mode === "success"
+                      ? "Updated"
+                      : "New version"}
+              </p>
+              <p className="flex min-w-0 items-center gap-2">
+                <span className="numeric text-xs text-muted-foreground">
+                  {run && mode !== "available" ? run.fromVersion : report.version}
+                </span>
+                <UpdateWire tone={tone} still={mode === "success" || mode === "failed"} />
+                <span className="numeric text-sm leading-tight font-semibold">
+                  {run && mode !== "available" ? run.toVersion : target}
+                </span>
+              </p>
+            </div>
+            {/* Dismissal is for a run that has finished and been read. An
+                update that is merely available has nothing to dismiss — it
+                is still available tomorrow, and a notice that can be silenced
+                is one an install is silently three versions behind on. */}
+            {(mode === "success" || mode === "failed") && (
+              <button
+                type="button"
+                aria-label="Dismiss"
+                onClick={() => dismiss().catch(() => {})}
+                className="-mr-1 shrink-0 self-start rounded-sm p-0.5 text-muted-foreground focus-ring transition-colors hover:text-foreground"
+              >
+                <Cross className="size-3" />
+              </button>
+            )}
+          </BlurFade>
+
+          <BlurFade delay={0.06} className="space-y-2.5">
+            {mode === "running" ? (
+              <>
+                <p className="truncate text-xs font-medium">
+                  <TextShimmer>{label}</TextShimmer>
+                </p>
+                <span aria-hidden className="grid grid-cols-3 gap-1">
+                  {updatePhases(run!, report.log).map((phase) => (
+                    <Segment key={phase.label} state={phase.state} />
+                  ))}
+                </span>
+                <p className="text-hint leading-snug text-muted-foreground">
+                  Keep this tab open — it picks back up after the restart.
+                </p>
+              </>
+            ) : mode === "failed" ? (
+              <p className="line-clamp-3 font-mono text-hint leading-snug break-words text-destructive">
+                {run?.error || "The updater stopped before the new version answered."}
+              </p>
+            ) : (
+              headline && (
+                <p className="line-clamp-2 text-xs leading-snug font-medium">{headline.title}</p>
+              )
+            )}
+            {mode !== "running" && mode !== "failed" && <KindBand releases={delivered} />}
+          </BlurFade>
+
+          <BlurFade delay={0.12} className="flex flex-col gap-1">
+            {mode === "available" && canInstall && (
+              <Button size="sm" className="w-full" onClick={openUpdate}>
+                <ArrowCircleUp />
+                Update now
+              </Button>
+            )}
+            {/* An update that exists but cannot be installed from here still
+                gets said out loud, with the reason: a dashboard running from
+                a binary or an unrecognised directory is a fine install, and
+                hiding the notice would leave its operator never finding out. */}
+            {mode === "available" && !report.install.supported && (
+              <p className="pb-1 text-hint leading-snug text-muted-foreground">
+                This install updates by hand — {report.install.reason}
+              </p>
+            )}
+            <Button asChild size="sm" variant="ghost" className="w-full justify-between">
+              <Link href="/dashboard">
+                {mode === "running"
+                  ? "View progress"
+                  : mode === "failed"
+                    ? "See what went wrong"
+                    : mode === "success"
+                      ? "See what's new"
+                      : "View patch notes"}
+                <ArrowRight />
+              </Link>
             </Button>
-          )}
-          <Button
-            size="xs"
-            variant={available && canInstall && !running && !outcome ? "ghost" : "outline"}
-            className="w-full"
-            onClick={() => setSheet(true)}
-          >
-            {running ? "View progress" : outcome ? "Open" : "View changes"}
-          </Button>
+          </BlurFade>
         </div>
-
-        {/* An update that exists but cannot be installed from here still gets
-            said out loud, with the reason: a dashboard running from a binary
-            or an unrecognised directory is a fine install, and hiding the
-            notice would leave its operator never finding out at all. */}
-        {available && !running && !outcome && !report.install.supported && (
-          <p className="text-hint leading-relaxed text-muted-foreground">
-            This install updates by hand — {report.install.reason}
-          </p>
-        )}
-      </div>
-      <ChangesSheet open={sheet} onOpenChange={setSheet} />
+      </section>
       {dialog}
     </>
+  )
+}
+
+/** The notice's mark: the dashboard's own J while it is on its way, the outcome once it lands. */
+function Mark({ mode }: { mode: "available" | "running" | "success" | "failed" }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "flex size-8 shrink-0 items-center justify-center rounded-lg border",
+        (mode === "available" || mode === "running") &&
+          "border-rule-brand bg-wash-brand text-brand",
+        mode === "success" && "border-rule-success bg-wash-success text-success",
+        mode === "failed" && "border-rule-danger bg-wash-danger text-destructive",
+      )}
+    >
+      {mode === "success" ? (
+        <Sparkles className="size-4" />
+      ) : mode === "failed" ? (
+        <CrossCircle className="size-4" />
+      ) : (
+        <LogoGlyph className="h-4 w-auto" />
+      )}
+    </span>
   )
 }

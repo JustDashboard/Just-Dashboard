@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/go-chi/chi/v5"
@@ -28,7 +29,6 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 		// What is wrong with Docker on this host, in sentences. Read-only: it
 		// only reports, and every remedy it suggests is a separate route with
 		// its own capability check.
-		r.Method(http.MethodGet, "/health", s.handle(s.handleDockerDiagnose))
 
 		// What the daemon did while nobody was watching.
 		r.Method(http.MethodGet, "/events", s.handle(s.handleDockerEvents))
@@ -48,8 +48,6 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 			// polls.
 			r.Method(http.MethodGet, "/{id}/writable-layer", s.handle(s.handleWritableLayer))
 			r.Method(http.MethodGet, "/{id}/migration-plan", s.handle(s.handleMigrationPlan))
-			r.Method(http.MethodGet, "/{id}/failure", s.handle(s.handleContainerFailure))
-			r.Method(http.MethodGet, "/{id}/anomalies", s.handle(s.handleContainerAnomalies))
 			// Where a published port is actually reachable, including
 			// through the reverse proxy this dashboard also manages.
 			r.Method(http.MethodGet, "/{id}/routes", s.handle(s.handleContainerRoutes))
@@ -925,7 +923,7 @@ func (s *Server) handleStackConfig(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return httpx.Wrap(http.StatusInternalServerError, "read_failed", err)
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"path": stack.ConfigFiles[0], "content": content})
+	httpx.JSON(w, http.StatusOK, map[string]any{"path": stack.ConfigFiles[0], "content": content, "revision": contentguard.Revision(content)})
 	return nil
 }
 

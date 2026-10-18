@@ -63,9 +63,9 @@ test("a missing IPv6 INPUT rule is identified independently and repaired only af
     return json(route, { repaired: true })
   })
 
-  await expect(
-    page.getByText("Owned admission rules need attention", { exact: true }),
-  ).toBeVisible()
+  await expect(page.getByText("Owned admission rules need attention", { exact: true })).toHaveCount(
+    0,
+  )
   await expect(chainReading(page, "IPv6 INPUT")).toContainText("absent")
   await expect(chainReading(page, "IPv6 INPUT")).toContainText("ip6tables INPUT")
   for (const label of ["IPv4 INPUT", "IPv4 FORWARD", "IPv6 FORWARD", "IPv6 DOCKER-USER"]) {

@@ -610,98 +610,6 @@ async function framedNonTables(page: Page) {
   )
 }
 
-test("the overview reads as readings, findings and how the panel is reached", async ({ page }) => {
-  await mockSecurity(page)
-  await page.goto("/security")
-  await loaded(page)
-
-  // The identity line: the way in drawn as itself, the grade, the allowlist,
-  // the address this browser came from, and the posture's verdict at its end.
-  const identity = page.locator("[data-slot=host-identity]")
-  // Twice: the way in on the tile, and the network this browser is on.
-  await expect(identity.locator('img[src="/logos/tailscale.svg"]')).toHaveCount(2)
-  await expect(identity.getByText("Tailscale only")).toBeVisible()
-  await expect(identity.getByText("100.110.34.9", { exact: true })).toBeVisible()
-  await expect(identity.getByText("Needs attention")).toBeVisible()
-  await expect(identity).toContainText("100.64.0.0/10")
-
-  // The seven checks the verdict is made of: a warning on SSH, a notice on
-  // the firewall, security updates not run, and the rest passed.
-  const checks = page.getByRole("region", { name: "Checks" })
-  await expect(checks).toContainText("4 of 7 checks passed")
-  await expect(checks.getByRole("button", { name: "SSH: 1 warning" })).toBeEnabled()
-  await expect(checks.getByRole("button", { name: "Updates: Not checked" })).toBeDisabled()
-  await expect(checks.getByRole("button", { name: "Exposure: Passed" })).toBeDisabled()
-
-  // Five tiles, each a destination with a figure read from its own poll.
-  // Scoped to the grid: the sidebar and the section strip link to the same
-  // pages under the same names, and this is about the tiles.
-  const grid = page.locator("[data-slot=stat-grid]")
-  const tiles = grid.locator("a")
-  await expect(tiles).toHaveCount(5)
-  // One width and one inset for all five, the first included: the first column
-  // used to give up its left padding, which put the hover wash flush against
-  // its name.
-  const cells = await tiles.evaluateAll((links) =>
-    links.map((a) => {
-      const tile = a.querySelector("[data-slot=stat-tile]")!
-      return `${Math.round(a.getBoundingClientRect().width)} ${getComputedStyle(tile).paddingLeft}`
-    }),
-  )
-  expect(new Set(cells).size, cells.join(" | ")).toBe(1)
-  await expect(grid.getByRole("link", { name: "Firewall", exact: true })).toContainText("ufw")
-  await expect(grid.getByRole("link", { name: "SSH", exact: true })).toContainText("1 finding")
-  await expect(grid.getByRole("link", { name: "Intrusion", exact: true })).toContainText(
-    "2 banned now",
-  )
-  // The figure and its unit are two spans, so the text runs together.
-  await expect(grid.getByRole("link", { name: "Connections", exact: true })).toContainText(
-    /1\s*from the internet/,
-  )
-  await expect(grid.getByRole("link", { name: "Logins", exact: true })).toContainText("1 session")
-
-  // The ways onto the machine: the internet's through the firewall, fail2ban
-  // and sshd, and this browser's through the allowlist.
-  const ways = page.getByRole("list", { name: "The ways onto this machine" })
-  await expect(ways).toContainText("ufw")
-  await expect(ways).toContainText("deny inbound")
-  await expect(ways).toContainText(":22")
-  await expect(ways).toContainText(":443")
-  await expect(ways).toContainText("2 banned now")
-  await expect(ways).toContainText("SSH accepts passwords")
-  await expect(ways).toContainText("Tailscale only")
-  await expect(ways.locator('img[src="/logos/fail2ban.webp"]')).toHaveCount(1)
-
-  // A check's segment narrows the findings to its area, and lets it go.
-  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toHaveCount(0)
-  await checks.getByRole("button", { name: "SSH: 1 warning" }).click()
-  await expect(checks.getByRole("button", { name: "SSH: 1 warning" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toHaveCount(0)
-  await page.getByRole("button", { name: "Show every area" }).click()
-  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toHaveCount(0)
-
-  // The action is visible before expansion and lands on the setting without applying it.
-  // The finding's row, not the SSH tile's hint, which quotes the same title.
-  await page.getByRole("button", { name: "Review SSH password login", exact: true }).click()
-  await expect(page).toHaveURL(
-    /\/security\/ssh\?setting=passwordauthentication#ssh-passwordauthentication$/,
-  )
-  await expect(
-    page
-      .getByRole("radiogroup", { name: "Password authentication" })
-      .getByRole("radio", { name: "yes", exact: true }),
-  ).toBeFocused()
-  await expect(
-    page
-      .getByRole("radiogroup", { name: "Password authentication" })
-      .getByRole("radio", { name: "yes", exact: true }),
-  ).toBeChecked()
-  await expect(page.getByRole("button", { name: "Apply changes", exact: true })).toHaveCount(0)
-})
-
 for (const path of PAGES) {
   test(`${path} keeps non-table Panels plain`, async ({ page }) => {
     await mockSecurity(page)
@@ -1524,6 +1432,39 @@ test("the overview reads the access boundary and names the part that broke", asy
   await expect(boundary).toContainText("21001 is funnelled")
 })
 
+for (const available of [false, true]) {
+  test(`the overview names ${available ? "stopped" : "absent"} fail2ban without judging other blockers`, async ({
+    page,
+  }) => {
+    await mockSecurity(page, [], {
+      overrides: { "/fail2ban/": { available, running: false, jails: [] } },
+    })
+    await page.goto("/security")
+    const reading = page.getByRole("main").getByRole("link", { name: "Intrusion", exact: true })
+    await expect(reading).toContainText(
+      available ? "fail2ban is not running" : "fail2ban is not installed",
+    )
+    await expect(reading).not.toContainText("nothing is blocking")
+  })
+}
+
+test("an unreadable fail2ban status is unknown rather than absent protection", async ({ page }) => {
+  await mockSecurity(page)
+  await page.route("**/api/v1/fail2ban/", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable", message: "Status read failed" } }),
+    }),
+  )
+  await page.goto("/security")
+  const reading = page.getByRole("main").getByRole("link", { name: "Intrusion", exact: true })
+  await expect(reading).toContainText("Unreadable")
+  await expect(reading).toContainText("fail2ban status could not be read")
+  await expect(reading).not.toContainText("nothing is blocking")
+  await expect(reading).not.toContainText("No fail2ban")
+})
+
 test("firewall and SSH changes use ordinary confirmation", async ({ page }) => {
   const mutations: Mutation[] = []
   await mockSecurity(page, mutations)
@@ -1568,47 +1509,27 @@ test("workspace: security filters are shareable and Back restores the previous q
   await expect(page.locator("[data-workspace-item]").first()).toBeFocused()
 })
 
-/**
- * The verdict says what its checks could not see: provider policy always,
- * since no provider adapter exists, and an nftables table no adapter models.
- * Neither is a finding, and a clean list beside them does not say "passed".
- */
-test("the posture names the layers its checks could not see", async ({ page }) => {
-  await mockSecurity(page, [], {
-    overrides: {
-      "/security/posture": {
-        ...posture,
-        status: "ok",
-        skipped: [],
-        findings: [],
-        unknowns: [
-          {
-            id: "unknown.provider",
-            layer: "provider",
-            title: "Provider policy is not visible",
-            detail:
-              "No provider adapter is configured. Security groups, provider firewalls, upstream NAT and load balancers in front of this host are unseen. This host has no public address on any interface, so traffic from the internet reaches it only through a provider's translation.",
-          },
-          {
-            id: "unknown.nftables",
-            layer: "nftables",
-            title: "Foreign nftables decisions are not modeled",
-            detail:
-              "1 chain outside the firewall adapter can drop or redirect inbound traffic with rules this check does not evaluate: inet crowdsec crowdsec-chain (input hook, policy accept).",
-            subjects: ["inet crowdsec crowdsec-chain (input hook, policy accept)"],
-          },
-        ],
-      },
-    },
-  })
-  await page.goto("/security")
-  const unseen = page.getByRole("region", { name: "Not seen by these checks" })
-  await expect(unseen.getByText("Provider policy is not visible", { exact: true })).toBeVisible()
-  await expect(unseen.getByText(/reaches it only through a provider's translation/)).toBeVisible()
-  await expect(
-    unseen.getByText("Foreign nftables decisions are not modeled", { exact: true }),
-  ).toBeVisible()
-  await expect(unseen.getByText(/inet crowdsec crowdsec-chain/)).toBeVisible()
-  await expect(page.getByText("No findings in the layers these checks can see")).toBeVisible()
-  await expect(page.getByText("All security checks passed")).toHaveCount(0)
+test("empty merged blocks describe only listed evidence when an engine is unread", async ({
+  page,
+}) => {
+  await mockSecurity(page)
+  await page.route("**/api/v1/security/blocks", (route) =>
+    json(route, {
+      entries: [],
+      distinct: 0,
+      duplicated: 0,
+      covered: 0,
+      communityOnly: 4,
+      truncated: false,
+      engines: [
+        { engine: "fail2ban", read: true, count: 0 },
+        { engine: "crowdsec", read: false, count: 0, note: "not read" },
+      ],
+    }),
+  )
+  await page.goto("/security/intrusion")
+  await expect(page.getByText("No blocked addresses are listed in this reading.")).toBeVisible()
+  await expect(page.getByText(/Not read: CrowdSec/)).toBeVisible()
+  await expect(page.getByText(/4 community decisions/)).toBeVisible()
+  await expect(page.getByText("No engine is refusing an address right now.")).toHaveCount(0)
 })

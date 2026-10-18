@@ -27,16 +27,18 @@ func init() {
 	register(&Lens{
 		ID: "postgres",
 		Events: []string{
-			"startup", "ready", "shutdown", "crash", "oom", "disk_full", "checkpoint",
-			"autovacuum", "autoanalyze", "connection", "authorized", "disconnection",
-			"auth_failed", "too_many_clients", "deadlock", "lock_wait", "slow", "duration",
-			"statement", "temp_file", "cancel", "terminated", "replication",
-			"archive_failed", "config", "error", "fatal",
+			"startup", "ready", "shutdown", "crash", "oom", "disk_full", "shm_full",
+			"recovery", "wraparound", "checkpoint", "checkpoint_pressure",
+			"autovacuum", "autoanalyze", "connection", "authenticated", "authorized",
+			"disconnection", "client_lost", "probe", "auth_failed", "too_many_clients",
+			"deadlock", "lock_wait", "lock_acquired", "slow", "duration", "statement",
+			"temp_file", "cancel", "terminated", "replication", "archive_failed", "config",
+			"error", "fatal",
 		},
 		Attrs: []string{
-			"pid", "user", "db", "client", "port", "app", "code", "severity",
-			"duration_ms", "query", "fp", "table", "bytes",
-			"buffers", "write_s", "sync_s", "total_s",
+			"pid", "user", "db", "client", "port", "app", "code", "error_class", "severity",
+			"duration_ms", "session_ms", "wait_ms", "lock", "auth_method", "reason", "query", "fp",
+			"table", "bytes", "buffers", "write_s", "sync_s", "total_s", "interval_s",
 		},
 		New: func() Reader { return &postgresReader{} },
 	})
@@ -69,6 +71,9 @@ type pgHead struct {
 	// statement is jsonlog's: the statement travels in the same record
 	// there, so an error can carry its query.
 	statement string
+	// body is the severity and the message, the end of the line as
+	// written: where a DETAIL is drawn from, so it still says it is one.
+	body string
 }
 
 func (r *postgresReader) Read(l *Line) {
@@ -98,6 +103,7 @@ func (r *postgresReader) Read(l *Line) {
 		l.Timestamp = h.at
 	}
 	if pgPart(h.severity) {
+		l.SetBody(h.body)
 		if r.open && h.pid == r.pid {
 			l.Cont = true
 			if r.level != "" {
@@ -110,6 +116,7 @@ func (r *postgresReader) Read(l *Line) {
 	}
 
 	l.SetLevel(pgLevel(h.severity))
+	l.SetBody(h.msg)
 	l.SetAttr("pid", h.pid)
 	dbSetWord(l, "severity", pgSeverity(h.severity))
 	if h.user != "[unknown]" {
@@ -163,9 +170,19 @@ func (r *postgresReader) log(l *Line, h *pgHead) {
 			l.Event = "statement"
 			pgQuery(l, query)
 		}
-	case strings.HasPrefix(msg, "checkpoint "), strings.HasPrefix(msg, "restartpoint "),
-		strings.HasPrefix(msg, "checkpoints are occurring too frequently"):
+	case strings.HasPrefix(msg, "checkpoints are occurring too frequently"):
+		// WAL is filling max_wal_size between timed checkpoints: every write
+		// pays for full-page images until it is raised.
+		l.Event = "checkpoint_pressure"
+		l.SetLevel("warn")
+		dbNumberAttr(l, "interval_s", dbBetween(msg, "(", " second"))
+	case strings.HasPrefix(msg, "checkpoint "), strings.HasPrefix(msg, "restartpoint "):
 		l.Event = "checkpoint"
+		// "time" is the schedule; "wal" is max_wal_size forcing one early,
+		// which is the reason worth ranking.
+		if _, reason, found := strings.Cut(msg, " starting: "); found {
+			l.SetAttr("reason", reason)
+		}
 		if strings.Contains(msg, " complete: ") {
 			dbNumberAttr(l, "buffers", dbBetween(msg, "wrote ", " buffers"))
 			dbNumberAttr(l, "write_s", dbBetween(msg, "write=", " s"))
@@ -182,6 +199,15 @@ func (r *postgresReader) log(l *Line, h *pgHead) {
 				r.peers = make(map[string]string)
 			}
 			r.peers[strings.Clone(h.pid)] = client
+		}
+	case strings.HasPrefix(msg, "connection authenticated: "):
+		// Postgres 17's line between received and authorized, the one place
+		// the pg_hba method is named: "trust" from a network address is a
+		// door left open.
+		l.Event = "authenticated"
+		l.SetAttr("auth_method", dbWord(msg, " method="))
+		if user := dbBetween(msg, `user="`, `"`); user != "" {
+			l.SetAttr("user", user)
 		}
 	case strings.HasPrefix(msg, "connection authorized: "),
 		strings.HasPrefix(msg, "replication connection authorized: "):
@@ -221,11 +247,32 @@ func (r *postgresReader) log(l *Line, h *pgHead) {
 		dbNumberAttr(l, "bytes", dbWord(msg, ", size "))
 	case strings.HasPrefix(msg, "process ") && strings.Contains(msg, " still waiting for "):
 		l.Event = "lock_wait"
-		if i := strings.LastIndex(msg, " after "); i >= 0 {
-			if ms, _, found := strings.Cut(msg[i+len(" after "):], " ms"); found {
-				dbMillis(l, "duration_ms", ms, 1)
-			}
-		}
+		pgLockWait(l, msg, " still waiting for ")
+	case strings.HasPrefix(msg, "process ") && strings.Contains(msg, " acquired "):
+		// The end of a wait log_lock_waits reported, with how long it took
+		// in all: a second line for the same wait, so it is not counted as
+		// one.
+		l.Event = "lock_acquired"
+		pgLockWait(l, msg, " acquired ")
+	case strings.HasPrefix(msg, "database system was interrupted"),
+		strings.HasPrefix(msg, "database system was not properly shut down"),
+		strings.HasPrefix(msg, "redo starts at "), strings.HasPrefix(msg, "redo done at "),
+		strings.HasPrefix(msg, "terminating any other active server processes"),
+		strings.HasPrefix(msg, "all server processes terminated; reinitializing"):
+		// The restart after a crash, which a container restart policy hides:
+		// the server is back, and these lines are the only sign it went.
+		l.Event = "recovery"
+		l.SetLevel("warn")
+	case pgClientLost(msg):
+		l.Event = "client_lost"
+		l.SetLevel("warn")
+	case pgProbe(msg):
+		l.Event = "probe"
+		l.SetLevel("warn")
+	case strings.Contains(msg, " must be vacuumed within "):
+		// A WARNING counting down to the server refusing writes.
+		l.Event = "wraparound"
+		l.SetAttr("db", dbBetween(msg, `database "`, `"`))
 	case strings.HasPrefix(msg, "starting PostgreSQL"):
 		l.Event = "startup"
 	case strings.HasPrefix(msg, "database system is ready to accept"):
@@ -261,18 +308,37 @@ func (r *postgresReader) log(l *Line, h *pgHead) {
 func (r *postgresReader) failure(l *Line, h *pgHead) {
 	msg := h.msg
 	switch {
+	case strings.HasPrefix(msg, "could not resize shared memory segment"):
+		// /dev/shm, not the data directory: Docker's 64MB default, which a
+		// parallel query outgrows. The fix is --shm-size, not a bigger disk.
+		l.Event = "shm_full"
 	case strings.Contains(msg, "No space left on device"):
 		l.Event = "disk_full"
 		l.SetLevel("critical")
-	case strings.HasPrefix(msg, "out of memory"):
+	case strings.HasPrefix(msg, "out of memory"),
+		strings.HasPrefix(msg, "could not fork new process for connection: Cannot allocate memory"):
 		l.Event = "oom"
 		l.SetLevel("critical")
+	case strings.HasPrefix(msg, "database is not accepting commands to avoid wraparound"):
+		l.Event = "wraparound"
+		l.SetLevel("critical")
+		l.SetAttr("db", dbBetween(msg, `database "`, `"`))
 	case strings.HasPrefix(msg, "deadlock detected"):
 		l.Event = "deadlock"
 	case strings.HasPrefix(msg, "canceling "):
 		l.Event = "cancel"
+		pgReason(l, msg)
 	case pgReplication(msg):
 		l.Event = "replication"
+	case pgProbe(msg):
+		// A scanner speaking something other than Postgres to an open
+		// port: a FATAL to the server, but nothing failed that was ever
+		// going to work.
+		l.Event = "probe"
+		l.SetLevel("warn")
+	case pgClientLost(msg):
+		l.Event = "client_lost"
+		l.SetLevel("warn")
 	case h.severity == "FATAL" && pgAuthFailure(l, msg):
 		l.Event = "auth_failed"
 	case strings.HasPrefix(msg, "sorry, too many clients"),
@@ -281,6 +347,7 @@ func (r *postgresReader) failure(l *Line, h *pgHead) {
 		l.Event = "too_many_clients"
 	case strings.HasPrefix(msg, "terminating "):
 		l.Event = "terminated"
+		pgReason(l, msg)
 	case h.severity == "PANIC":
 		l.Event = "crash"
 	case h.severity == "FATAL":
@@ -291,6 +358,7 @@ func (r *postgresReader) failure(l *Line, h *pgHead) {
 	if h.code == "" {
 		l.SetAttr("code", pgCode(msg))
 	}
+	dbSetWord(l, "error_class", pgClass(l.Attrs["code"]))
 	if h.statement != "" {
 		pgQuery(l, h.statement)
 	}
@@ -375,7 +443,101 @@ func pgSessionTime(l *Line, s string) {
 	if !okH || !okM || err != nil {
 		return
 	}
-	dbMillis(l, "duration_ms", strconv.FormatFloat(float64(h*3600+m*60)+sec, 'f', -1, 64), 1000)
+	dbMillis(l, "session_ms", strconv.FormatFloat(float64(h*3600+m*60)+sec, 'f', -1, 64), 1000)
+}
+
+// pgLockWait reads log_lock_waits's line: the lock mode after verb, and how
+// long the wait had been. It is time spent waiting, kept apart from a
+// statement's duration, which is what "statement time" ranks.
+func pgLockWait(l *Line, msg, verb string) {
+	if _, rest, found := strings.Cut(msg, verb); found {
+		mode, _, _ := strings.Cut(rest, " ")
+		l.SetAttr("lock", mode)
+	}
+	if i := strings.LastIndex(msg, " after "); i >= 0 {
+		if ms, _, found := strings.Cut(msg[i+len(" after "):], " ms"); found {
+			dbMillis(l, "wait_ms", ms, 1)
+		}
+	}
+}
+
+// pgReason reads why a statement was cancelled or a session ended:
+// "statement timeout", "lock timeout", "administrator command". Ranked, they
+// say whether the limits or the operator are cutting work short.
+func pgReason(l *Line, msg string) {
+	if _, reason, found := strings.Cut(msg, " due to "); found {
+		l.SetAttr("reason", reason)
+	} else if strings.HasPrefix(msg, "canceling autovacuum task") {
+		dbSetWord(l, "reason", "autovacuum")
+	}
+}
+
+// pgClientLost is a client that went away mid-session — a killed worker, a
+// network drop, a pooler's timeout. The server is fine; the application on
+// the other end is what to look at.
+func pgClientLost(msg string) bool {
+	return strings.HasPrefix(msg, "could not receive data from client") ||
+		strings.HasPrefix(msg, "could not send data to client") ||
+		strings.HasPrefix(msg, "unexpected EOF on client connection") ||
+		strings.HasPrefix(msg, "connection to client lost")
+}
+
+// pgProbe is what a port scanner leaves in the log of a Postgres it can
+// reach: a startup packet that is not one, TLS where Postgres expected its
+// own protocol. Each line is an address that can reach the server.
+func pgProbe(msg string) bool {
+	return strings.HasPrefix(msg, "incomplete startup packet") ||
+		strings.HasPrefix(msg, "invalid length of startup packet") ||
+		strings.HasPrefix(msg, "unsupported frontend protocol") ||
+		strings.HasPrefix(msg, "could not accept SSL connection") ||
+		strings.HasPrefix(msg, "received direct SSL connection request without ALPN")
+}
+
+// pgClass names a SQLSTATE's class, the first two characters, in a word:
+// the errors grouped as constraints, syntax, auth or resources say whether
+// the application, its users or the server is at fault, which a column of
+// five-character codes does not.
+func pgClass(code string) string {
+	if len(code) != 5 {
+		return ""
+	}
+	switch code[:2] {
+	case "08":
+		return "connection"
+	case "0A":
+		return "unsupported"
+	case "22":
+		return "data"
+	case "23":
+		return "constraint"
+	case "25":
+		return "transaction state"
+	case "26":
+		return "prepared statement"
+	case "28":
+		return "auth"
+	case "2B":
+		return "dependency"
+	case "3D", "3F":
+		return "catalog"
+	case "40":
+		return "rollback"
+	case "42":
+		return "syntax or access"
+	case "53":
+		return "resources"
+	case "54":
+		return "limits"
+	case "55":
+		return "lock"
+	case "57":
+		return "operator"
+	case "58":
+		return "system"
+	case "XX":
+		return "internal"
+	}
+	return ""
 }
 
 // pgReplication is the standby and WAL-shipping vocabulary. Checked by
@@ -608,6 +770,7 @@ func pgParseRest(h pgHead, rest string) (pgHead, bool) {
 		return pgHead{}, false
 	}
 	h.msg = rest[sevEnd+3:]
+	h.body = rest[sevStart:]
 	pgPrefix(&h, rest[:sevStart])
 	return h, true
 }

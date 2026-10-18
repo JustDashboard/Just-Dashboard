@@ -9,6 +9,7 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/in
 
 import { Field, FormFacts } from "@/components/form"
 import { Modal } from "@/components/modal"
+import type { OperationReading } from "@/components/operation-progress"
 
 export type ConfirmRequest = {
   /** Short title, e.g. "Remove container". */
@@ -39,13 +40,17 @@ export type ConfirmRequest = {
    */
   phrase?: string
   confirmLabel?: string
+  workingLabel?: string
   /**
    * Runs the action; the typed phrase is passed through to the API call. An
    * action whose outcome is not simply "done" — deleted, but not reloaded —
    * announces it itself and resolves to "reported", and the dialog then adds
    * no "completed" of its own.
    */
-  action: (confirm: string) => Promise<void | "reported">
+  action: (
+    confirm: string,
+    report: (reading: Partial<OperationReading>) => void,
+  ) => Promise<void | "reported">
   onDone?: () => void
 }
 
@@ -85,13 +90,20 @@ function ConfirmBody({
 }) {
   const [typed, setTyped] = useState("")
   const [busy, setBusy] = useState(false)
+  const [startedAt, setStartedAt] = useState(0)
+  const [progress, setProgress] = useState<OperationReading>({ label: "" })
   const matches = !request.phrase || typed === request.phrase
 
   const run = async () => {
     if (!matches || busy) return
     setBusy(true)
+    setStartedAt(Date.now())
+    setProgress({ label: request.workingLabel ?? `${request.title}…` })
     try {
-      if ((await request.action(typed)) !== "reported") notify.success(`${request.title} completed`)
+      const result = await request.action(typed, (reading) =>
+        setProgress((held) => ({ ...held, ...reading })),
+      )
+      if (result !== "reported") notify.success(`${request.title} completed`)
       onOpenChange(false)
       request.onDone?.()
     } catch (err) {
@@ -107,6 +119,7 @@ function ConfirmBody({
       open
       onOpenChange={(open) => !busy && onOpenChange(open)}
       title={request.title}
+      progress={busy && { ...progress, startedAt }}
       footer={
         <>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>

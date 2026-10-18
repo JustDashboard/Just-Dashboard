@@ -17,6 +17,75 @@ const pgLog = `/logs?source=${encodeURIComponent(PG)}`
 /** The questions about lines: the lens's readings ask for counts (`limit=1`) each minute. */
 const lineSearches = (mocks: LensMocks) => mocks.searches.filter((s) => s.get("limit") !== "1")
 
+test("native log export discloses its cap, scan limit and implicit journal window", async ({
+  page,
+}) => {
+  await mockLensLogs(page)
+  await page.goto("/logs?source=journal%3A")
+  await page.getByRole("button", { name: "Export", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toContainText("first 20,000 selected lines")
+  await expect(dialog).toContainText("five-minute scan limit")
+  await expect(dialog).toContainText("last 48 hours")
+  await expect(dialog).toContainText("downloaded file records caps")
+  await expect(dialog).not.toContainText("every line, on disk")
+  await expect(dialog.getByRole("combobox", { name: "Window" })).toContainText("Available history")
+})
+
+test("custom log export validates native extended years and date order without crashing", async ({
+  page,
+}) => {
+  const errors: string[] = []
+  page.on("pageerror", (error) => errors.push(error.message))
+  await mockLensLogs(page)
+  await page.goto(pgLog)
+  await page.getByRole("button", { name: "Export", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByRole("combobox", { name: "Window" }).click()
+  await page.getByRole("option", { name: "Custom range", exact: true }).click()
+  await expect(dialog.getByRole("button", { name: "Download", exact: true })).toBeDisabled()
+  const from = dialog.getByLabel("From", { exact: true })
+  const input = await from.evaluate((element) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!
+    setter.call(element, "10000-01-01T00:00")
+    element.dispatchEvent(new Event("input", { bubbles: true }))
+    element.dispatchEvent(new Event("change", { bubbles: true }))
+    return (element as HTMLInputElement).value
+  })
+  expect(input).toBe("10000-01-01T00:00")
+  await expect(dialog.getByText("Log windows support years up to 9999.")).toBeVisible()
+  await expect(from).toHaveAttribute("aria-invalid", "true")
+  await expect(dialog.getByRole("button", { name: "Download", exact: true })).toBeDisabled()
+  await expect(page.getByText("This page stopped rendering")).toHaveCount(0)
+  await from.fill("2026-10-14T12:00")
+  await dialog.getByLabel("To", { exact: true }).fill("2026-10-14T11:00")
+  await expect(
+    dialog.getByText("The start of the log window must be before its end."),
+  ).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Download", exact: true })).toBeDisabled()
+  await dialog.getByLabel("To", { exact: true }).fill("2026-10-14T13:00")
+  await expect(dialog.getByRole("link", { name: "Download", exact: true })).toBeVisible()
+  const href = await dialog
+    .getByRole("link", { name: "Download", exact: true })
+    .getAttribute("href")
+  expect(new URL(href!, page.url()).searchParams.get("since")).toBe("2026-10-14T12:00:00.000Z")
+  expect(errors).toEqual([])
+})
+
+test("the shared log time window disables Apply for unsupported native years", async ({ page }) => {
+  await mockLensLogs(page)
+  await page.goto(pgLog)
+  await page.getByRole("button", { name: /^Time window:/ }).click()
+  await page.locator("#window-from").evaluate((element) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!
+    setter.call(element, "10000-01-01T00:00")
+    element.dispatchEvent(new Event("input", { bubbles: true }))
+    element.dispatchEvent(new Event("change", { bubbles: true }))
+  })
+  await expect(page.getByText("Log windows support years up to 9999.")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Apply", exact: true })).toBeDisabled()
+})
+
 test("a lensed log reads as its events, folds a record and counts a repeat", async ({ page }) => {
   await mockLensLogs(page)
   await page.goto(pgLog)

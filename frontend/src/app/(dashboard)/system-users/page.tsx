@@ -27,7 +27,7 @@ import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
 import { AccessBand } from "@/components/system-users/access-band"
-import { isBare, signIns, verdict } from "@/components/system-users/access"
+import { hasSignInRoute, isBare, signIns, verdict } from "@/components/system-users/access"
 import { AccountMark, FaceRun, GroupList, isAdmin } from "@/components/system-users/marks"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
@@ -43,12 +43,10 @@ type Pending = Record<string, string | undefined>
 type Scope = "all" | "signin" | "admins" | "bare" | "locked"
 
 /**
- * The one word an account's state comes down to. Locked wins over everything —
- * a locked account cannot be signed into however it is otherwise arranged —
- * and a missing password is the only state on this page that is a warning.
+ * The password state is separate from key authentication and host policy.
  */
 function accountState(user: SystemUser): { tone: DotTone; label: string } {
-  if (user.locked) return { tone: "stopped", label: "Locked" }
+  if (user.locked) return { tone: "unknown", label: "Password locked" }
   if (user.noPassword) return { tone: "warning", label: "No password" }
   if (!user.canLogin) return { tone: "unknown", label: "No login" }
   return { tone: "running", label: "Active" }
@@ -92,10 +90,13 @@ export default function SystemUsersPage() {
   )
 
   const setLocked = async (user: SystemUser, locked: boolean) => {
-    setPending((p) => ({ ...p, [user.username]: locked ? "Locking" : "Unlocking" }))
+    setPending((p) => ({
+      ...p,
+      [user.username]: locked ? "Locking password" : "Unlocking password",
+    }))
     try {
       await patch(`/system-users/${encodeURIComponent(user.username)}`, { locked })
-      notify.success(`${user.username} ${locked ? "locked" : "unlocked"}`)
+      notify.success(`${user.username}'s password ${locked ? "locked" : "unlocked"}`)
       refresh()
     } catch (err) {
       notify.error("Could not change lock state", err)
@@ -139,7 +140,7 @@ export default function SystemUsersPage() {
     return {
       people: users.filter((u) => !u.system),
       system: users.filter((u) => u.system).length,
-      signIn: users.filter((u) => u.canLogin && !u.locked),
+      signIn: users.filter(hasSignInRoute),
       bare: users.filter((u) => isBare(u)).length,
       admins: users.filter(isAdmin),
       locked: users.filter((u) => u.locked).length,
@@ -157,7 +158,7 @@ export default function SystemUsersPage() {
     if (!data) return []
     const q = query.trim().toLowerCase()
     return data.filter((u) => {
-      if (activeScope === "signin" && !(u.canLogin && !u.locked)) return false
+      if (activeScope === "signin" && !hasSignInRoute(u)) return false
       if (activeScope === "admins" && !isAdmin(u)) return false
       if (activeScope === "bare" && !isBare(u)) return false
       if (activeScope === "locked" && !u.locked) return false
@@ -212,7 +213,7 @@ export default function SystemUsersPage() {
                   : plural(figures.people.length, "person", "people")}
               </span>
               <FactDot />
-              <span className="numeric">{figures.signIn.length} can sign in</span>
+              <span className="numeric">{figures.signIn.length} have sign-in routes</span>
               <FactDot />
               <span className="numeric">{plural(figures.keys, "SSH key")} authorised</span>
               {figures.latest && (
@@ -263,7 +264,7 @@ export default function SystemUsersPage() {
                 All <ChipCount>{data.length}</ChipCount>
               </FilterChip>
               <FilterChip selected={scope === "signin"} onClick={() => setScope("signin")}>
-                Can sign in <ChipCount>{figures.signIn.length}</ChipCount>
+                Sign-in routes <ChipCount>{figures.signIn.length}</ChipCount>
               </FilterChip>
               <FilterChip selected={scope === "admins"} onClick={() => setScope("admins")}>
                 Administrators <ChipCount>{figures.admins.length}</ChipCount>
@@ -275,7 +276,7 @@ export default function SystemUsersPage() {
                 </FilterChip>
               )}
               <FilterChip selected={scope === "locked"} onClick={() => setScope("locked")}>
-                Locked <ChipCount>{figures.locked}</ChipCount>
+                Password locked <ChipCount>{figures.locked}</ChipCount>
               </FilterChip>
             </ChipStrip>
           )}
@@ -397,7 +398,7 @@ function userVerbs({ user, pending, setLocked, remove }: CardProps): Verb[] {
   return [
     {
       key: "lock",
-      label: user.locked ? "Unlock" : "Lock",
+      label: user.locked ? "Unlock password" : "Lock password",
       icon: user.locked ? LockOpen : LockClosed,
       inline: true,
       disabled: Boolean(pending[user.username]),

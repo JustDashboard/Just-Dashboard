@@ -1,4 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { createHash } from "node:crypto"
+import { heldResponse, recordProgress } from "./progress-recording"
 
 test.use({
   video:
@@ -108,7 +110,16 @@ async function mockPicture(page: Page, width = 80, height = 40) {
     { width, height },
   )
   await page.route("**/api/v1/files/raw**", (route) =>
-    route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from(picture, "base64") }),
+    route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      headers: {
+        "X-JD-Content-Revision": createHash("sha256")
+          .update(Buffer.from(picture, "base64"))
+          .digest("hex"),
+      },
+      body: Buffer.from(picture, "base64"),
+    }),
   )
 }
 
@@ -156,7 +167,12 @@ async function mockFiles(
       // error and fall back to the icon, which is also correct but not what
       // this test is about.
       if ((url.searchParams.get("path") ?? "").endsWith(".mp4")) return new Promise(() => undefined)
-      return route.fulfill({ status: 200, contentType: "image/png", body: png })
+      return route.fulfill({
+        status: 200,
+        contentType: "image/png",
+        headers: { "X-JD-Content-Revision": createHash("sha256").update(png).digest("hex") },
+        body: png,
+      })
     }
     if (path === "/files/preview") {
       const target = url.searchParams.get("path") ?? ""
@@ -1196,7 +1212,7 @@ test("image export saves live adjustments and a copy keeps the source dirty", as
   let upload: { url: string; body: Buffer } | undefined
   await page.route("**/api/v1/files/upload**", async (route) => {
     upload = { url: route.request().url(), body: route.request().postDataBuffer()! }
-    await json(route, { ok: true })
+    await json(route, { revisions: { "copy.png": "1".repeat(64), "logo.png": "2".repeat(64) } })
   })
   await page.goto(
     `/files/editor?path=${encodeURIComponent(home + "/logo.png")}&root=${encodeURIComponent(home)}`,
@@ -1235,6 +1251,13 @@ test("image export saves live adjustments and a copy keeps the source dirty", as
   await page.getByRole("button", { name: "Cancel", exact: true }).click()
   await page.getByRole("button", { name: "Save over original", exact: true }).click()
   await expect.poll(() => upload?.url).toContain("overwrite=true")
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeHidden()
+  await page.getByRole("button", { name: "Right", exact: true }).click()
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Save over original", exact: true }).click()
+  await expect
+    .poll(() => upload && new URL(upload.url).searchParams.get("expectedRevision"))
+    .toBe("2".repeat(64))
   await expect(page.getByText("Unsaved edits", { exact: true })).toBeHidden()
 })
 
@@ -1774,4 +1797,388 @@ test("a failed native move keeps its source preview available", async ({ page })
   await expect(page.getByText("Could not move notes.md", { exact: true })).toBeVisible()
   await expect(page.getByRole("heading", { name: "notes.md", exact: true })).toBeVisible()
   await expect(page.locator('[data-dragging="true"]')).toHaveCount(0)
+})
+
+test("canceling or skipping a cut conflict keeps the pending clipboard for retry", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  await page.route("**/api/v1/files/list**", (route) => {
+    const dir = new URL(route.request().url()).searchParams.get("path") ?? home
+    return json(route, {
+      path: dir,
+      parent: home,
+      roots: ["/"],
+      entries: dir === home ? entries : [entry("notes.md", { path: `${dir}/notes.md` })],
+    })
+  })
+  await openFiles(page)
+  await page.locator(`[data-file-listing] [data-entry-path="${home}/notes.md"]`).click()
+  await page.keyboard.press("Control+x")
+  await page.locator(`[data-file-listing] [data-entry-path="${home}/photos"]`).dblclick()
+  await page.getByRole("button", { name: "Paste here", exact: true }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click()
+  await page.getByRole("button", { name: "Paste here", exact: true }).click()
+  await expect(page.getByRole("dialog")).toContainText("notes.md")
+  await page.getByRole("dialog").getByRole("button", { name: "Skip it", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Paste here", exact: true })).toBeVisible()
+})
+
+test("a stale file save preserves the draft and reviews the current server revision", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  let revision = "opened"
+  let content = "# Notes\nhello\n"
+  const writes: Record<string, unknown>[] = []
+  await page.route("**/api/v1/files/read**", (route) =>
+    json(route, {
+      path: `${home}/notes.md`,
+      content,
+      revision,
+      size: content.length,
+      language: "markdown",
+      binary: false,
+      modeOctal: "0644",
+    }),
+  )
+  await page.route("**/api/v1/files/write", async (route) => {
+    const body = route.request().postDataJSON()
+    writes.push(body)
+    if (body.expectedRevision !== revision)
+      return json(route, { error: { code: "content_conflict", message: "Changed on disk" } }, 409)
+    content = body.content
+    revision = "saved"
+    return json(route, { revision })
+  })
+  await openFiles(page)
+  await page.locator(`[data-file-listing] [data-entry-path="${home}/notes.md"]`).dblclick()
+  await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await page.locator(".monaco-editor").click()
+  await page.keyboard.press("Control+End")
+  await page.keyboard.insertText("MY DRAFT")
+  revision = "external"
+  content = "NATIVE CHANGE\n"
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(page.getByRole("alert").filter({ hasText: "Your draft is kept" })).toContainText(
+    "Your draft is kept",
+  )
+  await expect(page.locator(".monaco-editor")).toContainText("MY DRAFT")
+  expect(writes[0].expectedRevision).toBe("opened")
+  await page.getByRole("button", { name: "Review current file", exact: true }).click()
+  await expect(page.locator("pre").filter({ hasText: "NATIVE CHANGE" })).toBeVisible()
+  await expect(page.locator("pre").filter({ hasText: "MY DRAFT" })).toBeVisible()
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect.poll(() => writes.length).toBe(2)
+  expect(writes[1].expectedRevision).toBe("external")
+})
+
+test("folder uploads review nested collisions and keep both within the merged folder", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  const sent: { path: string | null; body: string; overwrite: string | null }[] = []
+  await page.route("**/api/v1/files/list**", (route) => {
+    const dir = new URL(route.request().url()).searchParams.get("path") ?? home
+    return json(route, {
+      path: dir,
+      parent: home,
+      roots: ["/"],
+      entries: dir === home ? entries : [entry("a.txt", { path: `${dir}/a.txt` })],
+    })
+  })
+  await page.route("**/api/v1/files/upload**", (route) => {
+    const url = new URL(route.request().url())
+    sent.push({
+      path: url.searchParams.get("path"),
+      overwrite: url.searchParams.get("overwrite"),
+      body: route.request().postDataBuffer()?.toString("latin1") ?? "",
+    })
+    return json(route, { uploaded: ["a (2).txt"] }, 201)
+  })
+  await openFiles(page)
+  // A directory dropped by the desktop entry API retains its relative path.
+  await page.locator("input[webkitdirectory]").evaluate((input: HTMLInputElement) => {
+    const transfer = new DataTransfer()
+    const file = new File(["new contents"], "a.txt", { type: "text/plain" })
+    Object.defineProperty(file, "webkitRelativePath", { value: "photos/a.txt" })
+    transfer.items.add(file)
+    input.files = transfer.files
+    input.dispatchEvent(new Event("change", { bubbles: true }))
+  })
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toContainText("photos/a.txt")
+  await expect(dialog).toContainText("folders will be merged")
+  expect(sent).toHaveLength(0)
+  await dialog.getByRole("button", { name: "Keep both", exact: true }).click()
+  await expect.poll(() => sent.length).toBe(1)
+  expect(sent[0].path).toBe(`${home}/photos`)
+  expect(sent[0].overwrite).toBe("false")
+  expect(sent[0].body).toContain('filename="a (2).txt"')
+})
+
+test("a partially failed cut paste retries only files that have not moved", async ({ page }) => {
+  await mockFiles(page)
+  const moved: string[] = []
+  await page.route("**/api/v1/files/move", (route) => {
+    const body = route.request().postDataJSON()
+    moved.push(body.from)
+    if (body.from.endsWith("logo.png"))
+      return json(
+        route,
+        { error: { code: "permission_denied", message: "Fixture refuses this file" } },
+        403,
+      )
+    return json(route, { ok: true })
+  })
+  await openFiles(page)
+  const listing = page.locator("[data-file-listing]")
+  await listing.locator(`[data-entry-path="${home}/notes.md"]`).getByRole("checkbox").click()
+  await listing.locator(`[data-entry-path="${home}/logo.png"]`).click()
+  await page
+    .getByRole("toolbar", { name: "Selection actions" })
+    .getByRole("button", { name: "Cut", exact: true })
+    .click()
+  await listing.locator(`[data-entry-path="${home}/photos"]`).dblclick()
+  await page.getByRole("button", { name: "Paste here", exact: true }).click()
+  await expect(page.getByText("1 item ready to move", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Paste here", exact: true }).click()
+  await expect.poll(() => moved.length).toBe(3)
+  expect(moved.filter((path) => path.endsWith("notes.md"))).toHaveLength(1)
+  expect(moved.filter((path) => path.endsWith("logo.png"))).toHaveLength(2)
+})
+
+// The working bar belongs to dialogs. A page operation keeps its own
+// feedback — the toast it ends with — and draws no bar over the workspace.
+for (const action of ["copy", "move", "duplicate", "extract"]) {
+  test(`progress: file ${action} draws no working bar on the page`, async ({ page }) => {
+    await mockFiles(page)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    if (action === "extract")
+      await page.route("**/api/v1/files/list**", (route) =>
+        json(route, {
+          path: home,
+          parent: "/home",
+          roots: ["/"],
+          entries: [...entries, entry("backup.zip", { size: 1200000 })],
+        }),
+      )
+    const held = await heldResponse(
+      page,
+      `/files/${action === "duplicate" ? "copy" : action}`,
+      action === "extract" ? { extracted: 3 } : { ok: true },
+    )
+    await openFiles(page)
+    const item = (name: string) => page.locator(`[data-entry-path='${home}/${name}']`)
+    if (action === "copy" || action === "move") {
+      await item("notes.md").click()
+      await page.keyboard.press(action === "copy" ? "ControlOrMeta+c" : "ControlOrMeta+x")
+      await item("site").dblclick()
+      await page.getByRole("button", { name: "Paste here", exact: true }).click()
+    } else {
+      await item(action === "extract" ? "backup.zip" : "notes.md").click({ button: "right" })
+      await page
+        .getByRole("menuitem", {
+          name: action === "extract" ? /Extract/ : "Duplicate",
+          exact: action !== "extract",
+        })
+        .click()
+    }
+    await expect.poll(() => held.calls()).toBe(1)
+    await expect(page.locator("[data-slot=operation-progress]")).toHaveCount(0)
+    await expect(page.getByRole("progressbar")).toHaveCount(0)
+    held.release()
+  })
+}
+
+for (const width of [1280, 390]) {
+  test(`progress: file delete counts its items in the dialog's footer at ${width}px`, async ({
+    page,
+  }) => {
+    await mockFiles(page)
+    await page.setViewportSize({ width, height: 900 })
+    const held = await heldResponse(page, "/files/delete", { ok: true })
+    await openFiles(page)
+    const item = (name: string) => page.locator(`[data-entry-path='${home}/${name}']`)
+    await item("notes.md").getByRole("checkbox").click()
+    await item("logo.png").getByRole("checkbox").click()
+    await page.keyboard.press("Delete")
+    const dialog = page.getByRole("dialog")
+    await dialog.evaluate((element) =>
+      Promise.all(element.getAnimations().map((animation) => animation.finished)),
+    )
+    const before = await dialog.boundingBox()
+    const footer = dialog.getByRole("button", { name: "Cancel", exact: true }).locator("..")
+    const strip = await footer.boundingBox()
+    const progress = page.locator("[data-slot=operation-progress]")
+    await recordProgress(
+      page,
+      `files-delete-${width}`,
+      async () => {
+        await dialog.getByRole("button", { name: "Delete all", exact: true }).click()
+        // Part of the footer, not a box over the body: the words sit beside
+        // the buttons, the track runs along the footer's top edge, and the
+        // dialog keeps its size.
+        await expect(footer.locator("[data-slot=operation-progress]")).toBeVisible()
+        await expect(progress).toContainText("0 of 2 processed")
+        const track = await footer.getByRole("progressbar").boundingBox()
+        expect(Math.abs(track!.y - strip!.y)).toBeLessThanOrEqual(1)
+        expect(Math.abs(track!.width - strip!.width)).toBeLessThanOrEqual(1)
+        await expect.poll(() => dialog.boundingBox()).toEqual(before)
+        expect(await footer.boundingBox()).toEqual(strip)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+          width,
+        )
+      },
+      progress,
+      async () => {
+        held.release()
+        await expect(dialog).toHaveCount(0)
+      },
+    )
+    expect(held.calls()).toBe(2)
+  })
+}
+
+test("a stale image save keeps the transformed canvas and original revision through handoff", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  await mockPicture(page)
+  let savedName = ""
+  let expectedRevision = ""
+  let originalSaves = 0
+  await page.route("**/api/v1/files/upload**", async (route) => {
+    const query = new URL(route.request().url()).searchParams
+    expectedRevision = query.get("expectedRevision") ?? ""
+    const body = route.request().postDataBuffer()!.toString("latin1")
+    savedName = /filename="([^"]+)"/.exec(body)?.[1] ?? ""
+    if (query.get("overwrite") === "true") {
+      originalSaves += 1
+      return json(route, { error: { code: "content_conflict", message: "Image changed" } }, 409)
+    }
+    return json(route, { revisions: { [savedName]: "1".repeat(64) } }, 201)
+  })
+  await openFiles(page)
+  await page.locator(`tr[data-entry-path="${home}/logo.png"]`).click()
+  await page.getByRole("button", { name: "Crop, rotate, resize" }).click()
+  await page.getByRole("button", { name: "Right", exact: true }).click()
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "40")
+  await page.getByRole("button", { name: "Open full editor" }).click()
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "40")
+  await page.getByRole("button", { name: "Save over original", exact: true }).click()
+  await expect(page.getByRole("alert").filter({ hasText: "Your edits are kept" })).toContainText(
+    "Your edits are kept",
+  )
+  expect(expectedRevision).toMatch(/^[a-f0-9]{64}$/)
+  expect(originalSaves).toBe(1)
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "40")
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Save over original", exact: true })).toBeDisabled()
+  await page.getByRole("textbox", { name: "Save image as" }).fill("edited-copy.png")
+  await page.getByRole("button", { name: "Save as", exact: true }).click()
+  await expect.poll(() => savedName).toBe("edited-copy.png")
+  expect(expectedRevision).toBe("")
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Reload current image", exact: true }).click()
+  await expect(page.getByRole("dialog")).toContainText("Discard edits and reload the image?")
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "40")
+  await page.getByRole("button", { name: "Reload current image", exact: true }).click()
+  await page.getByRole("button", { name: "Discard and reload", exact: true }).click()
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "80")
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeHidden()
+})
+
+async function holdImageEncoding(page: Page) {
+  await page.addInitScript(() => {
+    const encode = HTMLCanvasElement.prototype.toBlob
+    HTMLCanvasElement.prototype.toBlob = function (callback, ...options) {
+      const encodeCanvas = encode.bind(this)
+      Object.assign(window, {
+        imageEncodingStarted: true,
+        finishImageEncoding: () =>
+          new Promise<void>((resolve) => {
+            encodeCanvas(
+              (blob) => {
+                callback(blob)
+                queueMicrotask(resolve)
+              },
+              ...options,
+            )
+          }),
+      })
+    }
+  })
+}
+
+for (const exit of ["account cleanup", "editor departure"] as const) {
+  test(`an image encoded after ${exit} cannot publish the departed canvas`, async ({ page }) => {
+    await holdImageEncoding(page)
+    await mockFiles(page)
+    await mockPicture(page)
+    let uploads = 0
+    await page.route("**/api/v1/files/upload**", async (route) => {
+      uploads += 1
+      return json(route, { revisions: { "logo.png": "2".repeat(64) } }, 201)
+    })
+    await page.goto(`/files/editor?path=${encodeURIComponent(`${home}/logo.png`)}`)
+    await page.getByRole("button", { name: "Right", exact: true }).click()
+    await page.getByRole("button", { name: "Save over original", exact: true }).click()
+    await expect
+      .poll(() => page.evaluate(() => Reflect.get(window, "imageEncodingStarted")))
+      .toBe(true)
+    if (exit === "account cleanup") {
+      await page.evaluate(() => window.dispatchEvent(new Event("jd-working-state-cleared")))
+    } else {
+      await page.getByRole("button", { name: "Files", exact: true }).click()
+      await page.getByRole("button", { name: "Discard and leave", exact: true }).click()
+      await expect(page.getByLabel("Image editing canvas")).toHaveCount(0)
+    }
+    await page.evaluate(() => Reflect.get(window, "finishImageEncoding")())
+    expect(uploads).toBe(0)
+    await expect(page.getByText("Saved logo.png", { exact: true })).toHaveCount(0)
+  })
+}
+
+test("account cleanup aborts a pending image upload and suppresses late completion", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const fetch = window.fetch
+    window.fetch = (...args) => {
+      if (String(args[0]).includes("/files/upload")) {
+        return new Promise<Response>((resolve) => {
+          const signal = args[1]?.signal
+          signal?.addEventListener("abort", () =>
+            Object.assign(window, { imageUploadAborted: true }),
+          )
+          Object.assign(window, {
+            imageUploadStarted: true,
+            finishImageUpload: () => {
+              resolve(
+                new Response(JSON.stringify({ revisions: { "logo.png": "2".repeat(64) } }), {
+                  status: 201,
+                  headers: { "Content-Type": "application/json" },
+                }),
+              )
+              return new Promise<void>((settled) => setTimeout(settled, 0))
+            },
+          })
+        })
+      }
+      return fetch(...args)
+    }
+  })
+  await mockFiles(page)
+  await mockPicture(page)
+  await page.goto(`/files/editor?path=${encodeURIComponent(`${home}/logo.png`)}`)
+  await page.getByRole("button", { name: "Right", exact: true }).click()
+  await page.getByRole("button", { name: "Save over original", exact: true }).click()
+  await expect.poll(() => page.evaluate(() => Reflect.get(window, "imageUploadStarted"))).toBe(true)
+  await page.evaluate(() => window.dispatchEvent(new Event("jd-working-state-cleared")))
+  await expect.poll(() => page.evaluate(() => Reflect.get(window, "imageUploadAborted"))).toBe(true)
+  await page.evaluate(() => Reflect.get(window, "finishImageUpload")())
+  await expect(page.getByText("Saved logo.png", { exact: true })).toHaveCount(0)
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
 })

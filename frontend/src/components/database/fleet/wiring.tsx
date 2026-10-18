@@ -7,14 +7,14 @@ import type { DbTopoEdge, DbTopoNode, DbTopology } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { WireHost, WireMark, WireNode } from "@/components/deploy/wire"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
-import { Status, type Verdict } from "@/components/status-dot"
+import { StatusDot, type DotTone, type Verdict } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import type { Engine } from "@/components/database/engine"
 import {
   describeEdge,
   edgeRank,
-  shortEdge,
   splitTopology,
+  wiredOrder,
   worstStatus,
 } from "@/components/database/fleet/fleet"
 import { EngineGlyph } from "@/components/database/kit"
@@ -24,14 +24,21 @@ import { EngineGlyph } from "@/components/database/kit"
  * the other, and a wire between each pair with light travelling along it from
  * the database to its reader.
  *
- * It is drawn in the wiring vocabulary the rest of the product uses for "this
- * reaches that" (`deploy/wire`): a thing is its mark with its name beside it,
- * the marks stand at the inner edge of their lane, and the lane between them
- * is kept clear for the wires. A database is its engine's logo, this server
- * the rack every picture draws it as (`WireHost`), a container or a
- * deployment the product it runs where one is known. It stands on the page's
- * own ground over the dot grid, as every other picture does: the grid fades
- * out towards its edges, so the picture has a middle without a frame.
+ * It is drawn the way Configuration draws the path a request takes
+ * (`config/request-path.tsx`), which the operator asked the Databases pictures
+ * to match: every mark at the full size of the wiring vocabulary
+ * (`deploy/wire`), a wide lane between the two sides so a wire leaves its mark
+ * level and arrives level, and the two lanes centred on each other, so one
+ * reader fed by three databases sits across from the middle of them rather
+ * than level with the first. A database is its engine's logo, this server the
+ * rack every picture draws it as (`WireHost`), a container or a deployment the
+ * product it runs where one is known; whether each is up is the dot in its
+ * corner, as it is on the services Configuration draws. It stands on the
+ * page's own ground with no dot grid behind it, as every picture does.
+ *
+ * The lanes are ordered for the wires rather than the alphabet: databases that
+ * feed something first, and each reader across from the databases it is fed
+ * by, so wires cross only where the links themselves do.
  *
  * A wire that pulses is carrying sessions now; a still one is declared and
  * idle; a dashed one could carry (same stack, same network) and has not been
@@ -48,7 +55,7 @@ export function Wiring({
   topology,
   keep,
   engineOf,
-  compact,
+  stateOf,
   readers = true,
   className,
 }: {
@@ -57,8 +64,8 @@ export function Wiring({
   keep?: (node: DbTopoNode) => boolean
   /** A database node's engine, by what answered rather than by its driver. */
   engineOf: (node: DbTopoNode) => Engine
-  /** The control center's version: smaller marks, fewer words. */
-  compact?: boolean
+  /** Whether a database answers, where the page has read it: the dot on its mark. */
+  stateOf?: (node: DbTopoNode) => DotTone | undefined
   /**
    * Draw the lane of readers. False where something beside the picture lists
    * them and the wires that would join the two lanes are not drawn.
@@ -67,7 +74,7 @@ export function Wiring({
   className?: string
 }) {
   const { databases, consumers, edges, feeds, fedBy } = useMemo(
-    () => splitTopology(topology, keep),
+    () => wiredOrder(splitTopology(topology, keep)),
     [topology, keep],
   )
   const container = useRef<HTMLDivElement>(null)
@@ -83,7 +90,7 @@ export function Wiring({
   const refFor = (id: string) => refs.get(id)
 
   // A wire starts at the mark's edge, not under its logo.
-  const port = (compact ? 22 : 28) + 6
+  const port = 28 + 6
   const related = (id: string) =>
     focus === null ||
     focus === id ||
@@ -96,15 +103,10 @@ export function Wiring({
     onFocus: () => setFocus(id),
     onBlur: () => setFocus((held) => (held === id ? null : held)),
   })
-  const size = compact ? "md" : "lg"
 
   return (
-    <div
-      data-slot="wiring"
-      className={cn("relative min-w-0 animate-rise", compact ? "py-2" : "py-4", className)}
-    >
-      <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
-      <div ref={container} className="relative">
+    <div data-slot="wiring" className={cn("relative min-w-0 animate-rise py-6", className)}>
+      <div ref={container} className="relative min-w-0">
         {(readers ? edges : []).map((edge, index) => {
           const from = refFor(edge.from)
           const to = refFor(edge.to)
@@ -122,131 +124,161 @@ export function Wiring({
               still={edge.sessions === 0 && edge.status !== "connected"}
               dashed={edge.via.every((via) => via === "stack" || via === "network")}
               tone={beamTone(edge)}
-              duration={edge.sessions > 0 ? 1.8 : 3}
-              delay={(index % 6) * 0.35}
+              duration={edge.sessions > 0 ? 1.8 : 2.4}
+              delay={(index % 6) * 0.45}
               className={cn("transition-opacity max-lg:hidden", !lit && "opacity-15")}
             />
           )
         })}
 
-        <div
-          className={cn(
-            "relative grid gap-y-8",
-            compact
-              ? "lg:grid-cols-[minmax(0,1fr)_clamp(4rem,10vw,10rem)_minmax(0,1fr)]"
-              : "lg:grid-cols-[minmax(0,1fr)_clamp(6rem,14vw,16rem)_minmax(0,1fr)]",
-          )}
-        >
-          <div className="min-w-0">
-            <LaneHead count={databases.length} className="lg:text-right">
-              Databases
-            </LaneHead>
-            <ol className={cn("flex flex-col", compact ? "gap-4" : "gap-5")} aria-label="Databases">
-              {databases.map((node) => {
-                const engine = engineOf(node)
-                const out = feeds.get(node.id) ?? []
-                return (
-                  <li
-                    key={node.id}
-                    {...watch(node.id)}
-                    className={cn("transition-opacity", !related(node.id) && "opacity-40")}
-                  >
-                    <WireNode
-                      nodeRef={refFor(node.id)}
-                      align="end"
-                      mark={
-                        <WireMark tone="logo" size={size}>
+        <div className="relative grid min-w-0 gap-y-10 lg:grid-cols-[minmax(0,1fr)_minmax(7rem,0.9fr)_minmax(0,1fr)] lg:items-center">
+          <ol className="flex min-w-0 flex-col gap-7" aria-label="Databases">
+            {databases.map((node) => {
+              const engine = engineOf(node)
+              return (
+                <li
+                  key={node.id}
+                  {...watch(node.id)}
+                  className={cn("min-w-0 transition-opacity", !related(node.id) && "opacity-40")}
+                >
+                  <WireNode
+                    nodeRef={refFor(node.id)}
+                    align="end"
+                    mark={
+                      <Cornered tone={stateOf?.(node)}>
+                        <WireMark tone="logo">
                           <EngineGlyph engine={engine} />
                         </WireMark>
-                      }
-                      eyebrow={engine.label}
-                      title={
-                        node.href ? (
-                          <Link
-                            href={node.href}
-                            aria-label={`Open ${node.name}`}
-                            className="rounded-sm focus-ring hover:underline"
-                          >
-                            {node.name}
-                          </Link>
-                        ) : (
-                          node.name
-                        )
-                      }
-                      hint={feedsLine(out)}
-                    />
-                  </li>
-                )
-              })}
-            </ol>
-          </div>
+                      </Cornered>
+                    }
+                    eyebrow={engine.label}
+                    title={
+                      node.href ? (
+                        <Link
+                          href={node.href}
+                          aria-label={`Open ${node.name}`}
+                          className="rounded-sm focus-ring hover:underline"
+                        >
+                          {node.name}
+                        </Link>
+                      ) : (
+                        node.name
+                      )
+                    }
+                    hint={feedsLine(feeds.get(node.id) ?? [])}
+                  />
+                </li>
+              )
+            })}
+          </ol>
 
           {/* The lane the wires cross. Nothing is drawn in it on purpose. */}
           <div aria-hidden className="hidden lg:block" />
 
           {readers && (
-            <div className="min-w-0">
-              <LaneHead count={consumers.length}>What reads them</LaneHead>
-              <ol
-                className={cn("flex flex-col", compact ? "gap-4" : "gap-5")}
-                aria-label="What reads them"
-              >
-                {consumers.length === 0 && (
-                  <li className="text-hint leading-relaxed text-muted-foreground">
-                    Nothing has been seen reading these yet. A deployment that links a database, a
-                    container whose environment names one, or an open session will appear here.
-                  </li>
-                )}
-                {consumers.map((node) => {
-                  const sources = fedBy.get(node.id) ?? []
-                  const worst = worstStatus(sources.map((source) => source.edge))
-                  return (
-                    <li
-                      key={node.id}
-                      {...watch(node.id)}
-                      className={cn("transition-opacity", !related(node.id) && "opacity-40")}
-                    >
-                      <WireNode
-                        nodeRef={refFor(node.id)}
-                        mark={<ConsumerMark node={node} worst={worst} size={size} />}
-                        eyebrow={consumerKind(node)}
-                        title={
-                          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-                            <span className="min-w-0 truncate">{node.name}</span>
-                            {node.kind !== "host" && (edgeRank(worst) >= 2 || node.status) && (
-                              <Status
-                                verdict={consumerVerdict(worst, node.status)}
-                                label={consumerWord(worst, node.status)}
-                              />
-                            )}
-                          </span>
-                        }
-                        hint={
-                          <>
-                            {/* Which databases reach it — in words below `lg`,
-                            where the wires are not drawn. */}
-                            <span className="lg:hidden">
-                              {sources.map((source) => source.from.name).join(", ")}
-                              {sources.length > 0 && " · "}
+            <ol className="flex min-w-0 flex-col gap-7" aria-label="What reads them">
+              {consumers.length === 0 && (
+                <li className="text-hint leading-relaxed text-muted-foreground">
+                  Nothing has been seen reading these yet. A deployment that links a database, a
+                  container whose environment names one, or an open session will appear here.
+                </li>
+              )}
+              {consumers.map((node) => {
+                const sources = fedBy.get(node.id) ?? []
+                const worst = worstStatus(sources.map((source) => source.edge))
+                // Said in words only when something is wrong: a link that
+                // broke or went stale, a reader that is not running.
+                const verdict = consumerVerdict(worst, node.status)
+                return (
+                  <li
+                    key={node.id}
+                    {...watch(node.id)}
+                    className={cn("min-w-0 transition-opacity", !related(node.id) && "opacity-40")}
+                  >
+                    <WireNode
+                      nodeRef={refFor(node.id)}
+                      mark={
+                        <Cornered tone={node.kind === "host" ? undefined : runningTone(node)}>
+                          <ConsumerMark node={node} worst={worst} size="lg" />
+                        </Cornered>
+                      }
+                      eyebrow={consumerKind(node)}
+                      title={
+                        node.href ? (
+                          <Link
+                            href={node.href}
+                            aria-label={`Open ${node.name}`}
+                            className="block truncate rounded-sm focus-ring hover:underline"
+                          >
+                            {node.name}
+                          </Link>
+                        ) : (
+                          <span className="block truncate">{node.name}</span>
+                        )
+                      }
+                      hint={
+                        <>
+                          {verdict !== "ok" && node.kind !== "host" && (
+                            <span
+                              className={cn(
+                                "block font-medium",
+                                verdict === "critical" ? "text-destructive" : "text-warning",
+                              )}
+                            >
+                              {consumerWord(worst, node.status)}
                             </span>
-                            {sources.length === 1
-                              ? compact
-                                ? shortEdge(sources[0].edge)
-                                : describeEdge(sources[0].edge)
-                              : linksLine(sources.map((source) => source.edge))}
-                          </>
-                        }
-                      />
-                    </li>
-                  )
-                })}
-              </ol>
-            </div>
+                          )}
+                          {/* Which databases reach it — in words below `lg`,
+                              where the wires are not drawn. */}
+                          <span className="lg:hidden">
+                            {sources.map((source) => source.from.name).join(", ")}
+                            {sources.length > 0 && " · "}
+                          </span>
+                          {sources.length === 1
+                            ? describeEdge(sources[0].edge)
+                            : linksLine(sources.map((source) => source.edge))}
+                        </>
+                      }
+                    />
+                  </li>
+                )
+              })}
+            </ol>
           )}
         </div>
       </div>
     </div>
   )
+}
+
+/** A mark with a state's dot in its corner, as Configuration draws a service. */
+function Cornered({ tone, children }: { tone?: DotTone; children: React.ReactNode }) {
+  if (!tone) return <>{children}</>
+  return (
+    <span className="relative flex">
+      {children}
+      <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
+        <StatusDot tone={tone} />
+      </span>
+    </span>
+  )
+}
+
+/** A container's or a deployment's state as its dot; none where nothing says. */
+function runningTone(node: DbTopoNode): DotTone | undefined {
+  switch (node.status) {
+    case "running":
+    case "connected":
+      return "running"
+    case "restarting":
+    case "paused":
+    case "created":
+      return "warning"
+    case "exited":
+    case "dead":
+      return "danger"
+  }
+  return undefined
 }
 
 /** What the lines mean, in one line beside the map. */
@@ -268,7 +300,8 @@ export function WiringLegend({ className }: { className?: string }) {
   )
 }
 
-function LegendLine({
+/** One line of a legend: how a wire is drawn, and what that says. */
+export function LegendLine({
   kind,
   children,
 }: {
@@ -294,25 +327,6 @@ function LegendLine({
       </svg>
       <span>{children}</span>
     </li>
-  )
-}
-
-function LaneHead({
-  count,
-  className,
-  children,
-}: {
-  count: number
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <p className={cn("eyebrow mb-4", className)}>
-      {children}
-      <span className="numeric ml-1.5 font-medium tracking-normal text-muted-foreground/70">
-        {count}
-      </span>
-    </p>
   )
 }
 
@@ -367,7 +381,7 @@ export function consumerKind(node: DbTopoNode) {
   }
 }
 
-function beamTone(edge: DbTopoEdge): "default" | "warning" | "danger" {
+export function beamTone(edge: DbTopoEdge): "default" | "warning" | "danger" {
   if (edgeRank(edge.status) >= 3) return "danger"
   if (edgeRank(edge.status) >= 1) return "warning"
   return "default"
@@ -386,7 +400,7 @@ export function consumerWord(worst: string, status: string | undefined) {
 }
 
 function feedsLine(edges: DbTopoEdge[]) {
-  if (edges.length === 0) return "feeds nothing yet"
+  if (edges.length === 0) return "nothing seen reading it"
   const sessions = edges.reduce((sum, edge) => sum + edge.sessions, 0)
   const parts = [edges.length === 1 ? "feeds 1 thing" : `feeds ${edges.length} things`]
   if (sessions > 0) parts.push(sessions === 1 ? "1 session open" : `${sessions} sessions open`)

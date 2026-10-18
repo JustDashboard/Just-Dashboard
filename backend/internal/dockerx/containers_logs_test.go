@@ -3,9 +3,12 @@ package dockerx
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,5 +78,66 @@ func TestLogsCloseWhenTheReaderLeavesABusyContainer(t *testing.T) {
 				t.Fatalf("run %d: the log channel was still open a second after the reader left", run)
 			}
 		}
+	}
+}
+
+func TestLogsRetainScannerAndIncompleteFrameFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tty  bool
+		body []byte
+	}{
+		{name: "oversized tty line", tty: true, body: []byte(strings.Repeat("x", maxLogLine+1))},
+		{name: "incomplete frame header", body: []byte{1, 0, 0}},
+		{name: "incomplete frame body", body: append([]byte{1, 0, 0, 0, 0, 0, 0, 12}, []byte("short")...)},
+		{name: "complete frame", body: append([]byte{1, 0, 0, 0, 0, 0, 0, 6}, []byte("valid\n")...)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/v1.47/containers/test/json":
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = fmt.Fprintf(w, `{"Id":"test","Config":{"Tty":%t}}`, tc.tty)
+				case "/v1.47/containers/test/logs":
+					_, _ = w.Write(tc.body)
+				default:
+					t.Errorf("unexpected Docker request %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			cli, err := client.NewClientWithOpts(client.WithHost(server.URL), client.WithVersion("1.47"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cli.Close()
+			owner := &Client{cli: cli}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			ch, closer, err := owner.Logs(ctx, "test", LogOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer closer.Close()
+			var lines []LogLine
+			for line := range ch {
+				lines = append(lines, line)
+			}
+			err = LogReadError(closer)
+			switch tc.name {
+			case "complete frame":
+				if err != nil || len(lines) != 1 || lines[0].Text != "valid" {
+					t.Fatalf("valid frame = %+v, %v", lines, err)
+				}
+			case "oversized tty line":
+				if err == nil || !strings.Contains(err.Error(), "token too long") {
+					t.Fatalf("scanner failure was discarded: %v", err)
+				}
+			default:
+				if !errors.Is(err, io.ErrUnexpectedEOF) {
+					t.Fatalf("incomplete Docker frame was reported complete: %v", err)
+				}
+			}
+		})
 	}
 }

@@ -1,7 +1,5 @@
 "use client"
 
-import { needsProjectAttention } from "@/components/deploy/attention"
-
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -9,7 +7,6 @@ import { ArrowRight, External, FolderClosed, LockClosed, LockOpen } from "@/comp
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type {
-  DeploymentDiagnosis,
   DeploymentDomainRoute,
   DeploymentEngineRun,
   DeploymentEnvironmentConfiguration,
@@ -18,9 +15,8 @@ import type {
   BlueprintDetail,
 } from "@/lib/types"
 import { Page, PageContext } from "@/components/page"
-import { Status, type Verdict } from "@/components/status-dot"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ProductGlyph, buildMethodProduct, hasProductLogo } from "@/components/product-logo"
@@ -39,7 +35,6 @@ import {
   PENDING_KIND_PAGE,
   ProjectStatus,
   RECIPE_SHORT,
-  RUN_LABELS,
   autoDeployReading,
   deploymentURL,
   frameworkLabel,
@@ -132,21 +127,6 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
               archived={project.archived}
               live={Boolean(activeRun)}
             />
-            {activeRun ? (
-              <Link
-                href={`${base}/runs/${activeRun.id}`}
-                className="flex items-center gap-1.5 rounded-sm text-xs focus-ring"
-              >
-                <TextShimmer>
-                  {activeRun.currentStep?.label ?? RUN_LABELS[activeRun.state]}
-                </TextShimmer>
-                <span className="numeric text-muted-foreground">#{activeRun.runNumber}</span>
-              </Link>
-            ) : (
-              !project.archived && (
-                <Assessment diagnosis={project.operations?.diagnosis} href={`${base}#attention`} />
-              )
-            )}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2 max-sm:order-1 sm:row-span-2">
@@ -518,33 +498,4 @@ function AutoDeployFact({
       <Status tone={reading.tone} label={reading.label} />
     </Link>
   )
-}
-
-const WORST: Verdict[] = ["critical", "warning", "notice"]
-
-/**
- * The diagnosis beside the state: how many findings need attention, as a way
- * to them on the Overview, or that every owner was read and nothing was
- * wrong. A diagnosis that could not read every owner says so rather than
- * claiming a pass.
- */
-function Assessment({ diagnosis, href }: { diagnosis?: DeploymentDiagnosis; href: string }) {
-  if (!diagnosis) return null
-  const findings = diagnosis.findings.filter(needsProjectAttention)
-  const count = findings.length
-  if (count > 0) {
-    const worst =
-      WORST.find((level) => findings.some((finding) => finding.severity === level)) ?? "notice"
-    return (
-      <Link href={href} className="flex rounded-sm focus-ring hover:underline">
-        <Status
-          verdict={worst}
-          label={count === 1 ? "1 needs attention" : `${count} need attention`}
-        />
-      </Link>
-    )
-  }
-  if (diagnosis.status === "partial")
-    return <p className="text-xs text-muted-foreground">Partly assessed</p>
-  return <Status verdict="ok" label="No priority issues found" />
 }

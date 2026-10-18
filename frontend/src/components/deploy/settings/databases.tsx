@@ -440,35 +440,16 @@ function DatabasesBody({
     }
   }
 
-  /**
-   * Adds a linked database to a job's native dumps.
-   *
-   * The whole job goes back because that is the shape the route takes; the
-   * destination's keys are not in it and are preserved precisely because they
-   * are absent, and the recovery check's expected-output digest rides along as
-   * the value the job already holds.
-   */
+  // Add only this dump: the job in this poll may predate a retention or
+  // destination edit, and those settings must never ride along on the helper.
   const addDump = async (job: BackupJob, connectionId: number) => {
     setBusy(`dump-${job.id}-${connectionId}`)
     try {
-      await put(`/backups/${job.id}`, {
-        name: job.name,
-        sources: job.sources,
-        excludes: job.excludes,
-        targetKind: job.targetKind,
-        target: job.target,
-        schedule: job.schedule,
-        retention: job.retention,
-        retentionDays: job.retentionDays,
-        enabled: job.enabled,
-        recovery: job.recovery,
-        sqlitePaths: job.sqlitePaths,
-        databaseDumps: [...(job.databaseDumps ?? []), connectionId],
-        pauseContainers: job.pauseContainers,
-      })
+      await post(`/backups/${job.id}/database-dumps`, { connectionId })
       notify.success(`${job.name} now dumps this database`)
       jobs.refresh()
     } catch (error) {
+      jobs.refresh()
       notify.error("Could not add the dump", error)
     } finally {
       setBusy(undefined)
@@ -1056,7 +1037,7 @@ function DatabaseRowGroup({ children }: { children: React.ReactNode }) {
 /**
  * How the application reaches its databases: each database on the left as
  * its engine, the managed network in the middle, the application on the
- * right, on the page's own ground over the dot grid (`SettingPicture`). The
+ * right, on the page's own ground (`SettingPicture`). The
  * line is the link's state: a pulse while it is connected, still when it has
  * not been seen lately, red and still when it needs reconnecting, dashed
  * before the first deployment binds it.

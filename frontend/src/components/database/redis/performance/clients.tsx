@@ -25,6 +25,9 @@ import { redisClients, redisKillClient } from "@/components/database/redis/api"
 import { ReadError } from "@/components/database/redis/read-error"
 import type { RedisClientInfo } from "@/components/database/redis/types"
 import type { Redis } from "@/components/database/redis/use-redis"
+import { DbClientMark } from "@/components/database/client-mark"
+import { clientOf, clientProduct } from "@/components/database/clients"
+import { useKnownClients } from "@/components/database/use-known-clients"
 
 /** The server's flag letters that say something a reader would act on. */
 const FLAGS: Record<string, string> = {
@@ -58,6 +61,7 @@ export function ClientsView({ redis }: { redis: Redis }) {
   const clients = usePoll((signal) => redisClients(id, signal), 5000, [id])
   const [filter, setFilter] = useState("")
   const mayKill = redis.canKill
+  const known = useKnownClients()
 
   if (clients.error && !clients.data) {
     return <ReadError error={clients.error} onRetry={clients.refresh} />
@@ -141,8 +145,14 @@ export function ClientsView({ redis }: { redis: Redis }) {
             <TableBody>
               {shown.map((client) => (
                 <TableRow key={client.id}>
-                  <TableCell>
+                  <TableCell className="py-1.5">
                     <span className="flex items-center gap-2">
+                      <DbClientMark
+                        product={
+                          clientOf(client.name, known).product ?? clientProduct(client.library)
+                        }
+                        self={client.self}
+                      />
                       <span className="font-mono">{client.addr}</span>
                       {client.name && (
                         <span

@@ -1108,7 +1108,7 @@ export function autoDeployReading(
   if (["unavailable", "stale", "policy_conflict"].includes(watch.status)) {
     // A branch the watcher could not read says why when git's answer did.
     const stopped = watch.status === "unavailable" ? autoDeployStopped(watch) : undefined
-    return { tone: "warning", label: stopped ?? "Auto-deploy needs attention" }
+    return { tone: "warning", label: stopped ?? "Auto-deploy stopped" }
   }
   if (!automatic) return { tone: "stopped", label: "Manual deployments" }
   if (watch.status === "awaiting_first_deployment") {

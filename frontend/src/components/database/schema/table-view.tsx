@@ -70,6 +70,20 @@ import {
 import { Facts } from "@/components/database/schema/facts"
 import { GroupGlyph, groupSpec } from "@/components/database/schema/kinds"
 import { ViewDialog, useViewReplace } from "@/components/database/schema/object-forms"
+import {
+  PolicyDialog,
+  Policies,
+  PoliciesPlaceholder,
+  RowSecurityDialog,
+  namedRoles,
+  testableRoles,
+  useRoles,
+  useRowSecurity,
+} from "@/components/database/schema/policies"
+import { dropPolicyRequest } from "@/components/database/schema/policy"
+import { RoleTester } from "@/components/database/schema/role-test"
+import { TriggerDialog } from "@/components/database/schema/program-forms"
+import { triggerFunctions } from "@/components/database/schema/programs"
 import { selectStatement } from "@/components/database/schema/select"
 import { MaintenanceBand, TableStatistics } from "@/components/database/schema/statistics"
 import {
@@ -84,6 +98,7 @@ import {
 import type {
   DbCatalog,
   DbColumn,
+  DbPolicy,
   DbTableDetail,
   SchemaObject,
 } from "@/components/database/schema/types"
@@ -99,7 +114,11 @@ type Form =
   | { type: "add-index" }
   | { type: "add-foreign-key" }
   | { type: "add-constraint" }
+  | { type: "add-policy" }
+  | { type: "edit-policy"; policy: DbPolicy }
+  | { type: "row-security" }
   | { type: "replace-view" }
+  | { type: "add-trigger" }
 
 const TOUCH = "max-sm:h-8"
 
@@ -147,7 +166,7 @@ export function TableView({
   onRenamed: (to: string) => void
   onDropped: () => void
 }) {
-  const { engine, href, goto, readOnly } = useDatabase()
+  const { id, engine, href, goto, readOnly } = useDatabase()
   const { can } = useAuth()
   const tabsId = useId()
   const tabs = useRef<HTMLDivElement>(null)
@@ -185,6 +204,13 @@ export function TableView({
     [catalog, name, schema, data?.schema],
   )
   const replace = useViewReplace(schema, kind === "view" && mayWrite && has("views"))
+  // Policies decide who sees which rows, as grants decide who sees which
+  // tables: changing them is an administrator's, and removing the filter or a
+  // policy is destructive besides.
+  const hasPolicies = isTable && engine.can("rowSecurity")
+  const mayPolicy = can("system.admin") && !readOnly && changeable
+  const security = useRowSecurity(id, schema, name, hasPolicies, asked)
+  const roleList = useRoles(id, hasPolicies && view === "policies")
 
   const primary = data?.indexes.find((index) => index.primary)
   const keyCount = data
@@ -197,6 +223,15 @@ export function TableView({
       : []),
     ...(isTable
       ? [{ id: "keys" as const, label: "Keys & constraints", count: data ? keyCount : undefined }]
+      : []),
+    ...(hasPolicies
+      ? [
+          {
+            id: "policies" as const,
+            label: "Row security",
+            count: security.data?.policies.length,
+          },
+        ]
       : []),
     ...(engine.capabilities.catalogGroups.includes("triggers") && kind !== "dictionary"
       ? [
@@ -333,6 +368,12 @@ export function TableView({
   const done = () => {
     onChanged()
   }
+  // A policy or a switch changes what the table's own reading says of it
+  // ("Row-level security: enabled") as well as the policies.
+  const policiesDone = () => {
+    onChanged()
+    security.refresh()
+  }
 
   const missing = !data && detail.error instanceof ApiError && detail.error.status === 404
 
@@ -380,7 +421,7 @@ export function TableView({
             {engine.has("query") && (
               <Button size="xs" variant="outline" className={TOUCH} onClick={openQuery}>
                 <Code />
-                <span className="max-sm:sr-only">Query</span>
+                <span className="max-sm:sr-only">Open in Query</span>
               </Button>
             )}
             <VerbMenu verbs={tableVerbs} label={`Actions for ${name}`} />
@@ -553,6 +594,16 @@ export function TableView({
                       )}
                     </>
                   )}
+                  {open === "policies" && mayPolicy && security.data && (
+                    <Button
+                      size="xs"
+                      className={TOUCH}
+                      onClick={() => setForm({ type: "add-policy" })}
+                    >
+                      <Plus />
+                      Add policy
+                    </Button>
+                  )}
                   {open === "definition" && kind === "view" && mayWrite && has("views") && (
                     <Button
                       size="xs"
@@ -678,8 +729,57 @@ export function TableView({
                   })
                 }
               />
+            ) : open === "policies" ? (
+              security.data ? (
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                  <Policies
+                    security={security.data}
+                    mayChange={mayPolicy}
+                    mayDrop={mayPolicy && mayDestroy}
+                    onSwitches={() => setForm({ type: "row-security" })}
+                    onEdit={(policy) => setForm({ type: "edit-policy", policy })}
+                    onDrop={(policy) =>
+                      void destroy({
+                        request: dropPolicyRequest(data.schema, data.name, policy.name),
+                        title: "Drop policy",
+                        subject: {
+                          name: policy.name,
+                          facts: (
+                            <FormFact label="On" mono>
+                              {full}
+                            </FormFact>
+                          ),
+                        },
+                        sentence:
+                          "Rows the policy let through are no longer let through by it, and rows it held back are no longer held back by it. The table's rows are untouched.",
+                        done: `Dropped ${policy.name}`,
+                        onDone: policiesDone,
+                      })
+                    }
+                  />
+                  {can("service.control") && (
+                    <RoleTester
+                      key={`${data.schema}.${data.name}`}
+                      detail={data}
+                      security={security.data}
+                      roles={testableRoles(roleList.data?.roles)}
+                    />
+                  )}
+                </div>
+              ) : (
+                <PoliciesPlaceholder error={security.error} onRetry={security.refresh} />
+              )
             ) : open === "triggers" ? (
-              <Triggers triggers={triggers} read={catalog !== undefined} word={word} />
+              <Triggers
+                triggers={triggers}
+                read={catalog !== undefined}
+                word={word}
+                onNew={
+                  mayWrite && mayDestroy && has("triggers") && isTable
+                    ? () => setForm({ type: "add-trigger" })
+                    : undefined
+                }
+              />
             ) : open === "definition" ? (
               <>
                 {kind === "view" && replace?.supported === false && mayWrite && (
@@ -742,6 +842,43 @@ export function TableView({
       )}
       {data && form?.type === "add-constraint" && (
         <AddConstraintDialog detail={data} onClose={() => setForm(null)} onDone={done} />
+      )}
+      {data && form?.type === "add-policy" && (
+        <PolicyDialog
+          detail={data}
+          roles={namedRoles(roleList.data?.roles)}
+          onClose={() => setForm(null)}
+          onDone={policiesDone}
+        />
+      )}
+      {data && form?.type === "edit-policy" && (
+        <PolicyDialog
+          detail={data}
+          policy={form.policy}
+          roles={namedRoles(roleList.data?.roles)}
+          onClose={() => setForm(null)}
+          onDone={policiesDone}
+        />
+      )}
+      {data && security.data && form?.type === "row-security" && (
+        <RowSecurityDialog
+          detail={data}
+          security={security.data}
+          mayTurnOff={mayDestroy}
+          onClose={() => setForm(null)}
+          onDone={policiesDone}
+        />
+      )}
+      {data && form?.type === "add-trigger" && (
+        <TriggerDialog
+          schemas={catalog?.schemas ?? []}
+          schema={data.schema}
+          tables={[data.name]}
+          table={data.name}
+          functions={triggerFunctions(catalog)}
+          onClose={() => setForm(null)}
+          onDone={done}
+        />
       )}
       {data && form?.type === "replace-view" && (
         <ViewDialog
@@ -1114,10 +1251,13 @@ function Indexes({
     </>
   )
   // An index that enforces a constraint goes with it, under Keys &
-  // constraints; it cannot be dropped as an index.
+  // constraints; it cannot be dropped as an index. Its row keeps the
+  // button's height, or it stands shorter than the rows that have one.
   const drop = (index: Index) =>
     droppable &&
-    !index.constraint && (
+    (index.constraint ? (
+      <span aria-hidden className="block size-6" />
+    ) : (
       <VerbActions
         dim={!narrow}
         className={ROW_ACTIONS}
@@ -1131,7 +1271,7 @@ function Indexes({
           },
         ]}
       />
-    )
+    ))
 
   return (
     <div ref={box} className="min-h-0 flex-1 overflow-y-auto">
@@ -1244,9 +1384,9 @@ function Keys({
   const acts = Object.values(drops).some(Boolean)
   const [box, width] = useColumnWidth<HTMLDivElement>()
   const narrow = width > 0 && width < NARROW
+  // A key this role cannot drop keeps the button's height, as the rows beside it do.
   const drop = (kind: KeyKind, name: string) =>
-    drops[kind] &&
-    name !== "" && (
+    drops[kind] && name !== "" ? (
       <VerbActions
         dim={!narrow}
         className={ROW_ACTIONS}
@@ -1260,6 +1400,8 @@ function Keys({
           },
         ]}
       />
+    ) : (
+      acts && <span aria-hidden className="block size-6" />
     )
 
   // Every key and constraint as one row of the reading, whichever shape draws it.
@@ -1448,29 +1590,42 @@ function Triggers({
   triggers,
   read,
   word,
+  onNew,
 }: {
   triggers: SchemaObject[]
   /** The catalogue that lists them has been read. */
   read: boolean
   word: string
+  /** Asks for the form that makes a trigger on this table, where the role and the engine allow one. */
+  onNew?: () => void
 }) {
   const { href } = useDatabase()
   if (!read) return <TableSkeleton />
+  const add = onNew && (
+    <div className="flex shrink-0 justify-end border-b border-hairline px-4 py-1.5">
+      <Button size="xs" variant="outline" className={TOUCH} onClick={onNew}>
+        <Plus />
+        New trigger
+      </Button>
+    </div>
+  )
   if (triggers.length === 0) {
     return (
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {add}
         <EmptyNote className="px-4 py-10">No trigger fires on this {word}.</EmptyNote>
       </div>
     )
   }
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
+      {add}
       <ul className="divide-y divide-hairline border-b border-hairline">
         {triggers.map((trigger) => (
           <li key={trigger.name}>
             <Link
               href={href("schema", objectParams(trigger))}
-              className="flex min-h-9 items-center gap-2 px-4 py-1.5 focus-ring-inset transition-colors hover:bg-row-hover"
+              className="flex min-h-8 items-center gap-2 px-4 py-1.5 focus-ring-inset transition-colors hover:bg-row-hover"
             >
               <GroupGlyph group="triggers" />
               <span className="font-mono text-xs font-medium">{trigger.name}</span>

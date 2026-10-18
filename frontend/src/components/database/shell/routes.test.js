@@ -15,7 +15,6 @@ describe("addresses from before the connection moved into the path", () => {
     expect(legacy("/databases/query?conn=3")).toBe("/databases/3/query")
     expect(legacy("/databases/find?conn=3")).toBe("/databases/3/search")
     expect(legacy("/databases/monitor?conn=3")).toBe("/databases/3/performance")
-    expect(legacy("/databases/advisor?conn=3")).toBe("/databases/3/advisor")
     expect(legacy("/databases/server?conn=3")).toBe("/databases/3/access")
     expect(legacy("/databases/backups?conn=3")).toBe("/databases/3/backups")
     expect(legacy("/databases/logs?conn=3")).toBe("/databases/3/logs")
@@ -97,6 +96,16 @@ describe("reading an address", () => {
     expect(databasePlace("/databases/12/home")).toBeNull()
     expect(databasePlace("/databases/12/nonsense")).toBeNull()
     expect(databasePlace("/databases/new")).toBeNull()
+  })
+
+  test("a page under Settings is a page of Settings, and nothing else has pages under it", () => {
+    expect(databasePlace("/databases/12/settings/danger")).toEqual({ id: 12, section: "settings" })
+    expect(databasePlace("/databases/12/settings/network")).toEqual({
+      id: 12,
+      section: "settings",
+    })
+    expect(databasePlace("/databases/12/settings/nonsense")).toBeNull()
+    expect(databasePlace("/databases/12/data/danger")).toBeNull()
   })
 })
 

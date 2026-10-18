@@ -11,6 +11,7 @@ import {
   Database,
   Download,
   FolderOpen,
+  LockClosed,
   ShieldCheck,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
@@ -30,7 +31,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList, Page, PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
@@ -57,7 +58,7 @@ import {
   targetLabel,
 } from "@/components/backups/shared"
 import { LastRun } from "@/components/backups/job-card"
-import { RunContents, RunLog, RunRail } from "@/components/backups/job-runs"
+import { RunContents, RunEncryption, RunLog, RunRail } from "@/components/backups/job-runs"
 import { destinationProduct, jobProducts } from "@/components/backups/marks"
 import { JobMap } from "@/components/backups/protection-map"
 import { FileIcon } from "@/components/files/file-icon"
@@ -200,7 +201,8 @@ export function JobPage() {
     if (can("system.admin")) {
       out.push({
         key: "download",
-        label: "Download archive",
+        // The download is the archive inside, so it opens without the key.
+        label: run.manifest?.encryption ? "Download decrypted archive" : "Download archive",
         icon: Download,
         run: () => window.open(downloadUrl(`/backups/runs/${run.id}/download`), "_blank"),
       })
@@ -279,6 +281,12 @@ export function JobPage() {
                       {targetLabel(job)}
                     </span>
                   </HostFact>
+                  {job.encrypt && (
+                    <>
+                      <FactDot />
+                      <span>encrypted with this server&apos;s backup key</span>
+                    </>
+                  )}
                   {job.recovery && (
                     <>
                       <FactDot />
@@ -293,14 +301,10 @@ export function JobPage() {
               aside={<LastRun job={job} />}
             />
 
-            {/* The page's own ground under the dot grid, as the list page's
-                picture stands: the grid gives it a middle without a frame. */}
+            {/* On the page's own ground with no frame and no dot grid, as the
+                list page's picture stands. */}
             {(resources.data || resources.error) && (
               <div className="relative animate-rise py-2 lg:py-4">
-                <div
-                  aria-hidden
-                  className="wire-grid pointer-events-none absolute inset-x-0 -inset-y-4"
-                />
                 <JobMap job={job} resources={resourceList} containers={containers} />
               </div>
             )}
@@ -377,7 +381,22 @@ export function JobPage() {
                 }
               />
               <PanelBody flush className="pt-3">
-                {runs.loading && !runs.data ? (
+                {runs.error && runs.data && (
+                  <Notice title="Run history could not refresh" tone="warning" className="mb-3">
+                    <p>Showing the last successful reading. {runs.error.message}</p>
+                    <Button size="xs" variant="outline" onClick={runs.refresh} className="mt-2">
+                      Retry run history
+                    </Button>
+                  </Notice>
+                )}
+                {runs.error && !runs.data ? (
+                  <div className="space-y-2">
+                    <ErrorState error={runs.error} />
+                    <Button size="xs" variant="outline" onClick={runs.refresh}>
+                      Retry run history
+                    </Button>
+                  </div>
+                ) : runs.loading && !runs.data ? (
                   <LoadingRows rows={3} />
                 ) : runList.length === 0 ? (
                   <EmptyNote>No runs yet. Run now takes the first one.</EmptyNote>
@@ -489,6 +508,15 @@ function RunInspector({
                 <span className="numeric text-foreground">{bytes(run.sizeBytes)}</span>
               </>
             )}
+            {run.manifest?.encryption && (
+              <>
+                <FactDot />
+                <span className="inline-flex items-center gap-1">
+                  <LockClosed aria-hidden className="size-3" />
+                  encrypted
+                </span>
+              </>
+            )}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -539,6 +567,7 @@ function RunInspector({
 
       <RunLog log={run.log} />
       {run.manifest && <RunContents manifest={run.manifest} />}
+      {run.manifest?.encryption && <RunEncryption encryption={run.manifest.encryption} />}
       {run.artifact && (
         <p className="font-mono text-hint break-all text-muted-foreground">{run.artifact}</p>
       )}
@@ -750,6 +779,7 @@ function RestoreFilesDialog({
     void confirm({
       title: inPlace ? "Put the files back where they came from" : "Restore into a directory",
       confirmLabel: "Restore",
+      workingLabel: "Restoring files from the backup…",
       description: inPlace ? (
         <div className="space-y-2">
           <p className="text-destructive">
@@ -901,6 +931,7 @@ function RestoreDatabaseDialog({
             void confirm({
               title: `Restore ${selected.name} into ${target}`,
               confirmLabel: "Restore database",
+              workingLabel: `Restoring ${target} from the backup…`,
               description: (
                 <p>
                   The <span className="font-mono">{selected.method}</span> dump of{" "}

@@ -23,7 +23,9 @@ test("an account nothing names, or a person's, is no product", () => {
 test("an administrator is a member of a group that may run anything as root", () => {
   expect(isAdmin({ groups: ["adm", "sudo"] })).toBe(true)
   expect(isAdmin({ groups: ["wheel"] })).toBe(true)
-  expect(isAdmin({ groups: ["docker", "adm"] })).toBe(false)
+  expect(isAdmin({ groups: ["docker", "adm"] })).toBe(true)
+  expect(isAdmin({ uid: 0, groups: [] })).toBe(true)
+  expect(isAdmin({ uid: 1000, groups: ["adm"] })).toBe(false)
 })
 
 test("every account product has its file", () => {

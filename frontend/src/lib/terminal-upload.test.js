@@ -67,7 +67,9 @@ describe("terminal clipboard images", () => {
 
   test("refuses a returned path containing terminal control characters", () => {
     expect(() => insertTerminalPath("/tmp/screenshot.png\nrm -rf /", () => {})).toThrow()
-    expect(() => insertTerminalPath("/tmp/just-dashboard/a;rm-rf/clipboard-image.png", () => {})).toThrow()
+    expect(() =>
+      insertTerminalPath("/tmp/just-dashboard/a;rm-rf/clipboard-image.png", () => {}),
+    ).toThrow()
   })
 
   test("sends CSRF proof with the multipart upload", async () => {
@@ -97,6 +99,6 @@ describe("terminal clipboard images", () => {
 
     expect(request.input).toBe("/api/v1/terminal/abc123abc123abcd/clipboard")
     expect(request.init.method).toBe("POST")
-    expect(request.init.headers).toEqual({ "X-JD-CSRF": "1" })
+    expect(Object.fromEntries(new Headers(request.init.headers))).toEqual({ "x-jd-csrf": "1" })
   })
 })

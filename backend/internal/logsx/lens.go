@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 )
 
 // A Lens is what the dashboard knows about one kind of log: how Postgres
@@ -32,7 +33,7 @@ type Lens struct {
 }
 
 // Reader reads one line at a time, in order, after ParseLine and before any
-// filter test. It may set Event, Attrs, Cont, Lens, Level and Timestamp; it
+// filter test. It may set Event, Attrs, Cont, Lens, Level, Timestamp and Body; it
 // never changes Text, Source, Stream, No, File or Match. Readers are
 // single-pass and forward-only: a value can be carried onto later lines, but
 // an emitted line is never edited, so when the defining line of a record comes
@@ -100,6 +101,28 @@ func (l *Line) SetAttr(key, value string) {
 	// A value kept by a facet tally outlives the line; cloning here means the
 	// tally holds a few bytes rather than pinning a megabyte-long line.
 	l.Attrs[key] = strings.Clone(value)
+}
+
+// SetBody marks where the message starts. tail is the end of Text, as a
+// parser's slice of it is; a string that is not leaves Body as it was, so a
+// lens reading a copy of the message — syslog's, jsonlog's — draws the whole
+// line. Body is counted in UTF-16 units, as the match ranges are, because
+// that is how the browser indexes the text.
+func (l *Line) SetBody(tail string) {
+	if tail == "" || len(tail) >= len(l.Text) || !strings.HasSuffix(l.Text, tail) {
+		return
+	}
+	prefix := l.Text[:len(l.Text)-len(tail)]
+	l.Body = len(prefix)
+	for i := 0; i < len(prefix); i++ {
+		if prefix[i] >= 0x80 {
+			l.Body = 0
+			for _, r := range prefix {
+				l.Body += utf16.RuneLen(r)
+			}
+			return
+		}
+	}
 }
 
 // SetAttrNumber records a number in the one spelling every reader of it parses.

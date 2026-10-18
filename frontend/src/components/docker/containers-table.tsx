@@ -25,10 +25,9 @@ import { cpuTone } from "@/components/procs/shared"
 import { RatePair } from "@/components/network/rate-pair"
 import { bytes, duration, percent, rate } from "@/lib/format"
 import { hueFor, LANES } from "@/lib/hue"
-import type { Container, ContainerSparkline, ContainerStats, DockerDiagnosis } from "@/lib/types"
+import type { Container, ContainerSparkline, ContainerStats } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { PortList } from "@/components/docker/exposure"
-import { IssuesCell } from "@/components/docker/container-cells"
 import {
   ContainerRowActions,
   useContainerVerbs,
@@ -51,7 +50,6 @@ export type RowsProps = {
   stats: Record<string, ContainerStats>
   rates: Record<string, NetRate>
   trends: Map<string, ContainerSparkline>
-  diagnosis?: DockerDiagnosis
   oomKilled: Set<string>
   pending: PendingMap
   confirm: ConfirmFn
@@ -320,16 +318,14 @@ function ContainerNarrowRow({ container, arrived, now, ...rest }: RowProps) {
  */
 function Identity({
   container,
-  diagnosis,
   onOpen,
   onStack,
   children,
-}: Pick<RowsProps, "diagnosis" | "onOpen" | "onStack"> & {
+}: Pick<RowsProps, "onOpen" | "onStack"> & {
   container: Container
   /** What a narrow row draws under the name: its state and readings. */
   children?: React.ReactNode
 }) {
-  const findings = (diagnosis?.findings ?? []).some((f) => f.targetId === container.id)
   const stack = container.composeStack
   return (
     <div className={cn("flex min-w-0 flex-1 gap-3", children ? "items-start" : "items-center")}>
@@ -339,13 +335,6 @@ function Identity({
           <RowLink title={container.name} onClick={() => onOpen(container.id)}>
             {container.name}
           </RowLink>
-          {findings && (
-            <IssuesCell
-              diagnosis={diagnosis}
-              containerId={container.id}
-              onOpen={() => onOpen(container.id, "overview")}
-            />
-          )}
         </div>
         {/* The project leads, in its hue, because it is what the row is
             scanned for in a list of thirty; the image gives way first. */}

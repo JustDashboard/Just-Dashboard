@@ -7,18 +7,14 @@ import { bucketLive, containerRateLabel, peakOf } from "@/lib/container-usage"
 import type { ContainerRow } from "@/lib/metrics-range"
 import type { ContainerStats, MetricEvent } from "@/lib/types"
 import { useContainerFrame, useContainerLive } from "@/hooks/use-container-live"
-import { Meter, utilisationTone } from "@/components/meter"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ChartPanel, ChartPlaceholder } from "@/components/metrics/chart-panel"
+import { ChartReading } from "@/components/metrics/chart-reading"
 import { RangePicker } from "@/components/metrics/range-picker"
 import type { Series } from "@/components/metrics/metric-chart"
-import {
-  ContainerAnomalies,
-  useContainerScales,
-  useContainerUsage,
-} from "@/components/docker/container-usage"
+import { useContainerScales, useContainerUsage } from "@/components/docker/container-usage"
 
 // A hue per measurement rather than the two blues every chart shared, so the
 // page reads as five readings at a glance; in and out, read and write keep a
@@ -196,7 +192,6 @@ export function RuntimeUsage({
         {picker && <div className="min-w-0 max-sm:w-full sm:mr-auto">{picker}</div>}
       </PanelHeader>
       <PanelBody className="space-y-6">
-        <ContainerAnomalies containerId={containerId} />
         {disabled ? (
           <ChartPlaceholder
             plain
@@ -329,7 +324,7 @@ function Now({
 function cpuNow(stats?: ContainerStats) {
   const cpu = stats?.cpuReady ? stats.cpuPercent : undefined
   return (
-    <Reading
+    <ChartReading
       label="CPU now"
       color="var(--chart-1)"
       value={cpu !== undefined ? percent(cpu) : "—"}
@@ -347,7 +342,7 @@ function cpuNow(stats?: ContainerStats) {
 
 function memoryNow(stats?: ContainerStats) {
   return (
-    <Reading
+    <ChartReading
       label="Memory now"
       color="var(--chart-4)"
       value={stats ? bytes(stats.memUsage) : "—"}
@@ -368,13 +363,13 @@ function memoryNow(stats?: ContainerStats) {
 function networkNow(_stats?: ContainerStats, now?: ContainerRow) {
   return (
     <span className="flex flex-wrap items-baseline justify-end gap-x-4 gap-y-1">
-      <Reading
+      <ChartReading
         label="Received now"
         color="var(--chart-2)"
         value={containerRateLabel(now?.netRx)}
         note="in"
       />
-      <Reading
+      <ChartReading
         label="Sent now"
         color="var(--chart-5)"
         value={containerRateLabel(now?.netTx)}
@@ -387,13 +382,13 @@ function networkNow(_stats?: ContainerStats, now?: ContainerRow) {
 function diskNow(_stats?: ContainerStats, now?: ContainerRow) {
   return (
     <span className="flex flex-wrap items-baseline justify-end gap-x-4 gap-y-1">
-      <Reading
+      <ChartReading
         label="Read now"
         color="var(--chart-2)"
         value={containerRateLabel(now?.blockRead)}
         note="read"
       />
-      <Reading
+      <ChartReading
         label="Written now"
         color="var(--chart-4)"
         value={containerRateLabel(now?.blockWrite)}
@@ -406,64 +401,13 @@ function diskNow(_stats?: ContainerStats, now?: ContainerRow) {
 function processesNow(stats?: ContainerStats) {
   const limit = stats?.pidsLimit ?? 0
   return (
-    <Reading
+    <ChartReading
       label="Processes now"
       color="var(--chart-5)"
       value={stats ? stats.pids.toLocaleString() : "—"}
       note={limit > 0 ? `of ${limit.toLocaleString()}` : "no limit"}
       meter={limit > 0 && stats ? (stats.pids / limit) * 100 : undefined}
     />
-  )
-}
-
-/**
- * A chart's reading now, at the end of its head: the figure beside the key of
- * the series it is, what it is a share of, and — where there is a ceiling — a
- * short meter of how close it is. The words are read once, as a sentence; the
- * figure, the key and the meter are what the eye reads.
- */
-function Reading({
-  label,
-  color,
-  value,
-  note,
-  meter,
-}: {
-  label: string
-  color: string
-  value: string
-  note?: string
-  meter?: number
-}) {
-  return (
-    <span className="flex min-w-0 items-baseline gap-1.5">
-      <span className="sr-only">
-        {label}: {value}
-        {note && ` ${note}`}
-      </span>
-      <span
-        aria-hidden
-        className="h-2.5 w-0.5 shrink-0 self-center rounded-full"
-        style={{ background: color }}
-      />
-      <span aria-hidden className="numeric text-sm font-semibold tracking-tight">
-        {value}
-      </span>
-      {note && (
-        <span aria-hidden className="truncate text-hint text-muted-foreground">
-          {note}
-        </span>
-      )}
-      {meter !== undefined && (
-        <Meter
-          value={meter}
-          tone={utilisationTone(meter)}
-          size="thin"
-          label={label}
-          className="w-14 self-center"
-        />
-      )}
-    </span>
   )
 }
 

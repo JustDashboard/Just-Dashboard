@@ -119,17 +119,30 @@ export function grantSummary(
     new Set(
       given
         .filter((grant) => grant.level === level)
-        .map((grant) => [grant.database, grant.schema, grant.table].join("\u0000")),
+        .map((grant) =>
+          [
+            grant.database,
+            grant.schema,
+            grant.table,
+            grant.routine,
+            grant.arguments,
+            grant.column,
+          ].join("\u0000"),
+        ),
     ).size
   const objects: string[] = []
   const databases = count("database")
   const schemas = count("schema")
   const tables = count("table")
   const sequences = count("sequence")
+  const functions = count("function")
+  const columns = count("column")
   if (databases) objects.push(plural(databases, "database"))
   if (schemas) objects.push(plural(schemas, "schema"))
   if (tables) objects.push(plural(tables, "table"))
   if (sequences) objects.push(plural(sequences, "sequence"))
+  if (functions) objects.push(plural(functions, "function"))
+  if (columns) objects.push(plural(columns, "column"))
   const parts: string[] = []
   if (objects.length > 0) parts.push(`Granted on ${objects.join(", ")}`)
   else {
@@ -233,11 +246,23 @@ export type Cell = {
   level: DbPrivilegeLevel["level"]
   database?: string
   schema?: string
+  /** The object's name: a table, a sequence or a function — and at the column level, the table. */
   table?: string
+  /** A function's argument types: with its name, what tells it from its namesakes. */
+  signature?: string
+  /** The column of `table`, at the column level. */
+  column?: string
 }
 
 export function cellKey(cell: Cell): string {
-  return [cell.level, cell.database ?? "", cell.schema ?? "", cell.table ?? ""].join("\u0000")
+  return [
+    cell.level,
+    cell.database ?? "",
+    cell.schema ?? "",
+    cell.table ?? "",
+    cell.signature ?? "",
+    cell.column ?? "",
+  ].join("\u0000")
 }
 
 /** The privileges a level's chips stand for: every one but the word for all of them. */
@@ -260,6 +285,13 @@ function sameObject(grant: DbGrant, cell: Cell): boolean {
   if (grant.level !== cell.level || grant.future) return false
   if (cell.database !== undefined && (grant.database ?? "") !== cell.database) return false
   if (cell.schema !== undefined && (grant.schema ?? "") !== cell.schema) return false
+  if (cell.level === "function") {
+    return (
+      (grant.routine ?? "") === (cell.table ?? "") &&
+      (grant.arguments ?? "") === (cell.signature ?? "")
+    )
+  }
+  if (cell.level === "column" && (grant.column ?? "") !== (cell.column ?? "")) return false
   return (grant.table ?? "") === (cell.table ?? "")
 }
 
@@ -391,6 +423,13 @@ export type PlanOptions = {
   grantOption?: boolean
   /** A whole-schema change also covers objects created later. */
   future?: boolean
+  /**
+   * The scopes (`scopeKey`) that hold objects the matrix does not list — the
+   * functions an extension installed. A schema-wide request would reach them
+   * as well, so a scope named here is asked for object by object, whatever
+   * was pressed.
+   */
+  unlisted?: readonly string[]
 }
 
 /** An object as a kind and its name: "table" and "public.orders". */
@@ -398,9 +437,16 @@ function objectWords(cell: Cell): { kind: string; name: string } {
   if (cell.level === "database") return { kind: "database", name: cell.database ?? "" }
   if (cell.level === "schema") return { kind: "schema", name: cell.schema ?? "" }
   const scope = cell.schema ?? cell.database ?? ""
-  const kind = cell.level === "sequence" ? "sequence" : "table"
+  const kind =
+    cell.level === "sequence" ? "sequence" : cell.level === "function" ? "function" : "table"
   if (!cell.table) return { kind: `every ${kind} in`, name: scope }
-  return { kind, name: `${scope ? `${scope}.` : ""}${cell.table}` }
+  const name = `${scope ? `${scope}.` : ""}${cell.table}`
+  return { kind, name: cell.level === "function" ? `${name}(${cell.signature ?? ""})` : name }
+}
+
+/** A column grant request's object, in the words a review is headed by: `public.orders (id, total)`. */
+function columnWords(cell: Cell, columns: readonly string[]): string {
+  return `${cell.schema ? `${cell.schema}.` : ""}${cell.table} (${columns.join(", ")})`
 }
 
 /**
@@ -426,7 +472,7 @@ export function plannedRequests(
   const byLevel = new Map(levels.map((level) => [level.level, level]))
 
   type Change = { cell: Cell; grant: string[]; revoke: string[] }
-  const changes: Change[] = Object.values(wanted).flatMap(({ cell, privileges }) => {
+  const staged: Change[] = Object.values(wanted).flatMap(({ cell, privileges }) => {
     const level = byLevel.get(cell.level)
     if (!level) return []
     const held = holds(cell)
@@ -437,11 +483,15 @@ export function plannedRequests(
     if (grant.length === 0 && revoke.length === 0) return []
     return [{ cell, grant, revoke }]
   })
+  // Columns are asked for by the table, with the columns that were pressed
+  // the same way named together; they have no whole-schema form.
+  const changes = staged.filter((change) => change.cell.level !== "column")
+  const columnChanges = staged.filter((change) => change.cell.level === "column")
 
   // A privilege pressed the same way on every listed object of a schema.
   const whole = new Map<string, { cell: Cell; grant: Set<string>; revoke: Set<string> }>()
   for (const [scope, objects] of Object.entries(listed)) {
-    if (objects.length < 2) continue
+    if (objects.length < 2 || options.unlisted?.includes(scope)) continue
     const [levelName, database, schema] = scope.split("\u0000")
     const level = byLevel.get(levelName as Cell["level"])
     if (!level?.allObjects) continue
@@ -479,9 +529,12 @@ export function plannedRequests(
   const send = (action: Planned["action"], cell: Cell, privileges: string[]) => {
     if (privileges.length === 0) return
     const level = byLevel.get(cell.level)
+    // A level with one privilege has nothing to be "all" of: EXECUTE is
+    // asked for as EXECUTE.
     const all =
       Boolean(level?.privileges.some((one) => one.toUpperCase() === "ALL")) &&
       level !== undefined &&
+      levelPrivileges(level).length > 1 &&
       levelPrivileges(level).every((one) => privileges.includes(one))
     const future = options.future && level?.future && cell.table === ""
     const object = objectWords(cell)
@@ -496,7 +549,13 @@ export function plannedRequests(
         level: cell.level,
         ...(cell.database !== undefined ? { database: cell.database } : {}),
         ...(cell.schema !== undefined ? { schema: cell.schema } : {}),
-        ...(cell.table !== undefined ? { table: cell.table } : {}),
+        ...(cell.level === "function"
+          ? {
+              ...(cell.table ? { routine: cell.table, arguments: cell.signature ?? "" } : {}),
+            }
+          : cell.table !== undefined
+            ? { table: cell.table }
+            : {}),
         privileges: all ? ["ALL"] : privileges,
         ...(action === "grant" && options.grantOption && level?.grantOption
           ? { grantOption: true }
@@ -513,6 +572,48 @@ export function plannedRequests(
   for (const change of changes) {
     send("revoke", change.cell, change.revoke)
     send("grant", change.cell, change.grant)
+  }
+
+  const columnLevel = byLevel.get("column")
+  const byColumns = new Map<
+    string,
+    { action: Planned["action"]; cell: Cell; privileges: string[]; columns: string[] }
+  >()
+  for (const { cell, grant, revoke } of columnChanges) {
+    for (const [action, privileges] of [
+      ["revoke", revoke],
+      ["grant", grant],
+    ] as const) {
+      if (privileges.length === 0) continue
+      const key = [action, cell.schema, cell.table, ...privileges].join("\u0000")
+      const held = byColumns.get(key)
+      if (held) held.columns.push(cell.column ?? "")
+      else byColumns.set(key, { action, cell, privileges, columns: [cell.column ?? ""] })
+    }
+  }
+  for (const { action, cell, privileges, columns } of byColumns.values()) {
+    const all =
+      Boolean(columnLevel?.privileges.some((one) => one.toUpperCase() === "ALL")) &&
+      columnLevel !== undefined &&
+      levelPrivileges(columnLevel).every((one) => privileges.includes(one))
+    const act = `${action === "grant" ? "Grant on" : "Revoke on"} ${columns.length === 1 ? "column" : "columns of"}`
+    planned.push({
+      action,
+      about: `${act} ${columnWords(cell, columns)}`,
+      act,
+      on: columnWords(cell, columns),
+      body: {
+        ...base,
+        level: "column",
+        ...(cell.schema !== undefined ? { schema: cell.schema } : {}),
+        table: cell.table ?? "",
+        columns,
+        privileges: all ? ["ALL"] : privileges,
+        ...(action === "grant" && options.grantOption && columnLevel?.grantOption
+          ? { grantOption: true }
+          : {}),
+      },
+    })
   }
   for (const membership of memberships) {
     const act = membership.member ? "Make it a member of" : "Take it out of"

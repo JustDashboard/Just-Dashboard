@@ -221,9 +221,9 @@ describe("autoDeployReading", () => {
     ).toBe("Auto-deploy stopped: the credential was refused")
     expect(
       autoDeployReading(watch({ status: "unavailable", reason: "source_unavailable" }))?.label,
-    ).toBe("Auto-deploy needs attention")
+    ).toBe("Auto-deploy stopped")
     expect(autoDeployReading(watch({ status: "stale", reason: "ref_not_found" }))?.label).toBe(
-      "Auto-deploy needs attention",
+      "Auto-deploy stopped",
     )
   })
 })

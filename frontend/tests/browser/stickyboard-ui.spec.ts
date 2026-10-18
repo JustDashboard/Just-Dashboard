@@ -340,6 +340,13 @@ test("the format bar colours the selection, and a stale tab stops saving and say
   await page.keyboard.press("Digit2")
   await page.waitForTimeout(1200)
   expect(board.puts).toHaveLength(attempts)
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(true)
 })
 
 test("a reader sees the board and cannot change it", async ({ page }) => {
@@ -382,4 +389,140 @@ test("the first note on an empty board stays where it was put", async ({ page })
   expect(second.x).toBeGreaterThan(first.x + first.width)
   expect((await canvasNote(page, "First").boundingBox())!.x).toBe(first.x)
   await expect.poll(() => board.doc.notes.map((n) => n.text)).toEqual(["First", "Second"])
+})
+
+test("Escape cancels a board rename without persisting its draft", async ({ page }) => {
+  const board = await mockStickyboards(page)
+  await openBoard(page)
+  const name = page.getByLabel("Board name")
+  await name.fill("Canceled name")
+  await name.press("Escape")
+  await expect(name).toHaveValue("Ops wall")
+  expect(board.name).toBe("Ops wall")
+  await name.fill("Saved name")
+  await name.press("Enter")
+  await expect.poll(() => board.name).toBe("Saved name")
+})
+
+test("duplication stays with a dirty board when the latest save fails", async ({ page }) => {
+  const board = await mockStickyboards(page, {
+    version: 1,
+    background: "dots",
+    notes: [note("a", "Keep my edit", 0, 0)],
+    links: [],
+  })
+  board.refuse = { status: 503, code: "unavailable", message: "Save temporarily unavailable" }
+  let copies = 0
+  await page.route("**/api/v1/stickyboards/1/duplicate", async (route) => {
+    copies += 1
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({ id: 2 }),
+    })
+  })
+  await openBoard(page)
+  await canvasNote(page, "Keep my edit").click()
+  await page.getByRole("toolbar", { name: "Format" }).getByRole("radio", { name: "Violet" }).click()
+  await page.getByRole("button", { name: "Board options" }).click()
+  await page.getByRole("menuitem", { name: "Duplicate board" }).click()
+  await expect(page.getByText("Save the board before duplicating it")).toBeVisible()
+  await expect(page).toHaveURL(/\/stickyboard\/1$/)
+  expect(copies).toBe(0)
+  await expect(canvasNote(page, "Keep my edit")).toBeVisible()
+})
+
+test("leaving drains edits made during the first save and stays when the next save fails", async ({
+  page,
+}) => {
+  await mockStickyboards(page, {
+    version: 1,
+    background: "dots",
+    notes: [note("a", "Keep this", 0, 0)],
+    links: [],
+  })
+  const writes: Doc[] = []
+  let release = () => {}
+  const pending = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route("**/api/v1/stickyboards/1", async (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    writes.push(route.request().postDataJSON().document as Doc)
+    if (writes.length === 1) {
+      await pending
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ revision: 2 }),
+      })
+    }
+    return route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable", message: "Second save failed" } }),
+    })
+  })
+  await openBoard(page)
+  await canvasNote(page, "Keep this").click()
+  const format = page.getByRole("toolbar", { name: "Format" })
+  await format.getByRole("radio", { name: "Violet" }).click()
+  await expect.poll(() => writes.length).toBe(1)
+  await page.getByRole("button", { name: "Back to Stickyboard" }).click()
+  await format.getByRole("radio", { name: "Teal" }).click()
+  release()
+  await expect(page.getByRole("dialog", { name: "Leave without saving?" })).toBeVisible()
+  expect(writes[1].notes[0].color).toBe("teal")
+  await expect(page).toHaveURL(/\/stickyboard\/1$/)
+  await page.getByRole("button", { name: "Stay", exact: true }).click()
+  await expect(canvasNote(page, "Keep this")).toBeVisible()
+})
+
+test("sticky drafts retain failed edits through sidebar and Back, and explicit discard clears them", async ({
+  page,
+}) => {
+  const board = await mockStickyboards(page, {
+    version: 1,
+    background: "dots",
+    notes: [note("a", "Retain this", 0, 0)],
+    links: [],
+  })
+  board.refuse = { status: 503, code: "unavailable", message: "Save temporarily unavailable" }
+  await openBoard(page)
+  await canvasNote(page, "Retain this").click()
+  await page.getByRole("toolbar", { name: "Format" }).getByRole("radio", { name: "Violet" }).click()
+  await expect(page.getByRole("status")).toContainText("Save failed")
+  await page.locator('a[href="/excalidraw"]').first().click()
+  await expect(page).toHaveURL(/\/excalidraw$/)
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(true)
+  await page.goBack()
+  await canvasNote(page, "Retain this").click()
+  await expect(
+    page.getByRole("toolbar", { name: "Format" }).getByRole("radio", { name: "Violet" }),
+  ).toHaveAttribute("aria-checked", "true")
+  expect(board.doc.notes[0].color).toBe("yellow")
+  await page.getByRole("button", { name: "Back to Stickyboard" }).click()
+  await page
+    .getByRole("dialog", { name: "Leave without saving?" })
+    .getByRole("button", { name: "Leave without saving" })
+    .click()
+  await expect(page).toHaveURL(/\/stickyboard$/)
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(false)
+  await page.goBack()
+  await canvasNote(page, "Retain this").click()
+  await expect(
+    page.getByRole("toolbar", { name: "Format" }).getByRole("radio", { name: "Yellow" }),
+  ).toHaveAttribute("aria-checked", "true")
 })

@@ -18,6 +18,14 @@ keeps the shape its previous reference asked for. Quick setup also offers Postgr
 x86-64, the one architecture that image is published for), which Databases already recognises, and
 refuses MongoDB 7 on a CPU without AVX or ARMv8.2 atomics before pulling it.
 
+A PostgreSQL connection that has a [connection pooler](../backend/databases-proxy-platform.md) also has
+`${{database.5.pooled}}` (and `5.pooled.jdbc`, `5.pooled.url.app_cache`, …): the same string with the host
+`db-5-pool.jd.internal` and port 6432. The pooler joins the environment's network in the same pass that joins
+the database, under that name, and the pooled reference fails with a sentence of its own when the connection
+has no pooler. A pooler that cannot be joined to the environment's network (its name is held by another
+container, say) is recorded once on the audit trail as `deploy.database.pooler.attach` and does not stop
+`${{database.5}}` from binding; a variable that reads the pooled name is refused instead. Relinking a variable never carries `.pooled` over to another database.
+
 Creation stages entered variables in the draft's encrypted environment column before preflight and
 commits them with the initial project transaction. A required connection can therefore be satisfied by
 a managed database reference or an external provider URL before the first run. The browser receives
@@ -61,7 +69,7 @@ are audited without connection strings. Cancellation stops reconciliation with t
 engine and database, hostname, network and last observation, scoped to that environment. A project's
 Settings → Databases page shows these observations (`components/deploy/settings/databases.tsx`; the
 Runtime and Variables pages read the same route), and each linked connection there opens its database's
-own home, `/databases/<id>`. From the other side, the database's home lists what uses it and
+own home, `/databases/<id>`. From the other side, the database's home draws what reads it and
 `/databases/map` draws every such link (`GET /databases/{id}/consumers`, `GET /databases/topology`).
 Connected means the network binding was observed; it does not prove database schema or application
 health. Observations older than 30 seconds are marked stale. The database name is read from the sealed

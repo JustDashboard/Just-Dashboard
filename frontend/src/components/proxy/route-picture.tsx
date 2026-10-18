@@ -55,9 +55,9 @@ const KIND_GLYPH = { files: FolderOpen, redirect: CornerUpRight, config: FileTex
  * Pointing at a domain steps back every wire but its own and lights the
  * application it reaches; pointing at an application lights its domains.
  *
- * On the page's own ground over the dot grid. Three lanes from `lg`; below,
- * the lanes stack, the wires are not drawn and each domain says in words
- * what it reaches.
+ * On the page's own ground, with no frame or dot grid. Three lanes from `lg`;
+ * below, the lanes stack, the wires are not drawn and each domain says in
+ * words what it reaches.
  */
 export function RoutePicture({
   map,
@@ -137,7 +137,6 @@ export function RoutePicture({
 
   return (
     <div data-slot="route-picture" className="relative animate-rise py-4">
-      <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       <div ref={container} className="relative">
         {edges.map((edge, index) => {
           const into = edge.to === "hub"

@@ -20,7 +20,6 @@ import {
   OptionRow,
   Statement,
 } from "@/components/form"
-import { Meter } from "@/components/meter"
 import { Modal } from "@/components/modal"
 import { ErrorState, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -378,12 +377,20 @@ export function ImportDialog({
             ? "A file's rows written into this table, previewed first"
             : "A table made from a file's columns and filled with its rows, previewed first"
         }
+        progress={
+          run.pending && {
+            label: progress.words,
+            completed: progress.sending ? run.sent : undefined,
+            total: progress.sending ? run.total : undefined,
+            showCount: false,
+          }
+        }
         footer={
           done ? (
             <Button onClick={() => close(false)}>Done</Button>
           ) : (
             <>
-              {run.error && !run.pending ? (
+              {run.pending ? null : run.error ? (
                 // Why the import did not happen, beside the button that was
                 // pressed: the body may be scrolled anywhere, and said at its
                 // top the refusal was out of sight with nothing changed on screen.
@@ -393,22 +400,6 @@ export function ImportDialog({
                 >
                   {run.error.message}
                 </p>
-              ) : run.pending ? (
-                <div className="mr-auto min-w-0 basis-full space-y-1.5 sm:flex-1 sm:basis-0">
-                  <p className="numeric text-hint text-muted-foreground" aria-live="polite">
-                    {progress.sending ? (
-                      progress.words
-                    ) : (
-                      <TextShimmer>{progress.words}</TextShimmer>
-                    )}
-                  </p>
-                  <Meter
-                    size="thin"
-                    value={progress.percent}
-                    label="How much of the file has been sent"
-                    className="max-w-64"
-                  />
-                </div>
               ) : (
                 <p className="mr-auto min-w-0 text-hint text-muted-foreground">
                   {report

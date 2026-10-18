@@ -9,10 +9,10 @@ import { notify } from "@/lib/toast"
 import type { Release, SelfUpdateReport } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useSelfUpdate } from "@/hooks/use-self-update"
-import { useConfirm } from "@/components/confirm-dialog"
 import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph } from "@/components/product-logo"
 import { ReleaseTimeline } from "@/components/update/release-timeline"
+import { useUpdateDialog } from "@/components/update/update-dialog"
 import { UpdateProgress } from "@/components/update/update-progress"
 import { Page, PageContext, PageState, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -52,8 +52,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  */
 export default function DashboardVersionPage() {
   const { can } = useAuth()
-  const { report, error, restarting, check, checking, install } = useSelfUpdate()
-  const { confirm, dialog } = useConfirm()
+  const { report, error, restarting, check, checking } = useSelfUpdate()
+  const { openUpdate, dialog } = useUpdateDialog()
   const [filter, setFilter] = useSessionState("dashboard.releases.query", "")
 
   // Everything this build knows about, newest first: the releases the check
@@ -99,27 +99,6 @@ export default function DashboardVersionPage() {
   const canInstall = can("system.admin") && report.install.supported && !running
   const dirty = report.install.dirty ?? []
 
-  const startInstall = () =>
-    confirm({
-      title: `Update to ${target}`,
-      confirmLabel: "Update now",
-      description: (
-        <>
-          <p>
-            Pulls {report.check.repo} at <b>{report.check.ref}</b>, rebuilds every image in this
-            stack and restarts it — the dashboard included.
-          </p>
-          <p className="text-muted-foreground">
-            It runs in its own container so it survives the restart, and takes a few minutes. Your
-            data, accounts and settings are untouched.
-          </p>
-        </>
-      ),
-      action: async (phrase) => {
-        await install(phrase)
-      },
-    })
-
   const notices =
     (report.breaking && !running) || (report.available && !running && dirty.length > 0)
 
@@ -144,7 +123,7 @@ export default function DashboardVersionPage() {
               Check now
             </Button>
             {report.available && canInstall && (
-              <Button onClick={startInstall}>
+              <Button onClick={openUpdate}>
                 <ArrowCircleUp />
                 Update to {target}
               </Button>

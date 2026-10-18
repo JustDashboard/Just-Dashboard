@@ -58,7 +58,6 @@ export function ConnectionsMap({ data }: { data: Connections }) {
 
   return (
     <div className="relative animate-rise py-4">
-      <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       <div ref={container} className="relative">
         {groups.map((g, index) => {
           const ref = refs.get(`g:${g.kind}`)

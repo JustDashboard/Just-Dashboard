@@ -43,7 +43,10 @@ import (
 //     statement is a TRUNCATE the console holds to that capability, and the
 //     Redis slow log is cleared from the same group.
 //   - Changing a server parameter and granting or revoking a privilege are
-//     system.admin, beside creating an account.
+//     system.admin, beside creating an account. Adding the statistics module
+//     to the libraries a server loads at start is a parameter change, the one
+//     statement statistics wait on; the restart that loads it is the power
+//     route's, under its own capability.
 //
 // Nothing here takes SQL from the request. An action, a privilege, a sort and
 // a checkpoint mode are each one of a closed set; a table, a role and a
@@ -75,6 +78,7 @@ func (s *Server) mountDatabaseOpsRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodPut, "/{id}/settings", s.handle(s.handleDBSettingChange))
+		r.Method(http.MethodPost, "/{id}/statements/preload", s.handle(s.handleDBStatementsPreload))
 		r.Method(http.MethodPost, "/{id}/server/roles/{name}/privileges", s.handle(s.handleDBPrivilegeGrant))
 		r.Method(http.MethodPost, "/{id}/server/roles/{name}/privileges/revoke", s.handle(s.handleDBPrivilegeRevoke))
 	})
@@ -364,8 +368,48 @@ func (s *Server) handleDBStatementsReset(w http.ResponseWriter, r *http.Request)
 		httpx.SetAudit(r, "database.statements.reset", conn.Name, map[string]any{"error": err.Error()})
 		return httpx.BadRequest("%v", err)
 	}
+	s.dbStatements.noteReset(conn.ID)
 	httpx.SetAudit(r, "database.statements.reset", conn.Name, map[string]any{"statement": statement})
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true, "statement": statement})
+	return nil
+}
+
+// handleDBStatementsPreload is the first step of turning statement
+// statistics on where the module was never loaded: pg_stat_statements is
+// added to shared_preload_libraries beside every library already listed. The
+// parameter is read only at start, so the answer says a restart is needed;
+// restarting is the power route, and creating the extension once the module
+// is loaded is the extensions route — each the operator's own decision, under
+// its own capability and audit entry.
+func (s *Server) handleDBStatementsPreload(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseID(r)
+	if err != nil {
+		return err
+	}
+	pool, conn, err := s.dbPool(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	change, err := dbx.PreloadStatements(ctx, pool, conn.Driver)
+	if errors.Is(err, dbx.ErrUnsupported) {
+		return httpx.BadRequest("%s loads no statistics library at start; there is nothing to add", conn.Driver)
+	}
+	var refused dbx.ErrSettingRequest
+	if errors.As(err, &refused) {
+		httpx.SetAudit(r, "database.statements.preload", conn.Name, map[string]any{"refused": err.Error()})
+		return httpx.BadRequest("%v", err)
+	}
+	if err != nil {
+		httpx.SetAudit(r, "database.statements.preload", conn.Name, map[string]any{"error": err.Error()})
+		return queryFailed(err)
+	}
+	httpx.SetAudit(r, "database.statements.preload", conn.Name, map[string]any{
+		"setting": change.Name, "value": change.Value, "statements": change.Statements,
+		"restartRequired": change.RestartRequired,
+	})
+	httpx.JSON(w, http.StatusOK, change)
 	return nil
 }
 
@@ -699,11 +743,17 @@ func (s *Server) handleDBGrants(w http.ResponseWriter, r *http.Request) error {
 }
 
 type privilegeRequest struct {
-	Host       string   `json:"host"`
-	Level      string   `json:"level"`
-	Database   string   `json:"database"`
-	Schema     string   `json:"schema"`
-	Table      string   `json:"table"`
+	Host     string `json:"host"`
+	Level    string `json:"level"`
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+	Table    string `json:"table"`
+	// Routine names a function at the function level, and Arguments the types
+	// it takes as the catalogue lists them: absent, the function is named by
+	// its name alone. Columns are the columns of Table at the column level.
+	Routine    string   `json:"routine"`
+	Arguments  *string  `json:"arguments"`
+	Columns    []string `json:"columns"`
 	Privileges []string `json:"privileges"`
 	// MemberOf is the role to grant, at the role level.
 	MemberOf    string `json:"memberOf"`
@@ -748,6 +798,7 @@ func (s *Server) changePrivileges(w http.ResponseWriter, r *http.Request, revoke
 	change := dbx.PrivilegeChange{
 		Role: httpx.URLParam(r, "name"), Host: strings.TrimSpace(req.Host), Level: strings.TrimSpace(req.Level),
 		Database: strings.TrimSpace(req.Database), Schema: strings.TrimSpace(req.Schema), Table: strings.TrimSpace(req.Table),
+		Routine: strings.TrimSpace(req.Routine), Arguments: req.Arguments, Columns: req.Columns,
 		Privileges: req.Privileges, MemberOf: strings.TrimSpace(req.MemberOf),
 		GrantOption: req.GrantOption, Future: req.Future, Revoke: revoke,
 	}
@@ -781,10 +832,16 @@ func (s *Server) changePrivileges(w http.ResponseWriter, r *http.Request, revoke
 	}
 	detail := map[string]any{"role": change.Role, "level": change.Level, "driver": conn.Driver}
 	for key, value := range map[string]string{"host": change.Host, "database": change.Database,
-		"schema": change.Schema, "table": change.Table, "memberOf": change.MemberOf} {
+		"schema": change.Schema, "table": change.Table, "routine": change.Routine, "memberOf": change.MemberOf} {
 		if value != "" {
 			detail[key] = value
 		}
+	}
+	if change.Arguments != nil {
+		detail["arguments"] = *change.Arguments
+	}
+	if len(change.Columns) > 0 {
+		detail["columns"] = change.Columns
 	}
 	if len(change.Privileges) > 0 {
 		detail["privileges"] = change.Privileges

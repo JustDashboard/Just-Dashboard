@@ -182,8 +182,10 @@ export function SchemaLanding({
                   <h3 className="border-b border-hairline pb-2 text-title font-medium">
                     Largest in {name}
                   </h3>
+                  {/* Bled on the left only, so the names start under the title
+                      and the figures end on its hairline rather than past it. */}
                   <BarList
-                    className="-mx-2 pt-1.5"
+                    className="-ml-2 pt-1.5"
                     items={figures.largest.map(({ object, group, share, rows, bytes: size }) => ({
                       key: `${group}:${object.name}`,
                       label: object.name,

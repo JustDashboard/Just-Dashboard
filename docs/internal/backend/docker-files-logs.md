@@ -122,7 +122,11 @@ start. Cleanup removes only objects carrying its run's label and verifies none r
   form is how Portainer's create page became twelve accordions. `toEngine` translates and warns about
   what is legal but probably unintended (a port on every interface, no memory limit, an anonymous volume,
   a writable bind mount of a sensitive path). `SpecOf` reads a container back into that shape, which is
-  what makes duplicate, edit-and-recreate and "save as a stack" possible.
+  what makes duplicate, edit-and-recreate and "save as a stack" possible. `Files` are written into a
+  container between its creation and its start — in every container a port-conflict retry makes —
+  and a container they could not be written into is removed rather than left to be started without
+  them; it is how a provisioned PostgreSQL gets its first-boot script. The field has no JSON name, so
+  a spec decoded from a request cannot carry one, and one read back has none.
 - **`Recreate` is the verb Docker lacks.** Editing means destroy-and-recreate, which is fine until the
   create fails and the operator has nothing where their service was — so the old container is renamed
   aside (`<name>_jd_replaced_<random>`), restored if anything later fails, and removed only once the replacement
@@ -134,21 +138,10 @@ start. Cleanup removes only objects carrying its run's label and verifies none r
   compose service, rendered **on the server** so "what does this spec mean" has one implementation. The
   YAML is hand-written, not marshalled — key order carries meaning and a marshaller would sort it into
   something correct and unreadable.
-- **`diagnose.go` is what nothing else in this class has.** Every panel shows a state, an exit code and a
-  restart count and leaves you to read them; this says what 137 means and what the limit was, that a
-  container restarted twelve times in a minute, that a health check is failing and what it last said,
-  that a port is published in front of the firewall, that an unrotated json-file log has reached 800 MB,
-  that data is being written into the container rather than a volume. Deliberately conservative — a panel
-  that cries wolf is ignored wholesale — and `diagnose_test.go` pins the claims, including the
-  **silences** (a finished one-shot job, a loopback-bound port, a well-configured container).
-- **`attention.go` splits the two questions one word was answering.** `Diagnosis.Status` was the worst of
-  a list mixing "this container is not running" with "this container is more exposed than it needs to
-  be", and the overview labelled it *Health* — so a server whose containers were all up and one of which
-  mounted the Docker socket read "All good" above a page of warnings. Runtime health is Docker's own
-  report, counted from the container list so it can say how many are *fine*; Attention is posture,
-  storage, configuration and exposure, which never clears itself. Every finding carries a four-level
-  `Severity` (a recommendation is not a warning) and a `Class` deciding which summary it belongs to;
-  `Level` is derived from `Severity` by `normalizeFinding` so the two cannot drift.
+- Docker inventory reports the Engine's container state, health checks and recorded events.
+  The advisory diagnosis and anomaly scans, `/docker/health`, `/containers/{id}/failure` and
+  `/containers/{id}/anomalies` were removed in 0.7.5. Pages do not collect or display attention findings.
+  `format.go` retains formatting and native health-check presence for inventory consumers.
 - **`exposure.go` is the one definition of what a published port means.** `0.0.0.0:5432` and
   `127.0.0.1:5432` differ by a character and by everything else, and three places computed "is this
   public" with three slightly different rules. The vocabulary is about *binding*, never reachability:
@@ -159,14 +152,9 @@ start. Cleanup removes only objects carrying its run's label and verifies none r
   `:latest` to an id, so the daemon read it as the repository `sha256` with a hex tag and answered
   *invalid reference format: repository name (library/sha256…) must be lowercase* — which made every
   dangling image unopenable, since an id is its only handle.
-- **`failure.go`, `writable.go` and `anomaly.go` are the derived layer.** `DiagnoseFailure` assembles exit
-  code, OOM flag, health history and restart cadence into a cause and labels it *likely*, because it is
-  an inference; the cadence comes from the event log, since `RestartCount` cannot tell 17 restarts in
-  twelve minutes from 40 across a year. `AnalyzeWritableLayer` runs one `du` inside the container through
-  `ExecCheck` with explicit argv, reports which directories are not backed by a mount, and states its own
-  failure modes rather than returning an empty result. `PlanMigration` writes the move to a volume out as
-  steps and commands and **never performs it**. `DetectAnomalies` reads the recorded history for a level
-  *held* rather than a spike, a memory floor that only rises, and a writable layer growing by the day.
+- **`writable.go` measures container storage.** `AnalyzeWritableLayer` runs `du` through `ExecCheck`
+  with explicit argv and reports its own failures. `PlanMigration` prepares steps and commands without
+  executing them. These requested storage tools remain independent of the removed advisory scans.
 - **`events.go` keeps what Docker throws away**, so "why did this restart at 04:00" has an answer. An
   in-memory ring: an event log worth keeping across restarts belongs in the audit table. `oom` and
   `health_status: unhealthy` justify the feature alone. `EventFilter{Kinds, Search, Container, Stack}`
@@ -235,6 +223,14 @@ start. Cleanup removes only objects carrying its run's label and verifies none r
   through a temp file in the same directory and keeps `<name>.bak`, guarding what validation cannot catch
   — a correct file that says the wrong thing. `DeclaredServices` costs a subprocess per stack and is read
   on demand for administrators; other users receive the static declared-service list from discovery.
+  Compose config reads return a SHA-256 `revision`, and config saves may carry
+  `expectedRevision`. The editor retains that revision with a draft across view changes; a forced
+  save of invalid YAML still checks it. `WriteComposeFileChecked` shares the Files path lock,
+  compares the current bytes before staging and again before replacement, and refuses stale saves
+  with `409 content_conflict`. A stale save does not update the source or its backup. A failure to
+  write the backup also refuses replacement. The editor keeps the draft and offers **Review current
+  file** or confirmed **Discard draft and reload**; reviewing explicitly adopts the newly read
+  revision before the next guarded Save.
 - **`Build` drives the `docker` binary** because BuildKit is a separate builder the classic API path never
   reaches, and silently building with the legacy one produces images differing from the same Dockerfile
   from a shell.
@@ -351,6 +347,56 @@ is what permits the replacement at all. The handler sends one
 request per file from the page, maps a body over `maxUploadBytes` (2 GiB per request) to 413
 `too_large`, and drops any directory part a client put in the filename. Empty `from`/`to`/`path`
 fields are 400s rather than "the first root", which is what an empty path resolves to.
+
+Image editor reads use `GET /files/raw?revision=true`. The server takes a bounded 64 MiB
+snapshot of a regular image file, returns `X-JD-Content-Revision` for exactly its served bytes,
+and disables caching and partial reads on this path. The ordinary media preview keeps its existing
+range/cache behavior and allowlist; requesting an image revision does not permit other media or HTML.
+The editor decodes that response through a Blob URL, so the opened canvas and revision cannot come
+from separate native readings. Opening the full editor keeps the revision beside its RAM canvas
+handoff; modification-time refreshes do not replace unsaved canvases.
+
+`POST /files/upload` accepts an optional `expectedRevision` query parameter and returns a `revisions`
+map keyed by uploaded name. Image saves over the original always send the opened revision; converted
+copies and Save as retain the no-overwrite publication rule. `UploadChecked` compares binary content
+before staging and under the Files/Compose path lock immediately before publishing, re-resolves the
+client path and preserves the target's owner and mode. Staging runs outside the lock so a slow browser
+transfer cannot block other saves. A changed or removed image, a changed allowed symlink destination,
+or a competing dashboard save returns `409 content_conflict`; its transformed canvas remains available for
+Save as or review, and reloading the server image requires confirmed discard. Subsequent successful
+original saves use the returned saved revision. Legacy uploads without a revision keep their previous
+overwrite behavior. The same narrow native comparison/rename window described below still applies.
+Uploads open the resolved parent through the allowed root and keep its directory handle for staging,
+final revision reads, publication and cleanup. Mode and ownership changes use the still-open staging
+file descriptor and must succeed before publication. A moved parent followed by a replacement
+directory or symlink at its old pathname
+cannot redirect staging cleanup or metadata to an unrelated file. Publication rechecks both the
+resolved client path and the parent directory's identity; outward retargets retain the resolver's
+refusal and in-root parent replacements conflict, including replacement directories with identical
+file bytes. New-name publication uses directory-relative no-replace rename with a pinned-root hard
+link fallback. `upload_parent_test.go` covers legacy and revisioned uploads, complete and interrupted
+transfers, outward/inward symlink retargets, same-path replacement directories, untouched shadow files
+and cleanup of staging in the original moved directory.
+`image_snapshot_test.go` and `handlers_files_revision_test.go` cover bounded regular-file snapshots,
+exact binary revisions, changes during staging, concurrent text/image writers and the HTTP contract;
+`files-ui.spec.ts` checks conflict retention, Save as, confirmed reload and full-editor handoff.
+
+Editor reads (`GET /files/read`) return a SHA-256 `revision` of the bytes they read. The Files
+and Git editors send it as `expectedRevision` to `PUT /files/write`, whose successful response
+returns the saved revision. `WriteChecked` serializes the content comparison and atomic publish
+with Compose saves to the same resolved path, checks the bytes before staging and immediately
+before publish, and reports a stale, removed, nonregular or oversized backing file as
+`409 content_conflict`. Guarded disk reads use nonblocking open and an opened-file type check, so a
+FIFO introduced by a native writer cannot leave Save waiting for a pipe producer.
+The editor retains the draft after refusal and offers a fresh comparison or confirmed discard and
+reload. **Save as** sends an empty expected revision, requiring a name that remains unoccupied when
+it is published. API clients that omit the precondition keep their previous unconditional behavior.
+These are optimistic guards: an independent native writer can still change a path between the final
+comparison and rename. They do not make outside processes participate in a filesystem transaction.
+`revision_test.go`, `revision_shared_test.go`, `compose_revision_test.go` and
+`handlers_files_revision_test.go` cover stale/native edits, removal, concurrent Files/Compose
+saves, Save as occupancy, refusal of FIFOs without waiting for a producer, and the HTTP conflict
+contract on temporary files.
 
 `ResolveArchive` checks an archive download before a header goes out — the base directory, and each
 member through `ResolveEntry` so that a selected symlink is archived as the link it is — and refuses a
@@ -515,14 +561,26 @@ metadata to the inspector and details view; all tile sizes use compact fixed col
 dropped folder is its contents rather than an empty file named after it — and `conflict-dialog.tsx`
 asks once per operation (replace, keep both, skip) before an upload, move or paste touches a name that
 is taken; "keep both" is `photo (2).jpg` for a transfer and `photo copy.jpg` for a duplicate.
+`upload-plan.ts` reads every relevant destination folder before creating directories or enqueueing
+files, keeps names separately per directory, and reviews nested conflicts by their relative paths.
+Existing folders are explicitly approved for merging; the chosen Keep both, Skip or Replace policy
+applies to matching files inside each folder. Files or symlinks blocking a directory, directory
+replacement by an uploaded file and duplicate incoming targets under Replace are refused before
+uploads begin. A Cut paste removes only successfully moved source paths from its clipboard;
+cancellation, skipped items and failed moves remain available for another paste. Pure upload
+planning is checked by `upload-plan.test.js`; `files-ui.spec.ts` covers the transfer and review flows.
 `media-viewer.tsx` is the full-screen look (a `Modal` at `size="full"`): pictures fit or 1:1, video,
 audio, PDF through a blob, and the same head or archive listing the inspector shows for anything else;
 Space in the listing opens it, the arrows walk the folder's files. Text and image editors open beside
-that listing. **Open full editor** transfers the current draft in memory to `/files/editor`, which
+that listing. **Open full editor** transfers the current draft and its opened content/revision
+in memory to `/files/editor`, which
 shares the same editor controls beside a collapsible `FileTree`, which unfolds the current file's
 ancestors; on a phone the tree opens over the editor. Contents are never put in browser storage. Monaco exposes Find, Replace, commands, undo/redo,
 formatting, language, indentation, wrap, minimap and font size, with a cursor/UTF-8 size status and a
 diff review (`diff.ts`, a prefix/suffix-trimmed LCS capped at a few million cells) drawn by `DiffView`.
+Ordinary review compares the draft with the opened version. After a save conflict, **Review current
+file** reads the current bytes while retaining the draft, then compares those versions before a
+subsequent guarded Save.
 Content-search results reveal their matching line. `quick-open.tsx` shares one keyboard palette for
 names (Ctrl/Cmd+P) and contents (Ctrl/Cmd+Shift+F), with immediate current-listing name matches,
 cancelled stale requests, hidden/case/regex controls, a wider scope and explicit partial/error states.
@@ -630,7 +688,14 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
   every expression behind a cheap prefix or substring test: the budget is twice the no-lens search, and
   `BenchmarkSearchLens` measures the shipped lenses against it over a million mixed lines (the worst was
   about 1.6× when they landed). Parsing lives only here; the browser reads `event`/`attrs` off the
-  wire and never re-derives them. **Level precedence** is a lens's `SetLevel`
+  wire and never re-derives them. Where a lens read a prefix into the line's time, level and attrs it
+  marks where the message starts (`Line.Body`, `SetBody`, counted in UTF-16 units like the match
+  ranges): Postgres past its pid, `user@db` and severity (a `DETAIL` from its severity word, so it still
+  says what it is), MySQL past its thread, label, code and subsystem, Redis past its pid, role and level
+  character. A lens reading a copy of the message (syslog's envelope, jsonlog) leaves it unset. The
+  database lenses keep a statement's time apart from everything else timed: Postgres's session length is
+  `session_ms` and a lock wait `wait_ms`, so `duration_ms` — the measure Insights ranks as statement time
+  — is statements alone. **Level precedence** is a lens's `SetLevel`
   (the format's own severity token, or a status or crash rule), then a JSON or logfmt level key, then the
   journal's priority, then the word scan — which files, Docker and PM2 get and journal lines never do.
 - **A record is kept or dropped whole.** A Postgres `ERROR` is followed by its `DETAIL` and `STATEMENT`,
@@ -797,8 +862,12 @@ string, number, address, URL, path, method, status, id, failure and success word
 string, so the server's match ranges still intersect them, and `log-text.tsx` colours them from one map
 (design-system §14). In a narrow pane the message moves to a line of its own under the event word and
 the lane rather than starting past the edge. While the time column is on, the line's own leading
-timestamp is not drawn, and neither is a syslog hostname that is this host's. Error and critical rows are
-washed, warnings too; `stderr` is a muted mark, not a verdict, since Postgres writes everything there. A
+timestamp is not drawn, and neither is a syslog hostname that is this host's, and a line whose lens
+marked its `body` is drawn from there — the prefix it skips is the columns and the event word beside it;
+a search hit inside the prefix draws the whole line. A record's continuation lines draw no time of their
+own. Error and critical rows are
+washed, warnings too; `stderr` is a muted mark, not a verdict, since Postgres writes everything there,
+and it is not drawn on a line the lens read (`body`) or a record's continuation lines. A
 line the server parsed as structured (`message` and `fields` on the wire) is drawn as its message and
 fields in logfmt order, most telling field first — except in a History result, whose match ranges are
 over the raw JSON. A record's continuation lines stay under their head, three inline and the rest behind
@@ -866,7 +935,9 @@ window; it opens instead on what its own window adds up to (`Readings` in `insig
 the errors and the warnings among them (each narrowing to its levels on a press, with its line across
 the window — counted by level, or by the events the lens marks in that tone when the chart is split by
 event), the busiest minute, and the measure's p95 where the lens has one, or else how many distinct
-addresses the lens's first address key saw. A
+addresses the lens's first address key saw. A section that draws no metric cards — a database's Logs —
+passes `insightTiles={false}` through `ServiceLogs`, and its Insights opens on the chart: the level chips,
+the chart's busiest column and the measure's ladder already say what those tiles said. A
 page with a `StatGrid` of its own takes the tiles from `useLensReadings` (`only` names the ones it
 draws, and the rest are not searched for) and hands them to the pane (`answeredBy`).
 
@@ -954,45 +1025,14 @@ failures report the retained original's parking name.
 PM2 discovery cannot expand log roots. Its file paths must pass the configured `JD_LOG_ROOTS` check,
 including symlink resolution; custom PM2 log directories require explicit administrator configuration.
 
-## Actionable Docker findings
+## Container configuration
 
-Docker Overview, the container list and container details all use `components/docker/finding-actions.ts`.
-Attention keeps observed warning and critical findings; routine recommendations remain actionable
-in the container's Configure tab.
-Restart-policy remedies update a standalone container in place; log-driver remedies review replacement,
-interruption and loss of logs/writable-layer data. Compose configuration remedies open the owning stack
-so the source configuration can be changed durably. Storage and reachability actions focus the relevant
-container tab; findings without an automatic remedy can still open configuration evidence. Permission
-fallbacks name inspection instead of claiming an unavailable mutation. Group and singleton dismissals
-use the same finding-kind key; Rescan restores them without changing the server diagnosis.
-
-The resource editor uses the backend's **PATCH** route. RAM-only updates preserve existing swap
-headroom (including explicitly unlimited swap); previously unset swap gets Docker's equal-RAM swap
-allowance. Explicit combined limits are kept. Empty, negative and overflowing updates are refused;
-Engine warnings remain visible. A real Docker fixture checks that restart policy, RAM and CPU changes
-keep the running PID and start timestamp.
-
-A file link may open `/files?path=<parent>&entry=<absolute-file>`: the inspector selects only an
-entry already returned by that validated directory listing. An explicit click or deselection overrides
-the URL's initial selection. Paths still pass through the existing file service boundary.
-
-Standalone Configuration offers local preparation for readiness commands, image version/digest pins,
-port bindings, privileged mode and Docker socket mounts, plus the full supported replacement spec.
-Only administrators edit the replacement specification because it includes credentials and host
-settings. Restart-policy changes remain available to operators with `service.control`, through the
-existing in-place remedy and confirmation. Preview renders the
-reviewed spec; application readiness is not promised. Applying requires destructive capability and
-reviewed confirmation, reports Engine warnings and navigates to the returned replacement ID. Auto-remove
-containers cannot use this replacement path. Supported settings are carried through; Inspect remains the
-source for additional Engine options. Compose remedies open `?tab=compose&remedy=` with a service-level
-example, then use the existing validation/save/deploy workflow. Live limits link the owning file too.
-Removing Just Dashboard's required socket/host access is explicitly described as breaking its controls.
-
-Docker diagnosis reports unread inspections, disk accounting and log files in `silences`; running
-containers with unread inspections increment runtime `unknown`, rather than `noHealthcheck`. The
-Attention reclaim action uses `imagesAndCacheOnly=true` on `/docker/prune`, removing only unused images
-and build cache. It leaves containers, networks and volumes untouched. The older broad sweep retains
-its original scope; pairing images-only scope with volume removal is refused. Every scope is audited.
+The Configuration tab uses `components/docker/container-configuration.tsx` for manual editing.
+Compose containers open their owning Compose file. Standalone specifications are read only for an
+administrator, include the supported credentials and host settings, and are previewed before a
+confirmed replacement. The previous configuration is restored if replacement fails. The editor does
+not scan for changes to recommend. Restart policy, resource updates, cleanup and storage APIs retain
+capability, audit, confirmation and ownership checks. Resource updates use the existing PATCH route.
 
 ### Advanced network native acceptance
 
@@ -1008,3 +1048,35 @@ creates only its own temporary host bridge/routes through Docker; it does not ed
 
 This establishes the supported native bridge path. Third-party drivers/options still depend on
 installed Engine plugins and native support; a fixture does not establish provider connectivity.
+
+## Docker detail freshness and export coverage
+
+Container detail identity and associated route bindings poll every ten seconds and refresh after an
+in-page action. Child editors retain their drafts while these readings update. An unavailable or
+invalid detail tab falls back to the first available view; stopped containers do not leave an empty
+Shell panel. The Images verdict includes secondary tags/digests, and a matching outdated reference
+wins over an otherwise current alias. Unknown/failed registry checks are unverified; only an actual
+verified current answer contributes to the green current verdict.
+
+Native Docker/stack/journal log exports remain bounded to 20,000 selected lines and the native scan
+budget. Their downloaded text begins with coverage metadata: returned/matching/scanned counts,
+selected-line limit, unfinished scans, unread stack sources, and the journal's implicit last-48-hours
+scope when no start date is requested and Current boot is not selected. Any such omission makes coverage PARTIAL. The pane states the
+native bound before download; file and PM2 exports remain uncapped. A native read error is returned
+before attachment headers, and journal process exit failures are checked. Stack member read failures
+are retained by source; a partially readable stack is PARTIAL, and an entirely unreadable stack returns
+503 before attachment headers. Docker scan and incomplete multiplexed-frame errors are retained by the
+reader and consumed by buffered searches, so a closed channel does not certify successful EOF. Streaming file failures
+before output return an error; a failure after output appends an explicit incomplete-artifact warning.
+Consumers of native text exports must account for the comment-prefixed coverage header.
+
+Custom time windows share validation between pane, time-window dialog and export. Native HTML
+extended-year values are parsed, then years outside RFC3339's four-digit range, an empty custom window and
+reversed windows receive field errors. Invalid ranges do not trigger search or enable Download;
+server downloads also reject malformed bounds. Export fixture tests exceed 20,000 records, exercise
+native failures and partial coverage, and verify uncapped file output. Datetime unit and browser tests
+cover year 10000 and invalid/order recovery.
+
+Root-level upload jobs keep the destination's canonical path rather than adding a trailing slash.
+Their completion therefore refreshes the currently browsed directory just as nested uploads do;
+`upload-plan.test.js` and the desktop-drop browser case cover this identity and refresh contract.

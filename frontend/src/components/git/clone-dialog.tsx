@@ -153,6 +153,9 @@ function CloneDialogBody({ open, onOpenChange, github, onDone }: CloneDialogProp
       onOpenChange={(next) => !busy && onOpenChange(next)}
       title="Add a repository"
       size="md"
+      progress={
+        busy && { label: mode === "clone" ? "Cloning repository…" : "Initialising repository…" }
+      }
       footer={
         <>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>

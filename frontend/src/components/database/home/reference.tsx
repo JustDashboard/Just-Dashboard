@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useId, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Archive, Plus } from "@/components/icons"
 import { get, post } from "@/lib/api"
@@ -13,7 +14,6 @@ import { usePoll, type PollState } from "@/hooks/use-poll"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { OutcomeStrip, type Outcome } from "@/components/outcome-strip"
-import { Detail, DetailList } from "@/components/page"
 import { ChoiceRow } from "@/components/flow"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -27,6 +27,8 @@ import {
   Block,
   BlockLink,
   CardsSkeleton,
+  FactRow,
+  FactRows,
   FactsSkeleton,
   Quiet,
   Read,
@@ -43,6 +45,7 @@ import type {
 } from "@/components/database/home/types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
+import { settingsPageHref } from "@/components/database/shell/settings-pages"
 
 /**
  * The reference blocks at the foot of a home: what the server runs as, where
@@ -54,6 +57,7 @@ import { useDatabases } from "@/components/database/shell/databases-context"
 /** What the server runs as: its container, its unit, its file, or another machine. */
 export function RunsAs() {
   const { conn, summary, engine, href } = useDatabase()
+  const { can } = useAuth()
   const inspected = summary?.container?.id
   // What the container was told it may use is Docker's to say, not the
   // summary's: asked of the container's own record, and only for a database
@@ -99,52 +103,65 @@ export function RunsAs() {
         </>
       }
     >
-      <DetailList className="animate-rise">
+      <FactRows className="animate-rise">
         {container && (
           <>
-            <Detail label="Container" className="font-mono wrap-anywhere">
+            <FactRow label="Container" className="font-mono wrap-anywhere">
               {container.name}
-            </Detail>
-            <Detail label="Image" className="font-mono wrap-anywhere">
+            </FactRow>
+            <FactRow label="Image" className="font-mono wrap-anywhere">
               {container.image}
-            </Detail>
-            <Detail label="Docker says">
+            </FactRow>
+            <FactRow label="Docker says">
               {container.status ?? container.state}
               {container.health ? ` · ${container.health}` : ""}
-            </Detail>
+            </FactRow>
             {container.composeProject && (
-              <Detail label="Compose" className="font-mono wrap-anywhere">
+              <FactRow label="Compose" className="font-mono wrap-anywhere">
                 {container.composeProject}
                 {container.composeService ? ` / ${container.composeService}` : ""}
-              </Detail>
+              </FactRow>
             )}
-            <Detail label="Limits">
+            <FactRow label="Limits">
               <ContainerLimits poll={limits} />
-            </Detail>
+              {/* Not for a compose container: its file owns the limits, and
+                  the page would only say so. */}
+              {can("system.admin") && !container.composeProject && (
+                <>
+                  <span className="text-muted-foreground"> · </span>
+                  <Link
+                    href={settingsPageHref(href("settings"), { path: "resources" })}
+                    className="rounded-sm underline focus-ring"
+                  >
+                    Change
+                  </Link>
+                </>
+              )}
+            </FactRow>
             {limits.data?.restartPolicy && (
-              <Detail label="Restarts" className="font-mono">
+              <FactRow label="Restarts" className="font-mono">
                 {limits.data.restartPolicy}
-              </Detail>
+              </FactRow>
             )}
           </>
         )}
         {!container && unit && (
           <>
-            <Detail label="Unit" className="font-mono wrap-anywhere">
+            <FactRow label="Unit" className="font-mono wrap-anywhere">
               {unit.name}
-            </Detail>
-            <Detail label="systemd says">
+            </FactRow>
+            <FactRow label="systemd says">
               {unit.activeState}
               {unit.subState ? ` (${unit.subState})` : ""}
-            </Detail>
+            </FactRow>
           </>
         )}
         {file && (
           <>
-            <Detail label="File" className="font-mono wrap-anywhere">
+            <FactRow label="File" className="font-mono wrap-anywhere">
               {file.path}
-            </Detail>
-            <Detail label="On disk">
+            </FactRow>
+            <FactRow label="On disk">
               {file.exists ? (
                 <>
                   {bytes(file.size)}
@@ -160,26 +177,26 @@ export function RunsAs() {
                   <Status tone="danger" label="the file is missing" />
                 </span>
               )}
-            </Detail>
+            </FactRow>
           </>
         )}
         {!container && !unit && !file && (
-          <Detail label="Where">
+          <FactRow label="Where">
             {summary.source === "remote"
               ? `On another machine, at ${conn.host}${conn.port ? `:${conn.port}` : ""}`
               : summary.source === "host"
                 ? `A process on this server, listening on port ${conn.port}`
                 : "Not known"}
-          </Detail>
+          </FactRow>
         )}
-        <Detail label="Start and stop">
+        <FactRow label="Start and stop">
           {summary.power.via === "docker"
             ? "From here, through Docker"
             : summary.power.via === "systemd"
               ? "From here, through systemd"
               : (summary.power.reason ?? "Not from here")}
-        </Detail>
-      </DetailList>
+        </FactRow>
+      </FactRows>
     </Block>
   )
 }
@@ -224,8 +241,14 @@ const EXPOSURE: Record<string, { word: string; sentence: string }> = {
     sentence: "It listens on loopback, so nothing outside this machine can reach it.",
   },
   private: {
-    word: "One private address",
-    sentence: "It listens on one address of this machine — a private network or a VPN.",
+    word: "One address of this machine",
+    sentence:
+      "It listens on one address of this machine — a tailnet, a VPN or a local network — and only that network reaches it.",
+  },
+  allowlist: {
+    word: "Allowed addresses",
+    sentence:
+      "It listens on every interface, and the gateway refuses every address that is not on its list.",
   },
   public: {
     word: "Anywhere",
@@ -270,8 +293,8 @@ export function ReachableFrom() {
       stale={staleOf(access)}
       actions={<BlockLink href={href("settings")}>{admin ? "Change" : "Settings"}</BlockLink>}
     >
-      <DetailList className="animate-rise">
-        <Detail label="From">
+      <FactRows className="animate-rise">
+        <FactRow label="From">
           {open ? (
             <span className="flex">
               <Status verdict="warning" label={exposure.word} />
@@ -280,26 +303,31 @@ export function ReachableFrom() {
             <span className="font-medium">{exposure.word}</span>
           )}
           <span className="mt-0.5 block text-muted-foreground">{exposure.sentence}</span>
-        </Detail>
+        </FactRow>
         {conn.port && (
-          <Detail label="Listens on" className="font-mono">
+          <FactRow label="Listens on" className="font-mono">
             {conn.host}:{conn.port}
-          </Detail>
+          </FactRow>
         )}
         {admin && open && access.data && access.data.publicAddresses.length > 0 && (
-          <Detail label="Public address" className="font-mono wrap-anywhere">
+          <FactRow label="Public address" className="font-mono wrap-anywhere">
             {access.data.publicAddresses.join(", ")}
-          </Detail>
+          </FactRow>
+        )}
+        {admin && access.data && access.data.exposure === "allowlist" && (
+          <FactRow label="Allowed" className="font-mono wrap-anywhere">
+            {access.data.allow.join(", ")}
+          </FactRow>
         )}
         {admin && firewall && (
-          <Detail label="Firewall">
+          <FactRow label="Firewall">
             {firewall.active
-              ? `${firewall.backend ?? "The firewall"} is on, and port ${access.data?.port ?? conn.port} is ${firewall.open ? "open" : "closed"}`
+              ? `${firewall.backend ?? "The firewall"} is on, and port ${access.data?.port ?? conn.port} is ${firewall.open ? "open" : firewall.allowed.length > 0 ? `open to ${plural(firewall.allowed.length, "listed address", "listed addresses")}` : "closed"}`
               : "No firewall is active on this machine"}
-          </Detail>
+          </FactRow>
         )}
         {admin && access.error && !access.data && (
-          <Detail label="Firewall">
+          <FactRow label="Firewall">
             <span className="text-muted-foreground">Could not be read: {access.error.message}</span>{" "}
             <button
               type="button"
@@ -308,16 +336,16 @@ export function ReachableFrom() {
             >
               Try again
             </button>
-          </Detail>
+          </FactRow>
         )}
-        <Detail label="Changed">
+        <FactRow label="Changed">
           {summary.managed
             ? "From Settings: the dashboard owns the binding"
             : summary.source === "remote"
               ? "On the machine it runs on"
               : "In the server's own configuration"}
-        </Detail>
-      </DetailList>
+        </FactRow>
+      </FactRows>
     </Block>
   )
 }
@@ -441,8 +469,8 @@ export function BackupsBlock({
                   {answering ? "." : "; one can be taken once the server answers."}
                 </Quiet>
               ) : (
-                <DetailList>
-                  <Detail label="Kept">
+                <FactRows>
+                  <FactRow label="Kept">
                     <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                       <OutcomeStrip
                         items={outcomes}
@@ -452,21 +480,21 @@ export function BackupsBlock({
                         {plural(data.files.length, "dump")} · {bytes(kept)}
                       </span>
                     </span>
-                  </Detail>
+                  </FactRow>
                   {newest && (
-                    <Detail label="Newest">
+                    <FactRow label="Newest">
                       <span title={timestamp(newest.takenAt)}>{relativeTime(newest.takenAt)}</span>
                       {" · "}
                       {bytes(newest.size)}
                       {" · "}
                       {newest.tool ?? newest.format}
                       {newest.summary ? ` · ${newest.summary}` : ""}
-                    </Detail>
+                    </FactRow>
                   )}
-                  <Detail label="Directory" className="font-mono wrap-anywhere">
+                  <FactRow label="Directory" className="font-mono wrap-anywhere">
                     {data.dir}
-                  </Detail>
-                </DetailList>
+                  </FactRow>
+                </FactRows>
               )}
               {job ? (
                 <p className="flex text-xs font-medium" data-slot="backup-running">

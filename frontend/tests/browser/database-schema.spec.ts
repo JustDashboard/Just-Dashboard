@@ -1420,7 +1420,7 @@ test("Query hands over a SELECT in the engine's dialect, without reading the tab
   const { sent } = await mockSchema(page)
   await page.goto(TABLE)
   await expect(page.getByRole("cell", { name: "customer_id", exact: true })).toBeVisible()
-  await page.getByRole("button", { name: "Query", exact: true }).click()
+  await page.getByRole("button", { name: "Open in Query", exact: true }).click()
   await expect.poll(() => new URL(page.url()).pathname).toBe("/databases/1/query")
   await expect(page.locator("[data-slot=sql-editor] .view-lines")).toHaveText(
     'SELECT * FROM "public"."orders" LIMIT 100',

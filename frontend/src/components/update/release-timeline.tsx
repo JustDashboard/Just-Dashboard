@@ -3,7 +3,8 @@
 import { useState } from "react"
 import { ChevronDown, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import type { ChangeKind, Release } from "@/lib/types"
+import { kindCounts } from "@/lib/release-kinds"
+import type { Release } from "@/lib/types"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -76,8 +77,6 @@ export function ReleaseTimeline({
 /** How many of a release's changes are shown before it folds. */
 const FOLD = 3
 
-const KIND_ORDER: ChangeKind[] = ["security", "added", "changed", "fixed", "deprecated", "removed"]
-
 function Entry({
   release,
   installed,
@@ -96,10 +95,7 @@ function Entry({
   const [unfolded, setUnfolded] = useState(false)
   const all = open || unfolded || release.changes.length <= FOLD + 1
   const shown = all ? release.changes : release.changes.slice(0, FOLD)
-  const counts = KIND_ORDER.map((kind) => ({
-    kind,
-    n: release.changes.filter((change) => change.kind === kind).length,
-  })).filter((count) => count.n > 0)
+  const counts = kindCounts([release])
 
   return (
     <article
@@ -123,7 +119,7 @@ function Entry({
           {latest && <Tag>Latest</Tag>}
           {release.breaking && (
             <Tag tone="warning" icon={Warning}>
-              Needs attention
+              Breaking change
             </Tag>
           )}
         </span>

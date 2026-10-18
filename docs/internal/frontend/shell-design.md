@@ -1,6 +1,6 @@
 # Frontend shell and design system
 
-The App Router currently has 111 `page.tsx` entry points, including nested database, Docker, proxy,
+The App Router currently has 113 `page.tsx` entry points, including nested database, Docker, proxy,
 security, and deployment workflows plus `/login` and `/welcome`. Most page modules are client components; the three
 deployment detail/new wrappers remain server components and hand interaction to client components under
 `components/deploy/`.
@@ -11,8 +11,13 @@ deployment detail/new wrappers remain server components and hand interaction to 
 `SidebarProvider` + `AppSidebar`, `MetricsStream` — which renders nothing and exists to hold the
 metrics socket open for the whole shell, so Overview's charts keep filling from other pages — and
 `SavedFolderColours` around the page, which reads the folder labels from `/files/places` and again on
-each navigation, so a folder coloured in Files is that colour in every tree and browser. Its
+each navigation, so a folder coloured in Files is that colour in every tree and browser, and
+`HeldSessionsProvider` with `HeldSessionsHost` after the page, which draw Remote Desktop's sessions
+so they stay connected across pages (the session page only names which one is shown). Its
 redirect to `/login` is convenience, not a control; every API call behind it is authenticated server-side.
+The authenticated workspace is keyed by account ID. Session recovery for a different account remounts
+its providers and pages after account working-state cleanup, removing mounted editor buffers and held
+sessions. Recovery for the same account keeps those mounts and their drafts.
 
 **The scroll container is on the `SidebarInset`, not the document.** That is what lets a page ask for
 the remaining height (`<Page fill>`) instead of growing past the viewport.
@@ -77,10 +82,16 @@ a list of sections kept out of its sidebar — stored on the account (`users.hid
 `user.hiddenSections` on the session and written by `PUT /account/workspace`), so it follows the person
 to every browser rather than living in this one's storage. `lib/sidebar-sections.ts` names the
 sections that can be hidden — the first segment of their path: Deployments, Databases, Docker, the
-five Workspace tools, Network, Proxy & TLS, Security, Backups, Packages, System users and the audit
-log — and the purposes the question offers, each the sections it needs. Overview, Monitoring,
+six Workspace tools, Network, Proxy & TLS, Security, Backups, Packages, System users and the audit
+log — and the purposes the question offers, each the sections it brings. Every section belongs to
+exactly one purpose or to the base, so every card turns on something no other card does: Ship apps
+is Deployments and Proxy & TLS, Run databases is Databases and Backups, Work on the server is the six
+Workspace tools, Manage containers is Docker, Secure the server is Security and Route the network is
+Network. Until this was a partition, Manage containers brought nothing the other purposes had not,
+and Route the network and Secure the server brought the same two rows. Overview, Monitoring,
 Settings and the account cannot be hidden: a rail without them has no way to say how the machine is,
-or back to the switch.
+or back to the switch. Packages, System users and the audit log can be, but every answer keeps them
+(`BASE_SECTIONS`): they are how the machine itself is changed and checked, whatever it is for.
 
 What a hidden section loses is exactly three things, each read through `useHiddenSections()`:
 
@@ -111,9 +122,14 @@ screens, centred on arrival's ground (`.auth-backdrop`, design system §16), the
 
 1. **The question**: the purposes as big `ChoiceCard`s and nothing beside them — any number, each
    drawn as the three products it means (`PURPOSES[].products` in `lib/sidebar-sections.ts`) and its
-   name. On a server that already has projects or saved databases those purposes start chosen, with
-   the count on their card. *Continue* saves the sidebar they keep (`hiddenFor`); *Show me
-   everything* hides nothing and goes straight to the dashboard.
+   name. Five are stable — finished and tested — and come first, chosen to begin with
+   (`STABLE_PURPOSES`). Route the network works but is still being tested (`stage: "experimental"`),
+   so it comes last, carries `ExperimentalMark` (an amber *Experimental* tag and *Working, still
+   being tested*) and is taken only by somebody who presses it; stable is the rule and carries no
+   mark, so there is no shelf of one card. On a server that already has projects or saved databases,
+   those cards carry the count. *Continue* saves the sidebar they keep (`hiddenFor`, which always
+   keeps `BASE_SECTIONS`), so the defaults leave out only Network; *Show me everything* hides
+   nothing and goes straight to the dashboard.
 2. **The answer**: `ServerPicture` (`components/onboarding/server-picture.tsx`) filling the screen —
    this server's rack in the middle, named and marked with its distribution, each purpose chosen a
    card of its products around it on an ellipse, with an `AnimatedBeam` running out to each — and one
@@ -124,19 +140,32 @@ screens, centred on arrival's ground (`.auth-backdrop`, design system §16), the
 
 Until 0.7.4 it was three steps: the purposes beside a small picture of the server, then the sections
 as fifteen tiles beside a preview of the rail, then the outcome. Choosing sections one by one is
-Account → Workspace's job — the same tiles and preview, after the fact — and the first sign-in no
-longer asks for it. On a phone the question's cards are rows with the commands under them, as on a
+Account → Workspace's job, after the fact, and the first sign-in no longer asks for it. On a phone the question's cards are rows with the commands under them, as on a
 wide screen: a bar holding them at the foot of the window drew a dark strip the wide screen does not
 have.
 
-Nothing is saved until *Continue* or *Show me everything*. `/account/workspace` is where sections are
-chosen one by one, in the reading register: `SectionTiles` (`section-tiles.tsx`), one compact
-`ChoiceCard` per section the role can see under the rail's group names, beside `SidebarPreview`, the rail
-drawn from the same registry with the same rule — unlabelled, since drawn as the rail it is it needs no
-name — with *Ask me again* back to `/welcome`. Accounts that predate the question default to answered
-with nothing hidden, so an upgrade changes nobody's rail.
+Nothing is saved until *Continue* or *Show me everything*. `/account/workspace` is the answer after
+the fact, in the reading register (`components/account/workspace.tsx`), and nothing on it is framed
+but the rail. *What you use this server for* is the question's purposes in its order as lit cards
+(`PurposePicker`), each its three products, its name — with the same mark on Route the network —
+and the sections it brings with the ones out of the rail dimmed; *Ask me again* goes back to `/welcome`. Only sections are stored, so a
+purpose is chosen when every section of it the role is offered is shown (`purposeShown`); pressing a
+chosen one takes its sections out and pressing any other brings them back whole (`pressPurpose`).
+Purposes share no section, so a press never moves another card. Beside it, *Sidebar* is the rail itself (`SidebarEditor`), walked
+from the same registry in its groups and order with a switch on every row the role may hide;
+Overview, Monitoring and Settings say *Always* instead, and Server configuration heads the three
+sections it holds. A list of sections beside a separate picture of the rail was the same list twice.
+Both edit one draft, and an edit raises the settings pages' floating Save (`SaveBarProvider`,
+design system §7) rather than a disabled button sitting under the page. Accounts that predate the
+question default to answered with nothing hidden, so an upgrade changes nobody's rail.
 
 ### Signing in
+
+The dashboard Users page derives missing-factor descriptions from the same `require2fa` policy.
+On an optional install, an enabled unenrolled account is password-only. On a required install,
+its card and the coverage reading say enrollment is required before completing sign-in, and a
+two-factor reset explains that requirement. Enabled/disabled account counts describe account state;
+they do not promise that an unenrolled account can bypass the sign-in enrollment step.
 
 `app/login/page.tsx` is one `FlowPanel` card: the form, and from `lg` a picture half drawing
 `ProductOrbit` (`components/onboarding/product-orbit.tsx`) — the same server rack, ringed by the
@@ -188,7 +217,7 @@ parameter (`/databases/browse?conn=3`), and those addresses are still out there 
 link of every database card drawn on it, and a bookmark outlives every release — so a segment that is
 not a number is read by `legacyDatabasesHref` and replaced, not pushed: `overview` is the home,
 `browse` Data, `structure` Schema, `find` Search, `monitor` Performance, `server` Access,
-`connection` Settings, `diagram`, `query`, `advisor`, `backups`, `logs` and `generate` themselves,
+`connection` Settings, `diagram`, `query`, `backups`, `logs` and `generate` themselves,
 with `schema`, `table`, `sql`, `source` and `view` carried over, and `/databases/topology` is the
 map. An old page with no valid `conn` opens the control center rather than a guess.
 
@@ -204,12 +233,25 @@ row's slot made the heading read as one more row to press.
 
 The groups run in the order a day on the server runs, and the rail names each group:
 **Server** (Overview, and Monitoring: Metrics, Processes, Logs), **Apps** (Deployments first,
-then Databases, Docker), **Workspace** (Excalidraw, Stickyboard, Terminal, Files, Git), **Protection** (Security, Backups),
+then Databases, Docker), **Workspace** (Excalidraw, Stickyboard, Terminal, Files, Git, Remote Desktop), **Protection** (Security, Backups),
 **Advanced** (Server configuration: Proxy & TLS, Packages, System users, Audit log) and **System**
 (Settings). The top-level list is twelve rows rather than seventeen: the three monitoring pages answer
 one question, and the four configuration pages are opened to change the server rather than to use it.
 Deployments open the second group because shipping something is the reason most visits happen; until
 0.6.7 it sat fourth in a group called Operations, between Packages and Backups.
+
+Above the account card sits the update notice (`components/update/update-notice.tsx`), and only when
+there is something to say: a newer version, an update running, or one that finished and has not been
+dismissed. It is the account card's container (the same edge and ground, tinted green or red only
+once a run has finished) with the dashboard's J,
+an eyebrow in the notice's tone, the installed version wired to the newest with a pulse running
+along the wire, the newest release's title and a band of what the releases bring by kind. An admin on
+an install that updates in place gets *Update now*, which opens the update's own dialog
+(`update-dialog.tsx`: the two versions, *Not now* and *Update*, nothing else); everyone gets a link to the Version page (`/dashboard`) for the notes. While an
+update runs the card carries the border beam, the stage it is at and *View progress*; afterwards it
+turns green with *See what's new*, or red with the updater's error and *See what went wrong*, and only
+then can it be dismissed. In the icon rail it is one tile in the same tone that links to the Version
+page.
 
 `PERSONAL_NAV` is a flat list of leaves — Profile (`/account`), Security, Sessions, API keys, Workspace
 and, for `system.admin`, Users — drawn three times from the one array: `ACCOUNT_SECTION`, which is that list as a
@@ -446,14 +488,10 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   `RowActions` (the cluster of them that appears on hover, stays on keyboard focus and on an open menu,
   and is always visible on touch) and `DimActions`, the same cluster for a row whose controls have a
   column to themselves: always drawn, dimmed until the pointer arrives.
-- `components/finding-list.tsx` — `FindingList`, the one list of verdict findings in the product. A row
-  shows its severity, problem and measured consequence, with a named action beside the disclosure or
-  below it in a narrow panel. Extended evidence folds away; the action stays visible. Expanded
-  evidence does not repeat the header's text. Security, Docker, databases, deployments, network
-  evidence, proxy reports and backup failures share it.
-  Attention lists retain warnings and critical findings. Routine recommendations stay in configuration
-  or inventory; an unavailable check states its limits. Actions land on the actual resource or control,
-  retain capability and confirmation checks, and show progress while an async action runs.
+- `components/finding-list.tsx` renders results in requested diagnostic tools, including TLS/network
+  reports, config lint and issuance diagnostics. Automatic attention panels, routine settings
+  recommendations and navigation attention marks were removed in 0.7.5. Pending-edit marks still
+  represent saved changes. Operational error messages and diagnostic evidence remain visible.
 
 **Reach for `Panel`/`Pane`/`Page`, not raw `Card`**, and add a variant there rather than a one-off in a
 feature page — before these existed, fourteen pages read as fourteen products. `components/state.tsx`

@@ -1,10 +1,10 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowRight } from "@/components/icons"
+import { ArrowRight, Fingerprint, Key, Linked } from "@/components/icons"
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { Metric, MetricStrip } from "@/components/page"
+import { Metric } from "@/components/page"
 import { EmptyNote } from "@/components/state"
 import { Tag } from "@/components/tag"
 import {
@@ -20,6 +20,7 @@ import { useDatabase } from "@/components/database/shell/database-context"
 import { KindGlyph, rowObjectKind } from "@/components/database/data/kinds"
 import type { DbTableDetail } from "@/components/database/data/types"
 import { grouped } from "@/components/database/data/view"
+import { Facts } from "@/components/database/schema/facts"
 
 /**
  * What a table is made of, to read: its columns, its indexes, its keys and
@@ -48,7 +49,10 @@ export function TableStructure({ detail }: { detail: DbTableDetail }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="space-y-6 p-4">
-        <MetricStrip>
+        {/* Parted by space, as the Schema page draws the same figures: a run
+            the engine can lengthen wraps there without a rule left dividing
+            a line's first figure from nothing. */}
+        <Facts>
           <Metric
             label="Rows"
             value={detail.estimatedRows >= 0 ? `~${grouped(detail.estimatedRows)}` : "not counted"}
@@ -63,7 +67,7 @@ export function TableStructure({ detail }: { detail: DbTableDetail }) {
           {detail.facts.map((fact) => (
             <Metric key={fact.name} label={fact.name} value={fact.value} />
           ))}
-        </MetricStrip>
+        </Facts>
         {detail.comment && (
           <p className="max-w-3xl text-body text-muted-foreground">{detail.comment}</p>
         )}
@@ -114,9 +118,20 @@ export function TableStructure({ detail }: { detail: DbTableDetail }) {
                         : (column.default ?? (column.identity ? column.identity : ""))}
                     </TableCell>
                     <TableCell className="py-1.5">
+                      {/* The marks the Schema page's columns carry, glyphs and all. */}
                       <span className="flex items-center gap-2">
-                        {detail.primaryKey.includes(column.name) && <Tag>primary</Tag>}
-                        {unique.has(column.name) && <Tag>unique</Tag>}
+                        {detail.primaryKey.includes(column.name) && (
+                          <span className="flex items-center gap-1">
+                            <Key aria-hidden className="size-3 text-chart-2" />
+                            <Tag>primary</Tag>
+                          </span>
+                        )}
+                        {unique.has(column.name) && (
+                          <span className="flex items-center gap-1">
+                            <Fingerprint aria-hidden className="size-3 text-muted-foreground" />
+                            <Tag>unique</Tag>
+                          </span>
+                        )}
                         {column.generated && <Tag>computed</Tag>}
                         {reference && (
                           <Link
@@ -126,7 +141,7 @@ export function TableStructure({ detail }: { detail: DbTableDetail }) {
                             })}
                             className="flex items-center gap-1 rounded-sm font-mono text-xs text-muted-foreground focus-ring transition-colors hover:text-foreground"
                           >
-                            <ArrowRight className="size-3" />
+                            <Linked aria-hidden className="size-3 text-chart-1" />
                             {reference.key.refTable}.{reference.key.refColumns[reference.index]}
                           </Link>
                         )}
@@ -202,7 +217,10 @@ export function TableStructure({ detail }: { detail: DbTableDetail }) {
                   <TableRow key={`fk:${key.name}`} className="hover:bg-transparent">
                     <TableCell className="py-1.5 font-mono font-medium">{key.name}</TableCell>
                     <TableCell className="py-1.5">
-                      <Tag>foreign key</Tag>
+                      <span className="flex items-center gap-1">
+                        <Linked aria-hidden className="size-3 text-chart-1" />
+                        <Tag>foreign key</Tag>
+                      </span>
                     </TableCell>
                     <TableCell className="py-1.5 font-mono">
                       <span className="flex flex-wrap items-center gap-x-1.5">
@@ -295,7 +313,8 @@ function Part({
 }) {
   return (
     <section aria-label={title} className="min-w-0">
-      <h3 className="flex items-baseline gap-2 border-b border-hairline pb-2 text-title font-medium">
+      {/* Its hairline runs to the same edges as the rules of the rows under it. */}
+      <h3 className="-mx-4 flex items-baseline gap-2 border-b border-hairline px-4 pb-2 text-title font-medium">
         {title}
         <span className="numeric text-xs font-normal text-muted-foreground">{count}</span>
       </h3>

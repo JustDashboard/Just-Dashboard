@@ -18,7 +18,6 @@ import {
   Warning,
   Wrench,
 } from "@/components/icons"
-import { composeRemedy } from "@/lib/docker-remedies"
 import { dedupeEvents } from "@/lib/docker-events"
 import { notify } from "@/lib/toast"
 import { get } from "@/lib/api"
@@ -198,7 +197,7 @@ function StackBody({ name }: { name: string }) {
   const query = useSearchParams()
   const { snapshot } = useMetrics()
   const [rememberedTab, rememberTab] = useViewState("docker.stack.tab", "services")
-  const [tab, setRequestedTab] = useState(query.get("tab") ?? rememberedTab)
+  const [requestedTab, setRequestedTab] = useState(query.get("tab") ?? rememberedTab)
   const setTab = (value: string) => {
     setRequestedTab(value)
     rememberTab(value)
@@ -328,15 +327,19 @@ function StackBody({ name }: { name: string }) {
 
   const run = async (
     action: ComposeActionKey,
-    opts: { confirmPhrase?: string; service?: string } = {},
+    opts: { confirmPhrase?: string; service?: string; onOutput?: (line: string) => void } = {},
   ) => {
     setPending({ service: opts.service, label: PARTICIPLE[action] })
     const code = await runner
-      .run(`/docker/stacks/${encodeURIComponent(name)}/run`, {
-        action,
-        service: opts.service,
-        confirm: opts.confirmPhrase,
-      })
+      .run(
+        `/docker/stacks/${encodeURIComponent(name)}/run`,
+        {
+          action,
+          service: opts.service,
+          confirm: opts.confirmPhrase,
+        },
+        opts.onOutput,
+      )
       .finally(() => {
         setPending(undefined)
         setEpoch((n) => n + 1)
@@ -367,7 +370,12 @@ function StackBody({ name }: { name: string }) {
       phrase: action === "down" ? name : undefined,
       confirmLabel: title.split(" ")[0],
       description,
-      action: (phrase) => run(action, { confirmPhrase: phrase }),
+      workingLabel: `${PARTICIPLE[action]} ${name}…`,
+      action: (phrase, report) =>
+        run(action, {
+          confirmPhrase: phrase,
+          onOutput: (line) => report({ detail: line.slice(-500) }),
+        }),
     })
 
   const control = Boolean(data?.managed) && can("system.admin")
@@ -394,7 +402,13 @@ function StackBody({ name }: { name: string }) {
             <p className="font-mono text-hint text-muted-foreground">{meta.command(service)}</p>
           </>
         ),
-        action: (phrase) => run(action, { service, confirmPhrase: phrase }),
+        workingLabel: `${PARTICIPLE[action]} ${service}…`,
+        action: (phrase, report) =>
+          run(action, {
+            service,
+            confirmPhrase: phrase,
+            onOutput: (line) => report({ detail: line.slice(-500) }),
+          }),
       })
     }
     const verbs: Verb[] = []
@@ -480,6 +494,7 @@ function StackBody({ name }: { name: string }) {
     { value: "history", label: "History" },
     { value: "logs", label: "Logs" },
   ]
+  const tab = tabs.some((entry) => entry.value === requestedTab) ? requestedTab : "services"
 
   return (
     <Workspace
@@ -573,18 +588,6 @@ function StackBody({ name }: { name: string }) {
           )}
         </div>
 
-        {query.get("remedy") && (
-          <Notice title="Review the owning service">
-            <p>
-              Change only the affected service, validate and save the file, then bring the stack up
-              to apply it. Replacing a container discards its writable layer and old logs; retained
-              volumes keep their data.
-            </p>
-            <pre className="mt-2 font-mono text-hint whitespace-pre-wrap">
-              {composeRemedy(query.get("remedy") ?? "")}
-            </pre>
-          </Notice>
-        )}
         {error && <ErrorState error={error} />}
         {loading && !data && <LoadingRows />}
 

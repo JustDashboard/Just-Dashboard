@@ -198,10 +198,9 @@ func gatewayReadSysctl(key string) (string, bool) {
 
 // ProtectionSetting is one kernel setting as the page shows it.
 type ProtectionSetting struct {
-	Key         string `json:"key"`
-	Label       string `json:"label"`
-	Why         string `json:"why"`
-	Recommended string `json:"recommended"`
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Why   string `json:"why"`
 	// Kind is choice (Allowed lists the values) or number (Min to Max).
 	Kind    string   `json:"kind"`
 	Allowed []string `json:"allowed"`
@@ -213,9 +212,8 @@ type ProtectionSetting struct {
 	Available bool   `json:"available"`
 	// SetHere is whether the dashboard keeps a value for it, and Value is that
 	// value: restored at boot.
-	SetHere       bool   `json:"setHere"`
-	Value         string `json:"value"`
-	AtRecommended bool   `json:"atRecommended"`
+	SetHere bool   `json:"setHere"`
+	Value   string `json:"value"`
 }
 
 func protectionSettings(sp *Spec) []ProtectionSetting {
@@ -223,12 +221,10 @@ func protectionSettings(sp *Spec) []ProtectionSetting {
 	for _, d := range protectionDefs {
 		cur, ok := gatewayReadSysctl(d.Key)
 		v, set := sp.Sysctls[d.Key]
-		rec := d.recommended(cur)
 		s := ProtectionSetting{
-			Key: d.Key, Label: d.Label, Why: d.Why, Recommended: rec, Kind: d.kind(),
+			Key: d.Key, Label: d.Label, Why: d.Why, Kind: d.kind(),
 			Allowed: d.Allowed, Min: d.Min, Max: d.Max,
 			Current: cur, Available: ok, SetHere: set, Value: v,
-			AtRecommended: ok && cur == rec,
 		}
 		if s.Allowed == nil {
 			s.Allowed = []string{}

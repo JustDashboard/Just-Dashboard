@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { ApiError, downloadUrl, errorMessage, type ApiErrorBody } from "@/lib/api"
+import { ApiError, fetchResponse, errorMessage } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { Segments } from "@/components/deploy/settings/segments"
@@ -33,17 +33,6 @@ export type ExportRequest = {
   draft?: QueryDraft
 }
 
-/** A refused request as the error every other read throws. */
-async function refused(response: Response): Promise<ApiError> {
-  const text = await response.text()
-  try {
-    const body = (JSON.parse(text) as ApiErrorBody).error
-    return new ApiError(response.status, body.code, body.message)
-  } catch {
-    return new ApiError(response.status, "unknown", text.slice(0, 300) || response.statusText)
-  }
-}
-
 /**
  * A collection, or what a query matches in it, saved as a file.
  *
@@ -71,8 +60,10 @@ export function useMongoExport() {
     })
     try {
       const text = (value: string | undefined) => (value?.trim() ? value : undefined)
-      const response = await fetch(
-        downloadUrl(`/databases/${target.id}/mongo/export`, {
+      const response = await fetchResponse(
+        `/databases/${target.id}/mongo/export`,
+        { signal: controller.signal },
+        {
           database: target.database || undefined,
           collection: target.collection,
           filter: text(draft?.filter),
@@ -84,10 +75,9 @@ export function useMongoExport() {
           limit: request.limit,
           format,
           relaxed: request.relaxed && format !== "csv" ? 1 : undefined,
-        }),
-        { credentials: "include", signal: controller.signal },
+        },
       )
-      if (!response.ok || !response.body) throw await refused(response)
+      if (!response.body) throw new Error("The export response has no body")
 
       const parts: BlobPart[] = []
       const reader = response.body.getReader()
@@ -345,6 +335,8 @@ export function ImportDialog({
   const [report, setReport] = useState<MongoImportReport | null>(null)
   const [refused, setRefused] = useState("")
   const [busy, setBusy] = useState<"reading" | "importing" | null>(null)
+  const [sent, setSent] = useState(0)
+  const [sendTotal, setSendTotal] = useState(0)
 
   const formats = IMPORT_FORMATS.filter((entry) =>
     engine.capabilities.importFormats.includes(entry),
@@ -389,13 +381,24 @@ export function ImportDialog({
     if (!file) return
     setRefused("")
     setBusy("importing")
+    setSent(0)
+    setSendTotal(0)
     try {
-      const done = await importFile(target, file, file.name, {
-        format,
-        mode: replace ? "replace" : "insert",
-        skipBadRows: skipBad,
-        dryRun: false,
-      })
+      const done = await importFile(
+        target,
+        file,
+        file.name,
+        {
+          format,
+          mode: replace ? "replace" : "insert",
+          skipBadRows: skipBad,
+          dryRun: false,
+        },
+        (loaded, total) => {
+          setSent(loaded)
+          setSendTotal(total)
+        },
+      )
       setReport(done)
       onImported()
     } catch (err) {
@@ -414,16 +417,23 @@ export function ImportDialog({
       size="lg"
       title={`Import into ${target.collection}`}
       description={`Add the documents of a file to ${target.collection}`}
+      progress={
+        busy === "importing" && {
+          label: sendTotal > 0 && sent >= sendTotal ? "Writing documents…" : "Uploading documents…",
+          detail:
+            sendTotal > 0 && sent < sendTotal
+              ? `${bytes(sent)} of ${bytes(sendTotal)} sent`
+              : "Waiting for the database to finish the import",
+          completed: sendTotal > 0 && sent < sendTotal ? sent : undefined,
+          total: sendTotal > 0 && sent < sendTotal ? sendTotal : undefined,
+          showCount: false,
+        }
+      }
       footer={
         report ? (
           <Button onClick={() => close(false)}>Done</Button>
         ) : (
           <>
-            {busy === "importing" && (
-              <p className="mr-auto text-hint text-muted-foreground">
-                The request stays open until the last document is in.
-              </p>
-            )}
             <Button variant="outline" disabled={busy !== null} onClick={() => close(false)}>
               Cancel
             </Button>

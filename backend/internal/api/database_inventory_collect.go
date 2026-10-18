@@ -121,6 +121,12 @@ func (s *Server) collectContainers(ctx context.Context, detail bool) ([]dbx.Cont
 	facts := make([]dbx.ContainerFacts, 0, len(list))
 	inspected := 0
 	for _, c := range list {
+		if c.Labels[upgradeRoleLabel] != "" {
+			// A major-version upgrade's own copy of a server, there for the
+			// minutes of the upgrade: connecting it would leave a connection
+			// to a container that is about to go.
+			continue
+		}
 		f := dbx.ContainerFacts{
 			ID: c.ID, Name: c.Name, Image: s.containerImage(ctx, c), State: c.State, Status: c.Status,
 			Health: c.Health, Labels: c.Labels, Ports: publishedPorts(c.Ports), Command: c.Command,

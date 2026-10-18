@@ -94,11 +94,10 @@ export function JobCard({
         </>
       )}
       <span className={cn(job.targetKind === "local" && "font-mono")}>{targetLabel(job)}</span>
+      {job.encrypt && " · encrypted"}
     </>
   )
-  const next = (
-    <span className={cn(job.overdue && "font-medium text-warning")}>{nextLabel(job)}</span>
-  )
+  const next = <span>{nextLabel(job)}</span>
   const stored = (
     <span className="numeric">
       {job.stored.runs > 0
@@ -240,7 +239,6 @@ export function RunStrip({ runs }: { runs: BackupRun[] | undefined }) {
 export function nextLabel(job: BackupJob): string {
   if (!job.schedule) return "runs by hand"
   if (!job.enabled) return `paused · ${scheduleLabel(job.schedule).toLowerCase()}`
-  if (job.overdue) return `overdue · next ${job.nextRun ? relativeTime(job.nextRun) : "unknown"}`
   const next = job.nextRun ? `next ${relativeTime(job.nextRun)}` : "not scheduled"
   return `${next} · ${scheduleLabel(job.schedule).toLowerCase()}`
 }

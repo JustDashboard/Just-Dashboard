@@ -1,4 +1,6 @@
-import { del, get, patch, post, postForm, put } from "@/lib/api"
+import { del, get, patch, post, put } from "@/lib/api"
+import { uploadForm } from "@/components/database/data/upload"
+import { recordedServers } from "@/components/database/mongo/performance/samples"
 import type {
   MongoAggregateResult,
   MongoClassification,
@@ -328,6 +330,19 @@ export function mongoServer(id: number, signal?: AbortSignal) {
   )
 }
 
+/** The recorder's last hour of this server's counters, oldest first: what the charts open on. */
+export function mongoRecorded(id: number, signal?: AbortSignal) {
+  return get<unknown>(`${at(id)}/stats/history`, { hours: 1 }, signal).then((answer) =>
+    recordedServers(
+      shaped<{ samples: { at: number; stats: unknown }[] }>(
+        answer,
+        "samples",
+        "the recorded counters",
+      ).samples ?? [],
+    ),
+  )
+}
+
 export function mongoOperations(id: number, all: boolean, signal?: AbortSignal) {
   return get<unknown>(`${at(id)}/mongo/ops`, all ? { all: 1 } : undefined, signal).then(
     (answer) =>
@@ -411,6 +426,7 @@ export function importFile(
   file: Blob,
   name: string,
   options: MongoImportOptions,
+  onProgress?: (sent: number, total: number) => void,
 ) {
   const form = new FormData()
   form.append(
@@ -418,5 +434,5 @@ export function importFile(
     JSON.stringify({ schema: target.database || undefined, table: target.collection, ...options }),
   )
   form.append("file", file, name)
-  return postForm<MongoImportReport>(`${at(target.id)}/import/upload`, form)
+  return uploadForm<MongoImportReport>(`${at(target.id)}/import/upload`, form, { onProgress })
 }

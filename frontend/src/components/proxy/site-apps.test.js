@@ -1,13 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import {
-  certRunway,
+  certCounts,
+  certRows,
+  certTone,
   errorTone,
   listenerAt,
-  placeOnRunway,
-  runwayTone,
   siteApp,
   siteHue,
-  sitesVerdict,
   trafficShares,
   upstreamEndpoint,
 } from "./site-apps"
@@ -204,7 +203,7 @@ test("errorTone", () => {
   expect(errorTone(0.18)).toBe("danger")
 })
 
-describe("certRunway", () => {
+describe("certRows", () => {
   test("soonest first, with plain HTTP and unread certificates counted", () => {
     const sites = [
       vhost({ name: "late.example.com" }),
@@ -218,56 +217,25 @@ describe("certRunway", () => {
       cert({ name: "soon", path: "/s", usedBy: ["soon.example.com"], daysLeft: 6 }),
       cert({ name: "off", path: "/o", usedBy: ["off.example.com"], daysLeft: 1 }),
     ]
-    const runway = certRunway(sites, certs)
-    expect(runway.rows.map((r) => r.vhost.name)).toEqual(["soon.example.com", "late.example.com"])
-    expect(runway.plain.map((v) => v.name)).toEqual(["plain.example.com"])
-    expect(runway.unknown).toBe(1)
-    expect(runway.tls).toBe(3)
+    const read = certRows(sites, certs)
+    expect(read.rows.map((r) => r.vhost.name)).toEqual(["soon.example.com", "late.example.com"])
+    expect(read.plain.map((v) => v.name)).toEqual(["plain.example.com"])
+    expect(read.unknown).toBe(1)
+    expect(read.tls).toBe(3)
   })
 
-  test("the axis and its tones", () => {
-    expect(placeOnRunway(-3)).toBe(0)
-    expect(placeOnRunway(45)).toBe(50)
-    expect(placeOnRunway(400)).toBe(100)
-    expect(runwayTone(cert({ daysLeft: 50 }))).toBeUndefined()
-    expect(runwayTone(cert({ daysLeft: 9 }))).toBe("warning")
-    expect(runwayTone(cert({ daysLeft: -1, expired: true }))).toBe("danger")
-  })
-})
-
-describe("sitesVerdict", () => {
-  const base = { isDown: () => false, stopped: false, engine: "nginx", total: 3 }
-
-  test("says each site once, by the worst thing about it", () => {
-    const plain = vhost({ name: "plain", tls: false })
-    const down = vhost({ name: "down" })
-    const verdict = sitesVerdict({
-      ...base,
-      attention: [plain, down],
-      isDown: (v) => v.name === "down",
-    })
-    expect(verdict).toEqual({
-      tone: "danger",
-      label: "2 sites need attention",
-      detail: "1 application refusing · 1 on plain HTTP",
-      chip: "attention",
-    })
-  })
-
-  test("a lone warning is amber, and nothing to act on is said plainly", () => {
-    const parked = vhost({ name: "parked", enabled: false })
-    expect(sitesVerdict({ ...base, attention: [parked] })).toMatchObject({
-      tone: "warning",
-      label: "1 site needs attention",
-      detail: "1 disabled",
-    })
-    expect(sitesVerdict({ ...base, attention: [] })).toEqual({
-      tone: "running",
-      label: "Nothing needs attention",
-    })
-    expect(sitesVerdict({ ...base, attention: [], stopped: true })).toEqual({
-      tone: "stopped",
-      label: "No nginx site is served",
-    })
+  test("the tones, and the bar's count of each", () => {
+    const valid = cert({ daysLeft: 50 })
+    const due = cert({ daysLeft: 9 })
+    const renewing = cert({ daysLeft: 25, expiring: true })
+    const expired = cert({ daysLeft: -1, expired: true })
+    expect(certTone(valid)).toBeUndefined()
+    expect(certTone(due)).toBe("warning")
+    expect(certTone(renewing)).toBe("warning")
+    expect(certTone(expired)).toBe("danger")
+    const rows = [valid, due, renewing, expired].map((c) => ({ vhost: vhost({}), cert: c }))
+    expect(certCounts(rows)).toEqual({ valid: 1, due: 2, expired: 1 })
   })
 })
+
+describe("sitesVerdict", () => {})

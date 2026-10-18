@@ -42,6 +42,7 @@ import {
   ShieldOff,
   SignIn,
   Terminal,
+  TerminalWindow,
   Topology,
   UserSettings,
   Users,
@@ -213,6 +214,12 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
       { title: "Terminal", href: "/terminal", icon: Terminal, capability: "terminal" },
       { title: "Files", href: "/files", icon: FolderOpen },
       { title: "Git", href: "/git", icon: GitHubMark },
+      {
+        title: "Remote Desktop",
+        href: "/remote-desktop",
+        icon: TerminalWindow,
+        capability: "system.admin",
+      },
     ],
   },
   {

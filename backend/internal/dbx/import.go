@@ -1731,6 +1731,16 @@ func (r *importRun) oneByOne(rows []pendingRow) error {
 		}
 		wasInsert, err := r.write(row)
 		err = r.plan.rowError(err, row.args)
+		if err != nil && r.plan.d.Driver() == DriverOracle {
+			// A statement Oracle has refused every time it ran is sent again
+			// by go-ora in a form Oracle 23 takes for a protocol violation,
+			// and at the sixth the server ends the session (ORA-03138). One
+			// prepared afresh is sent the ordinary way.
+			r.close()
+			if perr := r.prepare(); perr != nil {
+				return perr
+			}
+		}
 		if r.strategy.savepoints {
 			undo := "RELEASE SAVEPOINT jd_import_row"
 			if err != nil {

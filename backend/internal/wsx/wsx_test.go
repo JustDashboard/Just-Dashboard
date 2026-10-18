@@ -1,8 +1,12 @@
 package wsx
 
 import (
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/gorilla/websocket"
 )
 
 func TestOriginMustMatchSchemeHostAndEffectivePort(t *testing.T) {
@@ -62,5 +66,33 @@ func TestOriginlessNonBrowserClientIsAllowed(t *testing.T) {
 	r := httptest.NewRequest("GET", "http://dashboard.example/ws", nil)
 	if !u.checkOrigin(r) {
 		t.Fatal("originless API client was rejected")
+	}
+}
+
+func TestUpgradeProtocolNamesTheProtocolOnlyWhenOffered(t *testing.T) {
+	u := NewUpgrader(nil, false)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if conn, err := u.UpgradeProtocol(w, r, "guacamole"); err == nil {
+			conn.Close()
+		}
+	}))
+	defer server.Close()
+	url := "ws" + strings.TrimPrefix(server.URL, "http")
+	for _, offered := range [][]string{{"guacamole"}, {"chat", "guacamole"}, nil, {"chat"}} {
+		dialer := websocket.Dialer{Subprotocols: offered}
+		conn, res, err := dialer.Dial(url, nil)
+		if err != nil {
+			t.Fatalf("offered %v: %v", offered, err)
+		}
+		conn.Close()
+		want := ""
+		for _, p := range offered {
+			if p == "guacamole" {
+				want = "guacamole"
+			}
+		}
+		if got := res.Header.Get("Sec-Websocket-Protocol"); got != want {
+			t.Fatalf("offered %v, answered %q, want %q", offered, got, want)
+		}
 	}
 }

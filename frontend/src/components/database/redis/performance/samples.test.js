@@ -6,6 +6,7 @@ import {
   micros,
   perSecond,
   rateBetween,
+  recordedSamples,
   seriesOf,
   statRows,
 } from "./samples"
@@ -176,5 +177,20 @@ describe("an axis for a count of things", () => {
     expect(countScale(37)).toEqual({ domain: [0, 40], ticks: [0, 10, 20, 30, 40] })
     expect(countScale(950)).toEqual({ domain: [0, 1000], ticks: [0, 500, 1000] })
     for (const tick of countScale(2311).ticks) expect(Number.isInteger(tick)).toBe(true)
+  })
+})
+
+describe("the recorder's snapshots", () => {
+  test("are samples on the clock INFO answered on, without the reads that failed", () => {
+    const samples = recordedSamples([
+      { at: 1_000, stats: { server: stats(990, { total_commands_processed: 10 }) } },
+      { at: 31_000, stats: { error: "connection refused" } },
+      { at: 61_000, stats: { server: { counters: { total_commands_processed: 70 } } } },
+    ])
+    expect(samples).toEqual([
+      { at: 990, counters: { total_commands_processed: 10 } },
+      { at: 61_000, counters: { total_commands_processed: 70 } },
+    ])
+    expect(statRows(samples)[1].ops).toBeCloseTo(60 / 60.01, 3)
   })
 })

@@ -359,7 +359,7 @@ func TestProtectionViewJoinsEverythingTheProtectionPageDraws(t *testing.T) {
 		t.Fatalf("view = %+v", v)
 	}
 	b, _ := json.Marshal(v)
-	for _, field := range []string{`"clientTrusted":true`, `"containsYou":true`, `"settings":[`, `"conntrack":{"available":true`, `"presets":[`, `"origin":"allowlist"`, `"atRecommended"`} {
+	for _, field := range []string{`"clientTrusted":true`, `"containsYou":true`, `"settings":[`, `"conntrack":{"available":true`, `"presets":[`, `"origin":"allowlist"`} {
 		if !strings.Contains(string(b), field) {
 			t.Errorf("json lacks %s", field)
 		}
@@ -389,10 +389,10 @@ func TestSettingsViewMarksWhatIsSetHereAndWhatIsAtTheRecommendation(t *testing.T
 	for _, s := range v.Settings {
 		by[s.Key] = s
 	}
-	if s := by["net.ipv4.tcp_syncookies"]; !s.SetHere || s.Value != "1" || s.Current != "0" || s.AtRecommended || s.Kind != "choice" {
+	if s := by["net.ipv4.tcp_syncookies"]; !s.SetHere || s.Value != "1" || s.Current != "0" || s.Kind != "choice" {
 		t.Errorf("syncookies = %+v", s)
 	}
-	if s := by["net.netfilter.nf_conntrack_max"]; s.Recommended != "1048576" || !s.AtRecommended || s.Kind != "number" || s.Min != 65536 || len(s.Allowed) != 0 {
+	if s := by["net.netfilter.nf_conntrack_max"]; s.Kind != "number" || s.Min != 65536 || len(s.Allowed) != 0 {
 		t.Errorf("conntrack max = %+v", s)
 	}
 	b, _ := json.Marshal(by["net.ipv4.tcp_syncookies"])

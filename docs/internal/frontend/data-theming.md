@@ -1,5 +1,27 @@
 # Frontend data flow and theming
 
+A dialog's action in flight uses `components/operation-progress.tsx` for a named working bar and
+elapsed time, and only a dialog does: `Modal` takes the reading as its `progress` prop and draws it
+into its footer, so no page, workbench or job console carries one. The bar is indeterminate unless a
+caller reports a measured count. It does not estimate remaining time, invent a server stage or imply
+a durable background operation. `ConfirmDialog` shows the reading while awaiting the existing action;
+`workingLabel` names that action and the action's optional second argument reports detail or
+processed-item counts. Failure clears the working state and leaves the confirmation available for a
+deliberate retry. Its existing dismissal and typed confirmation rules still apply.
+
+File deletion counts processed top-level items, including refused ones; the count is not byte
+progress inside a directory. Git clone and initialisation show the reading in their own dialog. SQL
+and MongoDB imports use browser upload readings followed by an indeterminate database-processing
+reading; 100% uploaded does not claim the import has finished. MongoDB imports share the multipart
+upload helper and its mutation headers and error handling. Page operations — Files copy, move,
+duplicate and extraction, Git workspace actions, exports, backup runs, diagnostics, blocklist
+refreshes, the proxy request tester and job consoles — keep their own feedback (pending controls,
+toasts, transcripts) and draw no working bar.
+
+The [operation progress audit](../../audits/2026-10-14-operation-progress/README.md) records the
+original placements; [dialog progress](../../audits/2026-10-16-dialog-progress/) has the current
+footer recordings.
+
 Network pages retain useful readings when a poll fails and mark them with
 `components/network/read-warning.tsx`; a failed initial read stays an error or loading state.
 The workload traffic, bandwidth link inventory, eBPF and Firewall warnings include the last successful
@@ -190,6 +212,11 @@ are dated evidence, not proof of current attachment ownership.
   longer than 90 seconds break chart lines and rates; missing snapshots are ignored. Historical
   working-session counts are the recorded active count minus the recorded waiting count, while live
   session filters use the current session list. SQLite has no activity chart or recording poll.
+  Performance's Statement history (`components/database/ops/performance-history.tsx`) reads
+  `GET /databases/{id}/statements/history` every minute over the same per-connection range, and an
+  open statement's `/statements/history/{statement}` on the same cadence; both are the backend's
+  store, which the recorder writes every five minutes. A point no reading falls in is a gap in a
+  statement's charts, and a reset is a mark on their time axis.
 - `useSocket` — reconnect with backoff (these sockets ride a tunnel that drops routinely), handlers in a
   ref so a fresh closure does not rebuild the socket. The delay doubles from 1 s to a 15 s ceiling with
   half of each step random (`retryDelay`), and resets only after a connection has stayed open for 10 s:
@@ -345,9 +372,14 @@ are dated evidence, not proof of current attachment ownership.
   problem: **the API goes away in the middle of the thing it is watching**. A failed poll during a run
   renders as "restarting", never an error, and the cadence is set from the fetch rather than an effect so a
   failure does not drop back to the five-minute interval. `components/update/` is the sidebar-footer notice
-  (which renders *nothing* when there is nothing to say), the release-notes sheet, and the panel on
-  `/dashboard` — that page is the dashboard's own version and nothing else, because the server's packages
-  and the tool you look at it through are updated by completely different machinery.
+  (which renders *nothing* when there is nothing to say), the dialog that installs an update, and the
+  panel on `/dashboard` — that page is the dashboard's own version and nothing else, because the server's
+  packages and the tool you look at it through are updated by completely different machinery. The
+  notice's links all go to that page, which is where the release notes are read; there is no second
+  rendering of them in a sheet. Installing goes through `useUpdateDialog`, not the shared
+  `ConfirmDialog`: that one is for acts that are awkward to undo and its command is always destructive
+  red, where an update is something taken, so its command is the brand face. It is a yes or a no and
+  nothing else to read — the notes are on the page. Both the notice and the page hold one.
 - `hooks/use-self-config.tsx` is the same shape for the dashboard's own settings, with one problem the
   update flow does not have: a change to the port or the address means the dashboard **does not come back
   here**. Nothing on the client can follow it, so the run record carries the new endpoint and
@@ -392,3 +424,54 @@ Saved connection investigations share the `netdiag` lifecycle and exact-source c
 `kind: "investigation"` record retains its typed request/report; `components/network/path-report.tsx`
 is used by both quick and saved readings. Report-completed-with-unknowns is a dated evidence outcome,
 not a connected/live state. The shared naming dialog snapshots its discriminated request kind.
+
+## Recovering an ended session
+
+`lib/api.ts` owns `fetchResponse`, which returns successful binary/streaming bodies untouched and
+reads a refused response once through `responseError`. XHR file uploads, database imports and dump
+uploads use the same synchronous `errorFromResponse` parser without changing upload progress.
+SQL table/query exports, MongoDB exports,
+image editing, PDF previews and the diagram keepalive save use that same path; cancellation signals,
+response headers and export completion/truncation checks remain with each reader. Image saves
+also fence asynchronous canvas encoding and upload completion to their mounted editor and working-state
+generation. Unmounting or clearing account-owned state aborts an in-flight upload; a late encoder never
+starts an old-canvas upload, and late responses cannot announce success or call a departed editor's
+callbacks. Image revision conflicts use the inline warning without a second error toast, keeping
+Save as and reload controls reachable. `files-ui.spec.ts` holds encoders and upload responses to cover both boundaries.
+
+All shared HTTP response readers emit `jd:authentication-lost` for an ordinary feature request's
+recognized authentication failure. Authentication endpoints are excluded: an incorrect password or
+code is a form error. The auth provider coalesces recovery, rechecks `/auth/session`, and sends a
+confirmed ended session to `/login?reason=session` with a visible notice that survives a reload.
+An unavailable recheck retains the current identity for retry. Request generations prevent a stale
+session probe or recheck from replacing a newer sign-in. Sign-out requests are coalesced, clear working
+drafts immediately, and finish their cookie expiry before a new sign-in is allowed; pending sign-out
+never starts expiry recovery. Reauthentication by a different account clears the prior account's
+working drafts; the same account retains values held in the shared session/memory stores. The
+mounted dashboard workspace is keyed by authenticated account ID. A recovery probe that discovers
+another usable account remounts its providers and pages at the current route, removing the prior
+account's local editors, canvases and active work as well as its shared drafts. Raw proxy validation
+and save callbacks also check their retained-draft generation before sending, fencing the synchronous
+cleanup interval before React remounts; a cleared owner cannot start another validation or save
+from its old buffer. Cleanup does not retract an already-sent authorized request or prove its
+publication outcome.
+A same-account recovery
+keeps the mounted workspace and local buffers. `auth-recovery.spec.ts` exercises actual raw-config
+PUT refusals followed by both kinds of session answer, including refusal to reuse the old buffer.
+Local
+component drafts are not covered by this retention and unmount on the sign-in redirect. A nonsensitive
+account ID retained in sessionStorage preserves owner isolation after an expiry/reload. If Web Storage
+is unavailable, the in-memory owner covers the current document. A sign-in with unknown ownership
+clears shared working drafts conservatively. `api-auth-recovery.test.js` and `auth-recovery.spec.ts` cover this contract.
+
+API-key creation uses the same reset path for Done, dismissal and reopening, so one-time secrets do
+not become the next key's form. Session views use actual `authMethod` provenance rather than treating
+an access-elevation bit as proof of a code; legacy provenance is unknown.
+
+The redesigned account identity, authenticator coverage band, user cards and account filters use the
+current `require2fa` policy. An enabled account without an authenticator is password-only under the
+optional policy and requires enrollment under the required policy; disabled accounts are excluded
+from both coverage counts and those filters. Reset-two-factor guidance follows the same distinction.
+The Profile picture labels required enrollment, and the Security sign-in picture draws a direct
+password-to-server path only when two-factor is optional. Session pictures continue to describe each
+session's recorded authentication method, independently of the current policy.

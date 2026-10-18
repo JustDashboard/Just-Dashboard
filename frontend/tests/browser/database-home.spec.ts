@@ -1,9 +1,6 @@
 import { expect as baseExpect, test, type Page } from "@playwright/test"
 import {
-  APP,
-  CACHE,
   CONNECTIONS,
-  NOTES,
   SHOP,
   hold,
   mockDatabases,
@@ -445,7 +442,12 @@ type Sent = { request: string; body: unknown }
  */
 async function mockHome(
   page: Page,
-  options: DatabaseMock & { answers?: Record<string, Answer>; capabilities?: string[] } = {},
+  options: DatabaseMock & {
+    answers?: Record<string, Answer>
+    capabilities?: string[]
+    /** How long the recorder keeps its history, in hours; a week unless given. */
+    retentionHours?: number
+  } = {},
 ) {
   const mock = await mockDatabases(page, options)
   const table = { ...ANSWERS, ...options.answers }
@@ -502,7 +504,9 @@ async function mockHome(
         if (isReply(value)) return route.fulfill({ status: value.status, json: value.body })
         samples.push({ at: Date.parse(NOW) - 60_000 + index * 5_000, stats: value, gap: false })
       }
-      return route.fulfill({ json: { samples, everySeconds: 30, retentionHours: 168 } })
+      return route.fulfill({
+        json: { samples, everySeconds: 30, retentionHours: options.retentionHours ?? 168 },
+      })
     }
     if (!Object.hasOwn(table, key)) return route.fallback()
     const call = calls.get(key) ?? 0
@@ -530,6 +534,8 @@ async function holdTime(page: Page) {
 const tick = (page: Page, ms = 30_000) => page.clock.runFor(ms)
 
 const block = (page: Page, name: string) => page.getByRole("region", { name, exact: true })
+const chart = (page: Page, name: string) =>
+  block(page, "Activity").getByRole("group", { name, exact: true })
 
 const names = (scope: ReturnType<typeof block>) =>
   scope
@@ -627,7 +633,7 @@ test("a SQL database's home keeps its identity and actions without metric cards"
   expect(home.asked).not.toContain("GET /databases/fleet")
 })
 
-test("the chart opens on saved activity and keeps its range and view after reload", async ({
+test("every view of saved activity is a chart of its own, and the range is kept after reload", async ({
   page,
 }) => {
   await holdTime(page)
@@ -637,36 +643,89 @@ test("the chart opens on saved activity and keeps its range and view after reloa
   const activity = block(page, "Activity")
   await expect(activity).toContainText("kept for 7 days")
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-  // The views are the strip every switch between views of a page wears.
-  const views = activity.getByRole("tablist", { name: "What the chart shows" })
-  await expect(views.getByRole("tab")).toHaveText(["Sessions", "Throughput", "Rows", "Cache"])
-  await expect(views.getByRole("tab", { name: "Sessions" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  )
+  // Sessions, throughput, rows and the cache are read at once, not one behind a strip of tabs.
+  await expect(activity.getByRole("tablist")).toHaveCount(0)
+  for (const name of ["Sessions", "Throughput", "Rows", "Cache"]) {
+    await expect(chart(page, name)).toBeVisible()
+  }
 
   await expect(activity).toContainText(/Recorded activity over/)
-  await expect(activity).toContainText("Open")
-  await views.getByRole("tab", { name: "Throughput" }).click()
-  await expect(activity).toContainText("Transactions")
-  await expect(activity).toContainText("10/s")
-  await expect(activity.locator(".recharts-area-curve").first()).toHaveAttribute("d", /^M/)
-  await activity.getByRole("combobox", { name: "Activity history range" }).click()
-  await page.getByRole("option", { name: "24 hours", exact: true }).click()
-  await expect(activity.getByRole("combobox", { name: "Activity history range" })).toHaveText(
-    "24 hours",
+  // Each chart is headed by its newest reading, in the hue of its line.
+  await expect(chart(page, "Sessions")).toContainText("of 100")
+  await expect(chart(page, "Throughput")).toContainText("Transactions")
+  await expect(chart(page, "Throughput")).toContainText("10/s")
+  await expect(chart(page, "Throughput").locator(".recharts-area-curve").first()).toHaveAttribute(
+    "d",
+    /^M/,
   )
-
-  // The view is the reader's arrangement of this database's home: it is there on return.
-  await tick(page, 1_000)
-  await page.reload()
-  await expect(block(page, "Activity").getByRole("tab", { name: "Throughput" })).toHaveAttribute(
-    "aria-selected",
+  const range = activity.getByRole("radiogroup", { name: "Activity history range" })
+  await expect(range.getByRole("radio")).toHaveText(["1h", "6h", "24h", "7d"])
+  await range.getByRole("radio", { name: "24 hours" }).click()
+  await expect(range.getByRole("radio", { name: "24 hours" })).toHaveAttribute(
+    "aria-checked",
     "true",
   )
+  // Pressing the range that is on keeps it on.
+  await range.getByRole("radio", { name: "24 hours" }).click()
+  await expect(range.getByRole("radio", { name: "24 hours" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  )
+
+  // The range is the reader's arrangement of this database's home: it is there on return.
+  await tick(page, 1_000)
+  await page.reload()
   await expect(
-    block(page, "Activity").getByRole("combobox", { name: "Activity history range" }),
-  ).toHaveText("24 hours")
+    block(page, "Activity")
+      .getByRole("radiogroup", { name: "Activity history range" })
+      .getByRole("radio", { name: "24 hours" }),
+  ).toHaveAttribute("aria-checked", "true")
+})
+
+test("a longer retention offers the longer ranges and says how long activity is kept", async ({
+  page,
+}) => {
+  await holdTime(page)
+  await mockHome(page, { retentionHours: 2160 })
+  await visit(page, "/databases/1")
+
+  const activity = block(page, "Activity")
+  await expect(activity).toContainText("kept for 90 days")
+  const range = activity.getByRole("radiogroup", { name: "Activity history range" })
+  await expect(range.getByRole("radio")).toHaveText(["1h", "6h", "24h", "7d", "14d", "30d", "90d"])
+  const asked = page.waitForRequest((request) => request.url().includes("stats/history?hours=2160"))
+  await range.getByRole("radio", { name: "90 days" }).click()
+  await asked
+  await expect(range.getByRole("radio", { name: "90 days" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  )
+})
+
+test("a saved long range falls back to the longest one still kept after retention is shortened", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("jd.view.state.entry.databases.1.history.hours", "2160"),
+  )
+  await holdTime(page)
+  await mockHome(page)
+  const longer = page.waitForRequest((request) =>
+    request.url().includes("stats/history?hours=2160"),
+  )
+  const fallback = page.waitForRequest((request) =>
+    request.url().includes("stats/history?hours=168"),
+  )
+  await visit(page, "/databases/1")
+  await longer
+  await fallback
+
+  const activity = block(page, "Activity")
+  const range = activity.getByRole("radiogroup", { name: "Activity history range" })
+  await expect(range.getByRole("radio")).toHaveText(["1h", "6h", "24h", "7d"])
+  await expect(range.getByRole("radio", { name: "7 days" })).toHaveAttribute("aria-checked", "true")
+  await expect(activity).toContainText("kept for 7 days")
+  await expect(chart(page, "Sessions")).toBeVisible()
 })
 
 test("a chart of a few sessions counts them in ones", async ({ page }) => {
@@ -685,7 +744,7 @@ test("a chart of a few sessions counts them in ones", async ({ page }) => {
   // A scale fitted to three put ticks at 2.25 and 1.5 and printed "3, 2, 2, 1, 0".
   await expect
     .poll(() =>
-      block(page, "Activity")
+      chart(page, "Sessions")
         .locator(".recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value")
         .allTextContents(),
     )
@@ -706,50 +765,9 @@ test("a server that lists no session to the account says so, and charts none", a
   })
   await visit(page, "/databases/1")
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-  await expect(block(page, "Activity").getByRole("tab")).toHaveText(["Throughput", "Rows", "Cache"])
-})
-
-test("what needs attention leads to the page that acts on it", async ({ page }) => {
-  await mockHome(page)
-  await visit(page, "/databases/1")
-
-  const attention = block(page, "Needs attention")
-  await expect(attention.getByRole("link", { name: "Advisor" })).toHaveAttribute(
-    "href",
-    "/databases/1/advisor",
-  )
-  // A finding that names a page of this database opens it.
-  await attention.getByRole("button", { name: /No dashboard backup recorded/ }).click()
-  await attention.getByRole("button", { name: "Open Backups" }).click()
-  await expect(page).toHaveURL(/\/databases\/1\/backups$/)
-
-  // One whose fix is a statement hands it to Query for review; nothing runs from here.
-  await page.goBack()
-  await block(page, "Needs attention")
-    .getByRole("button", { name: /1 foreign key with no index/ })
-    .click()
-  await expect(block(page, "Needs attention")).toContainText("orders(customer_id)")
-  await block(page, "Needs attention")
-    .getByRole("button", { name: "Review the fix in Query" })
-    .click()
-  await expect(page).toHaveURL(/\/databases\/1\/query\?/)
-  await expect.poll(() => new URL(page.url()).searchParams.get("sql")).toBe(ADVISOR.findings[1].sql)
-})
-
-test("an advisor link that leaves this database is not followed", async ({ page }) => {
-  await mockHome(page, {
-    answers: {
-      "GET 1/advisor": {
-        ...ADVISOR,
-        findings: [{ ...ADVISOR.findings[0], link: "/databases/4/settings" }],
-      },
-    },
-  })
-  await visit(page, "/databases/1")
-  const attention = block(page, "Needs attention")
-  await attention.getByRole("button", { name: /No dashboard backup/ }).click()
-  await expect(attention).toContainText("Take one now")
-  await expect(attention.getByRole("button", { name: /^Open / })).toHaveCount(0)
+  await expect(chart(page, "Throughput")).toBeVisible()
+  await expect(chart(page, "Cache")).toBeVisible()
+  await expect(chart(page, "Sessions")).toHaveCount(0)
 })
 
 test("the busiest statements are shapes on one line, and the largest tables are ways into Data", async ({
@@ -774,16 +792,29 @@ test("the busiest statements are shapes on one line, and the largest tables are 
     "/databases/1/performance?view=statements",
   )
 
-  const used = block(page, "Used by")
-  await expect(used.getByRole("link", { name: /shop-api/ })).toHaveAttribute("href", "/deploy/7")
-  await expect(used).toContainText("production · bound to it · connected now")
-  await expect(used).toContainText("8 sessions")
-  // The busiest consumer first; the database itself is not one of its users.
-  await expect(used.locator("[data-slot=choice-row]")).toHaveCount(2)
-  await expect(used.locator("[data-slot=choice-row]").first()).toContainText("shop-api")
-  // The machine itself is nowhere to go: it keeps its card and has no link.
-  await expect(used.getByRole("link")).toHaveCount(2)
-  await expect(used.locator("[data-slot=choice-row]").last().getByRole("link")).toHaveCount(0)
+  const used = block(page, "How it is used")
+  const readers = used.getByRole("list", { name: "Read by" })
+  await expect(readers.getByRole("link", { name: "Open shop-api" })).toHaveAttribute(
+    "href",
+    "/deploy/7",
+  )
+  await expect(readers).toContainText("linked by its deployment · 8 open sessions")
+  // The busiest reader first; the database itself is not one of its readers.
+  await expect(readers.getByRole("listitem")).toHaveCount(2)
+  await expect(readers.getByRole("listitem").first()).toContainText("shop-api")
+  // The machine itself is nowhere to go: it keeps its node and has no link.
+  await expect(readers.getByRole("link")).toHaveCount(1)
+  await expect(readers.getByRole("listitem").last()).toContainText("This server")
+  // What it holds, by schema, each a way into its tables; and where its copies go.
+  const holds = used.getByRole("list", { name: "Schemas" })
+  await expect(holds.getByRole("listitem")).toHaveCount(2)
+  await expect(holds.getByRole("listitem").first()).toContainText("analytics")
+  await expect(holds.getByRole("listitem").first()).toContainText("9.4 MB · 1 table")
+  await expect(holds.getByRole("link", { name: "Open public" })).toHaveAttribute(
+    "href",
+    "/databases/1/data?schema=public",
+  )
+  await expect(used.getByRole("list", { name: "Copied to" })).toContainText("2 dumps")
 
   const largest = block(page, "Largest tables")
   await expect(largest).toContainText("analytics.events")
@@ -791,6 +822,59 @@ test("the busiest statements are shapes on one line, and the largest tables are 
   // Two schemas can hold a table of one name: the row's name says which.
   await largest.getByRole("button", { name: "Open public.orders in Data" }).click()
   await expect.poll(() => where(page)).toBe("/databases/1/data?schema=public&table=orders")
+})
+
+test("the server's own log is followed live on its home, its failures counted and coloured", async ({
+  page,
+}) => {
+  await mockHome(page, {
+    logSources: {
+      sources: [
+        { id: "docker:shop-db", kind: "docker", label: "shop-db", rotated: false, primary: true },
+      ],
+    },
+  })
+  await page.routeWebSocket("**/api/v1/logs/stream**", (socket) => {
+    socket.send(JSON.stringify({ type: "meta", data: { label: "shop-db" }, ts: Date.now() }))
+    socket.send(
+      JSON.stringify({
+        type: "logs",
+        ts: Date.now(),
+        data: [
+          { text: "LOG:  checkpoint starting: time", level: "info", timestamp: NOW },
+          {
+            text: 'FATAL:  password authentication failed for user "reporting"',
+            level: "critical",
+            timestamp: NOW,
+          },
+          { text: "WARNING:  there is no transaction in progress", level: "warn", timestamp: NOW },
+        ],
+      }),
+    )
+  })
+  await visit(page, "/databases/1")
+
+  const log = block(page, "Server log")
+  await expect(log.getByRole("log", { name: "Server log" })).toContainText(
+    "password authentication failed",
+  )
+  await expect(log.getByRole("log").getByRole("listitem")).toHaveCount(3)
+  await expect(log).toContainText("1 error")
+  await expect(log).toContainText("1 warning")
+  // The dot is the truth about the socket the lines arrive on.
+  await expect(log).toContainText("Live")
+  await expect(log.getByRole("link", { name: "Logs" })).toHaveAttribute("href", "/databases/1/logs")
+})
+
+test("a server whose log is not on this machine says why, where the log would be", async ({
+  page,
+}) => {
+  await mockHome(page)
+  await visit(page, "/databases/1")
+  await expect(block(page, "Server log")).toContainText(
+    "This server runs on another machine, so its log is not here.",
+  )
+  await expect(block(page, "Server log").getByRole("log")).toHaveCount(0)
 })
 
 test("statement statistics that are off say how to turn them on, to the role that may", async ({
@@ -853,7 +937,7 @@ test("a block that could not be read says so, is tried again, and the rest stays
   await expect(largest).toContainText("statement timeout")
   await expect(largest).not.toContainText("No tables yet")
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-  await expect(block(page, "Used by")).toContainText("Could not read what uses it")
+  await expect(block(page, "How it is used")).toContainText("Could not read what uses it")
   // Every other block read what it asked for.
   await expect(block(page, "Busiest statements")).toContainText("SELECT * FROM orders")
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
@@ -942,74 +1026,6 @@ test("a snapshot the engine refuses is said in its words, and the home goes on",
   await expect(block(page, "Largest tables")).toContainText("analytics.events")
 })
 
-test("a key–value store has its own home and is asked nothing of a SQL server's", async ({
-  page,
-}) => {
-  await holdTime(page)
-  const home = await mockHome(page)
-  await visit(page, "/databases/4")
-
-  const identity = page.locator("[data-slot=host-identity]")
-  await expect(identity).toContainText("Redis 7.4.1")
-  await expect(identity.getByRole("link", { name: "Browse keys" })).toHaveAttribute(
-    "href",
-    "/databases/4/data",
-  )
-  await expect(identity.getByRole("link", { name: "Console" })).toHaveAttribute(
-    "href",
-    "/databases/4/query",
-  )
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-  await tick(page)
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-
-  // No advisor on the server: what needs attention is read off its own answers.
-  await expect(block(page, "Needs attention")).toContainText("No dashboard backup recorded")
-  // The commands that use the store are ranked; the ones that ask about it —
-  // this page's own among them — are counted apart and said to be.
-  const commands = block(page, "Busiest commands")
-  await expect
-    .poll(() => names(commands))
-    .toEqual([
-      "SET — 69% of the time. Open Performance",
-      "HSET — 31% of the time. Open Performance",
-    ])
-  await expect(commands).toContainText("75,120 commands on keys")
-  await expect(commands).toContainText("took another 33% of the server's time and are left out")
-
-  await expect(block(page, "Databases on this server").getByRole("link")).toHaveText([
-    /db 0/,
-    /db 3/,
-  ])
-  await expect(
-    block(page, "Databases on this server").getByRole("link", {
-      name: "Browse the keys of database 3",
-    }),
-  ).toHaveAttribute("href", "/databases/4/data?db=3")
-
-  const namespaces = block(page, "Largest namespaces")
-  await expect(namespaces).toContainText("hash · set")
-  // What the keys are by type, in the hue each type has wherever a key is drawn.
-  await expect(
-    namespaces.getByRole("img", { name: "Keys by type: String 1,500, Hash 400, Set 400" }),
-  ).toBeVisible()
-  await expect(namespaces.locator("[data-slot=key-types] li")).toHaveText([
-    "String1,500",
-    "Hash400",
-    "Set400",
-  ])
-  // The keyspace is walked once, when the page opens, and not on a timer —
-  // and before the first reading, so the walk is in no rate the page draws. Counted
-  // here, on the home: the key browser this leads to walks it for itself.
-  expect(home.calls.get("GET 4/keys/tree")).toBe(1)
-  expect(home.seen.indexOf("GET 4/keys/tree")).toBeLessThan(home.seen.indexOf("GET 4/stats"))
-  await namespaces.getByRole("button", { name: "Browse the keys under session:" }).click()
-  await expect.poll(() => where(page)).toBe("/databases/4/data?db=0&pattern=session%3A*")
-
-  const sql = /\/(advisor|statements|tablestats|overview|schemas|activity)$/
-  expect(home.seen.filter((request) => sql.test(request))).toEqual([])
-})
-
 test("a document database has its own home, and its profiler is switched on by an administrator", async ({
   page,
 }) => {
@@ -1046,37 +1062,6 @@ test("a document database has its own home, and its profiler is switched on by a
   )
 })
 
-test("a file-based database is its file: no sessions, no chart, no server to reach", async ({
-  page,
-}) => {
-  const home = await mockHome(page, {
-    summaries: {
-      7: {
-        file: { path: "/srv/notes/notes.db", exists: true, size: 319_488, modified: NOW },
-        power: {
-          via: "",
-          start: false,
-          stop: false,
-          restart: false,
-          reason: "A SQLite database is a file; there is no server to start or stop.",
-        },
-      },
-    },
-  })
-  await visit(page, "/databases/7")
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-
-  await expect(block(page, "The file")).toContainText("/srv/notes/notes.db")
-  await expect(block(page, "The file")).toContainText("3 tables · 1 index · 1 view")
-  await expect(block(page, "Needs attention")).toContainText("No priority issues found")
-  await expect(block(page, "Runs as")).toContainText("A SQLite database is a file")
-  await expect(page.getByRole("region", { name: "Activity" })).toHaveCount(0)
-  await expect(page.getByRole("region", { name: "Reachable from" })).toHaveCount(0)
-  await expect(page.getByRole("region", { name: "Databases on this server" })).toHaveCount(0)
-  await page.waitForLoadState("networkidle")
-  expect(home.seen.filter((request) => /\/(statements|access|schemas)$/.test(request))).toEqual([])
-})
-
 test("a stopped database keeps its home, is asked nothing, and Start brings it back", async ({
   page,
 }) => {
@@ -1110,8 +1095,11 @@ test("a stopped database keeps its home, is asked nothing, and Start brings it b
   await expect(page.getByRole("link", { name: "Open data" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Back up now" })).toHaveCount(0)
   await page.waitForLoadState("networkidle")
+  // Its log is read from Docker, not from the engine: the lines it wrote before it stopped.
   expect(
-    home.seen.filter((request) => !/\/(backups|access|stats\/history)$/.test(request)),
+    home.seen.filter(
+      (request) => !/\/(backups|access|stats\/history|logs\/sources)$/.test(request),
+    ),
   ).toEqual([])
 
   // What Docker lets the container use is read from Docker, not from the engine.
@@ -1790,32 +1778,6 @@ for (const [label, viewport] of [
   [" at a tablet's width", { width: 768, height: 1000 }],
   [" at a phone's width", { width: 390, height: 844 }],
 ] as const) {
-  test(`every engine's home keeps the design system's rules${label}`, async ({ page }) => {
-    test.setTimeout(90_000)
-    await page.setViewportSize(viewport)
-    await holdTime(page)
-    await mockHome(page, LABELLED)
-
-    for (const conn of [SHOP, CACHE, APP, NOTES]) {
-      await visit(page, `/databases/${conn.id}`)
-      await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-      await page.waitForLoadState("networkidle")
-      await tick(page)
-      await page.waitForLoadState("networkidle")
-      await keepsTheRules(page, `${conn.name}'s home`)
-      await identityHolds(page, `${conn.name}'s home`)
-    }
-
-    // With a finding open and the database's menu drawn over the page.
-    await visit(page, "/databases/1")
-    await block(page, "Needs attention")
-      .getByRole("button", { name: /1 foreign key/ })
-      .click()
-    await menu(page).click()
-    await expect(page.getByRole("menuitem", { name: "Stop protecting" })).toBeVisible()
-    await keepsTheRules(page, "the home with a finding and its menu open", true)
-  })
-
   test(`a home that could not read, and one that is stopped, keep the rules${label}`, async ({
     page,
   }) => {
@@ -1884,7 +1846,7 @@ for (const width of [390, 1280, 1720]) {
     await visit(page, "/databases/1")
     await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
     await expect(
-      block(page, "Activity").getByRole("combobox", { name: "Activity history range" }),
+      block(page, "Activity").getByRole("radiogroup", { name: "Activity history range" }),
     ).toBeVisible()
     await expect(block(page, "Largest tables")).toBeVisible()
     expect(

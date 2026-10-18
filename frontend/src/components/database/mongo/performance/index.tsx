@@ -2,7 +2,8 @@
 
 import { useConfirm } from "@/components/confirm-dialog"
 import { BlockedState, SectionError, SectionFrame } from "@/components/database/kit"
-import { mongoDatabases, mongoServer } from "@/components/database/mongo/api"
+import { joinRecorded } from "@/components/database/home/samples"
+import { mongoDatabases, mongoRecorded, mongoServer } from "@/components/database/mongo/api"
 import { OperationsView } from "@/components/database/mongo/performance/operations"
 import { OverviewView } from "@/components/database/mongo/performance/overview"
 import { ProfilerView } from "@/components/database/mongo/performance/profiler"
@@ -30,15 +31,15 @@ type View = "overview" | "operations" | "slow" | "replication"
  * What the server is doing: how busy it is, who is connected, what its cache
  * holds, and what has been slow.
  *
- * Five readings head the page — operations a second, connections against the
- * limit, the cache against its ceiling, how many documents a query examines
- * for each it returns, and how long a read takes — each with the shape it has
- * had since the page was opened. They come from the server's counters,
- * sampled every few seconds; a rate is the difference between two samples,
- * so the first line of a trend appears with the second sample and nothing
- * here is recorded history.
+ * The Overview charts operations, connections against the limit, the cache
+ * against its ceiling, the documents examined against those returned, how
+ * long an operation takes and the network, each headed by its newest reading.
+ * They come from the server's counters: the recorder's last hour of them,
+ * every thirty seconds, then the page's own samples every few; a rate is the
+ * difference between two, so the charts open drawn rather than filling over
+ * the first minutes.
  *
- * Under them the page reads four ways: the same samples as charts; the
+ * The page reads four ways: those charts; the
  * operations in progress, each of which can be stopped; the slow operations
  * the profiler kept; and, on a replica set, its members.
  *
@@ -60,7 +61,13 @@ export function MongoPerformance() {
     const next = addSample(samples, stats.data)
     if (next !== samples) setSamples(next)
   }
-  const rows = useMemo(() => statRows(samples), [samples])
+  // The recorder's hour is read again each minute, so the stretch between it
+  // and the oldest sample the page still holds stays filled.
+  const recorded = usePoll((signal) => mongoRecorded(id, signal), 60_000, [id])
+  const rows = useMemo(
+    () => statRows(joinRecorded(recorded.data ?? [], samples, (sample) => sample.timestamp)),
+    [recorded.data, samples],
+  )
 
   const replicaSet = newest?.topology === "replicaset"
   const views: { id: View; label: string }[] = [
@@ -156,6 +163,7 @@ export function MongoPerformance() {
             databases={databases}
             everyMs={EVERY_MS}
             silent={silent}
+            recorded={(recorded.data?.length ?? 0) > 0}
           />
         )}
       </div>

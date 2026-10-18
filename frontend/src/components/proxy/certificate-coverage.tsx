@@ -1,13 +1,11 @@
 "use client"
 
 import { useMemo } from "react"
-import type { CertificateCoverage, CertificateHygiene, CoveredName } from "@/lib/types"
-import { FindingList } from "@/components/finding-list"
+import type { CertificateCoverage, CoveredName } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { ErrorState, LoadingRows } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
-import { hygieneFindings } from "@/components/proxy/findings/certificates"
 import { Button } from "@/components/ui/button"
 import type { PollState } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
@@ -22,57 +20,6 @@ const STATE: Record<CoveredName["state"], { tone: DotTone; label: string }> = {
 
 /** Worst first: a name browsers refuse, then one nothing covers. */
 const ORDER: CoveredName["state"][] = ["wrong", "uncovered", "available", "unknown", "served"]
-
-/**
- * What the keys and the server blocks say about the certificates, as one
- * list. Each finding opens the certificate it is about; an uncovered name
- * offers the Issue dialog and a lineage pointing elsewhere offers Delete.
- */
-export function CertificateHygienePanel({
-  hygiene,
-  onIssue,
-  onDeleteLineage,
-}: {
-  hygiene: PollState<CertificateHygiene>
-  onIssue?: (names: string[]) => void
-  onDeleteLineage?: (name: string) => void
-}) {
-  const [, select] = useQuerySelection("cert")
-  const findings = useMemo(
-    () =>
-      hygieneFindings(hygiene.data, { issue: onIssue, deleteLineage: onDeleteLineage }).map(
-        (finding) => {
-          const path = new URL(finding.href, "http://certificate.invalid").searchParams.get("cert")
-          return finding.action || !path
-            ? finding
-            : { ...finding, action: { label: "Open certificate", onClick: () => select(path) } }
-        },
-      ),
-    [hygiene.data, onIssue, onDeleteLineage, select],
-  )
-  return (
-    <Panel plain>
-      <PanelHeader title="Hygiene" />
-      <PanelBody flush>
-        {hygiene.loading ? (
-          <LoadingRows rows={2} />
-        ) : hygiene.error ? (
-          <ErrorState error={hygiene.error} onRetry={hygiene.refresh} />
-        ) : hygiene.data ? (
-          <>
-            <FindingList
-              findings={findings}
-              emptyLabel="No priority certificate issues found in the completed checks"
-            />
-            {hygiene.data.configNote && (
-              <p className="pt-2 text-hint text-muted-foreground">{hygiene.data.configNote}</p>
-            )}
-          </>
-        ) : null}
-      </PanelBody>
-    </Panel>
-  )
-}
 
 /**
  * Every server name against the certificate that covers it, and the

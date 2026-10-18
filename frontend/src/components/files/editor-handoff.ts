@@ -1,9 +1,16 @@
 // Kept in memory for the one navigation from sheet to page. Sensitive file
 // contents never become a localStorage or sessionStorage preference.
-const drafts = new Map<string, { content: string; language?: string }>()
+import type { FileContent } from "@/lib/types"
 
-export function handoffDraft(path: string, content: string, language?: string) {
-  drafts.set(path, { content, language })
+const drafts = new Map<string, { content: string; language?: string; original?: FileContent }>()
+
+export function handoffDraft(
+  path: string,
+  content: string,
+  language?: string,
+  original?: FileContent,
+) {
+  drafts.set(path, { content, language, original })
 }
 
 export function takeDraft(path: string) {

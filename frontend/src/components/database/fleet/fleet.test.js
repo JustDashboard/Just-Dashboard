@@ -12,7 +12,6 @@ import {
   powerOffers,
   pushSample,
   reachWord,
-  shortEdge,
   sortFleet,
   sortRows,
   splitTopology,
@@ -20,6 +19,7 @@ import {
   storedBytes,
   topologyReadings,
   whereWord,
+  wiredOrder,
   worstStatus,
 } from "./fleet"
 
@@ -173,6 +173,32 @@ describe("the dump readings", () => {
     expect(readings.get(3)).toEqual({ newest: undefined, running: true })
     expect(backupReadings(undefined, undefined).size).toBe(0)
   })
+
+  test("a backup job's run newer than every dump is the last backup, and a dump since then wins", () => {
+    // The fleet's date counts the backup jobs' runs; the summary lists only the
+    // dump directory, and hears of a dump taken since the fleet was read first.
+    const fleet = {
+      connections: [
+        entry({ id: 1, lastBackup: "2026-09-25T03:00:00Z" }),
+        entry({ id: 2, lastBackup: "2026-09-25T03:00:00Z" }),
+        entry({ id: 3, lastBackup: "2026-09-25T03:00:00Z" }),
+      ],
+    }
+    const dump = (id, takenAt) => ({ id, name: "x", count: 1, totalSize: 9, newest: { takenAt } })
+    const readings = backupReadings(fleet, {
+      connections: [
+        dump(1, "2026-09-15T00:00:00Z"),
+        dump(2, "2026-09-25T11:30:00Z"),
+        { id: 3, name: "x", count: 0, totalSize: 0, newest: null },
+      ],
+    })
+    expect(readings.get(1)?.newest).toBe("2026-09-25T03:00:00Z")
+    expect(readings.get(2)?.newest).toBe("2026-09-25T11:30:00Z")
+    expect(readings.get(3)?.newest).toBe("2026-09-25T03:00:00Z")
+    // Read against the clock, a job that ran last night is not a week-old dump.
+    const concerns = fleetConcerns(fleet.connections[0], { backup: readings.get(1), now: NOW })
+    expect(kinds(concerns)).not.toContain("stale-backup")
+  })
 })
 
 describe("the order of the cards", () => {
@@ -266,6 +292,7 @@ describe("the words for where and how far", () => {
   test("reach is said in words", () => {
     expect(reachWord("local")).toBe("this server only")
     expect(reachWord("public")).toBe("the internet")
+    expect(reachWord("allowlist")).toBe("listed addresses")
   })
 })
 
@@ -413,6 +440,16 @@ describe("the map", () => {
     expect(fedBy.get("deploy:7").map((f) => f.from.name)).toEqual(["shop", "cache"])
   })
 
+  test("drawn, a reader stands across from the databases that feed it and the unread go last", () => {
+    const unread = { id: "db:0", kind: "database", name: "archive", product: "postgres", connId: 3 }
+    const { databases, consumers } = wiredOrder(
+      splitTopology({ ...topology, nodes: [unread, ...topology.nodes] }),
+    )
+    expect(databases.map((n) => n.id)).toEqual(["db:1", "db:2", "db:0"])
+    // shop feeds this server, shop and cache the deployment, cache the worker.
+    expect(consumers.map((n) => n.id)).toEqual(["host", "deploy:7", "container:worker"])
+  })
+
   test("narrowed to some databases, the others leave with their links and their readers", () => {
     const split = splitTopology(topology, (node) => node.connId === 2)
     expect(split.databases.map((n) => n.id)).toEqual(["db:2"])
@@ -447,8 +484,6 @@ describe("the map", () => {
   test("a link is described by how it is known", () => {
     expect(describeEdge(topology.edges[1])).toBe("named in its environment · 3 open sessions")
     expect(describeEdge(topology.edges[3])).toBe("same compose stack · shares a network")
-    expect(shortEdge(topology.edges[1])).toBe("3 open")
-    expect(shortEdge(topology.edges[0])).toBe("linked")
     expect(worstStatus(topology.edges)).toBe("broken")
     expect(worstStatus([])).toBe("observed")
   })

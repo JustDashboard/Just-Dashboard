@@ -277,23 +277,6 @@ test("a long history is drawn a page at a time and says when the window held mor
   await expect(changes.getByText("Only the newest 70 events of the day are listed")).toBeVisible()
 })
 
-test("the overview raises a database that began answering off the machine today", async ({
-  page,
-}) => {
-  await mockHost(page)
-  await page.goto("/proxy")
-  const finding = page.getByRole("button", {
-    name: /^Redis began answering on 203\.0\.113\.5 at 11:50/,
-  })
-  await expect(finding.locator(".bg-destructive")).toHaveCount(1)
-  await finding.click()
-  await expect(
-    page.getByText("6379/tcp redis-server on 203.0.113.5, first seen at 11:50"),
-  ).toBeVisible()
-  // The standing finding for the same database is still there beside it.
-  await expect(page.getByRole("button", { name: /^Redis answers on 203\.0\.113\.5/ })).toBeVisible()
-})
-
 test("an account that only reads sees the history too", async ({ page }) => {
   await mockHost(page)
   await page.route("**/api/v1/auth/session", (route) =>

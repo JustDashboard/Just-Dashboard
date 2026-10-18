@@ -251,39 +251,6 @@ test.describe("the control center", () => {
     await page.getByRole("radio", { name: "Where it runs" }).click()
   })
 
-  test("the server's databases are one line, with the verdict and the commands at its end", async ({
-    page,
-  }) => {
-    await mockFleet(page, {
-      dumps: { 4: null, 5: 200 },
-      fleet: { 2: { ok: false, state: "stopped" } },
-    })
-    await page.goto("/databases")
-    const identity = page.locator("[data-slot=host-identity]")
-
-    // The list that stood here is gone; nothing it said is.
-    await expect(page.getByRole("heading", { name: "Needs attention" })).toHaveCount(0)
-    await expect(identity).toContainText("5 databases")
-    // The file nobody's engine sizes is weighed by discovery, as on its card.
-    await expect(identity).toContainText("33.6 MB stored")
-    // A stopped server has no sessions to count, which is not zero of them.
-    await expect(identity).toContainText("13 sessions open")
-    await expect(identity.getByRole("link", { name: "read by 4" })).toHaveAttribute(
-      "href",
-      "/databases/map",
-    )
-    await expect(identity).toContainText("3 of 5 backed up in the last day")
-    await expect(identity.getByText("1 never backed up")).toHaveClass(/text-warning/)
-    await expect(identity).toContainText("1 database stopped")
-    // The largest database's engine leads the mark.
-    await expect(identity.locator("img").first()).toHaveAttribute("src", /postgresql/)
-    // The commands stand beside the verdict, and the page draws no row of its own for them.
-    await expect(identity.getByRole("link", { name: "Add a database" })).toBeVisible()
-    await expect(identity.getByRole("button", { name: "Scan this server again" })).toBeVisible()
-    await expect(page.locator("[data-slot=page-context]")).toHaveCount(0)
-    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-  })
-
   test("the band reads where the bytes are, who is connected and how old each dump is, each database in its card's hue", async ({
     page,
   }) => {
@@ -319,7 +286,10 @@ test.describe("the control center", () => {
     // Never dumped first, then the oldest; a row opens the database's dumps.
     const backups = band.getByRole("region", { name: "Backups" })
     await expect(backups).toContainText(/3\s*of 5 in the last day/)
-    expect(await names("Backup runway")).toEqual([
+    await expect(
+      backups.getByRole("img", { name: /^Databases by their newest backup: 3 today, .*1 never$/ }),
+    ).toBeVisible()
+    expect(await names("Databases by last backup")).toEqual([
       "Backups of cache",
       "Backups of app",
       "Backups of blog",
@@ -330,10 +300,11 @@ test.describe("the control center", () => {
     await expect(never).toHaveAttribute("href", "/databases/4/backups")
     await expect(never.getByText("never backed up")).toHaveClass(/text-warning/)
 
-    // One database, one hue: its span's key in the band is its card's edge.
+    // One database, one hue: its span's key in the band is its card's size bar,
+    // and the card's edge carries none.
     const hue = (el: Element) => getComputedStyle(el).backgroundColor
     const edge = async (name: string) =>
-      card(page, name).locator("[data-slot=fleet-hue]").evaluate(hue)
+      card(page, name).locator("[data-slot=fleet-size]").evaluate(hue)
     const key = (name: string) =>
       band
         .getByRole("list", { name: "Largest databases" })
@@ -342,9 +313,11 @@ test.describe("the control center", () => {
         .evaluate(hue)
     expect(await key("shop")).toBe(await edge("shop"))
     expect(await key("cache")).toBe(await edge("cache"))
+    await expect(page.locator("[data-slot=fleet-hue]")).toHaveCount(0)
     // Five databases are five hues.
-    const edges = await page
-      .locator("[data-slot=fleet-hue]")
+    const edges = await band
+      .getByRole("list", { name: "Largest databases" })
+      .locator("[data-slot=hue-key]")
       .evaluateAll((spans) => spans.map((span) => getComputedStyle(span).backgroundColor))
     expect(new Set(edges).size).toBe(5)
 
@@ -683,6 +656,53 @@ test.describe("the control center", () => {
     await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   })
 
+  test("draws what the databases feed at full size, ordered for the wires, and links the ones nothing reads", async ({
+    page,
+  }) => {
+    await mockFleet(page)
+    await page.goto("/databases")
+    const feed = page.locator("section").filter({
+      has: page.getByRole("heading", { name: "What they feed" }),
+    })
+    const picture = feed.locator("[data-slot=wiring]")
+    await expect(
+      picture.getByRole("list", { name: "Databases" }).getByRole("listitem"),
+    ).toHaveCount(4)
+    // Each reader across from the databases that feed it: the worker from
+    // shop and blog, the deployment from shop and cache, then cache's and
+    // app's own readers.
+    const readers = picture.getByRole("list", { name: "What reads them" }).getByRole("listitem")
+    await expect(readers).toHaveCount(4)
+    expect(
+      (await readers.allTextContents()).map((text) =>
+        ["worker", "storefront", "This server", "10.0.0.9"].find((name) => text.includes(name)),
+      ),
+    ).toEqual(["worker", "storefront", "This server", "10.0.0.9"])
+    await expect(readers.first()).toContainText("link broken")
+    // Nothing reads notes: it is a way to the database, not a name in a sentence.
+    await expect(feed.getByRole("link", { name: "notes", exact: true })).toHaveAttribute(
+      "href",
+      "/databases/7",
+    )
+  })
+
+  test("coming back to it draws the last reading at once while it asks again", async ({ page }) => {
+    const server = await mockFleet(page)
+    await page.goto("/databases")
+    await expect(card(page, "shop")).toBeVisible()
+    await page.getByRole("link", { name: "Map", exact: true }).click()
+    await expect(page.locator("[data-slot=wiring]")).toBeVisible()
+
+    const held = hold()
+    server.answer("GET /databases/fleet", async () => {
+      await held.until
+    })
+    await page.getByRole("link", { name: "Control center", exact: true }).click()
+    await expect(card(page, "shop")).toBeVisible()
+    await expect(page.getByRole("status", { name: "Loading databases" })).toHaveCount(0)
+    held.release()
+  })
+
   test("an empty server says so, offers the way to add one, and lists what was found under it", async ({
     page,
   }) => {
@@ -734,6 +754,17 @@ test.describe("found on this server", () => {
     )
     await expect(foundRow(page, "sales.duckdb")).toContainText("no driver for DuckDB")
     await expect(found.getByText("2 directories are outside the file roots")).toBeVisible()
+
+    // Servers stand in the order they can be connected: a press, a password,
+    // a start, and last what nothing here can open.
+    const rows = await found.locator("[data-slot=choice-row]").allTextContents()
+    const at = (name: string) => rows.findIndex((text) => text.includes(name))
+    expect(at("orders-db")).toBeLessThan(at("postgresql@17-main"))
+    expect(at("postgresql@17-main")).toBeLessThan(at("old-mysql"))
+    expect(at("old-mysql")).toBeLessThan(at("memcached"))
+    // A file's second line is the folder it is in; its name is the title.
+    await expect(foundRow(page, "data.db")).toContainText("/srv/app")
+    await expect(foundRow(page, "data.db")).not.toContainText("/srv/app/data.db")
 
     // The dashboard's own store is counted behind a fold, with no way to connect it.
     await found.getByText("Kept by other programs").click()
@@ -1027,6 +1058,8 @@ test.describe("the map", () => {
       picture.getByRole("list", { name: "Databases" }).getByRole("listitem"),
     ).toHaveCount(5)
     await expect(picture.getByRole("list", { name: "What reads them" })).toHaveCount(0)
+    // No wire is drawn, so there is no legend for one.
+    await expect(page.getByRole("list", { name: "How to read the map" })).toBeHidden()
     await expect(page.locator("[data-slot=row-list] [data-slot=row]")).toHaveCount(4)
     await expect(page.locator("[data-slot=row]").filter({ hasText: "worker" })).toHaveCount(1)
     await expect(picture).not.toContainText("worker")
@@ -1144,7 +1177,7 @@ test.describe("adding a database", () => {
     await expect(panel.getByLabel("Database")).toHaveCount(0)
     await panel.getByText("Account", { exact: true }).click()
     await expect(panel.getByLabel("User")).toHaveCount(0)
-    const publish = panel.getByRole("switch")
+    const publish = panel.getByRole("switch", { name: /^Publish its port/ })
     await expect(publish).not.toBeChecked()
     await publish.click()
     await expect(panel).toContainText("It will answer on every address this server has.")

@@ -1,88 +1,225 @@
 "use client"
 
+import { useEffect } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
-import { useConfirm } from "@/components/confirm-dialog"
+import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { FormSections } from "@/components/form"
+import { EmptyState } from "@/components/state"
+import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
 import { SectionFrame } from "@/components/database/kit"
-import { ConnectionSection } from "@/components/database/ops/settings-connection"
+import { BlockedState } from "@/components/database/kit/blocked-state"
+import { EngineMark } from "@/components/database/kit/engine-mark"
+import { AddressSection, ConnectionForm } from "@/components/database/ops/settings-connection"
 import { DangerSection } from "@/components/database/ops/settings-danger"
-import { ServerDatabasesSection } from "@/components/database/ops/settings-databases"
 import { ExtensionsSection } from "@/components/database/ops/settings-extensions"
-import {
-  SectionJump,
-  useSectionAnchor,
-  type SettingsSection,
-} from "@/components/database/ops/settings-nav"
 import { ParametersSection } from "@/components/database/ops/settings-parameters"
+import { PoolingSections } from "@/components/database/ops/settings-pooling"
 import { ReachabilitySection } from "@/components/database/ops/settings-reach"
+import { VersionSections } from "@/components/database/ops/settings-version"
+import { ResourcesSection } from "@/components/database/ops/settings-resources"
+import { TransportSecuritySection } from "@/components/database/ops/settings-tls"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
+import {
+  formerSettingsPage,
+  settingsPageHref,
+  settingsPages,
+  type SettingsPageKey,
+} from "@/components/database/shell/settings-pages"
+
+/** A page an engine lacks, as the end of "<Engine> has no …". */
+const MISSING: Record<SettingsPageKey, string> = {
+  general: "settings",
+  network: "network to configure",
+  resources: "resources to limit",
+  pooling: "connection pooling",
+  parameters: "parameters to change here",
+  extensions: "extensions",
+  version: "release to upgrade from here",
+  danger: "danger zone",
+}
 
 /**
- * One database's settings: the connection the dashboard keeps, where the
- * server is reachable from, the server's own parameters and extensions, what
- * else it holds, and the acts that end it.
+ * One page of a database's settings, in the shape every settings page in the
+ * product has (`deploy/settings/setting-card.tsx`): one centred column of
+ * sections divided by hairlines, each head over its fields carrying what the
+ * section currently is, and the page's one Save floating at its foot while an
+ * edit is held.
  *
- * The page is a form, so it is one column of sections (§7), each head over
- * its fields carrying what the section currently is — the engine and its
- * address, the reach, how many parameters differ from their default. It keeps
- * no tiles: every figure it has is one of those heads' lines.
- *
- * A section the engine lacks is not drawn. A file has no server, so no
- * reachability and no neighbours; a key–value server has modules where a SQL
- * engine has extensions, and its parameters come from its own configuration.
- * The danger zone is an administrator's, and the page's one frame.
- *
- * Every section has an anchor (`#connection`, `#reachability`, `#parameters`,
- * `#extensions`, `#databases`, `#danger`), and `?q=` narrows the parameters,
- * so a link from another page lands on one of them. The same anchors are the
- * strip at the top of the page: it is long, and its last section is the one a
- * reader most often comes for.
+ * The pages are the rail's (`settingsPages`), so a page the engine has no use
+ * for is not listed; reached by its address all the same, it says so in the
+ * engine's own terms rather than drawing a form the server would refuse.
  */
-export function Settings() {
-  const { engine, param } = useDatabase()
-  const { can } = useAuth()
+function SettingsFrame({
+  page,
+  children,
+}: {
+  page: SettingsPageKey
+  children: (confirm: (request: ConfirmRequest) => void) => React.ReactNode
+}) {
+  const { engine, href } = useDatabase()
   const { confirm, dialog } = useConfirm()
   // Every dialog here is opened by state: this hands the keyboard back to
   // the control that opened one.
   useFocusReturn()
-  useSectionAnchor(param("q") || param("only") ? "parameters" : "")
-  const server = engine.can("server")
-  const keyvalue = engine.kind === "keyvalue"
-  // A document database answers the parameters route with the counters of
-  // its status command: readings, which are Performance's to draw.
-  const parameters = engine.can("settings") && engine.kind !== "document"
-  const extensions = engine.can("extensions") || keyvalue
-  const danger = can("system.admin") && can("destructive")
-  const sections: SettingsSection[] = [
-    { id: "connection", title: "Connection" },
-    ...(server ? [{ id: "reachability", title: "Reachability" }] : []),
-    ...(parameters
-      ? [{ id: "parameters", title: engine.can("fileBased") ? "Parameters" : "Server parameters" }]
-      : []),
-    ...(extensions ? [{ id: "extensions", title: keyvalue ? "Modules" : "Extensions" }] : []),
-    ...(server
-      ? [
-          {
-            id: "databases",
-            title: engine.can("logicalDatabases") ? "Numbered databases" : "Databases",
-          },
-        ]
-      : []),
-    ...(danger ? [{ id: "danger", title: "Danger zone" }] : []),
-  ]
+  const listed = settingsPages(engine).find((one) => one.key === page)
+  if (!listed) {
+    return (
+      <SectionFrame section="settings">
+        <BlockedState
+          engine={engine}
+          thing={MISSING[page]}
+          href={href("settings")}
+          action="Open General"
+        >
+          {engine.can("fileBased")
+            ? "It is a file on this machine: there is no server to reach, configure or share."
+            : page === "version"
+              ? "A PostgreSQL server Databases started is moved to a newer release here; this one is upgraded with its own tools."
+              : "The engine keeps nothing of the kind for the dashboard to read or change."}
+        </BlockedState>
+      </SectionFrame>
+    )
+  }
   return (
-    <SectionFrame section="settings">
-      {sections.length > 2 && <SectionJump sections={sections} />}
-      <FormSections className="mx-auto">
-        <ConnectionSection />
-        {server && <ReachabilitySection confirm={confirm} />}
-        {parameters && <ParametersSection />}
-        {extensions && <ExtensionsSection confirm={confirm} />}
-        {server && <ServerDatabasesSection />}
-        {danger && <DangerSection confirm={confirm} />}
-      </FormSections>
+    <SectionFrame section="settings" part={page === "general" ? undefined : listed.title}>
+      <SaveBarProvider>
+        {/* The room at the foot is the save bar's, so it never lies over the last field. */}
+        <div className="mx-auto w-full max-w-3xl min-w-0 pb-20">
+          <FormSections>{children(confirm)}</FormSections>
+        </div>
+      </SaveBarProvider>
       {dialog}
     </SectionFrame>
+  )
+}
+
+/**
+ * General: the address the dashboard dials, drawn as the way it goes, then
+ * what it calls the connection and whether it may change what is in it.
+ *
+ * It is also where an address from the one-page Settings lands: `#danger`,
+ * `#reachability` or a parameter search (`?q=`) is sent on, in place, to the
+ * page that holds it now, and `#databases` to Home, whose list of what else
+ * the server holds is the one that section was.
+ */
+export function Settings() {
+  const { href } = useDatabase()
+  const router = useRouter()
+  const search = useSearchParams()
+  useEffect(() => {
+    if (window.location.hash === "#databases") {
+      router.replace(href("home"))
+      return
+    }
+    const page = formerSettingsPage(window.location.hash, search)
+    if (!page) return
+    const query = page === "parameters" ? search.toString() : ""
+    const to = settingsPageHref(href("settings"), { path: page })
+    router.replace(query ? `${to}?${query}` : to)
+  }, [href, router, search])
+  return (
+    <SettingsFrame page="general">
+      {() => (
+        <>
+          <AddressSection />
+          <ConnectionForm />
+        </>
+      )}
+    </SettingsFrame>
+  )
+}
+
+export function SettingsNetwork() {
+  const { engine } = useDatabase()
+  return (
+    <SettingsFrame page="network">
+      {(confirm) => (
+        <>
+          <ReachabilitySection confirm={confirm} />
+          {engine.can("serverTLS") && <TransportSecuritySection confirm={confirm} />}
+        </>
+      )}
+    </SettingsFrame>
+  )
+}
+
+export function SettingsResources() {
+  return (
+    <SettingsFrame page="resources">
+      {(confirm) => <ResourcesSection confirm={confirm} />}
+    </SettingsFrame>
+  )
+}
+
+export function SettingsPooling() {
+  return (
+    <SettingsFrame page="pooling">
+      {(confirm) => <PoolingSections confirm={confirm} />}
+    </SettingsFrame>
+  )
+}
+
+export function SettingsParameters() {
+  return <SettingsFrame page="parameters">{() => <ParametersSection />}</SettingsFrame>
+}
+
+export function SettingsExtensions() {
+  return (
+    <SettingsFrame page="extensions">
+      {(confirm) => <ExtensionsSection confirm={confirm} />}
+    </SettingsFrame>
+  )
+}
+
+/**
+ * The release it runs and moving it to a newer one. An upgrade replaces the
+ * server, so the page is an administrator's; any other role reaching the
+ * address is told whose it is.
+ */
+export function SettingsVersion() {
+  const { engine } = useDatabase()
+  const { can } = useAuth()
+  return (
+    <SettingsFrame page="version">
+      {(confirm) =>
+        can("system.admin") ? (
+          <VersionSections confirm={confirm} />
+        ) : (
+          <EmptyState
+            mark={<EngineMark engine={engine} />}
+            title="Upgrades are an administrator's"
+            description="Which release the server runs, and moving it to a newer one, are read and done by an administrator."
+          />
+        )
+      }
+    </SettingsFrame>
+  )
+}
+
+/**
+ * The acts that end it. They are an administrator's who may destroy; any
+ * other role reaching the address is told whose they are, with nothing to
+ * press.
+ */
+export function SettingsDanger() {
+  const { engine } = useDatabase()
+  const { can } = useAuth()
+  const mayDestroy = can("system.admin") && can("destructive")
+  return (
+    <SettingsFrame page="danger">
+      {(confirm) =>
+        mayDestroy ? (
+          <DangerSection confirm={confirm} />
+        ) : (
+          <EmptyState
+            mark={<EngineMark engine={engine} />}
+            title="The danger zone is an administrator's"
+            description="Forgetting the connection, deleting the database and removing its container are taken by an administrator whose role may destroy."
+          />
+        )
+      }
+    </SettingsFrame>
   )
 }

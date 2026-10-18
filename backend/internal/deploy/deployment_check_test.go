@@ -3,11 +3,9 @@ package deploy
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 )
 
 // gitTree commits files into a fresh local repository and returns its path
@@ -273,60 +271,6 @@ func TestDeploymentEvaluationPrefersTheCommitThenTheStoredEvidence(t *testing.T)
 	}
 }
 
-// The advisory check runs the evaluation analyze_plan runs, for the desired
-// plan and the commit a deployment would build, and answers a repeat from
-// memory while the plan revision and commit are unchanged.
-func TestDeploymentCheckEvaluatesTheDesiredPlanAndCachesIt(t *testing.T) {
-	root := t.TempDir()
-	writeBuildFixture(t, root, "package.json", `{"name":"web","scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16.0.0"}}`)
-	writeBuildFixture(t, root, "bun.lock", "{}")
-	fixture := newReleaseStoreFixture(t)
-	revision := strings.Repeat("d", 40)
-	fixture.addSourcePlan(t, 1, "/srv/release-fixture", revision, BuildPlanConfig{
-		Method: BuildRecipe, Recipe: "node", PackageManager: "npm", BuildCommand: "npm run build", StartCommand: "npm run start",
-	}, StoredBuildEvidence{})
-	inspector := &treeInspectorFake{root: root}
-	observer := readyObserver()
-	checker := &DeploymentChecker{
-		runs: fixture.runs, planning: fixture.variables, sources: inspector, observer: observer,
-		now: func() time.Time { return fixture.now }, cache: map[deploymentCheckKey]deploymentCheckEntry{},
-	}
-	result, err := checker.Check(context.Background(), fixture.projectID, fixture.envID, DeploymentCheckRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.PlanRevision != 1 || result.SourceRevision != revision || inspector.calls != 1 {
-		t.Fatalf("check = %#v, inspections %d", result, inspector.calls)
-	}
-	if item := findingByCode(result.Findings, "package_manager_lockfile_missing"); item == nil || item.Severity != PreflightBlocked {
-		t.Fatalf("the check missed what analyze_plan would stop: %#v", result.Findings)
-	}
-	if _, err := checker.Check(context.Background(), fixture.projectID, fixture.envID, DeploymentCheckRequest{}); err != nil || inspector.calls != 1 {
-		t.Fatalf("a repeat was not answered from memory: %v, inspections %d", err, inspector.calls)
-	}
-	fixture.now = fixture.now.Add(deploymentCheckTTL + time.Second)
-	if _, err := checker.Check(context.Background(), fixture.projectID, fixture.envID, DeploymentCheckRequest{}); err != nil || inspector.calls != 2 {
-		t.Fatalf("an expired answer was reused: %v, inspections %d", err, inspector.calls)
-	}
-	if _, err := checker.Check(context.Background(), fixture.projectID, fixture.envID, DeploymentCheckRequest{Ref: "main"}); err == nil {
-		t.Fatal("a ref was accepted for a local checkout")
-	}
-
-	proposal, err := checker.Detect(context.Background(), fixture.projectID, fixture.envID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var manager *DetectionChange
-	for index := range proposal.Changes {
-		if proposal.Changes[index].Field == "build.packageManager" {
-			manager = &proposal.Changes[index]
-		}
-	}
-	if proposal.Revision != 1 || manager == nil || manager.Saved != "npm" || manager.Detected != "bun" || !manager.Changed {
-		t.Fatalf("detect = %#v", proposal)
-	}
-}
-
 // A source change saves what detection read at the new source as the plan's
 // evidence and compares it with the plan, instead of carrying the old
 // source's evidence forward.
@@ -378,23 +322,6 @@ func TestSourceChangeSavesFreshDetectionAndProposesWhatChanged(t *testing.T) {
 	}
 	if proposal.Revision != 2 || len(proposal.Variables) != 1 || len(proposal.NewVariables) != 1 || proposal.NewVariables[0] != "VITE_API_URL" {
 		t.Fatalf("proposal = %#v", proposal)
-	}
-}
-
-// A checker built without its source or host modules reads them as absent
-// — the check and Detect again say so — rather than holding typed nil
-// pointers that panic on first use.
-func TestDeploymentCheckerWithoutItsModulesSaysSo(t *testing.T) {
-	fixture := newReleaseStoreFixture(t)
-	fixture.addSourcePlan(t, 1, "/srv/release-fixture", strings.Repeat("d", 40), BuildPlanConfig{
-		Method: BuildRecipe, Recipe: "node", PackageManager: "npm", BuildCommand: "npm run build", StartCommand: "npm run start",
-	}, StoredBuildEvidence{})
-	checker := NewDeploymentChecker(fixture.runs, fixture.variables, nil, nil)
-	if _, err := checker.Check(context.Background(), fixture.projectID, fixture.envID, DeploymentCheckRequest{}); !errors.Is(err, ErrBuilderUnavailable) {
-		t.Fatalf("check without a host observer = %v", err)
-	}
-	if _, err := checker.Detect(context.Background(), fixture.projectID, fixture.envID); !errors.Is(err, ErrSourceUnavailable) {
-		t.Fatalf("detect without a source analyzer = %v", err)
 	}
 }
 

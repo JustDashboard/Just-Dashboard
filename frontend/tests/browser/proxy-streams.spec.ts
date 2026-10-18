@@ -124,9 +124,7 @@ test("a stream block nginx cannot read is an outage, said as one", async ({ page
 // nginx reads a file included inside http — as http — and its test refuses
 // proxy_pass there, so every reload on the host fails. Saying "nginx is not
 // reading these" beside a Reload that can only fail was the opposite of it.
-test("a stream file included inside http is an outage, said as one on every surface", async ({
-  page,
-}) => {
+test("the streams tool retains native invalid-configuration feedback", async ({ page }) => {
   await mockProxy(page, { included: false })
   await listing(page, { included: false, includedIn: "http", streams: [bastion] })
   await page.goto("/proxy/streams")
@@ -172,21 +170,6 @@ test("a stream file included inside http is an outage, said as one on every surf
 
   // The Overview reports it with the module outage's weight, not as streams
   // nginx merely ignores.
-  await page.goto("/proxy")
-  const finding = page.getByText(
-    "nginx refuses every reload: a stream file is included inside http",
-  )
-  await expect(finding).toBeVisible()
-  await expect(page.getByText(/written but nginx is not reading/)).toHaveCount(0)
-  await finding.click()
-  await expect(
-    page.getByText(/every reload is refused — for every site on this host/),
-  ).toBeVisible()
-  await expect(
-    page.getByText(
-      "Move the include into a top-level stream block beside the http block, or delete the stream files.",
-    ),
-  ).toBeVisible()
 })
 
 // Ubuntu's default: no stream module. Moving the include into a stream block
@@ -220,15 +203,6 @@ test("with no stream module, a misplaced include comes out before the module and
   ).toBeVisible()
   await expect(sheet.getByText(/Move the include/)).toHaveCount(0)
   await page.keyboard.press("Escape")
-
-  await page.goto("/proxy")
-  await page.getByText("nginx refuses every reload: a stream file is included inside http").click()
-  await expect(
-    page.getByText(
-      /^Take out the include that puts \/etc\/nginx\/streams there, which ends the refusals\. Install libnginx-mod-stream/,
-    ),
-  ).toBeVisible()
-  await expect(page.getByText(/but this nginx has no stream module/)).toHaveCount(0)
 })
 
 test("an empty directory included inside http is named, and nothing offers a save", async ({
@@ -911,9 +885,7 @@ test("a refresh that fails keeps the list and says it is the last read", async (
 
 // With no finding for a directory it could not read, the overview said
 // streams were within limits over open forwards it could not see.
-test("the overview does not call streams within limits when it could not read them", async ({
-  page,
-}) => {
+test("the overview reports a failed stream read without advisory findings", async ({ page }) => {
   await mockProxy(page, { included: true })
   // Nothing else on this host has anything to say, so the list is the streams' alone.
   for (const path of ["certificates/", "proxy/vhosts", "ports"]) {
@@ -933,22 +905,16 @@ test("the overview does not call streams within limits when it could not read th
   await page.goto("/proxy")
   await expect(
     page.getByText("No priority problems found in the completed proxy checks"),
-  ).toBeVisible()
-
+  ).toHaveCount(0)
   broken = true
   await page.reload()
-  const finding = page.getByRole("button", { name: /^Could not read the stream directory/ })
-  await expect(finding).toBeVisible()
-  await expect(page.getByText(/all within limits/)).toHaveCount(0)
-  await finding.click()
+  const fact = page.locator("[data-slot='host-identity']").getByText("couldn't read streams")
+  await expect(fact).toBeVisible()
+  await expect(fact).toHaveAttribute("title", /permission denied/)
+  await expect(page.getByRole("heading", { name: "Attention", exact: true })).toHaveCount(0)
+  await page.goto("/proxy/streams")
+  await expect(page.getByText("Could not read the stream directory")).toBeVisible()
   await expect(page.getByText("open /etc/nginx/streams: permission denied")).toBeVisible()
-  await expect(
-    page.getByText(
-      "Until it can be read, no stream is checked for an open port or for a reload it would stop.",
-    ),
-  ).toBeVisible()
-  await page.getByRole("button", { name: "Open streams" }).click()
-  await expect(page).toHaveURL(/\/proxy\/streams$/)
 })
 
 test("the TCP+UDP form fits a phone, errors and all", async ({ page }) => {
@@ -1819,16 +1785,6 @@ test("a save says listening only when nginx held the port, and offers to ask aga
   await (await fillNew(page)).getByRole("button", { name: "Save and reload" }).click()
   await expect(page.getByText("replica saved and reloaded")).toBeVisible()
   await expect(page.getByText(/could not be checked: no running nginx reads/)).toBeVisible()
-})
-
-test("the overview names a stream that stops every reload", async ({ page }) => {
-  await mockProxy(page, { included: true })
-  await listing(page, { streams: [stateShowcase[1]] })
-  await page.goto("/proxy")
-  const finding = page.getByRole("button", {
-    name: /^nginx refuses every reload: stream cache asks for port 6379\/tcp, which postgres \(pid 900\) holds/,
-  })
-  await expect(finding).toBeVisible()
 })
 
 test("the states fit a phone, bind errors and all", async ({ page }) => {

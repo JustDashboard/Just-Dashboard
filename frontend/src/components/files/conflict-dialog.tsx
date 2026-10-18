@@ -12,6 +12,7 @@ type Request = {
   dir: string
   /** What is about to happen to them: "uploaded", "moved", "copied". */
   verb: string
+  folders: string[]
   resolve: (policy: ConflictPolicy | null) => void
 }
 
@@ -28,8 +29,10 @@ type Request = {
 export function useConflicts() {
   const [request, setRequest] = useState<Request | null>(null)
 
-  const ask = (names: string[], dir: string, verb: string) =>
-    new Promise<ConflictPolicy | null>((resolve) => setRequest({ names, dir, verb, resolve }))
+  const ask = (names: string[], dir: string, verb: string, folders: string[] = []) =>
+    new Promise<ConflictPolicy | null>((resolve) =>
+      setRequest({ names, dir, verb, folders, resolve }),
+    )
 
   const answer = (policy: ConflictPolicy | null) => {
     request?.resolve(policy)
@@ -41,28 +44,47 @@ export function useConflicts() {
       open
       onOpenChange={(open) => !open && answer(null)}
       size="sm"
-      title={`${plural(request.names.length, "item")} already ${
-        request.names.length === 1 ? "exists" : "exist"
-      } here`}
-      description={`Choose what happens to the ${request.verb} items that share a name with something in ${request.dir}.`}
+      title={
+        request.names.length === 0
+          ? "Merge uploaded folders?"
+          : `${plural(request.names.length, "item")} already ${
+              request.names.length === 1 ? "exists" : "exist"
+            } here`
+      }
+      description={
+        request.names.length === 0
+          ? `The uploaded folders share names with folders in ${request.dir}.`
+          : `Choose what happens to the ${request.verb} files that share a name with something in ${request.dir}.`
+      }
       footer={
         <>
           <Button variant="ghost" onClick={() => answer(null)}>
             Cancel
           </Button>
-          <Button variant="outline" onClick={() => answer("skip")}>
-            Skip {request.names.length === 1 ? "it" : "them"}
-          </Button>
+          {request.names.length > 0 && (
+            <Button variant="outline" onClick={() => answer("skip")}>
+              Skip {request.names.length === 1 ? "it" : "them"}
+            </Button>
+          )}
           <Button variant="outline" onClick={() => answer("keep")}>
-            Keep both
+            {request.names.length > 0 ? "Keep both" : "Merge folders and upload"}
           </Button>
-          <Button variant="destructive" onClick={() => answer("replace")}>
-            Replace
-          </Button>
+          {request.names.length > 0 && (
+            <Button variant="destructive" onClick={() => answer("replace")}>
+              Replace
+            </Button>
+          )}
         </>
       }
     >
       <div className="space-y-3 text-body">
+        {request.folders.length > 0 && (
+          <p>
+            These folders will be merged: <b>{request.folders.join(", ")}</b>. Existing files stay
+            in place unless you choose Replace for a matching file. Keep both numbers matching files
+            inside each folder.
+          </p>
+        )}
         <ul className="max-h-40 space-y-0.5 overflow-auto font-mono text-xs">
           {request.names.slice(0, 12).map((name) => (
             <li key={name} className="truncate" title={name}>
@@ -73,12 +95,14 @@ export function useConflicts() {
             <li className="text-muted-foreground">and {request.names.length - 12} more</li>
           )}
         </ul>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          <b className="font-medium text-foreground">Replace</b> overwrites what is there.{" "}
-          <b className="font-medium text-foreground">Keep both</b> gives the new one a numbered
-          name. <b className="font-medium text-foreground">Skip</b> leaves those out and{" "}
-          {request.verb === "uploaded" ? "uploads" : "handles"} the rest.
-        </p>
+        {request.names.length > 0 && (
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            <b className="font-medium text-foreground">Replace</b> overwrites what is there.{" "}
+            <b className="font-medium text-foreground">Keep both</b> gives the new one a numbered
+            name. <b className="font-medium text-foreground">Skip</b> leaves those out and{" "}
+            {request.verb === "uploaded" ? "uploads" : "handles"} the rest.
+          </p>
+        )}
       </div>
     </Modal>
   ) : null

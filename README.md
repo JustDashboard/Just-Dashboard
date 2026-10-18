@@ -9,7 +9,7 @@
 Deploy apps, run Docker, manage databases, shape the network, open a real shell and keep it all
 backed up — behind one login that lives on your private network.
 
-**Version 0.7.4** · Go backend · Next.js frontend · one `docker compose` stack
+**Version 0.7.5** · Go backend · Next.js frontend · one `docker compose` stack
 
 [![Website](https://img.shields.io/badge/website-just--dashboard.com-CAE9FF?style=flat-square&labelColor=16181d)](https://just-dashboard.com)
 [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FJustDashboard%2FJust-Dashboard%2Fmain%2Fbackend%2Finternal%2Fselfupdate%2Fchangelog.json&query=%24.latest&label=version&style=flat-square&color=CAE9FF&labelColor=16181d)](CHANGELOG.md)
@@ -26,7 +26,7 @@ backed up — behind one login that lives on your private network.
 
 ![The server overview: the machine drawn as itself, live resources with their last hour, storage and the deployed projects](docs/readme/overview.png)
 
-<p align="center"><sub>Screenshots show version 0.7.1 with example data.</sub></p>
+<p align="center"><sub>Screenshots show version 0.7.5 with example data.</sub></p>
 
 ---
 
@@ -36,10 +36,10 @@ backed up — behind one login that lives on your private network.
 <tr>
 <td width="25%" valign="top">
 
-**Answers, not numbers**
+**Readings and controls**
 
-It says *why*: a server that is waiting rather than busy, a container killed for its memory limit.
-Where it can fix a finding, the finding comes with a button.
+See what the server is doing through live readings, recorded events and logs.
+Open the owning controls to review and apply a change.
 
 </td>
 <td width="25%" valign="top">
@@ -107,8 +107,8 @@ free.
 - Overview of what every container uses and what just happened to it
 - Containers, stacks, images, volumes, networks and events, each a page
 - Create from a template, a pasted `docker run` or a form
-- Crash loops, failing health checks and memory kills said in words
-- Prepared fixes for exposure, limits and security posture
+- Docker state, health checks and recorded lifecycle events
+- Reviewed container configuration and live resource limits
 - Browse a volume's or a container's files in place
 
 </td>
@@ -118,10 +118,19 @@ free.
 
 - A control center for every database on the server — even unconnected ones
 - PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB, Redis
-- Table editor with staged, reviewed edits and a SQL editor with plans
-- Schema browser, diagram, code generation, performance and an advisor
+- Table editor with staged, reviewed edits and a SQL editor with plans and stored programs
+  (DELIMITER, GO and PL/SQL scripts)
+- An optional SQL assistant on your own Anthropic key or local model, told the schema and never the rows
+- Schema browser, diagram, schema comparison with its migration SQL, code generation, mock seed data
+  written parents first, performance
 - Key browser and console for Redis, documents and pipelines for MongoDB
-- Protected connections, dump backups, accounts, grants and a live map
+- Protected connections, dump backups, PostgreSQL major-version upgrades with a way back, accounts,
+  grants and a live map
+- Import from another server, kept current by logical replication on PostgreSQL until you cut over
+- Point-in-time recovery for PostgreSQL: the write-ahead log archived with WAL-G, recovered to any second
+- Alerts when a database goes down, fills its disk, runs low on connections, lags or misses a backup
+- An MCP server for AI clients such as Claude Code, Cursor and VS Code: keys that reach only the
+  databases you choose, read-only unless you allow changes, never a protected one, every call audited
 
 </td>
 </tr>
@@ -137,6 +146,7 @@ free.
 - GitHub, GitLab and Gitea pull requests and Actions logs
 - Excalidraw: drawings with live cards for the host, projects and databases, each listed as a thumbnail of itself
 - Stickyboard: endless boards of sticky notes you colour, group into sections and link together
+- Remote Desktop: your Windows PCs, Macs and Linux desktops in a browser tab over Tailscale, unattended, with clipboard and file transfer, and a Stream mode that plays the screen as 60 fps video from Sunshine
 
 </td>
 <td width="50%" valign="top">
@@ -170,7 +180,7 @@ free.
 
 - A verdict on the host: exposure, SSH, logins and who is attacking
 - fail2ban, CrowdSec and Suricata where they run
-- Scheduled backups to disk, S3 or Backblaze B2, and native database dumps
+- Scheduled backups to disk, S3 or Backblaze B2, encrypted on the way out, and native database dumps
 - A coverage map of everything that is *not* backed up yet
 - Single-file and in-place restore
 
@@ -185,6 +195,7 @@ free.
 - System users, an audit log of every change and the panel's own settings
 - Address, certificate, allowlist and ports applied with automatic rollback
 - Roles, two-factor, sessions and API keys for every account
+- Search and replace API keys, with explicit revocation and inactive-record cleanup
 - A first-run question that keeps the sections you don't use out of your sidebar
 - One-click self-update, with the release notes compiled in
 
@@ -268,6 +279,51 @@ free.
 </tr>
 </table>
 
+### New in 0.7.5
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/readme/remote-desktop.png" alt="The Remote Desktop overview drawing this browser, the server and four computers, one of them in a session">
+<p align="center"><b>Remote Desktop</b> — your own PCs and Macs in a tab, over Tailscale</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/readme/database-assistant.png" alt="The SQL editor with the assistant beside it, answering two questions with statements to insert or open">
+<p align="center"><b>SQL assistant</b> — ask for a statement, an error or a plan explained</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/readme/database-mcp.png" alt="A new MCP key with the command that connects Claude Code to the dashboard's databases">
+<p align="center"><b>MCP server</b> — the databases you choose, for your AI clients</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/readme/database-explain.png" alt="A measured PostgreSQL plan with a hash join and a sequential scan flagged as misjudged by four thousand times">
+<p align="center"><b>Measured plans</b> — where the time went, and what the planner misjudged</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/readme/database-schema-diff.png" alt="Two schemas compared, six differences listed beside the migration SQL and its destructive-step warning">
+<p align="center"><b>Schema comparison</b> — the differences, and the SQL that closes them</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/readme/database-rls.png" alt="A PostgreSQL table's row-level security policies, tried as a role that sees two rows">
+<p align="center"><b>Row-level security</b> — write the policies, then try them as a role</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/readme/database-seed.png" alt="The Generate page filling tables with believable mock rows, parents first">
+<p align="center"><b>Seed data</b> — believable rows, written parents first</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/readme/database-pitr.png" alt="Point-in-time recovery for PostgreSQL: the recoverable window, base backups, a restore point and a recovered copy">
+<p align="center"><b>Point-in-time recovery</b> — any second, not only the last dump</p>
+</td>
+</tr>
+</table>
+
 ## Install
 
 ```bash
@@ -298,6 +354,13 @@ that existed before 0.7.3 are not asked and keep every section.
 **Upgrading:** use **Update now** in the dashboard, run `sudo ./install.sh` again, or `git pull`
 followed by `docker compose up -d --build`. All three keep your `.env`, database, accounts and
 sessions.
+
+**API keys:** under **Account → API keys**, search by name, prefix, role or owner and filter keys
+that have never been used, have been unused for 30 days, expire soon or have no expiry. **Replace key**
+creates a new credential for your account; copy it into your tool and check it works before choosing
+**Revoke previous key**. Revocation immediately stops access and keeps the record in the folded
+**Revoked or expired** history. An administrator can use **Delete record** there to remove inactive
+metadata; the audit trail is kept. A key's secret is shown only once.
 
 ## Terminal admin scripts
 
@@ -364,7 +427,7 @@ disk.
 
 ## Version, and updating
 
-This is **0.7.4**. It is not 1.0 because the API is still moving. Every release is in
+This is **0.7.5**. It is not 1.0 because the API is still moving. Every release is in
 [CHANGELOG.md](CHANGELOG.md) and in the dashboard itself, where **Update now** pulls, rebuilds and
 restarts from a container that outlives the restart. The update check is one unauthenticated GET of
 one file from GitHub; `JD_UPDATE_CHECK=false` turns it off.
@@ -407,6 +470,7 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_TERMINAL_ENABLED` | `true` | The web terminal. |
 | `JD_TERMINAL_SHELL` | account's shell | The shell the web terminal opens. Empty honours `chsh`. `install.sh` sets it to the host's zsh, which the bundled startup gives inline history suggestions and command colouring; ssh is unaffected. |
 | `JD_TERMINAL_USER` | lowest regular account | Host account a terminal session logs in as. |
+| `JD_REMOTE_DESKTOP_BRIDGE` | none | A Moonlight Web stream bridge on another tailnet machine, as `host:port`, used in place of the container this server would run. Remote Desktop's picture always passes through the bridge; one near you and your computers spares it the trip to this server and back. The bridge must trust the dashboard's account header from this server only. |
 | `JD_SESSION_TTL` | `12h` | Absolute session lifetime. |
 | `JD_SESSION_IDLE_TTL` | `60m` | Idle timeout. |
 | `JD_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker Engine endpoint. |
@@ -503,6 +567,17 @@ dashboard stops; the whole transcript is in `/var/log/just-dashboard-uninstall.l
 The dashboard's own state is a SQLite database in `JD_DATA_DIR` (`/var/lib/just-dashboard`). Back up
 that directory **and** keep `JD_MASTER_KEY` somewhere separate; either alone will not restore. The
 Backups page lists the dashboard itself under Coverage and writes that job for you.
+
+A backup job can encrypt its archives, and a new one that writes to S3 or B2 does unless you turn it
+off. They are sealed with [age](https://age-encryption.org) to one backup key this server keeps, itself
+sealed with `JD_MASTER_KEY`, and restores, recovery checks and downloads here decrypt them as they read.
+**Export the key** — Backups → Backup key → Export key… — and keep the file somewhere other than the
+server: if the server is lost, that file is how its encrypted archives open. On any machine with `age`:
+
+```bash
+age --decrypt --identity just-dashboard-backup-key.txt NAME.tar.gz.age > NAME.tar.gz
+tar -xzf NAME.tar.gz    # source-0001/, database-0001/…: one folder per source and per dump
+```
 
 ## Who makes this
 

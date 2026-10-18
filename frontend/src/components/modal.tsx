@@ -2,6 +2,7 @@
 
 import { useRef } from "react"
 import { cn } from "@/lib/utils"
+import { OperationProgress, type OperationReading } from "@/components/operation-progress"
 import {
   Dialog,
   DialogContent,
@@ -54,9 +55,11 @@ export function Modal({
   size = "md",
   actions,
   footer,
+  progress,
   initialFocus = "first",
   bodyClassName,
   className,
+  onCloseAutoFocus,
   children,
 }: {
   open: boolean
@@ -69,6 +72,11 @@ export function Modal({
   actions?: React.ReactNode
   footer?: React.ReactNode
   /**
+   * The action in flight, drawn into the footer: its words beside the buttons
+   * and its track along the footer's top edge, so the dialog keeps its frame.
+   */
+  progress?: (OperationReading & { startedAt?: number | string }) | false
+  /**
    * Where the keyboard lands when the dialog opens. A form wants its first
    * field; a viewer wants nothing in particular — its first control is an
    * icon button whose tooltip would open with the dialog, and Escape would
@@ -77,6 +85,8 @@ export function Modal({
   initialFocus?: "first" | "body"
   bodyClassName?: string
   className?: string
+  /** For a dialog opened by state, with no `DialogTrigger` to hand the keyboard back to. */
+  onCloseAutoFocus?: (event: Event) => void
   children: React.ReactNode
 }) {
   const body = useRef<HTMLDivElement>(null)
@@ -96,6 +106,7 @@ export function Modal({
               }
             : undefined
         }
+        onCloseAutoFocus={onCloseAutoFocus}
       >
         <DialogHeader className="shrink-0 gap-1 border-b border-hairline bg-surface-header px-4 py-3 pr-12 text-left">
           <div className="flex min-w-0 items-center gap-3">
@@ -126,8 +137,9 @@ export function Modal({
           {children}
         </div>
 
-        {footer && (
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-hairline bg-surface-header px-4 py-3">
+        {(footer || progress) && (
+          <div className="relative flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-hairline bg-surface-header px-4 py-3">
+            {progress && <OperationProgress {...progress} />}
             {footer}
           </div>
         )}
