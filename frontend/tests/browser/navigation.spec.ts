@@ -190,7 +190,9 @@ for (const layout of ["expanded", "mobile"] as const) {
       includeHidden: true,
     })
     const face = trigger.locator('[data-slot="user-avatar"]')
-    await expect(face).toHaveText("OP")
+    // No picture: a silhouette, not letters.
+    await expect(face).toHaveText("")
+    await expect(face.locator("svg")).toHaveCount(1)
     await trigger.click()
     const menu = page.getByRole("menu", { name: "Account", exact: true })
     await expect(menu).toBeVisible()

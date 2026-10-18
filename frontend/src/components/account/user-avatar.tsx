@@ -15,13 +15,6 @@ export function displayNameOf(user: Pick<DashboardUser, "username" | "displayNam
   return user.displayName || user.username
 }
 
-/** The one or two letters that stand in for a picture: "Ion Moisei" → IM. */
-export function initialsOf(name: string) {
-  const words = name.trim().split(/\s+/).filter(Boolean)
-  const letters = words.length >= 2 ? words[0][0] + words[1][0] : (words[0] ?? "?").slice(0, 2)
-  return letters.toUpperCase()
-}
-
 /**
  * Where an account's picture is served from. The signed-in account reads its
  * own; the users table, which only a system.admin sees, reads anyone's by id.
@@ -38,17 +31,17 @@ export function avatarSrc(
 }
 
 const SIZES = {
-  xs: "size-4 rounded-sm text-micro",
-  sm: "size-7 rounded-md text-hint",
-  md: "size-9 rounded-md text-xs",
-  lg: "size-12 rounded-xl text-base",
-  xl: "size-18 rounded-xl text-2xl",
+  xs: "size-4 rounded-sm",
+  sm: "size-7 rounded-md",
+  md: "size-9 rounded-md",
+  lg: "size-12 rounded-xl",
+  xl: "size-18 rounded-xl",
 } as const
 
 /**
- * An account's picture, or its initials while it has none.
+ * An account's picture, or a head-and-shoulders silhouette while it has none.
  *
- * The initials take a hue by the username, as a commit's author and a run's
+ * The silhouette takes a hue by the username, as a commit's author and a run's
  * actor take one by theirs: a list of eight people in eight brand-blue faces
  * was a texture the eye read past, and the same person now keeps the same colour
  * in the rail, the users list and their own profile. The hues are `LANES`,
@@ -68,7 +61,6 @@ export function UserAvatar({
 }) {
   const src = avatarSrc(user, scope)
   const [broken, setBroken] = useState<string | undefined>(undefined)
-  const name = displayNameOf(user)
 
   if (src && broken !== src) {
     return (
@@ -83,9 +75,8 @@ export function UserAvatar({
     )
   }
   return (
-    <Initials
+    <Silhouette
       slot="user-avatar"
-      name={name}
       hue={hueFor(user.username.toLowerCase(), LANES)}
       size={size}
       className={cn("rounded-full", className)}
@@ -114,9 +105,8 @@ export function InitialsMark({
   className?: string
 }) {
   return (
-    <Initials
+    <Silhouette
       slot={slot}
-      name={name}
       hue={hueFor(name.toLowerCase(), LANES)}
       size={size}
       className={className}
@@ -124,15 +114,19 @@ export function InitialsMark({
   )
 }
 
-function Initials({
+/**
+ * The face of a person with no picture: a head and shoulders cut off by the
+ * tile's edge, in a solid hue. It was two letters in a 20% wash of the same
+ * hue, which read as a dim tint beside a real photograph and said nothing of
+ * the name that every row carries beside it already.
+ */
+function Silhouette({
   slot = "initials-mark",
-  name,
   hue,
   size,
   className,
 }: {
   slot?: "user-avatar" | "initials-mark"
-  name: string
   hue: string
   size: keyof typeof SIZES
   className?: string
@@ -142,13 +136,16 @@ function Initials({
       data-slot={slot}
       aria-hidden
       className={cn(
-        "flex shrink-0 items-center justify-center font-semibold select-none",
+        "flex shrink-0 items-end justify-center overflow-hidden select-none",
         SIZES[size],
         className,
       )}
-      style={{ color: hue, background: `color-mix(in oklab, ${hue} 20%, transparent)` }}
+      style={{ background: hue }}
     >
-      {size === "xs" ? initialsOf(name)[0] : initialsOf(name)}
+      <svg viewBox="0 0 32 32" fill="currentColor" className="size-full text-white/90">
+        <circle cx="16" cy="12.5" r="6" />
+        <path d="M3.5 32c0-7.2 5.6-11.5 12.5-11.5S28.5 24.8 28.5 32z" />
+      </svg>
     </span>
   )
 }
