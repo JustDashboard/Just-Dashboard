@@ -6294,6 +6294,8 @@ export type DbProvisionOption = {
   label: string
   image: string
   driver: string
+  versions: { version: string; build?: { ready: boolean } }[]
+  defaultVersion: string
 }
 
 // --- schema graph (the diagram) -------------------------------------------
@@ -6343,6 +6345,24 @@ export type DbDiagramLayoutResponse = {
 }
 
 // --- the fleet, the server behind a connection, and the map ----------------
+
+/**
+ * A release line's last day of maintenance, as the server's end-of-life table
+ * dates it (`dbx/eol.go`). Absent wherever the table does not know the
+ * release: nothing is said rather than a date guessed.
+ */
+export type DbEndOfLife = {
+  /** The engine as its vendor names it: PostgreSQL, MariaDB, … */
+  product: string
+  /** The release line the date belongs to: "18", "8.0", "26.3". */
+  release: string
+  /** Midnight UTC of the last day: "2030-11-14T00:00:00Z". */
+  date: string
+  /** The day has gone by. */
+  past: boolean
+  /** Negative once it has. */
+  daysLeft: number
+}
 
 /**
  * One connection as the control center's fleet lists it: the row's facts

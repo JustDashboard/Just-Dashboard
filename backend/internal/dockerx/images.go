@@ -136,6 +136,25 @@ func (c *Client) RemoveImage(ctx context.Context, id string, force, pruneChildre
 	return out, nil
 }
 
+// ImageLabels is what an image was labelled with when it was built, and nil
+// with no error for an image this host does not have: the answer a caller
+// that builds its own images needs to tell its build from an older one, or
+// from something else, under the same tag.
+func (c *Client) ImageLabels(ctx context.Context, ref string) (map[string]string, error) {
+	cli, err := c.api()
+	if err != nil {
+		return nil, err
+	}
+	insp, err := cli.ImageInspect(ctx, ImageRef(ref))
+	if errdefs.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil || insp.Config == nil {
+		return nil, err
+	}
+	return insp.Config.Labels, nil
+}
+
 // PruneReport is the shared shape for every prune operation so the UI can
 // render one confirmation summary regardless of what was reclaimed.
 type PruneReport struct {

@@ -3,7 +3,6 @@ package dbx
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 // The pure halves of the operations surface: what a statement is rendered
@@ -631,69 +630,6 @@ func TestHeapBloatEstimate(t *testing.T) {
 	if got := estimateHeapBloat(1000, 0, 40, 100, 8192); got != 0 {
 		t.Errorf("no pages: %d", got)
 	}
-}
-
-func TestVersionEndOfLife(t *testing.T) {
-	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	for _, c := range []struct {
-		driver  Driver
-		version string
-		release string
-		past    bool
-		known   bool
-	}{
-		{DriverPostgres, "PostgreSQL 13.14 on x86_64-pc-linux-gnu", "13", true, true},
-		{DriverPostgres, "PostgreSQL 14.11 (Debian 14.11-1)", "14", false, true},
-		{DriverPostgres, "PostgreSQL 16.15 on x86_64-pc-linux-musl", "16", false, true},
-		{DriverPostgres, "PostgreSQL 9.6.24 on x86_64", "9.6", true, true},
-		{DriverPostgres, "PostgreSQL 99.1", "", false, false},
-		{DriverMySQL, "8.0.36-0ubuntu0.22.04.1", "8.0", true, true},
-		{DriverMySQL, "8.4.11", "8.4", false, true},
-		{DriverMySQL, "5.7.44-log", "5.7", true, true},
-		{DriverMySQL, "11.8.9-MariaDB-ubu2404", "11.8", false, true},
-		{DriverMySQL, "10.5.23-MariaDB", "10.5", true, true},
-		{DriverMySQL, "10.11.6-MariaDB-0+deb12u1", "10.11", false, true},
-		{DriverMSSQL, "Microsoft SQL Server 2016 (SP3) - 13.0.6300.2 (X64)", "2016", true, true},
-		{DriverMSSQL, "Microsoft SQL Server 2022 (RTM-CU12) - 16.0.4115.5", "2022", false, true},
-		{DriverOracle, "Oracle Database 19c Enterprise Edition Release 19.0.0.0.0 - Production", "19", false, true},
-		{DriverOracle, "Oracle Database 11g Enterprise Edition Release 11.2.0.4.0", "11", true, true},
-		{DriverClickHouse, "ClickHouse 24.8.14.39", "24.8", true, true},
-		{DriverClickHouse, "ClickHouse 26.8.1.1", "26.8", false, true},
-		{DriverSQLite, "SQLite 3.46.0", "", false, false},
-		{DriverMySQL, "something else", "", false, false},
-		// The release is read where the engine's own number stands. A beta has
-		// no minor, and the first pair of numbers in its banner is the
-		// compiler's.
-		{DriverPostgres, "PostgreSQL 18beta1 on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14) 12.2.0, 64-bit", "18", false, true},
-		{DriverPostgres, "PostgreSQL 17rc1 on aarch64-unknown-linux-gnu, compiled by gcc (GCC) 11.4.1", "17", false, true},
-		{DriverPostgres, "EnterpriseDB 12.2.0 compiled by gcc 12.2", "", false, false},
-		// A fork answers with the version of the engine it is compatible with,
-		// which says nothing about the fork's own maintenance.
-		{DriverPostgres, "PostgreSQL 11.2-YB-2.20.1.3-b0 on x86_64-pc-linux-gnu", "", false, false},
-		{DriverPostgres, "CockroachDB CCL v23.2.4 (x86_64-pc-linux-gnu, built 2024/04/08)", "", false, false},
-		{DriverPostgres, "PostgreSQL 12.12 (Greenplum Database 7.0.0 build commit:abc) on x86_64", "", false, false},
-		{DriverMySQL, "8.0.11-TiDB-v7.5.0", "", false, false},
-		{DriverMySQL, "5.7.25-TiDB-v6.1.0", "", false, false},
-		{DriverMySQL, "8.0.30-Vitess", "", false, false},
-		// MariaDB's replication-compatible prefix is not its version.
-		{DriverMySQL, "5.5.5-10.6.12-MariaDB-log", "10.6", true, true},
-	} {
-		got, ok := VersionEndOfLife(c.driver, c.version, now)
-		if ok != c.known {
-			t.Errorf("%s %q: known %v, want %v", c.driver, c.version, ok, c.known)
-			continue
-		}
-		if !ok {
-			continue
-		}
-		if got.Release != c.release || got.Past != c.past {
-			t.Errorf("%s %q: release %q past %v (date %s), want %q %v", c.driver, c.version, got.Release, got.Past, got.Date.Format("2006-01-02"), c.release, c.past)
-		}
-		if got.Past != (got.DaysLeft < 0) && got.DaysLeft != 0 {
-			t.Errorf("%s %q: past %v with %d days left", c.driver, c.version, got.Past, got.DaysLeft)
-		}
-	}
-
 }
 
 func TestSessionRowsAreFinishedTheSameWay(t *testing.T) {

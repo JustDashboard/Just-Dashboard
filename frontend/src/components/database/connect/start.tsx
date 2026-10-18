@@ -1,16 +1,17 @@
 "use client"
 
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Database, Play } from "@/components/icons"
-import { errorMessage, get, post } from "@/lib/api"
+import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import type { DbConnection, DbDriverInfo } from "@/lib/types"
+import type { DbConnection, DbDriverInfo, Job, JobLine } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { ChoiceGrid, EngineCard } from "@/components/choice-card"
 import { Segments } from "@/components/deploy/settings/segments"
 import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
 import { Disclosure, Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
+import { JobConsole } from "@/components/job-console"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogos } from "@/components/product-logo"
 import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
@@ -24,25 +25,40 @@ import { engineOf, sectionHref } from "@/components/database/engine"
 import {
   EMPTY_PROVISION,
   SHELVES,
+  chosenRelease,
+  needsBuild,
   provisionImage,
   provisionProblems,
   provisionRequest,
+  releaseShelves,
   shelfOf,
   type ProvisionDraft,
   type ProvisionPhase,
 } from "@/components/database/connect/provision"
 import { reveal } from "@/components/database/connect/reveal"
 import { readCapacity, readInventory, readTemplates } from "@/components/database/fleet/read"
-import type { DbProvisionResponse } from "@/components/database/fleet/types"
+import type {
+  DbProvisionRelease,
+  DbProvisionResponse,
+  DbProvisionTemplate,
+} from "@/components/database/fleet/types"
 import { EngineMark } from "@/components/database/kit"
+import { supportWords } from "@/components/database/support"
 import { MIB, coresWord, defaultLimitsFor, sizeOf } from "@/components/database/kit/limits"
 import { useDatabases } from "@/components/database/shell/databases-context"
 
 /** How long a started engine is asked for before the page says it has not answered. */
 const READY_WITHIN_MS = 3 * 60_000
 
-type Work = { phase: ProvisionPhase; since: number }
-type Failure = { message: string; phase: ProvisionPhase }
+/** How often a build is read while it runs: one cheap read of the server's memory. */
+const BUILD_EVERY_MS = 1000
+
+/** `build`: this start builds its image first. */
+type Work = { phase: ProvisionPhase; since: number; build: boolean }
+type Failure = { message: string; phase: ProvisionPhase; build: boolean }
+type Watched = { job: Job; lines: JobLine[] }
+
+const pause = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
 /** The Databases page opens the saved connection as soon as it answers. */
 export function StartNew({
@@ -114,6 +130,10 @@ export function DatabaseCreation({
   const [failure, setFailure] = useState<Failure>()
   const [elapsed, setElapsed] = useState(0)
   const [container, setContainer] = useState(resume?.container)
+  // The image build this start is watching, and the images built since the
+  // page read the catalogue — which still says they are not.
+  const [building, setBuilding] = useState<Watched>()
+  const [built, setBuilt] = useState<ReadonlySet<string>>(() => new Set())
   const provisioning = useRef(false)
   const alive = useRef(true)
   useEffect(() => {
@@ -161,7 +181,7 @@ export function DatabaseCreation({
   }
 
   /** Adoption proves credentials; a fresh ping rules out temporary first-boot servers. */
-  const settle = async (startedContainer: string, started: number) => {
+  const settle = async (startedContainer: string, started: number, build: boolean) => {
     const deadline = Date.now() + READY_WITHIN_MS
     let connection: DbConnection
     let phase: ProvisionPhase = "wait"
@@ -169,11 +189,11 @@ export function DatabaseCreation({
       if (!alive.current) return
       try {
         phase = "wait"
-        setWork({ phase: "wait", since: started })
+        setWork({ phase: "wait", since: started, build })
         connection = await post<DbConnection>("/databases/adopt", { container: startedContainer })
         if (!alive.current) return
         phase = "connect"
-        setWork({ phase: "connect", since: started })
+        setWork({ phase: "connect", since: started, build })
         const answer = await get<{ ok: boolean; error?: string }>(
           `/databases/${connection.id}/ping`,
         )
@@ -182,16 +202,61 @@ export function DatabaseCreation({
       } catch (err) {
         if (!alive.current) return
         if (Date.now() > deadline) {
-          setFailure({ message: errorMessage(err), phase })
+          setFailure({ message: errorMessage(err), phase, build })
           setWork(null)
           onStep?.(1)
           return
         }
-        await new Promise((resolve) => window.setTimeout(resolve, 2000))
+        await pause(2000)
       }
     }
     if (!alive.current) return
     await onReady(connection)
+  }
+
+  /**
+   * Builds a release's image and watches the build to its end. It is a job
+   * on the server, so leaving the page does not stop it, and asking again
+   * while it runs answers the same job — which is how a reader who came back
+   * picks it up. False when the page was left first.
+   */
+  const buildImage = async (engine: string, release: DbProvisionRelease) => {
+    const job = await post<Job>("/databases/provision/build", {
+      engine,
+      version: release.version,
+    })
+    for (;;) {
+      if (!alive.current) return false
+      let reading: Watched
+      try {
+        reading = await get<Watched>(`/jobs/${encodeURIComponent(job.id)}`)
+      } catch (err) {
+        // The server keeps its last fifty jobs: one it no longer has is gone,
+        // not failing. Anything else is a read that may recover.
+        if (err instanceof ApiError && err.status === 404) throw err
+        await pause(BUILD_EVERY_MS * 3)
+        continue
+      }
+      if (!alive.current) return false
+      setBuilding(reading)
+      if (reading.job.status === "succeeded") {
+        setBuilt((held) => new Set(held).add(release.image))
+        return true
+      }
+      if (reading.job.status !== "running") {
+        throw new Error(reading.job.error || `The build was ${reading.job.status}.`)
+      }
+      await pause(BUILD_EVERY_MS)
+    }
+  }
+
+  const stopBuild = async () => {
+    if (!building) return
+    try {
+      await post(`/jobs/${encodeURIComponent(building.job.id)}/cancel`, {})
+    } catch (err) {
+      notify.error("Could not stop the build", err)
+    }
   }
 
   const create = async () => {
@@ -204,11 +269,20 @@ export function DatabaseCreation({
     provisioning.current = true
     const started = Date.now()
     let startedContainer = container
+    const release = chosenRelease(template, draft)
+    const build = !startedContainer && needsBuild(release, built)
+    let phase: ProvisionPhase = startedContainer ? "wait" : build ? "build" : "start"
     setElapsed(0)
     setFailure(undefined)
-    setWork({ phase: startedContainer ? "wait" : "start", since: started })
+    setBuilding(undefined)
+    setWork({ phase, since: started, build })
     onStep?.(2)
     try {
+      if (build && release) {
+        if (!(await buildImage(template.engine, release))) return
+        phase = "start"
+        setWork({ phase, since: started, build })
+      }
       if (!startedContainer) {
         const answer = await post<DbProvisionResponse>(
           "/databases/provision",
@@ -223,10 +297,10 @@ export function DatabaseCreation({
           notify.warning("The firewall was not opened", { description: answer.firewallError })
         }
       }
-      await settle(startedContainer, started)
+      await settle(startedContainer, started, build)
     } catch (err) {
       if (!alive.current) return
-      setFailure({ message: errorMessage(err), phase: startedContainer ? "connect" : "start" })
+      setFailure({ message: errorMessage(err), phase: startedContainer ? "connect" : phase, build })
       setWork(null)
       onStep?.(1)
     } finally {
@@ -236,11 +310,12 @@ export function DatabaseCreation({
 
   const problems = template ? provisionProblems(template, draft, host) : {}
   const image = template ? provisionImage(template, draft) : ""
-  const version = template
-    ? template.versions.some((one) => one.version === draft.version)
-      ? draft.version
-      : template.defaultVersion
-    : ""
+  const release = template ? chosenRelease(template, draft) : undefined
+  const version = release?.version ?? ""
+  const releases = template ? releaseShelves(template) : { current: [], older: [] }
+  const olderChosen = releases.older.some((one) => one.version === version)
+  // Made on this server from the dashboard's recipe, never pulled.
+  const recipe = Boolean(release?.build)
   const blocked = Object.keys(problems).length > 0 || Boolean(noDocker)
 
   return (
@@ -275,7 +350,9 @@ export function DatabaseCreation({
             // under the scrollbar, and pulled back out so they still start
             // where the title does.
             <div className="-mx-3 space-y-5 px-3 pt-1 pb-3 xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
-              {shelves.length === 0 && (
+              {/* Only once the catalogue has answered: under an error that
+                  says it could not be read, "no engine" contradicted it. */}
+              {templates.data && shelves.length === 0 && (
                 <EmptyNote className="px-0 text-left">
                   This server offers no engine to start from here.
                 </EmptyNote>
@@ -335,13 +412,34 @@ export function DatabaseCreation({
           />
           {work ? (
             <FlowPanelBody className="space-y-4 py-6">
-              <DatabaseProgress phase={work.phase} elapsed={elapsed} />
+              <DatabaseProgress
+                phase={work.phase}
+                elapsed={elapsed}
+                build={work.build}
+                built={recipe}
+              />
+              {work.phase === "build" && building && (
+                <JobConsole
+                  job={building.job}
+                  lines={building.lines}
+                  onCancel={() => void stopBuild()}
+                />
+              )}
               <p className="text-hint leading-relaxed text-muted-foreground">
-                The first start of an engine pulls its image, which can take a few minutes. It opens{" "}
-                {showAddress
-                  ? "with a verified connection string when it answers"
-                  : "on the database's own page when it answers"}
-                ; leave and it is listed under Found on this server.
+                {/* The console under the stages says what leaving does. */}
+                {work.phase === "build" ? (
+                  "The image is built once, on this server, and that takes a few minutes."
+                ) : (
+                  <>
+                    {recipe
+                      ? "It opens "
+                      : "The first start of an engine pulls its image, which can take a few minutes. It opens "}
+                    {showAddress
+                      ? "with a verified connection string when it answers"
+                      : "on the database's own page when it answers"}
+                    ; leave and it is listed under Found on this server.
+                  </>
+                )}
               </p>
             </FlowPanelBody>
           ) : (
@@ -358,7 +456,13 @@ export function DatabaseCreation({
               )}
               {failure && (
                 <>
-                  <DatabaseProgress phase={failure.phase} elapsed={elapsed} failed />
+                  <DatabaseProgress
+                    phase={failure.phase}
+                    elapsed={elapsed}
+                    build={failure.build}
+                    built={recipe}
+                    failed
+                  />
                   <Notice
                     tone="danger"
                     title={container ? "Database container already created" : "It was not started"}
@@ -368,7 +472,19 @@ export function DatabaseCreation({
                       <span className="mt-2 block">Retry continues setup for {container}.</span>
                     )}
                   </Notice>
+                  {/* What the build printed is the answer to why it stopped. */}
+                  {failure.phase === "build" && building && (
+                    <JobConsole job={building.job} lines={building.lines} />
+                  )}
                 </>
+              )}
+              {recipe && release && !failure && (
+                <BuiltHere
+                  template={template}
+                  release={release}
+                  product={engineOf(template.flavor, drivers).label}
+                  ready={!needsBuild(release, built)}
+                />
               )}
               <fieldset disabled={Boolean(container)} className="min-w-0 space-y-4">
                 <Field
@@ -387,19 +503,64 @@ export function DatabaseCreation({
                     spellCheck={false}
                   />
                 </Field>
-                {template.versions.length > 1 && (
-                  <Field label="Version">
-                    <Segments
-                      label={`${template.label} version`}
-                      value={version}
-                      onChange={(next) => set({ version: next })}
-                      options={template.versions.map((one) => ({
-                        value: one.version,
-                        label: one.version,
-                        mono: true,
-                      }))}
-                    />
+                {(releases.current.length > 1 || releases.older.length > 0) && (
+                  <Field
+                    label="Version"
+                    // The chosen release's support status, as a plain fact —
+                    // under the releases it is about. An older one chosen is
+                    // dated in the fold, and its date under these would read
+                    // as theirs.
+                    hint={
+                      release?.endOfLife && !olderChosen
+                        ? supportWords(release.endOfLife)
+                        : undefined
+                    }
+                  >
+                    {releases.current.length > 0 && (
+                      <Segments
+                        label={`${template.label} version`}
+                        value={olderChosen ? "" : version}
+                        onChange={(next) => set({ version: next })}
+                        options={releases.current.map((one) => ({
+                          value: one.version,
+                          label: one.version,
+                          mono: true,
+                        }))}
+                      />
+                    )}
                   </Field>
+                )}
+                {releases.older.length > 0 && (
+                  <Disclosure
+                    quiet
+                    summary="Older versions"
+                    facts={releases.older.map((one) => one.version).join(", ")}
+                    open={olderChosen}
+                  >
+                    <div className="space-y-2">
+                      <Segments
+                        label={`Older ${template.label} versions`}
+                        value={olderChosen ? version : ""}
+                        onChange={(next) => set({ version: next })}
+                        options={releases.older.map((one) => ({
+                          value: one.version,
+                          label: one.version,
+                          mono: true,
+                        }))}
+                      />
+                      <ul className="space-y-0.5 text-hint leading-relaxed text-muted-foreground">
+                        {releases.older.map((one) => (
+                          <li key={one.version}>
+                            <span className="font-mono text-foreground">{one.version}</span>
+                            {one.endOfLife && ` — ${supportWords(one.endOfLife)}`}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-hint leading-relaxed text-muted-foreground">
+                        A release past its end of life gets no more fixes, security fixes included.
+                      </p>
+                    </div>
+                  </Disclosure>
                 )}
                 {template.database && (
                   <Field
@@ -566,5 +727,51 @@ export function DatabaseCreation({
         />
       )}
     </div>
+  )
+}
+
+/**
+ * What a template whose image is made on this server says before it is
+ * created: what the image is, whether it is built yet, and where its
+ * extensions are turned on. The build is the step a reader would otherwise
+ * meet unannounced, as minutes of output after pressing Create.
+ */
+function BuiltHere({
+  template,
+  release,
+  product,
+  ready,
+}: {
+  template: DbProvisionTemplate
+  release: DbProvisionRelease
+  product: string
+  ready: boolean
+}) {
+  const extensions = template.extensions ?? []
+  return (
+    <Notice
+      title={
+        ready
+          ? "Its image is built"
+          : release.build?.job
+            ? "Its image is being built now"
+            : "Its image is built here first"
+      }
+    >
+      The official {product} image with{" "}
+      {extensions.map((name, index) => (
+        <Fragment key={name}>
+          {index > 0 && (index === extensions.length - 1 ? " and " : ", ")}
+          <span className="font-mono text-foreground">{name}</span>
+        </Fragment>
+      ))}
+      , from the {product} project&apos;s own packages.{" "}
+      {ready
+        ? "It starts like any other."
+        : release.build?.job
+          ? "Create waits for that build, then starts it."
+          : "The first build takes a few minutes, and is kept for the next one started here."}{" "}
+      Each extension is enabled under Settings → Extensions once it runs.
+    </Notice>
   )
 }

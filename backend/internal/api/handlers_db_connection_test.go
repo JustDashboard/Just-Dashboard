@@ -729,6 +729,54 @@ func TestAStoppedContainerIsReportedAndNotDialled(t *testing.T) {
 	}
 }
 
+// The summary says when the release a server runs stops being maintained,
+// from what the server last said it was — so a stopped one still says it —
+// and says nothing for a fork that keeps a calendar of its own.
+func TestSummarySaysWhenTheServersReleaseStopsBeingMaintained(t *testing.T) {
+	h := newConnHarness(t)
+	admin := h.as(auth.RoleAdmin)
+	for i, c := range []struct {
+		image    string
+		identity dbx.Identity
+		release  string
+		date     string
+	}{
+		{"postgres:13-alpine", dbx.Identity{Flavor: dbx.FlavorPostgres, Version: "PostgreSQL 13.14", Number: "13.14"}, "13", "2025-11-13"},
+		{"mariadb:10.6", dbx.Identity{Flavor: dbx.FlavorMariaDB, Version: "10.6.21-MariaDB-ubu2004", Number: "10.6.21"}, "10.6", "2026-07-06"},
+		{"cockroachdb/cockroach:v23.2.4", dbx.Identity{Flavor: dbx.FlavorCockroachDB, Version: "CockroachDB CCL v23.2.4", Number: "23.2.4"}, "", ""},
+	} {
+		port, _ := deafPort(t)
+		name := fmt.Sprintf("server-%d", i)
+		driver, engine, dsn := dbx.DriverPostgres, 5432, fmt.Sprintf("postgres://app:pw@127.0.0.1:%d/app?sslmode=disable", port)
+		switch c.identity.Flavor {
+		case dbx.FlavorMariaDB:
+			driver, engine, dsn = dbx.DriverMySQL, 3306, fmt.Sprintf("app:pw@tcp(127.0.0.1:%d)/app", port)
+		case dbx.FlavorCockroachDB:
+			engine = 26257
+		}
+		h.engine.containers = append(h.engine.containers, &fakeDBContainer{
+			id: name, name: name, image: c.image, state: "exited", hostIP: "127.0.0.1", hostPort: port, port: engine,
+		})
+		id := h.add(name, driver, dsn)
+		h.s.dbConns.identities.Store(id, dbIdentityKept{dsn: sha256.Sum256([]byte(dsn)), at: time.Now(), identity: c.identity})
+
+		got := readJSON[struct {
+			State     string         `json:"state"`
+			EndOfLife *dbx.EndOfLife `json:"endOfLife"`
+		}](t, do(t, admin, http.MethodGet, pathf("/databases/%d", id), ""))
+		if got.State != dbStateStopped {
+			t.Errorf("%s: state %q", c.image, got.State)
+		}
+		switch {
+		case c.release == "" && got.EndOfLife != nil:
+			t.Errorf("%s: a fork was dated %+v", c.image, got.EndOfLife)
+		case c.release != "" && (got.EndOfLife == nil || got.EndOfLife.Release != c.release ||
+			got.EndOfLife.Date.Format("2006-01-02") != c.date || !got.EndOfLife.Past):
+			t.Errorf("%s: end of life %+v, want %s ended %s", c.image, got.EndOfLife, c.release, c.date)
+		}
+	}
+}
+
 // Stopping and restarting interrupt whatever is using the database, so they
 // need what the Docker page's stop needs. They share a path with start, so
 // the handler decides — and it must decide before anything is touched.

@@ -8,11 +8,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 )
@@ -29,6 +32,11 @@ type provisionCreated struct {
 			HostIP   string `json:"HostIp"`
 			HostPort string `json:"HostPort"`
 		} `json:"PortBindings"`
+		Mounts []struct {
+			Type   string `json:"Type"`
+			Source string `json:"Source"`
+			Target string `json:"Target"`
+		} `json:"Mounts"`
 		Memory   int64 `json:"Memory"`
 		NanoCpus int64 `json:"NanoCpus"`
 	} `json:"HostConfig"`
@@ -36,6 +44,14 @@ type provisionCreated struct {
 }
 
 func provisionNameEngine(t *testing.T, s *Server, containers, volumes map[string]bool) *[]provisionCreated {
+	return provisionEngine(t, s, containers, volumes, nil)
+}
+
+// provisionEngine is provisionNameEngine with images of the server's own:
+// the labels each one built here carries, by reference. Every other image is
+// one the engine has, unlabelled, except the dashboard's own names, which it
+// has not.
+func provisionEngine(t *testing.T, s *Server, containers, volumes map[string]bool, built map[string]map[string]string) *[]provisionCreated {
 	t.Helper()
 	var mu sync.Mutex
 	created := &[]provisionCreated{}
@@ -76,6 +92,16 @@ func provisionNameEngine(t *testing.T, s *Server, containers, volumes map[string
 			}
 			_ = json.NewEncoder(w).Encode(map[string]string{"Name": name})
 		case strings.HasPrefix(path, "/images/") && strings.HasSuffix(path, "/json"):
+			ref := strings.TrimSuffix(strings.TrimPrefix(path, "/images/"), "/json")
+			if labels, ok := built[ref]; ok {
+				_ = json.NewEncoder(w).Encode(map[string]any{"Id": ref, "Config": map[string]any{"Labels": labels}})
+				return
+			}
+			if strings.HasPrefix(ref, "jd-") {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"No such image"}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"Id":"postgres-image"}`))
 		case path == "/containers/create":
 			name := r.URL.Query().Get("name")
@@ -270,6 +296,234 @@ func TestProvisionOptionsListEveryTemplateWithItsVersions(t *testing.T) {
 	}
 }
 
+type provisionedOption struct {
+	Engine   string `json:"engine"`
+	Versions []struct {
+		Version   string         `json:"version"`
+		Image     string         `json:"image"`
+		EndOfLife *dbx.EndOfLife `json:"endOfLife"`
+		Build     *struct {
+			Ready bool   `json:"ready"`
+			Job   string `json:"job"`
+		} `json:"build"`
+	} `json:"versions"`
+	DefaultVersion string   `json:"defaultVersion"`
+	Extensions     []string `json:"extensions"`
+}
+
+// Each release says where it stands as a date, where the table has one, and a
+// release whose image is built here says whether it already is — from this
+// recipe, not an older one.
+func TestProvisionOptionsSayWhereEachReleaseStands(t *testing.T) {
+	s, router := dbTestRouter(t)
+	provisionEngine(t, s, map[string]bool{}, map[string]bool{}, map[string]map[string]string{
+		"jd-postgres-full:18": {recipeLabel: recipeDigest(postgresFullRecipe)},
+		"jd-postgres-full:17": {recipeLabel: "a1b2c3d4e5f6"},
+	})
+	options := readJSON[[]provisionedOption](t, do(t, router, http.MethodGet, "/databases/provision/options", ""))
+	byEngine := map[string]provisionedOption{}
+	for _, o := range options {
+		byEngine[o.Engine] = o
+	}
+	release := func(engine, version string) (found struct {
+		eol   *dbx.EndOfLife
+		ready *bool
+	}) {
+		t.Helper()
+		for _, v := range byEngine[engine].Versions {
+			if v.Version == version {
+				found.eol = v.EndOfLife
+				if v.Build != nil {
+					found.ready = &v.Build.Ready
+				}
+				return found
+			}
+		}
+		t.Fatalf("%s offers no %s", engine, version)
+		return found
+	}
+	if eol := release("postgres", "18").eol; eol == nil || eol.Date.Format("2006-01-02") != "2030-11-14" || eol.Product != "PostgreSQL" {
+		t.Errorf("PostgreSQL 18 = %+v", eol)
+	}
+	if eol := release("mysql", "8.0").eol; eol == nil || !eol.Past {
+		t.Errorf("MySQL 8.0 ended on 2026-04-30 and reads as %+v", eol)
+	}
+	if eol := release("mariadb", "10.6").eol; eol == nil || !eol.Past {
+		t.Errorf("MariaDB 10.6 ended on 2026-07-06 and reads as %+v", eol)
+	}
+	if eol := release("timescaledb", "17").eol; eol == nil || eol.Release != "17" {
+		t.Errorf("TimescaleDB on 17 is PostgreSQL 17's: %+v", eol)
+	}
+	if eol := release("redis", "8").eol; eol != nil {
+		t.Errorf("Redis has no dates in the table and was given %+v", eol)
+	}
+	if ready := release("postgres-full", "18").ready; ready == nil || !*ready {
+		t.Error("an image built from this recipe does not read as built")
+	}
+	if ready := release("postgres-full", "17").ready; ready == nil || *ready {
+		t.Error("an image built from an older recipe reads as built")
+	}
+	for engine, o := range byEngine {
+		recipe := provisionTemplates[engine].recipe != ""
+		for _, v := range o.Versions {
+			if (v.Build != nil) != recipe {
+				t.Errorf("%s %s: build state %+v on a template whose recipe is %v", engine, v.Version, v.Build, recipe)
+			}
+		}
+		if (len(o.Extensions) > 0) != recipe {
+			t.Errorf("%s: extensions %v", engine, o.Extensions)
+		}
+	}
+}
+
+// The catalogue as refreshed on 2026-10-17: every release it offers is one
+// the end-of-life table can date, where the table speaks for the engine at
+// all, and every default was being maintained that day. An offered release
+// with no date would be drawn with nothing to say whether it is current.
+func TestProvisionCatalogueDefaultsWereMaintainedWhenItWasRefreshed(t *testing.T) {
+	refreshed := time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC)
+	dated := map[string]bool{
+		dbx.FlavorPostgres: true, dbx.FlavorTimescaleDB: true, dbx.FlavorMySQL: true,
+		dbx.FlavorMariaDB: true, dbx.FlavorMongoDB: true, dbx.FlavorClickHouse: true,
+	}
+	for engine, tmpl := range provisionTemplates {
+		for _, v := range tmpl.versions {
+			eol, ok := dbx.ReleaseEndOfLife(tmpl.flavor, v.id, refreshed)
+			if ok != dated[tmpl.flavor] {
+				t.Errorf("%s %s: dated %v, and the table speaks for %s: %v", engine, v.id, ok, tmpl.flavor, dated[tmpl.flavor])
+			}
+			if v.image == tmpl.image && ok && eol.Past {
+				t.Errorf("%s: the default %s ended on %s", engine, v.id, eol.Date.Format("2006-01-02"))
+			}
+		}
+		if engine == "postgres" || engine == "pgvector" || engine == "postgis" || engine == "timescaledb" || engine == "postgres-full" {
+			if def, _ := tmpl.version(""); def.id != "18" {
+				t.Errorf("%s defaults to %s, not 18", engine, def.id)
+			}
+		}
+	}
+	// A floating tag is a different server on a different day, and a date
+	// that belongs to the line it floated off.
+	for engine, tmpl := range provisionTemplates {
+		for _, v := range tmpl.versions {
+			if strings.Contains(v.image, ":latest-") || (strings.HasSuffix(v.image, ":latest") && engine != "keydb" && engine != "dragonfly") {
+				t.Errorf("%s %s floats: %s", engine, v.id, v.image)
+			}
+		}
+	}
+}
+
+// PostgreSQL 18's image keeps its cluster under /var/lib/postgresql and
+// declares that the volume; earlier majors keep it a directory further down.
+// The named volume has to be where each one writes, or the data goes into an
+// anonymous volume that a recreate leaves behind.
+func TestProvisionMountsTheVolumeWhereEachMajorKeepsItsData(t *testing.T) {
+	s, router := dbTestRouter(t)
+	created := provisionNameEngine(t, s, map[string]bool{}, map[string]bool{})
+	for _, c := range []struct{ body, image, target string }{
+		{`{"engine":"postgres","name":"jd-a"}`, "postgres:18-alpine", "/var/lib/postgresql"},
+		{`{"engine":"postgres","name":"jd-b","version":"17"}`, "postgres:17-alpine", "/var/lib/postgresql/data"},
+		{`{"engine":"timescaledb","name":"jd-c"}`, "timescale/timescaledb:2.30.2-pg18", "/var/lib/postgresql"},
+		{`{"engine":"pgvector","name":"jd-d","version":"16"}`, "pgvector/pgvector:pg16", "/var/lib/postgresql/data"},
+		{`{"engine":"mariadb","name":"jd-e"}`, "mariadb:11.8", "/var/lib/mysql"},
+	} {
+		before := len(*created)
+		if rec := do(t, router, http.MethodPost, "/databases/provision", c.body); rec.Code != http.StatusAccepted {
+			t.Fatalf("provision %s = %d %s", c.body, rec.Code, rec.Body.String())
+		}
+		spec := (*created)[before]
+		if spec.Image != c.image || len(spec.HostConfig.Mounts) != 1 || spec.HostConfig.Mounts[0].Target != c.target ||
+			spec.HostConfig.Mounts[0].Type != "volume" || !strings.HasSuffix(spec.HostConfig.Mounts[0].Source, "-data") {
+			t.Errorf("%s: image %s mounts %+v, want its volume at %s", c.body, spec.Image, spec.HostConfig.Mounts, c.target)
+		}
+		if len(spec.Cmd) != 0 {
+			t.Errorf("%s: started with %q rather than the image's own command", c.body, spec.Cmd)
+		}
+	}
+}
+
+// The full template is never pulled: until its image has been built here from
+// the current recipe, a request is refused before anything is created. Once
+// it has, the server starts like any other, on the image's own command: the
+// image loads what its extensions need, where the Parameters page can change
+// it afterwards.
+func TestTheFullTemplateStartsOnlyFromTheImageBuiltHere(t *testing.T) {
+	s, router := dbTestRouter(t)
+	built := map[string]map[string]string{"jd-postgres-full:17": {recipeLabel: "a1b2c3d4e5f6"}}
+	created := provisionEngine(t, s, map[string]bool{}, map[string]bool{}, built)
+	for _, body := range []string{`{"engine":"postgres-full"}`, `{"engine":"postgres-full","version":"17"}`} {
+		rec := do(t, router, http.MethodPost, "/databases/provision", body)
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "image_not_built") {
+			t.Errorf("%s with no current build = %d %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	if len(*created) != 0 {
+		t.Fatalf("an image that was never built started %d containers", len(*created))
+	}
+
+	built["jd-postgres-full:18"] = map[string]string{recipeLabel: recipeDigest(postgresFullRecipe)}
+	rec := do(t, router, http.MethodPost, "/databases/provision", `{"engine":"postgres-full","database":"orders"}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("provision = %d %s", rec.Code, rec.Body.String())
+	}
+	if len(*created) != 1 {
+		t.Fatalf("%d containers were created", len(*created))
+	}
+	spec := (*created)[0]
+	if spec.Image != "jd-postgres-full:18" || len(spec.Cmd) != 0 || spec.HostConfig.Mounts[0].Target != "/var/lib/postgresql" ||
+		!strings.Contains(strings.Join(spec.Env, "\n"), "POSTGRES_DB=orders") {
+		t.Errorf("full template spec: image %s, command %q, env %q, mounts %+v", spec.Image, spec.Cmd, spec.Env, spec.HostConfig.Mounts)
+	}
+}
+
+// The recipe is the official image and the PostgreSQL project's packages of
+// the extensions the template says it carries, and it labels what it builds
+// with the digest the readiness check compares. The libraries two of them
+// need loaded at start are named in the configuration a new cluster is made
+// from, never on the command line, where they would outrank every change
+// made from the Parameters page.
+func TestTheFullRecipeIsTheOfficialImageAndItsOwnRepository(t *testing.T) {
+	recipe := postgresFullRecipe
+	if !strings.Contains(recipe, "FROM postgres:${PG_MAJOR}-trixie") ||
+		!strings.Contains(recipe, `LABEL io.just-dashboard.recipe="${JD_RECIPE}"`) || recipeLabel != "io.just-dashboard.recipe" {
+		t.Errorf("the recipe does not start from the official image or does not label its build:\n%s", recipe)
+	}
+	if !strings.Contains(recipe, `\1 = 'pg_cron,pgaudit'/" /usr/share/postgresql/postgresql.conf.sample`) ||
+		!strings.Contains(recipe, "ALTER SYSTEM SET cron.database_name = %L', current_database()") ||
+		!strings.Contains(recipe, "> /docker-entrypoint-initdb.d/") {
+		t.Errorf("the recipe does not preload pg_cron and pgaudit in the sample configuration, or does not point pg_cron at the server's database:\n%s", recipe)
+	}
+	if strings.Contains(recipe, "CMD") || strings.Contains(recipe, "ENTRYPOINT") || len(provisionTemplates["postgres-full"].bootstrap) != 0 {
+		t.Error("the full template replaces the official image's command")
+	}
+	packages := map[string]string{
+		"vector": "pgvector", "postgis": "postgis-3", "pg_cron": "cron", "pg_partman": "partman",
+		"pgaudit": "pgaudit", "hypopg": "hypopg", "pg_repack": "repack",
+	}
+	tmpl := provisionTemplates["postgres-full"]
+	if len(tmpl.extensions) != len(packages) {
+		t.Errorf("the template says it carries %v", tmpl.extensions)
+	}
+	for _, extension := range tmpl.extensions {
+		if !strings.Contains(recipe, `"postgresql-${PG_MAJOR}-`+packages[extension]+`"`) {
+			t.Errorf("%s is said to be carried and the recipe installs no package of it", extension)
+		}
+	}
+	for _, line := range strings.Split(recipe, "\n") {
+		if strings.Contains(line, "curl") || strings.Contains(line, "wget") || strings.Contains(line, "http") {
+			t.Errorf("the recipe fetches from outside the image's own repository: %q", line)
+		}
+	}
+	for _, library := range []string{"pg_cron", "pgaudit"} {
+		if !slices.Contains(tmpl.extensions, library) {
+			t.Errorf("%s is preloaded and not carried", library)
+		}
+	}
+	if recipeDigest(recipe) == recipeDigest(recipe+" ") || len(recipeDigest(recipe)) != 12 {
+		t.Error("the digest does not follow the recipe")
+	}
+}
+
 // A request names a version from the template's own list, an account and a
 // password within what the image can take, and gets exactly that container —
 // on this server only, unless it asked for more.
@@ -335,8 +589,11 @@ func TestProvisionRefusesWhatItsTemplateDoesNotOffer(t *testing.T) {
 	s, router := dbTestRouter(t)
 	created := provisionNameEngine(t, s, map[string]bool{}, map[string]bool{})
 	for _, body := range []string{
-		`{"engine":"postgres","version":"18"}`,
+		`{"engine":"postgres","version":"13"}`,
 		`{"engine":"postgres","version":"16-alpine"}`,
+		`{"engine":"mariadb","version":"11"}`,
+		`{"engine":"timescaledb","version":"15"}`,
+		`{"engine":"postgres-full","version":"16"}`,
 		`{"engine":"postgres","version":"latest; rm -rf /"}`,
 		`{"engine":"postgres","image":"evil/postgres:16"}`,
 		`{"engine":"cockroachdb"}`,

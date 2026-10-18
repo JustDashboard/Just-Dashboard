@@ -193,6 +193,18 @@
           "kind": "changed",
           "text": "Keep database activity for 7, 14, 30 or 90 days",
           "detail": "Databases → Metrics export chooses how long the recorded activity is kept, with the space each window takes. Readings older than a week are thinned to the last of every five minutes so a long window stays small, and the activity charts offer the longer ranges. Choosing a shorter window deletes the history outside it."
+        },
+        {
+        },
+        {
+          "kind": "added",
+          "text": "Start PostgreSQL 18 by default, and a full PostgreSQL built on the server with seven extensions",
+          "detail": "New PostgreSQL, pgvector, PostGIS and TimescaleDB servers start on 18, which keeps its data in the volume where the image expects it. PostgreSQL full is the official image with pgvector, PostGIS, pg_cron, pg_partman, pgaudit, hypopg and pg_repack from the PostgreSQL project's own packages: its image is built on the server the first time, with the build's output shown, and pg_cron and pgaudit are loaded at start. TimescaleDB is pinned to 2.30.2, and MySQL 9.7, MariaDB 12.3 and ClickHouse 26.8 are offered."
+        },
+        {
+          "kind": "changed",
+          "text": "Say how long each database release is maintained",
+          "detail": "Add a database says beside each release when its support ends, and keeps the releases already past it, such as MySQL 8.0 and MariaDB 10.6, behind Older versions. A database's Home and General settings say the same beside its version. Databases already running on any release keep working."
         }
       ]
     },
