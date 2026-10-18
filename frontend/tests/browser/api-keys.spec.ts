@@ -130,6 +130,85 @@ test("replacing a metrics-only key makes another metrics-only key, never a wider
   await expect(secret).not.toContainText("/api/v1/system/host")
 })
 
+test("replacing an MCP key makes another MCP key for the same databases, at its role", async ({
+  page,
+}) => {
+  const mcpKey = {
+    id: 8,
+    userId: 1,
+    name: "claude-code",
+    prefix: "vpsd_88cc99dd",
+    role: "limited" as const,
+    scope: "mcp" as const,
+    createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+    revoked: false,
+    connections: [
+      { connectionId: 1, access: "write" as const },
+      { connectionId: 2, access: "read" as const },
+      { connectionId: 7, access: "read" as const },
+    ],
+  }
+  const { calls } = await mockKeys(page, "limited", [mcpKey])
+  await page.goto("/account/keys")
+  await expect(rows(page)).toContainText("MCP only")
+  await action(page, "claude-code", "Replace key")
+  const editor = page.getByRole("dialog", { name: "Replace API key" })
+  await expect(editor).toContainText("Opens the MCP endpoint only")
+  await editor.getByRole("button", { name: "Create replacement" }).click()
+  // The replacement first reads which databases a key can still be given.
+  await expect
+    .poll(() => calls[0])
+    .toEqual({
+      method: "POST",
+      path: "/tokens/mcp",
+      // blog, protected since, is left behind: no MCP key reaches it.
+      body: {
+        name: "claude-code",
+        role: "limited",
+        ttlDays: 90,
+        connections: [
+          { connectionId: 1, access: "write" },
+          { connectionId: 7, access: "read" },
+        ],
+      },
+    })
+  const secret = page.getByRole("dialog", { name: "Your new key" })
+  await expect(secret).toContainText("claude mcp add --transport http just-dashboard")
+  await expect(secret).toContainText("/api/v1/mcp")
+})
+
+test("an MCP key replaced by an owner who can no longer change a database only reads", async ({
+  page,
+}) => {
+  const { calls } = await mockKeys(page, "readonly", [
+    {
+      id: 8,
+      userId: 1,
+      name: "cursor",
+      prefix: "vpsd_88cc99dd",
+      role: "readonly",
+      scope: "mcp",
+      createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+      revoked: false,
+      connections: [{ connectionId: 1, access: "write" }],
+    },
+  ])
+  await page.goto("/account/keys")
+  await action(page, "cursor", "Replace key")
+  await page
+    .getByRole("dialog", { name: "Replace API key" })
+    .getByRole("button", { name: "Create replacement" })
+    .click()
+  await expect
+    .poll(() => calls[0]?.body)
+    .toEqual({
+      name: "cursor",
+      role: "readonly",
+      ttlDays: 90,
+      connections: [{ connectionId: 1, access: "read" }],
+    })
+})
+
 test("the first key keeps its one-time secret through refresh, then discards it on Done", async ({
   page,
 }) => {

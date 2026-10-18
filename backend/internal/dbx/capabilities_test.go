@@ -107,6 +107,8 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		// The editor's assistant, and the policies it drafts.
 		"assistant":       "sql",
 		"assistantPolicy": "postgres -cockroachdb",
+		// What an AI client reaches through the MCP endpoint.
+		"mcp": "sql",
 
 		// the schema
 		"ddl":               "sql -clickhouse",

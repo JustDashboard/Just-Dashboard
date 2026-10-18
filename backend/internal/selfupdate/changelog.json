@@ -128,6 +128,11 @@
           "detail": "The Backups page's Copy database dialog can now send the copy to another server saved here. SQL databases go from one to the other as they are read, without being written to this server's disk; MongoDB and Redis stage the dump in a directory of their own and remove it."
         },
         {
+          "kind": "added",
+          "text": "Let AI clients reach the databases you choose through an MCP server",
+          "detail": "Databases → MCP server makes keys for Claude Code, Cursor, VS Code or any client that speaks the Model Context Protocol over Streamable HTTP, and writes each client's configuration. A key opens the MCP endpoint and nothing else, and reaches only the databases it was given, each to read or to change. Its tools list the databases, read their tables and structure, sample rows, explain a statement and run read-only queries inside the engine's read-only scope; where the key may change a database it runs one statement at a time, held to what its owner may run in the SQL editor. Protected databases are never reachable, results are bounded, and every call is in the audit log as the shape of its statement without its values. A key's databases can be changed without making a new one."
+        },
+        {
           "kind": "security",
           "text": "Keep passwords and other values out of PostgreSQL's statement list",
           "detail": "Databases → Performance → Statements and the busiest statements on Home showed PostgreSQL's CREATE ROLE and ALTER ROLE with the password in clear, and SET, COMMENT, DEFAULT and DO statements with their values, to any account that may read. Every value in PostgreSQL's statement text is now replaced with a placeholder before it leaves the server, a password or a setting written without quotes included, and the $1 markers the server writes stay, so a statement's plan is still asked for with values put back in. A role created or changed from Access is no longer kept in pg_stat_statements at all when the connection signs in as a superuser."
