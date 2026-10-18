@@ -3,10 +3,15 @@
   "releases": [
     {
       "version": "0.7.5",
-      "date": "2026-10-13",
-      "title": "Operate without advisory panels",
-      "summary": "Automatic attention panels and settings recommendations are removed from the dashboard and their advisory APIs are retired. Operational tools, updates, diagnostics and the checks required to apply changes safely remain available.",
+      "date": "2026-10-18",
+      "title": "Remote Desktop, and databases you can run end to end",
+      "summary": "Remote Desktop opens your own Windows PCs, Macs and Linux desktops in a browser tab over Tailscale, with no one at the computer, and can stream a screen as video from Sunshine. Databases becomes the place to run them: an assistant beside the SQL editor and an MCP server for your AI clients, point-in-time recovery, TLS, PgBouncer, major-version upgrades, row-level security, schema comparison, measured plans with index trials, seed data, and imports kept current until you cut over. Automatic attention panels and settings recommendations are gone; the tools, updates and safety checks they sat beside remain.",
       "changes": [
+        {
+          "kind": "added",
+          "text": "Open your own PCs, Macs and Linux desktops in a browser tab, unattended, over Tailscale",
+          "detail": "Workspace → Remote Desktop draws this browser, this server and each computer you add, with whether its Remote Desktop, Screen Sharing or VNC answers, and offers the tailnet's Windows, Mac and Linux devices not added yet. Control opens a session through guacd with the clipboard both ways, file upload, the key combinations a browser keeps, and a Mac's own account asked for on the page. Stream plays the screen as video from Sunshine on the computer, up to 120 fps, over WebRTC on the tailnet. A session stays connected while you use other pages, and its column says where its round trip goes. The computers are reached over the tailnet, so nothing is opened to the internet."
+        },
         {
           "kind": "added",
           "text": "Limit the memory and processors a database's container may use",
