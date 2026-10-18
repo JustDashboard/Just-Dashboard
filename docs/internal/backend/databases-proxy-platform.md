@@ -14,8 +14,9 @@ capability table below), never by a page.
 discovery, dumps. `internal/api` is the routes. `handlers_db.go` mounts `/databases` behind the
 protected-connection guard, and each surface registers its own routes from its own file —
 `mountDatabaseAdminRoutes`, `…RedisRoutes`, `…MongoRoutes`, `…InventoryRoutes`, `…ConnectionRoutes`,
-`…WorkbenchRoutes`, `…SchemaRoutes`, `…OpsRoutes`, `…TransferRoutes`, `…PITRRoutes` and `…UpgradeRoutes` — grouped by the capability
-it needs. [Routes](#routes) lists every one with its capability, whether it is destructive, the
+`…WorkbenchRoutes`, `…SchemaRoutes`, `…OpsRoutes`, `…TransferRoutes`, `…PITRRoutes`, `…UpgradeRoutes`
+and `…AssistantRoutes` — grouped by the capability it needs. [Routes](#routes) lists every one with its
+capability, whether it is destructive, the
 action it is audited as and what a protected connection does with it. The pages over them are the
 `/databases/*` row of the [frontend feature map](../frontend/feature-map.md), and the checks that
 depend on what a request carries are stated once in
@@ -754,7 +755,8 @@ this is how it is built, and the Protected column of [Routes](#routes) gives eve
   - *Refused*: rows, structure, imports, an import from another server, a restore, a copy, the drop,
     a major-version upgrade and its revert, roles, privileges, settings, extensions, keys, streams, ACL
     users, documents, collections, indexes, validation rules, the profiler, a statistics reset,
-    row-level security policies and their switches.
+    row-level security policies and their switches, and the editor's assistant, which changes nothing
+    but would send the connection's structure to a model.
   It guards the dashboard's own controls and is as strong as the classification — a `SELECT` that
   calls a function of the operator's own which writes passes (the built-in ones that run SQL or outlive
   the rollback are not reads, see [the query runner](#the-query-runner)); it is not a sandbox around the
@@ -1018,6 +1020,83 @@ statements with their risk, duration, row counts and the engine's error text (`d
 a saved query
 (`GET`/`POST …/queries`, `PUT`/`DELETE …/queries/{qid}`, `db_saved_queries`) is dashboard state, so it
 stays editable on a protected connection.
+
+### The editor's assistant
+
+The SQL editor carries an assistant beside the statement (`internal/assistant`,
+`api/handlers_db_assistant.go`): it drafts a statement from a question, says why a statement failed
+and what a plan does, and on PostgreSQL drafts row-level security policies. It is off until an
+administrator chooses who answers it, and what it is sent and what it may do are decided here, not by
+the page.
+
+- **The provider is the operator's own.** `PUT /databases/assistant` (`system.admin`) takes
+  Anthropic — a Claude model from a closed list (`assistant.AnthropicModels`, Claude Opus 5.5 by
+  default) and an API key — or any server that speaks OpenAI's chat completions: OpenAI, a gateway,
+  or a model on this machine (Ollama, LM Studio, vLLM, llama.cpp), by its address, a model name and a
+  key if it asks for one. The address is HTTPS unless it is loopback, a private range or the
+  tailnet's `100.64.0.0/10`, and one with no path is given `/v1`. Nothing is saved until the
+  provider has said that the key, the address and the model answer, asked without asking the model
+  anything — Anthropic's `GET /v1/models/{model}`, the server's own `GET /models` with the model
+  looked for on it (a server that answers that path 404 or 405 lists nothing, and its first question
+  says whether the model is there) — so a mistyped key is refused under its field. The settings are one row of
+  `settings` (`databases.assistant`), sealed whole with `JD_MASTER_KEY`; the key is never read back,
+  and a blank key keeps the stored one only for the same provider at the same address, so a key is
+  never sent to a server typed in after it. `GET /databases/assistant` (any role) answers the
+  provider, the model, the address, whether a key is set and the model list; `DELETE` forgets it all.
+  No provider request follows a redirect, because the key travels in a header.
+- **What is sent is the structure.** A conversation begins by reading the schema in focus through the
+  catalogue the schema pages use (`assistant.ReadSchema`: `ListTables`, `BuildSchemaGraphWithLimit`
+  for 150 tables, and `DescribeTable` for up to eight more the first question names) and writing it
+  into the system prompt as tables and views with their columns, types, keys and references — never
+  row estimates, defaults or comments, any of which can be a value somebody typed. It is bounded
+  (`assistant.SchemaText`): the tables the question names, then the tables they reference and are
+  referenced by, then the rest, described up to 48,000 characters, named up to 12,000, then counted.
+  A row reaches the model only in a result attached to a question by the person asking: at most 50
+  rows of 30 columns and 200 characters a value, held to that on the server whatever the page sent.
+  The page cuts to the same bounds before sending, because the editor's results carry long text and
+  bytea whole and fifty rows of them would pass the request's 4 MiB limit.
+  The editor's statement, an error or a plan go only with the question that carries them, and every
+  value of the database stays out of the audit entry.
+- **Nothing runs.** A statement the assistant writes is text: the page opens it in a tab or writes it
+  at the cursor when the person presses to, and their own Run sends it, through the classifier like
+  any other. The one tool the model is offered, `describe_tables`, reads more of the same structure,
+  and only once the person allows it: an answer that asks for it ends with the calls pending, and
+  `POST …/assistant` with `allow: true` runs them (`false` declines them, which the model is told). A
+  question asked instead declines them too. The input of a call is checked field by field before
+  anybody is asked (`assistant.Calls`), and a call for anything else, or one that cannot be read,
+  runs nothing. An OpenAI-compatible server is offered no tool: many local models refuse a request
+  that carries one, so it is told the bounded schema and asked to say what it is missing.
+- **A conversation is held on the server** (`assistant.Store`), in memory, per person and
+  connection. Its system prompt and its tool are fixed when it begins and every turn is appended, so
+  what the provider is sent is the request before with the new turn added — the prompt cache, and the
+  reasoning a tool call was made with on the newest Claude models, both depend on that. A turn that
+  does not finish — stopped, failed, refused, cut off in the middle of a call — is undone back to
+  where it began. At most 200 conversations, 30 minutes idle and 40 turns; a restart, a change of the
+  settings (`Settings.Revision`) or another schema begins a new one.
+- **Refused on a protected connection, bounded and audited.** `POST /databases/{id}/assistant` is not
+  on `protectedRoutesAllowed`, so a protected connection refuses it with `409 connection_read_only`
+  before anything is read or sent. It takes `service.control`, the query route's capability. The
+  install has one budget of model calls whoever asks (20 a minute, a burst of 6) and answers four at
+  once. Each call is audited as `database.assistant.ask` or `database.assistant.tool`: the
+  connection, the person, the task, the provider and model, the tokens under `usage` (the audit log
+  redacts any field whose name says token; a turn stopped or failed part-way records what the provider
+  had counted by then, which for Anthropic is the input and for an OpenAI-compatible server, whose count
+  comes last, nothing), how it ended (`answered`, `asked`, `cut`, `refused`,
+  `cancelled`, `failed`) and what was attached by kind and count, never the question or a value.
+- **The answer streams** as one JSON object a line (`application/x-ndjson`): `start` (the
+  conversation, the model, what the schema text holds), `thinking`, `text`, `described` (what an
+  allowed call read), and `done` (why it ended, the tokens, the calls pending, whether the turn was
+  kept) or `error`. Everything that can refuse the request does so before the provider is asked, as an
+  ordinary error with its status, and closing the request stops the provider's answer. The Anthropic
+  request is the streamed Messages API, spoken over HTTP rather than through the SDK because it is one
+  request and the other provider is plain HTTP anyway: effort `medium`, thinking left adaptive, the
+  system prompt cached and the conversation under automatic caching, and the server-side refusal
+  fallback (`fallbacks: "default"`) for Opus and Sonnet. The OpenAI-compatible request carries the
+  model, the messages, the stream and the usage option, and nothing a server might not know.
+- **Engines** come from the capability table: `assistant` is every engine with a dialect, and
+  `assistantPolicy` is PostgreSQL and its forks but CockroachDB. The editor offers the assistant to a
+  role with `service.control` on those engines; a failed statement and a plan offer a question of
+  their own once it is set up.
 
 ### The table editor: rows, values and cells
 
@@ -2644,7 +2723,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the fourteen it calls): 285 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the fifteen it calls): 289 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -2670,15 +2749,18 @@ and `protectReadOnlyConnections`.
   through with `?preview=1`, which shows the statement and runs nothing) or `refused` with
   `409 connection_read_only`. It is `protectedRouteVerdicts` in `api/handlers_db_protect_test.go`,
   the list written out by hand that `TestProtectionCoversEveryMutatingRoute` holds the router to:
-  44 open, 13 by content, 28 preview only, 69 refused.
+  44 open, 13 by content, 28 preview only, 74 refused.
 
-**Every database** (23)
+**Every database** (26)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/databases/` | read | — | — | — |
 | `POST` | `/databases/` | `system.admin` | — | `database.connection.create` | — |
 | `POST` | `/databases/adopt` | `system.admin` | — | `database.connection.adopt`, `.refresh` | — |
+| `GET` | `/databases/assistant` | read | — | — | — |
+| `PUT` | `/databases/assistant` | `system.admin` | — | `database.assistant.configure` | — |
+| `DELETE` | `/databases/assistant` | `system.admin` | — | `database.assistant.remove` | — |
 | `GET` | `/databases/backups/summary` | read | — | — | — |
 | `GET` | `/databases/detected` | `system.admin` | — | — | — |
 | `GET` | `/databases/drivers` | read | — | — | — |
@@ -2739,10 +2821,11 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/stats` | read | — | — | — |
 | `GET` | `/databases/{id}/url` | `system.admin` | — | `database.connection.reveal` † | — |
 
-**Rows and statements** (24)
+**Rows and statements** (25)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
+| `POST` | `/databases/{id}/assistant` | `service.control` | — | `database.assistant.ask`, `.tool` | refused |
 | `GET` | `/databases/{id}/browse` | read | — | — | — |
 | `GET` | `/databases/{id}/cell` | read | — | — | — |
 | `POST` | `/databases/{id}/changes` | `service.control` | by content: a delete | `database.rows.change` | by content |

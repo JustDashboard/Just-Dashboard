@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
+import { SidebarLeftClose, SidebarLeftOpen, Sparkles } from "@/components/icons"
 import { del, errorMessage, post, put } from "@/lib/api"
 import { usePanelSize } from "@/lib/panel-size"
 import { notify } from "@/lib/toast"
@@ -18,6 +18,20 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { EngineMark, SectionFrame } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
+import {
+  AssistantPane,
+  type AssistantContext,
+} from "@/components/database/query/assistant/assistant-pane"
+import { AssistantSettingsSheet } from "@/components/database/query/assistant/settings-sheet"
+import {
+  attachable,
+  planSource,
+  type AssistantTask,
+} from "@/components/database/query/assistant/transcript"
+import {
+  useAssistant,
+  useAssistantSettings,
+} from "@/components/database/query/assistant/use-assistant"
 import { CommandStrip } from "@/components/database/query/command-strip"
 import type { SchemaTable } from "@/components/database/query/completion"
 import { dialectOf, qualifiedName, quoteName } from "@/components/database/query/dialect"
@@ -66,6 +80,7 @@ import { useResultExport } from "@/components/database/query/use-result-export"
 import { useRunner } from "@/components/database/query/use-runner"
 
 const RAIL = { fallback: 272, min: 208, max: 480 }
+const ASSISTANT = { fallback: 380, min: 300, max: 640 }
 const SPLIT = { fallback: 0.58, min: 0.15, max: 0.8 }
 const DEFAULT_LIMIT = 500
 const NO_STANDING: Standing = { target: null, at: 0, of: 0 }
@@ -90,7 +105,7 @@ const clamp = (value: number, min: number, max: number) => Math.min(Math.max(val
  * strength of what was classified a moment ago.
  */
 export function SqlQuery() {
-  const { id, conn, engine, selection, select } = useDatabase()
+  const { id, conn, engine, selection, select, readOnly } = useDatabase()
   const { can } = useAuth()
   const { confirm, dialog } = useAsking()
   const ids = useId()
@@ -214,6 +229,32 @@ export function SqlQuery() {
   const [split, setSplit] = useViewState("databases.query.split", SPLIT.fallback)
   const share = clamp(typeof split === "number" ? split : SPLIT.fallback, SPLIT.min, SPLIT.max)
   const compact = mainWidth > 0 && mainWidth < 640
+
+  // The assistant stands beside the editor where the frame has room for the
+  // three of them, and lies over it, like the rail, where it has not.
+  const offersAssistant = engine.can("assistant") && can("service.control")
+  const assistantBeside = frameWidth === 0 || frameWidth >= 960
+  const [assistantPinned, setAssistantPinned] = useViewState("databases.query.assistant", false)
+  const [assistantOver, setAssistantOver] = useState(false)
+  const assistantShown = offersAssistant && (assistantBeside ? assistantPinned : assistantOver)
+  const [assistantWidth, setAssistantWidth, resetAssistantWidth] = usePanelSize(
+    "databases.query.assistant",
+    ASSISTANT.fallback,
+  )
+  const assistantMax = Math.max(
+    ASSISTANT.min,
+    Math.min(ASSISTANT.max, frameWidth - (railShown && railBeside ? railColumn : 0) - 420),
+  )
+  const assistantColumn = clamp(assistantWidth, ASSISTANT.min, assistantMax)
+  const showAssistant = useCallback(
+    (shown: boolean) => {
+      if (assistantBeside) return setAssistantPinned(shown)
+      setAssistantOver(shown)
+      // Over the editor there is room for one of the two.
+      if (shown) setRailOver(false)
+    },
+    [assistantBeside, setAssistantPinned],
+  )
 
   /* -------------------------------------------------------------- schema */
 
@@ -404,6 +445,36 @@ export function SqlQuery() {
 
   const exporter = useResultExport(id)
 
+  /* ----------------------------------------------------------- assistant */
+
+  const assistantSettings = useAssistantSettings(offersAssistant)
+  const assistant = useAssistant(id)
+  const [settingUp, setSettingUp] = useState(false)
+  // What the tab holds that a question can carry, each only when the reader
+  // attaches it: the statement the cursor is on, the last result, the
+  // statement the run failed on, the last plan.
+  const ran = held?.run?.phase === "done" ? held.run : undefined
+  const resultStep = ran?.steps.findLast(
+    (step) => step.status === "ok" && (step.result?.columns.length ?? 0) > 0,
+  )
+  const explained =
+    held?.explain?.phase === "done" && held.explain.answer ? held.explain : undefined
+  const assistantContext: AssistantContext = {
+    statement: targetSql || tab.sql,
+    result: resultStep?.result ? attachable(resultStep.result) : undefined,
+    failed: failedStep?.error ? { sql: failedStep.sql, error: failedStep.error } : undefined,
+    plan: explained?.answer
+      ? { sql: explained.sql, text: planSource(explained.answer) }
+      : undefined,
+  }
+  // The results and the plan offer a question of their own once there is
+  // somebody to ask it of.
+  const assistantReady = offersAssistant && !readOnly && assistantSettings.data?.configured === true
+  const askAssistant = (task: AssistantTask) => {
+    showAssistant(true)
+    assistant.ask(task, picked)
+  }
+
   /* ------------------------------------------------------ saved queries */
 
   const canWrite = can("service.control")
@@ -571,7 +642,12 @@ export function SqlQuery() {
       <div
         ref={frame}
         data-slot="sql-workbench"
-        style={{ "--jd-query-rail": `${railColumn}px` } as React.CSSProperties}
+        style={
+          {
+            "--jd-query-rail": `${railColumn}px`,
+            "--jd-query-assistant": `${assistantColumn}px`,
+          } as React.CSSProperties
+        }
         className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border bg-card"
       >
         {railShown && (
@@ -640,7 +716,11 @@ export function SqlQuery() {
               label={railShown ? "Hide the rail" : "Show the rail"}
               aria-pressed={railShown}
               className="mx-1.5 size-7 shrink-0 self-center max-sm:size-8"
-              onClick={() => (railBeside ? setRailPinned(!railPinned) : setRailOver(!railOver))}
+              onClick={() => {
+                if (railBeside) return setRailPinned(!railPinned)
+                setRailOver(!railOver)
+                if (!railOver) setAssistantOver(false)
+              }}
             >
               {railShown ? <SidebarLeftClose /> : <SidebarLeftOpen />}
             </IconAction>
@@ -669,6 +749,21 @@ export function SqlQuery() {
               }}
               full={tabs.tabs.length >= MAX_TABS}
             />
+            {offersAssistant && (
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-pressed={assistantShown}
+                className={cn(
+                  "mx-1.5 h-7 shrink-0 gap-1.5 self-center px-2 max-sm:size-8 max-sm:px-0",
+                  assistantShown && "text-brand",
+                )}
+                onClick={() => showAssistant(!assistantShown)}
+              >
+                <Sparkles />
+                <span className="max-sm:sr-only">Assistant</span>
+              </Button>
+            )}
           </div>
 
           <div
@@ -771,6 +866,28 @@ export function SqlQuery() {
               onExport={(sql, format, rows) => void exporter.run(sql, format, rows)}
               exporting={exporter.running}
               onShowInEditor={showInEditor}
+              onAskAboutError={
+                assistantReady
+                  ? (step) =>
+                      askAssistant({
+                        kind: "error",
+                        prompt: "",
+                        statement: step.sql,
+                        error: step.error ?? "",
+                      })
+                  : undefined
+              }
+              onAskAboutPlan={
+                assistantReady && assistantContext.plan
+                  ? () =>
+                      askAssistant({
+                        kind: "plan",
+                        prompt: "",
+                        statement: assistantContext.plan!.sql,
+                        plan: assistantContext.plan!.text,
+                      })
+                  : undefined
+              }
               empty={empty}
               starters={starters}
               onStart={(snippet) => openStatement(snippet.sql, snippet.title)}
@@ -778,7 +895,65 @@ export function SqlQuery() {
             />
           </div>
         </div>
+
+        {assistantShown && (
+          <div
+            className={cn(
+              "flex min-h-0 flex-col border-hairline bg-card",
+              assistantBeside
+                ? "relative w-(--jd-query-assistant) shrink-0 border-l"
+                : "absolute inset-0 z-30",
+            )}
+          >
+            {assistantBeside && (
+              <ResizeHandle
+                side="right"
+                label="Assistant width"
+                value={assistantColumn}
+                min={ASSISTANT.min}
+                max={assistantMax}
+                onChange={(px, commit) =>
+                  setAssistantWidth(clamp(px, ASSISTANT.min, assistantMax), commit)
+                }
+                onReset={resetAssistantWidth}
+                className="absolute inset-y-0 -left-1 z-20"
+              />
+            )}
+            <AssistantPane
+              assistant={assistant}
+              settings={assistantSettings}
+              schema={picked}
+              tables={schema.model.tables.filter((table) => !picked || table.schema === picked)}
+              context={assistantContext}
+              canSetUp={can("system.admin")}
+              onSetUp={() => setSettingUp(true)}
+              onOpen={(sql, title) => {
+                openStatement(sql, title)
+                if (!assistantBeside) setAssistantOver(false)
+              }}
+              onInsert={(sql) => {
+                editor.current?.insert(sql)
+                if (!assistantBeside) setAssistantOver(false)
+                setTimeout(() => editor.current?.focus(), 0)
+              }}
+              onClose={() => showAssistant(false)}
+            />
+          </div>
+        )}
       </div>
+
+      {offersAssistant && (
+        <AssistantSettingsSheet
+          open={settingUp}
+          settings={assistantSettings.data}
+          onClose={() => setSettingUp(false)}
+          onSaved={() => {
+            assistantSettings.refresh()
+            assistant.reset()
+          }}
+          confirm={confirm}
+        />
+      )}
 
       {naming && (
         <SaveDialog
