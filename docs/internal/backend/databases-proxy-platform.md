@@ -1718,7 +1718,10 @@ stays editable on a protected connection.
     to its own parentheses, because it follows the function's name and what follows is the rest of
     the statement. `GET …/server/grants` lists both (`aclexplode` over `pg_proc.proacl` and
     `pg_attribute.attacl`; a function by `routine` and `arguments`, a column by `table` and
-    `column`), and `pg_default_acl` rows for functions.
+    `column`), and `pg_default_acl` rows for functions. The Access page's matrix asks for a whole
+    schema when every object it lists is pressed alike (`plannedRequests`), and object by object when
+    the schema holds ones it does not list — the functions an extension installed, which it hides, or
+    a group the catalogue cut off at its limit — because `ALL … IN SCHEMA` would reach those as well.
   - *What a non-administrator is not shown.* The role list and detail are on the read surface, so
     two things are withheld there: the password entries of a Redis ACL rule (`withoutACLSecrets`),
     and the values of a PostgreSQL role's own settings (`rolconfig`) whose name is one the settings

@@ -163,6 +163,8 @@ export type DbCatalog = {
     string,
     { name: string; schema?: string; signature?: string; extension?: string }[] | undefined
   >
+  /** The groups cut off at the catalogue's limit. */
+  truncated?: string[]
 }
 
 /** One user of `GET /databases/{id}/redis/acl`. */

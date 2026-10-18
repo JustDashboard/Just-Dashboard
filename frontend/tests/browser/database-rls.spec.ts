@@ -139,7 +139,7 @@ const CATALOG = {
     sequences: [],
     types: [],
   },
-  truncated: [],
+  truncated: [] as string[],
   limit: 5000,
 }
 
@@ -190,6 +190,8 @@ type Sent = { method: string; path: string; preview: boolean; body: Body }
 
 type Options = DatabaseMock & {
   security?: Security
+  /** What `GET /catalog` answers instead of `CATALOG`. */
+  catalog?: typeof CATALOG
   /** The session's capabilities, when neither an admin's nor a viewer's. */
   capabilities?: string[]
   /** `GET /rls` fails while this is set. */
@@ -257,7 +259,7 @@ async function mockRls(page: Page, options: Options = {}) {
     const rest = url.pathname.replace(/^\/api\/v1\/databases\/1/, "")
     const method = request.method()
 
-    if (rest === "/catalog") return json(route, CATALOG)
+    if (rest === "/catalog") return json(route, options.catalog ?? CATALOG)
     if (rest === "/table") return json(route, detailOf(url.searchParams.get("table") ?? "notes"))
     if (rest === "/server/roles") return json(route, ROLES)
     if (rest === "/rls") {
@@ -459,7 +461,7 @@ test("a policy is begun from a template and sent as the form says, after its sta
     withCheck: `"tenant_id"::text = current_setting('app.tenant_id', true)`,
   })
 
-  await form.getByRole("button", { name: "Restrictive" }).click()
+  await form.getByRole("radio", { name: "Restrictive" }).click()
   await form.getByRole("button", { name: "Add a role" }).click()
   await page.getByRole("menuitem", { name: "web" }).click()
   await expect(form).toContainText("AS RESTRICTIVE")
@@ -872,7 +874,7 @@ const REPORTING_GRANTS = [
   },
 ]
 
-async function mockGrants(page: Page, options: DatabaseMock = {}) {
+async function mockGrants(page: Page, options: Options = {}) {
   await mockRls(page, options)
   const sent: { path: string; preview: boolean; body: Body }[] = []
   await page.route("**/api/v1/databases/1/server/**", async (route) => {
@@ -953,10 +955,16 @@ test("EXECUTE is granted on one function of several that share a name", async ({
   await expect.poll(() => server.sent.filter((one) => !one.preview).length).toBe(1)
 })
 
+// A schema whose every function the matrix lists.
+const APPLICATION_ONLY = {
+  ...CATALOG,
+  objects: { ...CATALOG.objects, functions: FUNCTIONS.filter((one) => !one.extension) },
+}
+
 test("EXECUTE on every function of a schema is one request that can cover later ones", async ({
   page,
 }) => {
-  const server = await mockGrants(page)
+  const server = await mockGrants(page, { catalog: APPLICATION_ONLY })
   await visit(page, "/databases/1/access?account=readers")
   await matrix(page)
     .getByRole("button", { name: /^Functions/ })
@@ -972,6 +980,34 @@ test("EXECUTE on every function of a schema is one request that can cover later 
     .poll(() => server.sent.filter((one) => one.preview).at(-1)?.body)
     .toEqual({ level: "function", schema: "public", privileges: ["EXECUTE"], future: true })
 })
+
+for (const [held, catalog] of [
+  ["an extension's functions", CATALOG],
+  ["more functions than the catalogue lists", { ...APPLICATION_ONLY, truncated: ["functions"] }],
+] as [string, typeof CATALOG][]) {
+  test(`EXECUTE on every listed function is asked for one by one when the schema holds ${held}`, async ({
+    page,
+  }) => {
+    const server = await mockGrants(page, { catalog })
+    await visit(page, "/databases/1/access?account=readers")
+    await matrix(page)
+      .getByRole("button", { name: /^Functions/ })
+      .click()
+    await matrix(page).getByRole("button", { name: "EXECUTE on every function in public" }).click()
+    await page
+      .locator("[data-slot=grants-pending]")
+      .getByRole("button", { name: "Review…" })
+      .click()
+    const review = page.getByRole("dialog", { name: /Change what readers holds/ })
+    // ALL ROUTINES IN SCHEMA would reach the functions the matrix does not show.
+    await expect(review).toContainText(
+      `GRANT EXECUTE ON ROUTINE "public"."order_count"(cid text) TO "readers"`,
+    )
+    await expect(review).not.toContainText("ALL ROUTINES")
+    await expect(review.getByRole("switch", { name: /created later in public/ })).toHaveCount(0)
+    expect(server.sent.filter((one) => one.preview).every((one) => one.body.routine)).toBe(true)
+  })
+}
 
 test("privileges are granted on single columns, and columns pressed alike are one request", async ({
   page,
