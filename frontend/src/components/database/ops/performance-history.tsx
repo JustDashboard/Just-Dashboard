@@ -28,7 +28,7 @@ import { HistoryRange } from "@/components/database/home/activity"
 import { highest, roundTicks } from "@/components/database/home/charts"
 import { statementVerb } from "@/components/database/home/kinds"
 import { compact } from "@/components/database/home/readings"
-import { HISTORY_RANGES } from "@/components/database/home/use-samples"
+import { DEFAULT_RETENTION_HOURS, HISTORY_RANGES } from "@/components/database/home/use-samples"
 import { CodeView } from "@/components/database/kit"
 import { oneLine } from "@/components/database/ops/queries"
 import {
@@ -155,7 +155,12 @@ export function StatementHistoryView() {
                 onChange={(event) => setFilter(event.target.value)}
               />
             )}
-            <HistoryRange hours={hours} onHours={setHours} label="Statement history range" />
+            <HistoryRange
+              hours={hours}
+              onHours={setHours}
+              retentionHours={DEFAULT_RETENTION_HOURS}
+              label="Statement history range"
+            />
           </>
         }
       />
@@ -406,7 +411,12 @@ function HistoryPanel({
       <div className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <p className="text-body text-muted-foreground">Over {windowWords(hours)}</p>
-          <HistoryRange hours={hours} onHours={onHours} label="Statement history range" />
+          <HistoryRange
+            hours={hours}
+            onHours={onHours}
+            retentionHours={DEFAULT_RETENTION_HOURS}
+            label="Statement history range"
+          />
         </div>
         {entry && <Figures entry={entry} facts={data} />}
         <ViewRead

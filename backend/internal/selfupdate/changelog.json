@@ -181,6 +181,18 @@
           "kind": "added",
           "text": "Upgrade a PostgreSQL server to a newer major release, and revert it",
           "detail": "Databases → Settings → Version checks a newer release of a server Databases started before anything changes, then copies its roles, databases, extensions and parameters into a new server beside it, counts every table, and puts the new server in its place under the same name, port and password, so connections and deployments keep working. The old server is kept, stopped, until the upgrade is finished or reverted, and an upgrade that fails, or a dashboard that stops in the middle of one, puts the old server back."
+        },
+        {
+        },
+        {
+          "kind": "added",
+          "text": "Scrape database metrics with Prometheus",
+          "detail": "Databases → Metrics export gives the address of a Prometheus endpoint that serves the recorded activity of every database, one set of series per connection labelled with its driver, name and id, with a scrape config to copy. It answers only to an API key, and a key can be made there that is limited to reading these metrics and nothing else."
+        },
+        {
+          "kind": "changed",
+          "text": "Keep database activity for 7, 14, 30 or 90 days",
+          "detail": "Databases → Metrics export chooses how long the recorded activity is kept, with the space each window takes. Readings older than a week are thinned to the last of every five minutes so a long window stays small, and the activity charts offer the longer ranges. Choosing a shorter window deletes the history outside it."
         }
       ]
     },

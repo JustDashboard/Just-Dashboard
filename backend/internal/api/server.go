@@ -98,6 +98,11 @@ type Server struct {
 	dbMetricsStop  context.CancelFunc
 	dbMetricsDone  chan struct{}
 	dbMetricOffset int
+	// dbMetricThinnedAt is when thinning the history past its raw window was
+	// last tried, and dbMetricThinnedTo how far back it has completed; only
+	// the recorder's pass reads or writes them.
+	dbMetricThinnedAt time.Time
+	dbMetricThinnedTo int64
 	// The statement recorder's readings between one and the next
 	// (database_statements.go).
 	dbStatements statementHistory

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"sync"
@@ -16,7 +17,6 @@ import (
 )
 
 const databaseMetricEvery = 30 * time.Second
-const databaseMetricRetention = 7 * 24 * time.Hour
 
 // The same bounded statistics read serves live requests and the recorder.
 // It reads engine statistics views only, never application tables or keys.
@@ -92,6 +92,27 @@ func (s *Server) stopDatabaseMetrics() {
 	}
 }
 
+// recordedDatabaseConns are the saved connections the recorder reads. SQLite is
+// a file, with no activity counters or sessions to record.
+func (s *Server) recordedDatabaseConns(ctx context.Context) ([]*dbConnRecord, error) {
+	rows, err := s.Store.DB.QueryContext(ctx, `SELECT `+dbConnColumns+` FROM db_connections ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var records []*dbConnRecord
+	for rows.Next() {
+		rec, err := scanDBConn(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		if rec.conn.Driver != dbx.DriverSQLite {
+			records = append(records, rec)
+		}
+	}
+	return records, rows.Err()
+}
+
 func (s *Server) recordDatabaseMetrics(ctx context.Context) {
 	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
@@ -103,26 +124,9 @@ func (s *Server) recordDatabaseMetrics(ctx context.Context) {
 	if err != nil {
 		s.Log.Warn("database alert rules could not be read", "err", err)
 	}
-	rows, err := s.Store.DB.QueryContext(ctx, `SELECT `+dbConnColumns+` FROM db_connections ORDER BY id`)
+	records, err := s.recordedDatabaseConns(ctx)
 	if err != nil {
 		s.Log.Warn("database activity connections could not be read", "err", err)
-		return
-	}
-	var records []*dbConnRecord
-	for rows.Next() {
-		rec, err := scanDBConn(rows.Scan)
-		if err != nil {
-			rows.Close()
-			return
-		}
-		// SQLite is a file, with no activity counters or sessions to record.
-		if rec.conn.Driver != dbx.DriverSQLite {
-			records = append(records, rec)
-		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
 		return
 	}
 	if len(records) > 0 {
@@ -161,10 +165,7 @@ send:
 	// Pruning has its own deadline so an unavailable engine cannot prevent it.
 	pruneCtx, pruneCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer pruneCancel()
-	if _, err := s.Store.DB.ExecContext(pruneCtx, `DELETE FROM db_metric_samples WHERE at < ?`,
-		time.Now().Add(-databaseMetricRetention).UnixMilli()); err != nil {
-		s.Log.Warn("database activity history could not be pruned", "err", err)
-	}
+	s.pruneDatabaseMetrics(pruneCtx)
 	if len(rules) == 0 {
 		return
 	}
@@ -244,26 +245,49 @@ func (s *Server) handleDBStatsHistory(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return httpx.Internal(err)
 	}
+	retentionDays, err := s.databaseMetricRetentionDays(r.Context())
+	var bad unreadableRetention
+	if errors.As(err, &bad) {
+		// Reading deletes nothing, so a week stands in until a window is chosen.
+		retentionDays, err = databaseMetricRetentionOptions[0], nil
+	}
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	retentionHours := retentionDays * 24
 	hours := 1
 	if raw := r.URL.Query().Get("hours"); raw != "" {
 		hours, err = strconv.Atoi(raw)
-		if err != nil || hours < 1 || hours > 168 {
-			return httpx.BadRequest("hours must be between 1 and 168")
+		maxHours := databaseMetricRetentionOptions[len(databaseMetricRetentionOptions)-1] * 24
+		if err != nil || hours < 1 || hours > maxHours {
+			return httpx.BadRequest("hours must be between 1 and %d", maxHours)
 		}
+		// A range chosen while a longer retention was set is still a range the
+		// reader may have saved: it answers with what is kept, and says how
+		// much that is in retentionHours, rather than failing every poll.
+		hours = min(hours, retentionHours)
 	}
 	window := time.Duration(hours) * time.Hour
 	bucket := max(databaseMetricEvery.Milliseconds(), window.Milliseconds()/720)
 	// Keep the newest raw totals per bucket so rates remain differences of
 	// totals. Carry missed intervals through bucketing instead of drawing
-	// an outage as continuous activity.
+	// an outage as continuous activity. Samples past the raw window are one
+	// per coarse step, so a gap there is measured in steps, not in 30 seconds.
+	// The winners are picked on timestamps alone: a 90-day window would
+	// otherwise carry every snapshot through the window functions.
+	now := time.Now()
 	rows, err := s.Store.DB.QueryContext(r.Context(), `WITH intervals AS (
-		SELECT at, snapshot, at - LAG(at) OVER (ORDER BY at) > ? AS gap
+		SELECT at, at - LAG(at) OVER (ORDER BY at) > CASE WHEN LAG(at) OVER (ORDER BY at) < ? THEN ? ELSE ? END AS gap
 		FROM db_metric_samples WHERE connection_id=? AND identity=? AND at>=?
 	), buckets AS (
-		SELECT at, snapshot, MAX(COALESCE(gap, 0)) OVER (PARTITION BY at / ?) AS gap,
+		SELECT at, MAX(COALESCE(gap, 0)) OVER (PARTITION BY at / ?) AS gap,
 		ROW_NUMBER() OVER (PARTITION BY at / ? ORDER BY at DESC) AS position FROM intervals
-	) SELECT at, snapshot, gap FROM buckets WHERE position=1 ORDER BY at`,
-		3*databaseMetricEvery.Milliseconds(), id, databaseMetricIdentity(rec), time.Now().Add(-window).UnixMilli(), bucket, bucket)
+	) SELECT b.at, s.snapshot, b.gap FROM buckets b
+	JOIN db_metric_samples s ON s.connection_id=? AND s.identity=? AND s.at=b.at
+	WHERE b.position=1 ORDER BY b.at`,
+		now.Add(-databaseMetricRawWindow).UnixMilli(), 3*databaseMetricCoarseEvery.Milliseconds(), 3*databaseMetricEvery.Milliseconds(),
+		id, databaseMetricIdentity(rec), now.Add(-window).UnixMilli(), bucket, bucket,
+		id, databaseMetricIdentity(rec))
 	if err != nil {
 		return httpx.Internal(err)
 	}
@@ -282,7 +306,7 @@ func (s *Server) handleDBStatsHistory(w http.ResponseWriter, r *http.Request) er
 		return httpx.Internal(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
-		"samples": samples, "everySeconds": int(databaseMetricEvery.Seconds()), "retentionHours": 168,
+		"samples": samples, "everySeconds": int(databaseMetricEvery.Seconds()), "retentionHours": retentionHours,
 	})
 	return nil
 }

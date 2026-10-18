@@ -1194,14 +1194,22 @@ stays editable on a protected connection.
   Redis statistics reads disable command retries and honor the context deadline for socket replies.
   SQLite has no activity counters and is skipped. It uses the same bounded statistics readers as
   `GET /{id}/stats`, never a keyspace scan or application-table read. Successful snapshots are saved
-  in `db_metric_samples` for seven days, with pruning even when engines fail to answer. History is
+  in `db_metric_samples` for the retention the operator chose (7, 14, 30 or 90 days, the
+  `databases.metrics.retention_days` setting, a week until chosen), with pruning even when engines
+  fail to answer; a retention that cannot be read prunes nothing. Readings older than seven days
+  are thinned once an hour to the newest of each five minutes (`database_metrics_retention.go`):
+  the history derives rates from differences of stored totals, so the last total in a step stands
+  in for it where an average would corrupt every counter. History is
   keyed by connection and a hash of the saved driver and sealed DSN, so a replaced connection target
   cannot inherit another target's history; an in-flight read is saved only if that target still matches.
   Forgetting the connection cascades to its samples. No credentials, rows, query text or key values
-  are recorded. `GET /{id}/stats/history?hours=1` is on the read surface, accepts 1–168 hours, returns
-  the newest raw totals in each of at most about 720 time buckets and carries missed intervals as gaps.
+  are recorded. `GET /{id}/stats/history?hours=1` is on the read surface, accepts 1 to 2160 hours,
+  answers no more than the retention (a longer range saved before the retention was shortened is
+  clamped to it, and `retentionHours` in the answer says how much that is), returns the newest raw totals in each of at most about
+  720 time buckets and carries missed intervals as gaps, measured in five-minute steps past the
+  seven-day mark so thinning is not drawn as an outage.
   It reads only the dashboard store, so history survives restarts and remains readable during an
-  engine outage. Home offers 1h, 6h, 24h and 7d ranges and derives rates from stored totals; negative
+  engine outage. Home offers 1h, 6h, 24h and 7d ranges, and 14d, 30d and 90d when the retention reaches them, and derives rates from stored totals; negative
   counter deltas and recording gaps longer than 90 seconds are never drawn as continuous rates.
   History begins when this version of the dashboard starts; past activity cannot be reconstructed
   from engine totals. Each pass ends by handing what it read to the
@@ -1249,6 +1257,31 @@ stays editable on a protected connection.
   one statement's figures and about 168 points for its charts, and 404 for a statement never
   recorded. Hours are 1–168, as `/stats/history` takes them. Neither is audited. The page is
   Performance → Statement history.
+
+- **Metrics export** (`api/database_metrics_export.go`, `database_metrics_retention.go`).
+  `GET /api/v1/metrics/databases` serves the recorder's newest reading of every connection in the
+  Prometheus text format (`text/plain; version=0.0.4`, `no-store`). It reads `db_metric_samples`
+  and dials nothing, so a scrape costs the databases nothing and works while one is down. Every
+  series carries `driver`, `name` and `id`; the names are `jd_database_*`, counters ending
+  `_total`. `up` is 1 while the newest reading is under 90 seconds old, `last_sample_timestamp_seconds`
+  says when it was taken, and a server whose reading is older exports those two series alone, so
+  stale figures are never charted as current. A connection never recorded, and SQLite, have none.
+  SQL engines export their counters and gauges by the engine's own key in snake case, beside the
+  shared connection, size, uptime and pool series; Redis and MongoDB export the fixed sets in
+  `redisPromReads` and `mongoPromReads`. The route is for **API keys only**: no credential is 401, a session
+  cookie is `403 token_required`, and a key narrowed to `metrics.read` is admitted here and
+  refused everywhere else ([request lifecycle](../architecture/request-lifecycle.md)). It is not
+  audited per scrape, like every read; minting a key records `dashboard.token.create` with its
+  `scope`. `GET /databases/metrics-export` (any role) answers the endpoint, the retention, the
+  bytes the history takes and an estimate for each window from the average saved reading and the
+  servers read in the last day, `null` until there is something to measure; `PUT` (administrator,
+  behind `s.destructive` because a shorter window deletes history at the recorder's next pass,
+  audited as `database.metrics.retention` with `days` and `previousDays`) chooses it. The UI is the
+  *Metrics export* dialog of the control center
+  (`components/database/fleet/metrics-export-dialog.tsx`): the URL, a button that makes a
+  metrics-only key and shows it once, a copyable `prometheus.yml` job, and the retention choice,
+  confirmed when it shortens. The activity charts offer the 14, 30 and 90 day ranges that the
+  retention allows.
 
 - **The diagnostic surface is what a data browser usually lacks.** `activity.go` lists what the server is
   running now with the blocking session named, turning twenty "slow" sessions into one culprit, and can
@@ -2330,7 +2363,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the twelve it calls): 256 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the twelve it calls): 258 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -2358,7 +2391,7 @@ and `protectReadOnlyConnections`.
   the list written out by hand that `TestProtectionCoversEveryMutatingRoute` holds the router to:
   41 open, 12 by content, 20 preview only, 66 refused.
 
-**Every database** (20)
+**Every database** (22)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -2375,6 +2408,8 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/inventory/connect` | `system.admin` | — | `database.inventory.connect` | — |
 | `POST` | `/databases/inventory/ignore` | `system.admin` | — | `database.inventory.ignore`, `.unignore` | — |
 | `POST` | `/databases/inventory/scan` | `system.admin` | — | — | — |
+| `GET` | `/databases/metrics-export` | read | — | — | — |
+| `PUT` | `/databases/metrics-export` | `system.admin` | yes | `database.metrics.retention` | — |
 | `GET` | `/databases/orm/targets` | read | — | — | — |
 | `POST` | `/databases/provision` | `system.admin` | — | `database.server.provision` | — |
 | `GET` | `/databases/provision/capacity` | `system.admin` | — | — | — |

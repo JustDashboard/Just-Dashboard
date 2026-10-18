@@ -109,6 +109,16 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/tls/authority", s.handle(s.handleDBTLSAuthority))
 		r.Method(http.MethodGet, "/fleet", s.handle(s.handleDBFleet))
 		r.Method(http.MethodGet, "/topology", s.handle(s.handleDBTopology))
+		// How long the recorded activity is kept and where it is scraped from.
+		// Every role may read how it is set up; choosing a shorter window
+		// deletes history, so the change is an administrator's.
+		r.Method(http.MethodGet, "/metrics-export", s.handle(s.handleDBMetricsExportGet))
+		r.Group(func(r chi.Router) {
+			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+			s.destructive(r, func(r chi.Router) {
+				r.Method(http.MethodPut, "/metrics-export", s.handle(s.handleDBMetricsExportPut))
+			})
+		})
 		r.Method(http.MethodGet, "/{id}/consumers", s.handle(s.handleDBConsumers))
 		r.Method(http.MethodGet, "/{id}/resources", s.handle(s.handleDBResources))
 		s.mountDatabaseAdminRoutes(r)
