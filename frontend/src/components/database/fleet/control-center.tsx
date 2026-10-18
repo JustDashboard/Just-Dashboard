@@ -387,7 +387,7 @@ export function ControlCenter() {
         aside={
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
             {verdict && <Status tone={verdict.tone} label={verdict.label} />}
-            <span className="flex items-center gap-2">
+            <span className="flex flex-wrap items-center gap-2">
               <MetricsExport admin={admin} />
               <McpServer />
               {admin && (
