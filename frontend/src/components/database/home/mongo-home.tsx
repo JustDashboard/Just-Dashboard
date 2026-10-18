@@ -90,6 +90,7 @@ export function DocumentHome() {
       <Activity
         hours={stats.hours}
         onHours={stats.setHours}
+        retentionHours={stats.retentionHours}
         views={MONGO_VIEWS}
         samples={samples}
         loading={stats.loading}

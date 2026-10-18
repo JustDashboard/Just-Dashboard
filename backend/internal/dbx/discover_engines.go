@@ -330,6 +330,8 @@ var imageRules = []imageRule{
 	{"cloudnative-pg/postgresql", "postgres", "cloudnative-pg", stylePostgres},
 	{"groonga/pgroonga", "postgres", "pgroonga", stylePostgres},
 	{"pgautoupgrade/pgautoupgrade", "postgres", "", stylePostgres},
+	// The dashboard's own "full" template, built on the server it runs on.
+	{"jd-postgres-full", "postgres", "full", stylePostgres},
 	{"bitnami/postgresql", "postgres", "bitnami", styleBitnamiPostgres},
 	{"bitnamilegacy/postgresql", "postgres", "bitnami", styleBitnamiPostgres},
 	{"timescale/timescaledb", "timescaledb", "", stylePostgres},

@@ -49,7 +49,7 @@ func TestRestoreSubsetWritesOnlyTheChosenEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 	dest := filepath.Join(root, "restored")
-	res, err := extractArchiveBounded(context.Background(), artifact, dest, 1, 0,
+	res, err := extractArchiveBounded(context.Background(), ArchiveFile{Path: artifact}, dest, 1, 0,
 		restorePlan{filter: newPathFilter([]RestoreOptions{{Paths: []string{"source-0001/etc"}}})})
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +96,7 @@ func TestRestoreInPlaceMapsEachSourceRootBackToItsPath(t *testing.T) {
 	for _, source := range manifest.Sources {
 		plan.roots[source.ArchivePath] = source.Path
 	}
-	res, err := extractArchiveBounded(context.Background(), artifact, "", 1, 0, plan)
+	res, err := extractArchiveBounded(context.Background(), ArchiveFile{Path: artifact}, "", 1, 0, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestRestoreInPlaceMapsEachSourceRootBackToItsPath(t *testing.T) {
 	// An entry outside every recorded root is left in the archive.
 	plan.roots = map[string]string{"source-0002": two}
 	write(filepath.Join(one, "etc", "app.conf"), "conf v3")
-	if _, err := extractArchiveBounded(context.Background(), artifact, "", 1, 0, plan); err != nil {
+	if _, err := extractArchiveBounded(context.Background(), ArchiveFile{Path: artifact}, "", 1, 0, plan); err != nil {
 		t.Fatal(err)
 	}
 	if body, _ := os.ReadFile(filepath.Join(one, "etc", "app.conf")); string(body) != "conf v3" {

@@ -584,6 +584,10 @@ func TestEveryStructureRouteCanBeShownWithoutRunning(t *testing.T) {
 		"PATCH /ddl/row-security": `{"table":"orders","enabled":true}`,
 		"DELETE /ddl/policy":      `{"table":"orders","name":"mine"}`,
 		"POST /ddl/truncate":      `{"table":"customers"}`,
+		"POST /ddl/routine":       `{"kind":"function","name":"f","language":"sql","returns":"int","body":"SELECT 1"}`,
+		"POST /ddl/trigger":       `{"name":"orders_stamp","table":"orders","timing":"after","events":["insert"],"forEach":"row","body":"SELECT 1"}`,
+		"DELETE /ddl/routine":     `{"kind":"function","name":"f"}`,
+		"DELETE /ddl/trigger":     `{"name":"orders_touch","table":"orders"}`,
 		"DELETE /ddl/table":       `{"table":"orders"}`,
 		"DELETE /ddl/column":      `{"table":"customers","name":"name"}`,
 		"DELETE /ddl/index":       `{"table":"orders","name":"orders_customer"}`,
@@ -627,8 +631,8 @@ func TestEveryStructureRouteCanBeShownWithoutRunning(t *testing.T) {
 			t.Errorf("%q is in this test and is not a route", key)
 		}
 	}
-	if shown != 10 {
-		t.Errorf("%d routes showed a statement, want the ten SQLite has one for", shown)
+	if shown != 12 {
+		t.Errorf("%d routes showed a statement, want the twelve SQLite has one for", shown)
 	}
 	if after := schemaText(t, db); after != before {
 		t.Errorf("a preview changed the database:\n%s\n---\n%s", before, after)

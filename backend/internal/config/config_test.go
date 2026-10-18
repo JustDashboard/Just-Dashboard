@@ -155,3 +155,21 @@ func writeDatabase(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 }
+
+func TestRemoteDesktopBridgeMustBeHostAndPort(t *testing.T) {
+	t.Setenv("JD_MASTER_KEY", strings.Repeat("ab", 32))
+	t.Setenv("JD_ADDR", "127.0.0.1:0")
+	t.Setenv("JD_REMOTE_DESKTOP_BRIDGE", "100.64.0.5")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "JD_REMOTE_DESKTOP_BRIDGE") {
+		t.Fatalf("a bridge without a port must refuse to start, got %v", err)
+	}
+	t.Setenv("JD_REMOTE_DESKTOP_BRIDGE", " 100.64.0.5:8080 ")
+	c, err := Load()
+	if err != nil || c.RemoteDesktopBridge != "100.64.0.5:8080" {
+		t.Fatalf("bridge %q, %v", c.RemoteDesktopBridge, err)
+	}
+	t.Setenv("JD_REMOTE_DESKTOP_BRIDGE", "")
+	if c, err := Load(); err != nil || c.RemoteDesktopBridge != "" {
+		t.Fatalf("no bridge: %q, %v", c.RemoteDesktopBridge, err)
+	}
+}

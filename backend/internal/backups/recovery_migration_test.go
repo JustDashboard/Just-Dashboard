@@ -38,7 +38,7 @@ func TestRecoveryMigrationPreservesExistingJobsAndDoesNotInventEvidence(t *testi
 	if err != nil || job.Name != "existing-job" || job.Schedule != "0 3 * * *" || job.Sources[0] != "/srv/important" || job.Recovery != nil || len(job.SQLitePaths) != 0 || job.Revision != 1 {
 		t.Fatalf("existing job changed: %+v %v", job, err)
 	}
-	if !job.Enabled || !job.HasCredentials || job.Retention != 7 || job.RetentionDays != 0 || len(job.DatabaseDumps) != 0 || len(job.PauseContainers) != 0 || job.Target.Path != "/var/backups" {
+	if !job.Enabled || !job.HasCredentials || job.Retention != 7 || job.RetentionDays != 0 || len(job.DatabaseDumps) != 0 || len(job.PauseContainers) != 0 || job.Encrypt || job.Target.Path != "/var/backups" {
 		t.Fatalf("migration changed existing fields or additive defaults: %+v", job)
 	}
 	var sealed string

@@ -41,6 +41,7 @@ export const ChartPanel = memo(function ChartPanel({
   axisFormat,
   domain,
   yTicks,
+  axisWidth,
   height = 180,
   events,
   onZoom,
@@ -64,6 +65,8 @@ export const ChartPanel = memo(function ChartPanel({
   domain?: [number | string, number | string]
   /** Y ticks, where the domain would split into unround steps. */
   yTicks?: number[]
+  /** A fixed y-axis gutter, so a column of charts starts its plots on one line. */
+  axisWidth?: number
   height?: number
   events?: MetricEvent[]
   onZoom?: (from: number, to: number) => void
@@ -125,6 +128,7 @@ export const ChartPanel = memo(function ChartPanel({
               height={height}
               domain={domain}
               yTicks={yTicks}
+              axisWidth={axisWidth}
               unit={unit}
               format={format}
               axisFormat={axisFormat}

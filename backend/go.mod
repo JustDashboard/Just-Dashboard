@@ -3,6 +3,7 @@ module github.com/Wayy01/Just-Dashboard/backend
 go 1.26.8
 
 require (
+	filippo.io/age v1.2.1
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.37
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.36

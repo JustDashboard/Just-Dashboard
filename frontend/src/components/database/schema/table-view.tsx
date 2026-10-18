@@ -82,6 +82,8 @@ import {
 } from "@/components/database/schema/policies"
 import { dropPolicyRequest } from "@/components/database/schema/policy"
 import { RoleTester } from "@/components/database/schema/role-test"
+import { TriggerDialog } from "@/components/database/schema/program-forms"
+import { triggerFunctions } from "@/components/database/schema/programs"
 import { selectStatement } from "@/components/database/schema/select"
 import { MaintenanceBand, TableStatistics } from "@/components/database/schema/statistics"
 import {
@@ -116,6 +118,7 @@ type Form =
   | { type: "edit-policy"; policy: DbPolicy }
   | { type: "row-security" }
   | { type: "replace-view" }
+  | { type: "add-trigger" }
 
 const TOUCH = "max-sm:h-8"
 
@@ -767,7 +770,16 @@ export function TableView({
                 <PoliciesPlaceholder error={security.error} onRetry={security.refresh} />
               )
             ) : open === "triggers" ? (
-              <Triggers triggers={triggers} read={catalog !== undefined} word={word} />
+              <Triggers
+                triggers={triggers}
+                read={catalog !== undefined}
+                word={word}
+                onNew={
+                  mayWrite && mayDestroy && has("triggers") && isTable
+                    ? () => setForm({ type: "add-trigger" })
+                    : undefined
+                }
+              />
             ) : open === "definition" ? (
               <>
                 {kind === "view" && replace?.supported === false && mayWrite && (
@@ -855,6 +867,17 @@ export function TableView({
           mayTurnOff={mayDestroy}
           onClose={() => setForm(null)}
           onDone={policiesDone}
+        />
+      )}
+      {data && form?.type === "add-trigger" && (
+        <TriggerDialog
+          schemas={catalog?.schemas ?? []}
+          schema={data.schema}
+          tables={[data.name]}
+          table={data.name}
+          functions={triggerFunctions(catalog)}
+          onClose={() => setForm(null)}
+          onDone={done}
         />
       )}
       {data && form?.type === "replace-view" && (
@@ -1567,23 +1590,36 @@ function Triggers({
   triggers,
   read,
   word,
+  onNew,
 }: {
   triggers: SchemaObject[]
   /** The catalogue that lists them has been read. */
   read: boolean
   word: string
+  /** Asks for the form that makes a trigger on this table, where the role and the engine allow one. */
+  onNew?: () => void
 }) {
   const { href } = useDatabase()
   if (!read) return <TableSkeleton />
+  const add = onNew && (
+    <div className="flex shrink-0 justify-end border-b border-hairline px-4 py-1.5">
+      <Button size="xs" variant="outline" className={TOUCH} onClick={onNew}>
+        <Plus />
+        New trigger
+      </Button>
+    </div>
+  )
   if (triggers.length === 0) {
     return (
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {add}
         <EmptyNote className="px-4 py-10">No trigger fires on this {word}.</EmptyNote>
       </div>
     )
   }
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
+      {add}
       <ul className="divide-y divide-hairline border-b border-hairline">
         {triggers.map((trigger) => (
           <li key={trigger.name}>

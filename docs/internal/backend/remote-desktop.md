@@ -8,12 +8,35 @@ browser tab, from `/remote-desktop`. The backend is `internal/remotedesk`; the h
 A session draws the computer one of two ways, switched in its header and kept in the address
 (`?mode=stream`):
 
-- **Control** (the default) is guacd speaking RDP or VNC to the computer. It needs nothing installed
-  on the computer beyond its own Remote Desktop or Screen Sharing, but VNC is a pull protocol: each
-  frame is asked for after the last arrived, so a 50 ms path caps it near twenty frames a second, and
-  a Mac's Retina framebuffer makes each frame large.
+- **Control** is guacd speaking RDP or VNC to the computer. It needs nothing installed on the
+  computer beyond its own Remote Desktop or Screen Sharing, but VNC is a pull protocol: each frame is
+  asked for after the last arrived, so a 50 ms path caps it near twenty frames a second, and a Mac's
+  Retina framebuffer makes each frame large. Apple's Screen Sharing is worse than that for any client
+  but Apple's own: it serves them ZRLE or raw at about one update a second under motion, so Control
+  on a Mac is for signing in and setting up, and the session's column says so.
 - **Stream** is Sunshine on the computer encoding its screen as H.264 at its own frame rate, received
   by a bridge on this server and played in the page ([Stream mode](#stream-mode)).
+
+A computer opened without a mode in its address opens in its own default (`defaultSessionMode`):
+Stream for a Mac paired with Sunshine, Control for everything else. The address and the column's
+switch choose; a held session keeps whichever it has.
+
+**What a session says of itself.** Each mode measures itself once a second and shows the figures in
+the column's *Live* block and the header (`lib/remote-desktop-stats.ts`). Control wraps the tunnel the
+client was given: guacd ends every frame with a `sync` carrying its clock and the client answers the
+same `sync` once the frame is drawn, so frames sent, frames drawn and the time to draw one are read
+off the two; guacd calls that time the client's processing lag and sends fewer, rougher frames as it
+grows past 20 ms, so a high figure is the browser holding the session back. Stream counts the
+frames of the bridge page's video element (`requestVideoFrameCallback`) and, over WebRTC, the time
+from a frame's last packet to its showing, which is the browser's own share of the delay; the rest
+is the path. The header also says the tailnet's path to the computer, direct or which relay.
+
+**Before a session, the path is warmed.** Tailscale looks for a direct path to a peer only when
+there is traffic, and lets one lapse after idle minutes, so a session otherwise opens through the
+nearest relay at twice the round trip until one is found. The session page reads its computer just
+before it connects, and that read (`Service.View`) asks `tailscale ping -c 3 --timeout 1s <ip>` in
+the background for a peer that is online and not direct (`Options.Warm`, `netx.TailscaleWarm`, a
+tailnet address only), at most once a minute per peer.
 
 ## How a session travels
 
@@ -31,9 +54,12 @@ browser ──WebSocket "guacamole"──▶ backend ──TCP 127.0.0.1──�
   among those values, so **the password never reaches the browser**; the page only ever sees the
   screen.
 - **After `ready`, the backend relays** (`Session.Relay`). guacd's output is read as whole
-  instructions and sent in text frames that always end on a `;`, at most about 8 KiB each and
-  flushed as soon as nothing more is buffered, because the browser client parses every frame as
-  whole instructions. From the browser, the tunnel's own channel (the empty opcode) is answered
+  instructions and sent in text frames that always end on a `;`, flushed as soon as nothing more is
+  buffered and otherwise at 64 KiB, because the browser client parses every frame as whole
+  instructions; the size only decides how finely a backlog is cut. The handshake offers PNG and
+  JPEG, never WebP: guacd uses WebP in JPEG's place for the parts of the screen that change often,
+  and libwebp costs several times libjpeg-turbo's CPU per tile, which on this server is what caps
+  the frame rate rather than the tailnet's bandwidth. From the browser, the tunnel's own channel (the empty opcode) is answered
   here: a `ping` is echoed, as Guacamole's own servlet does, and never forwarded; everything else is
   passed to guacd untouched.
 - **Lengths count code points, not bytes** (`protocol.go`). The reader scans whole buffered chunks
@@ -80,8 +106,11 @@ a container removed by hand reads as missing.
   binding, so a container someone edited to publish on every address is not one the backend dials.
   Nothing binds a routable address; [invariant 7](../security/invariants.md#invariants-that-must-not-regress) is unchanged.
 - **Hardening.** All capabilities dropped, `no-new-privileges`, 2 GiB memory without swap, 512 PIDs,
-  half the default CPU shares (encoding a busy screen must not starve the dashboard), json-file logs
-  capped at 2 × 5 MB, restart `unless-stopped`.
+  the ordinary CPU shares and no CPU quota (guacd starts an encoder thread per CPU for each
+  connection, and a quota stalls a frame half-encoded), json-file logs capped at 2 × 5 MB, restart
+  `unless-stopped`. The container carries `io.justdashboard.remote-desktop.revision`
+  (`guacdRevision`): `Server.Start` runs `UpgradeEngine`, which makes a running engine again when an
+  older dashboard made it, its volume kept.
 - **Reaching computers.** The container is on its own bridge; Docker's NAT carries its connections
   out through the host's routes, the tailnet's included, so guacd reaches a `100.x` computer the way
   the host does.
@@ -132,8 +161,25 @@ browser ──HTTPS / WebSocket──▶ backend ──HTTP 127.0.0.1──▶ M
   jitter buffer (`playoutDelayHint` 0), so a lost packet costs that packet rather than stalling
   the frames behind it the way TCP does; the signalling still rides the authenticated WebSocket,
   so a tailnet device without a dashboard session gets nothing from the ports. Off a tailnet the
-  picture rides the dashboard's own HTTPS connection (`websocket`). The page decodes H.264 with
-  WebCodecs, which needs the secure context the dashboard already is.
+  picture rides the dashboard's own HTTPS connection (`websocket`), and the column says what that
+  costs. The page decodes H.264 with WebCodecs, which needs the secure context the dashboard
+  already is.
+- **A bridge elsewhere.** The picture always passes through the bridge, so a browser and a computer
+  near each other and far from this server pay the server's distance twice. `JD_REMOTE_DESKTOP_BRIDGE`
+  (`host:port` on the tailnet) names a Moonlight Web the operator runs on a machine near them, a PC
+  of their own included, and the dashboard drives it in the container's place (`remoteBridge`):
+  the proxy forwards to it, pairing and the host list go to it, and its status is whether it
+  answers (`probeBridge`, held ten seconds). Nothing is installed or removed from here; the install
+  job says so, and removal is refused with where it is. Its WebRTC is taken to be published on its
+  own address (`EngineStatus.Media` is the host), so a browser on the tailnet is offered WebRTC as
+  for the local bridge. The remote bridge needs the same `PATH_PREFIX` and `FORWARDED_HEADER` as the
+  seeded one, `DISABLE_DEFAULT_WEBRTC_ICE_SERVERS=true`, a `WEBRTC_PORT_RANGE` it publishes, and
+  `nat_1to1` naming its own tailnet address in its config. **It trusts the account header from
+  anyone who reaches its port**, so it must listen on its tailnet address only and be reachable
+  from this server alone (a Tailscale ACL, or its own firewall); the dashboard's sign-in is still
+  the only one for anything that comes through the proxy. Whether a browser reaches it over WebRTC
+  or the WebSocket, the WebSocket now runs browser → this server → that bridge, so a bridge far from
+  both is worse than the container.
 - **A bridge made by an older dashboard is made again.** The container carries
   `io.justdashboard.remote-desktop.revision` (`bridgeRevision` and the media address); an install
   that finds another one stops and removes the container, keeps its volume (so its pairings), and
@@ -143,11 +189,14 @@ browser ──HTTPS / WebSocket──▶ backend ──HTTP 127.0.0.1──▶ M
 - **The bridge's own page draws the stream.** The session page frames
   `/api/v1/remote-desktop/bridge/stream.html?hostId=…&appId=…` (Sunshine's *Desktop* app). The page
   reads its settings from this origin's `localStorage` (`mlSettings`), so the session page writes
-  them just before it loads the frame: the transport, H.264, a frame queue of one (a frame that
-  arrives late is dropped for the next rather than shown behind it), and the reader's quality
-  (Light 720p60 at 8 Mb/s, Smooth 1080p60 at 20, Sharp 1440p60 at 40, Max 1440p120 at 80; a
-  computer whose screen runs at 60 Hz sends 60), over whatever the reader changed in the stream's
-  own menu.
+  them just before it loads the frame: the transport, H.264, the bridge's own frame queue of three
+  (it drops a frame only past that many waiting and asks Sunshine for a whole new picture after one,
+  so a queue of one dropped on every hiccup and spent the bitrate on keyframes), and the reader's
+  quality (Light 720p60 at 8 Mb/s, Smooth 1080p60 at 20, Sharp 1440p60 at 40, Max 1440p120 at 80,
+  which are Moonlight's own defaults for those sizes; a computer whose screen runs at 60 Hz sends
+  60), over whatever the reader changed in the stream's own menu. The Mac's Sunshine steps end with
+  choosing its software encoder: Sunshine's VideoToolbox path holds each frame about 120 ms, the
+  software encoder about 10.
 
 **Ready to stream is a preparation verdict.** A running bridge, Sunshine answering and completed
 pairing permit opening the player; they do not prove that the browser receives a picture. The session
@@ -232,14 +281,27 @@ stream starts its muted video without a press, inside a frame of this origin.
 `computers.go`. A computer is a name, a system (`windows`, `macos`, `linux`), a host (an IP or a host
 name), a protocol (`rdp`, `vnc`; a Mac defaults to VNC, which is Screen Sharing), a port (3389 or
 5900 unless given), an account, a domain, a sealed password, an RDP security mode (`any`, `nla`,
-`tls`, `rdp`), an RDP keyboard layout from the 23 guacd 1.6 compiles in (`Layouts`) and the tailnet
-node it was added from. The password is sealed with the master key like every stored credential;
+`tls`, `rdp`), an RDP keyboard layout from the 23 guacd 1.6 compiles in (`Layouts`), whether to ask
+for RDP's graphics pipeline (`gfx`, off unless the server insists) and the tailnet node it was added
+from. The password is sealed with the master key like every stored credential;
 readers get `hasPassword`. On an edit a missing password keeps the sealed one and an empty one
 clears it.
 
 RDP connections always set `ignore-cert`: the path is the tailnet, which already authenticates and
 encrypts both ends, and a PC's self-signed RDP certificate has nothing to be checked against. They
-also set `resize-method=display-update`, so the PC's screen follows the browser window.
+also set `resize-method=display-update`, so the PC's screen follows the browser window, and
+`disable-gfx=true` unless the computer's `gfx` is on: guacd 1.6 turns RDP's Graphics Pipeline on by
+default and with it loses the server's frame marks, cutting frames on a timer between 10 and 100 ms
+and sending two to three times the data (GUACAMOLE-2174); the classic path draws on the marks at
+16-bit colour. The computer form's *Use the RDP graphics pipeline* is for the few servers that
+refuse to connect without it.
+
+**The screen's size is the frame's, at one pixel per pixel unless asked otherwise.** `displaySize`
+multiplies by the browser's device pixel ratio (capped at two) only when the column's *Picture* is
+*Sharp*; *Smooth*, the default, asks a 1440 px frame for a 1440 px screen. On a 2x display Sharp is
+four times the pixels for guacd to encode and the browser to decode, and that many fewer frames a
+second. The choice is kept per tab and sent as a new size at once; VNC servers that take no size
+(macOS) are unaffected.
 
 Every session is a row in `remote_desktop_sessions` (computer, who, start, end, outcome), opened
 after a successful handshake and closed when the relay ends; rows go with their computer
@@ -298,7 +360,16 @@ logged when it opens, before the upgrade, so a crash mid-session still leaves th
   bridge's CSP, `X-Frame-Options` and cookie, refuses a write with no `Origin` or another site's,
   takes one from this dashboard without the CSRF header, and refuses a limited account and no
   session; a stopped bridge answers `503`, and pairing without it `409`. WebRTC is offered only
-  to a browser on the tailnet and only when the bridge publishes a block.
+  to a browser on the tailnet and only when the bridge publishes a block. A bridge elsewhere is
+  proxied the same, reads as running while it answers with its own address as its media, is never
+  removed from here, and reads as stopped with where it is once it stops answering.
+- `remote_bridge_test.go`, and in `service_test.go`: a bridge address must be host and port; a
+  remote bridge is probed, its answer held, never installed or removed; RDP asks for the classic
+  path unless `gfx` is on, and VNC keeps no `gfx`; reading a computer warms the path to a relayed
+  peer once a minute and never to a direct one. `netx` pings only a tailnet address.
+- `lib/remote-desktop.test.js`, `lib/remote-desktop-stats.test.js`: the display size at one pixel
+  per pixel unless sharp, the path in a word, a paired Mac's default mode, the frame queue of three;
+  the tunnel meter's frames sent, drawn and lag, and the video meter's frames, delay and drops.
 - `live_test.go`, opt-in: `JD_REMOTE_DESKTOP_LIVE=1 go test ./internal/remotedesk -run Live -v`
   installs the real engine, starts a throwaway XFCE desktop over VNC and one over RDP on its network,
   opens a session to each and waits for the first frame (`img` and `sync`), then removes the engine
@@ -316,14 +387,16 @@ logged when it opens, before the upgrade, so a crash mid-session still leaves th
   stuck Sunshine named as stuck, with how to free it and no Pair. A Control session survives a
   visit to another page (one socket, never closed, the dock leading back) until Disconnect closes
   it; a stream's frame is loaded once across the same round trip, and hides this computer's pointer
-  until asked.
+  until asked. A paired Mac opens in Stream unless the address asks for Control, which says why and
+  leads back; a PC opens in Control.
 
 ## Not here
 
 - **Which computer a stream was.** The stream's socket names its host inside the socket, so a
   stream is audited as one but not counted in a computer's session history or time.
-- **A shorter path.** The picture always passes through this server: the bridge runs here (it has
-  no macOS build to run beside Sunshine), so a browser and a computer near each other but far from
-  the server pay the server's distance twice.
+- **A shorter path by default.** The picture always passes through the bridge, and the bridge runs
+  here unless `JD_REMOTE_DESKTOP_BRIDGE` names one elsewhere, so a browser and a computer near each
+  other but far from this server pay the server's distance twice until the operator runs one near
+  them. The dashboard does not install a remote bridge, write its configuration or guard its port.
 - **Wake-on-LAN.** A sleeping computer cannot be reached; the add flow says to turn sleep off.
 - **Windows Home** has no RDP server; the add flow sends it to TightVNC as a service, over VNC.

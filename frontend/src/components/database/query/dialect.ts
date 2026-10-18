@@ -8,6 +8,24 @@
  * would do — is always the server's reading (`POST /classify`); nothing here
  * decides whether a statement runs.
  */
+
+/**
+ * Where a statement holding a body of statements ends, read as the engine's
+ * own client reads a script. Each is the twin of the server's reading of the
+ * same engine (`dbx/statement_split.go`), and both are held to one file of
+ * scripts (`dbx/testdata/statement-splits.json`).
+ *
+ * - `psql`: a semicolon inside parentheses, or in the BEGIN … END of a CREATE
+ *   FUNCTION or PROCEDURE written in SQL, ends nothing.
+ * - `mysql`: DELIMITER lines, and the blocks of a stored program's body.
+ * - `sqlite`: the BEGIN … END of a CREATE TRIGGER.
+ * - `tsql`: GO lines, BEGIN … END blocks, `; ELSE`, and a routine's body to
+ *   the end of its batch.
+ * - `plsql`: a PL/SQL unit runs to a line holding only `/`.
+ * - `plain`: every semicolon ends a statement.
+ */
+export type Bodies = "psql" | "mysql" | "sqlite" | "tsql" | "plsql" | "plain"
+
 export type Dialect = {
   /** The pair that quotes a name with a space or a capital in it. */
   quote: readonly [string, string]
@@ -17,6 +35,8 @@ export type Dialect = {
   doubleQuotedText: boolean
   /** `$$ … $$` and `$tag$ … $tag$` bodies. */
   dollarQuoting: boolean
+  /** How a stored program's body and the client's separators are read. */
+  bodies: Bodies
   /** `#` opens a comment to the end of the line. */
   hashComments: boolean
   /** A backslash escapes the next character inside a text. */
@@ -36,6 +56,7 @@ const GENERIC: Dialect = {
   alsoQuotes: [],
   doubleQuotedText: false,
   dollarQuoting: false,
+  bodies: "plain",
   hashComments: false,
   backslashEscapes: false,
   escapeStrings: false,
@@ -44,16 +65,24 @@ const GENERIC: Dialect = {
 }
 
 const DIALECTS: Record<string, Dialect> = {
-  postgres: { ...GENERIC, dollarQuoting: true, escapeStrings: true, folds: "lower" },
+  postgres: {
+    ...GENERIC,
+    dollarQuoting: true,
+    bodies: "psql",
+    escapeStrings: true,
+    folds: "lower",
+  },
   mysql: {
     ...GENERIC,
     quote: ["`", "`"],
     doubleQuotedText: true,
+    bodies: "mysql",
     hashComments: true,
     backslashEscapes: true,
   },
   sqlite: {
     ...GENERIC,
+    bodies: "sqlite",
     alsoQuotes: [
       ["`", "`"],
       ["[", "]"],
@@ -63,6 +92,7 @@ const DIALECTS: Record<string, Dialect> = {
     ...GENERIC,
     quote: ["[", "]"],
     alsoQuotes: [['"', '"']],
+    bodies: "tsql",
     firstRows: (relation, n) => `SELECT TOP ${n} *\nFROM ${relation};`,
   },
   clickhouse: {
@@ -73,6 +103,7 @@ const DIALECTS: Record<string, Dialect> = {
   },
   oracle: {
     ...GENERIC,
+    bodies: "plsql",
     folds: "upper",
     firstRows: (relation, n) => `SELECT *\nFROM ${relation}\nFETCH FIRST ${n} ROWS ONLY;`,
   },

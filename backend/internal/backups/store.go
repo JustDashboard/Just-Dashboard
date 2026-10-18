@@ -63,20 +63,20 @@ func (s *Store) ValidatePaths(j *Job) error {
 	return s.validateDatabaseDumps(context.Background(), j)
 }
 
-const jobCols = `id, name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at, recovery_json, sqlite_paths, database_dumps, retention_days, pause_containers, revision`
+const jobCols = `id, name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at, recovery_json, sqlite_paths, database_dumps, retention_days, pause_containers, revision, encrypt`
 
 func (s *Store) scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	var (
 		j                              Job
 		sources, excludes, targetKind  string
 		targetCfg, secrets, schedule   string
-		enabled                        int
+		enabled, encrypt               int
 		created                        int64
 		recovery, sqlitePaths          string
 		databaseDumps, pauseContainers string
 	)
 	if err := row.Scan(&j.ID, &j.Name, &sources, &excludes, &targetKind,
-		&targetCfg, &secrets, &schedule, &j.Retention, &enabled, &created, &recovery, &sqlitePaths, &databaseDumps, &j.RetentionDays, &pauseContainers, &j.Revision); err != nil {
+		&targetCfg, &secrets, &schedule, &j.Retention, &enabled, &created, &recovery, &sqlitePaths, &databaseDumps, &j.RetentionDays, &pauseContainers, &j.Revision, &encrypt); err != nil {
 		return nil, err
 	}
 	j.Sources = decodeStrings(sources)
@@ -84,6 +84,7 @@ func (s *Store) scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	j.TargetKind = TargetKind(targetKind)
 	j.Schedule = schedule
 	j.Enabled = enabled == 1
+	j.Encrypt = encrypt == 1
 	j.CreatedAt = time.Unix(created, 0).UTC()
 	j.HasCredentials = secrets != ""
 	json.Unmarshal([]byte(targetCfg), &j.Target)
@@ -217,6 +218,9 @@ func (s *Store) Create(ctx context.Context, j *Job, secrets *TargetSecrets) (*Jo
 	if err := s.ValidatePaths(j); err != nil {
 		return nil, err
 	}
+	if err := s.ensureArchiveKey(ctx, j); err != nil {
+		return nil, err
+	}
 	sealed := ""
 	if secrets != nil && (secrets.AccessKeyID != "" || secrets.SecretAccessKey != "") {
 		v, err := s.sealer.Seal(encodeJSON(secrets))
@@ -230,10 +234,10 @@ func (s *Store) Create(ctx context.Context, j *Job, secrets *TargetSecrets) (*Jo
 		enabled = 1
 	}
 	res, err := s.st.DB.ExecContext(ctx,
-		`INSERT INTO backup_jobs(name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at, recovery_json, sqlite_paths, database_dumps, retention_days, pause_containers)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO backup_jobs(name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at, recovery_json, sqlite_paths, database_dumps, retention_days, pause_containers, encrypt)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		j.Name, encodeJSON(j.Sources), encodeJSON(j.Excludes), string(j.TargetKind),
-		encodeJSON(j.Target), sealed, j.Schedule, j.Retention, enabled, time.Now().Unix(), encodeJSON(j.Recovery), encodeJSON(j.SQLitePaths), encodeJSON(j.DatabaseDumps), j.RetentionDays, encodeJSON(j.PauseContainers))
+		encodeJSON(j.Target), sealed, j.Schedule, j.Retention, enabled, time.Now().Unix(), encodeJSON(j.Recovery), encodeJSON(j.SQLitePaths), encodeJSON(j.DatabaseDumps), j.RetentionDays, encodeJSON(j.PauseContainers), j.Encrypt)
 	if err != nil {
 		return nil, err
 	}
@@ -246,6 +250,9 @@ func (s *Store) Create(ctx context.Context, j *Job, secrets *TargetSecrets) (*Jo
 // Credentials are replaced only when supplied, so a schedule edit keeps keys.
 func (s *Store) Update(ctx context.Context, id int64, j *Job, secrets *TargetSecrets) (*Job, error) {
 	if err := s.ValidatePaths(j); err != nil {
+		return nil, err
+	}
+	if err := s.ensureArchiveKey(ctx, j); err != nil {
 		return nil, err
 	}
 	enabled := 0
@@ -263,11 +270,11 @@ func (s *Store) Update(ctx context.Context, id int64, j *Job, secrets *TargetSec
 	}
 	result, err := s.st.DB.ExecContext(ctx,
 		`UPDATE backup_jobs SET name = ?, sources = ?, excludes = ?, target_kind = ?, target_cfg = ?,
-		 schedule = ?, retention = ?, enabled = ?, recovery_json = ?, sqlite_paths = ?, database_dumps = ?, retention_days = ?, pause_containers = ?,
+		 schedule = ?, retention = ?, enabled = ?, recovery_json = ?, sqlite_paths = ?, database_dumps = ?, retention_days = ?, pause_containers = ?, encrypt = ?,
 		 secrets_enc = CASE WHEN ? THEN ? ELSE secrets_enc END, revision = revision + 1
 		 WHERE id = ? AND (? = 0 OR revision = ?)`,
 		j.Name, encodeJSON(j.Sources), encodeJSON(j.Excludes), string(j.TargetKind),
-		encodeJSON(j.Target), j.Schedule, j.Retention, enabled, encodeJSON(j.Recovery), encodeJSON(j.SQLitePaths), encodeJSON(j.DatabaseDumps), j.RetentionDays, encodeJSON(j.PauseContainers), replaceSecrets, sealed, id, j.Revision, j.Revision)
+		encodeJSON(j.Target), j.Schedule, j.Retention, enabled, encodeJSON(j.Recovery), encodeJSON(j.SQLitePaths), encodeJSON(j.DatabaseDumps), j.RetentionDays, encodeJSON(j.PauseContainers), j.Encrypt, replaceSecrets, sealed, id, j.Revision, j.Revision)
 	if err != nil {
 		return nil, err
 	}

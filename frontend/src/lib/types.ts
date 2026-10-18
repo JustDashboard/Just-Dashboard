@@ -14,7 +14,13 @@ import type {
 } from "@/lib/network-traffic"
 
 export type Capability =
-  "read" | "service.control" | "file.write" | "terminal" | "destructive" | "system.admin"
+  | "read"
+  | "service.control"
+  | "file.write"
+  | "terminal"
+  | "destructive"
+  | "system.admin"
+  | "metrics.read"
 
 export type Role = "admin" | "limited" | "readonly"
 
@@ -1833,6 +1839,14 @@ export type DbFlavor =
   | "azure-sql-edge"
 
 /**
+ * What a database can be watched for: its server not answering, its disk,
+ * its connections against its limit, its replication, and the backup jobs
+ * that dump it failing or missing their time (`dbx.AlertKinds`).
+ */
+export type DbAlertKind =
+  "down" | "disk" | "connections" | "replication" | "backup_failed" | "backup_missed"
+
+/**
  * The capability flags that are a yes or a no, as `GET /databases/drivers`
  * serves them for every driver and every flavour (`dbx.Capabilities`; the
  * server's tests pin who has which). A flag says the feature exists for the
@@ -1842,6 +1856,8 @@ export type DbCapabilityFlag =
   // Connections and discovery.
   | "server" // a process that listens, logs and can be started; false = a file
   | "provision" // the dashboard can start one from its own images
+  | "majorUpgrade" // a server started from those images can be moved to a newer major release
+  | "serverTLS" // a server it started can speak TLS with a certificate from its own authority
   | "inventoryConnect" // can be connected from the inventory by its key
   | "hostAccount" // POST /host/grant can make or reset an account on a host server
   | "fileBased" // no host, port or account to ask for
@@ -1862,6 +1878,8 @@ export type DbCapabilityFlag =
   | "cellRead" // GET /cell: one whole value the grid clipped
   | "explainJSON" // a plan as a tree
   | "explainAnalyze" // a plan measured by running the statement
+  | "indexWhatIf" // POST /explain/index-candidates and /explain/what-if: an index tried on a plan with HypoPG
+  | "missingIndexes" // GET /missing-indexes: SQL Server's own list of the indexes its plans wanted
   // The schema.
   | "ddl" // the create-table form; gate the other forms on `ddlOperations`
   | "schemas" // more than one namespace to choose from
@@ -1876,6 +1894,7 @@ export type DbCapabilityFlag =
   | "indexes"
   | "extensions"
   | "rowSecurity" // GET /rls, the policy forms and the role tester
+  | "pooler" // a PgBouncer can be run in front of the server
   // Watching and maintaining a server.
   | "stats" // GET /stats: one snapshot of counters and gauges
   | "sessions" // sessions, Redis clients, MongoDB operations
@@ -1892,6 +1911,8 @@ export type DbCapabilityFlag =
   | "privileges" // role detail, grants, grant and revoke
   | "statements"
   | "statementsReset"
+  | "statementHistory"
+  | "statementsSetup" // POST /statements/preload: the library loaded at start, then a restart
   | "queryLog"
   | "clickhouseViews" // parts, merges, mutations, running queries
   | "sqliteFile"
@@ -1949,6 +1970,7 @@ export type DbCapabilityFlag =
   | "serverDatabaseConnect" // POST /{id}/server/databases/connect opens another one as a connection
   | "copy"
   | "copyStructureOnly"
+  | "pitr" // GET /{id}/pitr: the write-ahead log archived with WAL-G, recovered to a moment
 
 /** A branch of the schema catalogue (`GET /catalog`). */
 export type DbCatalogGroup =
@@ -1990,6 +2012,9 @@ export type DbDdlOperation =
   | "indexPartial"
   | "indexIfNotExists"
   | "indexConcurrently"
+  | "functions"
+  | "procedures"
+  | "triggers"
 
 export type DbExportFormat = "csv" | "tsv" | "json" | "ndjson" | "sql"
 export type DbImportFormat = "csv" | "tsv" | "json" | "ndjson"
@@ -2006,6 +2031,8 @@ export type DbImportFormat = "csv" | "tsv" | "json" | "ndjson"
  * form and `false` where the engine has none of them.
  */
 export type DbCapabilities = Record<DbCapabilityFlag, boolean> & {
+  /** What a database of this engine can be watched for (`/databases/alerts`). */
+  alertKinds: DbAlertKind[]
   catalogGroups: DbCatalogGroup[]
   ddlOperations: DbDdlOperation[]
   /** The ids `POST /maintenance` takes; `GET /maintenance` describes them. */
@@ -2030,6 +2057,12 @@ export type DbCapabilities = Record<DbCapabilityFlag, boolean> & {
   hashFieldTtl: string | false
   /** What `GET /redis/commands` holds: the server's documentation, or names only. */
   commandReference: "docs" | "names" | false
+  /**
+   * The setting the engine keeps its own memory in (`shared_buffers`,
+   * `innodb_buffer_pool_size`, `maxmemory`, …), read beside its container's
+   * memory limit by `GET /{id}/resources`.
+   */
+  memoryBuffer: string | false
 }
 
 /** Any key of the capabilities object: what `engine.can(…)` takes. */
@@ -2753,7 +2786,20 @@ export type BackupJob = {
   databaseDumps?: number[]
   /** Containers frozen for the archive step, so their volumes are quiet. */
   pauseContainers?: string[]
+  /** New archives are sealed to the server's backup key before they are written. */
+  encrypt?: boolean
   recovery?: BackupRecoveryPlan
+}
+
+/** The server's backup key, by its public half; the secret never leaves but by export. */
+export type BackupArchiveKey = {
+  exists: boolean
+  /** The age public key, as an exported key file's "public key" line prints it. */
+  recipient?: string
+  createdAt?: string
+  exportedAt?: string
+  encryptingJobs: number
+  encryptedArchives: number
 }
 
 export type BackupResourceKind =
@@ -2818,11 +2864,22 @@ export type BackupDatabaseDump = {
 
 export type BackupManifest = {
   version: number
+  /** Over the bytes the destination holds: the ciphertext, for an encrypted archive. */
   artifactDigest: string
   complete: boolean
   sources?: { path: string; archivePath: string }[]
   databaseDumps?: BackupDatabaseDump[]
   pausedContainers?: string[]
+  encryption?: BackupArchiveEncryption
+}
+
+/** How an archive was sealed: age, to the key whose public half is `recipient`. */
+export type BackupArchiveEncryption = {
+  format: "age"
+  recipient: string
+  /** Over the .tar.gz inside, which is what a copy decrypted by hand is checked against. */
+  plaintextDigest: string
+  plaintextBytes: number
 }
 
 export type BackupRecoveryPlan = {
@@ -4896,6 +4953,8 @@ export type DeploymentDatabaseLink = {
   database: string
   network: string
   hostname: string
+  /** The connection has a pooler, so `${{database.N.pooled}}` resolves. */
+  pooler?: boolean
   status: "pending" | "connected" | "stale" | "unavailable"
   detail?: string
   checkedAt?: string
@@ -5123,10 +5182,28 @@ export type ApiToken = {
   name: string
   prefix: string
   role: Role
+  /** The one capability the key is limited to; empty for an ordinary key. */
+  scope?: "" | "metrics.read"
   createdAt: string
   expiresAt?: string
   lastUsedAt?: string
   revoked: boolean
+}
+
+/** How the recorded database activity is kept and where it is scraped from. */
+export type DbMetricsExport = {
+  retentionDays: number
+  options: { days: number; estimatedBytes: number | null }[]
+  /** Servers the recorder has saved a reading of in the last day. */
+  connections: number
+  samples: number
+  storedBytes: number | null
+  everySeconds: number
+  /** Days kept whole; older samples are thinned. */
+  rawDays: number
+  coarseMinutes: number
+  /** Path of the scrape endpoint on this dashboard. */
+  endpoint: string
 }
 
 export type SessionInfo = {
@@ -5886,23 +5963,290 @@ export type DbAccess = {
   container?: string
   composeProject?: string
   managed: boolean
-  exposure: "local" | "public" | "private" | "remote"
+  /**
+   * Read off the port binding: this machine only, one of its addresses, every
+   * interface — and, every interface with the gateway keeping the port to a
+   * list, `allowlist`.
+   */
+  exposure: "local" | "public" | "private" | "allowlist" | "remote"
   port?: number
   publicAddresses: string[]
   firewall: {
     backend?: string
     active: boolean
     open: boolean
+    /** The sources the firewall's other allow rules for the port name. */
+    allowed: string[]
     editable: boolean
+  }
+  /** The one host address a private binding publishes on. */
+  address?: string
+  /**
+   * What the gateway keeps the port to. Set while the binding is not every
+   * interface only when a change could not finish taking it away.
+   */
+  allow: string[]
+  gateway: DbGateway
+  /** This machine's addresses the port can be published on alone. */
+  addresses: DbHostAddress[]
+  /** The address this request came from, which the list's form offers. */
+  client?: string
+}
+
+/** Whether the gateway table can keep a port to a list, and what it lets in besides. */
+export type DbGateway = {
+  available: boolean
+  reason?: string
+  /** The networks every drop in the gateway table lets through first. */
+  alsoAdmitted: string[]
+  /** The kernel holds the port's rules now. */
+  enforced: boolean
+  /** Connection attempts the rules dropped since the table was loaded. */
+  refused: number
+}
+
+/** One address of this machine a port can be published on alone. */
+export type DbHostAddress = {
+  address: string
+  interface?: string
+  /** Who the address faces: tailnet, vpn, private or uplink. */
+  network: "tailnet" | "vpn" | "private" | "uplink"
+}
+
+/** What PUT /databases/{id}/access takes. */
+export type DbAccessRequest =
+  | { exposure: "local" | "public" }
+  | { exposure: "private"; address: string }
+  | { exposure: "allowlist"; allow: string[] }
+
+export type DbPoolMode = "transaction" | "session"
+export type DbPoolerAuth = "userlist" | "auth_query"
+
+/** What an operator chooses about a pooler (`PUT /databases/{id}/pooler`). */
+export type DbPoolerSettings = {
+  poolMode: DbPoolMode
+  poolSize: number
+  maxClientConn: number
+  authMode: DbPoolerAuth
+}
+
+/**
+ * A connection's pooler, as GET /databases/{id}/pooler reads it. `available`
+ * is whether one can be turned on, with `reason` when not; a connection that
+ * has one is always available. `state` is the container's own word, or
+ * `missing` when its container is gone. `inSync` is whether the files it holds
+ * were made from the connection's current password.
+ */
+export type DbPooler = {
+  available: boolean
+  reason?: string
+  enabled: boolean
+  settings: DbPoolerSettings
+  defaults: DbPoolerSettings
+  limits: { poolSize: number; maxClientConn: number }
+  state?: string
+  container?: string
+  image: string
+  network?: string
+  exposure?: "local" | "public" | "private"
+  port?: number
+  linkedHost: string
+  linkedPort: number
+  reference: string
+  inSync: boolean
+  createdAt?: string
+}
+
+/** What PUT /databases/{id}/pooler did, and the reading afterwards. */
+export type DbPoolerChange = {
+  pooler: DbPooler
+  warnings: string[]
+  /** opened, closed, already, none, inactive, read-only or failed. */
+  firewall?: string
+  firewallError?: string
+}
+
+/** One row of PgBouncer's SHOW POOLS. */
+export type DbPoolerPool = {
+  database: string
+  user: string
+  poolMode: string
+  clActive: number
+  clWaiting: number
+  svActive: number
+  svIdle: number
+  svUsed: number
+  svTested: number
+  svLogin: number
+  maxWaitSec: number
+}
+
+/** One row of SHOW STATS: totals since it started, averages over its last period; microseconds and bytes. */
+export type DbPoolerStat = {
+  database: string
+  totalXactCount: number
+  totalQueryCount: number
+  totalReceived: number
+  totalSent: number
+  totalXactTime: number
+  totalQueryTime: number
+  totalWaitTime: number
+  avgXactCount: number
+  avgQueryCount: number
+  avgRecv: number
+  avgSent: number
+  avgXactTime: number
+  avgQueryTime: number
+  avgWaitTime: number
+}
+
+export type DbPoolerStats = {
+  version: string
+  pools: DbPoolerPool[]
+  stats: DbPoolerStat[]
+  at: string
+}
+
+/**
+ * GET /databases/{id}/tls: whether a server the dashboard started speaks TLS
+ * with a certificate from the dashboard's own authority, and what it needs
+ * next. `supported: false` carries `reason`, in a sentence.
+ */
+export type DbTLS = {
+  supported: boolean
+  reason?: string
+  enabled: boolean
+  /** A connection without TLS is refused. Always true where the port speaks one protocol. */
+  require: boolean
+  /** The engine can accept TLS and plaintext on one port; Redis cannot. */
+  canOptional: boolean
+  /** This release can refuse plaintext. */
+  canRequire: boolean
+  /** The dashboard's own saved connection checks the certificate against the authority. */
+  verified: boolean
+  container?: string
+  port?: number
+  exposure?: DbAccess["exposure"]
+  names: string[]
+  serial?: string
+  issuedAt?: string
+  notAfter?: string
+  /** When the renewal takes it up. */
+  renewAt?: string
+  renewedAt?: string
+  /**
+   * What a linked application is given: the string it had before TLS ("plain",
+   * while TLS is only allowed), TLS without checking the certificate
+   * ("unverified", once required), or TLS that checks and so needs the
+   * authority's certificate ("needsCA", Redis).
+   */
+  applications?: "plain" | "unverified" | "needsCA"
+  /** Deployment environments that reach this database by its internal name. */
+  linked: number
+  authority: {
+    subject: string
+    fingerprint: string
+    notAfter: string
+    createdAt: string
+  } | null
+  client?: {
+    host: string
+    port: number
+    /** Absent for an engine whose client has no URL form. The password is a placeholder. */
+    url?: string
+    command: string
+    caFile: string
   }
 }
 
 /** What PUT /databases/{id}/access did, and the reading afterwards. */
 export type DbAccessChange = {
   access: DbAccess
-  /** opened, closed, already, none, inactive, read-only or failed. */
+  /** opened, closed, updated, already, none, inactive, read-only or failed. */
   firewall: string
   firewallError?: string
+  /** kept, released, restored, unchanged or failed. */
+  gateway: string
+  gatewayError?: string
+  /**
+   * What the switch did to the connection's pooler, when it has one. `error`
+   * is why it could not be moved; `removed` that it was taken down instead of
+   * being left published (a move to this server that failed).
+   */
+  pooler?: {
+    container: string
+    port?: number
+    exposure?: "local" | "public" | "private"
+    recreated?: boolean
+    firewall?: string
+    firewallError?: string
+    error?: string
+    removed?: boolean
+    closeError?: string
+  }
+}
+
+/** One end of a change to where a server is reachable from. */
+export type DbReach = {
+  exposure: DbAccess["exposure"]
+  hostIp: string
+  allow?: string[]
+}
+
+/** What POST /databases/{id}/access/preview says a change would do, in order. */
+export type DbAccessPreview = {
+  from: DbReach
+  to: DbReach
+  /** The container is replaced, which drops every session. */
+  recreate: boolean
+  steps: { kind: "gateway" | "recreate" | "firewall"; description: string; lines?: string[] }[]
+  firewall: string
+  firewallError?: string
+  /**
+   * What the switch did to the connection's pooler, when it has one. `error`
+   * is why it could not be moved; `removed` that it was taken down instead of
+   * being left published (a move to this server that failed).
+   */
+  pooler?: {
+    container: string
+    port?: number
+    exposure?: "local" | "public" | "private"
+    recreated?: boolean
+    firewall?: string
+    firewallError?: string
+    error?: string
+    removed?: boolean
+    closeError?: string
+  }
+}
+
+/** What a database's container may use, as GET /databases/{id}/resources reads it. */
+export type DbResources = {
+  container?: string
+  /** The route can change the limits; `refusal` says why it cannot. */
+  editable: boolean
+  refusal?: string
+  running: boolean
+  /** Bytes and cores, zero for no limit. */
+  limits: { memoryBytes: number; cpus: number }
+  /** What it uses now, read while it runs. */
+  usedBytes?: number
+  /** The kernel stopped it, the last time it stopped, for going past its memory limit. */
+  oomKilled?: boolean
+  /** This machine as Docker sees it; zero where Docker did not say. */
+  host: { memoryBytes: number; cpus: number }
+  /** The memory the engine keeps for itself, by its own setting. */
+  buffer?: { setting: string; bytes: number }
+  /** Why the buffer could not be read from a server that runs. */
+  bufferError?: string
+}
+
+/** What PUT /databases/{id}/resources did. */
+export type DbResourcesChange = {
+  limits: { memoryBytes: number; cpus: number }
+  /** A limit was lifted, which replaced the container. */
+  replaced: boolean
+  warnings: string[]
 }
 
 /**
@@ -5951,6 +6295,8 @@ export type DbProvisionOption = {
   label: string
   image: string
   driver: string
+  versions: { version: string; build?: { ready: boolean } }[]
+  defaultVersion: string
 }
 
 // --- schema graph (the diagram) -------------------------------------------
@@ -6002,6 +6348,24 @@ export type DbDiagramLayoutResponse = {
 // --- the fleet, the server behind a connection, and the map ----------------
 
 /**
+ * A release line's last day of maintenance, as the server's end-of-life table
+ * dates it (`dbx/eol.go`). Absent wherever the table does not know the
+ * release: nothing is said rather than a date guessed.
+ */
+export type DbEndOfLife = {
+  /** The engine as its vendor names it: PostgreSQL, MariaDB, … */
+  product: string
+  /** The release line the date belongs to: "18", "8.0", "26.3". */
+  release: string
+  /** Midnight UTC of the last day: "2030-11-14T00:00:00Z". */
+  date: string
+  /** The day has gone by. */
+  past: boolean
+  /** Negative once it has. */
+  daysLeft: number
+}
+
+/**
  * One connection as the control center's fleet lists it: the row's facts
  * with the readings the server answered — dialled, sized and counted in one
  * request (`GET /databases/fleet`).
@@ -6036,6 +6400,10 @@ export type DbFleetEntry = DbConnection & {
   unit?: string
   exposure: DbAccess["exposure"] | "unknown"
   consumers: number
+  /**
+   * When it was last backed up from here: its newest dump, or the newest
+   * backup job run that dumped it, whichever is later. Absent for never.
+   */
   lastBackup?: string
 }
 
