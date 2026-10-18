@@ -102,7 +102,7 @@ export function CopyDatabase({
       refusal={refusal}
       note={
         into
-          ? `Read from ${conn.name} and loaded into ${into.name} as it is read. Nothing here is changed.`
+          ? `Loaded into ${into.name} as it is read. Nothing here is changed.`
           : "A dump and a restore as one job. Nothing here is changed."
       }
       command="Copy"
