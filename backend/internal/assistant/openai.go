@@ -217,17 +217,19 @@ func (c *openAIClient) Stream(ctx context.Context, req Request, emit func(Event)
 		}
 		return nil
 	})
+	// A turn that ends early still cost what the server counted by then.
+	spent := Reply{Usage: usage, Model: model}
 	if err != nil && !errors.Is(err, errStreamDone) {
 		if ctx.Err() != nil {
-			return Reply{}, ctx.Err()
+			return spent, ctx.Err()
 		}
-		return Reply{}, err
+		return spent, err
 	}
 	if !finished && finish == "" {
 		if ctx.Err() != nil {
-			return Reply{}, ctx.Err()
+			return spent, ctx.Err()
 		}
-		return Reply{}, &ProviderError{Message: c.name() + "'s answer was cut off before it finished", Retryable: true}
+		return spent, &ProviderError{Message: c.name() + "'s answer was cut off before it finished", Retryable: true}
 	}
 	out := Reply{Usage: usage, Model: model, Stop: openAIStop(finish)}
 	if model == "" {

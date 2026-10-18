@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  ATTACH_CELL,
   ATTACH_COLUMNS,
   ATTACH_ROWS,
   EMPTY_TRANSCRIPT,
@@ -178,6 +179,22 @@ describe("what a question carries", () => {
     expect(attached.rows).toHaveLength(ATTACH_ROWS)
     expect(attached.rows[0]).toHaveLength(ATTACH_COLUMNS)
     expect(attached.total).toBe(900)
+  })
+
+  test("cuts a long value as the server does, so a wide result still fits the request", () => {
+    const body = "é".repeat(100_000)
+    const document = { body: "x".repeat(300) }
+    const attached = attachable({
+      columns: ["body", "doc", "short", "n"],
+      rows: [[body, document, "kept", 7]],
+      rowCount: 1,
+    })
+    const [cut, json, short, n] = attached.rows[0]
+    expect([...cut]).toHaveLength(ATTACH_CELL + 1)
+    expect(cut.endsWith("…")).toBe(true)
+    expect(json).toBe(JSON.stringify(document).slice(0, ATTACH_CELL) + "…")
+    expect(short).toBe("kept")
+    expect(n).toBe(7)
   })
 
   test("is listed by kind and count, never by what is in it", () => {

@@ -34,6 +34,7 @@ func TestPrepareChecksEachProvidersFields(t *testing.T) {
 		{"a query in the address", Setup{Provider: ProviderOpenAI, Model: "m", BaseURL: "https://api.example.com/v1?key=1"}, "baseUrl"},
 		{"plain HTTP across the internet", Setup{Provider: ProviderOpenAI, Model: "m", BaseURL: "http://api.example.com/v1"}, "baseUrl"},
 		{"plain HTTP to a public address", Setup{Provider: ProviderOpenAI, Model: "m", BaseURL: "http://203.0.113.9:8000/v1"}, "baseUrl"},
+		{"plain HTTP to a link-local address", Setup{Provider: ProviderOpenAI, Model: "m", BaseURL: "http://169.254.169.254/v1"}, "baseUrl"},
 		{"not an address", Setup{Provider: ProviderOpenAI, Model: "m", BaseURL: "ollama"}, "baseUrl"},
 	} {
 		_, err := Prepare(c.in, nil)

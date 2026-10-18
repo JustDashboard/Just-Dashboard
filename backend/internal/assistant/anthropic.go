@@ -186,17 +186,19 @@ func (c *anthropicClient) Stream(ctx context.Context, req Request, emit func(Eve
 	}
 	defer res.Body.Close()
 	s := &anthropicStream{blocks: map[int]*streamBlock{}, emit: emit}
+	// A turn that ends early still cost what the provider counted by then.
+	spent := func() Reply { return Reply{Usage: s.usage, Model: s.model} }
 	if err := readEvents(res.Body, s.event); err != nil && !errors.Is(err, errStreamDone) {
 		if ctx.Err() != nil {
-			return Reply{}, ctx.Err()
+			return spent(), ctx.Err()
 		}
-		return Reply{}, err
+		return spent(), err
 	}
 	if !s.done {
 		if ctx.Err() != nil {
-			return Reply{}, ctx.Err()
+			return spent(), ctx.Err()
 		}
-		return Reply{}, &ProviderError{Message: "Anthropic's answer was cut off before it finished", Retryable: true}
+		return spent(), &ProviderError{Message: "Anthropic's answer was cut off before it finished", Retryable: true}
 	}
 	return s.reply(), nil
 }

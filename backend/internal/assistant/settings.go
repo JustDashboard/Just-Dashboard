@@ -206,5 +206,5 @@ func nearby(host string) bool {
 		return true
 	}
 	ip := net.ParseIP(host)
-	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || carrierGradeNAT.Contains(ip))
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || carrierGradeNAT.Contains(ip))
 }

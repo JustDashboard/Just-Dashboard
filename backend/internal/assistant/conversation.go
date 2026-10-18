@@ -126,7 +126,7 @@ func Exchange(ctx context.Context, client Client, c *Conversation, emit func(Eve
 	}
 	reply, err := client.Stream(ctx, req, emit)
 	if err != nil {
-		return Outcome{}, err
+		return Outcome{Usage: reply.Usage, Model: reply.Model}, err
 	}
 	out := Outcome{Stop: reply.Stop, Usage: reply.Usage, Model: reply.Model}
 	calling := false

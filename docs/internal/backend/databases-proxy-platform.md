@@ -1037,7 +1037,8 @@ the page.
   tailnet's `100.64.0.0/10`, and one with no path is given `/v1`. Nothing is saved until the
   provider has said that the key, the address and the model answer, asked without asking the model
   anything — Anthropic's `GET /v1/models/{model}`, the server's own `GET /models` with the model
-  looked for on it — so a mistyped key is refused under its field. The settings are one row of
+  looked for on it (a server that answers that path 404 or 405 lists nothing, and its first question
+  says whether the model is there) — so a mistyped key is refused under its field. The settings are one row of
   `settings` (`databases.assistant`), sealed whole with `JD_MASTER_KEY`; the key is never read back,
   and a blank key keeps the stored one only for the same provider at the same address, so a key is
   never sent to a server typed in after it. `GET /databases/assistant` (any role) answers the
@@ -1052,6 +1053,8 @@ the page.
   referenced by, then the rest, described up to 48,000 characters, named up to 12,000, then counted.
   A row reaches the model only in a result attached to a question by the person asking: at most 50
   rows of 30 columns and 200 characters a value, held to that on the server whatever the page sent.
+  The page cuts to the same bounds before sending, because the editor's results carry long text and
+  bytea whole and fifty rows of them would pass the request's 4 MiB limit.
   The editor's statement, an error or a plan go only with the question that carries them, and every
   value of the database stays out of the audit entry.
 - **Nothing runs.** A statement the assistant writes is text: the page opens it in a tab or writes it
@@ -1076,7 +1079,9 @@ the page.
   install has one budget of model calls whoever asks (20 a minute, a burst of 6) and answers four at
   once. Each call is audited as `database.assistant.ask` or `database.assistant.tool`: the
   connection, the person, the task, the provider and model, the tokens under `usage` (the audit log
-  redacts any field whose name says token), how it ended (`answered`, `asked`, `cut`, `refused`,
+  redacts any field whose name says token; a turn stopped or failed part-way records what the provider
+  had counted by then, which for Anthropic is the input and for an OpenAI-compatible server, whose count
+  comes last, nothing), how it ended (`answered`, `asked`, `cut`, `refused`,
   `cancelled`, `failed`) and what was attached by kind and count, never the question or a value.
 - **The answer streams** as one JSON object a line (`application/x-ndjson`): `start` (the
   conversation, the model, what the schema text holds), `thinking`, `text`, `described` (what an

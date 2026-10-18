@@ -311,11 +311,18 @@ func TestAnthropicReportsAnAnswerThatFailsPartWay(t *testing.T) {
 	}
 
 	cut, _ := anthropicFor(t, "claude-opus-5-5", func(w http.ResponseWriter, _ *http.Request, _ int) {
-		sse(w, ev("message_start", map[string]any{"type": "message_start", "message": map[string]any{"model": "claude-opus-5-5"}}))
+		sse(w, ev("message_start", map[string]any{"type": "message_start", "message": map[string]any{
+			"model": "claude-opus-5-5",
+			"usage": map[string]int{"input_tokens": 1200, "cache_read_input_tokens": 900, "output_tokens": 1},
+		}}))
 	})
-	_, err = cut.Stream(context.Background(), Request{Messages: []Message{{Role: "user", Blocks: []Block{{Type: BlockText, Text: "x"}}}}}, func(Event) {})
+	reply, err := cut.Stream(context.Background(), Request{Messages: []Message{{Role: "user", Blocks: []Block{{Type: BlockText, Text: "x"}}}}}, func(Event) {})
 	if pe, ok := IsProviderError(err); !ok || !strings.Contains(pe.Message, "cut off") {
 		t.Errorf("a stream that ended early: %v", err)
+	}
+	// The audit entry of a turn that did not finish still says what it cost.
+	if reply.Usage != (Usage{Input: 1200, Output: 1, CacheRead: 900}) || reply.Model != "claude-opus-5-5" {
+		t.Errorf("an early end's usage %+v, model %q", reply.Usage, reply.Model)
 	}
 }
 

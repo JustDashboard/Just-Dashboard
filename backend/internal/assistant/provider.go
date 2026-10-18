@@ -95,7 +95,8 @@ type Client interface {
 	// Stream sends the conversation and calls emit as the answer arrives.
 	// Nothing is emitted before the provider has accepted the request, so an
 	// error with no event before it is one the caller may still answer as a
-	// plain refusal.
+	// plain refusal. A stream that ends in an error still answers the usage
+	// and model the provider had reported by then.
 	Stream(ctx context.Context, req Request, emit func(Event)) (Reply, error)
 	// Probe asks the provider whether the key, the address and the model
 	// answer, without asking the model anything.

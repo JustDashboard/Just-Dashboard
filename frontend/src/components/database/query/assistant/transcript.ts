@@ -127,15 +127,30 @@ export const EMPTY_TRANSCRIPT: Transcript = {
   turns: [],
 }
 
-/** How many rows and columns of a result are ever attached, as the server bounds them. */
+/** How many rows, columns and characters a value of a result are ever attached, as the server bounds them. */
 export const ATTACH_ROWS = 50
 export const ATTACH_COLUMNS = 30
+export const ATTACH_CELL = 200
+
+/**
+ * A value cut as the server cuts it. The editor's results carry long text and
+ * bytea whole, and fifty rows of them would pass the request's size limit
+ * before the server could shorten them.
+ */
+function attachedCell(value: CellValue): CellValue {
+  const text = typeof value === "object" && value !== null ? JSON.stringify(value) : value
+  if (typeof text !== "string" || text.length <= ATTACH_CELL) return value
+  const points = [...text]
+  return points.length > ATTACH_CELL ? points.slice(0, ATTACH_CELL).join("") + "…" : value
+}
 
 /** A result as it is attached: its first rows, its first columns, and how many there were. */
 export function attachable(result: QueryResult): AttachedResult {
   return {
     columns: result.columns.slice(0, ATTACH_COLUMNS),
-    rows: result.rows.slice(0, ATTACH_ROWS).map((row) => row.slice(0, ATTACH_COLUMNS)),
+    rows: result.rows
+      .slice(0, ATTACH_ROWS)
+      .map((row) => row.slice(0, ATTACH_COLUMNS).map(attachedCell)),
     total: result.rowCount,
   }
 }
