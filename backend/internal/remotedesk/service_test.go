@@ -225,7 +225,7 @@ func (p *pipeSocket) ReadMessage() (int, []byte, error) {
 func TestConnectHandsGuacdTheCredentialsAndRelaysWholeInstructions(t *testing.T) {
 	ctx := context.Background()
 	fromBrowser := make(chan Instruction, 8)
-	guacd := startGuacd(t, []string{"hostname", "port", "username", "password", "security", "ignore-cert", "server-layout", "drive-path"},
+	guacd := startGuacd(t, []string{"hostname", "port", "username", "password", "security", "ignore-cert", "server-layout", "drive-path", "disable-gfx"},
 		func(conn net.Conn, rd *Reader) {
 			conn.Write([]byte(encode("size", "0", "1920", "1080")))
 			conn.Write([]byte(encode("sync", "1")))
@@ -250,7 +250,7 @@ func TestConnectHandsGuacdTheCredentialsAndRelaysWholeInstructions(t *testing.T)
 	if got := strings.Join(guacd.opcodes(), " "); got != "select size audio video image timezone name connect" {
 		t.Fatalf("handshake was %q", got)
 	}
-	want := []string{"VERSION_1_5_0", "100.101.12.7", "3389", "wayy", "hunter2", "any", "true", "ro-ro-qwerty", "/home/guacd/" + pc.ID}
+	want := []string{"VERSION_1_5_0", "100.101.12.7", "3389", "wayy", "hunter2", "any", "true", "ro-ro-qwerty", "/home/guacd/" + pc.ID, "true"}
 	if strings.Join(guacd.connect, "|") != strings.Join(want, "|") {
 		t.Fatalf("connect values %q, want %q", guacd.connect, want)
 	}
@@ -429,5 +429,98 @@ func TestConnectHandsGuacdTheAddressThisServerResolves(t *testing.T) {
 	var guac *GuacError
 	if _, err := svc.Connect(ctx, gone.ID, Display{}, "wayy"); !errors.As(err, &guac) || !strings.Contains(guac.Message, "gone-pc does not resolve") {
 		t.Fatalf("an unresolvable name should say so: %v", err)
+	}
+}
+
+// guacd 1.6 draws a GFX session on a timer and sends it at two to three
+// times the size, so the classic path is asked for unless the computer
+// insists on the pipeline. VNC has no such choice.
+func TestRDPTakesTheClassicPathUnlessGfxIsOn(t *testing.T) {
+	d := Display{Width: 1280, Height: 720, DPI: 96}
+	pc := Computer{Protocol: ProtocolRDP, Host: "100.101.12.7", Port: 3389}
+	if p := connectParams(pc, "", d); p["disable-gfx"] != "true" {
+		t.Fatalf("an RDP session must ask for the classic path, got %q", p["disable-gfx"])
+	}
+	pc.Gfx = true
+	if p := connectParams(pc, "", d); p["disable-gfx"] != "" {
+		t.Fatalf("a computer that insists on the pipeline must get it, got %q", p["disable-gfx"])
+	}
+	mac := Computer{Protocol: ProtocolVNC, Host: "100.84.53.82", Port: 5900}
+	if p := connectParams(mac, "", d); len(p) != 4 {
+		t.Fatalf("VNC takes only the address and the sign-in, got %v", p)
+	}
+}
+
+func TestGfxIsSavedForRDPAndClearedForVNC(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService(t, &fakeEngine{})
+	pc, err := svc.Add(ctx, ComputerInput{Name: "office-pc", OS: "windows", Host: "100.101.12.7", Gfx: true})
+	if err != nil || !pc.Gfx {
+		t.Fatalf("add with gfx: %+v %v", pc, err)
+	}
+	if pc, err = svc.Update(ctx, pc.ID, ComputerInput{Name: "office-pc", OS: "windows", Host: "100.101.12.7"}); err != nil || pc.Gfx {
+		t.Fatalf("update without gfx: %+v %v", pc, err)
+	}
+	mac, err := svc.Add(ctx, ComputerInput{Name: "studio-mac", OS: "macos", Host: "100.84.53.82", Gfx: true})
+	if err != nil || mac.Gfx {
+		t.Fatalf("a VNC computer keeps no gfx: %+v %v", mac, err)
+	}
+}
+
+// The session page reads its computer just before it connects; that read
+// asks the tailnet for the direct path to a peer still on a relay, once a
+// minute, never for one already direct.
+func TestViewWarmsThePathToARelayedPeerOncePerMinute(t *testing.T) {
+	ctx := context.Background()
+	st, err := storetest.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	now := time.Unix(1_700_000_000, 0)
+	peer := Peer{ID: "n1", Name: "zoro-1", Address: "100.84.53.82", Online: true, Relay: "fra"}
+	var warmed []string
+	done := make(chan string, 4)
+	svc := New(Options{
+		DB: st.DB, Seal: func(v string) (string, error) { return v, nil }, Open: func(v string) (string, error) { return v, nil },
+		Engine: &fakeEngine{}, Bridge: &fakeEngine{},
+		Tailnet: func(context.Context) (Tailnet, error) { return Tailnet{Installed: true, Peers: []Peer{peer}}, nil },
+		Warm:    func(_ context.Context, address string) { done <- address },
+		Now:     func() time.Time { return now },
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return nil, errors.New("refused")
+		},
+	})
+	mac, err := svc.Add(ctx, ComputerInput{Name: "zoro-1", OS: "macos", Host: "100.84.53.82", PeerID: "n1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait := func() {
+		select {
+		case address := <-done:
+			warmed = append(warmed, address)
+		case <-time.After(2 * time.Second):
+			t.Fatal("the path was not warmed")
+		}
+	}
+	if _, err := svc.View(ctx, mac.ID); err != nil {
+		t.Fatal(err)
+	}
+	wait()
+	now = now.Add(30 * time.Second)
+	svc.View(ctx, mac.ID)
+	now = now.Add(31 * time.Second)
+	svc.View(ctx, mac.ID)
+	wait()
+	if strings.Join(warmed, ",") != "100.84.53.82,100.84.53.82" {
+		t.Fatalf("warmed %v", warmed)
+	}
+	peer.Direct, peer.Relay = true, ""
+	now = now.Add(2 * time.Minute)
+	svc.View(ctx, mac.ID)
+	select {
+	case address := <-done:
+		t.Fatalf("a direct peer was warmed: %s", address)
+	case <-time.After(200 * time.Millisecond):
 	}
 }

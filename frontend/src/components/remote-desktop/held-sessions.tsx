@@ -29,9 +29,15 @@ export type HeldState = {
   drawn: string
   /** The round trip, said, when it is known. */
   latency?: string
+  /** The tailnet's path to the computer, direct or relayed, when it is known. */
+  path?: string
 }
 
-type Held = { id: string; mode: SessionMode } & Partial<HeldState>
+/**
+ * chosen is whether the mode came from the address or the reader; a session
+ * opened without one takes the computer's own default once it is read.
+ */
+type Held = { id: string; mode: SessionMode; chosen: boolean } & Partial<HeldState>
 
 type HeldSessions = {
   held: Held[]
@@ -64,9 +70,11 @@ export function HeldSessionsProvider({ children }: { children: React.ReactNode }
     setLatestId(id)
     setHeld((sessions) => {
       const open = sessions.find((session) => session.id === id)
-      if (!open) return [...sessions, { id, mode: mode ?? "control" }]
-      if (!mode || open.mode === mode) return sessions
-      return sessions.map((session) => (session.id === id ? { ...session, mode } : session))
+      if (!open) return [...sessions, { id, mode: mode ?? "control", chosen: mode !== null }]
+      if (!mode || (open.mode === mode && open.chosen)) return sessions
+      return sessions.map((session) =>
+        session.id === id ? { ...session, mode, chosen: true } : session,
+      )
     })
   }, [])
   const describe = useCallback((id: string, state: HeldState) => {
@@ -128,6 +136,7 @@ export function HeldSessionsHost() {
             <RemoteSession
               id={session.id}
               mode={session.mode}
+              modeChosen={session.chosen}
               visible={visible}
               onMode={(next) => {
                 hold(session.id, next)
@@ -188,6 +197,7 @@ function HeldSessionsDock({ held, onRelease }: { held: Held[]; onRelease: (id: s
                       ? [
                           session.mode === "stream" ? "Streaming" : (session.drawn ?? "Connected"),
                           session.latency,
+                          session.path,
                         ]
                           .filter(Boolean)
                           .join(" · ")

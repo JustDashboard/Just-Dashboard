@@ -49,7 +49,11 @@ type Options struct {
 	Dial func(ctx context.Context, network, address string) (net.Conn, error)
 	// Lookup resolves a computer's name the way this server does; tests swap it.
 	Lookup func(ctx context.Context, host string) ([]net.IPAddr, error)
-	Now    func() time.Time
+	// Warm, when set, asks the tailnet to find its direct path to a peer
+	// before a session needs it. None is fine: paths are found on traffic
+	// too, only later.
+	Warm func(ctx context.Context, address string)
+	Now  func() time.Time
 }
 
 type Service struct {
@@ -59,6 +63,7 @@ type Service struct {
 	tailnet func(ctx context.Context) (Tailnet, error)
 	dial    func(ctx context.Context, network, address string) (net.Conn, error)
 	lookup  func(ctx context.Context, host string) ([]net.IPAddr, error)
+	warm    func(ctx context.Context, address string)
 	now     func() time.Time
 
 	mu          sync.Mutex
@@ -67,6 +72,9 @@ type Service struct {
 	streams     int
 	bridgeAt    string
 	bridgeUntil time.Time
+	// warmed is when each peer's path was last asked for, so the session
+	// page's polling asks once a minute rather than every few seconds.
+	warmed map[string]time.Time
 }
 
 func New(o Options) *Service {
@@ -90,10 +98,42 @@ func New(o Options) *Service {
 		tailnet: o.Tailnet,
 		dial:    o.Dial,
 		lookup:  o.Lookup,
+		warm:    o.Warm,
 		now:     o.Now,
 		live:    map[string]int{},
 		pairs:   map[string]*pairing{},
+		warmed:  map[string]time.Time{},
 	}
+}
+
+// warmInterval is how long one warm-up is trusted for. Tailscale lets a
+// direct path lapse after a few minutes without traffic.
+const warmInterval = time.Minute
+
+// warmPath asks the tailnet, in the background, to find its direct path to
+// the peer the computer is, so a session that starts in the next moments
+// starts on it rather than on a relay. A path is only looked for on traffic,
+// and the first seconds of a session are what suffer when it is still being
+// found: the picture arrives through the nearest relay, at twice the round
+// trip, until it is.
+func (s *Service) warmPath(ctx context.Context, view ComputerView) {
+	if s.warm == nil || view.Peer == nil || !view.Peer.Online || view.Peer.Direct || view.Peer.Address == "" {
+		return
+	}
+	s.mu.Lock()
+	last, seen := s.warmed[view.Peer.Address]
+	if seen && s.now().Sub(last) < warmInterval {
+		s.mu.Unlock()
+		return
+	}
+	s.warmed[view.Peer.Address] = s.now()
+	s.mu.Unlock()
+	address := view.Peer.Address
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		s.warm(ctx, address)
+	}()
 }
 
 // Reconcile closes the history of sessions a restart cut off.
@@ -112,6 +152,17 @@ func (s *Service) Close() error {
 func (s *Service) Engine(ctx context.Context) EngineStatus { return s.engine.Status(ctx) }
 
 func (s *Service) InstallEngine(ctx context.Context, progress func(string)) error {
+	return s.engine.Install(ctx, progress)
+}
+
+// UpgradeEngine makes a running engine again when an older dashboard made it
+// with another configuration; its volume, and the files on it, stay. Install
+// is a no-op for one that is current. Nothing is open at start, which is
+// when it runs.
+func (s *Service) UpgradeEngine(ctx context.Context, progress func(string)) error {
+	if s.engine.Status(ctx).State != EngineRunning {
+		return nil
+	}
 	return s.engine.Install(ctx, progress)
 }
 
@@ -295,12 +346,15 @@ func (s *Service) ProbeTarget(ctx context.Context, host string, port int) (Reach
 	return s.Probe(ctx, host, port), nil
 }
 
+// View is one computer as the session page reads it. The page reads it
+// before it connects, which is when the path to the computer is warmed.
 func (s *Service) View(ctx context.Context, id string) (ComputerView, error) {
 	c, err := s.store.get(ctx, id)
 	if err != nil {
 		return ComputerView{}, err
 	}
 	views := s.views(ctx, []Computer{c}, s.readTailnet(ctx))
+	s.warmPath(ctx, views[0])
 	return views[0], nil
 }
 
@@ -448,6 +502,14 @@ func connectParams(c Computer, password string, d Display) map[string]string {
 	p["ignore-cert"] = "true"
 	p["resize-method"] = "display-update"
 	p["enable-font-smoothing"] = "true"
+	// guacd 1.6 turns RDP's Graphics Pipeline on by default, and with it
+	// loses the server's frame marks: frames are cut on a timer, between
+	// ten and a hundred milliseconds, and carry two to three times the data.
+	// The classic path draws on the marks, at 16-bit colour. A computer
+	// whose server insists on the pipeline asks for it.
+	if !c.Gfx {
+		p["disable-gfx"] = "true"
+	}
 	p["client-name"] = "Just Dashboard"
 	p["server-layout"] = c.Layout
 	p["timezone"] = d.Timezone

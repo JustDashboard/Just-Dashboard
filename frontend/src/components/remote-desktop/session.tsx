@@ -30,20 +30,26 @@ import { VerbMenu } from "@/components/verbs"
 import { put, wsUrl } from "@/lib/api"
 import {
   combosFor,
+  defaultSessionMode,
   displaySize,
   latency,
+  pathLabel,
   protocolLabel,
   reachability,
   REMOTE_DESKTOP_HREF,
   sessionHref,
   sessionProblem,
   streamStage,
+  type ControlDensity,
+  type ControlStats,
   type KeyCombo,
   type RdComputerView,
   type RdStream,
   type SessionMode,
   type StreamQuality,
+  type StreamStats,
 } from "@/lib/remote-desktop"
+import { meterTunnel } from "@/lib/remote-desktop-stats"
 import { notify } from "@/lib/toast"
 import { useViewState } from "@/lib/view-state"
 import { cn } from "@/lib/utils"
@@ -104,6 +110,7 @@ const DISCONNECTED = 5
 export function RemoteSession({
   id,
   mode,
+  modeChosen,
   visible,
   onMode,
   onDisconnect,
@@ -111,6 +118,8 @@ export function RemoteSession({
 }: {
   id: string
   mode: SessionMode
+  /** Whether the address or the reader chose the mode; unchosen, the computer's own default stands. */
+  modeChosen: boolean
   /** A held session on another page stays connected and stops reading the computers. */
   visible: boolean
   onMode: (mode: SessionMode) => void
@@ -144,6 +153,16 @@ export function RemoteSession({
   )
   const [streamAttempt, setStreamAttempt] = useState(0)
   const [pointer, setPointer] = useViewState("remote-desktop.stream-pointer", false)
+  const [density, setDensity] = useViewState<ControlDensity>(
+    "remote-desktop.control-density",
+    "smooth",
+  )
+  const sharp = density === "sharp"
+  const sharpRef = useRef(sharp)
+  // Sends the screen's size again when the density changes, once a session is up.
+  const refit = useRef<() => void>(() => {})
+  const [controlStats, setControlStats] = useState<ControlStats>()
+  const [streamStats, setStreamStats] = useState<StreamStats>()
   const toolsOpen = narrow ? mobileTools : tools
   const streamFrame = useRef<HTMLIFrameElement>(null)
   const streamPoll = useStream(id, visible && mode === "stream")
@@ -160,9 +179,23 @@ export function RemoteSession({
     : undefined
   const name = computer?.name
   const os = computer?.os
+  const path = pathLabel(computer?.peer)
   useEffect(() => {
-    if (name && os && drawn) onState({ name, os, live, drawn, latency: latency(latencyMs) })
-  }, [name, os, live, drawn, latencyMs, onState])
+    if (name && os && drawn) onState({ name, os, live, drawn, latency: latency(latencyMs), path })
+  }, [name, os, live, drawn, latencyMs, path, onState])
+
+  // A computer opened without a mode named opens in its own: Stream for a
+  // Mac paired with Sunshine, Control for everything else.
+  const preferredMode = computer ? defaultSessionMode(computer) : undefined
+  useEffect(() => {
+    if (modeChosen || !preferredMode || preferredMode === mode) return
+    onMode(preferredMode)
+  }, [modeChosen, preferredMode, mode, onMode])
+
+  useEffect(() => {
+    sharpRef.current = sharp
+    refit.current()
+  }, [sharp])
 
   const track = useCallback((key: string, change: Partial<Transfer>) => {
     setTransfers((held) =>
@@ -180,11 +213,19 @@ export function RemoteSession({
       const holder = stage.current
       if (cancelled || !frame || !holder) return
       guac.current = G
-      const size = displaySize(frame.clientWidth, frame.clientHeight, window.devicePixelRatio)
-      const session = new G.Client(
-        new G.WebSocketTunnel(wsUrl(`/remote-desktop/computers/${id}/session`)),
+      const size = displaySize(
+        frame.clientWidth,
+        frame.clientHeight,
+        window.devicePixelRatio,
+        sharpRef.current,
       )
+      const tunnel = new G.WebSocketTunnel(wsUrl(`/remote-desktop/computers/${id}/session`))
+      const session = new G.Client(tunnel)
       client.current = session
+      // Read after the client has taken the tunnel, so its handlers are the
+      // ones wrapped.
+      const meter = meterTunnel(tunnel)
+      const meterTimer = window.setInterval(() => setControlStats(meter.read()), 1000)
       const display = session.getDisplay()
       const node = display.getElement()
       holder.appendChild(node)
@@ -219,11 +260,17 @@ export function RemoteSession({
       const followFrame = () => {
         // A session held while another page is up has no frame to follow;
         // the computer keeps the size it had until the session is shown.
-        if (!frame.clientWidth || !frame.clientHeight) return
-        const next = displaySize(frame.clientWidth, frame.clientHeight, window.devicePixelRatio)
+        if (!connected || !frame.clientWidth || !frame.clientHeight) return
+        const next = displaySize(
+          frame.clientWidth,
+          frame.clientHeight,
+          window.devicePixelRatio,
+          sharpRef.current,
+        )
         session.sendSize(next.width, next.height)
         fit()
       }
+      refit.current = followFrame
 
       session.onstatechange = (state) => {
         if (state === CONNECTED) {
@@ -234,6 +281,8 @@ export function RemoteSession({
           fit()
         }
         if (state === DISCONNECTED) {
+          connected = false
+          setControlStats(undefined)
           setPhase((held) => (held.kind === "failed" ? held : { kind: "ended" }))
         }
       }
@@ -297,6 +346,9 @@ export function RemoteSession({
       teardown = () => {
         observer.disconnect()
         window.clearTimeout(resizeTimer)
+        window.clearInterval(meterTimer)
+        refit.current = () => {}
+        setControlStats(undefined)
         keyboard.onkeydown = null
         keyboard.onkeyup = null
         keyboard.reset()
@@ -479,6 +531,9 @@ export function RemoteSession({
         <ControlSections
           computer={computer}
           connected={phase.kind === "connected"}
+          density={density}
+          onDensity={setDensity}
+          stats={controlStats}
           remoteClip={remoteClip}
           localClip={localClip}
           onLocalClip={setLocalClip}
@@ -493,6 +548,7 @@ export function RemoteSession({
         <StreamSections
           computer={computer}
           stream={stream}
+          stats={streamStats}
           quality={quality}
           onQuality={setQuality}
           pointer={pointer}
@@ -556,14 +612,22 @@ export function RemoteSession({
             )}
             <span className="flex-1" />
             {!control ? (
-              <StreamStatus stream={stream} playing={playing} />
+              <StreamStatus stream={stream} playing={playing} stats={streamStats} path={path} />
             ) : phase.kind === "connected" ? (
-              <Status
-                tone="running"
-                live
-                label={latency(computer?.reach.latencyMs) ?? "connected"}
-                className="px-2"
-              />
+              <>
+                <Status
+                  tone="running"
+                  live
+                  label={latency(computer?.reach.latencyMs) ?? "connected"}
+                  className="px-2"
+                />
+                <SessionFigures
+                  fps={
+                    controlStats && controlStats.clientFps > 0 ? controlStats.clientFps : undefined
+                  }
+                  path={path}
+                />
+              </>
             ) : phase.kind === "connecting" ? (
               <TextShimmer className="px-2 text-xs font-medium">connecting…</TextShimmer>
             ) : phase.kind === "sign-in" ? (
@@ -628,6 +692,7 @@ export function RemoteSession({
                 readyStream={streamPoll.readyStream}
                 error={streamPoll.error}
                 onPlayback={setPlaying}
+                onStats={setStreamStats}
                 quality={quality}
                 attempt={streamAttempt}
                 pointer={pointer}
@@ -809,8 +874,38 @@ function Rail({
   )
 }
 
-function StreamStatus({ stream, playing }: { stream: RdStream | undefined; playing: boolean }) {
-  if (playing) return <Status tone="running" live label="streaming" className="px-2" />
+/** The frames a second and the tailnet's path, beside the header's status, when known. */
+function SessionFigures({ fps, path }: { fps: number | undefined; path: string | undefined }) {
+  const parts = [fps ? `${fps} fps` : undefined, path].filter(Boolean)
+  if (parts.length === 0) return null
+  return (
+    <span
+      data-slot="session-figures"
+      className="numeric shrink-0 px-1 text-hint text-muted-foreground max-sm:hidden"
+    >
+      {parts.join(" · ")}
+    </span>
+  )
+}
+
+function StreamStatus({
+  stream,
+  playing,
+  stats,
+  path,
+}: {
+  stream: RdStream | undefined
+  playing: boolean
+  stats: StreamStats | undefined
+  path: string | undefined
+}) {
+  if (playing)
+    return (
+      <>
+        <Status tone="running" live label="streaming" className="px-2" />
+        <SessionFigures fps={stats?.fps || undefined} path={path} />
+      </>
+    )
   if (!stream) return <TextShimmer className="px-2 text-xs font-medium">reading…</TextShimmer>
   const stage = streamStage(stream)
   if (stage === "ready") return <Status tone="notice" label="ready to stream" className="px-2" />
