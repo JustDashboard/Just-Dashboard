@@ -186,6 +186,11 @@
           "kind": "changed",
           "text": "Say how long each database release is maintained",
           "detail": "Add a database says beside each release when its support ends, and keeps the releases already past it, such as MySQL 8.0 and MariaDB 10.6, behind Older versions. A database's Home and General settings say the same beside its version. Databases already running on any release keep working."
+        },
+        {
+          "kind": "added",
+          "text": "Show where a measured query plan spent its time and which steps the planner misjudged",
+          "detail": "Databases → Query → Plan draws each measured step's own time beside the time of everything under it, against the whole statement's, and can list the steps slowest first. A step whose rows came out ten times more or fewer than planned says so under its name, as \"est 12 · actual 48,210 (×4,000)\". Oracle's, ClickHouse's and an older MySQL's printed plans are drawn as the same tree."
         }
       ]
     },
