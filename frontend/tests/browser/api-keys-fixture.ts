@@ -135,6 +135,22 @@ export async function mockKeys(page: Page, role: Role = "admin", initial = keyTo
         tokens.push(token)
         return json(route, { token, secret: `vpsd_synthetic_key_${sequence}` }, 201)
       }
+      if (method === "POST" && path === "/tokens/mcp") {
+        const token: ApiToken = {
+          id: ++sequence,
+          userId: 1,
+          prefix: "vpsd_synthetic",
+          name: body.name,
+          role,
+          scope: "mcp",
+          createdAt: new Date().toISOString(),
+          expiresAt: body.ttlDays ? iso(body.ttlDays) : undefined,
+          revoked: false,
+          connections: body.connections,
+        }
+        tokens.push(token)
+        return json(route, { token, secret: `vpsd_synthetic_key_${sequence}` }, 201)
+      }
       const id = Number(path.split("/")[2])
       if (method === "DELETE" && path.endsWith("/record"))
         tokens = tokens.filter((token) => token.id !== id)
