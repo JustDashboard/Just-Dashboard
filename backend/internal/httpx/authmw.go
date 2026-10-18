@@ -93,10 +93,13 @@ func (a *Authenticator) resolveWithPasswordChange(r *http.Request, allowPassword
 		if user.MustChangePW {
 			return nil, passwordChangeRequired()
 		}
-		return &Principal{
-			User: user, Role: role, TokenID: tok.ID, Kind: "token",
-			IP: ClientIP(r), UserAgent: r.UserAgent(), Elevated: true,
-		}, nil
+		// A key made for an AI client opens the MCP endpoint and no other
+		// route, whatever its owner's role would open.
+		if tok.Scope != "" {
+			return nil, Err(http.StatusForbidden, "token_scope",
+				"this is an MCP key: it opens the MCP endpoint, /api/v1/mcp, and nothing else")
+		}
+		return tokenPrincipal(r, tok, user, role), nil
 	}
 	token := sessionToken(r)
 	if token == "" {
@@ -125,6 +128,46 @@ func (a *Authenticator) resolveWithPasswordChange(r *http.Request, allowPassword
 		User: user, Role: user.Role, SessionID: sess.ID, Kind: "session",
 		IP: ClientIP(r), UserAgent: r.UserAgent(), Elevated: true,
 	}, nil
+}
+
+// AuthenticateMCP admits an MCP key and nothing else. A session cookie is
+// not read, so no page in a browser can reach the endpoint and it needs no
+// CSRF header, and a key for the rest of the API is refused: an AI client
+// reaches the databases its own key was granted and no others.
+func (a *Authenticator) AuthenticateMCP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The challenge names no authorization server, so a client finds
+		// nothing to sign in through and says the key it was given failed.
+		bearer := bearerToken(r)
+		if bearer == "" {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="Just Dashboard MCP"`)
+			WriteError(w, r, Err(http.StatusUnauthorized, "unauthorized", "send an MCP key as a bearer token"))
+			return
+		}
+		tok, user, role, err := a.Svc.ResolveAPIToken(r.Context(), bearer)
+		if err != nil {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="Just Dashboard MCP", error="invalid_token"`)
+			WriteError(w, r, Err(http.StatusUnauthorized, "unauthorized", "api token invalid, revoked or expired"))
+			return
+		}
+		if user.MustChangePW {
+			WriteError(w, r, passwordChangeRequired())
+			return
+		}
+		if tok.Scope != auth.ScopeMCP {
+			WriteError(w, r, Err(http.StatusForbidden, "token_scope",
+				"this endpoint takes an MCP key, made under Databases → MCP server; this key is for the rest of the API"))
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), tokenPrincipal(r, tok, user, role))))
+	})
+}
+
+func tokenPrincipal(r *http.Request, tok *auth.APIToken, user *auth.User, role auth.Role) *Principal {
+	return &Principal{
+		User: user, Role: role, TokenID: tok.ID, Token: tok, Kind: "token",
+		IP: ClientIP(r), UserAgent: r.UserAgent(), Elevated: true,
+	}
 }
 
 func passwordChangeRequired() error {

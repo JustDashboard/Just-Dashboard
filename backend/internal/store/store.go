@@ -78,7 +78,11 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   created_at   INTEGER NOT NULL,
   expires_at   INTEGER NOT NULL DEFAULT 0,
   last_used_at INTEGER NOT NULL DEFAULT 0,
-  revoked      INTEGER NOT NULL DEFAULT 0
+  revoked      INTEGER NOT NULL DEFAULT 0,
+  -- '' opens every route the key's role allows; 'mcp' opens the MCP endpoint
+  -- and nothing else, and reaches only the databases api_token_connections
+  -- grants it.
+  scope        TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -113,6 +117,17 @@ CREATE TABLE IF NOT EXISTS db_connections (
   read_only   INTEGER NOT NULL DEFAULT 0,
   notes       TEXT NOT NULL DEFAULT ''
 );
+
+-- The databases an MCP key reaches, and whether it may change what is in
+-- each ('read' or 'write'). A key reaches nothing that has no row here, and
+-- forgetting the connection or deleting the key's record takes the row with it.
+CREATE TABLE IF NOT EXISTS api_token_connections (
+  token_id      INTEGER NOT NULL REFERENCES api_tokens(id) ON DELETE CASCADE,
+  connection_id INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+  access        TEXT NOT NULL DEFAULT 'read',
+  PRIMARY KEY (token_id, connection_id)
+);
+CREATE INDEX IF NOT EXISTS idx_api_token_connections_conn ON api_token_connections(connection_id);
 
 -- Background activity history is tied to the exact saved target.
 CREATE TABLE IF NOT EXISTS db_metric_samples (
@@ -1446,6 +1461,9 @@ var addedColumns = []struct{ table, column, spec string }{
 	// A computer paired with Remote Desktop's stream bridge keeps the
 	// bridge's id for it; 0 is a computer that streams nothing yet.
 	{"remote_desktop_computers", "stream_host_id", "INTEGER NOT NULL DEFAULT 0"},
+	// A key learned to be an MCP key, which opens the MCP endpoint alone. Every
+	// key made before is one for the whole API its role allows.
+	{"api_tokens", "scope", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on

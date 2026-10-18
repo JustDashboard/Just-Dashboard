@@ -18,6 +18,8 @@ type Principal struct {
 	Role      auth.Role
 	SessionID string
 	TokenID   int64
+	// Token is the key behind a token principal, scope and all.
+	Token     *auth.APIToken
 	Kind      string // "session" | "token"
 	IP        string
 	UserAgent string

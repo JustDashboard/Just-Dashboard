@@ -131,6 +131,18 @@ func (s *Server) Routes() http.Handler {
 			s.mountRemoteDesktopRoutes(r)
 		})
 
+		// The MCP endpoint (handlers_mcp.go) takes an MCP key and nothing
+		// else, so no browser cookie reaches it and it needs no CSRF header.
+		// An agent has no databases of its own to offer an AI client.
+		if !s.Cfg.AgentMode {
+			r.Group(func(r chi.Router) {
+				r.Use(s.Authn.AuthenticateMCP)
+				r.Use(s.apiLim.ByPrincipal)
+				r.Use(httpx.AuditMutations(s.Audit))
+				s.mountMCPRoutes(r)
+			})
+		}
+
 		// Remote Desktop's stream bridge serves its own page, which posts
 		// without the CSRF header; the bridge group asks for a same-site
 		// Origin instead. An agent has no screen to stream to.
@@ -169,6 +181,10 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireSession)
 			r.Method(http.MethodPost, "/", s.handle(s.handleCreateToken))
+			// A key for an AI client, and the databases it reaches
+			// (handlers_mcp_keys.go).
+			r.Method(http.MethodPost, "/mcp", s.handle(s.handleCreateMCPToken))
+			r.Method(http.MethodPut, "/{id}/connections", s.handle(s.handleSetMCPTokenConnections))
 			r.Method(http.MethodDelete, "/{id}", s.handle(s.handleRevokeToken))
 			r.Group(func(r chi.Router) {
 				r.Use(httpx.RequireCapability(auth.CapSystemAdmin))

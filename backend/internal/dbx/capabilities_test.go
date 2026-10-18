@@ -98,6 +98,8 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		"cellRead":       "sql",
 		"explainJSON":    "postgres -cockroachdb mysql -tidb " + mongoProper,
 		"explainAnalyze": "postgres -cockroachdb mysql " + mongoProper,
+		// What an AI client reaches through the MCP endpoint.
+		"mcp": "sql",
 
 		// the schema
 		"ddl":               "sql -clickhouse",

@@ -93,6 +93,9 @@ type Server struct {
 	dbMetricsDone  chan struct{}
 	dbMetricOffset int
 
+	// The tool calls each MCP key has in flight (handlers_mcp.go).
+	mcp mcpState
+
 	modules moduleSet
 }
 

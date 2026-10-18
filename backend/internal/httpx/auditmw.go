@@ -21,6 +21,7 @@ type auditInfo struct {
 	Detail string
 	Actor  string
 	Skip   bool
+	Failed bool
 }
 
 // SetAudit labels the current request for the audit trail.
@@ -48,6 +49,16 @@ func SetAuditActor(r *http.Request, actor string) {
 func SkipAudit(r *http.Request) {
 	if info, ok := r.Context().Value(auditCtxKey).(*auditInfo); ok {
 		info.Skip = true
+	}
+}
+
+// AuditFailed records the request as failed whatever its status. The MCP
+// endpoint answers a refused or failed tool call with a 200 and a result that
+// says so, because that is how its protocol lets the model read why; the
+// trail still has to say it did not go through.
+func AuditFailed(r *http.Request) {
+	if info, ok := r.Context().Value(auditCtxKey).(*auditInfo); ok {
+		info.Failed = true
 	}
 }
 
@@ -95,7 +106,7 @@ func AuditMutations(log *audit.Logger) func(http.Handler) http.Handler {
 				Method:   r.Method,
 				Path:     r.URL.Path,
 				Status:   sw.Status(),
-				Success:  sw.Status() < 400,
+				Success:  sw.Status() < 400 && !info.Failed,
 				Detail:   detail,
 			})
 		})
