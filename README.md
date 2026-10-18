@@ -26,7 +26,7 @@ backed up — behind one login that lives on your private network.
 
 ![The server overview: the machine drawn as itself, live resources with their last hour, storage and the deployed projects](docs/readme/overview.png)
 
-<p align="center"><sub>Screenshots show version 0.7.1 with example data.</sub></p>
+<p align="center"><sub>Screenshots show version 0.7.5 with example data.</sub></p>
 
 ---
 
@@ -275,6 +275,51 @@ free.
 <td width="50%" valign="top">
 <img src="docs/readme/command-palette.png" alt="The command palette searching for shop across projects, repositories, databases and containers">
 <p align="center"><b>Ctrl/⌘K</b> — everything one keystroke away</p>
+</td>
+</tr>
+</table>
+
+### New in 0.7.5
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/readme/remote-desktop.png" alt="The Remote Desktop overview drawing this browser, the server and four computers, one of them in a session">
+<p align="center"><b>Remote Desktop</b> — your own PCs and Macs in a tab, over Tailscale</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/readme/database-assistant.png" alt="The SQL editor with the assistant beside it, answering two questions with statements to insert or open">
+<p align="center"><b>SQL assistant</b> — ask for a statement, an error or a plan explained</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/readme/database-mcp.png" alt="A new MCP key with the command that connects Claude Code to the dashboard's databases">
+<p align="center"><b>MCP server</b> — the databases you choose, for your AI clients</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/readme/database-explain.png" alt="A measured PostgreSQL plan with a hash join and a sequential scan flagged as misjudged by four thousand times">
+<p align="center"><b>Measured plans</b> — where the time went, and what the planner misjudged</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/readme/database-schema-diff.png" alt="Two schemas compared, six differences listed beside the migration SQL and its destructive-step warning">
+<p align="center"><b>Schema comparison</b> — the differences, and the SQL that closes them</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/readme/database-rls.png" alt="A PostgreSQL table's row-level security policies, tried as a role that sees two rows">
+<p align="center"><b>Row-level security</b> — write the policies, then try them as a role</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/readme/database-seed.png" alt="The Generate page filling tables with believable mock rows, parents first">
+<p align="center"><b>Seed data</b> — believable rows, written parents first</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/readme/database-pitr.png" alt="Point-in-time recovery for PostgreSQL: the recoverable window, base backups, a restore point and a recovered copy">
+<p align="center"><b>Point-in-time recovery</b> — any second, not only the last dump</p>
 </td>
 </tr>
 </table>
