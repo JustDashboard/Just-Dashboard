@@ -58,6 +58,12 @@ import { RoleChoice } from "@/components/account/role-choice"
 import { ROLE_HUE } from "@/components/account/capabilities"
 import { expired, expiringSoon, usableKeys } from "@/components/account/access"
 import { KeyMap } from "@/components/account/key-map"
+import {
+  clientConfig,
+  grantList,
+  grantsOf,
+  grantsWithin,
+} from "@/components/database/fleet/mcp-server"
 import { UserAvatar, displayNameOf } from "@/components/account/user-avatar"
 
 export function useApiKeys() {
@@ -89,8 +95,16 @@ export function keyProducts(tokens: ApiToken[]) {
 }
 
 export function curlExample(origin: string, key = "vpsd_…", scope?: ApiToken["scope"]) {
+  if (scope === "mcp") return clientConfig("claude-code", origin, key)
   const path = scope === "metrics.read" ? "metrics/databases" : "system/host"
   return `curl -H "Authorization: Bearer ${key}" ${origin}/api/v1/${path}`
+}
+
+/** A key narrowed to one job, in the words a row or a node has room for. */
+export function scopeWords(token: ApiToken) {
+  if (token.scope === "metrics.read") return "metrics only"
+  if (token.scope === "mcp") return "MCP only"
+  return undefined
 }
 
 /** The one line a key's state comes down to. */
@@ -127,7 +141,7 @@ function KeyRow({
   const usage = token.lastUsedAt ? `used ${relativeTime(token.lastUsedAt)}` : "never used"
   // A key narrowed to one job says the job, where the role beneath it would
   // read as the key being able to do everything that role can.
-  const can = token.scope === "metrics.read" ? "metrics only" : token.role
+  const can = scopeWords(token) ?? token.role
   return (
     <Row
       className="group"
@@ -535,7 +549,7 @@ export function ApiKeysView({
   )
 }
 
-const EXPIRY = [
+export const EXPIRY = [
   { value: "7", label: "7 days" },
   { value: "30", label: "30 days" },
   { value: "90", label: "90 days" },
@@ -612,12 +626,22 @@ function KeyDialog({
     setBusy(true)
     try {
       // A replacement is made the same way as the key it replaces: a key limited
-      // to one job is never replaced by one that can do what its owner can.
-      const res = await post<{ secret: string }>("/tokens/", {
-        name: name.trim(),
-        ...(scope ? { scope } : { role }),
-        ttlDays: Number(ttl),
-      })
+      // to one job is never replaced by one that can do what its owner can,
+      // and an MCP key's replacement reaches the same databases.
+      const res =
+        scope === "mcp"
+          ? await post<{ secret: string }>("/tokens/mcp", {
+              name: name.trim(),
+              ttlDays: Number(ttl),
+              connections: grantList(
+                grantsWithin(grantsOf(replacement), status?.user?.role !== "readonly"),
+              ),
+            })
+          : await post<{ secret: string }>("/tokens/", {
+              name: name.trim(),
+              ...(scope ? { scope } : { role }),
+              ttlDays: Number(ttl),
+            })
       if (request === generation.current) setSecret(res.secret)
       onDone()
     } catch (err) {
@@ -700,9 +724,11 @@ function KeyDialog({
             <Field
               label="Try it"
               hint={
-                scope
-                  ? "Send the key as a bearer token. This one returns the recorded database metrics."
-                  : "Send the key as a bearer token on any request. This one returns what the Overview shows."
+                scope === "mcp"
+                  ? "Adds the dashboard to Claude Code. Databases → MCP server has Cursor's and VS Code's."
+                  : scope
+                    ? "Send the key as a bearer token. This one returns the recorded database metrics."
+                    : "Send the key as a bearer token on any request. This one returns what the Overview shows."
               }
               trailing={
                 <Button
@@ -745,7 +771,12 @@ function KeyDialog({
                 />
               </div>
             </Field>
-            {scope ? (
+            {scope === "mcp" ? (
+              <Notice title="Opens the MCP endpoint only">
+                The replacement reaches the same databases as the key it replaces, and opens nothing
+                else on this dashboard.
+              </Notice>
+            ) : scope ? (
               <Notice title="Reads database metrics only">
                 The replacement is limited the same way: it can scrape the metrics endpoint and
                 nothing else on this dashboard.

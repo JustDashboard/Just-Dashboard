@@ -1880,6 +1880,7 @@ export type DbCapabilityFlag =
   | "explainAnalyze" // a plan measured by running the statement
   | "indexWhatIf" // POST /explain/index-candidates and /explain/what-if: an index tried on a plan with HypoPG
   | "missingIndexes" // GET /missing-indexes: SQL Server's own list of the indexes its plans wanted
+  | "mcp" // an MCP key can be given it, and an AI client's tools reach it
   // The schema.
   | "ddl" // the create-table form; gate the other forms on `ddlOperations`
   | "schemas" // more than one namespace to choose from
@@ -5189,12 +5190,23 @@ export type ApiToken = {
   name: string
   prefix: string
   role: Role
-  /** The one capability the key is limited to; empty for an ordinary key. */
-  scope?: "" | "metrics.read"
+  /**
+   * The one capability the key is limited to, or `mcp` for a key that opens
+   * the MCP endpoint alone; empty for an ordinary key.
+   */
+  scope?: "" | "metrics.read" | "mcp"
   createdAt: string
   expiresAt?: string
   lastUsedAt?: string
   revoked: boolean
+  /** The databases an MCP key reaches. Every other key has none. */
+  connections?: ApiTokenConnection[]
+}
+
+/** One database an MCP key reaches, to read only or to change as well. */
+export type ApiTokenConnection = {
+  connectionId: number
+  access: "read" | "write"
 }
 
 /** How the recorded database activity is kept and where it is scraped from. */
