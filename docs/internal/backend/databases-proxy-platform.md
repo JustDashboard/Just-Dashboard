@@ -113,8 +113,10 @@ is connected by naming the instance found, not by typing its address again.
   only its unit file names (`procs.ListInstalled`, `dbx.InstalledUnits`), and a stopped Debian PostgreSQL
   cluster, found by its `/etc/postgresql/<version>/<name>` directory — and a cluster's port is read from
   its `postgresql.conf`. Files are confirmed by their first sixteen bytes and never opened with a driver
-  to be listed; the walk is server-chosen roots through `files.Resolve`, bounded by depth, visits and
-  time, on a ten-minute cadence or `POST /databases/inventory/scan`. Where `JD_FILE_ROOTS` is narrower
+  to be listed, and the dashboard's own store is not read at all: closing a descriptor for it would
+  release the store's SQLite locks (see [runtime boundaries](../architecture/runtime-boundaries.md));
+  the walk is server-chosen roots through `files.Resolve`, bounded by depth, visits and time, on a
+  ten-minute cadence or `POST /databases/inventory/scan`. Where `JD_FILE_ROOTS` is narrower
   than those roots — beneath `/home`, or beside all of them — the file roots themselves are walked: a
   broad root above a file root is outside the roots as a whole, and the scan used to walk nothing and
   list no file that `inventory/connect` would still take by its path. A file root with a broad root
@@ -948,6 +950,27 @@ SQL Server resets SHOWPLAN using a bounded cancellation-independent context, inc
 failure. An uncertain enable/reset outcome discards the connection instead of returning its mode to
 the pool.
 
+The Query page's Plan draws the answer as one tree, read in the browser
+(`components/database/query/plan.ts`, the printed forms in `plan-text.ts`, both unit-tested):
+PostgreSQL's JSON, MySQL's `query_block` and 8.3's measured JSON, MariaDB's `r_` measurements, SQL
+Server's SHOWPLAN rows and SQLite's query plan, and three plans that arrive only as text — Oracle's
+DBMS_XPLAN table (its conditions under the step they name, its notes under the statement), MySQL's
+measured tree as an older MySQL prints it when the JSON form is refused, and ClickHouse's indented
+steps. Any other print stays the engine's text. A step carries what its format has and nothing it
+does not: cost, with the step's own share as its bar; rows; and in a measured plan its own time and
+the time of it with everything under it, as one bar of two inks against the plan's total, with the
+steps orderable slowest first. A measured step whose rows came out ten times more or fewer than
+planned says so under its name — `est 12 · actual 48,210 (×4,000)`, both over the whole run.
+Whether they are that far apart is decided a loop at a time with each side at least one row,
+because PostgreSQL never plans under one row a loop and before 18 rounds what came to whole rows,
+and fewer rows than planned is not said beneath a step that stops reading early (a limit, a merge
+join's inputs, the inner input of a nested semi- or anti-join), since the planner plans a run to
+its end. A MariaDB table's rows are those its condition kept (`rows × filtered` against
+`r_rows × r_filtered`, what it read a fact beside them), so a misjudged condition shows where
+comparing the rows read never would. These are statements of what the plan says, run on request,
+not findings. `TestLivePlansAreTheShapesTheTreeReads` asks every live engine for the shapes these
+readers rely on, so a server that changes one fails there rather than quietly drawing text.
+
 **Index advice is a tool the reader runs from the Explain view, never a finding.** 0.7.5 removed the
 Advisor and every automatic recommendation, and nothing here comes back as one: both actions are buttons
 on the Plan view, nothing is asked until one is pressed, and nothing is kept (`dbx/index_advice*.go`,
@@ -1251,6 +1274,49 @@ stays editable on a protected connection.
   not compile, because Oracle keeps it enabled and then refuses every write to its table (ORA-04098).
   A save reply carries the routine's catalogue `signature` where the engine has them, so a page that
   addressed it by signature can follow it.
+- **Two schemas are compared, and the migration between them is written, never run.** `GET
+  /databases/{id}/schema-diff?to=<id>&schema=&toSchema=` reads this connection's schema (*from*) and
+  another's (*to*) — a saved connection to the same driver, this one's other schemas included — and
+  answers what differs and the ordered steps that turn *from* into *to*; the page writes the
+  script from the steps, so the statements travel once. It is on the read surface and leaves no audit entry: the statements are text, and the
+  Query tab classifies and records them if they are run. A protected connection is compared like any
+  other. The flag is `schemaDiff` (`dbx/schema_diff_capabilities.go`): PostgreSQL, MySQL (MariaDB and
+  Percona included), SQL Server and SQLite, and not TimescaleDB, CockroachDB, YugabyteDB, TiDB or
+  Azure SQL Edge, whose statements differ from their driver's. Each side is read once
+  (`ReadSchemaSnapshot`): the tables through `dbx.Detail` — up to 400 a side, and 1500 objects of all
+  kinds, past which the route refuses by name — and the views, materialized views, sequences, enum types, functions and
+  procedures through the catalogue, with their definitions as the engine writes them. A kind of
+  object the login cannot read whole — or whose definition the server will not give (no privilege, an
+  encrypted module, an empty answer) — is left out of both sides and named under `notes`, so it is
+  never reported as missing or dropped and made again with nothing. Triggers, events, grants, comments, storage options and rows are not
+  compared.
+  - *The diff* (`DiffSchemas`) matches objects by name and the parts of a table — columns, primary
+    key, indexes, unique and check constraints, foreign keys — by name and then by definition, so an
+    index or key that differs only by an engine-generated name is not a difference. Where the two
+    schemas have different names, text that spells the schema out (`"alpha".mood`, a default's
+    `nextval('alpha.t_id_seq')`, a view's `FROM alpha.t`) is compared with the name taken away and
+    written for the *from* schema when it is planned; only where it qualifies a name, never inside a
+    quoted text or a comment (a relation named by `nextval('alpha.seq')` or `::regclass` is a name).
+    A renamed table or column reads as one dropped
+    and one added.
+  - *The plan* (`PlanMigration`) reuses the generators the schema forms use — `PlanAddColumn`,
+    `PlanAlterColumn`, `PlanDropColumn`, `PlanCreateIndex`, `PlanAddConstraint`, `PlanAddForeignKey`,
+    the drops, `PlanCreateEnum` and `PlanAddEnumValue`, `PlanCreateView` and `PlanDropView` — and
+    writes a new table with the same renderer the schema page shows a table's DDL with (SQLite's and
+    MySQL's own text, with MySQL's foreign keys taken out). The order: enum types and sequences, and
+    the routines that a default, check or generated column calls, first; then the views that read
+    what will change are dropped — an unchanged view is dropped and made again when it reads a
+    dropped view or a table that loses a column or changes a column's type — then foreign keys
+    (on MySQL and SQL Server also the unchanged ones on a column that changes type),
+    indexes and constraints that hold the old shape; new tables; column changes; dropped tables
+    (a table before the ones it references, a key of a cycle dropped first); then primary keys,
+    indexes, constraints and foreign keys, sequence ownership, the other routines (made when their
+    tables and columns exist), views, and the routines, sequences and enum types that went. A name
+    reaches the script only quoted or in a comment line of its own: a control character or line
+    break in a title is a space, and a name the engine will not quote makes the step a manual one. A step the generator refuses — a NOT NULL column with no default, an
+    identity column, an expression default it does not write, anything SQLite cannot alter in place —
+    is a *manual* step: no statements, and a comment in the script saying why. Every drop, and a
+    column's change of type, is marked destructive in the script and in the answer.
 - **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
   connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
   and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the
@@ -2516,7 +2582,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the twelve it calls): 258 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the twelve it calls): 259 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -2642,7 +2708,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/table` | read | — | — | — |
 | `GET` | `/databases/{id}/tables` | read | — | — | — |
 
-**Schema** (33)
+**Schema** (34)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -2679,6 +2745,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/outline` | read | — | — | — |
 | `GET` | `/databases/{id}/program` | read | — | — | — |
 | `GET` | `/databases/{id}/relations` | read | — | — | — |
+| `GET` | `/databases/{id}/schema-diff` | read | — | — | — |
 
 **Operations** (22)
 

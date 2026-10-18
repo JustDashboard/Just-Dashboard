@@ -1893,6 +1893,7 @@ export type DbCapabilityFlag =
   | "comments"
   | "indexes"
   | "extensions"
+  | "schemaDiff" // GET /schema-diff: two schemas compared and the migration between them written
   | "pooler" // a PgBouncer can be run in front of the server
   // Watching and maintaining a server.
   | "stats" // GET /stats: one snapshot of counters and gauges

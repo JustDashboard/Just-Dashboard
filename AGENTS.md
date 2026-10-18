@@ -24,6 +24,8 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
 - Do not add or change CI: no GitHub Actions workflows, no `.github/` automation, no hosted checks of
   any kind, unless the operator asks for them by name. Verification happens locally with the commands
   below; a red check on GitHub that nobody asked for is confusion, not safety.
+- Inspect a live dashboard's store only read-only, with
+  `sqlite3 'file:/var/lib/just-dashboard/vpsd.db?mode=ro'`; never write to it from outside the backend.
 - Use **Bun only** in `frontend/`. Keep `bun.lock`; never create `package-lock.json` or `yarn.lock`.
 - Match project style: Go uses standard formatting; TS/TSX uses Prettier with no semicolons, double
   quotes, a 100-column print width, and trailing commas. Comments explain why, not what.

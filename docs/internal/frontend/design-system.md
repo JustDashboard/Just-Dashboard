@@ -919,6 +919,12 @@ rather than assembling its own recharts tree — adding a measurement should mea
   tile's trend band then collapses rather than leave a gap. With a fixed `max` a flat line sits at
   its level and says so. Its colour is a series colour, never a status one: a failing share is
   `--chart-3`, because `--destructive` on a line says the line itself is an error (§3).
+- **A part of a tree is one bar of two inks.** A measured plan step's time on the Query page
+  (`query/plan-view.tsx`) is drawn against the whole plan's: the step's own share in the time
+  series' colour and, behind it at a third of that ink, the share of the step with everything under
+  it. One bar says what the step took and what its branch took, and only the solid inks down the
+  plan add up to the whole. The figure beside it is the step's own, which is what "slowest first"
+  orders by.
 
 ## 11. Motion says one of four things
 
@@ -3102,7 +3108,7 @@ the reader through it.
 | Host Overview, metrics, Docker, Security, Network, proxy, Processes, System, Backups, Packages, audit, Git, files, terminal | Reading | The reader arrives to find out what is true. |
 | Deployments list, a project's overview, runtime, logs, deployments, requests | Reading | A project that exists is a thing you read. |
 | `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
-| Databases — the control center, the map, a database's home, Search, Generate, Performance, Advisor, Access, Backups, Alerts, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
+| Databases — the control center, the map, a database's home, Search, Compare, Generate, Performance, Advisor, Access, Backups, Alerts, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
 | `/databases/[id]/import` — bring a database over from another server | **Flow** | A sequence with an outcome: which server it is on now, how it should come over, and — for a replication — when to cut over, ending in a database here. The spine is taken from the import the server keeps, so a reload, or the next day, finds it where it was. |
 | A database's Data, Query, Schema, Diagram and Logs | Reading, as a workbench | The reader works rather than scrolls, so the page is one frame held to the window (`<Page fill>` through `SectionFrame`, which takes the fact from the engine registry). A workbench is a layout of this register (§2), not a third one: same grounds, same type ladder, no flow panel. |
 | `/databases/new` — add a database | **Flow** | A question with an outcome: which database, started here or connected, ending in the one command that does it. The section's other flow page is Import. |

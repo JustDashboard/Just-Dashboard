@@ -1,5 +1,6 @@
 import {
   Archive,
+  ArrowLeftRight,
   Bell,
   ChartActivity,
   CloudDownload,
@@ -67,6 +68,7 @@ export type SectionId =
   | "search"
   | "schema"
   | "diagram"
+  | "compare"
   | "generate"
   | "performance"
   | "logs"
@@ -256,6 +258,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   comments: false,
   indexes: false,
   extensions: false,
+  schemaDiff: false,
   pooler: false,
   stats: false,
   sessions: false,
@@ -362,10 +365,10 @@ export const CAPABILITY_NAMES = Object.keys(NO_CAPABILITIES) as DbCapabilityName
  * is off until then, so nothing is offered that the server has not vouched for.
  */
 const FLOOR: Record<DbDriver, readonly DbCapabilityFlag[]> = {
-  postgres: ["sql", "console", "server", "dump", "orm", "roles"],
-  mysql: ["sql", "console", "server", "dump", "orm", "roles"],
-  sqlite: ["sql", "console", "dump", "orm"],
-  sqlserver: ["sql", "console", "server", "dump", "orm", "roles"],
+  postgres: ["sql", "console", "server", "dump", "orm", "roles", "schemaDiff"],
+  mysql: ["sql", "console", "server", "dump", "orm", "roles", "schemaDiff"],
+  sqlite: ["sql", "console", "dump", "orm", "schemaDiff"],
+  sqlserver: ["sql", "console", "server", "dump", "orm", "roles", "schemaDiff"],
   clickhouse: ["sql", "console", "server", "dump", "orm", "roles"],
   oracle: ["sql", "console", "server", "dump", "orm"],
   mongodb: ["console", "server", "dump", "roles"],
@@ -815,6 +818,15 @@ const SECTIONS: SectionSpec[] = [
     thing: "diagram",
   },
   {
+    id: "compare",
+    group: "schema",
+    title: "Compare",
+    icon: ArrowLeftRight,
+    kinds: ["sql"],
+    needs: "schemaDiff",
+    thing: "schema comparison",
+  },
+  {
     id: "generate",
     group: "schema",
     title: "Generate",
@@ -920,6 +932,7 @@ const CARRIES: Partial<Record<EngineKind, Partial<Record<SectionId, readonly Sel
     query: ["schema"],
     search: ["schema"],
     diagram: ["schema"],
+    compare: ["schema"],
     generate: ["schema"],
     performance: ["schema"],
   },

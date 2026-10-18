@@ -1,5 +1,16 @@
 import { describe, expect, test } from "bun:test"
-import { planFromRows, planOf, planRows, planText } from "./plan"
+import {
+  estimateText,
+  factorText,
+  planFromRows,
+  planOf,
+  planRows,
+  planText,
+  readingsOf,
+  rowsText,
+  shareText,
+  slowestFirst,
+} from "./plan"
 
 const POSTGRES = [
   {
@@ -433,5 +444,419 @@ describe("a shape nobody has described", () => {
     expect(planOf("text")).toBeNull()
     expect(planOf(null)).toBeNull()
     expect(planOf([])).toBeNull()
+  })
+})
+
+/* What PostgreSQL 17 answered for a join whose two conditions are one condition twice. */
+const MISJUDGED = [
+  {
+    Plan: {
+      "Node Type": "Sort",
+      "Total Cost": 107.79,
+      "Plan Rows": 1,
+      "Actual Rows": 50,
+      "Actual Total Time": 0.76,
+      "Actual Loops": 1,
+      "Sort Key": ["o.id"],
+      Plans: [
+        {
+          "Node Type": "Hash Join",
+          "Join Type": "Inner",
+          "Total Cost": 107.77,
+          "Plan Rows": 1,
+          "Actual Rows": 50,
+          "Actual Total Time": 0.713,
+          "Actual Loops": 1,
+          "Hash Cond": "(c.id = o.customer_id)",
+          Plans: [
+            {
+              "Node Type": "Seq Scan",
+              "Relation Name": "jdt_explain_view_c",
+              Alias: "c",
+              "Total Cost": 4,
+              "Plan Rows": 200,
+              "Actual Rows": 200,
+              "Actual Total Time": 0.036,
+              "Actual Loops": 1,
+            },
+            {
+              "Node Type": "Hash",
+              "Total Cost": 103,
+              "Plan Rows": 1,
+              "Actual Rows": 50,
+              "Actual Total Time": 0.629,
+              "Actual Loops": 1,
+              Plans: [
+                {
+                  "Node Type": "Seq Scan",
+                  "Relation Name": "jdt_explain_view_o",
+                  Alias: "o",
+                  "Total Cost": 103,
+                  "Plan Rows": 1,
+                  "Actual Rows": 50,
+                  "Actual Total Time": 0.575,
+                  "Actual Loops": 1,
+                  Filter: "((a = 1) AND (b = 1))",
+                  "Rows Removed by Filter": 4950,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    "Planning Time": 0.448,
+    "Execution Time": 0.839,
+  },
+]
+
+describe("a measured step far from its estimate", () => {
+  const rows = planRows(planOf(MISJUDGED))
+  const by = Object.fromEntries(rows.map((row) => [row.node.target ?? row.node.title, row]))
+  test("is said where the rows that came are ten times the expected or more", () => {
+    expect(by["jdt_explain_view_o o"].estimate).toEqual({
+      expected: 1,
+      actual: 50,
+      factor: 50,
+      farOff: true,
+    })
+    expect(estimateText(by["jdt_explain_view_o o"].estimate)).toBe("est 1 · actual 50 (×50)")
+    expect(by["jdt_explain_view_c c"].estimate.farOff).toBe(false)
+    expect(rows.filter((row) => row.estimate?.farOff).map((row) => row.node.title)).toEqual([
+      "Sort",
+      "Hash Join",
+      "Hash",
+      "Seq Scan",
+    ])
+  })
+  test("either way: fewer rows than expected is as far off as more", () => {
+    const [row] = planRows(
+      planOf([
+        {
+          Plan: {
+            "Node Type": "Seq Scan",
+            "Plan Rows": 48_000,
+            "Actual Rows": 12,
+            "Actual Loops": 1,
+            "Actual Total Time": 4,
+          },
+        },
+      ]),
+    )
+    expect(row.estimate.farOff).toBe(true)
+    expect(estimateText(row.estimate)).toBe("est 48,000 · actual 12 (×4,000)")
+  })
+  test("is not said of a plan that was only planned", () => {
+    const [row] = planRows(
+      planOf([{ Plan: { "Node Type": "Seq Scan", "Plan Rows": 1, "Total Cost": 3 } }]),
+    )
+    expect(row.estimate).toBeUndefined()
+    expect(row.never).toBeUndefined()
+  })
+  test("counts the whole run: a loop's estimate times its loops against every row that came", () => {
+    const [, , inner] = planRows(
+      planOf([
+        {
+          Plan: {
+            "Node Type": "Nested Loop",
+            "Join Type": "Inner",
+            "Plan Rows": 200,
+            "Actual Rows": 9_000,
+            "Actual Loops": 1,
+            Plans: [
+              { "Node Type": "Seq Scan", "Plan Rows": 200, "Actual Rows": 200, "Actual Loops": 1 },
+              { "Node Type": "Index Scan", "Plan Rows": 1, "Actual Rows": 45, "Actual Loops": 200 },
+            ],
+          },
+        },
+      ]),
+    )
+    expect(inner.estimate).toMatchObject({ expected: 200, actual: 9_000, farOff: true })
+    expect(estimateText(inner.estimate)).toBe("est 200 · actual 9,000 (×45)")
+  })
+  test("a lookup that mostly finds nothing is the planner's one-row floor, not a misjudgement", () => {
+    // PostgreSQL before 18 rounds a loop's rows to whole rows: 0 of the 1 it always plans for.
+    const [, , inner] = planRows(
+      planOf([
+        {
+          Plan: {
+            "Node Type": "Nested Loop",
+            "Plan Rows": 10_000,
+            "Actual Rows": 30,
+            "Actual Loops": 1,
+            Plans: [
+              {
+                "Node Type": "Seq Scan",
+                "Plan Rows": 10_000,
+                "Actual Rows": 10_000,
+                "Actual Loops": 1,
+              },
+              {
+                "Node Type": "Index Scan",
+                "Plan Rows": 1,
+                "Actual Rows": 0,
+                "Actual Loops": 10_000,
+              },
+            ],
+          },
+        },
+      ]),
+    )
+    expect(inner.estimate.farOff).toBe(false)
+  })
+  test("fewer rows under a limit is the limit stopping, not a misjudgement", () => {
+    const [limit, scan] = planRows(
+      planOf([
+        {
+          Plan: {
+            "Node Type": "Limit",
+            "Plan Rows": 5,
+            "Actual Rows": 5,
+            "Actual Loops": 1,
+            Plans: [
+              {
+                "Node Type": "Seq Scan",
+                "Plan Rows": 2500,
+                "Actual Rows": 5,
+                "Actual Loops": 1,
+                Filter: "(a < 50)",
+              },
+            ],
+          },
+        },
+      ]),
+    )
+    expect(limit.node.stops).toBe("inputs")
+    expect(scan.estimate).toMatchObject({ expected: 2500, actual: 5, farOff: false })
+    // More rows than planned has no such reason.
+    const [, more] = planRows(
+      planOf([
+        {
+          Plan: {
+            "Node Type": "Limit",
+            "Plan Rows": 5,
+            "Actual Rows": 5,
+            "Actual Loops": 1,
+            Plans: [
+              { "Node Type": "Seq Scan", "Plan Rows": 1, "Actual Rows": 50, "Actual Loops": 1 },
+            ],
+          },
+        },
+      ]),
+    )
+    expect(more.estimate.farOff).toBe(true)
+  })
+  test("a semi-join stops its inner input at the first match, and only that input", () => {
+    const [, outer, inner] = planRows(
+      planOf([
+        {
+          Plan: {
+            "Node Type": "Nested Loop",
+            "Join Type": "Semi",
+            "Plan Rows": 200,
+            "Actual Rows": 2,
+            "Actual Loops": 1,
+            Plans: [
+              { "Node Type": "Seq Scan", "Plan Rows": 2000, "Actual Rows": 200, "Actual Loops": 1 },
+              { "Node Type": "Index Scan", "Plan Rows": 50, "Actual Rows": 2, "Actual Loops": 200 },
+            ],
+          },
+        },
+      ]),
+    )
+    expect(outer.estimate.farOff).toBe(true)
+    expect(inner.estimate.farOff).toBe(false)
+  })
+  test("a step that never ran says so and is not compared", () => {
+    const [, , never] = planRows(
+      planOf([
+        {
+          Plan: {
+            "Node Type": "Hash Join",
+            "Plan Rows": 10,
+            "Actual Rows": 0,
+            "Actual Loops": 1,
+            Plans: [
+              { "Node Type": "Seq Scan", "Plan Rows": 10, "Actual Rows": 0, "Actual Loops": 1 },
+              { "Node Type": "Hash", "Plan Rows": 900, "Actual Rows": 0, "Actual Loops": 0 },
+            ],
+          },
+        },
+      ]),
+    )
+    expect(never.never).toBe(true)
+    expect(never.estimate).toBeUndefined()
+  })
+})
+
+describe("a measured step's time", () => {
+  const rows = planRows(planOf(MISJUDGED))
+  const by = Object.fromEntries(rows.map((row) => [row.node.target ?? row.node.title, row]))
+  test("is its own and, with the steps under it, the whole of its subtree, both against the plan's", () => {
+    expect(by["Hash"].selfMs).toBeCloseTo(0.054, 6)
+    expect(by["Hash"].timeMs).toBeCloseTo(0.629, 6)
+    expect(by["Hash"].timeShare).toBeCloseTo(0.054 / 0.76, 6)
+    expect(by["Hash"].totalShare).toBeCloseTo(0.629 / 0.76, 6)
+    expect(by["Sort"].totalShare).toBe(1)
+    expect(by["Hash Join"].selfMs).toBeCloseTo(0.713 - 0.036 - 0.629, 6)
+    // The steps' own shares make up the whole.
+    expect(rows.reduce((total, row) => total + row.timeShare, 0)).toBeCloseTo(1, 6)
+  })
+  test("orders the steps slowest first, out of the tree, a step's place kept as its id", () => {
+    const sorted = slowestFirst(rows)
+    expect(sorted.map((row) => row.node.target ?? row.node.title)).toEqual([
+      "jdt_explain_view_o o",
+      "Hash",
+      "Hash Join",
+      "Sort",
+      "jdt_explain_view_c c",
+    ])
+    expect(sorted[0].id).toBe("0.0.1.0")
+    expect(sorted.every((row) => row.depth === 0 && row.rails.length === 0)).toBe(true)
+    // The plan's own order is left as it was.
+    expect(rows[0].node.title).toBe("Sort")
+  })
+  test("a step the plan did not time keeps its place after the timed ones", () => {
+    const sorted = slowestFirst([
+      { id: "0", depth: 0, rails: [], last: true, node: { title: "Group" } },
+      { id: "0.0", depth: 1, rails: [], last: false, node: { title: "Quick" }, selfMs: 1 },
+      { id: "0.1", depth: 1, rails: [], last: true, node: { title: "Slow" }, selfMs: 9 },
+    ])
+    expect(sorted.map((row) => row.node.title)).toEqual(["Slow", "Quick", "Group"])
+  })
+  test("reads under the step as facts, in words", () => {
+    expect(readingsOf(by["Hash"])).toEqual([
+      ["Time in this step", "0.05 ms · 7%"],
+      ["With the steps under it", "0.63 ms · 83%"],
+      ["Rows expected", "1"],
+    ])
+    // A leaf has nothing under it to add; a loop count is said once there are loops.
+    expect(readingsOf(by["jdt_explain_view_c c"]).map(([label]) => label)).toEqual([
+      "Time in this step",
+      "Rows expected",
+    ])
+  })
+})
+
+describe("the figures a plan prints", () => {
+  test("a factor to two figures", () => {
+    expect(factorText(4017.5)).toBe("×4,000")
+    expect(factorText(12.4)).toBe("×12")
+    expect(factorText(125)).toBe("×130")
+    expect(factorText(50)).toBe("×50")
+  })
+  test("rows whole from ten, a fraction of a row below", () => {
+    expect(rowsText(50.00000353902578)).toBe("50")
+    expect(rowsText(1666.4999)).toBe("1,666")
+    expect(rowsText(2.5)).toBe("2.5")
+    expect(rowsText(0.01)).toBe("0.01")
+  })
+  test("a share as a percentage, and a sliver as under one", () => {
+    expect(shareText(0.45)).toBe("45%")
+    expect(shareText(0.003)).toBe("under 1%")
+    expect(shareText(0)).toBe("0%")
+  })
+})
+
+describe("a measured MySQL and MariaDB plan", () => {
+  test("MySQL's limit stops the steps under it", () => {
+    // As MySQL 8.4 measured `… WHERE a < 50 LIMIT 5`.
+    const plan = planOf({
+      operation: "Limit: 5 row(s)",
+      access_type: "limit",
+      limit: 5,
+      estimated_rows: 5,
+      actual_rows: 5,
+      actual_loops: 1,
+      actual_last_row_ms: 0.12,
+      inputs: [
+        {
+          operation: "Filter: (jdt_explain_view_o.a < 50)",
+          access_type: "filter",
+          estimated_rows: 1666.4999723434448,
+          actual_rows: 5,
+          actual_loops: 1,
+          actual_last_row_ms: 0.118,
+          inputs: [
+            {
+              operation: "Table scan on jdt_explain_view_o",
+              access_type: "table",
+              table_name: "jdt_explain_view_o",
+              estimated_rows: 5000,
+              actual_rows: 5,
+              actual_loops: 1,
+              actual_last_row_ms: 0.115,
+            },
+          ],
+        },
+      ],
+    })
+    const rows = planRows(plan)
+    expect(rows[0].node.stops).toBe("inputs")
+    expect(rows.map((row) => row.estimate.farOff)).toEqual([false, false, false])
+    expect(rows[2].estimate.factor).toBe(1000)
+  })
+  test("MySQL's nested semi-join stops its inner input", () => {
+    const [row] = planRows(
+      planOf({
+        operation: "Nested loop semijoin",
+        join_type: "semijoin",
+        join_algorithm: "nested_loop",
+        inputs: [],
+      }),
+    )
+    expect(row.node.stops).toBe("inner")
+  })
+  test("a MariaDB table's rows are the ones its condition kept, so a misjudged condition shows", () => {
+    // As MariaDB 11.4 measured it: the scan read the 5,000 rows it planned to
+    // and kept 1% of them, where it had planned to keep them all.
+    const rows = planRows(
+      planOf({
+        query_block: {
+          select_id: 1,
+          cost: 8.61,
+          r_loops: 1,
+          r_total_time_ms: 1.0,
+          nested_loop: [
+            {
+              table: {
+                table_name: "o",
+                access_type: "index",
+                key: "PRIMARY",
+                attached_condition: "o.a = 1 and o.b = 1",
+                rows: 5000,
+                filtered: 100,
+                r_rows: 5000,
+                r_filtered: 1,
+                r_loops: 1,
+                r_table_time_ms: 0.76,
+                r_other_time_ms: 0.19,
+              },
+            },
+            {
+              table: {
+                table_name: "c",
+                access_type: "eq_ref",
+                key: "PRIMARY",
+                rows: 1,
+                filtered: 100,
+                r_rows: 1,
+                r_filtered: 100,
+                r_loops: 50,
+                r_table_time_ms: 0.035,
+              },
+            },
+          ],
+        },
+      }),
+    )
+    const by = Object.fromEntries(rows.map((row) => [row.node.target, row]))
+    expect(by["o using PRIMARY"].node.rows).toBe(5000)
+    expect(by["o using PRIMARY"].node.actualRows).toBe(50)
+    expect(by["o using PRIMARY"].node.facts).toContainEqual(["Rows read", "5,000"])
+    expect(estimateText(by["o using PRIMARY"].estimate)).toBe("est 5,000 · actual 50 (×100)")
+    expect(by["c using PRIMARY"].node.actualRows).toBe(50)
+    expect(by["c using PRIMARY"].estimate.farOff).toBe(false)
+    expect(by["c using PRIMARY"].node.facts.map(([label]) => label)).not.toContain("Rows read")
   })
 })
