@@ -647,6 +647,42 @@ func TestLiveOracleImport(t *testing.T) {
 // stands: a document comes back laid out afresh, and an empty cell fails the
 // statement or holds it until its time runs out. The dump reads such a column
 // as the text it was written as, and a restore puts that text back.
+// Each row is written by the statement the last one was. A statement Oracle
+// had refused every time it ran was sent again by go-ora in a form Oracle 23
+// takes for a protocol violation, and at the sixth the server ended the
+// session (ORA-03138): an import told to skip bad rows whose first rows were
+// bad lost its connection and imported nothing.
+func TestLiveOracleImportSkipsMoreThanAFewBadRows(t *testing.T) {
+	db, _, schema := liveOwnOracle(t, "jd_transfer_skips")
+	ctx := context.Background()
+	execAll(t, db, `CREATE TABLE "things" (
+		"id" NUMBER(10) GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+		"title" VARCHAR2(80) NOT NULL CHECK (LENGTH("title") > 3)
+	)`)
+	var file strings.Builder
+	file.WriteString("title\n")
+	for i := 1; i <= 40; i++ {
+		// Refusals before any row has gone in are what the server ends the
+		// session over.
+		title := "long enough " + strconv.Itoa(i)
+		if i <= 13 {
+			title = "n" + strconv.Itoa(i)
+		}
+		file.WriteString(title + "\n")
+	}
+	report, err := Import(ctx, db, DriverOracle, strings.NewReader(file.String()),
+		ImportSpec{Schema: schema, Table: "things", SkipBadRows: true})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if report.Inserted != 27 || report.Skipped != 13 {
+		t.Fatalf("inserted %d, skipped %d: %+v", report.Inserted, report.Skipped, report.Errors)
+	}
+	if got := queryString(t, db, `SELECT TO_CHAR(COUNT(*)) FROM "things"`); got != "27" {
+		t.Errorf("%s rows in the table", got)
+	}
+}
+
 func TestLiveOracleDumpKeepsAnXMLColumn(t *testing.T) {
 	db, dsn, _ := liveOwnOracle(t, "jd_transfer_live")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
