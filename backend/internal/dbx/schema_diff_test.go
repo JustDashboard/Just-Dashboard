@@ -10,7 +10,7 @@ import (
 // snapshots, so they are proved here without a server. What an engine accepts
 // of the statements is proved against real servers in schema_diff_live_test.go.
 
-func snapshot(driver Driver, schema string, tables ...*TableDetail) *SchemaSnapshot {
+func schemaSnap(driver Driver, schema string, tables ...*TableDetail) *SchemaSnapshot {
 	s := &SchemaSnapshot{
 		Driver: driver, Flavor: string(driver), Schema: schema,
 		Tables: map[string]*TableDetail{}, Views: map[string]SnapshotView{},
@@ -68,7 +68,7 @@ func TestIdenticalSchemasHaveNoDifference(t *testing.T) {
 	users := func() *TableDetail {
 		return withForeignKey(withPrimaryKey(table("orders", col("id", "integer", false), col("user_id", "integer", true)), "id"), "orders_user_fkey", "users", "user_id")
 	}
-	diff := DiffSchemas(snapshot(DriverPostgres, "public", users()), snapshot(DriverPostgres, "public", users()))
+	diff := DiffSchemas(schemaSnap(DriverPostgres, "public", users()), schemaSnap(DriverPostgres, "public", users()))
 	if !diff.Empty() {
 		t.Fatalf("identical schemas differ: %+v", diff.Objects)
 	}
@@ -80,7 +80,7 @@ func TestADifferenceIsNamedPartByPart(t *testing.T) {
 	to.Columns[2].Default = "now()"
 	to.Indexes = []Index{{Name: "users_email_idx", Columns: []string{"email"}, Unique: true, Method: "btree"}}
 	to.Constraints = []Constraint{{Name: "users_email_key", Type: ConstraintUnique, Columns: []string{"email"}}}
-	diff := DiffSchemas(snapshot(DriverPostgres, "public", from), snapshot(DriverPostgres, "public", to))
+	diff := DiffSchemas(schemaSnap(DriverPostgres, "public", from), schemaSnap(DriverPostgres, "public", to))
 	if len(diff.Objects) != 1 || diff.Objects[0].Kind != DiffTable || diff.Objects[0].Change != ChangeChanged {
 		t.Fatalf("objects = %+v", diff.Objects)
 	}
@@ -115,13 +115,13 @@ func TestAnIndexThatDiffersOnlyByNameIsNotADifference(t *testing.T) {
 	b.Indexes = []Index{{Name: "idx_9f2", Columns: []string{"x"}}}
 	a.ForeignKeys = []ForeignKey{{Name: "t_ibfk_1", Columns: []string{"x"}, RefTable: "u", RefColumns: []string{"id"}}}
 	b.ForeignKeys = []ForeignKey{{Name: "t_x_fkey", Columns: []string{"x"}, RefTable: "u", RefColumns: []string{"id"}, OnDelete: "NO ACTION"}}
-	if diff := DiffSchemas(snapshot(DriverMySQL, "s", a), snapshot(DriverMySQL, "s", b)); !diff.Empty() {
+	if diff := DiffSchemas(schemaSnap(DriverMySQL, "s", a), schemaSnap(DriverMySQL, "s", b)); !diff.Empty() {
 		t.Fatalf("generated names are reported: %+v", diff.Objects)
 	}
 	// The same name with another definition is a change.
 	b.Indexes[0].Name = "t_x_idx"
 	b.Indexes[0].Unique = true
-	diff := DiffSchemas(snapshot(DriverMySQL, "s", a), snapshot(DriverMySQL, "s", b))
+	diff := DiffSchemas(schemaSnap(DriverMySQL, "s", a), schemaSnap(DriverMySQL, "s", b))
 	if len(diff.Objects) != 1 || diff.Objects[0].Parts[0].Change != ChangeChanged {
 		t.Fatalf("objects = %+v", diff.Objects)
 	}
@@ -134,7 +134,7 @@ func TestTheSchemasOwnNameIsNotADifference(t *testing.T) {
 	b.Columns[0].Default = `nextval('beta.orders_id_seq'::regclass)`
 	a.ForeignKeys = []ForeignKey{{Name: "fk", Columns: []string{"id"}, RefSchema: "alpha", RefTable: "u", RefColumns: []string{"id"}}}
 	b.ForeignKeys = []ForeignKey{{Name: "fk", Columns: []string{"id"}, RefSchema: "beta", RefTable: "u", RefColumns: []string{"id"}}}
-	from, to := snapshot(DriverPostgres, "alpha", a), snapshot(DriverPostgres, "beta", b)
+	from, to := schemaSnap(DriverPostgres, "alpha", a), schemaSnap(DriverPostgres, "beta", b)
 	from.Views["v"] = SnapshotView{Name: "v", Definition: "SELECT id FROM alpha.orders"}
 	to.Views["v"] = SnapshotView{Name: "v", Definition: "SELECT id FROM beta.orders"}
 	if diff := DiffSchemas(from, to); !diff.Empty() {
@@ -147,7 +147,7 @@ func TestTheSchemasOwnNameIsNotADifference(t *testing.T) {
 }
 
 func TestAKindOfObjectThatCouldNotBeReadIsNotCompared(t *testing.T) {
-	from, to := snapshot(DriverPostgres, "public"), snapshot(DriverPostgres, "public")
+	from, to := schemaSnap(DriverPostgres, "public"), schemaSnap(DriverPostgres, "public")
 	to.Views["v"] = SnapshotView{Name: "v", Definition: "SELECT 1"}
 	to.Routines[routineKey(KindFunction, "f", "")] = SnapshotRoutine{Kind: KindFunction, Name: "f", Definition: "CREATE FUNCTION f()"}
 	from.Unread[GroupViews] = "permission denied for view definitions"
@@ -165,7 +165,7 @@ func TestANewTableIsCreatedBeforeTheKeysThatPointAtIt(t *testing.T) {
 	users := withPrimaryKey(table("users", col("id", "integer", false)), "id")
 	payments := withForeignKey(withPrimaryKey(table("payments", col("id", "integer", false), col("order_id", "integer", true)), "id"), "payments_order_fkey", "orders", "order_id")
 	orders := withForeignKey(withPrimaryKey(table("orders", col("id", "integer", false), col("user_id", "integer", true)), "id"), "orders_user_fkey", "users", "user_id")
-	diff, m := planFor(t, snapshot(DriverPostgres, "public", users), snapshot(DriverPostgres, "public", users, orders, payments))
+	diff, m := planFor(t, schemaSnap(DriverPostgres, "public", users), schemaSnap(DriverPostgres, "public", users, orders, payments))
 	script := m.Script()
 	if len(diff.Objects) != 2 {
 		t.Fatalf("objects = %+v", diff.Objects)
@@ -183,7 +183,7 @@ func TestAKeyIsDroppedBeforeTheTableItPointsAtGoes(t *testing.T) {
 	users := withPrimaryKey(table("users", col("id", "integer", false)), "id")
 	orders := withForeignKey(withPrimaryKey(table("orders", col("id", "integer", false), col("user_id", "integer", true)), "id"), "orders_user_fkey", "users", "user_id")
 	ordersWithout := withPrimaryKey(table("orders", col("id", "integer", false), col("user_id", "integer", true)), "id")
-	_, m := planFor(t, snapshot(DriverPostgres, "public", users, orders), snapshot(DriverPostgres, "public", ordersWithout))
+	_, m := planFor(t, schemaSnap(DriverPostgres, "public", users, orders), schemaSnap(DriverPostgres, "public", ordersWithout))
 	script := m.Script()
 	before(t, script, `DROP CONSTRAINT "orders_user_fkey"`, `DROP TABLE "public"."users"`)
 	steps, destructive, manual := m.Counts()
@@ -196,7 +196,7 @@ func TestTablesThatPointAtEachOtherCanBeDropped(t *testing.T) {
 	a := withForeignKey(withPrimaryKey(table("a", col("id", "integer", false), col("b_id", "integer", true)), "id"), "a_b_fkey", "b", "b_id")
 	b := withForeignKey(withPrimaryKey(table("b", col("id", "integer", false), col("a_id", "integer", true)), "id"), "b_a_fkey", "a", "a_id")
 	c := withForeignKey(withPrimaryKey(table("c", col("id", "integer", false), col("a_id", "integer", true)), "id"), "c_a_fkey", "a", "a_id")
-	_, m := planFor(t, snapshot(DriverPostgres, "public", a, b, c), snapshot(DriverPostgres, "public"))
+	_, m := planFor(t, schemaSnap(DriverPostgres, "public", a, b, c), schemaSnap(DriverPostgres, "public"))
 	script := m.Script()
 	// c points at a, so c goes first; a and b point at each other, so one key
 	// is dropped to let either of them go.
@@ -208,8 +208,8 @@ func TestTablesThatPointAtEachOtherCanBeDropped(t *testing.T) {
 }
 
 func TestAViewIsDroppedBeforeTheColumnItReadsAndMadeAgainAfter(t *testing.T) {
-	from := snapshot(DriverPostgres, "public", table("users", col("id", "integer", false), col("legacy", "text", true)))
-	to := snapshot(DriverPostgres, "public", table("users", col("id", "integer", false), col("email", "text", true)))
+	from := schemaSnap(DriverPostgres, "public", table("users", col("id", "integer", false), col("legacy", "text", true)))
+	to := schemaSnap(DriverPostgres, "public", table("users", col("id", "integer", false), col("email", "text", true)))
 	from.Views["v_users"] = SnapshotView{Name: "v_users", Definition: "CREATE VIEW v_users AS SELECT id, legacy FROM users"}
 	to.Views["v_users"] = SnapshotView{Name: "v_users", Definition: "CREATE VIEW v_users AS SELECT id, email FROM users"}
 	_, m := planFor(t, from, to)
@@ -272,8 +272,8 @@ func positionOf(list []string, s string) int {
 }
 
 func TestAnEnumTypeExistsBeforeTheColumnThatUsesIt(t *testing.T) {
-	from := snapshot(DriverPostgres, "public", table("users", col("id", "integer", false)))
-	to := snapshot(DriverPostgres, "public", table("users", col("id", "integer", false), col("mood", "mood", true)))
+	from := schemaSnap(DriverPostgres, "public", table("users", col("id", "integer", false)))
+	to := schemaSnap(DriverPostgres, "public", table("users", col("id", "integer", false), col("mood", "mood", true)))
 	to.Enums["mood"] = []string{"sad", "ok"}
 	_, m := planFor(t, from, to)
 	script := m.Script()
@@ -281,8 +281,8 @@ func TestAnEnumTypeExistsBeforeTheColumnThatUsesIt(t *testing.T) {
 }
 
 func TestAnEnumGainsLabelsInPlaceAndASmallerOneNeedsYou(t *testing.T) {
-	from := snapshot(DriverPostgres, "public")
-	to := snapshot(DriverPostgres, "public")
+	from := schemaSnap(DriverPostgres, "public")
+	to := schemaSnap(DriverPostgres, "public")
 	from.Enums["mood"], to.Enums["mood"] = []string{"sad", "ok"}, []string{"sad", "meh", "ok", "great"}
 	_, m := planFor(t, from, to)
 	script := m.Script()
@@ -301,7 +301,7 @@ func TestAnEnumGainsLabelsInPlaceAndASmallerOneNeedsYou(t *testing.T) {
 func TestADroppedColumnTakesItsSequenceWithIt(t *testing.T) {
 	users := withPrimaryKey(table("users", col("id", "integer", false), col("n", "integer", true)), "id")
 	bare := withPrimaryKey(table("users", col("id", "integer", false)), "id")
-	from, to := snapshot(DriverPostgres, "public", users), snapshot(DriverPostgres, "public", bare)
+	from, to := schemaSnap(DriverPostgres, "public", users), schemaSnap(DriverPostgres, "public", bare)
 	from.Sequences["users_n_seq"] = SnapshotSequence{Name: "users_n_seq", Owner: "users.n", Definition: "CREATE SEQUENCE users_n_seq"}
 	from.Sequences["spare_seq"] = SnapshotSequence{Name: "spare_seq", Definition: "CREATE SEQUENCE spare_seq"}
 	_, m := planFor(t, from, to)
@@ -316,10 +316,10 @@ func TestADroppedColumnTakesItsSequenceWithIt(t *testing.T) {
 }
 
 func TestASequenceIsMadeBeforeTheTableThatDefaultsToItAndHandedToItAfter(t *testing.T) {
-	from := snapshot(DriverPostgres, "public")
+	from := schemaSnap(DriverPostgres, "public")
 	users := withPrimaryKey(table("users", col("id", "integer", false)), "id")
 	users.Columns[0].Default = "nextval('users_id_seq'::regclass)"
-	to := snapshot(DriverPostgres, "public", users)
+	to := schemaSnap(DriverPostgres, "public", users)
 	to.Sequences["users_id_seq"] = SnapshotSequence{Name: "users_id_seq", Owner: "users.id", Definition: "CREATE SEQUENCE public.users_id_seq"}
 	_, m := planFor(t, from, to)
 	script := m.Script()
@@ -328,10 +328,10 @@ func TestASequenceIsMadeBeforeTheTableThatDefaultsToItAndHandedToItAfter(t *test
 }
 
 func TestAChangedColumnIsAlteredAndALossyOneIsMarked(t *testing.T) {
-	from := snapshot(DriverPostgres, "public", table("t", col("id", "integer", false), col("a", "varchar(10)", true), col("b", "text", true), col("c", "text", true)))
+	from := schemaSnap(DriverPostgres, "public", table("t", col("id", "integer", false), col("a", "varchar(10)", true), col("b", "text", true), col("c", "text", true)))
 	toTable := table("t", col("id", "integer", false), col("a", "varchar(10)", false), col("b", "text", true), col("c", "integer", true))
 	toTable.Columns[2].Default = "'x'::text"
-	_, m := planFor(t, from, snapshot(DriverPostgres, "public", toTable))
+	_, m := planFor(t, from, schemaSnap(DriverPostgres, "public", toTable))
 	byTitle := map[string]MigrationStep{}
 	for _, s := range m.Steps {
 		byTitle[s.Title] = s
@@ -349,8 +349,8 @@ func TestAChangedColumnIsAlteredAndALossyOneIsMarked(t *testing.T) {
 
 func TestWhatTheGeneratorCannotWriteIsLeftToTheOperatorAndSaysSo(t *testing.T) {
 	// A NOT NULL column with no default cannot be added to a table that has rows.
-	from := snapshot(DriverPostgres, "public", table("t", col("id", "integer", false)))
-	to := snapshot(DriverPostgres, "public", table("t", col("id", "integer", false), col("name", "text", false)))
+	from := schemaSnap(DriverPostgres, "public", table("t", col("id", "integer", false)))
+	to := schemaSnap(DriverPostgres, "public", table("t", col("id", "integer", false), col("name", "text", false)))
 	_, m := planFor(t, from, to)
 	if len(m.Steps) != 1 || !m.Steps[0].Manual || len(m.Steps[0].Statements) != 0 || !strings.Contains(m.Steps[0].Note, "needs a default") {
 		t.Fatalf("steps = %+v", m.Steps)
@@ -367,8 +367,8 @@ func TestWhatTheGeneratorCannotWriteIsLeftToTheOperatorAndSaysSo(t *testing.T) {
 }
 
 func TestSQLiteCannotAlterAColumnAndSaysWhy(t *testing.T) {
-	from := snapshot(DriverSQLite, "main", table("t", col("id", "INTEGER", false), col("a", "TEXT", true)))
-	to := snapshot(DriverSQLite, "main", table("t", col("id", "INTEGER", false), col("a", "INTEGER", true)))
+	from := schemaSnap(DriverSQLite, "main", table("t", col("id", "INTEGER", false), col("a", "TEXT", true)))
+	to := schemaSnap(DriverSQLite, "main", table("t", col("id", "INTEGER", false), col("a", "INTEGER", true)))
 	_, m := planFor(t, from, to)
 	if len(m.Steps) != 1 || !m.Steps[0].Manual || !strings.Contains(m.Steps[0].Note, "SQLite cannot change a column") {
 		t.Fatalf("steps = %+v", m.Steps)
@@ -381,7 +381,7 @@ func TestSQLiteCannotAlterAColumnAndSaysWhy(t *testing.T) {
 func TestANewSQLiteTableIsItsOwnCreateTextAndHoldsItsKeys(t *testing.T) {
 	orders := withForeignKey(table("orders", col("id", "INTEGER", false), col("user_id", "INTEGER", true)), "fk", "users", "user_id")
 	orders.CreateSQL = "CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id))"
-	_, m := planFor(t, snapshot(DriverSQLite, "main"), snapshot(DriverSQLite, "main", orders))
+	_, m := planFor(t, schemaSnap(DriverSQLite, "main"), schemaSnap(DriverSQLite, "main", orders))
 	if len(m.Steps) != 1 || m.Steps[0].Statements[0] != orders.CreateSQL {
 		t.Fatalf("steps = %+v", m.Steps)
 	}
@@ -392,7 +392,7 @@ func TestAMySQLTableKeepsItsEngineTextWithoutItsForeignKeys(t *testing.T) {
 	orders.CreateSQL = "CREATE TABLE `orders` (\n  `id` int NOT NULL AUTO_INCREMENT,\n  `user_id` int DEFAULT NULL,\n  PRIMARY KEY (`id`),\n" +
 		"  KEY `user_id` (`user_id`),\n  CONSTRAINT `orders_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)\n" +
 		") ENGINE=InnoDB AUTO_INCREMENT=42 DEFAULT CHARSET=utf8mb4"
-	from, to := snapshot(DriverMySQL, "shop"), snapshot(DriverMySQL, "shop_copy", orders)
+	from, to := schemaSnap(DriverMySQL, "shop"), schemaSnap(DriverMySQL, "shop_copy", orders)
 	_, m := planFor(t, from, to)
 	if len(m.Steps) < 2 {
 		t.Fatalf("steps = %+v", m.Steps)
@@ -533,7 +533,7 @@ func TestSQLServerReplacesARoutineInPlace(t *testing.T) {
 
 func TestASequenceBehindAnIdentityColumnIsTheColumnsOwn(t *testing.T) {
 	payments := table("payments", Column{Name: "id", Type: "bigint", Identity: "always"})
-	snap := snapshot(DriverPostgres, "public", payments, table("users", col("id", "integer", false)))
+	snap := schemaSnap(DriverPostgres, "public", payments, table("users", col("id", "integer", false)))
 	snap.Sequences["payments_id_seq"] = SnapshotSequence{Name: "payments_id_seq", Owner: "payments.id"}
 	snap.Sequences["users_id_seq"] = SnapshotSequence{Name: "users_id_seq", Owner: "users.id"}
 	snap.Sequences["spare_seq"] = SnapshotSequence{Name: "spare_seq"}
@@ -547,9 +547,9 @@ func TestASequenceBehindAnIdentityColumnIsTheColumnsOwn(t *testing.T) {
 }
 
 func TestANewSequenceIsMadeWithoutAnOwnerItsColumnCannotYetHave(t *testing.T) {
-	from := snapshot(DriverPostgres, "public")
+	from := schemaSnap(DriverPostgres, "public")
 	users := withPrimaryKey(table("users", col("id", "integer", false)), "id")
-	to := snapshot(DriverPostgres, "public", users)
+	to := schemaSnap(DriverPostgres, "public", users)
 	to.Sequences["users_id_seq"] = SnapshotSequence{Name: "users_id_seq", Owner: "users.id",
 		Definition: "CREATE SEQUENCE \"public\".\"users_id_seq\"\n  AS integer\n  NO CYCLE\n  OWNED BY \"public\".\"users\".\"id\";"}
 	_, m := planFor(t, from, to)
@@ -565,7 +565,7 @@ func TestAMySQLUniqueKeyIsOneDifferenceNotTwo(t *testing.T) {
 	a, b := table("users", col("id", "int", false), col("email", "varchar(120)", false)), table("users", col("id", "int", false), col("email", "varchar(120)", false))
 	b.Indexes = []Index{{Name: "users_email_key", Columns: []string{"email"}, Unique: true, Method: "BTREE"}}
 	b.Constraints = []Constraint{{Name: "users_email_key", Type: ConstraintUnique, Columns: []string{"email"}}}
-	diff, m := planFor(t, snapshot(DriverMySQL, "s", a), snapshot(DriverMySQL, "s", b))
+	diff, m := planFor(t, schemaSnap(DriverMySQL, "s", a), schemaSnap(DriverMySQL, "s", b))
 	if len(diff.Objects) != 1 || len(diff.Objects[0].Parts) != 1 || diff.Objects[0].Parts[0].Part != PartUnique {
 		t.Fatalf("objects = %+v", diff.Objects)
 	}
@@ -575,7 +575,7 @@ func TestAMySQLUniqueKeyIsOneDifferenceNotTwo(t *testing.T) {
 }
 
 func TestAMySQLRoutineIsNamedInTheSchemaBeingChanged(t *testing.T) {
-	from, to := snapshot(DriverMySQL, "live"), snapshot(DriverMySQL, "copy")
+	from, to := schemaSnap(DriverMySQL, "live"), schemaSnap(DriverMySQL, "copy")
 	to.Routines[routineKey(KindFunction, "add_two", "x int")] = SnapshotRoutine{Kind: KindFunction, Name: "add_two", Signature: "x int",
 		Definition: "CREATE FUNCTION `add_two`(x int) RETURNS int\n    DETERMINISTIC\nRETURN x + 2"}
 	_, m := planFor(t, from, to)

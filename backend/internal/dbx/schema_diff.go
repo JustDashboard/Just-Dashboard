@@ -235,7 +235,7 @@ func DiffSchemas(from, to *SchemaSnapshot) *SchemaDiff {
 		fromEnums, toEnums = nil, nil
 	}
 
-	for _, name := range unionNames(keysOf(from.Tables), keysOf(to.Tables)) {
+	for _, name := range unionNames(objectNames(from.Tables), objectNames(to.Tables)) {
 		a, b := from.Tables[name], to.Tables[name]
 		switch {
 		case a == nil:
@@ -248,7 +248,7 @@ func DiffSchemas(from, to *SchemaSnapshot) *SchemaDiff {
 			}
 		}
 	}
-	for _, name := range unionNames(keysOf(fromViews), keysOf(toViews)) {
+	for _, name := range unionNames(objectNames(fromViews), objectNames(toViews)) {
 		a, inFrom := fromViews[name]
 		b, inTo := toViews[name]
 		switch {
@@ -260,7 +260,7 @@ func DiffSchemas(from, to *SchemaSnapshot) *SchemaDiff {
 			diff.views = append(diff.views, viewDiff{name: name, change: ChangeChanged, from: &a, to: &b})
 		}
 	}
-	for _, name := range unionNames(keysOf(fromSequences), keysOf(toSequences)) {
+	for _, name := range unionNames(objectNames(fromSequences), objectNames(toSequences)) {
 		a, inFrom := fromSequences[name]
 		b, inTo := toSequences[name]
 		switch {
@@ -272,7 +272,7 @@ func DiffSchemas(from, to *SchemaSnapshot) *SchemaDiff {
 			diff.sequences = append(diff.sequences, sequenceDiff{name: name, change: ChangeChanged, from: &a, to: &b})
 		}
 	}
-	for _, name := range unionNames(keysOf(fromEnums), keysOf(toEnums)) {
+	for _, name := range unionNames(objectNames(fromEnums), objectNames(toEnums)) {
 		a, inFrom := fromEnums[name]
 		b, inTo := toEnums[name]
 		switch {
@@ -284,7 +284,7 @@ func DiffSchemas(from, to *SchemaSnapshot) *SchemaDiff {
 			diff.enums = append(diff.enums, enumDiff{name: name, change: ChangeChanged, from: a, to: b})
 		}
 	}
-	for _, key := range unionNames(keysOf(fromRoutines), keysOf(toRoutines)) {
+	for _, key := range unionNames(objectNames(fromRoutines), objectNames(toRoutines)) {
 		a, inFrom := fromRoutines[key]
 		b, inTo := toRoutines[key]
 		switch {
@@ -300,7 +300,7 @@ func DiffSchemas(from, to *SchemaSnapshot) *SchemaDiff {
 	return diff
 }
 
-func keysOf[V any](m map[string]V) []string {
+func objectNames[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)

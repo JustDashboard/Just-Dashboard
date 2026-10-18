@@ -27,7 +27,7 @@ func statementLines(script string) []string {
 
 func TestANameWithALineBreakInATitleStaysAComment(t *testing.T) {
 	label := "x\nDROP TABLE customers; --"
-	from, to := snapshot(DriverPostgres, "public"), snapshot(DriverPostgres, "public")
+	from, to := schemaSnap(DriverPostgres, "public"), schemaSnap(DriverPostgres, "public")
 	from.Enums["mood"], to.Enums["mood"] = []string{"sad"}, []string{"sad", label}
 	_, m := planFor(t, from, to)
 	script := m.Script()
@@ -64,8 +64,8 @@ func TestEveryControlCharacterEndsNoCommentEarly(t *testing.T) {
 func TestANameTheEngineWillNotQuoteIsLeftToTheOperator(t *testing.T) {
 	bad := "a\nDROP TABLE customers"
 	// A column, a table to create, a table to drop's enum, a sequence, a routine.
-	from := snapshot(DriverPostgres, "public", table("users", col("id", "integer", false)))
-	to := snapshot(DriverPostgres, "public",
+	from := schemaSnap(DriverPostgres, "public", table("users", col("id", "integer", false)))
+	to := schemaSnap(DriverPostgres, "public",
 		table("users", col("id", "integer", false), col(bad, "text", true)),
 		table(bad, col("id", "integer", false)),
 		table("fine", col("id", "integer", false), col(bad, "text", true)))
@@ -126,13 +126,13 @@ func TestADefaultWithAnAddressInItIsTheSameDefaultInTwoSchemas(t *testing.T) {
 	b := table("users", col("id", "integer", false), col("sender", "text", true))
 	a.Columns[1].Default = `'noreply@alpha.example'::text`
 	b.Columns[1].Default = `'noreply@beta.example'::text`
-	diff := DiffSchemas(snapshot(DriverPostgres, "alpha", a), snapshot(DriverPostgres, "beta", b))
+	diff := DiffSchemas(schemaSnap(DriverPostgres, "alpha", a), schemaSnap(DriverPostgres, "beta", b))
 	if diff.Empty() {
 		t.Fatal("two different addresses are called the same default because they contain the schema's name")
 	}
 	// And a new column is written with the address it has.
-	from := snapshot(DriverPostgres, "alpha", table("users", col("id", "integer", false)))
-	to := snapshot(DriverPostgres, "beta", b)
+	from := schemaSnap(DriverPostgres, "alpha", table("users", col("id", "integer", false)))
+	to := schemaSnap(DriverPostgres, "beta", b)
 	_, m := planFor(t, from, to)
 	if !strings.Contains(m.Script(), `DEFAULT 'noreply@beta.example'`) {
 		t.Errorf("the default was rewritten:\n%s", m.Script())
@@ -159,7 +159,7 @@ func TestADefinitionTheServerWillNotGiveIsNotAnEmptyOne(t *testing.T) {
 func TestAViewIsLeftOutOfTheComparisonWhenItsDefinitionCannotBeRead(t *testing.T) {
 	// A view with no definition on one side, and a view on the other: if the
 	// empty text were kept, the plan would drop it and make it again with nothing.
-	from, to := snapshot(DriverMySQL, "s"), snapshot(DriverMySQL, "s")
+	from, to := schemaSnap(DriverMySQL, "s"), schemaSnap(DriverMySQL, "s")
 	to.Views["v"] = SnapshotView{Name: "v", Definition: "CREATE VIEW v AS SELECT 1"}
 	from.Unread[GroupViews] = "v: the server gave no definition"
 	diff := DiffSchemas(from, to)
@@ -193,8 +193,8 @@ func TestTooManyObjectsOfAnyKindAreRefusedBeforeTheyAreRead(t *testing.T) {
 }
 
 func TestAViewThatReadsAChangedColumnIsDroppedAndMadeAgain(t *testing.T) {
-	from := snapshot(DriverPostgres, "public", table("orders", col("id", "integer", false), col("total", "numeric(10,2)", false)))
-	to := snapshot(DriverPostgres, "public", table("orders", col("id", "integer", false), col("total", "numeric(12,2)", false)))
+	from := schemaSnap(DriverPostgres, "public", table("orders", col("id", "integer", false), col("total", "numeric(10,2)", false)))
+	to := schemaSnap(DriverPostgres, "public", table("orders", col("id", "integer", false), col("total", "numeric(12,2)", false)))
 	// Neither changes: both read the column that does.
 	for _, s := range []*SchemaSnapshot{from, to} {
 		s.Views["v_totals"] = SnapshotView{Name: "v_totals", Definition: "CREATE OR REPLACE VIEW public.v_totals AS SELECT id, total FROM public.orders"}
@@ -218,7 +218,7 @@ func TestAViewThatReadsAChangedColumnIsDroppedAndMadeAgain(t *testing.T) {
 }
 
 func TestAViewThatReadsAChangedViewGoesBeforeItAndComesBackAfter(t *testing.T) {
-	from, to := snapshot(DriverPostgres, "public"), snapshot(DriverPostgres, "public")
+	from, to := schemaSnap(DriverPostgres, "public"), schemaSnap(DriverPostgres, "public")
 	from.Views["v1"] = SnapshotView{Name: "v1", Definition: "CREATE OR REPLACE VIEW public.v1 AS SELECT 1 AS a"}
 	to.Views["v1"] = SnapshotView{Name: "v1", Definition: "CREATE OR REPLACE VIEW public.v1 AS SELECT 2 AS a"}
 	for _, s := range []*SchemaSnapshot{from, to} {
@@ -241,8 +241,8 @@ func TestAKeyThatUsesAColumnWhoseTypeChangesIsDroppedAndAddedAgain(t *testing.T)
 	}
 	for _, driver := range []Driver{DriverMySQL, DriverMSSQL} {
 		t.Run(string(driver), func(t *testing.T) {
-			from := snapshot(driver, "s", users("int"), tickets("int"))
-			to := snapshot(driver, "s", users("bigint"), tickets("bigint"))
+			from := schemaSnap(driver, "s", users("int"), tickets("int"))
+			to := schemaSnap(driver, "s", users("bigint"), tickets("bigint"))
 			diff := DiffSchemas(from, to)
 			if len(diff.Objects) != 2 {
 				t.Fatalf("objects = %+v", diff.Objects)
@@ -263,8 +263,8 @@ func TestAKeyThatUsesAColumnWhoseTypeChangesIsDroppedAndAddedAgain(t *testing.T)
 		})
 	}
 	// Postgres converts the key along with the column.
-	from := snapshot(DriverPostgres, "s", users("integer"), tickets("integer"))
-	to := snapshot(DriverPostgres, "s", users("bigint"), tickets("bigint"))
+	from := schemaSnap(DriverPostgres, "s", users("integer"), tickets("integer"))
+	to := schemaSnap(DriverPostgres, "s", users("bigint"), tickets("bigint"))
 	p := &migrationPlanner{driver: DriverPostgres, schema: "s", toSchema: "s", from: from, to: to, diff: DiffSchemas(from, to), settled: map[string]bool{}}
 	if got := p.cycledForeignKeys(); len(got) != 0 {
 		t.Errorf("Postgres keys are cycled: %+v", got)
@@ -272,10 +272,10 @@ func TestAKeyThatUsesAColumnWhoseTypeChangesIsDroppedAndAddedAgain(t *testing.T)
 }
 
 func TestARoutineIsMadeAfterTheColumnsItReadsUnlessAnEarlierStepCallsIt(t *testing.T) {
-	from := snapshot(DriverPostgres, "public", table("users", col("id", "integer", false)))
+	from := schemaSnap(DriverPostgres, "public", table("users", col("id", "integer", false)))
 	users := table("users", col("id", "integer", false), col("created_at", "timestamp with time zone", true), col("code", "text", true))
 	users.Columns[2].Default = "make_code()"
-	to := snapshot(DriverPostgres, "public", users)
+	to := schemaSnap(DriverPostgres, "public", users)
 	to.Routines[routineKey(KindFunction, "newest", "")] = SnapshotRoutine{Kind: KindFunction, Name: "newest",
 		Definition: "CREATE OR REPLACE FUNCTION public.newest()\n RETURNS timestamptz\n LANGUAGE sql\nAS $function$select max(created_at) from public.users$function$"}
 	to.Routines[routineKey(KindFunction, "make_code", "")] = SnapshotRoutine{Kind: KindFunction, Name: "make_code",
@@ -291,7 +291,7 @@ func TestAFunctionThatCannotBeReplacedInPlaceIsDroppedAndMade(t *testing.T) {
 	head := func(returns string) string {
 		return "CREATE OR REPLACE FUNCTION public.f(x integer)\n RETURNS " + returns + "\n LANGUAGE sql\nAS $function$select 1$function$"
 	}
-	from, to := snapshot(DriverPostgres, "public"), snapshot(DriverPostgres, "public")
+	from, to := schemaSnap(DriverPostgres, "public"), schemaSnap(DriverPostgres, "public")
 	key := routineKey(KindFunction, "f", "x integer")
 	from.Routines[key] = SnapshotRoutine{Kind: KindFunction, Name: "f", Signature: "x integer", Definition: head("integer")}
 	to.Routines[key] = SnapshotRoutine{Kind: KindFunction, Name: "f", Signature: "x integer", Definition: head("bigint")}
@@ -308,7 +308,7 @@ func TestAFunctionThatCannotBeReplacedInPlaceIsDroppedAndMade(t *testing.T) {
 }
 
 func TestAFunctionWithRenamedParametersReplacesTheOldOne(t *testing.T) {
-	from, to := snapshot(DriverPostgres, "public"), snapshot(DriverPostgres, "public")
+	from, to := schemaSnap(DriverPostgres, "public"), schemaSnap(DriverPostgres, "public")
 	from.Routines[routineKey(KindFunction, "shout", "a text")] = SnapshotRoutine{Kind: KindFunction, Name: "shout", Signature: "a text",
 		Definition: "CREATE OR REPLACE FUNCTION public.shout(a text)\n RETURNS text\n LANGUAGE sql\nAS $function$select upper(a)$function$"}
 	to.Routines[routineKey(KindFunction, "shout", "b text")] = SnapshotRoutine{Kind: KindFunction, Name: "shout", Signature: "b text",
@@ -362,7 +362,7 @@ func TestCreateOrAlterSkipsCommentsAndKeepsTheCase(t *testing.T) {
 
 func TestATableWithAKeyOnItselfNeedsNoKeyDropped(t *testing.T) {
 	tree := withForeignKey(withPrimaryKey(table("tree", col("id", "integer", false), col("parent_id", "integer", true)), "id"), "tree_parent_fkey", "tree", "parent_id")
-	_, m := planFor(t, snapshot(DriverPostgres, "public", tree), snapshot(DriverPostgres, "public"))
+	_, m := planFor(t, schemaSnap(DriverPostgres, "public", tree), schemaSnap(DriverPostgres, "public"))
 	if script := m.Script(); strings.Contains(script, "DROP CONSTRAINT") || !strings.Contains(script, `DROP TABLE "public"."tree"`) {
 		t.Errorf("script:\n%s", script)
 	}

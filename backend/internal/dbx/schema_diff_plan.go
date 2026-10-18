@@ -570,7 +570,7 @@ func (p *migrationPlanner) routines(phase routinePhase) {
 }
 
 var (
-	returnsClause   = regexp.MustCompile(`(?mi)^\s*RETURNS\s+(.+)$`)
+	returnsLine     = regexp.MustCompile(`(?mi)^\s*RETURNS\s+(.+)$`)
 	replaceableHead = regexp.MustCompile(`(?i)^\s*CREATE\s+OR\s+REPLACE\b`)
 )
 
@@ -585,7 +585,7 @@ func (p *migrationPlanner) canReplaceInPlace(from, to SnapshotRoutine) bool {
 		if rebase {
 			text = p.rebase(text)
 		}
-		m := returnsClause.FindStringSubmatch(text)
+		m := returnsLine.FindStringSubmatch(text)
 		if m == nil {
 			return ""
 		}
