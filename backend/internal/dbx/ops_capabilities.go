@@ -9,7 +9,7 @@ package dbx
 func init() {
 	for _, flag := range []string{
 		"locks", "tableStats", "indexStats", "maintenance", "privileges", "statements", "statementsReset",
-		"clickhouseViews", "sqliteFile",
+		"statementsSetup", "clickhouseViews", "sqliteFile",
 	} {
 		RegisterCapabilities(Capability{Flag: flag, Has: opsFlag(flag)})
 	}

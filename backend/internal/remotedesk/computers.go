@@ -41,6 +41,11 @@ type Computer struct {
 	// StreamHostID is the stream bridge's id for this computer once it has
 	// been paired with Sunshine on it.
 	StreamHostID int `json:"streamHostId"`
+	// Gfx asks guacd for RDP's Graphics Pipeline. It is off unless asked
+	// for: guacd 1.6 draws a GFX session on a timer rather than on the
+	// server's own frame marks, and sends two to three times the data for
+	// it; a few servers insist on the pipeline, and they turn this on.
+	Gfx bool `json:"gfx"`
 }
 
 // ComputerInput is what an administrator saves. A nil Password on an edit
@@ -57,6 +62,7 @@ type ComputerInput struct {
 	Security string  `json:"security"`
 	Layout   string  `json:"layout"`
 	PeerID   string  `json:"peerId"`
+	Gfx      bool    `json:"gfx"`
 }
 
 const (
@@ -134,7 +140,7 @@ func (in *ComputerInput) normalize() error {
 		return invalid("password must be at most 1024 characters")
 	}
 	if in.Protocol != ProtocolRDP {
-		in.Security, in.Layout, in.Domain = "", "", ""
+		in.Security, in.Layout, in.Domain, in.Gfx = "", "", "", false
 	}
 	if !securityModes[in.Security] {
 		return invalid("security must be any, nla, tls or rdp")
@@ -168,14 +174,14 @@ type store struct {
 	now  func() time.Time
 }
 
-const computerColumns = `id, name, os, host, protocol, port, username, domain, password_enc <> '', security, layout, peer_id, created_at, updated_at, last_session_at, stream_host_id`
+const computerColumns = `id, name, os, host, protocol, port, username, domain, password_enc <> '', security, layout, peer_id, created_at, updated_at, last_session_at, stream_host_id, gfx`
 
 type scanner interface{ Scan(...any) error }
 
 func scanComputer(row scanner) (Computer, error) {
 	var c Computer
 	err := row.Scan(&c.ID, &c.Name, &c.OS, &c.Host, &c.Protocol, &c.Port, &c.Username, &c.Domain,
-		&c.HasPassword, &c.Security, &c.Layout, &c.PeerID, &c.CreatedAt, &c.UpdatedAt, &c.LastSession, &c.StreamHostID)
+		&c.HasPassword, &c.Security, &c.Layout, &c.PeerID, &c.CreatedAt, &c.UpdatedAt, &c.LastSession, &c.StreamHostID, &c.Gfx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, ErrNotFound
 	}
@@ -219,9 +225,9 @@ func (s *store) create(ctx context.Context, in ComputerInput) (Computer, error) 
 	}
 	now := s.now().Unix()
 	_, err = s.db.ExecContext(ctx, `INSERT INTO remote_desktop_computers
-		(id, name, os, host, protocol, port, username, domain, password_enc, security, layout, peer_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, in.Name, in.OS, in.Host, in.Protocol, in.Port, in.Username, in.Domain, sealed, in.Security, in.Layout, in.PeerID, now, now)
+		(id, name, os, host, protocol, port, username, domain, password_enc, security, layout, peer_id, gfx, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, in.Name, in.OS, in.Host, in.Protocol, in.Port, in.Username, in.Domain, sealed, in.Security, in.Layout, in.PeerID, in.Gfx, now, now)
 	if err != nil {
 		return Computer{}, err
 	}
@@ -236,10 +242,10 @@ func (s *store) update(ctx context.Context, id string, in ComputerInput) (Comput
 	// The bridge's pairing is with the computer at its old address; a
 	// computer moved to another one is paired again.
 	res, err := s.db.ExecContext(ctx, `UPDATE remote_desktop_computers SET
-		name = ?, os = ?, host = ?, protocol = ?, port = ?, username = ?, domain = ?, security = ?, layout = ?, peer_id = ?, updated_at = ?,
+		name = ?, os = ?, host = ?, protocol = ?, port = ?, username = ?, domain = ?, security = ?, layout = ?, peer_id = ?, gfx = ?, updated_at = ?,
 		stream_host_id = CASE WHEN host = ? THEN stream_host_id ELSE 0 END
 		WHERE id = ?`,
-		in.Name, in.OS, in.Host, in.Protocol, in.Port, in.Username, in.Domain, in.Security, in.Layout, in.PeerID, now, in.Host, id)
+		in.Name, in.OS, in.Host, in.Protocol, in.Port, in.Username, in.Domain, in.Security, in.Layout, in.PeerID, in.Gfx, now, in.Host, id)
 	if err := affectedOne(res, err); err != nil {
 		return Computer{}, err
 	}

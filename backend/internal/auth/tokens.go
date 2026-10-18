@@ -14,11 +14,14 @@ const tokenPrefix = "vpsd_"
 var ErrTokenInvalid = errors.New("api token invalid, revoked or expired")
 
 type APIToken struct {
-	ID         int64      `json:"id"`
-	UserID     int64      `json:"userId"`
-	Name       string     `json:"name"`
-	Prefix     string     `json:"prefix"`
-	Role       Role       `json:"role"`
+	ID     int64  `json:"id"`
+	UserID int64  `json:"userId"`
+	Name   string `json:"name"`
+	Prefix string `json:"prefix"`
+	Role   Role   `json:"role"`
+	// Scope narrows the key to one capability. Empty is an ordinary key, bound
+	// only by its role; a scoped key reaches nothing but the routes that name it.
+	Scope      string     `json:"scope"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	ExpiresAt  *time.Time `json:"expiresAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt"`
@@ -28,6 +31,23 @@ type APIToken struct {
 // CreateAPIToken mints a scripting credential. The role may narrow the owner's
 // role but never widen it, so a leaked token cannot exceed its creator.
 func (s *Service) CreateAPIToken(ctx context.Context, owner *User, name string, role Role, ttl time.Duration) (*APIToken, string, error) {
+	return s.createAPIToken(ctx, owner, name, role, "", ttl)
+}
+
+// CreateScopedAPIToken mints a key for one job, such as a metrics scraper. It is
+// read-only whatever its owner is, so a scraper's credential on a monitoring
+// host cannot do more than the one thing it was made for.
+func (s *Service) CreateScopedAPIToken(ctx context.Context, owner *User, name string, scope Capability, ttl time.Duration) (*APIToken, string, error) {
+	if scope != CapMetricsRead {
+		return nil, "", fmt.Errorf("unknown key scope %q", scope)
+	}
+	if !owner.Role.Can(scope) {
+		return nil, "", fmt.Errorf("a %s account cannot mint a %s key", owner.Role, scope)
+	}
+	return s.createAPIToken(ctx, owner, name, RoleReadOnly, string(scope), ttl)
+}
+
+func (s *Service) createAPIToken(ctx context.Context, owner *User, name string, role Role, scope string, ttl time.Duration) (*APIToken, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, "", errors.New("token name required")
@@ -46,9 +66,9 @@ func (s *Service) CreateAPIToken(ctx context.Context, owner *User, name string, 
 	}
 	prefix := full[:len(tokenPrefix)+8]
 	res, err := s.st.DB.ExecContext(ctx,
-		`INSERT INTO api_tokens(user_id, name, prefix, token_hash, role, created_at, expires_at)
-		 VALUES(?,?,?,?,?,?,?)`,
-		owner.ID, name, prefix, HashToken(full), string(role), time.Now().Unix(), expires)
+		`INSERT INTO api_tokens(user_id, name, prefix, token_hash, role, scope, created_at, expires_at)
+		 VALUES(?,?,?,?,?,?,?,?)`,
+		owner.ID, name, prefix, HashToken(full), string(role), scope, time.Now().Unix(), expires)
 	if err != nil {
 		return nil, "", err
 	}
@@ -67,7 +87,7 @@ func roleAtMost(want, have Role) bool {
 
 func (s *Service) apiTokenByID(ctx context.Context, id int64) (*APIToken, error) {
 	row := s.st.DB.QueryRowContext(ctx,
-		`SELECT id, user_id, name, prefix, role, created_at, expires_at, last_used_at, revoked FROM api_tokens WHERE id = ?`, id)
+		`SELECT id, user_id, name, prefix, role, scope, created_at, expires_at, last_used_at, revoked FROM api_tokens WHERE id = ?`, id)
 	return scanAPIToken(row)
 }
 
@@ -78,7 +98,7 @@ func scanAPIToken(row interface{ Scan(...any) error }) (*APIToken, error) {
 		created, expires, used int64
 		revoked                int
 	)
-	if err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &role, &created, &expires, &used, &revoked); err != nil {
+	if err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &role, &t.Scope, &created, &expires, &used, &revoked); err != nil {
 		return nil, err
 	}
 	t.Role = Role(role)
@@ -96,7 +116,7 @@ func scanAPIToken(row interface{ Scan(...any) error }) (*APIToken, error) {
 }
 
 func (s *Service) ListAPITokens(ctx context.Context, userID int64, all bool) ([]*APIToken, error) {
-	q := `SELECT id, user_id, name, prefix, role, created_at, expires_at, last_used_at, revoked FROM api_tokens`
+	q := `SELECT id, user_id, name, prefix, role, scope, created_at, expires_at, last_used_at, revoked FROM api_tokens`
 	args := []any{}
 	if !all {
 		q += ` WHERE user_id = ?`
@@ -137,7 +157,7 @@ func (s *Service) ResolveAPIToken(ctx context.Context, presented string) (*APITo
 		return nil, nil, "", ErrTokenInvalid
 	}
 	row := s.st.DB.QueryRowContext(ctx,
-		`SELECT id, user_id, name, prefix, role, created_at, expires_at, last_used_at, revoked
+		`SELECT id, user_id, name, prefix, role, scope, created_at, expires_at, last_used_at, revoked
 		 FROM api_tokens WHERE token_hash = ?`, HashToken(presented))
 	t, err := scanAPIToken(row)
 	if err == sql.ErrNoRows {

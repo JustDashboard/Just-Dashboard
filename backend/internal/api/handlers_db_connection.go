@@ -90,12 +90,18 @@ type dbConnState struct {
 	// each connection, or has just carried out and is waiting to see the
 	// effect of: what the summary and the fleet report as in flight.
 	power sync.Map
+	// poolerLocks holds one mutex per connection that has a pooler: what
+	// changes the pooler takes while it does (lockPooler).
+	poolerLocks sync.Map
 	// probe reads the machine's sockets and units. Nil is the machine itself;
 	// a test hands in one of its own.
 	probe *dbHostProbe
 	// systemctl starts and stops a unit. Nil is the host's own; a test hands
 	// in one that records what it was asked.
 	systemctl *dbSystemctl
+	// keeper keeps a port to a list. Nil is the network module's gateway; a
+	// test hands in one of its own.
+	keeper dbPortKeeper
 }
 
 // forget drops everything kept about a connection, for a change after which
@@ -205,6 +211,9 @@ type forgottenConnection struct {
 	// the last connection to it.
 	origin  string
 	ignored bool
+	// pooler is what became of the connection's pooler container, when it
+	// had one: it goes with the connection, and the entry says so.
+	pooler string
 }
 
 // audited adds the mark to the audit detail of the request that forgot the
@@ -212,13 +221,18 @@ type forgottenConnection struct {
 // what the next sync does, so the entry that records the one records the
 // other.
 func (f forgottenConnection) audited(detail map[string]any) map[string]any {
-	if !f.ignored {
+	if !f.ignored && f.pooler == "" {
 		return detail
 	}
 	if detail == nil {
 		detail = map[string]any{}
 	}
-	detail["origin"], detail["ignored"] = f.origin, true
+	if f.ignored {
+		detail["origin"], detail["ignored"] = f.origin, true
+	}
+	if f.pooler != "" {
+		detail["pooler"] = f.pooler
+	}
 	return detail
 }
 
@@ -236,6 +250,14 @@ func (f forgottenConnection) audited(detail map[string]any) map[string]any {
 // thing to call.
 func (s *Server) forgetConnection(ctx context.Context, id int64, actor string) (forgottenConnection, error) {
 	origin := s.connectionOrigin(ctx, id)
+	pooler, _ := s.poolerRecord(ctx, id)
+	var poolerConn *dbConnection
+	var poolerDSN string
+	if pooler != nil {
+		// The saved string is read now: auth_query's role is removed with it
+		// once the row, and the string with it, has gone.
+		poolerConn, poolerDSN, _ = s.dbConnRow(ctx, id)
+	}
 	result, err := s.Store.DB.ExecContext(ctx,
 		`DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
 	if err != nil {
@@ -249,6 +271,7 @@ func (s *Server) forgetConnection(ctx context.Context, id int64, actor string) (
 	return forgottenConnection{
 		removed: true, origin: origin,
 		ignored: s.afterConnectionForgotten(ctx, id, origin, actor),
+		pooler:  s.forgetPooler(ctx, pooler, poolerConn, poolerDSN),
 	}, nil
 }
 
@@ -740,6 +763,32 @@ type dbHostView struct {
 	// actions out, looked for once however many connections ask.
 	systemctlOnce sync.Once
 	hasSystemctl  bool
+
+	// kept is the owners of the ports the gateway keeps to a list, read once.
+	keptOnce sync.Once
+	kept     map[string]bool
+}
+
+// listed is how far a container's binding reaches once the gateway has had
+// its say: a port on every interface that is kept to a list reaches the list.
+func (v *dbHostView) listed(container string, exposure dbExposure) dbExposure {
+	if exposure != exposurePublic {
+		return exposure
+	}
+	v.keptOnce.Do(func() {
+		v.kept = map[string]bool{}
+		if keeper := v.s.portKeeper(); keeper != nil {
+			if entries, err := keeper.KeptPorts(); err == nil {
+				for _, e := range entries {
+					v.kept[e.Owner] = true
+				}
+			}
+		}
+	})
+	if v.kept[dbPortOwner(container)] {
+		return exposureAllowlist
+	}
+	return exposure
 }
 
 // dbManaged is what runs one process, read once.
@@ -835,7 +884,7 @@ func (v *dbHostView) place(ctx context.Context, conn *dbConnection, dsn string) 
 
 	if server := s.serverBehind(ctx, conn, info); server != nil {
 		out.inContainer(server.container)
-		out.Exposure = exposureOf(server)
+		out.Exposure = v.listed(server.container.Name, exposureOf(server))
 		out.Managed = out.Container.ComposeProject == "" && server.binding != nil
 		return out
 	}
@@ -845,7 +894,7 @@ func (v *dbHostView) place(ctx context.Context, conn *dbConnection, dsn string) 
 		if c, binding := s.runningContainerPublishing(ctx, port); c != nil {
 			out.inContainer(c)
 			out.foreign = !s.engineImage(ctx, conn, c)
-			out.Exposure = exposureOf(&dbServer{container: c, binding: binding})
+			out.Exposure = v.listed(c.Name, exposureOf(&dbServer{container: c, binding: binding}))
 			return out
 		}
 	} else if c := s.containerAt(ctx, info.Host); c != nil {
@@ -873,7 +922,7 @@ func (v *dbHostView) place(ctx context.Context, conn *dbConnection, dsn string) 
 	if listening == nil {
 		if c, exposure := v.stoppedContainerFor(ctx, conn, loopback, port); c != nil {
 			out.inContainer(c)
-			out.Exposure = exposure
+			out.Exposure = v.listed(c.Name, exposure)
 			return out
 		}
 	}
@@ -1185,6 +1234,10 @@ type dbConnSummary struct {
 	FlavorLabel   string `json:"flavorLabel"`
 	Version       string `json:"version,omitempty"`
 	VersionNumber string `json:"versionNumber,omitempty"`
+	// EndOfLife is when that release stops being maintained, where the
+	// table knows it: said beside the version, as a fact, wherever the
+	// version is said.
+	EndOfLife *dbx.EndOfLife `json:"endOfLife,omitempty"`
 	// State is running, stopped, paused, unreachable or broken.
 	State     string `json:"state"`
 	OK        bool   `json:"ok"`
@@ -1207,7 +1260,9 @@ type dbConnSummary struct {
 	Exposure dbExposure `json:"exposure"`
 	Managed  bool       `json:"managed"`
 	// Consumers is how many deployment environments are bound to it.
-	Consumers  int        `json:"consumers"`
+	Consumers int `json:"consumers"`
+	// LastBackup is when it was last backed up from here, by hand or by a
+	// backup job (lastBackup); nil for never.
 	LastBackup *time.Time `json:"lastBackup,omitempty"`
 	// Capabilities is the feature reading for this driver and flavour, the
 	// same object the driver catalogue serves.
@@ -1247,7 +1302,8 @@ func (s *Server) handleDBConnSummary(w http.ResponseWriter, r *http.Request) err
 	}
 	_ = s.Store.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM deploy_database_bindings WHERE connection_id = ?`, id).Scan(&out.Consumers)
-	out.LastBackup = s.newestDump(conn.Name)
+	jobDumps, _ := s.modules.backupStore.LastDatabaseDumps(ctx)
+	out.LastBackup = s.lastBackup(conn, jobDumps)
 	if conn.Broken {
 		out.Error = conn.BrokenReason
 		out.Power = dbPower{Reason: dbPowerBrokenReason}
@@ -1292,6 +1348,7 @@ func (s *Server) handleDBConnSummary(w http.ResponseWriter, r *http.Request) err
 	if known {
 		out.Flavor, out.FlavorLabel = identity.Flavor, dbx.FlavorLabel(identity.Flavor)
 		out.Version, out.VersionNumber = identity.Version, identity.Number
+		out.EndOfLife, _ = dbx.VersionEndOfLife(conn.Driver, identity.Flavor, identity.Version, time.Now())
 		out.Capabilities = dbx.Capabilities(conn.Driver, identity.Flavor)
 	}
 	out.InFlight = s.dbConns.inFlight(id, out.State)
@@ -1418,6 +1475,10 @@ func (s *Server) handleDBPower(w http.ResponseWriter, r *http.Request) error {
 		result["target"] = place.Container.Name
 		if after, err := s.modules.docker.Inspect(ctx, place.Container.ID); err == nil {
 			result["state"] = after.State
+		}
+		// The pooler goes where its database goes.
+		if pooler := s.followPoolerPower(ctx, id, action); pooler != "" {
+			detail["pooler"], result["pooler"] = pooler, pooler
 		}
 	case "systemd":
 		detail["unit"] = place.Unit.Name

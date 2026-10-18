@@ -38,9 +38,9 @@ import (
 // find them — the process table and /proc already say.
 //
 // Both routes are read surface. The log is the server's own output and the
-// query log is statements with their literals, which /activity and
-// /statements already hand any role; the files are opened through the same
-// log roots every /logs route checks.
+// query log is statements with their literals, which /activity already hands
+// any role (/statements does not: it lists shapes); the files are opened
+// through the same log roots every /logs route checks.
 
 // dbLogSource is one log the page offers, in the shape /logs/sources lists.
 type dbLogSource struct {

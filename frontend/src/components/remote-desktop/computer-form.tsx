@@ -1,6 +1,7 @@
 "use client"
 
 import { Disclosure, Field, FieldRow } from "@/components/form"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -30,6 +31,7 @@ export type ComputerDraft = {
   security: string
   layout: string
   peerId: string
+  gfx: boolean
 }
 
 export function draftOf(computer: RdComputer): ComputerDraft {
@@ -45,6 +47,7 @@ export function draftOf(computer: RdComputer): ComputerDraft {
     security: computer.security,
     layout: computer.layout,
     peerId: computer.peerId,
+    gfx: computer.gfx,
   }
 }
 
@@ -66,6 +69,7 @@ export function inputOf(draft: ComputerDraft, editing: boolean): RdComputerInput
     security: draft.protocol === "rdp" ? draft.security : "",
     layout: draft.protocol === "rdp" ? draft.layout : "",
     peerId: draft.peerId,
+    gfx: draft.protocol === "rdp" && draft.gfx,
   }
 }
 
@@ -233,6 +237,22 @@ export function ComputerFields({
                 />
               </Field>
             </FieldRow>
+          )}
+          {rdp && (
+            <label className="flex items-start gap-2.5 text-body">
+              <Checkbox
+                checked={draft.gfx}
+                onCheckedChange={(on) => onChange({ gfx: on === true })}
+                className="mt-0.5"
+              />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span>Use the RDP graphics pipeline</span>
+                <span className="text-hint text-muted-foreground">
+                  Off, the screen is drawn on the computer&apos;s own frame marks, which is smoother
+                  and lighter. On only for a server that refuses to connect without it.
+                </span>
+              </span>
+            </label>
           )}
         </div>
       </Disclosure>

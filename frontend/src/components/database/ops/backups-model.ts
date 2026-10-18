@@ -21,7 +21,30 @@ export const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
 /** How many operations the strip of outcomes draws. */
 export const STRIP = 14
 
-export type TransferKind = "backup" | "restore" | "copy" | "import"
+/**
+ * The operations one connection runs one at a time: a dump, a restore, a
+ * copy, an import from another server, and a major-version upgrade's check,
+ * upgrade and revert, which move the whole server and so wait for, and hold
+ * off, the others.
+ */
+export type TransferKind =
+  | "backup"
+  | "restore"
+  | "copy"
+  | "import"
+  | "major-upgrade"
+  | "major-upgrade-check"
+  | "major-upgrade-revert"
+
+const TRANSFER_WORDS: Record<TransferKind, string> = {
+  backup: "Dump",
+  restore: "Restore",
+  copy: "Copy",
+  import: "Import",
+  "major-upgrade": "Upgrade",
+  "major-upgrade-check": "Upgrade check",
+  "major-upgrade-revert": "Revert",
+}
 
 /**
  * Which operation a transfer job is, read off the end of its kind. An import's
@@ -29,19 +52,13 @@ export type TransferKind = "backup" | "restore" | "copy" | "import"
  */
 export function transferKind(job: Pick<Job, "kind">): TransferKind | undefined {
   const word = job.kind.slice(job.kind.lastIndexOf(".") + 1)
-  if (word === "import" || word === "import-cutover") return "import"
-  return word === "backup" || word === "restore" || word === "copy" ? word : undefined
+  if (word === "import-cutover") return "import"
+  return Object.hasOwn(TRANSFER_WORDS, word) ? (word as TransferKind) : undefined
 }
 
-/** The word a finished operation is announced and listed under. */
+/** An operation's name, as a chip or a toast says it. */
 export function transferWord(kind: TransferKind | undefined): string {
-  return kind === "restore"
-    ? "Restore"
-    : kind === "copy"
-      ? "Copy"
-      : kind === "import"
-        ? "Import"
-        : "Dump"
+  return kind ? TRANSFER_WORDS[kind] : "Dump"
 }
 
 /** The kind prefix every dump, restore and copy of one connection runs under. */

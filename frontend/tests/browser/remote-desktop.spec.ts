@@ -121,6 +121,7 @@ test("adding a tailnet PC says where Remote Desktop is, waits for the port and s
       security: "",
       layout: "",
       peerId: "n06",
+      gfx: false,
     },
   ])
   expect(calls.probes).toContain("workshop-pc:3389")
@@ -196,7 +197,7 @@ test("a Mac that asks for its account is answered from the page, and the answer 
       setTimeout(() => socket.send(instruction("required", "username", "password")), 200)
     },
   )
-  await page.goto(`/remote-desktop/${MAC}`)
+  await page.goto(`/remote-desktop/${MAC}?mode=control`)
   await expect(page.getByText("Sign in to studio-mac")).toBeVisible()
   await page.getByLabel("Mac account name").fill("zoro")
   await page.getByLabel("Mac login password").fill("login-password")
@@ -224,7 +225,7 @@ test("the screen's size is sent only once it is up, never while the computer sig
       up = () => socket.send(instruction("size", "0", "1280", "720") + instruction("sync", "1"))
     },
   )
-  await page.goto(`/remote-desktop/${MAC}`)
+  await page.goto(`/remote-desktop/${MAC}?mode=control`)
   await expect(page.getByText("Connecting to studio-mac…")).toBeVisible()
   await page.setViewportSize({ width: 1100, height: 760 })
   await page.waitForTimeout(1200)
@@ -246,7 +247,7 @@ test("a refused session says what to check on the computer, in its words", async
       socket.close()
     },
   )
-  await page.goto(`/remote-desktop/${MAC}`)
+  await page.goto(`/remote-desktop/${MAC}?mode=control`)
   await expect(page.getByText("studio-mac is not answering")).toBeVisible()
   await expect(page.getByText("Screen Sharing is turned on")).toBeVisible()
   await expect(page.getByRole("button", { name: "Connect again" })).toBeVisible()
@@ -318,12 +319,35 @@ test("Stream pairs with Sunshine, keeps the PIN over Control while it is typed, 
     videoSize: "1080p",
     fps: 60,
     bitrate: 20000,
-    videoFrameQueueSize: 1,
+    videoFrameQueueSize: 3,
   })
 
   await page.getByRole("radio", { name: "Sharp" }).click()
   await expect.poll(async () => (await settings()).videoSize).toBe("1440p")
   expect((await settings()).bitrate).toBe(40000)
+})
+
+test("a paired Mac opens in Stream unless the address asks for Control, which says why", async ({
+  page,
+}) => {
+  await mockRemoteDesktop(page, { stream: streamView(PAIRED) })
+  await page.goto(`/remote-desktop/${MAC}`)
+  await expect(page).toHaveURL(/mode=stream/)
+  await expect(page.locator('iframe[data-slot="remote-stream"]')).toBeVisible()
+
+  // Asked for Control, a Mac gets it, with the reason Stream is the default
+  // and one press back to it.
+  await page.goto(`/remote-desktop/${MAC}?mode=control`)
+  await expect(page).not.toHaveURL(/mode=stream/)
+  const note = page.locator('[data-slot="mac-control-note"]')
+  await expect(note).toContainText("Screen Sharing is slow")
+  await note.getByRole("button", { name: "Switch to Stream" }).click()
+  await expect(page).toHaveURL(/mode=stream/)
+
+  // A PC opens in Control, whatever Sunshine is paired with.
+  await page.goto(`/remote-desktop/${OFFICE}`)
+  await expect(page).not.toHaveURL(/mode=stream/)
+  await expect(page.locator('[data-slot="mac-control-note"]')).toHaveCount(0)
 })
 
 test("Stream installs its bridge as a job on a server that has none", async ({ page }) => {
@@ -470,7 +494,7 @@ test("the session's column switches how the screen is drawn, and the computers c
       socket.send(instruction("", "6b1e3b54-6f2c-4d55-a0a2-5c7cf1c4b8d9"))
     },
   )
-  await page.goto(`/remote-desktop/${MAC}`)
+  await page.goto(`/remote-desktop/${MAC}?mode=control`)
   const panel = page.getByRole("complementary", { name: "Session" })
   const modes = panel.getByRole("radiogroup", { name: "How the screen is drawn" })
   await expect(modes.getByRole("radio", { name: /Screen Sharing/ })).toHaveAttribute(
@@ -515,7 +539,7 @@ test("a browser on the tailnet is sent the stream over WebRTC, at up to Max", as
   expect(await settings()).toMatchObject({
     videoSize: "1440p",
     bitrate: 80000,
-    videoFrameQueueSize: 1,
+    videoFrameQueueSize: 3,
   })
 })
 
@@ -544,7 +568,7 @@ for (const width of [390, 1024]) {
   })
 }
 
-for (const path of ["/remote-desktop/new", `/remote-desktop/${MAC}`]) {
+for (const path of ["/remote-desktop/new", `/remote-desktop/${MAC}?mode=control`]) {
   test(`inventory failures show their reason and retry on ${path}`, async ({ page }) => {
     await mockRemoteDesktop(page)
     let fail = true

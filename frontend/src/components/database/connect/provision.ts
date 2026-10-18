@@ -5,7 +5,13 @@ import {
   DATABASE_NAME,
   PROVISION_PASSWORD,
 } from "@/components/database/connect/rules"
-import type { DbProvisionRequest, DbProvisionTemplate } from "@/components/database/fleet/types"
+import type {
+  DbHostCapacity,
+  DbProvisionRelease,
+  DbProvisionRequest,
+  DbProvisionTemplate,
+} from "@/components/database/fleet/types"
+import { limitProblems } from "@/components/database/kit/limits"
 
 /**
  * Starting a new database, decided apart from its drawing: which shelf an
@@ -39,6 +45,15 @@ export type ProvisionDraft = {
   password: string
   /** Reachable from anywhere: the port on every interface and the firewall opened. */
   shared: boolean
+  /**
+   * Whether its container is limited, and to what: MiB and cores, zero for
+   * no limit on one of them. Off is Docker's default, no limit at all.
+   */
+  limited: boolean
+  memoryMb: number
+  cpus: number
+  /** Log the plans of slow statements, where the template offers it. */
+  autoExplain: boolean
 }
 
 export const EMPTY_PROVISION: ProvisionDraft = {
@@ -48,14 +63,30 @@ export const EMPTY_PROVISION: ProvisionDraft = {
   user: "",
   password: "",
   shared: false,
+  limited: false,
+  memoryMb: 0,
+  cpus: 0,
+  autoExplain: false,
 }
 
-/** The rules the server will hold the answers to, as one message per field that breaks one. */
+type ProvisionField = "name" | "database" | "user" | "password" | "memory" | "cpus"
+
+/**
+ * The rules the server will hold the answers to, as one message per field
+ * that breaks one. `host` is this machine, which a limit is held to once it
+ * has been read.
+ */
 export function provisionProblems(
   template: DbProvisionTemplate,
   draft: ProvisionDraft,
-): Partial<Record<"name" | "database" | "user" | "password", string>> {
-  const problems: Partial<Record<"name" | "database" | "user" | "password", string>> = {}
+  host?: DbHostCapacity,
+): Partial<Record<ProvisionField, string>> {
+  const problems: Partial<Record<ProvisionField, string>> = draft.limited
+    ? limitProblems(draft, host)
+    : {}
+  if (draft.limited && draft.memoryMb > 0 && draft.memoryMb < template.minMemoryMb) {
+    problems.memory = `${template.label} needs at least ${template.minMemoryMb} MiB the first time it starts.`
+  }
   const name = draft.name.trim()
   if (name && !CONTAINER_NAME.test(name)) {
     problems.name =
@@ -75,6 +106,43 @@ export function provisionProblems(
   return problems
 }
 
+/** The release a draft would start: the one chosen, or the template's own. */
+export function chosenRelease(
+  template: DbProvisionTemplate,
+  draft: ProvisionDraft,
+): DbProvisionRelease | undefined {
+  return (
+    template.versions.find((one) => one.version === draft.version) ??
+    template.versions.find((one) => one.version === template.defaultVersion)
+  )
+}
+
+/**
+ * The releases a template offers, as the picker sets them out: the ones still
+ * maintained, and apart from them the ones past their end of life — kept on
+ * the list for a server that has to match one it replaces, and never the
+ * first thing offered. A release the table has no date for is offered with
+ * the maintained ones; nothing is known against it.
+ */
+export function releaseShelves(template: DbProvisionTemplate): {
+  current: DbProvisionRelease[]
+  older: DbProvisionRelease[]
+} {
+  return {
+    current: template.versions.filter((one) => !one.endOfLife?.past),
+    older: template.versions.filter((one) => one.endOfLife?.past),
+  }
+}
+
+/**
+ * Whether starting a release means building its image first: one made on
+ * this server from the dashboard's recipe, not built yet — or built from an
+ * older recipe — and not built since the page asked.
+ */
+export function needsBuild(release: DbProvisionRelease | undefined, built: ReadonlySet<string>) {
+  return Boolean(release?.build && !release.build.ready && !built.has(release.image))
+}
+
 /**
  * What the form sends. An answer left empty is left out, so the server's own
  * default stands; a field the engine has no use for is never sent, because
@@ -84,44 +152,54 @@ export function provisionRequest(
   template: DbProvisionTemplate,
   draft: ProvisionDraft,
 ): DbProvisionRequest {
-  const version = template.versions.some((one) => one.version === draft.version)
-    ? draft.version
-    : template.defaultVersion
   return {
     engine: template.engine,
     name: draft.name.trim() || undefined,
-    version,
+    version: chosenRelease(template, draft)?.version ?? template.defaultVersion,
     database: template.database ? draft.database.trim() || undefined : undefined,
     user: template.defaultUser ? draft.user.trim() || undefined : undefined,
     password: draft.password || undefined,
     exposure: draft.shared ? "public" : "local",
+    memoryMb: draft.limited && draft.memoryMb > 0 ? draft.memoryMb : undefined,
+    cpus: draft.limited && draft.cpus > 0 ? draft.cpus : undefined,
+    autoExplain: template.autoExplain && draft.autoExplain ? true : undefined,
   }
 }
 
 /** The image a draft would start. */
 export function provisionImage(template: DbProvisionTemplate, draft: ProvisionDraft): string {
-  return (
-    template.versions.find((one) => one.version === draft.version)?.image ??
-    template.versions.find((one) => one.version === template.defaultVersion)?.image ??
-    template.image
-  )
+  return chosenRelease(template, draft)?.image ?? template.image
 }
 
 /**
- * The work, in the order it happens. The container is running a moment after
- * the first request returns; the engine inside it accepts connections some
- * seconds to a minute later, and there is no way to know which but to ask.
+ * The work, in the order it happens. An image built on this server is built
+ * first, as a job that goes on if the page is left. The container is running
+ * a moment after the next request returns; the engine inside it accepts
+ * connections some seconds to a minute later, and there is no way to know
+ * which but to ask.
  */
-export const PROVISION_STEPS = [
+const STEPS = [
+  { key: "build", label: "Build the image" },
   { key: "start", label: "Start the container" },
   { key: "wait", label: "Wait for the engine" },
   { key: "connect", label: "Connect it" },
 ] as const
 
-export type ProvisionPhase = (typeof PROVISION_STEPS)[number]["key"]
+export type ProvisionPhase = (typeof STEPS)[number]["key"]
 
-export const PHASE_SENTENCE: Record<ProvisionPhase, string> = {
+/** The steps of one start: the build only where there is an image to build. */
+export function provisionSteps(build: boolean) {
+  return build ? STEPS : STEPS.filter((step) => step.key !== "build")
+}
+
+const PHASE_SENTENCE: Record<ProvisionPhase, string> = {
+  build: "Building the image on this server…",
   start: "Pulling the image and starting the container…",
   wait: "Waiting for the engine to accept connections…",
   connect: "Verifying the saved connection…",
+}
+
+/** What is happening now. An image built here is never pulled. */
+export function phaseSentence(phase: ProvisionPhase, built: boolean): string {
+  return built && phase === "start" ? "Starting the container…" : PHASE_SENTENCE[phase]
 }

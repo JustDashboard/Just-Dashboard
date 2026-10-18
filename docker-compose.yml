@@ -57,6 +57,9 @@ services:
       JD_TERMINAL_ENABLED: ${JD_TERMINAL_ENABLED:-true}
       JD_TERMINAL_SHELL: ${JD_TERMINAL_SHELL:-}
       JD_TERMINAL_USER: ${JD_TERMINAL_USER:-}
+      # A Moonlight Web stream bridge on another tailnet machine, host:port,
+      # in place of the container this server would run for Remote Desktop.
+      JD_REMOTE_DESKTOP_BRIDGE: ${JD_REMOTE_DESKTOP_BRIDGE:-}
       JD_SESSION_TTL: ${JD_SESSION_TTL:-12h}
       JD_SESSION_IDLE_TTL: ${JD_SESSION_IDLE_TTL:-60m}
       # Two-factor is offered to every account and demanded of none, unless

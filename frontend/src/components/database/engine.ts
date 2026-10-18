@@ -1,5 +1,6 @@
 import {
   Archive,
+  Bell,
   ChartActivity,
   CloudDownload,
   CodeBracket,
@@ -72,6 +73,7 @@ export type SectionId =
   | "access"
   | "backups"
   | "import"
+  | "alerts"
   | "settings"
 
 export type SectionGroupId = "home" | "work" | "schema" | "insights" | "operate"
@@ -219,6 +221,8 @@ export function kindWord(kind: EngineKind): string {
 const NO_CAPABILITIES: DbCapabilities = {
   server: false,
   provision: false,
+  majorUpgrade: false,
+  serverTLS: false,
   inventoryConnect: false,
   hostAccount: false,
   fileBased: false,
@@ -238,6 +242,8 @@ const NO_CAPABILITIES: DbCapabilities = {
   cellRead: false,
   explainJSON: false,
   explainAnalyze: false,
+  indexWhatIf: false,
+  missingIndexes: false,
   ddl: false,
   schemas: false,
   catalog: false,
@@ -250,6 +256,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   comments: false,
   indexes: false,
   extensions: false,
+  pooler: false,
   stats: false,
   sessions: false,
   kill: false,
@@ -265,6 +272,8 @@ const NO_CAPABILITIES: DbCapabilities = {
   privileges: false,
   statements: false,
   statementsReset: false,
+  statementHistory: false,
+  statementsSetup: false,
   queryLog: false,
   clickhouseViews: false,
   sqliteFile: false,
@@ -319,6 +328,8 @@ const NO_CAPABILITIES: DbCapabilities = {
   serverDatabaseConnect: false,
   copy: false,
   copyStructureOnly: false,
+  pitr: false,
+  alertKinds: [],
   catalogGroups: [],
   ddlOperations: [],
   maintenanceActions: [],
@@ -332,6 +343,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   json: false,
   hashFieldTtl: false,
   commandReference: false,
+  memoryBuffer: false,
   onlineImport: false,
 }
 
@@ -368,8 +380,14 @@ const FLOOR: Record<DbDriver, readonly DbCapabilityFlag[]> = {
 const FLOOR_IMPORT: readonly DbDriver[] = ["postgres", "mysql", "sqlserver", "mongodb", "redis"]
 
 function floorOf(driver: DbDriver): Partial<DbCapabilities> {
+  const flags = FLOOR[driver]
   return {
-    ...Object.fromEntries(FLOOR[driver].map((flag) => [flag, true])),
+    ...Object.fromEntries(flags.map((flag) => [flag, true])),
+    // Every engine can be in a backup job, and every server can stop
+    // answering or fill its disk; the rest of the list is the server's.
+    alertKinds: flags.includes("server")
+      ? ["down", "disk", "backup_failed", "backup_missed"]
+      : ["backup_failed", "backup_missed"],
     ...(FLOOR_IMPORT.includes(driver) && { onlineImport: "stream" as const }),
   }
 }
@@ -848,6 +866,15 @@ const SECTIONS: SectionSpec[] = [
     kinds: OPENED,
     needs: "onlineImport",
     thing: "imports from another server",
+  },
+  {
+    id: "alerts",
+    group: "operate",
+    title: "Alerts",
+    icon: Bell,
+    kinds: OPENED,
+    needs: "alertKinds",
+    thing: "alerts",
   },
   {
     id: "settings",

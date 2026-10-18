@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import {
   bridgeSettings,
+  defaultSessionMode,
   candidates,
   combosFor,
   computerHues,
   desktopApp,
   displaySize,
+  pathLabel,
   overviewVerdict,
   peerOS,
   reachability,
@@ -156,9 +158,38 @@ describe("sessionProblem", () => {
 })
 
 describe("displaySize", () => {
-  test("asks for the frame's device pixels, capped at twice its size", () => {
+  test("asks for one pixel per pixel unless sharpness is asked for, then at most twice", () => {
     expect(displaySize(1000, 600, 1)).toEqual({ width: 1000, height: 600, dpi: 96, density: 1 })
-    expect(displaySize(400, 800, 3)).toEqual({ width: 800, height: 1600, dpi: 192, density: 2 })
+    expect(displaySize(1000, 600, 2)).toEqual({ width: 1000, height: 600, dpi: 96, density: 1 })
+    expect(displaySize(1000, 600, 2, true)).toEqual({
+      width: 2000,
+      height: 1200,
+      dpi: 192,
+      density: 2,
+    })
+    expect(displaySize(400, 800, 3, true)).toEqual({
+      width: 800,
+      height: 1600,
+      dpi: 192,
+      density: 2,
+    })
+  })
+})
+
+describe("pathLabel", () => {
+  test("says direct or which relay, and nothing when the tailnet does not know", () => {
+    expect(pathLabel({ direct: true, relay: "" })).toBe("direct")
+    expect(pathLabel({ direct: false, relay: "fra" })).toBe("relayed via fra")
+    expect(pathLabel({ direct: false, relay: "" })).toBeUndefined()
+    expect(pathLabel(undefined)).toBeUndefined()
+  })
+})
+
+describe("defaultSessionMode", () => {
+  test("opens a Mac paired with Sunshine in Stream and everything else in Control", () => {
+    expect(defaultSessionMode({ os: "macos", streamHostId: 41 })).toBe("stream")
+    expect(defaultSessionMode({ os: "macos", streamHostId: 0 })).toBe("control")
+    expect(defaultSessionMode({ os: "windows", streamHostId: 41 })).toBe("control")
   })
 })
 
@@ -219,7 +250,7 @@ describe("bridgeSettings", () => {
       videoSize: "1440p",
       fps: 60,
       bitrate: 40000,
-      videoFrameQueueSize: 1,
+      videoFrameQueueSize: 3,
     })
   })
 

@@ -442,7 +442,12 @@ type Sent = { request: string; body: unknown }
  */
 async function mockHome(
   page: Page,
-  options: DatabaseMock & { answers?: Record<string, Answer>; capabilities?: string[] } = {},
+  options: DatabaseMock & {
+    answers?: Record<string, Answer>
+    capabilities?: string[]
+    /** How long the recorder keeps its history, in hours; a week unless given. */
+    retentionHours?: number
+  } = {},
 ) {
   const mock = await mockDatabases(page, options)
   const table = { ...ANSWERS, ...options.answers }
@@ -499,7 +504,9 @@ async function mockHome(
         if (isReply(value)) return route.fulfill({ status: value.status, json: value.body })
         samples.push({ at: Date.parse(NOW) - 60_000 + index * 5_000, stats: value, gap: false })
       }
-      return route.fulfill({ json: { samples, everySeconds: 30, retentionHours: 168 } })
+      return route.fulfill({
+        json: { samples, everySeconds: 30, retentionHours: options.retentionHours ?? 168 },
+      })
     }
     if (!Object.hasOwn(table, key)) return route.fallback()
     const call = calls.get(key) ?? 0
@@ -673,6 +680,52 @@ test("every view of saved activity is a chart of its own, and the range is kept 
       .getByRole("radiogroup", { name: "Activity history range" })
       .getByRole("radio", { name: "24 hours" }),
   ).toHaveAttribute("aria-checked", "true")
+})
+
+test("a longer retention offers the longer ranges and says how long activity is kept", async ({
+  page,
+}) => {
+  await holdTime(page)
+  await mockHome(page, { retentionHours: 2160 })
+  await visit(page, "/databases/1")
+
+  const activity = block(page, "Activity")
+  await expect(activity).toContainText("kept for 90 days")
+  const range = activity.getByRole("radiogroup", { name: "Activity history range" })
+  await expect(range.getByRole("radio")).toHaveText(["1h", "6h", "24h", "7d", "14d", "30d", "90d"])
+  const asked = page.waitForRequest((request) => request.url().includes("stats/history?hours=2160"))
+  await range.getByRole("radio", { name: "90 days" }).click()
+  await asked
+  await expect(range.getByRole("radio", { name: "90 days" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  )
+})
+
+test("a saved long range falls back to the longest one still kept after retention is shortened", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("jd.view.state.entry.databases.1.history.hours", "2160"),
+  )
+  await holdTime(page)
+  await mockHome(page)
+  const longer = page.waitForRequest((request) =>
+    request.url().includes("stats/history?hours=2160"),
+  )
+  const fallback = page.waitForRequest((request) =>
+    request.url().includes("stats/history?hours=168"),
+  )
+  await visit(page, "/databases/1")
+  await longer
+  await fallback
+
+  const activity = block(page, "Activity")
+  const range = activity.getByRole("radiogroup", { name: "Activity history range" })
+  await expect(range.getByRole("radio")).toHaveText(["1h", "6h", "24h", "7d"])
+  await expect(range.getByRole("radio", { name: "7 days" })).toHaveAttribute("aria-checked", "true")
+  await expect(activity).toContainText("kept for 7 days")
+  await expect(chart(page, "Sessions")).toBeVisible()
 })
 
 test("a chart of a few sessions counts them in ones", async ({ page }) => {

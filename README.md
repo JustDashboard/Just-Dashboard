@@ -118,11 +118,15 @@ free.
 
 - A control center for every database on the server — even unconnected ones
 - PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB, Redis
-- Table editor with staged, reviewed edits and a SQL editor with plans
+- Table editor with staged, reviewed edits and a SQL editor with plans and stored programs
+  (DELIMITER, GO and PL/SQL scripts)
 - Schema browser, diagram, code generation, performance
 - Key browser and console for Redis, documents and pipelines for MongoDB
-- Protected connections, dump backups, accounts, grants and a live map
+- Protected connections, dump backups, PostgreSQL major-version upgrades with a way back, accounts,
+  grants and a live map
 - Import from another server, kept current by logical replication on PostgreSQL until you cut over
+- Point-in-time recovery for PostgreSQL: the write-ahead log archived with WAL-G, recovered to any second
+- Alerts when a database goes down, fills its disk, runs low on connections, lags or misses a backup
 
 </td>
 </tr>
@@ -172,7 +176,7 @@ free.
 
 - A verdict on the host: exposure, SSH, logins and who is attacking
 - fail2ban, CrowdSec and Suricata where they run
-- Scheduled backups to disk, S3 or Backblaze B2, and native database dumps
+- Scheduled backups to disk, S3 or Backblaze B2, encrypted on the way out, and native database dumps
 - A coverage map of everything that is *not* backed up yet
 - Single-file and in-place restore
 
@@ -417,6 +421,7 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_TERMINAL_ENABLED` | `true` | The web terminal. |
 | `JD_TERMINAL_SHELL` | account's shell | The shell the web terminal opens. Empty honours `chsh`. `install.sh` sets it to the host's zsh, which the bundled startup gives inline history suggestions and command colouring; ssh is unaffected. |
 | `JD_TERMINAL_USER` | lowest regular account | Host account a terminal session logs in as. |
+| `JD_REMOTE_DESKTOP_BRIDGE` | none | A Moonlight Web stream bridge on another tailnet machine, as `host:port`, used in place of the container this server would run. Remote Desktop's picture always passes through the bridge; one near you and your computers spares it the trip to this server and back. The bridge must trust the dashboard's account header from this server only. |
 | `JD_SESSION_TTL` | `12h` | Absolute session lifetime. |
 | `JD_SESSION_IDLE_TTL` | `60m` | Idle timeout. |
 | `JD_DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker Engine endpoint. |
@@ -513,6 +518,17 @@ dashboard stops; the whole transcript is in `/var/log/just-dashboard-uninstall.l
 The dashboard's own state is a SQLite database in `JD_DATA_DIR` (`/var/lib/just-dashboard`). Back up
 that directory **and** keep `JD_MASTER_KEY` somewhere separate; either alone will not restore. The
 Backups page lists the dashboard itself under Coverage and writes that job for you.
+
+A backup job can encrypt its archives, and a new one that writes to S3 or B2 does unless you turn it
+off. They are sealed with [age](https://age-encryption.org) to one backup key this server keeps, itself
+sealed with `JD_MASTER_KEY`, and restores, recovery checks and downloads here decrypt them as they read.
+**Export the key** — Backups → Backup key → Export key… — and keep the file somewhere other than the
+server: if the server is lost, that file is how its encrypted archives open. On any machine with `age`:
+
+```bash
+age --decrypt --identity just-dashboard-backup-key.txt NAME.tar.gz.age > NAME.tar.gz
+tar -xzf NAME.tar.gz    # source-0001/, database-0001/…: one folder per source and per dump
+```
 
 ## Who makes this
 

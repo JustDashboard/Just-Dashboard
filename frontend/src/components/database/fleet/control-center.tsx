@@ -28,6 +28,7 @@ import {
 import { FleetBand } from "@/components/database/fleet/fleet-band"
 import { FleetCard } from "@/components/database/fleet/fleet-card"
 import { FleetTable } from "@/components/database/fleet/fleet-table"
+import { MetricsExport } from "@/components/database/fleet/metrics-export-dialog"
 import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { Shelves } from "@/components/database/fleet/shelves"
 import { useAddress, useTypedParam } from "@/components/database/fleet/use-address"
@@ -385,12 +386,15 @@ export function ControlCenter() {
         aside={
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
             {verdict && <Status tone={verdict.tone} label={verdict.label} />}
-            {admin && (
-              <span className="flex items-center gap-2">
-                {scan}
-                {add}
-              </span>
-            )}
+            <span className="flex items-center gap-2">
+              <MetricsExport admin={admin} />
+              {admin && (
+                <>
+                  {scan}
+                  {add}
+                </>
+              )}
+            </span>
           </div>
         }
       />
