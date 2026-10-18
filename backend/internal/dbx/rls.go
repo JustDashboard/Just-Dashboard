@@ -228,10 +228,13 @@ type RowSecurityChange struct {
 	Force         *bool
 }
 
-// TurnsOff reports whether the change takes the filter off the table. It
-// shows every row to everybody who may read the table, which is the opposite
-// of what the policies were written for, so the caller treats it as a drop.
-func (c RowSecurityChange) TurnsOff() bool { return c.Enabled != nil && !*c.Enabled }
+// TurnsOff reports whether the change takes the filter off anybody: off for
+// the table, which shows every row to everybody who may read it, or no longer
+// forced, which shows them to its owner. That is the opposite of what the
+// policies were written for, so the caller treats it as a drop.
+func (c RowSecurityChange) TurnsOff() bool {
+	return c.Enabled != nil && !*c.Enabled || c.Force != nil && !*c.Force
+}
 
 // PlanRowSecurity plans enabling, disabling or forcing row-level security.
 func PlanRowSecurity(driver Driver, c RowSecurityChange) (*DDLPlan, error) {
@@ -454,7 +457,10 @@ type RoleTest struct {
 
 // RoleTestResult is what the role saw.
 type RoleTestResult struct {
-	Result *QueryResult `json:"result"`
+	// Result is absent when Skipped.
+	Result *QueryResult `json:"result,omitempty"`
+	// Skipped is true when nothing was run: the role is a superuser.
+	Skipped bool `json:"skipped"`
 	// Role is the one the statement ran as, as the server reported it.
 	Role string `json:"role"`
 	// Setup is every statement sent before the query, in order. The query is
@@ -531,14 +537,18 @@ func CheckRoleTest(driver Driver, t RoleTest) (*SQLStatement, error) {
 //
 // The query runs in a read-only transaction that is rolled back and never
 // committed, after SET LOCAL ROLE — which lasts to the end of that
-// transaction and no further — and the settings, which are set_config(…, true)
-// for the same length. Nothing is left on the connection the pool gets back,
-// and a function the query calls that writes is refused by the transaction.
-// The rows are bounded, and the server is given a timeout of its own.
+// transaction and no further — and the settings, which are bound
+// set_config($1, $2, true) calls made as that role, so that a setting only a
+// superuser may change is refused to a test as it is to the role. Nothing is
+// left on the connection the pool gets back, and a function the query calls
+// that writes is refused by the transaction. The rows are bounded, and the
+// server is given a timeout of its own.
 //
 // The account the connection signs in with has to be a member of the role, as
 // SET ROLE requires; that is what keeps this from being a way to become a role
-// the account could not already act as.
+// the account could not already act as. A superuser is not become at all: no
+// policy filters it, so its rows say nothing about the policies, and becoming
+// one would hand its reach (pg_read_file, pg_authid) to whoever may run a test.
 func RunAsRole(ctx context.Context, db *sql.DB, driver Driver, t RoleTest) (*RoleTestResult, error) {
 	statement, err := CheckRoleTest(driver, t)
 	if err != nil {
@@ -549,17 +559,45 @@ func RunAsRole(ctx context.Context, db *sql.DB, driver Driver, t RoleTest) (*Rol
 	if err != nil {
 		return nil, roleTestRefused("%v", err)
 	}
-	setup := []string{fmt.Sprintf("SET LOCAL statement_timeout = '%dms'", testTimeout.Milliseconds())}
+	var super bool
+	err = db.QueryRowContext(ctx, `SELECT rolsuper FROM pg_roles WHERE rolname = $1`, strings.TrimSpace(t.Role)).Scan(&super)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if super {
+		return &RoleTestResult{
+			Role: strings.TrimSpace(t.Role), Skipped: true, Setup: []string{},
+			Notes: []string{strings.TrimSpace(t.Role) + " is a superuser, so no policy filters what it reads. Nothing was run as it."},
+		}, nil
+	}
+	// What is sent, and how it is said on the answer: the role, then each
+	// setting as the role. The settings are bound, and shown with their values
+	// written in so that the answer reads as the statements it stands for.
+	type step struct {
+		shown, query string
+		args         []any
+	}
+	steps := []step{
+		{shown: fmt.Sprintf("SET LOCAL statement_timeout = '%dms'", testTimeout.Milliseconds())},
+		{shown: "SET LOCAL ROLE " + role},
+	}
 	for _, claim := range t.Claims {
 		value, err := ddlLiteral(driver, "the value of "+claim.Name, claim.Value)
 		if err != nil {
 			return nil, roleTestRefused("%v", err)
 		}
-		setup = append(setup, "SELECT set_config('"+claim.Name+"', "+value+", true)")
+		steps = append(steps, step{
+			shown: "SELECT set_config('" + claim.Name + "', " + value + ", true)",
+			query: "SELECT set_config($1, $2, true)", args: []any{claim.Name, claim.Value},
+		})
 	}
-	// The role last, after the settings: they are set by the account that
-	// signs in, and the query is the only thing that runs as the role.
-	setup = append(setup, "SET LOCAL ROLE "+role)
+	setup := make([]string, len(steps))
+	for i, st := range steps {
+		setup[i] = st.shown
+		if st.query == "" {
+			steps[i].query = st.shown
+		}
+	}
 
 	s, err := openSession(ctx, db, driver)
 	if err != nil {
@@ -571,10 +609,10 @@ func RunAsRole(ctx context.Context, db *sql.DB, driver Driver, t RoleTest) (*Rol
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	for _, stmt := range setup {
-		rows, err := tx.QueryContext(ctx, stmt)
+	for _, st := range steps {
+		rows, err := tx.QueryContext(ctx, st.query, st.args...)
 		if err != nil {
-			if isInsufficientPrivilege(err) && strings.HasPrefix(stmt, "SET LOCAL ROLE") {
+			if isInsufficientPrivilege(err) && strings.HasPrefix(st.query, "SET LOCAL ROLE") {
 				return nil, roleTestRefused("the account this connection signs in with may not become %s: it is not a member of that role", t.Role)
 			}
 			return nil, err
@@ -611,9 +649,11 @@ func RunAsRole(ctx context.Context, db *sql.DB, driver Driver, t RoleTest) (*Rol
 		}
 		return nil, err
 	}
-	// A statement can change the role it runs as (set_config('role', …)). The
+	// A function the statement calls can leave the role it was put in. The
 	// rows it returned were then read under another identity, and showing them
-	// as this role's would be the one lie the test must not tell.
+	// as this role's would be the one lie the test must not tell. This catches
+	// a role left changed; it is not what keeps a test from doing harm, which
+	// is the read-only transaction and the role being a member's.
 	var after string
 	if err := tx.QueryRowContext(ctx, `SELECT current_user::text`).Scan(&after); err != nil {
 		return nil, err
@@ -629,7 +669,7 @@ func RunAsRole(ctx context.Context, db *sql.DB, driver Driver, t RoleTest) (*Rol
 func tableFilterNote(ctx context.Context, q *sql.Tx, schema, table, role string, exempt bool) (string, error) {
 	var enabled, forced, owns bool
 	err := q.QueryRowContext(ctx, `
-	  SELECT c.relrowsecurity, c.relforcerowsecurity, pg_get_userbyid(c.relowner) = current_user
+	  SELECT c.relrowsecurity, c.relforcerowsecurity, pg_has_role(current_user, c.relowner, 'USAGE')
 	  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 	  WHERE `+pgSchemaIs("n")+` AND c.relname = $2 AND c.relkind IN ('r', 'p')`, schema, table).
 		Scan(&enabled, &forced, &owns)
@@ -643,7 +683,7 @@ func tableFilterNote(ctx context.Context, q *sql.Tx, schema, table, role string,
 	case !enabled:
 		return "Row-level security is off on " + table + ": " + role + " sees every row its privileges allow.", nil
 	case owns && !forced && !exempt:
-		return role + " owns " + table + ", and an owner is not filtered unless row-level security is forced on it.", nil
+		return role + " owns " + table + " or inherits its owner's rights, and an owner is not filtered unless row-level security is forced on it.", nil
 	}
 	return "", nil
 }

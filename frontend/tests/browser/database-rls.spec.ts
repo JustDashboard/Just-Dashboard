@@ -65,7 +65,7 @@ const security = (over: Partial<Security> = {}): Security => ({
   enabled: true,
   forced: false,
   owner: "app",
-  exempt: ["app", "postgres"],
+  exempt: ["app", "etl", "postgres"],
   policies: [TENANT, AUDITORS],
   ...over,
 })
@@ -87,6 +87,7 @@ const ROLES = {
     role("app", { superuser: true }),
     role("auditor", { login: false }),
     role("web"),
+    role("etl"),
     role("reporting"),
     role("readers", { login: false }),
     role("pg_monitor", { login: false, system: true }),
@@ -284,8 +285,8 @@ async function mockRls(page: Page, options: Options = {}) {
           `SET LOCAL ROLE "${body.role}"`,
         ],
         notes:
-          body.role === "app"
-            ? ["app is a superuser or has BYPASSRLS, so no policy filters what it reads."]
+          body.role === "etl"
+            ? ["etl is a superuser or has BYPASSRLS, so no policy filters what it reads."]
             : [],
         result: {
           columns: ["id", "owner", "body"],
@@ -625,6 +626,27 @@ test("turning security off asks first, and turning it on does not", async ({ pag
   await expect(status(page)).toContainText("The owner is held to the policies as well.")
 })
 
+test("no longer holding the owner to the policies asks first", async ({ page }) => {
+  const server = await mockRls(page, { security: security({ forced: true }) })
+  await visit(page, POLICIES)
+  await status(page).getByRole("button", { name: "Change…" }).click()
+  const form = dialog(page)
+
+  await form.getByRole("switch", { name: /Hold the table's owner/ }).click()
+  await expect(form).toContainText("The owner sees every row")
+  await expect(form).toContainText(`NO FORCE ROW LEVEL SECURITY`)
+  await form.getByRole("button", { name: "Apply…" }).click()
+  await expect(form).toContainText("Stop holding the owner to the policies?")
+  expect(server.sent.ddl.filter((one) => !one.preview)).toHaveLength(0)
+  await form.getByRole("button", { name: "Apply", exact: true }).click()
+  await expect(form).toHaveCount(0)
+  expect(server.sent.ddl.findLast((one) => !one.preview)?.body).toEqual({
+    schema: "public",
+    table: "notes",
+    force: false,
+  })
+})
+
 // ---------------------------------------------------------------------------
 // The test of a role
 // ---------------------------------------------------------------------------
@@ -641,7 +663,7 @@ test("a role is tried with the settings the policies read, and the rows it sees 
   await tester(page).getByRole("combobox", { name: "Role" }).click()
   // The engine's own roles are not offered, and the ones nothing filters are marked.
   await expect(page.getByRole("option", { name: "pg_monitor" })).toHaveCount(0)
-  await expect(page.getByRole("option", { name: "app · not filtered" })).toBeVisible()
+  await expect(page.getByRole("option", { name: "etl · not filtered" })).toBeVisible()
   await page.getByRole("option", { name: "web", exact: true }).click()
   await tester(page).getByLabel("Setting 1 value").fill("acme")
   await expect(tester(page).getByLabel("Query")).toHaveValue(`SELECT * FROM "public"."notes"`)
@@ -666,8 +688,10 @@ test("a role no policy filters is said to be one", async ({ page }) => {
   await mockRls(page)
   await visit(page, POLICIES)
   await tester(page).getByRole("combobox", { name: "Role" }).click()
-  await page.getByRole("option", { name: "app · not filtered" }).click()
-  await tester(page).getByRole("button", { name: "Run as app" }).click()
+  // A superuser says nothing about the policies and is not offered.
+  await expect(page.getByRole("option", { name: /^app/ })).toHaveCount(0)
+  await page.getByRole("option", { name: "etl · not filtered" }).click()
+  await tester(page).getByRole("button", { name: "Run as etl" }).click()
   await expect(tester(page)).toContainText("no policy filters what it reads")
 })
 

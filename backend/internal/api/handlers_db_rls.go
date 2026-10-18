@@ -173,9 +173,9 @@ type rowSecurityRequest struct {
 }
 
 // handleDDLRowSecurity turns a table's row-level security on or off, and holds
-// its owner to it or not. Turning it off is destructive: the table shows every
-// row to everybody who may read it, and the route cannot know that from its
-// path.
+// its owner to it or not. Turning it off, or no longer holding the owner to
+// it, is destructive: rows are shown to whoever it was filtering, and the route
+// cannot know that from its path.
 func (s *Server) handleDDLRowSecurity(w http.ResponseWriter, r *http.Request) error {
 	var req rowSecurityRequest
 	conn, err := s.ddlDecode(r, &req)
@@ -188,13 +188,25 @@ func (s *Server) handleDDLRowSecurity(w http.ResponseWriter, r *http.Request) er
 	change := dbx.RowSecurityChange{Schema: req.Schema, Table: req.Table, Enabled: req.Enabled, Force: req.Force}
 	destructive := ""
 	if change.TurnsOff() {
-		destructive = "turning row-level security off shows every row to everyone who can read the table"
+		destructive = "turning row-level security off, or no longer forcing it on the owner, shows rows to everyone it was filtering"
 	}
 	return s.runDDL(w, r, conn, 60*time.Second, "database.ddl.row_security",
 		map[string]any{"table": req.Table, "enabled": req.Enabled, "force": req.Force}, destructive,
 		func(context.Context, *sql.DB) (*dbx.DDLPlan, error) {
 			return dbx.PlanRowSecurity(conn.Driver, change)
 		})
+}
+
+// withoutClaimValues takes the values of a test's settings out of an engine's
+// message, which quotes a value it rejected ("invalid input syntax for type
+// uuid: …").
+func withoutClaimValues(message string, claims []dbx.Claim) string {
+	for _, claim := range claims {
+		if claim.Value != "" {
+			message = strings.ReplaceAll(message, claim.Value, "…")
+		}
+	}
+	return message
 }
 
 type roleTestRequest struct {
@@ -213,7 +225,8 @@ type roleTestRequest struct {
 // query runner uses, and the run itself is a read-only transaction that is
 // rolled back (dbx.RunAsRole). What is recorded is the role, the names of the
 // settings it was given — their values are the operator's test data and may
-// be a token — and the statement.
+// be a token — and the statement. A failure is recorded by its SQLSTATE: the
+// engine's text can quote a value it rejected.
 func (s *Server) handleRLSTest(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
@@ -247,15 +260,30 @@ func (s *Server) handleRLSTest(w http.ResponseWriter, r *http.Request) error {
 	detail := map[string]any{"role": test.Role, "claims": claims, "statement": strings.TrimSpace(test.Query)}
 	res, err := dbx.RunAsRole(ctx, pool, conn.Driver, test)
 	if err != nil {
-		detail["error"] = err.Error()
-		httpx.SetAudit(r, "database.rls.test", conn.Name, detail)
 		var refused dbx.ErrRoleTestRefused
-		if errors.As(err, &refused) {
+		refusal := errors.As(err, &refused)
+		if refusal {
+			detail["error"] = err.Error()
+		} else {
+			detail["error"] = "the engine refused it"
+			var state interface{ SQLState() string }
+			if errors.As(err, &state) {
+				detail["sqlstate"] = state.SQLState()
+			}
+		}
+		httpx.SetAudit(r, "database.rls.test", conn.Name, detail)
+		if refusal {
 			return httpx.BadRequest("%v", err)
 		}
-		return queryFailed(err)
+		// The middleware writes the error it is handed into the trail and
+		// the log, so the values are taken out before it is handed one.
+		return retryable(httpx.Err(http.StatusBadGateway, "query_failed", withoutClaimValues(err.Error(), test.Claims)), err)
 	}
-	detail["rowCount"] = res.Result.RowCount
+	if res.Skipped {
+		detail["skipped"] = true
+	} else {
+		detail["rowCount"] = res.Result.RowCount
+	}
 	httpx.SetAudit(r, "database.rls.test", conn.Name, detail)
 	httpx.JSON(w, http.StatusOK, res)
 	return nil

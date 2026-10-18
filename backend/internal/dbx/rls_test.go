@@ -34,9 +34,20 @@ func TestRowSecurityStatements(t *testing.T) {
 	if _, err := PlanRowSecurity(DriverPostgres, RowSecurityChange{Schema: "app", Table: "orders"}); err == nil {
 		t.Error("a change that says nothing was planned")
 	}
-	if !(RowSecurityChange{Enabled: boolPtr(false)}).TurnsOff() || (RowSecurityChange{Enabled: boolPtr(true)}).TurnsOff() ||
-		(RowSecurityChange{Force: boolPtr(false)}).TurnsOff() {
-		t.Error("TurnsOff does not say when the filter comes off")
+	for change, off := range map[string]struct {
+		c    RowSecurityChange
+		want bool
+	}{
+		"disabled":         {RowSecurityChange{Enabled: boolPtr(false)}, true},
+		"no longer forced": {RowSecurityChange{Force: boolPtr(false)}, true},
+		"both":             {RowSecurityChange{Enabled: boolPtr(false), Force: boolPtr(false)}, true},
+		"enabled":          {RowSecurityChange{Enabled: boolPtr(true)}, false},
+		"forced":           {RowSecurityChange{Force: boolPtr(true)}, false},
+		"enabled, forced":  {RowSecurityChange{Enabled: boolPtr(true), Force: boolPtr(true)}, false},
+	} {
+		if got := off.c.TurnsOff(); got != off.want {
+			t.Errorf("%s: TurnsOff = %v, want %v", change, got, off.want)
+		}
 	}
 }
 

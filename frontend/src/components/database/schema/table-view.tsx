@@ -76,6 +76,7 @@ import {
   PoliciesPlaceholder,
   RowSecurityDialog,
   namedRoles,
+  testableRoles,
   useRoles,
   useRowSecurity,
 } from "@/components/database/schema/policies"
@@ -758,7 +759,7 @@ export function TableView({
                       key={`${data.schema}.${data.name}`}
                       detail={data}
                       security={security.data}
-                      roles={namedRoles(roleList.data?.roles)}
+                      roles={testableRoles(roleList.data?.roles)}
                     />
                   )}
                 </div>

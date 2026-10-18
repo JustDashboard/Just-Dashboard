@@ -572,6 +572,60 @@ describe("functions and columns", () => {
     expect(planned[0].about).toBe("Grant on every function in public")
   })
 
+  test("a schema that holds functions the matrix does not list is never asked for as a whole", () => {
+    // Pressed on every function that is listed; an extension installed more
+    // in the schema, and ALL ROUTINES IN SCHEMA would grant those as well.
+    const cells = [fn("a", ""), fn("b", "integer")]
+    const key = scopeKey({ level: "function", schema: "public" })
+    const grant = Object.fromEntries(
+      cells.map((cell) => [cellKey(cell), { cell, privileges: ["EXECUTE"] }]),
+    )
+    const asked = (wanted, holds, options) =>
+      plannedRequests(wanted, holds, OVERLOADS, { [key]: ["a()", "b(integer)"] }, [], options)
+
+    const planned = asked(grant, holdsNothing, { future: true, unlisted: [key] })
+    expect(planned.map((one) => [one.action, one.body])).toEqual([
+      [
+        "grant",
+        {
+          level: "function",
+          schema: "public",
+          routine: "a",
+          arguments: "",
+          privileges: ["EXECUTE"],
+        },
+      ],
+      [
+        "grant",
+        {
+          level: "function",
+          schema: "public",
+          routine: "b",
+          arguments: "integer",
+          privileges: ["EXECUTE"],
+        },
+      ],
+    ])
+    expect(planned.some((one) => one.body.future)).toBe(false)
+
+    // The same for a revoke of what is held on every listed function.
+    const held = () => ({ ...nothing, privileges: ["EXECUTE"] })
+    const revoke = Object.fromEntries(
+      cells.map((cell) => [cellKey(cell), { cell, privileges: [] }]),
+    )
+    const revoked = asked(revoke, held, { unlisted: [key] })
+    expect(revoked.map((one) => [one.action, one.body.routine])).toEqual([
+      ["revoke", "a"],
+      ["revoke", "b"],
+    ])
+
+    // And without the extension's functions in the schema, the whole is still one request.
+    expect(asked(grant, holdsNothing, {})).toHaveLength(1)
+    expect(
+      asked(grant, holdsNothing, { unlisted: [scopeKey({ level: "function", schema: "other" })] }),
+    ).toHaveLength(1)
+  })
+
   test("a column is held on its table, by its name", () => {
     const grants = [
       {

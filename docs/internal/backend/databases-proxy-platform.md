@@ -798,7 +798,8 @@ stays editable on a protected connection.
   `runDDL` like the rest, so the dialog's statement is the one that runs. A policy decides who sees
   which rows as a grant decides who sees which tables, so the routes are `system.admin`, not
   `service.control`: dropping a policy is behind `s.destructive` as well, and so is turning security
-  off, which the handler asks of the destructive capability by hand because it is a `PATCH`. The
+  off or no longer forcing it on the owner (`RowSecurityChange.TurnsOff`), which the handler asks of
+  the destructive capability and its budget by hand because it is a `PATCH`. The
   conditions are the operator's SQL, confined by `validateFragment` as a CHECK condition is, and
   read for calls: `current_setting` and the `has_*_privilege` family are vouched for
   (`policyCalls`), anything else — `auth.uid()`, a subquery's qualified table — is named in the reply
@@ -811,20 +812,28 @@ stays editable on a protected connection.
     answers the rows (`dbx.RunAsRole`). The statement is read first by the query runner's own
     classifier and has to be a `SELECT`, `WITH`, `TABLE` or `VALUES` that classifies as a read; it
     then runs on a connection of its own in a read-only transaction that is rolled back and never
-    committed, after `SET LOCAL statement_timeout`, `set_config(name, value, true)` for each setting
-    and `SET LOCAL ROLE` — in that order, the role last. A setting has to be named with a dot
-    (`app.tenant_id`): `set_config('role', …)` is how a statement leaves the role it was put in, and
-    the statement that does so anyway is refused afterwards, because the transaction's
-    `current_user` is read again and must still be the role. At most 100 rows are read (1000 at
-    most), twenty settings of 4 KiB. The answer says the role, every statement sent before the query
-    (`setup`) and, when the table is named, why the filter may not apply to that role: security is
-    off, the role owns the table and it is not forced, or the role is exempt. The account the
-    connection signs in with has to be a member of the role, as `SET ROLE` requires; that is
-    reported in words ("not a member"). A function the SELECT calls that writes is refused by the
-    read-only transaction. On a protected connection the test is let through when the statement is a
-    read (`protectedRoleTest`) and refused when it is not. Audited as `database.rls.test` with the
-    role, the settings' *names* (their values are the operator's test data and may be a token), the
-    statement and the row count.
+    committed, after `SET LOCAL statement_timeout` and `SET LOCAL ROLE`, and then one bound
+    `SELECT set_config($1, $2, true)` for each setting — made *as the role*, so a setting only a
+    superuser may change (`pg_stat_statements.track`) is refused to a test as it is to the role.
+    A setting has to be named with a dot (`app.tenant_id`), which keeps `role` and the server's own
+    settings out of it. A superuser is not become: no policy filters it, so what it reads says
+    nothing about them, and `SET ROLE` to one would hand its reach (`pg_read_file`, `pg_authid`) to
+    whoever may run a test; the answer is `skipped` with a note and nothing is run. The role of the
+    transaction is read again after the statement, to catch a function that left it changed (a role
+    left changed would pass its rows off as another's); that is a check of the answer, not what
+    bounds the test — the read-only transaction and the requirement that the account be a member of
+    the role do. At most 100 rows are read (1000 at most), twenty settings of 4 KiB. The answer says
+    the role, every statement sent before the query (`setup`) and, when the table is named, why the
+    filter may not apply to that role: security is off, the role owns the table or inherits its
+    owner's rights (`pg_has_role(…, 'USAGE')`) and it is not forced, or the role bypasses it. The
+    account the connection signs in with has to be a member of the role, as `SET ROLE` requires;
+    that is reported in words ("not a member"). A function the SELECT calls that writes is refused
+    by the read-only transaction. The classifier's judgement of a function is the query runner's,
+    with the gaps it has: it is not a sandbox. On a protected connection the test is let through
+    when the statement is a read (`protectedRoleTest`) and refused when it is not. Audited as
+    `database.rls.test` with the role, the settings' *names* (their values are the operator's test
+    data and may be a token), the statement and the row count; a failure is recorded by its
+    SQLSTATE, because the engine's text can quote a value it rejected.
 - **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
   connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
   and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the
@@ -1846,7 +1855,7 @@ What the table cannot say in a cell:
 - A `/ddl/*` route in the `service.control` or `system.admin` group needs the destructive capability
   when its plan rewrites a column's type or calls a function `dbx` does not vouch for (`runDDL`), for
   a preview as much as for a run; `PATCH …/ddl/row-security` asks for it when the body turns row-level
-  security off.
+  security off or stops forcing it.
 - The two Redis live feeds, `…/redis/monitor` and `…/redis/subscribe`, are WebSockets.
 - `GET /databases/inventory`, `GET /databases/fleet` are `read` and answer more
   for `system.admin`; the sections above say what.

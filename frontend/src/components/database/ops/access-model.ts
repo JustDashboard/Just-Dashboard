@@ -423,6 +423,13 @@ export type PlanOptions = {
   grantOption?: boolean
   /** A whole-schema change also covers objects created later. */
   future?: boolean
+  /**
+   * The scopes (`scopeKey`) that hold objects the matrix does not list — the
+   * functions an extension installed. A schema-wide request would reach them
+   * as well, so a scope named here is asked for object by object, whatever
+   * was pressed.
+   */
+  unlisted?: readonly string[]
 }
 
 /** An object as a kind and its name: "table" and "public.orders". */
@@ -484,7 +491,7 @@ export function plannedRequests(
   // A privilege pressed the same way on every listed object of a schema.
   const whole = new Map<string, { cell: Cell; grant: Set<string>; revoke: Set<string> }>()
   for (const [scope, objects] of Object.entries(listed)) {
-    if (objects.length < 2) continue
+    if (objects.length < 2 || options.unlisted?.includes(scope)) continue
     const [levelName, database, schema] = scope.split("\u0000")
     const level = byLevel.get(levelName as Cell["level"])
     if (!level?.allObjects) continue

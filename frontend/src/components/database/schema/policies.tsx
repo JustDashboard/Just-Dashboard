@@ -111,9 +111,17 @@ export function useRoles(id: number, enabled: boolean) {
   )
 }
 
-/** The roles a policy or a test may name: the ones the engine did not make for itself. */
+/** The roles a policy may name: the ones the engine did not make for itself. */
 export function namedRoles(roles: DbRole[] | undefined): string[] {
   return (roles ?? []).filter((role) => !role.system).map((role) => role.name)
+}
+
+/**
+ * The roles a test may become. A superuser is left out: no policy filters it,
+ * so what it sees says nothing about them, and the server will not run as one.
+ */
+export function testableRoles(roles: DbRole[] | undefined): string[] {
+  return (roles ?? []).filter((role) => !role.system && !role.superuser).map((role) => role.name)
 }
 
 const NARROW = 640
@@ -334,6 +342,13 @@ const TURNING_OFF: Risk = {
   question: "Turn row-level security off?",
 }
 
+const UNFORCING: Risk = {
+  title: "The owner sees every row",
+  description:
+    "The policies still apply to other roles. The owner, and any role that inherits the owner's rights, is no longer held to them.",
+  question: "Stop holding the owner to the policies?",
+}
+
 /** Turning row-level security on and off, and holding the table's owner to it. */
 export function RowSecurityDialog({
   detail,
@@ -353,6 +368,7 @@ export function RowSecurityDialog({
   const [wanted, setWanted] = useState(now)
   const request = rowSecurityRequest(detail.schema, detail.name, now, wanted)
   const turningOff = now.enabled && !wanted.enabled
+  const unforcing = now.forced && !wanted.forced
   return (
     <ChangeDialog
       onClose={onClose}
@@ -371,7 +387,7 @@ export function RowSecurityDialog({
       command="Apply"
       done={`Changed row-level security on ${detail.name}`}
       dirty={request !== null}
-      confirm={turningOff ? TURNING_OFF : null}
+      confirm={turningOff ? TURNING_OFF : unforcing ? UNFORCING : null}
     >
       <OptionList>
         <OptionRow
@@ -387,8 +403,13 @@ export function RowSecurityDialog({
         />
         <OptionRow
           title="Hold the table's owner to them as well"
-          hint="An owner is not filtered otherwise, and the dashboard's own account usually is one."
+          hint={
+            now.forced && !mayTurnOff
+              ? "Letting the owner go needs the destructive capability, which this role does not have."
+              : "An owner is not filtered otherwise, and the dashboard's own account usually is one."
+          }
           checked={wanted.forced}
+          disabled={now.forced && !mayTurnOff}
           onCheckedChange={(forced) => setWanted({ ...wanted, forced })}
         />
       </OptionList>

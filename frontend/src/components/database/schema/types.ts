@@ -106,7 +106,10 @@ export interface DbRowSecurity {
 
 /** What a role saw (`POST /{id}/rls/test`). */
 export interface DbRoleTestResult {
-  result: QueryResult
+  /** Absent when `skipped`. */
+  result?: QueryResult
+  /** Nothing was run: the role is a superuser. */
+  skipped: boolean
   /** The role the query ran as, as the server reported it. */
   role: string
   /** Every statement sent before the query, in order. */

@@ -212,6 +212,14 @@ export function GrantsMatrix({
       .flatMap((group) => held[group] ?? [])
       .filter((one) => level.level !== "function" || !one.extension)
   }, [level, databases.data, schemas, catalog.data, currentScope])
+  // Routines the matrix leaves out: a request for the whole schema would
+  // reach them too, and they are not the reader's to be granted by a press.
+  const unlistedRoutines =
+    level?.level === "function" &&
+    catalog.data?.schema === currentScope &&
+    CATALOG_GROUPS.function.some((group) =>
+      (catalog.data?.objects[group] ?? []).some((one) => Boolean(one.extension)),
+    )
   const tables = level?.level === "column" ? listed.map((one) => one.name) : []
   const chosenTable = tables.includes(table) ? table : (tables[0] ?? "")
 
@@ -700,7 +708,11 @@ export function GrantsMatrix({
                 ? { [scopeKey(cellOf(""))]: objects.map((entry) => entry.key) }
                 : {},
               members,
-              { host: detail.host, ...options },
+              {
+                host: detail.host,
+                unlisted: unlistedRoutines ? [scopeKey(cellOf(""))] : [],
+                ...options,
+              },
             )
           }
           offersGrantOption={Object.values(wanted).some(

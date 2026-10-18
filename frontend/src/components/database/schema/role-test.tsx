@@ -243,6 +243,17 @@ export function RoleTester({
 
 function TestAnswer({ answer, serial }: { answer: DbRoleTestResult; serial: number }) {
   const { result } = answer
+  if (!result) {
+    return (
+      <div className="space-y-3">
+        {answer.notes.map((note) => (
+          <FormNote key={note} tone="warning">
+            {note}
+          </FormNote>
+        ))}
+      </div>
+    )
+  }
   return (
     <div className="space-y-3">
       <p className="text-body">

@@ -18,6 +18,8 @@ const (
 	rlsAlice   = "jdt_rls_editor_alice"
 	rlsBob     = "jdt_rls_editor_bob"
 	rlsLimited = "jdt_rls_editor_limited"
+	// rlsCarol is a member of alice that inherits her rights.
+	rlsCarol = "jdt_rls_editor_carol"
 )
 
 func rlsLive(t *testing.T) (*sql.DB, string) {
@@ -29,7 +31,7 @@ func rlsLive(t *testing.T) (*sql.DB, string) {
 	}
 	cleanup := func() {
 		db.Exec(`DROP SCHEMA IF EXISTS ` + rlsSchema + ` CASCADE`)
-		for _, role := range []string{rlsAlice, rlsBob, rlsLimited} {
+		for _, role := range []string{rlsAlice, rlsBob, rlsLimited, rlsCarol} {
 			db.Exec(`DROP OWNED BY ` + role)
 			db.Exec(`DROP ROLE IF EXISTS ` + role)
 		}
@@ -37,7 +39,7 @@ func rlsLive(t *testing.T) (*sql.DB, string) {
 	cleanup()
 	t.Cleanup(cleanup)
 	opsMustExec(t, db,
-		`CREATE ROLE `+rlsAlice, `CREATE ROLE `+rlsBob, `CREATE ROLE `+rlsLimited+` LOGIN PASSWORD 'jdt-rls-Pw1'`,
+		`CREATE ROLE `+rlsAlice, `CREATE ROLE `+rlsBob, `CREATE ROLE `+rlsCarol, `GRANT `+rlsAlice+` TO `+rlsCarol, `CREATE ROLE `+rlsLimited+` LOGIN PASSWORD 'jdt-rls-Pw1'`,
 		`CREATE SCHEMA `+rlsSchema,
 		`CREATE TABLE `+rlsSchema+`.notes (id serial PRIMARY KEY, owner text NOT NULL, tenant text NOT NULL, body text)`,
 		`INSERT INTO `+rlsSchema+`.notes (owner, tenant, body) VALUES
@@ -173,6 +175,11 @@ func TestLivePostgresRowSecurityPoliciesAndTheRoleTester(t *testing.T) {
 	if got := rlsBodies(t, res); len(got) != 4 || len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "owns notes") {
 		t.Errorf("the owner saw %v with notes %v", got, res.Notes)
 	}
+	// A member that inherits the owner's rights is not filtered either.
+	res = seeing(rlsCarol, claims, true)
+	if got := rlsBodies(t, res); len(got) != 4 || len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "inherits its owner's rights") {
+		t.Errorf("a role that inherits the owner's rights saw %v with notes %v", got, res.Notes)
+	}
 	run(PlanRowSecurity(DriverPostgres, RowSecurityChange{Schema: rlsSchema, Table: "notes", Force: boolPtr(true)}))
 	if got := rlsBodies(t, seeing(rlsAlice, claims, true)); strings.Join(got, ",") != "a2" {
 		t.Errorf("the owner of a forced table saw %v", got)
@@ -181,10 +188,11 @@ func TestLivePostgresRowSecurityPoliciesAndTheRoleTester(t *testing.T) {
 		t.Errorf("forced = %v, owner %q", state.Forced, state.Owner)
 	}
 
-	// A role no policy filters.
-	res = seeing("jdtest", nil, true)
-	if got := rlsBodies(t, res); len(got) != 4 || len(res.Notes) == 0 || !strings.Contains(res.Notes[0], "superuser") {
-		t.Errorf("the superuser saw %v with notes %v", got, res.Notes)
+	// A superuser is not become: no policy filters it, and the account would
+	// act with its reach.
+	res, err = RunAsRole(ctx, db, DriverPostgres, RoleTest{Role: "jdtest", Query: `SELECT body FROM ` + rlsSchema + `.notes`, Schema: rlsSchema, Table: "notes"})
+	if err != nil || !res.Skipped || res.Result != nil || len(res.Setup) != 0 || len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "is a superuser") {
+		t.Errorf("a test as a superuser = %+v, %v", res, err)
 	}
 
 	// Changing a policy.
@@ -222,7 +230,7 @@ func TestLivePostgresRowSecurityPoliciesAndTheRoleTester(t *testing.T) {
 
 	// The test is a read, in a transaction that cannot write.
 	opsMustExec(t, db, `CREATE FUNCTION `+rlsSchema+`.bump() RETURNS int LANGUAGE sql AS 'UPDATE `+rlsSchema+`.notes SET body = ''bumped'' RETURNING 1'`)
-	_, err = RunAsRole(ctx, db, DriverPostgres, RoleTest{Role: "jdtest", Query: `SELECT ` + rlsSchema + `.bump()`})
+	_, err = RunAsRole(ctx, db, DriverPostgres, RoleTest{Role: rlsBob, Query: `SELECT ` + rlsSchema + `.bump()`})
 	if err == nil || !strings.Contains(err.Error(), "read-only transaction") {
 		t.Errorf("a function that writes ran from a test: %v", err)
 	}
@@ -249,9 +257,23 @@ func TestLivePostgresRowSecurityPoliciesAndTheRoleTester(t *testing.T) {
 	}
 	// What was sent first is on the answer, in order.
 	res = seeing(rlsBob, []Claim{{"app.tenant_id", "o'brien"}}, false)
-	want := []string{"SET LOCAL statement_timeout = '15000ms'", "SELECT set_config('app.tenant_id', 'o''brien', true)", `SET LOCAL ROLE "` + rlsBob + `"`}
+	want := []string{"SET LOCAL statement_timeout = '15000ms'", `SET LOCAL ROLE "` + rlsBob + `"`, "SELECT set_config('app.tenant_id', 'o''brien', true)"}
 	if strings.Join(res.Setup, "\n") != strings.Join(want, "\n") {
 		t.Errorf("setup = %v, want %v", res.Setup, want)
+	}
+	// A setting is bound, whatever it holds, and set as the role.
+	res, err = RunAsRole(ctx, db, DriverPostgres, RoleTest{Role: rlsBob, Query: `SELECT current_setting('app.tenant_id')`,
+		Claims: []Claim{{"app.tenant_id", `x'); DROP TABLE t; --`}}})
+	if err != nil || fmt.Sprint(res.Result.Rows[0][0]) != `x'); DROP TABLE t; --` {
+		t.Errorf("a setting with quotes in it = %+v, %v", res, err)
+	}
+	// ...so one only a superuser may change is refused to the test as it is to the role.
+	var libraries string
+	if err := db.QueryRow(`SHOW shared_preload_libraries`).Scan(&libraries); err == nil && strings.Contains(libraries, "pg_stat_statements") {
+		_, err = RunAsRole(ctx, db, DriverPostgres, RoleTest{Role: rlsBob, Query: `SELECT 1`, Claims: []Claim{{"pg_stat_statements.track", "none"}}})
+		if err == nil || !strings.Contains(err.Error(), "permission denied") {
+			t.Errorf("a superuser-only setting as a test = %v", err)
+		}
 	}
 	if _, err := RunAsRole(ctx, db, DriverPostgres, RoleTest{Role: "jdt_rls_editor_nobody", Query: `SELECT 1`}); err == nil {
 		t.Error("a role that does not exist was run as")

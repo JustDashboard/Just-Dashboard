@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 )
@@ -184,8 +185,37 @@ func TestLiveAPIRowSecurityFormsAndTheRoleTester(t *testing.T) {
 			t.Errorf("%s = %d %s, want 400", name, res.code, res.body)
 		}
 	}
-	var rows int
 	db := liveOpen(t, dbx.DriverPostgres, os.Getenv("JD_TEST_POSTGRES_DSN"))
+
+	// A superuser is not become, and says so.
+	var login string
+	if err := db.QueryRow(`SELECT current_user`).Scan(&login); err != nil {
+		t.Fatal(err)
+	}
+	if res := test(`{"role":"` + login + `","query":"SELECT body FROM ` + schema + `.notes"}`); res.code != http.StatusOK ||
+		!strings.Contains(res.body, `"skipped":true`) || strings.Contains(res.body, `"result"`) {
+		t.Errorf("a test as a superuser = %d %s", res.code, res.body)
+	}
+
+	// What the engine says of a value it rejected quotes the value; neither the
+	// answer nor the trail keeps it, and the trail keeps the SQLSTATE.
+	const secret = "SECRETCLAIMVALUE"
+	res = test(`{"role":"` + alice + `","query":"SELECT current_setting('app.n')::uuid","claims":[{"name":"app.n","value":"` + secret + `"}]}`)
+	if res.code != http.StatusBadGateway || strings.Contains(res.body, secret) || !strings.Contains(res.body, "22P02") {
+		t.Fatalf("a claim the engine rejects = %d %s", res.code, res.body)
+	}
+	// The trail is written after the response: wait for this test's entry.
+	var trail string
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if _, trail, _ = auditEntry(t, h.s, "database.rls.test"); strings.Contains(trail, "sqlstate") {
+			break
+		}
+	}
+	if strings.Contains(trail, secret) || !strings.Contains(trail, "22P02") {
+		t.Errorf("the audit entry of a failed test = %s, want its SQLSTATE and no claim value", trail)
+	}
+
+	var rows int
 	if err := db.QueryRow(`SELECT count(*) FROM ` + schema + `.notes`).Scan(&rows); err != nil || rows != 2 {
 		t.Errorf("the table holds %d rows after the refused tests (%v)", rows, err)
 	}
@@ -314,5 +344,34 @@ func TestLiveAPIFunctionAndColumnGrants(t *testing.T) {
 	target, auditDetail, _ := auditEntry(t, h.s, "database.role.grant")
 	if target != "rlsdb" || !strings.Contains(auditDetail, `"routine"`) && !strings.Contains(auditDetail, `"columns"`) {
 		t.Errorf("audit of the grant: %s %s", target, auditDetail)
+	}
+}
+
+// Taking the filter off the owner shows rows to someone it was filtering, so
+// it spends the destructive budget as turning security off does, and holding
+// the owner to it does not.
+func TestLiveAPIUnforcingSpendsTheDestructiveBudget(t *testing.T) {
+	h, schema, _ := rlsAPIHarness(t)
+	table := `"schema":"` + schema + `","table":"notes"`
+	limited := func(body string) bool {
+		throttled := false
+		// The budget is a burst of ten.
+		for range 14 {
+			rec := h.admin.do(http.MethodPatch, h.base+"/ddl/row-security", body, nil)
+			switch rec.Code {
+			case http.StatusOK:
+			case http.StatusTooManyRequests:
+				throttled = true
+			default:
+				t.Fatalf("PATCH row-security %s = %d %s", body, rec.Code, rec.Body.String())
+			}
+		}
+		return throttled
+	}
+	if limited(`{` + table + `,"enabled":true,"force":true}`) {
+		t.Error("turning security on and forcing it spent the destructive budget")
+	}
+	if !limited(`{` + table + `,"force":false}`) {
+		t.Error("no longer forcing security on the owner did not spend the destructive budget")
 	}
 }
