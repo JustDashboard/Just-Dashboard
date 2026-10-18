@@ -148,8 +148,9 @@ API tokens may narrow their creator's role, never widen it, and are demoted with
 The account keys page replaces an owned key through the existing create route, followed by an
 optional, separately confirmed revoke after the tool has switched credentials. The old key remains
 valid until revoked or expired; creating a replacement does not impersonate another owner.
-An MCP key's replacement is made on `POST /tokens/mcp` with the databases the old key reaches, each
-narrowed to `read` where its owner may no longer change a database. `PUT /tokens/{id}/connections`
+An MCP key's replacement is made on `POST /tokens/mcp` at the old key's role with the databases the
+old key reaches that are neither protected nor forgotten since, each narrowed to `read` where that
+role may not change a database. `PUT /tokens/{id}/connections`
 (session only, the owner's own active MCP key, `404` for another account's, `409 not_mcp_key` for any
 other key) replaces what a key reaches without a new secret; it is audited as
 `dashboard.token.connections` with the databases by name. Forgetting a connection removes its grants

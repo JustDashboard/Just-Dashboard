@@ -2630,16 +2630,20 @@ Streamable HTTP — reaches the databases through one endpoint, `POST /api/v1/mc
   `httpx.AuthenticateMCP`, which reads a bearer key and never the session cookie (so it needs no CSRF
   header), refuses any other key with `403 key_scope`, and answers a missing or wrong key with
   `401` and `WWW-Authenticate: Bearer` naming no authorization server. A request with a foreign
-  `Origin` is refused `403` (`wsx.Upgrader.CheckOrigin`), which is what the transport asks of a
-  server against DNS rebinding. Then the allowlist, `apiLim` per principal and `AuditMutations`, as
-  every group. An agent mounts none of it.
+  `Origin` is refused `403` (`wsx.Upgrader.CheckOrigin`), as the transport asks; a page that rebinds
+  its own name to this address passes that check and is stopped by the key it cannot know, since
+  nothing on the endpoint reads an ambient credential. Then the allowlist, `apiLim` per principal
+  and `AuditMutations`, as every group. An agent mounts none of it.
 - **What a key reaches** is `api_token_connections`: one row per connection, `read` or `write`, at
   most 64, read again on every call so a grant taken away answers the next request. A key carries
-  its owner's role. `POST /tokens/mcp` (session only) makes one from `{name, ttlDays, connections}`;
+  its owner's role or a narrower one, and like every key never more than its owner holds now.
+  `POST /tokens/mcp` (session only) makes one from `{name, role?, ttlDays, connections}` — Account →
+  API keys sends the replaced key's role and its databases less those protected or forgotten since;
   `PUT /tokens/{id}/connections` (session only, the owner's own active MCP key) replaces what it
   reaches and keeps the secret. Both refuse a protected connection (`409 connection_read_only`), an
   engine without the `mcp` capability (every SQL engine has it; MongoDB and Redis do not), a missing
-  one, an empty list, and a `write` grant from a role without `service.control`. They are audited as
+  one, an empty list, and a `write` grant for a key whose role lacks `service.control`. The dialog
+  lets a database protected since be cleared from a key, the one way to save the rest. They are audited as
   `dashboard.token.create` (with `scope` and the databases by name) and
   `dashboard.token.connections`. Listing, revoking and deleting are the routes every key has.
 - **Both revisions of the protocol.** A 2025 client (`2025-03-26`, `2025-06-18`, `2025-11-25`)
@@ -2660,7 +2664,10 @@ Streamable HTTP — reaches the databases through one endpoint, `POST /api/v1/mc
   most 500, 30 seconds). `run_write` is offered only when the key may change some database, runs one
   statement at a time (60 seconds), and passes it through `authoriseSQL`: a destructive statement
   needs `destructive` and spends `destrLim`, as in the SQL editor. Every value is cut at 1,000 bytes
-  and a result at 48 KB. A key has four calls in flight at most.
+  and a result at 48 KB. A key has four calls in flight at most. The read-only scope is the
+  engine's: on Oracle it is a check of the statement's first word and a rollback, so a function a
+  read calls that commits in an autonomous transaction is not stopped there, and the database
+  account the connection signs in as is the real limit.
 - **A protected connection is refused for every tool, reads included,** whatever the key was given,
   and `list_connections` names it under `unavailable` with why. Unlike the SQL editor, where a
   protected connection still reads, nothing about a database the operator protected reaches an AI
@@ -2670,9 +2677,12 @@ Streamable HTTP — reaches the databases through one endpoint, `POST /api/v1/mc
   entry is `database.mcp.<tool>` with the connection as target and the outcome (`ok`, `refused` with
   a reason, `failed`) in the detail, and `httpx.AuditFailed` marks it a failure although the HTTP
   status is 200. A statement is recorded as its shape (`dbx.StatementShape`: every literal and number
-  a `?`, comments dropped, read with the runner's own lexer for the engine) and an engine error with
-  its quoted spans removed, because a literal is somebody's e-mail address. `tools/list`, `ping` and
-  discovery are not audited.
+  a `?`, a `"…"` too where MySQL or SQLite can read it as a string, comments dropped, read with the
+  runner's own lexer for the engine) and an engine error as its code alone (`dbx.ErrorCode`:
+  `SQLSTATE 22P02`, `MySQL 1064`, `SQL Server 2627`, `ORA-00001`, …), because a literal is
+  somebody's e-mail address and every engine's message can quote one back. A name a client chose
+  (its own on `initialize`, a database's it asked for) is cut to 120 characters as a target.
+  `tools/list`, `ping` and discovery are not audited.
 - **The UI** is the *MCP server* dialog of the control center
   (`components/database/fleet/mcp-server-dialog.tsx`, logic in `mcp-server.ts`): the endpoint, the
   signed-in account's active MCP keys with what each reaches, a form choosing databases (those the

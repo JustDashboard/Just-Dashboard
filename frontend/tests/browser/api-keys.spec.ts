@@ -130,7 +130,9 @@ test("replacing a metrics-only key makes another metrics-only key, never a wider
   await expect(secret).not.toContainText("/api/v1/system/host")
 })
 
-test("replacing an MCP key makes another MCP key for the same databases", async ({ page }) => {
+test("replacing an MCP key makes another MCP key for the same databases, at its role", async ({
+  page,
+}) => {
   const mcpKey = {
     id: 8,
     userId: 1,
@@ -142,6 +144,7 @@ test("replacing an MCP key makes another MCP key for the same databases", async 
     revoked: false,
     connections: [
       { connectionId: 1, access: "write" as const },
+      { connectionId: 2, access: "read" as const },
       { connectionId: 7, access: "read" as const },
     ],
   }
@@ -155,7 +158,16 @@ test("replacing an MCP key makes another MCP key for the same databases", async 
   expect(calls[0]).toEqual({
     method: "POST",
     path: "/tokens/mcp",
-    body: { name: "claude-code", ttlDays: 90, connections: mcpKey.connections },
+    // blog, protected since, is left behind: no MCP key reaches it.
+    body: {
+      name: "claude-code",
+      role: "limited",
+      ttlDays: 90,
+      connections: [
+        { connectionId: 1, access: "write" },
+        { connectionId: 7, access: "read" },
+      ],
+    },
   })
   const secret = page.getByRole("dialog", { name: "Your new key" })
   await expect(secret).toContainText("claude mcp add --transport http just-dashboard")
@@ -186,6 +198,7 @@ test("an MCP key replaced by an owner who can no longer change a database only r
     .click()
   expect(calls[0].body).toEqual({
     name: "cursor",
+    role: "readonly",
     ttlDays: 90,
     connections: [{ connectionId: 1, access: "read" }],
   })

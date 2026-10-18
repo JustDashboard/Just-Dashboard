@@ -87,9 +87,8 @@ func (u *Upgrader) checkOrigin(r *http.Request) bool {
 }
 
 // CheckOrigin is the same check for a plain HTTP route that takes no cookie
-// but may still be reached from a page in a browser — the MCP endpoint, which
-// its transport says must refuse a foreign Origin so that a site the operator
-// visits cannot rebind its name to this dashboard and talk to it.
+// but may still be reached from a page in a browser — the MCP endpoint, whose
+// transport says to refuse a foreign Origin.
 func (u *Upgrader) CheckOrigin(r *http.Request) bool { return u.checkOrigin(r) }
 
 // SameSite is checkOrigin for a request that must come from a page: one

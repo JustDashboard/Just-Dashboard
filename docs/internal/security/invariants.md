@@ -73,8 +73,9 @@ A change that weakens any of these has to say so explicitly.
 
    An MCP key (`scope = 'mcp'`, made by `CreateMCPToken`) is refused the same way by `Authenticate`
    and `AuthenticateScoped` alike, and opens only `/api/v1/mcp` through `AuthenticateMCP`, which
-   takes no session cookie and no other key. There it keeps its owner's role, so a statement is
-   judged by `authoriseSQL` exactly as the SQL editor judges it for that owner — a destructive one
+   takes no session cookie and no other key. There it keeps its role — its owner's or one made
+   narrower, never more than the owner holds now — so a statement is judged by `authoriseSQL`
+   exactly as the SQL editor judges it for that role — a destructive one
    still needs `destructive` and spends the same budget — and the key's grants narrow it further:
    only the connections `api_token_connections` names, each `read` or `write`, re-read on every call,
    and never a protected connection, which is refused for every tool, reads included. A walk of

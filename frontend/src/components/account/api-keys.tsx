@@ -16,7 +16,7 @@ import { del, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { calendarDate, plural, relativeTime } from "@/lib/format"
 import { keyProduct } from "@/lib/clients"
-import type { ApiToken, DashboardUser, Role } from "@/lib/types"
+import type { ApiToken, DashboardUser, DbConnection, Role } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useCopy } from "@/hooks/use-copy"
@@ -105,6 +105,23 @@ export function scopeWords(token: ApiToken) {
   if (token.scope === "metrics.read") return "metrics only"
   if (token.scope === "mcp") return "MCP only"
   return undefined
+}
+
+/**
+ * What an MCP key's replacement reaches: the databases the key reaches that a
+ * key can still be given. One protected since, or forgotten, is refused every
+ * call already, and the server would refuse the whole list for it.
+ */
+async function replacementGrants(token: ApiToken | undefined, role: Role) {
+  const saved = await get<DbConnection[]>("/databases/")
+  const open = new Set(saved.filter((conn) => !conn.readOnly).map((conn) => conn.id))
+  const grants = grantList(grantsWithin(grantsOf(token), role !== "readonly")).filter((grant) =>
+    open.has(grant.connectionId),
+  )
+  if (grants.length === 0) {
+    throw new Error("None of the databases this key reaches can be given to a key any more.")
+  }
+  return grants
 }
 
 /** The one line a key's state comes down to. */
@@ -627,15 +644,14 @@ function KeyDialog({
     try {
       // A replacement is made the same way as the key it replaces: a key limited
       // to one job is never replaced by one that can do what its owner can,
-      // and an MCP key's replacement reaches the same databases.
+      // and an MCP key's replacement reaches the same databases at its role.
       const res =
         scope === "mcp"
           ? await post<{ secret: string }>("/tokens/mcp", {
               name: name.trim(),
+              role,
               ttlDays: Number(ttl),
-              connections: grantList(
-                grantsWithin(grantsOf(replacement), status?.user?.role !== "readonly"),
-              ),
+              connections: await replacementGrants(replacement, role),
             })
           : await post<{ secret: string }>("/tokens/", {
               name: name.trim(),

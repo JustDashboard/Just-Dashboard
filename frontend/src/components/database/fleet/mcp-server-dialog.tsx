@@ -36,6 +36,7 @@ import { del, post, put } from "@/lib/api"
 import { keyProduct } from "@/lib/clients"
 import { calendarDate, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
+import { cn } from "@/lib/utils"
 import type { ApiToken, DbConnection } from "@/lib/types"
 import { useRef, useState } from "react"
 
@@ -204,6 +205,9 @@ function McpServerDialog({
             onChange={(draft) => setView({ ...view, draft })}
             connections={connections}
             canRun={canRun}
+            // A key made to read only — a replacement keeps the role of the
+            // key it replaced — is never given a database to change.
+            canChange={canRun && !(view.kind === "edit" && view.token.role === "readonly")}
             busy={busy}
           />
         ) : view.kind === "made" ? (
@@ -331,6 +335,7 @@ function KeyFields({
   onChange,
   connections,
   canRun,
+  canChange,
   busy,
 }: {
   editing: boolean
@@ -338,6 +343,7 @@ function KeyFields({
   onChange: (draft: Draft) => void
   connections: DbConnection[]
   canRun: boolean
+  canChange: boolean
   busy: boolean
 }) {
   const { engineFor } = useDatabases()
@@ -376,9 +382,11 @@ function KeyFields({
       <Field
         label="Databases"
         hint={
-          canRun
-            ? "Read runs queries that only read. Change also runs one statement at a time that changes data or structure."
-            : "Your role runs no SQL, so a key you make reads structure and rows only."
+          !canRun
+            ? "Your role runs no SQL, so a key you make reads structure and rows only."
+            : !canChange
+              ? "This key was made to read only, so it changes no database."
+              : "Read runs queries that only read. Change also runs one statement at a time that changes data or structure."
         }
       >
         {connections.length === 0 ? (
@@ -399,26 +407,35 @@ function KeyFields({
                   key={conn.id}
                   className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5"
                 >
+                  {/* A database protected since the key was given it can still
+                      be taken away, which is the one way to save the rest. */}
                   <Checkbox
                     id={id}
                     checked={access !== undefined}
-                    disabled={refusal !== undefined}
+                    disabled={refusal !== undefined && access === undefined}
                     onCheckedChange={(checked) => toggle(conn.id, checked === true)}
                   />
                   <label htmlFor={id} className="flex min-w-0 flex-1 items-center gap-2 text-body">
                     <EngineGlyph engine={engine} />
                     <span className="truncate font-medium">{conn.name}</span>
                     {refusal ? (
-                      <span className="truncate text-hint text-muted-foreground">{refusal}</span>
+                      <span
+                        className={cn(
+                          "truncate text-hint",
+                          access === undefined ? "text-muted-foreground" : "text-warning",
+                        )}
+                      >
+                        {access === undefined ? refusal : `${refusal}; clear it to save`}
+                      </span>
                     ) : (
                       conn.environment && <EnvironmentTag environment={conn.environment} />
                     )}
                   </label>
-                  {access !== undefined && (
+                  {access !== undefined && refusal === undefined && (
                     <Segments
                       label={`What the key may do in ${conn.name}`}
                       value={access}
-                      disabled={!canRun}
+                      disabled={!canChange}
                       onChange={(next) => setGrants({ ...grants, [conn.id]: next })}
                       options={[
                         { value: "read", label: "Read" },

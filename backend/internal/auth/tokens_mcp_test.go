@@ -26,7 +26,7 @@ func connectionsFor(t *testing.T, svc *Service, names ...string) []int64 {
 func TestAnMCPKeyCarriesItsOwnersRoleAndItsDatabases(t *testing.T) {
 	svc, owner := newTestService(t, false)
 	ids := connectionsFor(t, svc, "shop", "analytics")
-	tok, secret, err := svc.CreateMCPToken(t.Context(), owner, " claude-desktop ", 30*24*time.Hour, []TokenConnection{
+	tok, secret, err := svc.CreateMCPToken(t.Context(), owner, " claude-desktop ", "", 30*24*time.Hour, []TokenConnection{
 		{ConnectionID: ids[1], Access: AccessWrite},
 		{ConnectionID: ids[0], Access: AccessRead},
 	})
@@ -86,11 +86,11 @@ func TestAnMCPKeysGrantsAreChecked(t *testing.T) {
 		{"no id", admin, []TokenConnection{{0, AccessRead}}},
 		{"changes through a read-only account", viewer, []TokenConnection{{ids[0], AccessWrite}}},
 	} {
-		if _, _, err := svc.CreateMCPToken(t.Context(), tc.owner, "key", 0, tc.grants); err == nil {
+		if _, _, err := svc.CreateMCPToken(t.Context(), tc.owner, "key", "", 0, tc.grants); err == nil {
 			t.Errorf("%s: created", tc.name)
 		}
 	}
-	if _, _, err := svc.CreateMCPToken(t.Context(), viewer, "key", 0, []TokenConnection{{ids[0], AccessRead}}); err != nil {
+	if _, _, err := svc.CreateMCPToken(t.Context(), viewer, "key", "", 0, []TokenConnection{{ids[0], AccessRead}}); err != nil {
 		t.Errorf("a read-only account cannot make a key that reads: %v", err)
 	}
 	var keys int
@@ -102,7 +102,7 @@ func TestAnMCPKeysGrantsAreChecked(t *testing.T) {
 func TestAnMCPKeyIsRepointedOnlyByItsOwnerWhileItWorks(t *testing.T) {
 	svc, owner := newTestService(t, false)
 	ids := connectionsFor(t, svc, "shop", "analytics")
-	tok, secret, err := svc.CreateMCPToken(t.Context(), owner, "cursor", 0, []TokenConnection{{ids[0], AccessRead}})
+	tok, secret, err := svc.CreateMCPToken(t.Context(), owner, "cursor", "", 0, []TokenConnection{{ids[0], AccessRead}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestAnMCPKeyIsRepointedOnlyByItsOwnerWhileItWorks(t *testing.T) {
 func TestAnMCPKeysGrantsGoWithTheKeyAndTheConnection(t *testing.T) {
 	svc, owner := newTestService(t, false)
 	ids := connectionsFor(t, svc, "shop", "analytics")
-	tok, _, err := svc.CreateMCPToken(t.Context(), owner, "claude", 0, []TokenConnection{
+	tok, _, err := svc.CreateMCPToken(t.Context(), owner, "claude", "", 0, []TokenConnection{
 		{ids[0], AccessRead}, {ids[1], AccessRead},
 	})
 	if err != nil {

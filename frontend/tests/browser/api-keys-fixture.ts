@@ -116,6 +116,13 @@ export async function mockKeys(page: Page, role: Role = "admin", initial = keyTo
               : ["read"],
       })
     if (path === "/dashboard-users/") return json(route, [keyOwner, otherOwner])
+    // What an MCP key's replacement can still reach: blog was protected since.
+    if (path === "/databases/")
+      return json(route, [
+        { id: 1, name: "shop", driver: "postgres", readOnly: false },
+        { id: 2, name: "blog", driver: "mysql", readOnly: true },
+        { id: 7, name: "notes", driver: "sqlite", readOnly: false },
+      ])
     if (path === "/tokens/" && method === "GET") return json(route, tokens)
     if (path.startsWith("/tokens/")) {
       const body = request.postData() ? request.postDataJSON() : undefined

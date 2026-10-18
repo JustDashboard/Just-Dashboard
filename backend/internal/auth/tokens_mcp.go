@@ -13,9 +13,11 @@ import (
 // other route, and it reaches only the databases granted to it, each either to
 // read or to change.
 //
-// It carries its owner's role, like any key that does not narrow it: what one
-// statement may do is decided as the SQL editor decides it for that owner, so
-// a destructive one still needs the destructive capability. The grants narrow
+// It carries its owner's role, or a narrower one chosen when it is made — a
+// replacement keeps the key's it replaces — and like any key it never holds
+// more than its owner does now: what one statement may do is decided as the
+// SQL editor decides it for that role, so a destructive one still needs the
+// destructive capability. The grants narrow
 // where, and read narrows what. Which connections may be granted at all — not
 // a protected one, not an engine the endpoint does not speak — is the API's
 // to say, since it is the API that knows connections.
@@ -45,13 +47,23 @@ var (
 	ErrTokenInactive = errors.New("this key was revoked or has expired")
 )
 
-// CreateMCPToken mints an MCP key reaching the databases granted.
-func (s *Service) CreateMCPToken(ctx context.Context, owner *User, name string, ttl time.Duration, grants []TokenConnection) (*APIToken, string, error) {
+// CreateMCPToken mints an MCP key reaching the databases granted. An empty
+// role is the owner's.
+func (s *Service) CreateMCPToken(ctx context.Context, owner *User, name string, role Role, ttl time.Duration, grants []TokenConnection) (*APIToken, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, "", errors.New("token name required")
 	}
-	if err := checkTokenConnections(owner.Role, grants); err != nil {
+	if role == "" {
+		role = owner.Role
+	}
+	if !role.Valid() {
+		return nil, "", fmt.Errorf("unknown role %q", role)
+	}
+	if !roleAtMost(role, owner.Role) {
+		return nil, "", fmt.Errorf("cannot mint a %s token from a %s account", role, owner.Role)
+	}
+	if err := checkTokenConnections(role, grants); err != nil {
 		return nil, "", err
 	}
 	tx, err := s.st.DB.BeginTx(ctx, nil)
@@ -59,7 +71,7 @@ func (s *Service) CreateMCPToken(ctx context.Context, owner *User, name string, 
 		return nil, "", err
 	}
 	defer tx.Rollback()
-	id, full, err := insertAPIToken(ctx, tx, owner, name, owner.Role, ScopeMCP, ttl)
+	id, full, err := insertAPIToken(ctx, tx, owner, name, role, ScopeMCP, ttl)
 	if err != nil {
 		return nil, "", err
 	}
@@ -82,9 +94,6 @@ func (s *Service) CreateMCPToken(ctx context.Context, owner *User, name string, 
 // fewer without a new key being pasted anywhere. Another account's key is not
 // found: an administrator may revoke it, never re-point it.
 func (s *Service) SetTokenConnections(ctx context.Context, owner *User, tokenID int64, grants []TokenConnection) (*APIToken, error) {
-	if err := checkTokenConnections(owner.Role, grants); err != nil {
-		return nil, err
-	}
 	tx, err := s.st.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -93,10 +102,10 @@ func (s *Service) SetTokenConnections(ctx context.Context, owner *User, tokenID 
 	var (
 		userID, expires int64
 		revoked         int
-		scope           string
+		scope, role     string
 	)
-	err = tx.QueryRowContext(ctx, `SELECT user_id, revoked, expires_at, scope FROM api_tokens WHERE id = ?`, tokenID).
-		Scan(&userID, &revoked, &expires, &scope)
+	err = tx.QueryRowContext(ctx, `SELECT user_id, revoked, expires_at, scope, role FROM api_tokens WHERE id = ?`, tokenID).
+		Scan(&userID, &revoked, &expires, &scope, &role)
 	switch {
 	case err != nil || userID != owner.ID:
 		return nil, ErrNotFound
@@ -104,6 +113,15 @@ func (s *Service) SetTokenConnections(ctx context.Context, owner *User, tokenID 
 		return nil, ErrNotMCPToken
 	case revoked == 1 || (expires > 0 && expires <= time.Now().Unix()):
 		return nil, ErrTokenInactive
+	}
+	// What the key may do is its own role, narrowed to its owner's now, as
+	// ResolveAPIToken narrows it on every call.
+	effective := Role(role)
+	if !roleAtMost(effective, owner.Role) {
+		effective = owner.Role
+	}
+	if err := checkTokenConnections(effective, grants); err != nil {
+		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM api_token_connections WHERE token_id = ?`, tokenID); err != nil {
 		return nil, err

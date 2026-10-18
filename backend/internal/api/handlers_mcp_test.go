@@ -98,7 +98,7 @@ func (b *mcpBench) protect(id int64, on bool) {
 
 func (b *mcpBench) key(owner *auth.User, grants ...auth.TokenConnection) string {
 	b.t.Helper()
-	_, secret, err := b.s.Auth.CreateMCPToken(b.t.Context(), owner, "claude-desktop", 0, grants)
+	_, secret, err := b.s.Auth.CreateMCPToken(b.t.Context(), owner, "claude-desktop", "", 0, grants)
 	if err != nil {
 		b.t.Fatal(err)
 	}
@@ -241,6 +241,13 @@ func TestTheMCPEndpointTakesAnMCPKeyAndNothingElse(t *testing.T) {
 	}
 	if w := b.post(api, ping, nil); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "key_scope") {
 		t.Errorf("a key for the API on the endpoint: %d %s", w.Code, w.Body.String())
+	}
+	_, metrics, err := b.s.Auth.CreateScopedAPIToken(t.Context(), b.admin, "prometheus", auth.CapMetricsRead, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := b.post(metrics, ping, nil); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "key_scope") {
+		t.Errorf("a metrics key on the endpoint: %d %s", w.Code, w.Body.String())
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/mcp", strings.NewReader(ping))
 	req.RemoteAddr = "127.0.0.1:5555"
@@ -545,7 +552,9 @@ func TestEveryMCPCallIsAuditedAsAShape(t *testing.T) {
 	}
 	b.refused(key, mcp.ToolRunWrite, map[string]any{"connection": "shop", "sql": "INSERT INTO nowhere VALUES ('bo@example.com')"})
 	failed := b.lastAudit("database.mcp.run_write")
-	if failed.Success || !strings.Contains(failed.Detail, `"outcome":"failed"`) || strings.Contains(failed.Detail, "bo@") {
+	// The engine's text is the model's; the trail keeps the engine's code.
+	if failed.Success || !strings.Contains(failed.Detail, `"outcome":"failed"`) || strings.Contains(failed.Detail, "bo@") ||
+		!strings.Contains(failed.Detail, `"error":"SQLite 1"`) || strings.Contains(failed.Detail, "no such table") {
 		t.Errorf("a failed write was audited as %+v", failed)
 	}
 	b.ok(key, mcp.ToolListConnections, map[string]any{})
@@ -557,6 +566,43 @@ func TestEveryMCPCallIsAuditedAsAShape(t *testing.T) {
 	b.post(key, `{"jsonrpc":"2.0","id":2,"method":"ping"}`, legacy)
 	if after := b.audits(""); after != b.audits("") || b.audits("database.mcp.") != before+3 {
 		t.Errorf("listing tools or a ping was audited")
+	}
+}
+
+// A key past its bound is told to wait, and the refusal is in the trail.
+func TestAnMCPKeyPastItsBoundIsToldToWait(t *testing.T) {
+	b := newMCPBench(t)
+	key := b.key(b.admin, read(b.shop))
+	tokens, err := b.s.Auth.ListAPITokens(t.Context(), b.admin.ID, false)
+	if err != nil || len(tokens) != 1 {
+		t.Fatalf("keys: %v %v", tokens, err)
+	}
+	for range mcpCallsPerKey {
+		b.s.mcp.enter(tokens[0].ID)
+	}
+	if text := b.refused(key, mcp.ToolListTables, map[string]any{"connection": "shop"}); !strings.Contains(text, "wait for one to finish") {
+		t.Errorf("a fifth call: %s", text)
+	}
+	if entry := b.lastAudit("database.mcp.list_tables"); entry.Success || !strings.Contains(entry.Detail, `"reason":"busy"`) {
+		t.Errorf("the refusal was audited as %+v", entry)
+	}
+	b.s.mcp.leave(tokens[0].ID)
+	b.ok(key, mcp.ToolListTables, map[string]any{"connection": "shop"})
+}
+
+// A name a client chooses is bounded before it is an entry's target.
+func TestAnMCPClientsNameIsBoundedInTheTrail(t *testing.T) {
+	b := newMCPBench(t)
+	key := b.key(b.admin, read(b.shop))
+	name := strings.Repeat("x", 5000)
+	b.post(key, `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25",
+		"capabilities":{},"clientInfo":{"name":"`+name+`","version":"1"}}}`, nil)
+	if target := b.lastAudit("database.mcp.connect").Target; len(target) > 200 || !strings.HasPrefix(target, "xxx") {
+		t.Errorf("the client's name became a %d-byte target", len(target))
+	}
+	b.refused(key, mcp.ToolListTables, map[string]any{"connection": name})
+	if target := b.lastAudit("database.mcp.list_tables").Target; len(target) > 200 {
+		t.Errorf("a database's name the key does not reach became a %d-byte target", len(target))
 	}
 }
 
@@ -653,6 +699,29 @@ func TestMCPKeysAreMadeForDatabasesTheEndpointReaches(t *testing.T) {
 	}
 	if w := c.do(http.MethodPut, fmt.Sprintf("/api/v1/tokens/%d/connections", api.ID), string(repoint), nil); w.Code != http.StatusConflict {
 		t.Errorf("a key for the API was given databases: %d %s", w.Code, w.Body.String())
+	}
+
+	// A key made narrower than its owner — a replacement keeps the role of
+	// the key it replaces — changes nothing, then or later.
+	narrow, _ := json.Marshal(map[string]any{"name": "old-cursor", "role": "readonly", "connections": []auth.TokenConnection{write(b.shop)}})
+	if w := c.do(http.MethodPost, "/api/v1/tokens/mcp", string(narrow), nil); w.Code != http.StatusBadRequest {
+		t.Errorf("a read-only key was given a database to change: %d %s", w.Code, w.Body.String())
+	}
+	narrow, _ = json.Marshal(map[string]any{"name": "old-cursor", "role": "readonly", "connections": []auth.TokenConnection{read(b.shop)}})
+	w = c.do(http.MethodPost, "/api/v1/tokens/mcp", string(narrow), nil)
+	readOnly := decodeJSONBody[struct {
+		Token auth.APIToken `json:"token"`
+	}](t, w)
+	if w.Code != http.StatusCreated || readOnly.Token.Role != auth.RoleReadOnly {
+		t.Fatalf("a read-only key: %d %+v", w.Code, readOnly.Token)
+	}
+	if w := c.do(http.MethodPut, fmt.Sprintf("/api/v1/tokens/%d/connections", readOnly.Token.ID), string(repoint), nil); w.Code != http.StatusBadRequest {
+		t.Errorf("a read-only key was re-pointed to change a database: %d %s", w.Code, w.Body.String())
+	}
+	widen, _ := json.Marshal(map[string]any{"name": "x", "role": "admin", "connections": []auth.TokenConnection{read(b.shop)}})
+	limited := &client{t: t, h: b.h, cookie: signInAs(t, b.s, "lena", auth.RoleLimited)}
+	if w := limited.do(http.MethodPost, "/api/v1/tokens/mcp", string(widen), nil); w.Code != http.StatusBadRequest {
+		t.Errorf("a limited account made an administrator's key: %d %s", w.Code, w.Body.String())
 	}
 
 	viewer := &client{t: t, h: b.h, cookie: signInAs(t, b.s, "reader", auth.RoleReadOnly)}

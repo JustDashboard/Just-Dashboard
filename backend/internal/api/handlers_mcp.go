@@ -7,6 +7,7 @@ import (
 	"mime"
 	"net/http"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
@@ -69,6 +70,17 @@ func (s *Server) mountMCPRoutes(r chi.Router) {
 	r.Method(http.MethodDelete, "/mcp", s.handle(handleMCPNoStream))
 }
 
+// clipTarget bounds a name an MCP client chose — its own, or a database's it
+// asked for — before it is an audit entry's target, which has no bound of its
+// own.
+func clipTarget(name string) string {
+	const most = 120
+	if utf8.RuneCountInString(name) <= most {
+		return name
+	}
+	return string([]rune(name)[:most]) + "…"
+}
+
 func handleMCPNoStream(w http.ResponseWriter, _ *http.Request) error {
 	w.Header().Set("Allow", http.MethodPost)
 	return httpx.Err(http.StatusMethodNotAllowed, "method_not_allowed", "the MCP endpoint takes one POST per message")
@@ -92,8 +104,10 @@ func mcpRefusal(w http.ResponseWriter, id json.RawMessage, e *mcp.Error) error {
 }
 
 func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) error {
-	// A page on another site could otherwise rebind its own name to this
-	// dashboard's address and post here from the operator's browser.
+	// The transport asks a server to refuse a foreign Origin. That turns away
+	// a page on another site; a page that rebinds its own name to this address
+	// sends an Origin matching the Host and passes, and is stopped by the key
+	// it cannot know, since nothing here reads an ambient credential.
 	if !s.WS.CheckOrigin(r) {
 		httpx.SetAudit(r, "database.mcp.refused", "", map[string]any{"reason": "origin", "origin": r.Header.Get("Origin")})
 		return mcpRefusal(w, nil, &mcp.Error{Status: http.StatusForbidden, Code: mcp.CodeInvalidRequest,
@@ -137,7 +151,7 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) error {
 	case req.Method == "initialize" && !call.Modern:
 		// A client connecting is worth a line in the trail, the way opening
 		// a terminal is; the requests after it are their own lines.
-		httpx.SetAudit(r, "database.mcp.connect", req.Client.Name, map[string]any{
+		httpx.SetAudit(r, "database.mcp.connect", clipTarget(req.Client.Name), map[string]any{
 			"key": p.Token.Name, "prefix": p.Token.Prefix,
 			"client": req.Client.Name, "clientVersion": req.Client.Version, "protocolVersion": call.Version,
 		})

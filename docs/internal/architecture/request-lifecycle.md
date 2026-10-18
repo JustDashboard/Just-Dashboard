@@ -31,7 +31,8 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   `/api/v1/mcp`, whose group runs `httpx.AuthenticateMCP` instead: a bearer key only, no session
   cookie read (so no CSRF header is needed and no page can ride a cookie), any other key refused with
   `403 key_scope`, and a `WWW-Authenticate: Bearer` challenge naming no authorization server. Inside
-  the endpoint the principal carries the owner's role with no capability scope, and every tool call
+  the endpoint the principal carries the key's role (narrowed to its owner's) with no capability
+  scope, and every tool call
   is held to the databases `api_token_connections` grants the key, read again on each call; see
   [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
 - **`httpx.AuditMutations`** records every state-changing request. WebSocket routes are GET and

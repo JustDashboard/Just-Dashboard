@@ -160,6 +160,38 @@ test.describe("MCP server", () => {
     expect(server.sent.map((one) => one.call)).toContain("DELETE /tokens/9")
   })
 
+  test("a database protected since a key was given it can be cleared from the key", async ({
+    page,
+  }) => {
+    const server = await mockMcp(page, [
+      mcpKey({
+        connections: [
+          { connectionId: 1, access: "read" },
+          { connectionId: 2, access: "read" },
+        ],
+      }),
+    ])
+    const dialog = await open(page)
+    await dialog.getByRole("button", { name: "Edit databases" }).click()
+    const blog = choice(dialog, "blog")
+    await expect(blog).toContainText("protected, so no MCP key reaches it; clear it to save")
+    await expect(blog.getByRole("radiogroup")).toHaveCount(0)
+    await blog.getByRole("checkbox").click()
+    await expect(blog.getByRole("checkbox")).toBeDisabled()
+    await dialog.getByRole("button", { name: "Save databases" }).click()
+    expect(server.bodies("PUT /tokens/9/connections")).toEqual([
+      { connections: [{ connectionId: 1, access: "read" }] },
+    ])
+  })
+
+  test("a key made to read only is never given a database to change", async ({ page }) => {
+    await mockMcp(page, [mcpKey({ role: "readonly" })])
+    const dialog = await open(page)
+    await dialog.getByRole("button", { name: "Edit databases" }).click()
+    await expect(dialog.getByText("This key was made to read only")).toBeVisible()
+    await expect(choice(dialog, "shop").getByRole("radio", { name: "Change" })).toBeDisabled()
+  })
+
   test("a role that runs no SQL makes keys that read", async ({ page }) => {
     await mockMcp(page, [], { viewer: true })
     const dialog = await open(page)

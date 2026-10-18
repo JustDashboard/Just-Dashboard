@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
@@ -65,7 +64,7 @@ func (c *mcpCall) run(tool string, raw []byte) map[string]any {
 	defer c.s.mcp.leave(c.p.TokenID)
 	grants, err := c.s.Auth.TokenConnections(c.r.Context(), c.p.TokenID)
 	if err != nil {
-		return c.fail("the key's databases could not be read")
+		return c.fail("the key's databases could not be read", nil)
 	}
 	c.grants = map[int64]auth.TokenAccess{}
 	for _, g := range grants {
@@ -101,11 +100,22 @@ func (c *mcpCall) refuse(reason, message string) map[string]any {
 }
 
 // fail is a call the database or the dashboard could not answer. What the
-// engine said goes to the model as it is, and to the trail with what it
-// quotes taken out: MySQL names the value a duplicate key had.
-func (c *mcpCall) fail(message string) map[string]any {
+// engine said goes to the model as it is, and to the trail as its code alone
+// (dbx.ErrorCode), since its text quotes what it was sent. A failure with no
+// error behind it is one of the dashboard's own sentences, which quote nothing.
+func (c *mcpCall) fail(message string, err error) map[string]any {
 	c.failed = true
-	c.detail["outcome"], c.detail["error"] = "failed", errorShape(message)
+	c.detail["outcome"] = "failed"
+	switch code := dbx.ErrorCode(err); {
+	case err == nil:
+		c.detail["error"] = message
+	case code != "":
+		c.detail["error"] = code
+	case errors.Is(err, context.DeadlineExceeded):
+		c.detail["error"] = "timeout"
+	default:
+		c.detail["error"] = "error"
+	}
 	return mcp.Failure(message)
 }
 
@@ -143,7 +153,7 @@ func (c *mcpCall) open(name string) (*mcpDatabase, map[string]any) {
 	}
 	recs, err := c.granted()
 	if err != nil {
-		return nil, c.fail("the key's databases could not be read")
+		return nil, c.fail("the key's databases could not be read", nil)
 	}
 	var rec *dbConnRecord
 	for _, one := range recs {
@@ -163,7 +173,7 @@ func (c *mcpCall) open(name string) (*mcpDatabase, map[string]any) {
 		}
 	}
 	if rec == nil {
-		c.target = name
+		c.target = clipTarget(name)
 		return nil, c.refuse("not_granted", fmt.Sprintf("No database named %q is open to this key; list_connections names the ones that are.", name))
 	}
 	c.target = rec.conn.Name
@@ -179,7 +189,7 @@ func (c *mcpCall) open(name string) (*mcpDatabase, map[string]any) {
 	}
 	pool, err := c.s.modules.dbs.Pool(c.r.Context(), conn.ID, conn.Driver, dsn)
 	if err != nil {
-		return nil, c.fail(fmt.Sprintf("%s did not answer: %s", conn.Name, connectError(dsn, err)))
+		return nil, c.fail(fmt.Sprintf("%s did not answer: %s", conn.Name, connectError(dsn, err)), err)
 	}
 	identity := c.s.identityOf(conn.ID, dsn, func() dbx.Identity { return dbx.IdentifySQL(c.r.Context(), pool, conn.Driver) })
 	if !dbx.Capable(conn.Driver, identity.Flavor, "mcp") {
@@ -206,7 +216,7 @@ type mcpUnavailable struct {
 func (c *mcpCall) listConnections() map[string]any {
 	recs, err := c.granted()
 	if err != nil {
-		return c.fail("the key's databases could not be read")
+		return c.fail("the key's databases could not be read", nil)
 	}
 	open, unavailable := []mcpConnection{}, []mcpUnavailable{}
 	for _, rec := range recs {
@@ -250,7 +260,7 @@ func (c *mcpCall) listTables(args mcp.Arguments) map[string]any {
 	defer cancel()
 	tables, truncated, err := mcp.ListTables(ctx, db.pool, db.conn.Driver, args.Schema)
 	if err != nil {
-		return c.fail(err.Error())
+		return c.fail(err.Error(), err)
 	}
 	c.detail["tables"] = len(tables)
 	return c.answer(map[string]any{"connection": db.conn.Name, "tables": tables, "truncated": truncated})
@@ -269,7 +279,7 @@ func (c *mcpCall) describeSchema(args mcp.Arguments) map[string]any {
 	defer cancel()
 	schema, err := mcp.DescribeSchema(ctx, db.pool, db.conn.Driver, args.Schema, args.Tables)
 	if err != nil {
-		return c.fail(err.Error())
+		return c.fail(err.Error(), err)
 	}
 	c.detail["tables"] = len(schema.Tables)
 	return c.answer(schema)
@@ -293,7 +303,7 @@ func (c *mcpCall) sampleRows(args mcp.Arguments) map[string]any {
 	defer cancel()
 	listed, _, err := mcp.ListTables(ctx, db.pool, db.conn.Driver, args.Schema)
 	if err != nil {
-		return c.fail(err.Error())
+		return c.fail(err.Error(), err)
 	}
 	name, ok := mcp.Resolve(args.Table, args.Schema, mcp.Names(listed))
 	if !ok {
@@ -310,7 +320,7 @@ func (c *mcpCall) sampleRows(args mcp.Arguments) map[string]any {
 		Schema: name.Schema, Table: name.Name, Limit: limit, ClipText: mcp.CellBytes,
 	})
 	if err != nil {
-		return c.fail(err.Error())
+		return c.fail(err.Error(), err)
 	}
 	rows := mcp.BoundRows(page.Columns, page.Types, page.Rows, page.Truncated)
 	c.detail["rows"] = rows.RowCount
@@ -348,7 +358,7 @@ func (c *mcpCall) explain(args mcp.Arguments) map[string]any {
 		return c.refuse("unsupported", err.Error())
 	}
 	if err != nil {
-		return c.fail(err.Error())
+		return c.fail(err.Error(), err)
 	}
 	return c.answer(map[string]any{"connection": db.conn.Name, "plan": planText(plan.Result)})
 }
@@ -447,40 +457,11 @@ func (c *mcpCall) execute(db *mcpDatabase, st *dbx.SQLStatement, limit int, time
 	c.detail["ms"] = elapsed
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return c.fail(fmt.Sprintf("The statement ran past %d seconds and was stopped.", int(timeout.Seconds())))
+			return c.fail(fmt.Sprintf("The statement ran past %d seconds and was stopped.", int(timeout.Seconds())), ctx.Err())
 		}
-		return c.fail(err.Error())
+		return c.fail(err.Error(), err)
 	}
 	rows := mcp.BoundRows(res.Columns, res.Types, res.Rows, res.Truncated)
 	c.detail["rows"], c.detail["rowsAffected"] = rows.RowCount, res.Affected
 	return c.answer(mcpRows{Connection: db.conn.Name, Rows: rows, RowsAffected: res.Affected, DurationMs: elapsed})
-}
-
-// errorShape is an error's text with every quoted span replaced, for the
-// audit entry. A word with an apostrophe in it loses what follows it, which is
-// the direction this may be wrong in.
-func errorShape(text string) string {
-	var b strings.Builder
-	quoted := false
-	for _, r := range text {
-		if r == '\'' {
-			if !quoted {
-				b.WriteString("'?'")
-			}
-			quoted = !quoted
-			continue
-		}
-		if !quoted {
-			b.WriteRune(r)
-		}
-	}
-	out := b.String()
-	if len(out) <= 300 {
-		return out
-	}
-	n := 300
-	for n > 0 && !utf8.RuneStart(out[n]) {
-		n--
-	}
-	return out[:n] + "…"
 }

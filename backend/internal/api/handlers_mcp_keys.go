@@ -21,7 +21,10 @@ import (
 // are listed, revoked and deleted by the routes every key already has.
 
 type mcpTokenRequest struct {
-	Name        string                 `json:"name"`
+	Name string `json:"name"`
+	// Role narrows the owner's; empty is the owner's own. A replacement sends
+	// the role of the key it replaces.
+	Role        auth.Role              `json:"role"`
 	TTLDays     int                    `json:"ttlDays"`
 	Connections []auth.TokenConnection `json:"connections"`
 }
@@ -43,7 +46,7 @@ func (s *Server) handleCreateMCPToken(w http.ResponseWriter, r *http.Request) er
 	if req.TTLDays > 0 {
 		ttl = time.Duration(req.TTLDays) * 24 * time.Hour
 	}
-	tok, secret, err := s.Auth.CreateMCPToken(r.Context(), httpx.MustPrincipal(r).User, req.Name, ttl, req.Connections)
+	tok, secret, err := s.Auth.CreateMCPToken(r.Context(), httpx.MustPrincipal(r).User, req.Name, req.Role, ttl, req.Connections)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
