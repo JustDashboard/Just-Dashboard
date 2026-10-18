@@ -830,7 +830,7 @@ test("screenshots of each state @shots", async ({ page }) => {
   await settle()
   await shot("source-1440")
   await typeSource(page)
-  await page.getByLabel("Port").fill("5432")
+  await page.getByRole("textbox", { name: "Port" }).fill("5432")
   await shot("source-typed-1440")
 
   // The plan, with what the source holds.
