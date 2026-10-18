@@ -121,7 +121,7 @@ free.
 - Table editor with staged, reviewed edits and a SQL editor with plans and stored programs
   (DELIMITER, GO and PL/SQL scripts)
 - An optional SQL assistant on your own Anthropic key or local model, told the schema and never the rows
-- Schema browser, diagram, schema comparison with its migration SQL, code generation, mock seed data
+- Schema browser, diagram, code generation, mock seed data
   written parents first, performance
 - Key browser and console for Redis, documents and pipelines for MongoDB
 - Protected connections, dump backups, PostgreSQL major-version upgrades with a way back, accounts,
@@ -304,19 +304,15 @@ free.
 </tr>
 <tr>
 <td width="50%" valign="top">
-<img src="docs/readme/database-schema-diff.png" alt="Two schemas compared, six differences listed beside the migration SQL and its destructive-step warning">
-<p align="center"><b>Schema comparison</b> — the differences, and the SQL that closes them</p>
-</td>
-<td width="50%" valign="top">
 <img src="docs/readme/database-rls.png" alt="A PostgreSQL table's row-level security policies, tried as a role that sees two rows">
 <p align="center"><b>Row-level security</b> — write the policies, then try them as a role</p>
 </td>
-</tr>
-<tr>
 <td width="50%" valign="top">
 <img src="docs/readme/database-seed.png" alt="The Generate page filling tables with believable mock rows, parents first">
 <p align="center"><b>Seed data</b> — believable rows, written parents first</p>
 </td>
+</tr>
+<tr>
 <td width="50%" valign="top">
 <img src="docs/readme/database-pitr.png" alt="Point-in-time recovery for PostgreSQL: the recoverable window, base backups, a restore point and a recovered copy">
 <p align="center"><b>Point-in-time recovery</b> — any second, not only the last dump</p>

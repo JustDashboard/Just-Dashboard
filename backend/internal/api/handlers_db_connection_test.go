@@ -1645,7 +1645,7 @@ var gatedCapabilities = []string{
 	"mcp",
 	// the schema
 	"ddl", "schemas", "catalog", "views", "materializedViews", "routines", "triggers", "sequences", "enums",
-	"comments", "indexes", "extensions", "rowSecurity", "schemaDiff", "pooler",
+	"comments", "indexes", "extensions", "rowSecurity", "pooler",
 	// watching and maintaining a server
 	"stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats", "maintenance",
 	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "statementsSetup", "statementHistory",
