@@ -1274,6 +1274,49 @@ stays editable on a protected connection.
   not compile, because Oracle keeps it enabled and then refuses every write to its table (ORA-04098).
   A save reply carries the routine's catalogue `signature` where the engine has them, so a page that
   addressed it by signature can follow it.
+- **Two schemas are compared, and the migration between them is written, never run.** `GET
+  /databases/{id}/schema-diff?to=<id>&schema=&toSchema=` reads this connection's schema (*from*) and
+  another's (*to*) — a saved connection to the same driver, this one's other schemas included — and
+  answers what differs and the ordered steps that turn *from* into *to*; the page writes the
+  script from the steps, so the statements travel once. It is on the read surface and leaves no audit entry: the statements are text, and the
+  Query tab classifies and records them if they are run. A protected connection is compared like any
+  other. The flag is `schemaDiff` (`dbx/schema_diff_capabilities.go`): PostgreSQL, MySQL (MariaDB and
+  Percona included), SQL Server and SQLite, and not TimescaleDB, CockroachDB, YugabyteDB, TiDB or
+  Azure SQL Edge, whose statements differ from their driver's. Each side is read once
+  (`ReadSchemaSnapshot`): the tables through `dbx.Detail` — up to 400 a side, and 1500 objects of all
+  kinds, past which the route refuses by name — and the views, materialized views, sequences, enum types, functions and
+  procedures through the catalogue, with their definitions as the engine writes them. A kind of
+  object the login cannot read whole — or whose definition the server will not give (no privilege, an
+  encrypted module, an empty answer) — is left out of both sides and named under `notes`, so it is
+  never reported as missing or dropped and made again with nothing. Triggers, events, grants, comments, storage options and rows are not
+  compared.
+  - *The diff* (`DiffSchemas`) matches objects by name and the parts of a table — columns, primary
+    key, indexes, unique and check constraints, foreign keys — by name and then by definition, so an
+    index or key that differs only by an engine-generated name is not a difference. Where the two
+    schemas have different names, text that spells the schema out (`"alpha".mood`, a default's
+    `nextval('alpha.t_id_seq')`, a view's `FROM alpha.t`) is compared with the name taken away and
+    written for the *from* schema when it is planned; only where it qualifies a name, never inside a
+    quoted text or a comment (a relation named by `nextval('alpha.seq')` or `::regclass` is a name).
+    A renamed table or column reads as one dropped
+    and one added.
+  - *The plan* (`PlanMigration`) reuses the generators the schema forms use — `PlanAddColumn`,
+    `PlanAlterColumn`, `PlanDropColumn`, `PlanCreateIndex`, `PlanAddConstraint`, `PlanAddForeignKey`,
+    the drops, `PlanCreateEnum` and `PlanAddEnumValue`, `PlanCreateView` and `PlanDropView` — and
+    writes a new table with the same renderer the schema page shows a table's DDL with (SQLite's and
+    MySQL's own text, with MySQL's foreign keys taken out). The order: enum types and sequences, and
+    the routines that a default, check or generated column calls, first; then the views that read
+    what will change are dropped — an unchanged view is dropped and made again when it reads a
+    dropped view or a table that loses a column or changes a column's type — then foreign keys
+    (on MySQL and SQL Server also the unchanged ones on a column that changes type),
+    indexes and constraints that hold the old shape; new tables; column changes; dropped tables
+    (a table before the ones it references, a key of a cycle dropped first); then primary keys,
+    indexes, constraints and foreign keys, sequence ownership, the other routines (made when their
+    tables and columns exist), views, and the routines, sequences and enum types that went. A name
+    reaches the script only quoted or in a comment line of its own: a control character or line
+    break in a title is a space, and a name the engine will not quote makes the step a manual one. A step the generator refuses — a NOT NULL column with no default, an
+    identity column, an expression default it does not write, anything SQLite cannot alter in place —
+    is a *manual* step: no statements, and a comment in the script saying why. Every drop, and a
+    column's change of type, is marked destructive in the script and in the answer.
 - **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
   connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
   and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the
@@ -2460,7 +2503,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the twelve it calls): 258 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the twelve it calls): 259 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -2586,7 +2629,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/table` | read | — | — | — |
 | `GET` | `/databases/{id}/tables` | read | — | — | — |
 
-**Schema** (33)
+**Schema** (34)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -2623,6 +2666,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/outline` | read | — | — | — |
 | `GET` | `/databases/{id}/program` | read | — | — | — |
 | `GET` | `/databases/{id}/relations` | read | — | — | — |
+| `GET` | `/databases/{id}/schema-diff` | read | — | — | — |
 
 **Operations** (22)
 
