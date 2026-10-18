@@ -23,24 +23,36 @@ export const STRIP = 14
 
 /**
  * The operations one connection runs one at a time: a dump, a restore, a
- * copy, and a major-version upgrade's check, upgrade and revert, which move
- * the whole server and so wait for, and hold off, the other three.
+ * copy, an import from another server, and a major-version upgrade's check,
+ * upgrade and revert, which move the whole server and so wait for, and hold
+ * off, the others.
  */
 export type TransferKind =
-  "backup" | "restore" | "copy" | "major-upgrade" | "major-upgrade-check" | "major-upgrade-revert"
+  | "backup"
+  | "restore"
+  | "copy"
+  | "import"
+  | "major-upgrade"
+  | "major-upgrade-check"
+  | "major-upgrade-revert"
 
 const TRANSFER_WORDS: Record<TransferKind, string> = {
   backup: "Dump",
   restore: "Restore",
   copy: "Copy",
+  import: "Import",
   "major-upgrade": "Upgrade",
   "major-upgrade-check": "Upgrade check",
   "major-upgrade-revert": "Revert",
 }
 
-/** Which operation a transfer job is, read off the end of its kind. */
+/**
+ * Which operation a transfer job is, read off the end of its kind. An import's
+ * cutover is the import's other job and reads as one.
+ */
 export function transferKind(job: Pick<Job, "kind">): TransferKind | undefined {
   const word = job.kind.slice(job.kind.lastIndexOf(".") + 1)
+  if (word === "import-cutover") return "import"
   return Object.hasOwn(TRANSFER_WORDS, word) ? (word as TransferKind) : undefined
 }
 

@@ -1,7 +1,9 @@
 import {
   Archive,
+  ArrowLeftRight,
   Bell,
   ChartActivity,
+  CloudDownload,
   CodeBracket,
   FileText,
   GridSquare,
@@ -66,11 +68,13 @@ export type SectionId =
   | "search"
   | "schema"
   | "diagram"
+  | "compare"
   | "generate"
   | "performance"
   | "logs"
   | "access"
   | "backups"
+  | "import"
   | "alerts"
   | "settings"
 
@@ -255,6 +259,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   indexes: false,
   extensions: false,
   rowSecurity: false,
+  schemaDiff: false,
   pooler: false,
   stats: false,
   sessions: false,
@@ -343,6 +348,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   hashFieldTtl: false,
   commandReference: false,
   memoryBuffer: false,
+  onlineImport: false,
 }
 
 /**
@@ -360,15 +366,22 @@ export const CAPABILITY_NAMES = Object.keys(NO_CAPABILITIES) as DbCapabilityName
  * is off until then, so nothing is offered that the server has not vouched for.
  */
 const FLOOR: Record<DbDriver, readonly DbCapabilityFlag[]> = {
-  postgres: ["sql", "console", "server", "dump", "orm", "roles"],
-  mysql: ["sql", "console", "server", "dump", "orm", "roles"],
-  sqlite: ["sql", "console", "dump", "orm"],
-  sqlserver: ["sql", "console", "server", "dump", "orm", "roles"],
+  postgres: ["sql", "console", "server", "dump", "orm", "roles", "schemaDiff"],
+  mysql: ["sql", "console", "server", "dump", "orm", "roles", "schemaDiff"],
+  sqlite: ["sql", "console", "dump", "orm", "schemaDiff"],
+  sqlserver: ["sql", "console", "server", "dump", "orm", "roles", "schemaDiff"],
   clickhouse: ["sql", "console", "server", "dump", "orm", "roles"],
   oracle: ["sql", "console", "server", "dump", "orm"],
   mongodb: ["console", "server", "dump", "roles"],
   redis: ["console", "server", "dump", "roles"],
 }
+
+/**
+ * The engines that open the Import page, which is gated on a word and not a
+ * flag. Before the catalogue is read it is the plain form: the replication
+ * one is PostgreSQL's alone, and the server says so.
+ */
+const FLOOR_IMPORT: readonly DbDriver[] = ["postgres", "mysql", "sqlserver", "mongodb", "redis"]
 
 function floorOf(driver: DbDriver): Partial<DbCapabilities> {
   const flags = FLOOR[driver]
@@ -379,6 +392,7 @@ function floorOf(driver: DbDriver): Partial<DbCapabilities> {
     alertKinds: flags.includes("server")
       ? ["down", "disk", "backup_failed", "backup_missed"]
       : ["backup_failed", "backup_missed"],
+    ...(FLOOR_IMPORT.includes(driver) && { onlineImport: "stream" as const }),
   }
 }
 
@@ -805,6 +819,15 @@ const SECTIONS: SectionSpec[] = [
     thing: "diagram",
   },
   {
+    id: "compare",
+    group: "schema",
+    title: "Compare",
+    icon: ArrowLeftRight,
+    kinds: ["sql"],
+    needs: "schemaDiff",
+    thing: "schema comparison",
+  },
+  {
     id: "generate",
     group: "schema",
     title: "Generate",
@@ -847,6 +870,15 @@ const SECTIONS: SectionSpec[] = [
     kinds: OPENED,
     needs: "dump",
     thing: "dumps",
+  },
+  {
+    id: "import",
+    group: "operate",
+    title: "Import",
+    icon: CloudDownload,
+    kinds: OPENED,
+    needs: "onlineImport",
+    thing: "imports from another server",
   },
   {
     id: "alerts",
@@ -901,6 +933,7 @@ const CARRIES: Partial<Record<EngineKind, Partial<Record<SectionId, readonly Sel
     query: ["schema"],
     search: ["schema"],
     diagram: ["schema"],
+    compare: ["schema"],
     generate: ["schema"],
     performance: ["schema"],
   },

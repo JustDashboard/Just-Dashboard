@@ -1642,7 +1642,7 @@ var gatedCapabilities = []string{
 	"dollarQuoting", "regexFilter", "rowEstimate", "cellRead", "explainJSON", "explainAnalyze", "indexWhatIf", "missingIndexes",
 	// the schema
 	"ddl", "schemas", "catalog", "views", "materializedViews", "routines", "triggers", "sequences", "enums",
-	"comments", "indexes", "extensions", "rowSecurity", "pooler",
+	"comments", "indexes", "extensions", "rowSecurity", "schemaDiff", "pooler",
 	// watching and maintaining a server
 	"stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats", "maintenance",
 	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "statementsSetup", "statementHistory",
@@ -1673,7 +1673,7 @@ var listedCapabilities = []string{
 // and false where the engine has none of them.
 var wordedCapabilities = []string{
 	"rowIdentity", "returnsChangedRow", "readOnlyScope", "importAtomic", "json", "hashFieldTtl", "commandReference",
-	"memoryBuffer",
+	"memoryBuffer", "onlineImport",
 }
 
 func TestDriverCatalogueCarriesCapabilitiesAndFlavours(t *testing.T) {

@@ -493,6 +493,35 @@ func TestUpgradeOfAProtectedServerIsRefused(t *testing.T) {
 	}
 }
 
+// An import replicating into one of the server's databases keeps its
+// subscription in the server, so neither the upgrade nor its revert replaces
+// it, through that connection or a neighbour, until the import is over.
+func TestUpgradeOfAServerAnImportIsReplicatingIntoIsRefused(t *testing.T) {
+	h, _, id := upgradeHarness(t)
+	admin := h.as(auth.RoleAdmin)
+	other := h.add("shop-admin", dbx.DriverPostgres, "postgres://jd:pw@localhost:5433/postgres?sslmode=disable")
+	res, err := h.s.Store.DB.Exec(`
+		INSERT INTO db_online_imports(connection_id, name, mode, status, target_database, source_label, created_at, updated_at)
+		VALUES(?, 'jd_import_shop', ?, ?, 'shop_copy', 'source.example.com:5432/shop', 0, 0)`,
+		other, importReplication, importReplicating)
+	if err != nil {
+		t.Fatal(err)
+	}
+	number, _ := res.LastInsertId()
+	base := pathf("/databases/%d/upgrade", id)
+	for path, body := range map[string]string{base: `{"version":"17"}`, base + "/revert": `{}`} {
+		rec := do(t, admin, http.MethodPost, path, body)
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "import_active") ||
+			!strings.Contains(rec.Body.String(), "shop-admin") {
+			t.Errorf("POST %s with an import under way = %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	h.s.setImport(number, importCancelled, "")
+	if rec := do(t, admin, http.MethodPost, base+"/revert", `{}`); strings.Contains(rec.Body.String(), "import_active") {
+		t.Errorf("once the import was over: %s", rec.Body.String())
+	}
+}
+
 // While the old server is kept, the reading says so and where it is, a
 // second upgrade waits for it, and finishing removes it with its data volume
 // and records that — through the whole stack, so the audit entry is the one

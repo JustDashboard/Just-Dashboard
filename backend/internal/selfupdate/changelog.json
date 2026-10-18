@@ -28,6 +28,11 @@
           "detail": "Databases \u2192 Schema opens a function, procedure or trigger with Edit and Drop, and the schema offers New function, New procedure and New trigger (a table's Triggers reading has its own). The form has the fields the engine has a word for, the body in the editor and the exact statement under it, sent as one statement, so a MySQL BEGIN \u2026 END block, an Oracle PL/SQL block or a SQLite trigger needs no delimiter. PostgreSQL, MySQL, MariaDB, SQL Server and Oracle take all three; SQLite takes triggers. An edit uses CREATE OR REPLACE or CREATE OR ALTER where the engine has one and otherwise drops and creates in one transaction, or puts the old definition back if the new one is refused; Oracle's result is checked for compile errors. A program whose text holds something the form cannot state is shown with the reason and left to the Query tab. Writing one asks for the destructive capability, as the Query tab does for the same CREATE."
         },
         {
+          "kind": "added",
+          "text": "Compare two database schemas and write the SQL that makes one like the other",
+          "detail": "A new Compare page under Schema lists what differs between this connection's schema and another schema of the same engine, side by side: tables with their columns, keys, indexes, constraints and foreign keys, views, sequences, enum types, and functions and procedures as text. The migration is ordered so tables exist before the keys that point at them and a key is dropped before its table, destructive steps are marked, and what the engine cannot change in place is said so in a comment. It is text to copy, save or open in Query and is never run by the dashboard. PostgreSQL, MySQL and MariaDB, SQL Server and SQLite."
+        },
+        {
           "kind": "removed",
           "text": "Remove automatic attention panels, issue badges and settings recommendations",
           "detail": "Docker, databases, security, deployments, proxy, networking, backups and PM2 keep their operational readings and controls without proactive advice panels. The database Advisor page and recommendation comparisons in SSH, kernel protection and nginx settings are removed."
@@ -103,6 +108,16 @@
           "detail": "Databases → Access → an account's PostgreSQL grants list Functions and Columns beside Tables. Press EXECUTE on one function or on every function of a schema, and the ones made later, or SELECT, INSERT, UPDATE and REFERENCES on chosen columns of a table."
         },
         {
+          "kind": "added",
+          "text": "Bring a database over from another server, keeping it current until you cut over",
+          "detail": "A database's new Import page takes the source's connection string, says what stands in the way, and brings the database into a new one on that server. On PostgreSQL it uses logical replication: the structure is copied, the dashboard publishes the tables on the source (or gives you the statement to run yourself), subscribes the target, and shows each table's copy and how far behind the target is. The cutover waits for zero lag, sets the sequences to the source's positions and takes the subscription and its slot away. Every other engine that can restore under another name reads a dump from the source and loads it as it is read. The source's password is sealed for as long as a replication needs it and is never shown again."
+        },
+        {
+          "kind": "added",
+          "text": "Copy a database to another saved connection of the same engine",
+          "detail": "The Backups page's Copy database dialog can now send the copy to another server saved here. SQL databases go from one to the other as they are read, without being written to this server's disk; MongoDB and Redis stage the dump in a directory of their own and remove it."
+        },
+        {
           "kind": "security",
           "text": "Keep passwords and other values out of PostgreSQL's statement list",
           "detail": "Databases → Performance → Statements and the busiest statements on Home showed PostgreSQL's CREATE ROLE and ALTER ROLE with the password in clear, and SET, COMMENT, DEFAULT and DO statements with their values, to any account that may read. Every value in PostgreSQL's statement text is now replaced with a placeholder before it leaves the server, a password or a setting written without quotes included, and the $1 markers the server writes stay, so a statement's plan is still asked for with values put back in. A role created or changed from Access is no longer kept in pg_stat_statements at all when the connection signs in as a superuser."
@@ -153,6 +168,11 @@
           "detail": "A Redis dump is the dashboard's own gzipped JSON Lines of each key's DUMP payload, which only the dashboard restores. The backup job form and the documentation no longer call it a snapshot or an RDB file."
         },
         {
+          "kind": "fixed",
+          "text": "Keep the dashboard's own database from being corrupted by another program reading it",
+          "detail": "Reading the dashboard's database file outside SQLite, as the Databases page's file scan did with its first bytes, released the locks SQLite held on it. A sqlite3 shell or another program that opened the database afterwards could then delete its write-ahead log while the dashboard was still writing through it, leaving a table unreadable, and Deployments → Credentials answered Internal error. The dashboard now holds a lock no other read can release for as long as its database is open, and the scan no longer reads the dashboard's own database."
+        },
+        {
           "kind": "security",
           "text": "Oracle and SQL Server statement lists no longer show what comments said or the literals after one",
           "detail": "Oracle keeps a statement's text with its line breaks turned into spaces, so a -- comment hid everything after it from the literal masker and the rest of the statement was shown as it was run. Comments are now dropped from the text of Oracle and SQL Server statements, optimizer hints are kept with their literals replaced, and SQL Server's nested comments are read the way it reads them."
@@ -191,6 +211,11 @@
           "kind": "changed",
           "text": "Say how long each database release is maintained",
           "detail": "Add a database says beside each release when its support ends, and keeps the releases already past it, such as MySQL 8.0 and MariaDB 10.6, behind Older versions. A database's Home and General settings say the same beside its version. Databases already running on any release keep working."
+        },
+        {
+          "kind": "added",
+          "text": "Show where a measured query plan spent its time and which steps the planner misjudged",
+          "detail": "Databases → Query → Plan draws each measured step's own time beside the time of everything under it, against the whole statement's, and can list the steps slowest first. A step whose rows came out ten times more or fewer than planned says so under its name, as \"est 12 · actual 48,210 (×4,000)\". Oracle's, ClickHouse's and an older MySQL's printed plans are drawn as the same tree."
         }
       ]
     },

@@ -1894,6 +1894,7 @@ export type DbCapabilityFlag =
   | "indexes"
   | "extensions"
   | "rowSecurity" // GET /rls, the policy forms and the role tester
+  | "schemaDiff" // GET /schema-diff: two schemas compared and the migration between them written
   | "pooler" // a PgBouncer can be run in front of the server
   // Watching and maintaining a server.
   | "stats" // GET /stats: one snapshot of counters and gauges
@@ -2063,6 +2064,12 @@ export type DbCapabilities = Record<DbCapabilityFlag, boolean> & {
    * memory limit by `GET /{id}/resources`.
    */
   memoryBuffer: string | false
+  /**
+   * Bringing a database over from another server into a new one here:
+   * `replication` keeps it current until a cutover (PostgreSQL's logical
+   * replication), `stream` reads a dump from the source as it loads it.
+   */
+  onlineImport: "replication" | "stream" | false
 }
 
 /** Any key of the capabilities object: what `engine.can(…)` takes. */

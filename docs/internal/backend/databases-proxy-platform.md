@@ -70,7 +70,7 @@ depend on what a request carries are stated once in
 - **The served table is also a file, and a test holds the two together.** The frontend's tests run
   with no server, so what `GET /databases/drivers` answers is kept as
   `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 126
-  flags (115 a yes or a no, four a word, seven a list) and its flavours' rows — which the engine
+  flags (111 a yes or a no, nine a word, seven a list) and its flavours' rows — which the engine
   registry's tests (`frontend/src/components/database/engine.test.js`) and the browser fixture
   (`frontend/tests/browser/database-fixture.ts`) read. `TestTheDriverCatalogueSnapshotIsCurrent`
   fails the moment the route and the file differ. After giving a flag to an engine or taking one
@@ -113,8 +113,10 @@ is connected by naming the instance found, not by typing its address again.
   only its unit file names (`procs.ListInstalled`, `dbx.InstalledUnits`), and a stopped Debian PostgreSQL
   cluster, found by its `/etc/postgresql/<version>/<name>` directory — and a cluster's port is read from
   its `postgresql.conf`. Files are confirmed by their first sixteen bytes and never opened with a driver
-  to be listed; the walk is server-chosen roots through `files.Resolve`, bounded by depth, visits and
-  time, on a ten-minute cadence or `POST /databases/inventory/scan`. Where `JD_FILE_ROOTS` is narrower
+  to be listed, and the dashboard's own store is not read at all: closing a descriptor for it would
+  release the store's SQLite locks (see [runtime boundaries](../architecture/runtime-boundaries.md));
+  the walk is server-chosen roots through `files.Resolve`, bounded by depth, visits and time, on a
+  ten-minute cadence or `POST /databases/inventory/scan`. Where `JD_FILE_ROOTS` is narrower
   than those roots — beneath `/home`, or beside all of them — the file roots themselves are walked: a
   broad root above a file root is outside the roots as a whole, and the scan used to walk nothing and
   list no file that `inventory/connect` would still take by its path. A file root with a broad root
@@ -749,10 +751,10 @@ this is how it is built, and the Protected column of [Routes](#routes) gives eve
   - *Shown, not run.* A schema form asked for its statement (`/ddl/*?preview=1`) is let through:
     `runDDL` answers a preview before it executes. The flag is in the address, so it is asked in the
     middleware itself and not by a check of the body; no other route is opened by it.
-  - *Refused*: rows, structure, imports, a restore, a copy, the drop, a major-version upgrade and its
-    revert, roles, privileges, settings, extensions, keys, streams, ACL users, documents, collections,
-    indexes, validation rules, the profiler, a statistics reset, row-level security policies and their
-    switches.
+  - *Refused*: rows, structure, imports, an import from another server, a restore, a copy, the drop,
+    a major-version upgrade and its revert, roles, privileges, settings, extensions, keys, streams, ACL
+    users, documents, collections, indexes, validation rules, the profiler, a statistics reset,
+    row-level security policies and their switches.
   It guards the dashboard's own controls and is as strong as the classification — a `SELECT` that
   calls a function of the operator's own which writes passes (the built-in ones that run SQL or outlive
   the rollback are not reads, see [the query runner](#the-query-runner)); it is not a sandbox around the
@@ -949,6 +951,27 @@ older MySQL has no such variable and its own refusal of the combination is the a
 SQL Server resets SHOWPLAN using a bounded cancellation-independent context, including after query
 failure. An uncertain enable/reset outcome discards the connection instead of returning its mode to
 the pool.
+
+The Query page's Plan draws the answer as one tree, read in the browser
+(`components/database/query/plan.ts`, the printed forms in `plan-text.ts`, both unit-tested):
+PostgreSQL's JSON, MySQL's `query_block` and 8.3's measured JSON, MariaDB's `r_` measurements, SQL
+Server's SHOWPLAN rows and SQLite's query plan, and three plans that arrive only as text — Oracle's
+DBMS_XPLAN table (its conditions under the step they name, its notes under the statement), MySQL's
+measured tree as an older MySQL prints it when the JSON form is refused, and ClickHouse's indented
+steps. Any other print stays the engine's text. A step carries what its format has and nothing it
+does not: cost, with the step's own share as its bar; rows; and in a measured plan its own time and
+the time of it with everything under it, as one bar of two inks against the plan's total, with the
+steps orderable slowest first. A measured step whose rows came out ten times more or fewer than
+planned says so under its name — `est 12 · actual 48,210 (×4,000)`, both over the whole run.
+Whether they are that far apart is decided a loop at a time with each side at least one row,
+because PostgreSQL never plans under one row a loop and before 18 rounds what came to whole rows,
+and fewer rows than planned is not said beneath a step that stops reading early (a limit, a merge
+join's inputs, the inner input of a nested semi- or anti-join), since the planner plans a run to
+its end. A MariaDB table's rows are those its condition kept (`rows × filtered` against
+`r_rows × r_filtered`, what it read a fact beside them), so a misjudged condition shows where
+comparing the rows read never would. These are statements of what the plan says, run on request,
+not findings. `TestLivePlansAreTheShapesTheTreeReads` asks every live engine for the shapes these
+readers rely on, so a server that changes one fails there rather than quietly drawing text.
 
 **Index advice is a tool the reader runs from the Explain view, never a finding.** 0.7.5 removed the
 Advisor and every automatic recommendation, and nothing here comes back as one: both actions are buttons
@@ -1299,6 +1322,49 @@ stays editable on a protected connection.
   not compile, because Oracle keeps it enabled and then refuses every write to its table (ORA-04098).
   A save reply carries the routine's catalogue `signature` where the engine has them, so a page that
   addressed it by signature can follow it.
+- **Two schemas are compared, and the migration between them is written, never run.** `GET
+  /databases/{id}/schema-diff?to=<id>&schema=&toSchema=` reads this connection's schema (*from*) and
+  another's (*to*) — a saved connection to the same driver, this one's other schemas included — and
+  answers what differs and the ordered steps that turn *from* into *to*; the page writes the
+  script from the steps, so the statements travel once. It is on the read surface and leaves no audit entry: the statements are text, and the
+  Query tab classifies and records them if they are run. A protected connection is compared like any
+  other. The flag is `schemaDiff` (`dbx/schema_diff_capabilities.go`): PostgreSQL, MySQL (MariaDB and
+  Percona included), SQL Server and SQLite, and not TimescaleDB, CockroachDB, YugabyteDB, TiDB or
+  Azure SQL Edge, whose statements differ from their driver's. Each side is read once
+  (`ReadSchemaSnapshot`): the tables through `dbx.Detail` — up to 400 a side, and 1500 objects of all
+  kinds, past which the route refuses by name — and the views, materialized views, sequences, enum types, functions and
+  procedures through the catalogue, with their definitions as the engine writes them. A kind of
+  object the login cannot read whole — or whose definition the server will not give (no privilege, an
+  encrypted module, an empty answer) — is left out of both sides and named under `notes`, so it is
+  never reported as missing or dropped and made again with nothing. Triggers, events, grants, comments, storage options and rows are not
+  compared.
+  - *The diff* (`DiffSchemas`) matches objects by name and the parts of a table — columns, primary
+    key, indexes, unique and check constraints, foreign keys — by name and then by definition, so an
+    index or key that differs only by an engine-generated name is not a difference. Where the two
+    schemas have different names, text that spells the schema out (`"alpha".mood`, a default's
+    `nextval('alpha.t_id_seq')`, a view's `FROM alpha.t`) is compared with the name taken away and
+    written for the *from* schema when it is planned; only where it qualifies a name, never inside a
+    quoted text or a comment (a relation named by `nextval('alpha.seq')` or `::regclass` is a name).
+    A renamed table or column reads as one dropped
+    and one added.
+  - *The plan* (`PlanMigration`) reuses the generators the schema forms use — `PlanAddColumn`,
+    `PlanAlterColumn`, `PlanDropColumn`, `PlanCreateIndex`, `PlanAddConstraint`, `PlanAddForeignKey`,
+    the drops, `PlanCreateEnum` and `PlanAddEnumValue`, `PlanCreateView` and `PlanDropView` — and
+    writes a new table with the same renderer the schema page shows a table's DDL with (SQLite's and
+    MySQL's own text, with MySQL's foreign keys taken out). The order: enum types and sequences, and
+    the routines that a default, check or generated column calls, first; then the views that read
+    what will change are dropped — an unchanged view is dropped and made again when it reads a
+    dropped view or a table that loses a column or changes a column's type — then foreign keys
+    (on MySQL and SQL Server also the unchanged ones on a column that changes type),
+    indexes and constraints that hold the old shape; new tables; column changes; dropped tables
+    (a table before the ones it references, a key of a cycle dropped first); then primary keys,
+    indexes, constraints and foreign keys, sequence ownership, the other routines (made when their
+    tables and columns exist), views, and the routines, sequences and enum types that went. A name
+    reaches the script only quoted or in a comment line of its own: a control character or line
+    break in a title is a space, and a name the engine will not quote makes the step a manual one. A step the generator refuses — a NOT NULL column with no default, an
+    identity column, an expression default it does not write, anything SQLite cannot alter in place —
+    is a *manual* step: no statements, and a comment in the script saying why. Every drop, and a
+    column's change of type, is marked destructive in the script and in the answer.
 - **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
   connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
   and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the
@@ -2258,6 +2324,85 @@ the detail of each classifier is below, with the surface it guards.
   that is there: overwriting it by hand gave a program with it open half of each database, and
   renaming a new file into place left that program writing to one with no name. `POST /{id}/copy`
   (`system.admin`) is a dump, a new database and a restore as one job, the dump its own and removed.
+- **A copy can go to another saved connection of the same engine** (`copyToServer`). `to` names the
+  connection whose server receives it; the job runs, and is stopped from, the connection copied from,
+  and the target is only checked — the same engine (`400`), not protected (`409 connection_read_only`,
+  because a copy makes a database there) and with no transfer of its own running (`409
+  transfer_running`). The new database is made with the target's login and removed again if the copy
+  fails. The job's `result` line carries `connection` and `connectionName`, so the page opens the copy
+  through the server it is on. `dbx.CopyBetween` does the work (`copy_stream.go`): for a SQL engine the
+  built-in dump (`writeBuiltInDump`) is written into one end of an `io.Pipe` and `replayGenericSQL`
+  reads the other, so no dump file exists — a row is on the target while the source is still reading the
+  tables after it, and a failure on either side stops the other (a failed dump reaches the restore as a
+  failed read, a failed restore closes the pipe under the dump). The restore is the one transaction
+  `restoreGenericSQL` always was on the engines that can roll back. The native tools are not used:
+  `pg_dump`'s custom format cannot be read until it is whole. MongoDB and Redis dump to an archive that
+  is read by seeking, so they stage it in a `.copy-*` directory beside the dump directories and remove
+  it. ClickHouse, Oracle and SQLite are refused, for the reason a restore under another name is
+  (`DumpCapability.NewDatabase`). `dbx.CanCopyBetween` is that answer.
+- **A database can be brought over from another server** (`handlers_db_import.go`,
+  `dbx/online_pg.go`, `db_online_imports`). The source is a connection string typed on the Import page,
+  not a saved connection. It is never returned, never in a job line, an audit entry or an error
+  (`withoutSecrets` on every message that could quote it), and only a replication keeps it: sealed with
+  the same `Sealer` as a saved connection's, in `db_online_imports.source_enc`, because its cutover
+  needs the source hours later. The column is emptied when the import ends (`setImport`), and forgetting
+  a connection with an import under way is refused (`409 import_active`). So is replacing the server an
+  import is under way into, through any connection to it (`refuseServerOfImport`): a major-version
+  upgrade, its revert and switching in a recovered copy would take the subscription away and leave the
+  slot holding the source's log. The capability is the word
+  flag `onlineImport`: `replication` for PostgreSQL itself, `stream` for every other engine that can be
+  restored under another name (CockroachDB, YugabyteDB and TimescaleDB speak PostgreSQL's protocol
+  without publications that carry their tables), `false` for ClickHouse, Oracle and SQLite. The page is
+  the `import` section, in the Operate group, gated on it.
+  - `POST /{id}/imports/inspect` reads the source and keeps nothing: its identity, and for a
+    PostgreSQL pair the report `dbx.InspectReplicationSource` and `InspectReplicationTarget` make —
+    `wal_level`, the REPLICATION attribute (or `rds_replication`), free slots and WAL senders, every
+    table with its replica identity, sequences, unlogged tables and large objects, which replication
+    does not carry. A table with no key is a blocker, with the `ALTER TABLE … REPLICA IDENTITY FULL` to
+    run: once published the source would refuse its own updates and deletes. A subscriber whose login
+    cannot subscribe, and a source that is the target's own cluster (told by `pg_postmaster_start_time()`, which any login
+    reads, because a subscription to its own cluster waits for ever for a slot only it could make) are
+    blockers too.
+    The statement that publishes the tables is handed back for an operator who will run it themselves.
+  - `POST /{id}/imports` always makes a **new** database here (`newDatabaseName`), so an import never
+    overwrites. A row is written first, `running`, and a `database.transfer.<id>.import` job does the
+    rest. Replication: check the source again, create the database, copy the structure through the
+    stream above with the rows left out, publish the tables **both servers have** (an extension's
+    tables the structure copy leaves out would otherwise fail the subscription), make the slot, then
+    `CREATE SUBSCRIPTION` with the slot already made (`create_slot = false`), and the row is
+    `replicating`. The slot is made first on purpose: the subscription is created from a temporary
+    function whose connection string is a bind parameter, because `CREATE SUBSCRIPTION` carries it as a
+    literal and a utility statement is recorded as written by `pg_stat_statements`, which the
+    Statements page reads back — and that statement cannot be run from a function while it makes the
+    slot itself. The conninfo is rebuilt from the parsed parts (`ReplicationConninfo`), so a string
+    cannot make the target server read a file (`sslrootcert`, `passfile`, `service`) or run options.
+    Anything the import made and cannot use is removed when it fails: slot, publication, database.
+    Stream: the new database, `CopyBetween`, and the row is `done`; progress is held in memory
+    (`dbConnState.importProgress`) for the page, and only a line per table goes to the job.
+  - `GET /{id}/imports/{n}` is the live reading, any role: the target's `pg_subscription_rel` (each
+    table `waiting`, `copying`, `copied`, `synchronizing` or `ready`, with the rows a copy has taken
+    from `pg_stat_progress_copy` on PostgreSQL 14+), whether the apply worker runs, the error counts
+    from 15, and the source's `confirmed_flush_lsn` against its current WAL position as the lag in
+    bytes. A row that says it is running with no job to show for it (the dashboard restarted) is
+    settled on the read: a stream is `failed`; a replication is `replicating` if its subscription
+    exists and `failed` otherwise.
+  - `POST /{id}/imports/{n}/cutover` takes `writesStopped: true` — the operator's word that nothing
+    writes to the source, which the cutover cannot see — and refuses a replication whose subscription is
+    gone (`409 import_not_replicating`) or whose tables are not all `ready` (`409 import_copying`). The job reads the source's WAL position once, waits until the
+    slot has confirmed it (`WaitCaughtUp`, bounded by `CatchUpTimeout`), sets every sequence on the
+    target to the source's `last_value` and `is_called` (`SyncSequences`; replication does not carry
+    them), disables the subscription and detaches it from its slot, drops it, drops the slot from the
+    source's side and the publication if the dashboard made it. A failure before the subscription is
+    dropped leaves the import `replicating`, with the reason in `detail`, and the cutover can be asked
+    for again; once it is dropped the data is the target's, and a slot or a publication that could not
+    be removed from the source is a note in `detail` with the statement to run there, not a failure.
+    Nothing is changed on the source but the removal of what the import made there.
+  - `DELETE /{id}/imports/{n}` (`system.admin` and `s.destructive`) stops a replicating import by the
+    same removals, tolerating a source that no longer answers (the warnings say which statement to run
+    there), and forgets one that has ended. The database made here is left; dropping it is the server
+    page's. A running import cannot be removed under its job (`409 transfer_running`).
+  Every mutation is audited (`database.import.start`/`.finish`, `.cutover`/`.cutover.finish`,
+  `.cancel`, `.forget`); the detail has the source's address and user and no secret.
 
 ### Major-version upgrades
 
@@ -2499,7 +2644,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the fourteen it calls): 278 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the fourteen it calls): 285 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -2625,7 +2770,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/table` | read | — | — | — |
 | `GET` | `/databases/{id}/tables` | read | — | — | — |
 
-**Schema** (39)
+**Schema** (40)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -2666,6 +2811,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/outline` | read | — | — | — |
 | `GET` | `/databases/{id}/program` | read | — | — | — |
 | `GET` | `/databases/{id}/relations` | read | — | — | — |
+| `GET` | `/databases/{id}/schema-diff` | read | — | — | — |
 | `GET` | `/databases/{id}/rls` | read | — | — | — |
 | `POST` | `/databases/{id}/rls/test` | `service.control` | — | `database.rls.test` | by content |
 
@@ -2721,7 +2867,7 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/{id}/server/roles/{name}/privileges/revoke` | `system.admin` | — | `database.role.revoke` | refused |
 | `GET` | `/databases/{id}/server/settings` | read | — | — | — |
 
-**Moving data** (13)
+**Moving data** (19)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -2736,6 +2882,12 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/export/status` | read | — | — | — |
 | `POST` | `/databases/{id}/import` | `service.control` | by content: `truncate` | `database.import` | refused |
 | `POST` | `/databases/{id}/import/upload` | `service.control` | by content: `replace` | `database.import` | refused |
+| `GET` | `/databases/{id}/imports` | read | — | — | — |
+| `POST` | `/databases/{id}/imports` | `system.admin` | — | `database.import.start`, `.finish` | refused |
+| `POST` | `/databases/{id}/imports/inspect` | `system.admin` | — | — | refused |
+| `GET` | `/databases/{id}/imports/{importId}` | read | — | — | — |
+| `DELETE` | `/databases/{id}/imports/{importId}` | `system.admin` + `destructive` | yes | `database.import.cancel`, `.forget` | refused |
+| `POST` | `/databases/{id}/imports/{importId}/cutover` | `system.admin` | — | `database.import.cutover`, `.cutover.finish` | refused |
 | `POST` | `/databases/{id}/orm` | read | — | `database.orm.generate` | open |
 | `POST` | `/databases/{id}/restore` | `destructive` | yes | `database.restore`, `.finish` | refused |
 

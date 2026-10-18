@@ -261,6 +261,9 @@ func (s *Server) handleDBUpgradeStart(w http.ResponseWriter, r *http.Request) er
 	if err := s.refuseServerOfProtected(r.Context(), plan.conn); err != nil {
 		return err
 	}
+	if err := s.refuseServerOfImport(r.Context(), plan.conn); err != nil {
+		return err
+	}
 	window, _, err := s.upgradeRecords(r.Context(), plan.conn.ID)
 	if err != nil {
 		return err
@@ -318,6 +321,9 @@ func (s *Server) handleDBUpgradeRevert(w http.ResponseWriter, r *http.Request) e
 		return httpx.Err(http.StatusServiceUnavailable, "docker_unavailable", "this host has no Docker socket")
 	}
 	if err := s.refuseServerOfProtected(r.Context(), conn); err != nil {
+		return err
+	}
+	if err := s.refuseServerOfImport(r.Context(), conn); err != nil {
 		return err
 	}
 	rec, err := s.openUpgrade(r.Context(), id)

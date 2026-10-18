@@ -454,9 +454,10 @@ for (const [label, viewport] of [
       expect(await filledPills(page), `fully rounded filled chips on ${path}`).toEqual([])
       const seen = await registers(page)
       expectOneRegister(path, seen)
-      // Adding a database is the section's one sequence with an outcome.
+      // Adding a database and bringing one over from another server are the
+      // section's sequences with an outcome.
       expect(seen.registers.includes("flow"), `${path} is in the wrong register`).toBe(
-        path === "/databases/new",
+        path === "/databases/new" || path === "/databases/1/import",
       )
       const sideways = await page.evaluate(() =>
         [document.documentElement, ...document.querySelectorAll("[data-slot=page]")]

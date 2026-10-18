@@ -208,6 +208,12 @@ nothing the account may do; every route still answers by role. See
 State is SQLite in `JD_DATA_DIR`, schema as one `CREATE TABLE IF NOT EXISTS` block in
 `internal/store/store.go` with no migration tool ([invariant 8](../security/invariants.md#invariants-that-must-not-regress)). The file is still named `vpsd.db`
 through the rename: moving it would strand every existing install's accounts, audit log and secrets.
+For as long as the store is open it holds open file description locks on SQLite's shared-lock range and
+on the `-shm` dead-man switch (`store/wal_guard.go`). SQLite's own locks belong to the process, so a
+close of the file anywhere in it — a scan reading its header, a download, an archive — releases them,
+and another SQLite closing its connection afterwards would believe it was the last one and delete the
+`-wal` and `-shm` the store is still writing through, corrupting the database. Inspect a live store
+read-only: `sqlite3 'file:/var/lib/just-dashboard/vpsd.db?mode=ro'`.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
 `api_tokens`, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`, the statement history's `db_statement_intervals`, `db_statement_shapes` and `db_statement_samples`, point-in-time recovery's `db_wal_archives` — with the destination's keys and the archive's private key sealed — `db_wal_restore_points` and `db_wal_restores`, `db_upgrades`, and `db_tls_ca` and `db_server_tls` for the certificate authority, whose key is sealed, and the certificates issued from it); boards (`boards`, `sticky_boards`); Remote Desktop (`remote_desktop_computers`, with sealed passwords and the stream bridge's id once paired, and
 `remote_desktop_sessions`); backups
