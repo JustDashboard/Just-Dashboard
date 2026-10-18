@@ -94,8 +94,10 @@ export function RunStep({
           )}
           {imp.status === "done" && (
             <Notice tone="success" title={`${imp.database} is on this server`}>
-              {imp.detail || "The import finished."}
-              {imp.mode === "replication" ? " It no longer follows the source." : ""}
+              {imp.detail ||
+                (imp.mode === "replication"
+                  ? "It no longer follows the source."
+                  : "The import finished.")}
             </Notice>
           )}
           {live.sourceError && replicating && (

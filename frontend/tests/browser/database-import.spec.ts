@@ -595,7 +595,7 @@ test("a finished import leads to its database", async ({ page }) => {
     imports: [
       record({
         status: "done",
-        detail: "shop_copy is a copy of shop on db.example.com:5432, and no longer follows it",
+        detail: "shop_copy is a copy of shop on db.example.com:5432, and no longer follows it.",
       }),
     ],
   })
@@ -603,7 +603,9 @@ test("a finished import leads to its database", async ({ page }) => {
   await expect(question(page, "Is it all here?")).toBeVisible()
   const run = page.getByRole("region", { name: /→ shop_copy/ })
   await expect(run).toContainText("shop_copy is on this server")
-  await expect(run).toContainText("It no longer follows the source.")
+  // The server's own words say it no longer follows the source, once.
+  await expect(run).toContainText("and no longer follows it.")
+  await expect(run).not.toContainText("It no longer follows the source.")
   await run.getByRole("button", { name: "Open shop_copy" }).click()
   await expect
     .poll(() => sent.some((one) => one.request === "POST /databases/1/server/databases/connect"))
@@ -917,7 +919,7 @@ test("screenshots of each state @shots", async ({ page }) => {
     imports: [
       record({
         status: "done",
-        detail: "shop_copy is a copy of shop on db.example.com:5432, and no longer follows it",
+        detail: "shop_copy is a copy of shop on db.example.com:5432, and no longer follows it.",
       }),
     ],
   })
