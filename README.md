@@ -120,7 +120,8 @@ free.
 - PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB, Redis
 - Table editor with staged, reviewed edits and a SQL editor with plans and stored programs
   (DELIMITER, GO and PL/SQL scripts)
-- Schema browser, diagram, schema comparison with its migration SQL, code generation, performance
+- Schema browser, diagram, schema comparison with its migration SQL, code generation, mock seed data
+  written parents first, performance
 - Key browser and console for Redis, documents and pipelines for MongoDB
 - Protected connections, dump backups, PostgreSQL major-version upgrades with a way back, accounts,
   grants and a live map

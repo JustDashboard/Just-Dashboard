@@ -14,7 +14,7 @@ capability table below), never by a page.
 discovery, dumps. `internal/api` is the routes. `handlers_db.go` mounts `/databases` behind the
 protected-connection guard, and each surface registers its own routes from its own file —
 `mountDatabaseAdminRoutes`, `…RedisRoutes`, `…MongoRoutes`, `…InventoryRoutes`, `…ConnectionRoutes`,
-`…WorkbenchRoutes`, `…SchemaRoutes`, `…OpsRoutes`, `…TransferRoutes`, `…PITRRoutes` and `…UpgradeRoutes` — grouped by the capability
+`…WorkbenchRoutes`, `…SchemaRoutes`, `…OpsRoutes`, `…TransferRoutes`, `…SeedRoutes`, `…PITRRoutes` and `…UpgradeRoutes` — grouped by the capability
 it needs. [Routes](#routes) lists every one with its capability, whether it is destructive, the
 action it is audited as and what a protected connection does with it. The pages over them are the
 `/databases/*` row of the [frontend feature map](../frontend/feature-map.md), and the checks that
@@ -57,7 +57,7 @@ depend on what a request carries are stated once in
   answer from the interfaces their dialects implement (`OpsCapabilities`, `ExplainForms`) and Redis and
   MongoDB are named beside them; the ones that belong to one surface are registered beside its code from
   an `init` (`RegisterCapabilities`, in `discovery_`, `admin_`, `workbench_`, `catalog_`, `ops_`,
-  `redis_`, `mongo_`, `transfer_`, `upgrade_`, `orm_` and `alert_capabilities.go`). A registration replaces a row of the same
+  `redis_`, `mongo_`, `transfer_`, `upgrade_`, `orm_`, `seed_` and `alert_capabilities.go`). A registration replaces a row of the same
   name for every engine, so a flag stated twice is a defect and `TestCapabilityTableIsCoherent` refuses
   one. A flag is a yes or a no; a few are a list (`catalogGroups`, `ddlOperations`, `maintenanceActions`,
   `ormTargets`, `exportFormats`, `importFormats`, `alertKinds`; empty and never null) or a word where a feature comes
@@ -69,8 +69,8 @@ depend on what a request carries are stated once in
   that is true to a route that answers.
 - **The served table is also a file, and a test holds the two together.** The frontend's tests run
   with no server, so what `GET /databases/drivers` answers is kept as
-  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 126
-  flags (111 a yes or a no, nine a word, seven a list) and its flavours' rows — which the engine
+  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 129
+  flags (113 a yes or a no, nine a word, seven a list) and its flavours' rows — which the engine
   registry's tests (`frontend/src/components/database/engine.test.js`) and the browser fixture
   (`frontend/tests/browser/database-fixture.ts`) read. `TestTheDriverCatalogueSnapshotIsCurrent`
   fails the moment the route and the file differ. After giving a flag to an engine or taking one
@@ -2104,6 +2104,64 @@ the detail of each classifier is below, with the surface it guards.
   PostgreSQL, SQL Server and Oracle ones drop what they made, run the generated SQL and require the same
   schema back.
 
+### Seed data
+
+- **Rows of mock data for tables that exist, beside the code generators** (`dbx/seed*.go`,
+  `api/handlers_db_seed.go`). `POST /databases/{id}/seed/plan` is a read: it loads the tables through
+  `LoadORMSchema` and the generators' prepared model, so it knows what they know — which column the
+  engine numbers itself (an identity, a serial, AUTO_INCREMENT, SQLite's rowid), which is computed or a
+  rowversion (`importComputedColumns` beside the model's own flag), an enum and its labels, the primary
+  key and the usable unique indexes — and answers with the tables in the order they are written, how
+  every column is filled and the first eight rows of each. It is open on a protected connection and
+  records nothing, as `/orm` does. `POST /databases/{id}/seed` writes the same request at
+  `service.control`, is refused on a protected connection, and is audited as `database.seed` with the
+  seed number and each table's count — never a value. The seed number fixes the random stream: a
+  column's value in row *n* depends on the seed, the table, the column and *n*, and on nothing else, so
+  the preview is the rows the write writes. A request that names none is given one, which the answer
+  carries; the page sends one always and moves to a new one after a write.
+- **A column's generator** (`seed_generators.go`, forty-seven of them: people, places, business,
+  internet, text, numbers, moments, a value of the column's own list, JSON, bytes) is chosen from its
+  name in words first (`createdAt`, `created_at` and `CREATED_AT` are the same two) and its type
+  second (`seed_infer.go`), and never one the type rules out; a bare `name` reads by its table (a
+  person's, a product's, a company's, a category's). What the column's definition holds it to wins over
+  both: an enum's labels, a set, and a CHECK of the two shapes read — the column in a list (PostgreSQL's
+  `= ANY (ARRAY[…])`, SQL Server's chain of `OR`ed equalities) and the column between numeric bounds.
+  CHECKs come from PostgreSQL's catalogue with the model, from the CREATE text on MySQL and SQLite,
+  and from `sys.check_constraints` and `all_constraints` on SQL Server and Oracle; anything else is the
+  table's to refuse. A column with a default and nothing in its name or its checks to say what it holds
+  keeps its default. The reader may choose another generator per column from the plan's `choices`; each
+  column also says which one it opens with (`inferred`). Every address and number is one that reaches
+  nobody: RFC 2606's example domains, RFC 5737's documentation ranges, the 555-01xx and 07700 900xxx
+  ranges set aside for fiction. A value is made as the text an import would carry and is bound by the
+  import's own `bindValue`, so a seed reaches an engine by the road a file does.
+- **Keys.** A foreign key holds a value its parent has. Tables are ordered parents first; a parent the
+  same seed fills is written first and its new rows are what the child points at — the values the seed
+  made for them, or, for a key the server numbers, the rows past the largest number it held before.
+  A parent outside the seed is read for up to 10,000 of the keys it has. A table that points at itself
+  is written in chunks of about a fifth of its rows, reading its own keys between them, so its first rows
+  are empty there and the rest point at earlier ones. Tables that point at each other are broken at a key
+  that can be left empty, which then points at what its parent held before the seed; a cycle with no
+  such key leaves its tables out. A one-to-one key points at each parent row once, and caps the table's
+  rows at the parent's. A unique column's values are kept apart — a number counts up from past the
+  largest one there, a text carries the row's own number counted from the table's rows — and a key of
+  several columns is drawn again until it differs from every earlier row's. A required key with
+  nothing to point at leaves its table out with the reason, and so does a column of a type no generator
+  writes that has no default and cannot be empty.
+- **The write is one transaction through the import's writer** (`seed_write.go`, `importRun`): batches
+  under each engine's parameter limit, PostgreSQL's savepoints, SQL Server's conversions in the
+  statement. A row the table refuses for a reason the seed could not see — a CHECK on an expression, a
+  trigger, a unique index over an expression — is left out and counted with its reason, and the rest
+  carries on; a table whose parent took none of its seeded rows is left out. On ClickHouse, which has no
+  transaction, each table is its own batch and a table written before a failure stays (`atomic: false`).
+  A request may name 100 tables and 10,000 rows a table, 100,000 in all.
+- **The page** is a card of its own on the Generate page (`components/database/generate/seed.tsx`,
+  `seed-model.ts`), gated on `seed`: the tables (every one, or the ones ticked), the rows each and a
+  table's own count, a tab per table in the order they are written with its first rows under column
+  heads that name each column's type and generator, the statement a row is written with, and
+  `SqlReview` before the write. Tests: `dbx/seed_test.go` (SQLite, and the pure parts),
+  `dbx/seed_live_test.go` (PostgreSQL, MariaDB, MySQL 8, SQL Server, Oracle and ClickHouse; the tables
+  are named `jdt_seed_…`), `api/handlers_db_seed_test.go` and `tests/browser/database-seed.spec.ts`.
+
 ### Moving data: export, import, dumps, restore and copy
 
 - **The export is the view, not the table.** `/databases/{id}/export` takes the grid's `filters`,
@@ -2174,7 +2232,11 @@ the detail of each classifier is below, with the surface it guards.
   `TestLiveImportLeavesEveryTypedColumnEmpty` imports a row of nothing but NULLs under every type that
   could object, on each engine. **Oracle** reads a text as a date by the session's NLS format, so a value
   in an ISO form is bound as the instant it names (`importISOTime`), and `true`/`false` go into a numeric
-  column as 1 and 0 — `NUMBER(1)` is what a column of them is created as there. ClickHouse has no
+  column as 1 and 0 — `NUMBER(1)` is what a column of them is created as there. A row Oracle refuses
+  has its statement prepared again before the next one: go-ora sent a statement that had been refused
+  every time it ran in a form Oracle 23 takes for a protocol violation, and at the sixth the server
+  ended the session (ORA-03138), so an import whose first rows were bad lost its connection and
+  imported nothing (`TestLiveOracleImportSkipsMoreThanAFewBadRows`). ClickHouse has no
   transaction and its driver cannot continue past a refused row, so `atomic` is false there and a refused
   row ends the import before anything is sent. Mongo's upload inserts in batches; its `replace` stages
   the documents and swaps them in with `$out`, which keeps the collection's indexes and leaves it
@@ -2644,7 +2706,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the fourteen it calls): 285 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the fifteen it calls): 287 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -2670,7 +2732,7 @@ and `protectReadOnlyConnections`.
   through with `?preview=1`, which shows the statement and runs nothing) or `refused` with
   `409 connection_read_only`. It is `protectedRouteVerdicts` in `api/handlers_db_protect_test.go`,
   the list written out by hand that `TestProtectionCoversEveryMutatingRoute` holds the router to:
-  44 open, 13 by content, 28 preview only, 69 refused.
+  45 open, 13 by content, 28 preview only, 74 refused.
 
 **Every database** (23)
 
@@ -2867,7 +2929,7 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/{id}/server/roles/{name}/privileges/revoke` | `system.admin` | — | `database.role.revoke` | refused |
 | `GET` | `/databases/{id}/server/settings` | read | — | — | — |
 
-**Moving data** (19)
+**Moving data** (21)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -2890,6 +2952,8 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/{id}/imports/{importId}/cutover` | `system.admin` | — | `database.import.cutover`, `.cutover.finish` | refused |
 | `POST` | `/databases/{id}/orm` | read | — | `database.orm.generate` | open |
 | `POST` | `/databases/{id}/restore` | `destructive` | yes | `database.restore`, `.finish` | refused |
+| `POST` | `/databases/{id}/seed` | `service.control` | — | `database.seed` | refused |
+| `POST` | `/databases/{id}/seed/plan` | read | — | — | open |
 
 **A server's release** (5)
 
