@@ -221,6 +221,11 @@
           "kind": "added",
           "text": "Show where a measured query plan spent its time and which steps the planner misjudged",
           "detail": "Databases → Query → Plan draws each measured step's own time beside the time of everything under it, against the whole statement's, and can list the steps slowest first. A step whose rows came out ten times more or fewer than planned says so under its name, as \"est 12 · actual 48,210 (×4,000)\". Oracle's, ClickHouse's and an older MySQL's printed plans are drawn as the same tree."
+        },
+        {
+          "kind": "added",
+          "text": "Ask an assistant in the SQL editor to write a statement, explain an error or a plan, or draft a row-level security policy",
+          "detail": "It is off until an administrator chooses who answers: Claude with an Anthropic API key, or an OpenAI-compatible server such as a model on this machine; the key is sealed with the master key and checked before it is saved. The assistant is told the structure of the schema — names, types, keys and references — and sees rows only in a result attached to a question. What it writes opens in a tab or at the cursor and runs only with your own Run, and reading more tables waits for your Allow. It is refused on protected connections, and every question is audited with its connection, who asked and the tokens it cost."
         }
       ]
     },

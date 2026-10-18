@@ -563,6 +563,7 @@ Docker): `database-shell.spec.ts`, `database-control-center.spec.ts`,
 the databases each reaches), `database-home.spec.ts`, `database-data.spec.ts`,
 `database-query.spec.ts`, `database-query-bodies.spec.ts` (stored programs and script separators in
 the editor), `database-explain.spec.ts` (the Plan tree's measured, estimated and printed plans),
+`database-assistant.spec.ts` (the editor's assistant, its answers streamed by the mock),
 `database-schema.spec.ts`, `database-programs.spec.ts` (functions, procedures and triggers), `database-rls.spec.ts` (row-level
 security, the role test, and function and column grants), `database-redis.spec.ts`, `database-mongo.spec.ts`,
 `database-performance.spec.ts` and `database-logos.spec.ts`.

@@ -1640,6 +1640,7 @@ var gatedCapabilities = []string{
 	// the workbench
 	"sql", "console", "changeSets", "keylessEdits", "updateDefault", "script", "transactions", "queryCancel",
 	"dollarQuoting", "regexFilter", "rowEstimate", "cellRead", "explainJSON", "explainAnalyze", "indexWhatIf", "missingIndexes",
+	"assistant", "assistantPolicy",
 	// what an AI client reaches through the MCP endpoint
 	"mcp",
 	// the schema

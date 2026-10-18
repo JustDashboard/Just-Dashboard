@@ -104,6 +104,9 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		// SQL Server's own list of the indexes its plans wanted.
 		"indexWhatIf":    "postgres -cockroachdb -yugabytedb",
 		"missingIndexes": "sqlserver",
+		// The editor's assistant, and the policies it drafts.
+		"assistant":       "sql",
+		"assistantPolicy": "postgres -cockroachdb",
 		// What an AI client reaches through the MCP endpoint.
 		"mcp": "sql",
 

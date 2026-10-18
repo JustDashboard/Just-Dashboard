@@ -246,6 +246,8 @@ const NO_CAPABILITIES: DbCapabilities = {
   explainAnalyze: false,
   indexWhatIf: false,
   missingIndexes: false,
+  assistant: false,
+  assistantPolicy: false,
   mcp: false,
   ddl: false,
   schemas: false,
