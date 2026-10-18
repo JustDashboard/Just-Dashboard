@@ -19,8 +19,8 @@ type Principal struct {
 	SessionID string
 	TokenID   int64
 	// Token is the key behind a token principal, scope and all.
-	Token     *auth.APIToken
-	Kind      string // "session" | "token"
+	Token *auth.APIToken
+	Kind  string // "session" | "token"
 	// Scope is the one capability a scoped API key holds; empty for a session
 	// and for an ordinary key.
 	Scope     string

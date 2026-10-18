@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/mcp"
 )
 
@@ -106,8 +105,12 @@ func (b *mcpBench) key(owner *auth.User, grants ...auth.TokenConnection) string 
 	return secret
 }
 
-func read(id int64) auth.TokenConnection  { return auth.TokenConnection{ConnectionID: id, Access: auth.AccessRead} }
-func write(id int64) auth.TokenConnection { return auth.TokenConnection{ConnectionID: id, Access: auth.AccessWrite} }
+func read(id int64) auth.TokenConnection {
+	return auth.TokenConnection{ConnectionID: id, Access: auth.AccessRead}
+}
+func write(id int64) auth.TokenConnection {
+	return auth.TokenConnection{ConnectionID: id, Access: auth.AccessWrite}
+}
 
 func (b *mcpBench) post(key, body string, headers map[string]string) *httptest.ResponseRecorder {
 	b.t.Helper()
@@ -279,8 +282,10 @@ func TestAnMCPKeyOpensNoOtherRoute(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		b.h.ServeHTTP(w, req)
+		// A 403 is the key refused, or a route that refuses every caller
+		// before it reads a credential, as sign-in does without its header.
 		if w.Code < 400 || (w.Code == http.StatusForbidden && !strings.Contains(w.Body.String(), "key_scope") &&
-			!strings.Contains(w.Body.String(), "network_denied")) {
+			!strings.Contains(w.Body.String(), "network_denied") && !strings.Contains(w.Body.String(), "csrf_required")) {
 			t.Errorf("%s %s answered an MCP key with %d: %s", rt.method, rt.pattern, w.Code, strings.TrimSpace(w.Body.String()))
 		}
 	}
@@ -376,7 +381,7 @@ func TestTheMCPEndpointSpeaksBothEras(t *testing.T) {
 	if w := b.post(key, `{"jsonrpc":"2.0","id":1,"method":"ping"}`, map[string]string{"Origin": "https://evil.example"}); w.Code != http.StatusForbidden {
 		t.Errorf("a foreign Origin: %d", w.Code)
 	}
-	if w := b.post(key, `{"jsonrpc":"2.0","id":1,"method":"ping"}`, map[string]string{"Origin": "http://example.com"}); w.Code != http.StatusOK {
+	if w := b.post(key, `{"jsonrpc":"2.0","id":1,"method":"ping"}`, map[string]string{"Origin": "https://example.com"}); w.Code != http.StatusOK {
 		t.Errorf("this dashboard's own Origin: %d %s", w.Code, w.Body.String())
 	}
 }
@@ -616,9 +621,9 @@ func TestMCPKeysAreMadeForDatabasesTheEndpointReaches(t *testing.T) {
 		status int
 		code   string
 	}{
-		"a protected database": {body(read(b.vault)), http.StatusConflict, "connection_read_only"},
-		"a Redis server":       {body(read(b.cache)), http.StatusBadRequest, "bad_request"},
-		"no database":          {body(), http.StatusBadRequest, "bad_request"},
+		"a protected database":  {body(read(b.vault)), http.StatusConflict, "connection_read_only"},
+		"a Redis server":        {body(read(b.cache)), http.StatusBadRequest, "bad_request"},
+		"no database":           {body(), http.StatusBadRequest, "bad_request"},
 		"one that is not there": {body(read(999)), http.StatusBadRequest, "bad_request"},
 	} {
 		if w := c.do(http.MethodPost, "/api/v1/tokens/mcp", c2.body, nil); w.Code != c2.status || !strings.Contains(w.Body.String(), c2.code) {
@@ -664,12 +669,15 @@ func TestMCPKeysAreMadeForDatabasesTheEndpointReaches(t *testing.T) {
 			t.Errorf("the key list says %+v", tok)
 		}
 	}
-	_ = dbx.DriverSQLite
 }
 
 func mustUser(t *testing.T, s *Server, username string) *auth.User {
 	t.Helper()
-	u, err := s.Auth.UserByUsername(t.Context(), username)
+	var id int64
+	if err := s.Store.DB.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	u, err := s.Auth.UserByID(t.Context(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
