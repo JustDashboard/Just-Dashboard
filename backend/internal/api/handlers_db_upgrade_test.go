@@ -518,9 +518,9 @@ func TestFinishingAnUpgradeRemovesTheOldServer(t *testing.T) {
 		got.Window.SafetyDump != "app-safety.dump" || !strings.Contains(got.Reason, "Finish or revert") {
 		t.Fatalf("reading with the old server kept = %+v %+v", got, got.Window)
 	}
-	if rec := do(t, admin, http.MethodPost, base, `{"version":"17"}`); rec.Code != http.StatusConflict {
-		// 17 is the newest offered once the server runs it, or the window
-		// refuses: either way nothing starts.
+	if rec := do(t, admin, http.MethodPost, base, `{"version":"18"}`); rec.Code != http.StatusConflict {
+		// 18 is the newest release offered; the window refuses it while the
+		// old server is kept, and nothing starts.
 		t.Errorf("a second upgrade while the first is open = %d %s", rec.Code, rec.Body.String())
 	}
 

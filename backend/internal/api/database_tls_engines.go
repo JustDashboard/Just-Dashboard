@@ -85,10 +85,11 @@ func certFiles(keyName string) func(*dbtls.Leaf, []byte) []dbTLSFile {
 }
 
 var dbTLSEngines = map[string]dbTLSEngine{
-	"postgres":    postgresTLS,
-	"pgvector":    postgresTLS,
-	"postgis":     postgresTLS,
-	"timescaledb": postgresTLS,
+	"postgres":      postgresTLS,
+	"pgvector":      postgresTLS,
+	"postgis":       postgresTLS,
+	"postgres-full": postgresTLS,
+	"timescaledb":   postgresTLS,
 	"mysql": {
 		account: "mysql", servers: []string{"mysqld"}, keyFile: "server.key", optional: true,
 		args: func(require bool) []string {
