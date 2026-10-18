@@ -107,6 +107,9 @@ var protectedRouteVerdicts = map[string]string{
 	"POST /query":                    byContent,
 	"POST /script":                   byContent,
 	"POST /export/query":             byContent,
+	// The editor's assistant writes nothing, and is refused all the same:
+	// nothing about a protected connection is sent to a model.
+	"POST /assistant": isRefused,
 	// Rows: a change set can be shown as its statements and not applied.
 	"POST /changes": byContent,
 	"POST /rows":    isRefused,

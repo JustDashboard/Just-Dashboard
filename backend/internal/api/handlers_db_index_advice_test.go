@@ -138,6 +138,11 @@ func TestLiveWhatIfWithoutHypoPGSaysSo(t *testing.T) {
 	s := testServer(t)
 	id := saveOpsConnection(t, s, "advice-plain", dbx.DriverPostgres, dsn)
 	admin := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	// CI points the DSN at a closed port, so an unreachable server is a skip,
+	// checked through the product's own ping route as liveAPIRouter does.
+	if rec := admin.do(http.MethodGet, pathf("/api/v1/databases/%d", id)+"/ping", "", nil); !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Skipf("postgres unreachable: %s", rec.Body.String())
+	}
 	body := adviceBody(map[string]any{"query": "select 1", "table": "t", "columns": []string{"a"}})
 	rec := admin.do(http.MethodPost, pathf("/api/v1/databases/%d", id)+"/explain/what-if", body, nil)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "the hypopg extension") ||

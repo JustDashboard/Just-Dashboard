@@ -1880,6 +1880,8 @@ export type DbCapabilityFlag =
   | "explainAnalyze" // a plan measured by running the statement
   | "indexWhatIf" // POST /explain/index-candidates and /explain/what-if: an index tried on a plan with HypoPG
   | "missingIndexes" // GET /missing-indexes: SQL Server's own list of the indexes its plans wanted
+  | "assistant" // POST /assistant: the editor's assistant drafts SQL from the schema
+  | "assistantPolicy" // the assistant drafts row-level security policies
   // The schema.
   | "ddl" // the create-table form; gate the other forms on `ddlOperations`
   | "schemas" // more than one namespace to choose from

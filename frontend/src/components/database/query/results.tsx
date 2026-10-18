@@ -3,7 +3,7 @@
 import { MenuItemText } from "@/components/ui/menu-item-text"
 
 import { useEffect, useId, useRef, useState } from "react"
-import { ChevronDown, Download, StopCircle, Warning } from "@/components/icons"
+import { ChevronDown, Download, Sparkles, StopCircle, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { DbExportFormat } from "@/lib/types"
 import { EmptyState, Notice } from "@/components/state"
@@ -82,6 +82,8 @@ export function Results({
   onExport,
   exporting,
   onShowInEditor,
+  onAskAboutError,
+  onAskAboutPlan,
   empty,
   starters,
   onStart,
@@ -110,6 +112,10 @@ export function Results({
   exporting: boolean
   /** Marks a failed statement in the editor. */
   onShowInEditor: (step: RunStep) => void
+  /** Asks the editor's assistant why a statement failed, where it is set up. */
+  onAskAboutError?: (step: RunStep) => void
+  /** Asks it what the plan says. */
+  onAskAboutPlan?: () => void
   /** The editor holds no statement. */
   empty: boolean
   /** Diagnostics to start from when it holds none. */
@@ -182,6 +188,7 @@ export function Results({
       <PlanView
         explained={held?.explain}
         onExplain={onExplain}
+        onAsk={onAskAboutPlan}
         canAnalyze={canAnalyze}
         why={noPlanWhy}
         onOpenStatement={onOpenStatement}
@@ -296,9 +303,17 @@ export function Results({
               }
               text={step.error ?? "The engine gave no reason."}
               action={
-                <Button size="xs" variant="outline" onClick={() => onShowInEditor(step)}>
-                  Show in the editor
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="xs" variant="outline" onClick={() => onShowInEditor(step)}>
+                    Show in the editor
+                  </Button>
+                  {onAskAboutError && (
+                    <Button size="xs" variant="outline" onClick={() => onAskAboutError(step)}>
+                      <Sparkles />
+                      Ask the assistant
+                    </Button>
+                  )}
+                </div>
               }
             >
               <p className="flex min-w-0 items-center gap-2">

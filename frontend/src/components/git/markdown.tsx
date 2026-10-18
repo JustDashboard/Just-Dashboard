@@ -20,23 +20,34 @@ import { Well } from "@/components/panel"
 export function Markdown({
   source,
   repoUrl,
+  code,
   className,
 }: {
   source: string
   /** The repository's page on its forge, e.g. `https://github.com/owner/name`. */
   repoUrl?: string
+  /**
+   * Draws a fenced block in place of the plain well, for a page whose code
+   * blocks are things to act on: the SQL editor's assistant gives each
+   * statement it wrote the verbs that open it in the editor.
+   */
+  code?: (block: { lang: string; v: string }) => React.ReactNode
   className?: string
 }) {
   const blocks = useMemo(() => parseMarkdown(source), [source])
   const forge = repoUrl ? new URL(repoUrl).origin : undefined
   return (
     <div className={cn("min-w-0 space-y-2.5 text-body leading-relaxed break-words", className)}>
-      <Blocks blocks={blocks} repoUrl={repoUrl} forge={forge} />
+      <Blocks blocks={blocks} repoUrl={repoUrl} forge={forge} code={code} />
     </div>
   )
 }
 
-type Links = { repoUrl?: string; forge?: string }
+type Links = {
+  repoUrl?: string
+  forge?: string
+  code?: (block: { lang: string; v: string }) => React.ReactNode
+}
 
 const HEADING = [
   "text-title font-semibold",
@@ -74,6 +85,7 @@ function BlockView({ block, ...links }: { block: Block } & Links) {
         </p>
       )
     case "code":
+      if (links.code) return links.code(block)
       return (
         <Well className="max-h-96 p-2.5 text-hint whitespace-pre" aria-label={block.lang || "code"}>
           {block.v}

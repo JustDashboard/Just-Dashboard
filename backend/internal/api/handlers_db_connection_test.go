@@ -1640,6 +1640,7 @@ var gatedCapabilities = []string{
 	// the workbench
 	"sql", "console", "changeSets", "keylessEdits", "updateDefault", "script", "transactions", "queryCancel",
 	"dollarQuoting", "regexFilter", "rowEstimate", "cellRead", "explainJSON", "explainAnalyze", "indexWhatIf", "missingIndexes",
+	"assistant", "assistantPolicy",
 	// the schema
 	"ddl", "schemas", "catalog", "views", "materializedViews", "routines", "triggers", "sequences", "enums",
 	"comments", "indexes", "extensions", "rowSecurity", "schemaDiff", "pooler",

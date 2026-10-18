@@ -436,6 +436,17 @@ Before these existed, fourteen pages read as fourteen products.
 `Modal`, `PaletteModal` and `SidePanel` are the only assemblers of raw `Dialog` and `Sheet`, and
 `no-restricted-imports` enforces it. A page never opens one itself.
 
+**A conversation is a column of the workbench, not a window over it.** The SQL editor's assistant
+(`database/query/assistant/`) is the editor's third column, on its right with a hairline and a resize
+handle, and lies over the editor like the rail where the frame cannot hold three columns. A question is
+a recessed block on `--surface-header` with what it carried as `Tag`s (*statement*, *result · 20
+rows*), never their values; an answer is the product's Markdown on the pane's own ground, and a
+statement in it is a sunken block with its verbs in words — *Open in a tab*, *Insert*, *Copy* —
+drawn only once the answer has finished, because a statement still arriving may not be whole. A
+request the model makes of the reader is a fence with the two answers as buttons (*Allow*, *Don't
+allow*) that becomes one word once answered. Where the question is written, one line says who it goes
+to and what of the database goes with it, and turns amber while rows are attached.
+
 **What goes inside a task surface is `components/form.tsx`.** A `Field` is a label at `text-body`,
 a control, and one line under it — a hint, or the error while there is one; `FieldRow` puts two or
 three side by side; `FormSection` opens a part of a longer form with a title and a hairline;

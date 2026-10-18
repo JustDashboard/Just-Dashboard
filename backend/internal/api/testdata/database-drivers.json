@@ -12,6 +12,8 @@
         "backup_missed"
       ],
       "aofRewrite": false,
+      "assistant": true,
+      "assistantPolicy": true,
       "bulkKeys": false,
       "cancel": true,
       "catalog": true,
@@ -269,6 +271,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": true,
+          "assistantPolicy": true,
           "bulkKeys": false,
           "cancel": true,
           "catalog": true,
@@ -482,6 +486,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": true,
+          "assistantPolicy": true,
           "bulkKeys": false,
           "cancel": true,
           "catalog": true,
@@ -693,6 +699,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": true,
+          "assistantPolicy": false,
           "bulkKeys": false,
           "cancel": true,
           "catalog": true,
@@ -897,6 +905,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": true,
+          "assistantPolicy": true,
           "bulkKeys": false,
           "cancel": true,
           "catalog": true,
@@ -1117,6 +1127,8 @@
         "backup_missed"
       ],
       "aofRewrite": false,
+      "assistant": true,
+      "assistantPolicy": false,
       "bulkKeys": false,
       "cancel": true,
       "catalog": true,
@@ -1366,6 +1378,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": true,
+          "assistantPolicy": false,
           "bulkKeys": false,
           "cancel": true,
           "catalog": true,
@@ -1570,6 +1584,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": true,
+          "assistantPolicy": false,
           "bulkKeys": false,
           "cancel": true,
           "catalog": true,
@@ -1776,6 +1792,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": true,
+          "assistantPolicy": false,
           "bulkKeys": false,
           "cancel": true,
           "catalog": true,
@@ -1978,6 +1996,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": true,
+          "assistantPolicy": false,
           "bulkKeys": false,
           "cancel": true,
           "catalog": true,
@@ -2177,6 +2197,8 @@
         "backup_missed"
       ],
       "aofRewrite": false,
+      "assistant": true,
+      "assistantPolicy": false,
       "bulkKeys": false,
       "cancel": false,
       "catalog": true,
@@ -2399,6 +2421,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": true,
+          "assistantPolicy": false,
           "bulkKeys": false,
           "cancel": false,
           "catalog": true,
@@ -2603,6 +2627,8 @@
         "backup_missed"
       ],
       "aofRewrite": false,
+      "assistant": true,
+      "assistantPolicy": false,
       "bulkKeys": false,
       "cancel": false,
       "catalog": true,
@@ -2851,6 +2877,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": true,
+          "assistantPolicy": false,
           "bulkKeys": false,
           "cancel": false,
           "catalog": true,
@@ -3057,6 +3085,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": true,
+          "assistantPolicy": false,
           "bulkKeys": false,
           "cancel": false,
           "catalog": true,
@@ -3270,6 +3300,8 @@
         "backup_missed"
       ],
       "aofRewrite": false,
+      "assistant": true,
+      "assistantPolicy": false,
       "bulkKeys": false,
       "cancel": false,
       "catalog": true,
@@ -3493,6 +3525,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": true,
+          "assistantPolicy": false,
           "bulkKeys": false,
           "cancel": false,
           "catalog": true,
@@ -3682,6 +3716,8 @@
         "backup_missed"
       ],
       "aofRewrite": false,
+      "assistant": true,
+      "assistantPolicy": false,
       "bulkKeys": false,
       "cancel": true,
       "catalog": true,
@@ -3919,6 +3955,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": true,
+          "assistantPolicy": false,
           "bulkKeys": false,
           "cancel": true,
           "catalog": true,
@@ -4128,6 +4166,8 @@
         "backup_missed"
       ],
       "aofRewrite": false,
+      "assistant": false,
+      "assistantPolicy": false,
       "bulkKeys": false,
       "cancel": true,
       "catalog": false,
@@ -4279,6 +4319,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": false,
+          "assistantPolicy": false,
           "bulkKeys": false,
           "cancel": true,
           "catalog": false,
@@ -4427,6 +4469,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": false,
+          "assistantPolicy": false,
           "bulkKeys": false,
           "cancel": false,
           "catalog": false,
@@ -4584,6 +4628,8 @@
         "backup_missed"
       ],
       "aofRewrite": true,
+      "assistant": false,
+      "assistantPolicy": false,
       "bulkKeys": true,
       "cancel": false,
       "catalog": false,
@@ -4727,6 +4773,8 @@
             "backup_missed"
           ],
           "aofRewrite": true,
+          "assistant": false,
+          "assistantPolicy": false,
           "bulkKeys": true,
           "cancel": false,
           "catalog": false,
@@ -4869,6 +4917,8 @@
             "backup_missed"
           ],
           "aofRewrite": true,
+          "assistant": false,
+          "assistantPolicy": false,
           "bulkKeys": true,
           "cancel": false,
           "catalog": false,
@@ -5011,6 +5061,8 @@
             "backup_missed"
           ],
           "aofRewrite": true,
+          "assistant": false,
+          "assistantPolicy": false,
           "bulkKeys": true,
           "cancel": false,
           "catalog": false,
@@ -5153,6 +5205,8 @@
             "backup_missed"
           ],
           "aofRewrite": false,
+          "assistant": false,
+          "assistantPolicy": false,
           "bulkKeys": true,
           "cancel": false,
           "catalog": false,
