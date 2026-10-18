@@ -110,10 +110,16 @@ type engineSpec struct {
 // with, so an install can tell a container that is out of date.
 const revisionLabel = engineLabel + ".revision"
 
+// guacdRevision changes whenever the container's own configuration does (its
+// resources, its environment), so an engine made by an older dashboard is
+// made again on the next start; its volume, and the files on it, stay.
+const guacdRevision = "2"
+
 var guacdSpec = engineSpec{
 	name: engineName, role: engineRole, product: "guacd", image: GuacdImage, version: GuacdVersion,
 	port: guacdPort, prefer: 4822, volume: engineVolume, mountAt: engineHome,
 	env: []string{"LOG_LEVEL=info"}, memory: 2 << 30, hostname: "remote-desktop", probe: probeGuacd,
+	revision: guacdRevision,
 }
 
 type dockerEngine struct {
@@ -328,9 +334,12 @@ func (d *dockerEngine) Install(ctx context.Context, progress func(string)) error
 		Mounts:       []mount.Mount{{Type: mount.TypeVolume, Source: d.spec.volume, Target: d.spec.mountAt}},
 		CapDrop:      []string{"ALL"},
 		SecurityOpt:  []string{"no-new-privileges:true"},
-		// Encoding a busy screen is the heaviest thing these do; they get a
-		// smaller share than the dashboard so a session never starves it.
-		Resources:     container.Resources{Memory: d.spec.memory, MemorySwap: d.spec.memory, PidsLimit: &pids, CPUShares: 512},
+		// Encoding a busy screen is the heaviest thing these do, and it is
+		// what caps a session's frame rate: guacd starts an encoder thread
+		// per CPU for each connection. They get the ordinary share of the
+		// CPU, the same as the dashboard's own containers, and no quota,
+		// which would stall a frame half-encoded. Memory is still bounded.
+		Resources:     container.Resources{Memory: d.spec.memory, MemorySwap: d.spec.memory, PidsLimit: &pids},
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyUnlessStopped},
 		LogConfig:     container.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "5m", "max-file": "2"}},
 	}

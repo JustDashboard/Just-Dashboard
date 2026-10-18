@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/remotedesk"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 )
@@ -36,6 +37,12 @@ type Config struct {
 	TLSMode        string
 	TerminalEnable bool
 	AgentMode      bool
+	// RemoteDesktopBridge is a Moonlight Web stream bridge on another
+	// machine, as host:port on the tailnet, in place of the container this
+	// server would run. Empty is the normal case. Remote Desktop's picture
+	// always passes through the bridge, so one near the browser and the
+	// computer spares them the trip to this server and back.
+	RemoteDesktopBridge string
 	// Require2FA makes an authenticator mandatory for every account: a
 	// password-only session then reaches nothing but the enrolment routes.
 	//
@@ -94,17 +101,18 @@ type Config struct {
 func Load() (*Config, error) {
 	l := &loader{}
 	c := &Config{
-		Addr:           env("JD_ADDR", "127.0.0.1:8080"),
-		DataDir:        env("JD_DATA_DIR", "/var/lib/just-dashboard"),
-		MasterKeyHex:   Env("JD_MASTER_KEY"),
-		SessionTTL:     l.duration("JD_SESSION_TTL", 12*time.Hour),
-		IdleTTL:        l.duration("JD_SESSION_IDLE_TTL", 60*time.Minute),
-		DockerHost:     env("JD_DOCKER_HOST", "unix:///var/run/docker.sock"),
-		Site:           env("JD_SITE", "localhost"),
-		TLSMode:        strings.ToLower(env("JD_TLS", "internal")),
-		TerminalEnable: l.boolean("JD_TERMINAL_ENABLED", true),
-		AgentMode:      l.boolean("JD_AGENT_MODE", false),
-		Require2FA:     l.boolean("JD_REQUIRE_2FA", false),
+		Addr:                env("JD_ADDR", "127.0.0.1:8080"),
+		DataDir:             env("JD_DATA_DIR", "/var/lib/just-dashboard"),
+		MasterKeyHex:        Env("JD_MASTER_KEY"),
+		SessionTTL:          l.duration("JD_SESSION_TTL", 12*time.Hour),
+		IdleTTL:             l.duration("JD_SESSION_IDLE_TTL", 60*time.Minute),
+		DockerHost:          env("JD_DOCKER_HOST", "unix:///var/run/docker.sock"),
+		Site:                env("JD_SITE", "localhost"),
+		TLSMode:             strings.ToLower(env("JD_TLS", "internal")),
+		TerminalEnable:      l.boolean("JD_TERMINAL_ENABLED", true),
+		AgentMode:           l.boolean("JD_AGENT_MODE", false),
+		RemoteDesktopBridge: env("JD_REMOTE_DESKTOP_BRIDGE", ""),
+		Require2FA:          l.boolean("JD_REQUIRE_2FA", false),
 		// Empty means "the account's own login shell", read from the host's
 		// passwd file. Naming a shell here would override what the operator
 		// chose with chsh, which is the opposite of behaving like ssh.
@@ -166,6 +174,13 @@ func Load() (*Config, error) {
 	c.DataDir = adoptLegacyData(c.DataDir, "/var/lib/vps-dashboard")
 
 	c.AllowedOrigins = envList("JD_ALLOWED_ORIGINS", "")
+	if c.RemoteDesktopBridge != "" {
+		address, err := remotedesk.ParseBridgeAddress(c.RemoteDesktopBridge)
+		if err != nil {
+			return nil, err
+		}
+		c.RemoteDesktopBridge = address
+	}
 	if len(c.MasterKeyHex) != 64 {
 		return nil, fmt.Errorf("JD_MASTER_KEY must be 64 hex characters (32 bytes); generate one with: openssl rand -hex 32")
 	}

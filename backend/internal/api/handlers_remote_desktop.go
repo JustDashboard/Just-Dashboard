@@ -106,6 +106,28 @@ func (s *Server) remoteDesktopMedia(ctx context.Context) string {
 	return ""
 }
 
+// remoteDesktopBridge is the stream bridge the dashboard drives: Moonlight
+// Web as a container beside guacd, or, when JD_REMOTE_DESKTOP_BRIDGE names
+// one, a bridge on another machine the proxy reaches over the tailnet. The
+// address was checked when the configuration was read.
+func (s *Server) remoteDesktopBridge() remotedesk.Engine {
+	if s.Cfg.RemoteDesktopBridge != "" {
+		if bridge, err := remotedesk.NewRemoteBridge(s.Cfg.RemoteDesktopBridge); err == nil {
+			return bridge
+		}
+	}
+	return remotedesk.NewDockerStreamBridge(s.Cfg.DockerHost, s.remoteDesktopMedia)
+}
+
+// remoteDesktopWarm asks Tailscale for its direct path to a computer before
+// a session opens to it. The network module is made after Remote Desktop's,
+// so it is read when asked rather than when wired.
+func (s *Server) remoteDesktopWarm(ctx context.Context, address string) {
+	if s.modules.network != nil {
+		s.modules.network.TailscaleWarm(ctx, address)
+	}
+}
+
 func firstAddress(values []string) string {
 	if len(values) == 0 {
 		return ""

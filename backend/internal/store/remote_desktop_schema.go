@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS remote_desktop_computers (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   last_session_at INTEGER NOT NULL DEFAULT 0,
-  stream_host_id INTEGER NOT NULL DEFAULT 0
+  stream_host_id INTEGER NOT NULL DEFAULT 0,
+  gfx INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS remote_desktop_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -31,6 +31,12 @@ export type RdComputer = {
   lastSessionAt: number
   /** The stream bridge's id for the computer once it is paired with Sunshine; 0 before. */
   streamHostId: number
+  /**
+   * Whether RDP's Graphics Pipeline is asked for. Off, guacd draws on the
+   * computer's own frame marks, which is smoother and lighter; on, for the
+   * few servers that refuse to connect without it.
+   */
+  gfx: boolean
 }
 
 export type RdReach = {
@@ -100,6 +106,7 @@ export type RdComputerInput = {
   security: string
   layout: string
   peerId: string
+  gfx: boolean
 }
 
 export type RdStreamApp = { id: number; title: string }
@@ -296,12 +303,22 @@ export function sessionProblem(
 }
 
 /**
- * The size to ask the remote screen to be: the frame's own size in device
- * pixels, capped at twice the CSS size so a 3x phone does not ask a PC for a
- * screen three times the bandwidth.
+ * How many of the screen's pixels a Control session asks for per pixel of
+ * the frame. Smooth is one: a 1440 px frame is a 1440 px screen. Sharp is
+ * the browser's own density, capped at two: the same frame on a 2x display
+ * is a 2880 px screen, four times the pixels for the server to encode and
+ * the browser to decode, and that many fewer frames a second.
  */
-export function displaySize(width: number, height: number, ratio: number) {
-  const density = Math.min(Math.max(ratio || 1, 1), 2)
+export type ControlDensity = "smooth" | "sharp"
+
+/**
+ * The size to ask the remote screen to be: the frame's own size, in its
+ * device pixels only when asked for sharpness, and never more than twice
+ * the CSS size so a 3x phone does not ask a PC for a screen three times the
+ * bandwidth.
+ */
+export function displaySize(width: number, height: number, ratio: number, sharp = false) {
+  const density = sharp ? Math.min(Math.max(ratio || 1, 1), 2) : 1
   return {
     width: Math.max(320, Math.round(width * density)),
     height: Math.max(240, Math.round(height * density)),
@@ -309,6 +326,30 @@ export function displaySize(width: number, height: number, ratio: number) {
     density,
   }
 }
+
+/** The tailnet's path to a computer, in a word, when the tailnet knows it. */
+export function pathLabel(peer: Pick<RdPeer, "direct" | "relay"> | undefined) {
+  if (!peer) return undefined
+  if (peer.direct) return "direct"
+  if (peer.relay) return `relayed via ${peer.relay}`
+  return undefined
+}
+
+/**
+ * What a Control session measures of itself each second: the frames guacd
+ * sent, the frames this browser finished drawing, and how long each took
+ * to draw once it arrived. guacd slows down and lowers its picture quality
+ * when that lag grows, so a high lag is the browser holding the session
+ * back and a low client rate with a low lag is the server or the path.
+ */
+export type ControlStats = { serverFps: number; clientFps: number; lagMs: number }
+
+/**
+ * What a stream measures of itself each second: frames shown, the time
+ * from a frame's last packet arriving to its being shown (known over
+ * WebRTC only), and frames dropped since the stream began.
+ */
+export type StreamStats = { fps: number; delayMs?: number; dropped: number }
 
 /** X11 keysyms for the combinations a browser keeps for itself. */
 export const KEYSYM = {
@@ -353,6 +394,17 @@ export type SessionMode = "control" | "stream"
 
 export function sessionMode(raw: string | null | undefined): SessionMode {
   return raw === "stream" ? "stream" : "control"
+}
+
+/**
+ * The mode a computer opens in when the address names none. A Mac that is
+ * paired with Sunshine opens in Stream: Apple's Screen Sharing serves
+ * anything but Apple's own client a few frames a second, so Control on a
+ * Mac is for signing in and setting up. Everything else opens in Control,
+ * which needs nothing installed.
+ */
+export function defaultSessionMode(computer: Pick<RdComputer, "os" | "streamHostId">): SessionMode {
+  return computer.os === "macos" && computer.streamHostId > 0 ? "stream" : "control"
 }
 
 /** Sunshine's port for pairing and the list of what it streams. */
@@ -410,8 +462,11 @@ export const BRIDGE_SETTINGS_KEY = "mlSettings"
  * own menu. H.264, which every browser decodes in hardware; WebRTC when the
  * backend says this browser can reach the bridge's UDP ports ("auto" falls
  * back to the WebSocket should it still fail), else the dashboard's own
- * WebSocket; and a frame queue of one, so a frame that arrives late is
- * dropped for the next rather than shown behind it.
+ * WebSocket; and the bridge's own frame queue of three. The bridge drops a
+ * frame only past that many waiting, and asks Sunshine for a whole new
+ * picture after one: a queue of one dropped frames on every hiccup and
+ * spent the bitrate on keyframes, which was a rougher picture, not a
+ * sooner one.
  */
 export function bridgeSettings(
   held: Record<string, unknown>,
@@ -426,7 +481,7 @@ export function bridgeSettings(
     videoSize: preset.size,
     fps: preset.fps,
     bitrate: preset.bitrate,
-    videoFrameQueueSize: 1,
+    videoFrameQueueSize: 3,
     playAudioLocal: false,
     enterFullscreenOnStreamStart: false,
   }

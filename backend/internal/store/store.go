@@ -1714,6 +1714,7 @@ var addedColumns = []struct{ table, column, spec string }{
 	// A computer paired with Remote Desktop's stream bridge keeps the
 	// bridge's id for it; 0 is a computer that streams nothing yet.
 	{"remote_desktop_computers", "stream_host_id", "INTEGER NOT NULL DEFAULT 0"},
+	{"remote_desktop_computers", "gfx", "INTEGER NOT NULL DEFAULT 0"},
 	// An API key can be narrowed to one capability, such as reading the
 	// exported database metrics. Every key that existed before is unscoped.
 	{"api_tokens", "scope", "TEXT NOT NULL DEFAULT ''"},
