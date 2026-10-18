@@ -2218,7 +2218,10 @@ the detail of each classifier is below, with the surface it guards.
   (`withoutSecrets` on every message that could quote it), and only a replication keeps it: sealed with
   the same `Sealer` as a saved connection's, in `db_online_imports.source_enc`, because its cutover
   needs the source hours later. The column is emptied when the import ends (`setImport`), and forgetting
-  a connection with an import under way is refused (`409 import_active`). The capability is the word
+  a connection with an import under way is refused (`409 import_active`). So is replacing the server an
+  import is under way into, through any connection to it (`refuseServerOfImport`): a major-version
+  upgrade, its revert and switching in a recovered copy would take the subscription away and leave the
+  slot holding the source's log. The capability is the word
   flag `onlineImport`: `replication` for PostgreSQL itself, `stream` for every other engine that can be
   restored under another name (CockroachDB, YugabyteDB and TimescaleDB speak PostgreSQL's protocol
   without publications that carry their tables), `false` for ClickHouse, Oracle and SQLite. The page is

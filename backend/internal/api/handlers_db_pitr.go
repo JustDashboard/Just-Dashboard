@@ -690,6 +690,9 @@ func (s *Server) handleDBPITRSwitch(w http.ResponseWriter, r *http.Request) erro
 	if restore.State != "ready" {
 		return httpx.Err(http.StatusConflict, "pitr_switched", restore.Container+" was already switched in")
 	}
+	if err := s.refuseServerOfImport(r.Context(), srv.conn); err != nil {
+		return err
+	}
 	if _, err := s.modules.docker.Inspect(r.Context(), restore.Container); err != nil {
 		return httpx.Err(http.StatusConflict, "copy_missing", restore.Container+" is not on this server any more")
 	}

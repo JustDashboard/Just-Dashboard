@@ -1090,3 +1090,28 @@ func (s *Server) importsActive(ctx context.Context, conn int64) (bool, error) {
 		`SELECT count(*) FROM db_online_imports WHERE connection_id = ? AND status IN ('running','replicating','cutting')`, conn).Scan(&n)
 	return n > 0, err
 }
+
+// refuseServerOfImport stops a server being replaced while an import into any
+// of its databases is under way. The subscription lives in the server, so after
+// an upgrade, its revert or a recovered copy switched in, the import would wait
+// on a subscription that is no longer there while its slot holds the source's
+// log.
+func (s *Server) refuseServerOfImport(ctx context.Context, through *dbConnection) error {
+	all, err := s.allConnections(ctx)
+	if err != nil {
+		return err
+	}
+	server := addressKey(through.Host, atoiDefault(through.Port, 0))
+	for _, other := range all {
+		if other.Driver != through.Driver || addressKey(other.Host, atoiDefault(other.Port, 0)) != server {
+			continue
+		}
+		if active, err := s.importsActive(ctx, other.ID); err != nil {
+			return httpx.Internal(err)
+		} else if active {
+			return httpx.Err(http.StatusConflict, "import_active",
+				fmt.Sprintf("an import into %s on this server is still under way; finish it or stop it first", other.Name))
+		}
+	}
+	return nil
+}
