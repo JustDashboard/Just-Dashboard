@@ -9,6 +9,9 @@ import {
   convertToExcalidrawElements,
   Excalidraw,
   hashElementsVersion,
+  isLinearElement,
+  reconcileElements,
+  restoreElements,
   serializeAsJSON,
   viewportCoordsToSceneCoords,
 } from "@excalidraw/excalidraw"
@@ -19,7 +22,11 @@ import type {
   ExcalidrawInitialDataState,
   ExcalidrawProps,
 } from "@excalidraw/excalidraw/types"
-import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types"
+import type { RemoteExcalidrawElement } from "@excalidraw/excalidraw/data/reconcile"
+import type {
+  ExcalidrawElement,
+  OrderedExcalidrawElement,
+} from "@excalidraw/excalidraw/element/types"
 import "@excalidraw/excalidraw/index.css"
 import {
   ArrowLeft,
@@ -33,15 +40,24 @@ import {
 } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ErrorState, LoadingPanel } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Modal } from "@/components/modal"
 import { sectionHref } from "@/components/database/engine"
 import { ApiError, del, get, put } from "@/lib/api"
-import type { Board, BoardScene, BoardSummary } from "@/lib/boards"
+import { dashboardResource, embeddable } from "@/lib/board-embeds"
+import { BOARD_FILE_TYPES, shownFileIds } from "@/lib/board-files"
+import type { Board, BoardSaved, BoardScene } from "@/lib/boards"
 import type { DbFleet, DeployProject } from "@/lib/types"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
+import { BoardMenus } from "@/components/boards/board-menus"
+import { listOf } from "@/components/boards/drawing-list"
+import { LiveCard, LiveCardProvider } from "@/components/boards/live-card"
+import { useBoardFiles } from "@/components/boards/use-board-files"
+import { useBoardLibrary } from "@/components/boards/use-board-library"
+import { useBoardLive } from "@/components/boards/use-board-live"
 
 type SaveState = "saved" | "pending" | "saving" | "error" | "unnamed" | "conflict" | "missing"
 
@@ -70,6 +86,28 @@ const drawingDrafts = createEditorDraftStore<DrawingDraft>()
 // scene is serialized only when it is saved.
 function signature(elements: Snapshot["elements"], appState: AppState) {
   return `${hashElementsVersion(elements)}:${serializeAsJSON([], appState, {}, "local")}`
+}
+
+/**
+ * The scene as it is stored: Excalidraw's file format, with its deleted
+ * elements kept and its images left to the file store. A deletion is an
+ * element at a newer version; dropped from the save, as Excalidraw's own
+ * export drops it, a merge with an editor that had not seen it yet put the
+ * element back. The server forgets one a day after it was deleted. A file of
+ * a type the store refuses stays in the scene, as every file used to.
+ */
+function sceneBody(snapshot: Snapshot): BoardScene {
+  const scene = JSON.parse(serializeAsJSON([], snapshot.appState, {}, "local")) as BoardScene
+  scene.elements = snapshot.elements.map((element) =>
+    isLinearElement(element) ? { ...element, lastCommittedPoint: null } : element,
+  )
+  const shown = shownFileIds(snapshot.elements)
+  scene.files = Object.fromEntries(
+    Object.entries(snapshot.files).filter(
+      ([id, file]) => shown.has(id) && !BOARD_FILE_TYPES.has(file.mimeType),
+    ),
+  )
+  return scene
 }
 
 declare global {
@@ -151,6 +189,11 @@ function LoadedBoard({ board }: { board: Board }) {
   const [databases, setDatabases] = useState<DbFleet["connections"]>([])
   const [catalogError, setCatalogError] = useState<Error | null>(null)
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
+  const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null)
+  // Once the live room has been joined, saves merge with the stored scene
+  // instead of refusing a revision another editor moved on: the editors are
+  // drawing together, and each sees the other's changes as they are made.
+  const mergeRef = useRef(false)
   const nameRef = useRef(retained?.name ?? board.name)
   const savedNameRef = useRef(retained?.savedName ?? board.name)
   const sceneRef = useRef<Snapshot | null>(retained?.scene ?? null)
@@ -162,6 +205,8 @@ function LoadedBoard({ board }: { board: Board }) {
   const savingRef = useRef<Promise<boolean> | null>(null)
   const errorToastRef = useRef<string | number | undefined>(undefined)
   const cardCountRef = useRef(0)
+  const files = useBoardFiles(board.id, board.fileIds)
+  const onLibraryChange = useBoardLibrary(api, canWrite)
 
   // sonner's dismiss() with no id clears every toast on the page.
   const clearSaveError = useCallback(() => {
@@ -204,6 +249,30 @@ function LoadedBoard({ board }: { board: Board }) {
     [board, isDirty, owner],
   )
 
+  // Another editor's changes, from the live room or merged in by a save.
+  // They are theirs to save: a drawing that had nothing unsaved before them
+  // still has nothing, or every editor in the room would save every change.
+  const applyRemote = useCallback(
+    (remote: readonly ExcalidrawElement[]) => {
+      const api = apiRef.current
+      if (!api) return
+      const clean =
+        sceneRef.current === null || sceneRef.current.signature === savedSignatureRef.current
+      api.updateScene({
+        elements: reconcileElements(
+          api.getSceneElementsIncludingDeleted(),
+          restoreElements(remote, null) as RemoteExcalidrawElement[],
+          api.getAppState(),
+        ),
+        captureUpdate: CaptureUpdateAction.NEVER,
+      })
+      const elements = api.getSceneElementsIncludingDeleted()
+      if (clean) savedSignatureRef.current = signature(elements, api.getAppState())
+      void files.read(api, elements)
+    },
+    [files],
+  )
+
   const flush = useCallback(async (): Promise<boolean> => {
     if (timerRef.current) clearTimeout(timerRef.current)
     if (savingRef.current) return savingRef.current
@@ -217,22 +286,23 @@ function LoadedBoard({ board }: { board: Board }) {
       }
       const snapshot = sceneRef.current
       setSaveState("saving")
-      return put<BoardSummary>(`/boards/${board.id}`, {
-        name: title,
-        // "local" is Excalidraw's file format, and the one that keeps `files`:
-        // "database" drops them for a separate image store this server does not
-        // have, so every save was refused and images would have been lost.
-        scene: snapshot
-          ? (JSON.parse(
-              serializeAsJSON(snapshot.elements, snapshot.appState, snapshot.files, "local"),
-            ) as BoardScene)
-          : board.scene,
-        revision: revisionRef.current,
-      })
+      // The images go first: a scene naming a file the server lacks would
+      // draw a hole for everyone else until this editor sent it.
+      return (snapshot ? files.upload(snapshot.elements, snapshot.files) : Promise.resolve())
+        .then(() =>
+          put<BoardSaved>(`/boards/${board.id}`, {
+            name: title,
+            scene: snapshot ? sceneBody(snapshot) : board.scene,
+            revision: revisionRef.current,
+            ...(mergeRef.current && { merge: true }),
+          }),
+        )
         .then((saved) => {
           revisionRef.current = saved.revision
           savedNameRef.current = saved.name
           if (snapshot) savedSignatureRef.current = snapshot.signature
+          files.settle(saved.fileIds)
+          if (saved.remoteElements?.length) applyRemote(saved.remoteElements as ExcalidrawElement[])
           clearSaveError()
           setSaveState(!isDirty() ? "saved" : nameRef.current.trim() ? "pending" : "unnamed")
           retain("pending")
@@ -262,7 +332,7 @@ function LoadedBoard({ board }: { board: Board }) {
       if (savingRef.current === task) savingRef.current = null
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [board.id, board.scene, clearSaveError, isDirty, owner, retain])
+  }, [applyRemote, board.id, board.scene, clearSaveError, files, isDirty, owner, retain])
 
   const changed = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
@@ -280,19 +350,61 @@ function LoadedBoard({ board }: { board: Board }) {
     timerRef.current = setTimeout(() => void flush(), 900)
   }, [flush, isDirty, retain])
 
+  const live = useBoardLive({
+    boardId: board.id,
+    api,
+    canWrite,
+    onScene: applyRemote,
+    onFiles: () => {
+      if (apiRef.current)
+        void files.read(apiRef.current, apiRef.current.getSceneElementsIncludingDeleted())
+    },
+    onDeleted: () => {
+      stoppedRef.current = "missing"
+      setSaveState("missing")
+      retain("missing")
+    },
+  })
+  useEffect(() => {
+    if (live.joined) mergeRef.current = true
+  }, [live.joined])
+
+  const { broadcast, announceFiles } = live
   const onChange: NonNullable<ExcalidrawProps["onChange"]> = useCallback(
-    (elements, appState, files) => {
+    (elements, appState, held) => {
       const next = signature(elements, appState)
       // The first call is the scene as Excalidraw restored it. Comparing with
       // the stored JSON instead made every visit a save, which bumped the
       // revision and put anyone else looking at the board into a conflict.
-      if (savedSignatureRef.current === null) savedSignatureRef.current = next
+      const first = savedSignatureRef.current === null
+      if (first) savedSignatureRef.current = next
       const previous = sceneRef.current?.signature ?? savedSignatureRef.current
-      sceneRef.current = { elements, appState, files, signature: next }
-      if (canWrite && next !== previous) changed()
+      sceneRef.current = { elements, appState, files: held, signature: next }
+      // The images stored apart are read once the scene they belong to is
+      // there; another editor's are read as their elements arrive.
+      if (first && apiRef.current) void files.read(apiRef.current, elements)
+      if (!canWrite || next === previous) return
+      changed()
+      broadcast()
+      // A failure here is retried by the save, which says so.
+      files.upload(elements, held).then(announceFiles, () => {})
     },
-    [canWrite, changed],
+    [announceFiles, broadcast, canWrite, changed, files],
   )
+
+  const renderEmbeddable: NonNullable<ExcalidrawProps["renderEmbeddable"]> = useCallback(
+    (element) => {
+      const resource = dashboardResource(element.link)
+      return resource ? <LiveCard resource={resource} href={element.link!} /> : null
+    },
+    [],
+  )
+
+  useEffect(() => {
+    // Excalidraw's library site sends an added pack back to the tab of this
+    // name, so it lands in the open editor rather than in a second one.
+    window.name = "just-dashboard-excalidraw"
+  }, [])
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
@@ -337,13 +449,7 @@ function LoadedBoard({ board }: { board: Board }) {
     )
   }, [])
 
-  function insertCard(
-    kind: "server" | "project" | "database",
-    label: string,
-    detail: string,
-    link: string,
-    resourceId?: number,
-  ) {
+  function insertCard(kind: "server" | "project" | "database", link: string, resourceId?: number) {
     const api = apiRef.current
     if (!api || !canWrite) return
     const state = api.getAppState()
@@ -354,7 +460,11 @@ function LoadedBoard({ board }: { board: Board }) {
       { clientX: state.offsetLeft + state.width / 2, clientY: state.offsetTop + state.height / 2 },
       state,
     )
-    const elements = convertToExcalidrawElements([
+    // An embed, which `renderEmbeddable` draws as a live card. Excalidraw
+    // builds no embed from a skeleton, but one is a rectangle by another type.
+    // The colours are the cards' from before, for the list's thumbnail and an
+    // exported image, which draw the shape and not the card.
+    const [card] = convertToExcalidrawElements([
       {
         type: "rectangle",
         x: center.x - 140 + offset,
@@ -367,11 +477,10 @@ function LoadedBoard({ board }: { board: Board }) {
         roughness: 0,
         link,
         customData: { justDashboard: { kind, resourceId } },
-        label: { text: `${label}\n${detail}`, fontSize: 18 },
       },
     ])
     api.updateScene({
-      elements: [...api.getSceneElements(), ...elements],
+      elements: [...api.getSceneElements(), { ...card, type: "embeddable" } as ExcalidrawElement],
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     })
     setInsertOpen(false)
@@ -467,6 +576,15 @@ function LoadedBoard({ board }: { board: Board }) {
           {saveState === "conflict" && "Changed in another tab — reload to review"}
           {saveState === "missing" && "This drawing was deleted — changes can’t be saved"}
         </span>
+        {live.peers.length > 0 && (
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Status
+              tone="running"
+              live
+              label={`Live with ${listOf(live.peers.map((p) => p.name || p.user))}`}
+            />
+          </span>
+        )}
         {canWrite && (
           <>
             <Button
@@ -502,29 +620,51 @@ function LoadedBoard({ board }: { board: Board }) {
       </div>
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <div className="min-h-0 min-w-0 flex-1" aria-label={`${name} drawing canvas`}>
-          <Excalidraw
-            initialData={
-              (retained?.scene
-                ? JSON.parse(
-                    serializeAsJSON(
-                      retained.scene.elements,
-                      retained.scene.appState,
-                      retained.scene.files,
-                      "local",
-                    ),
-                  )
-                : board.scene) as ExcalidrawInitialDataState
-            }
-            excalidrawAPI={(api) => {
-              apiRef.current = api
-            }}
-            onChange={onChange}
-            onLinkOpen={onLinkOpen}
-            name={name}
-            theme="dark"
-            UIOptions={{ canvasActions: { saveToActiveFile: false } }}
-            viewModeEnabled={!canWrite}
-          />
+          <LiveCardProvider open={(href) => void go(href)}>
+            <Excalidraw
+              initialData={
+                (retained?.scene
+                  ? JSON.parse(
+                      serializeAsJSON(
+                        retained.scene.elements,
+                        retained.scene.appState,
+                        retained.scene.files,
+                        "local",
+                      ),
+                    )
+                  : board.scene) as ExcalidrawInitialDataState
+              }
+              excalidrawAPI={(next) => {
+                apiRef.current = next
+                setApi(next)
+              }}
+              onChange={onChange}
+              onLinkOpen={onLinkOpen}
+              onLibraryChange={onLibraryChange}
+              onPointerUpdate={live.onPointerUpdate}
+              isCollaborating={live.peers.length > 0}
+              validateEmbeddable={embeddable}
+              renderEmbeddable={renderEmbeddable}
+              name={name}
+              theme="dark"
+              UIOptions={{ canvasActions: { saveToActiveFile: false } }}
+              viewModeEnabled={!canWrite}
+            >
+              <BoardMenus
+                canWrite={canWrite}
+                onSave={() => void flush()}
+                onAddServerItem={() => {
+                  void loadCatalog()
+                  setInsertOpen(true)
+                }}
+                onDescribe={() =>
+                  apiRef.current?.updateScene({
+                    appState: { openDialog: { name: "ttd", tab: "text-to-diagram" } },
+                  })
+                }
+              />
+            </Excalidraw>
+          </LiveCardProvider>
         </div>
         {insertOpen && canWrite && (
           <aside
@@ -557,7 +697,7 @@ function LoadedBoard({ board }: { board: Board }) {
                   icon={Servers}
                   title="This server"
                   detail="Dashboard overview"
-                  onClick={() => insertCard("server", "THIS SERVER", "Dashboard overview", "/")}
+                  onClick={() => insertCard("server", "/")}
                 />
               </section>
               <section>
@@ -573,15 +713,7 @@ function LoadedBoard({ board }: { board: Board }) {
                     icon={CloudUpload}
                     title={project.name}
                     detail={project.enabled ? "Active project" : "Paused project"}
-                    onClick={() =>
-                      insertCard(
-                        "project",
-                        project.name,
-                        project.enabled ? "ACTIVE PROJECT" : "PAUSED PROJECT",
-                        `/deploy/${project.id}`,
-                        project.id,
-                      )
-                    }
+                    onClick={() => insertCard("project", `/deploy/${project.id}`, project.id)}
                   />
                 ))}
               </section>
@@ -598,15 +730,7 @@ function LoadedBoard({ board }: { board: Board }) {
                     icon={Database}
                     title={database.name}
                     detail={`${database.driver} · ${database.ok ? "reachable" : "unreachable"}`}
-                    onClick={() =>
-                      insertCard(
-                        "database",
-                        database.name,
-                        `${database.driver.toUpperCase()} · ${database.ok ? "REACHABLE" : "UNREACHABLE"}`,
-                        sectionHref(database.id),
-                        database.id,
-                      )
-                    }
+                    onClick={() => insertCard("database", sectionHref(database.id), database.id)}
                   />
                 ))}
               </section>

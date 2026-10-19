@@ -10,7 +10,7 @@ type Scene = {
   appState: Record<string, unknown>
   files: Record<string, unknown>
 }
-type Put = { name: string; revision: number; scene: Scene }
+type Put = { name: string; revision: number; scene: Scene; merge?: boolean }
 type Refusal = { status: number; code: string; message: string }
 type BoardPreview = {
   background: string
@@ -26,7 +26,8 @@ const isObject = (value: unknown) =>
  * The boards API as the Go handler behaves: names are trimmed and required, a
  * scene without elements, appState and files is refused, and a stale revision
  * is a conflict. A mock that accepted anything is how a save that could never
- * succeed against the real server passed this spec.
+ * succeed against the real server passed this spec. Images a scene still
+ * carries are moved into the file store on save, as the handler moves them.
  */
 async function mockBoards(page: Page, scene: Scene = { elements: [], appState: {}, files: {} }) {
   const board = {
@@ -38,6 +39,11 @@ async function mockBoards(page: Page, scene: Scene = { elements: [], appState: {
     deletedWith: null as string | null,
     /** What the server derives from the scene on save; the list draws it. */
     preview: undefined as BoardPreview | undefined,
+    files: new Map<string, { type: string; body: Buffer }>(),
+    fileReads: [] as string[],
+    library: { libraryItems: [] as unknown[], revision: 0 },
+    fetched: [] as string[],
+    prompts: [] as string[],
   }
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request()
@@ -48,6 +54,7 @@ async function mockBoards(page: Page, scene: Scene = { elements: [], appState: {
     const refuse = ({ status, code, message }: Refusal) =>
       json({ error: { code, message } }, status)
     const detail = () => ({ id: 1, name: board.name, revision: board.revision, createdAt: now })
+    const fileIds = () => [...board.files.keys()].sort()
     if (path === "/auth/session") {
       return json({
         authenticated: true,
@@ -66,8 +73,44 @@ async function mockBoards(page: Page, scene: Scene = { elements: [], appState: {
     if (path === "/boards/" && request.method() === "POST") {
       return json({ ...detail(), scene: board.scene, updatedAt: now }, 201)
     }
+    if (path === "/boards/library" && request.method() === "GET") return json(board.library)
+    if (path === "/boards/library" && request.method() === "PUT") {
+      const body = request.postDataJSON() as { libraryItems: unknown[]; revision: number }
+      if (body.revision !== board.library.revision) {
+        return refuse({ status: 409, code: "library_conflict", message: "library changed" })
+      }
+      board.library = { libraryItems: body.libraryItems, revision: body.revision + 1 }
+      return json({ revision: board.library.revision })
+    }
+    if (path === "/boards/library/fetch") {
+      board.fetched.push((request.postDataJSON() as { url: string }).url)
+      return json({ type: "excalidrawlib", version: 2, libraryItems: [libraryItem] })
+    }
+    if (path === "/boards/diagram") {
+      board.prompts.push((request.postDataJSON() as { prompt: string }).prompt)
+      return json({ mermaid: "flowchart LR\n  web[Storefront] --> db[(Orders)]" })
+    }
+    const file = path.match(/^\/boards\/1\/files\/(.+)$/)
+    if (file && request.method() === "PUT") {
+      const known = board.files.has(file[1])
+      board.files.set(file[1], {
+        type: request.headers()["content-type"],
+        body: request.postDataBuffer() ?? Buffer.alloc(0),
+      })
+      return json({ id: file[1] }, known ? 200 : 201)
+    }
+    if (file && request.method() === "GET") {
+      board.fileReads.push(file[1])
+      const stored = board.files.get(file[1])
+      if (!stored) return refuse({ status: 404, code: "board_file_not_found", message: "no file" })
+      return route.fulfill({ status: 200, contentType: stored.type, body: stored.body })
+    }
+    if (path === "/system/host") return json({ hostname: "atlas", uptimeSeconds: 7200 })
+    if (path === "/system/metrics") {
+      return json({ cpu: { totalPercent: 12 }, memory: { usedPercent: 41 }, uptimeSeconds: 7200 })
+    }
     if (path === "/boards/1" && request.method() === "GET") {
-      return json({ ...detail(), scene: board.scene, updatedAt: now })
+      return json({ ...detail(), scene: board.scene, fileIds: fileIds(), updatedAt: now })
     }
     if (path === "/boards/1" && request.method() === "PUT") {
       const body = request.postDataJSON() as Put
@@ -95,13 +138,27 @@ async function mockBoards(page: Page, scene: Scene = { elements: [], appState: {
             "board revision and scene are required; scene must contain elements, appState, and files",
         })
       }
-      if (body.revision !== board.revision) {
+      if (!body.merge && body.revision !== board.revision) {
         return refuse({ status: 409, code: "board_conflict", message: "board changed" })
       }
+      const files: Record<string, unknown> = {}
+      for (const [id, entry] of Object.entries(body.scene.files)) {
+        const { mimeType, dataURL } = entry as { mimeType: string; dataURL: string }
+        if (typeof dataURL !== "string" || !dataURL.startsWith(`data:${mimeType};base64,`)) {
+          files[id] = entry
+          continue
+        }
+        board.files.set(id, { type: mimeType, body: Buffer.from(dataURL.split(",")[1], "base64") })
+      }
       board.name = name
-      board.scene = body.scene
+      board.scene = { ...body.scene, files }
       board.revision++
-      return json({ ...detail(), updatedAt: now })
+      return json({
+        ...detail(),
+        fileIds: fileIds(),
+        ...(body.merge && { remoteElements: [] }),
+        updatedAt: now,
+      })
     }
     if (path === "/boards/1" && request.method() === "DELETE") {
       board.deletedWith = board.name
@@ -121,7 +178,46 @@ async function mockBoards(page: Page, scene: Scene = { elements: [], appState: {
     if (path === "/deploy/") return json([{ id: 4, name: "Storefront", enabled: true }])
     return json([])
   })
+  // A room nobody else is in: the relay never says hello, so the editor saves
+  // as it does alone. The live spec below plays the relay itself.
+  await page.routeWebSocket(/\/api\/v1\/boards\/\d+\/live/, () => {})
   return board
+}
+
+const libraryItem = {
+  id: "rack",
+  status: "published",
+  created: 1,
+  name: "Rack",
+  elements: [
+    {
+      type: "rectangle",
+      id: "rack-shape",
+      x: 0,
+      y: 0,
+      width: 120,
+      height: 200,
+      version: 1,
+      versionNonce: 1,
+      seed: 1,
+      isDeleted: false,
+      strokeColor: "#1e1e1e",
+      backgroundColor: "transparent",
+      fillStyle: "solid",
+      strokeWidth: 2,
+      strokeStyle: "solid",
+      roughness: 1,
+      opacity: 100,
+      angle: 0,
+      groupIds: [],
+      frameId: null,
+      roundness: null,
+      boundElements: null,
+      updated: 1,
+      link: null,
+      locked: false,
+    },
+  ],
 }
 
 async function openBoard(page: Page) {
@@ -130,7 +226,7 @@ async function openBoard(page: Page) {
   await expect(page.locator("canvas").first()).toBeVisible()
 }
 
-test("a board opens without saving, keeps its images, and saves inserted server cards", async ({
+test("a board opens without saving, keeps its images, and saves inserted live server cards", async ({
   page,
 }) => {
   const board = await mockBoards(page, {
@@ -174,13 +270,24 @@ test("a board opens without saving, keeps its images, and saves inserted server 
   await page.getByRole("button", { name: /Storefront/ }).click()
   await page.getByRole("button", { name: "Add server item" }).click()
   await page.getByRole("button", { name: /Orders/ }).click()
-  await expect.poll(() => board.scene.elements.length).toBeGreaterThanOrEqual(7)
+  await expect.poll(() => board.scene.elements.length).toBe(4)
   await expect.poll(() => JSON.stringify(board.scene)).toContain('"kind":"server"')
   await expect.poll(() => JSON.stringify(board.scene)).toContain('"kind":"project","resourceId":4')
   await expect.poll(() => JSON.stringify(board.scene)).toContain('"kind":"database","resourceId":7')
   await expect(page.getByRole("status")).toContainText("Saved on this server")
-  expect(board.scene.files).toMatchObject({ pixel: { dataURL: pixel } })
+  expect(
+    board.scene.elements.filter((e) => (e as { type: string }).type === "embeddable"),
+  ).toHaveLength(3)
+  // The image left the scene for the file store, sent before the scene that names it.
+  expect(board.scene.files).toEqual({})
+  expect(board.files.get("pixel")?.type).toBe("image/png")
   expect(board.scene.appState).toMatchObject({ viewBackgroundColor: "#121212" })
+  // Each card reads the thing it links now, rather than the words it was placed with.
+  const cards = page.locator(".excalidraw__embeddable-container")
+  await expect(cards).toHaveCount(3)
+  await expect(cards.filter({ hasText: "atlas" })).toContainText("CPU 12%")
+  await expect(cards.filter({ hasText: "Storefront" })).toBeVisible()
+  await expect(cards.filter({ hasText: "Orders" })).toContainText("Answering")
 
   const saves = board.puts.length
   await page.reload()
@@ -188,6 +295,7 @@ test("a board opens without saving, keeps its images, and saves inserted server 
   await expect(page.locator("canvas").first()).toBeVisible()
   await page.waitForTimeout(1500)
   expect(board.puts).toHaveLength(saves)
+  expect(board.fileReads).toContain("pixel")
   await page.setViewportSize({ width: 375, height: 812 })
   await expect(page.getByRole("button", { name: "Add server item" })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375)
@@ -462,4 +570,146 @@ test("returning to a drawing waits for departing saves and keeps the acknowledge
   await expect(page.getByRole("status")).toContainText("Saved on this server")
   expect(board.name).toBe("Newer retained snapshot")
   expect(board.puts.at(-1)?.revision).toBe(2)
+})
+
+test("the library is kept on the server, and a pack from the library site is added through it", async ({
+  page,
+}) => {
+  const board = await mockBoards(page)
+  const pack = "https://libraries.excalidraw.com/libraries/ops/racks.excalidrawlib"
+  const prompts: string[] = []
+  page.on("dialog", (dialog) => {
+    prompts.push(dialog.message())
+    void dialog.accept()
+  })
+  // The library site sends the pack back in the address; the token is
+  // another editor's, so this one asks before adding it.
+  await page.goto(`/excalidraw/1#addLibrary=${encodeURIComponent(pack)}&token=another-tab`)
+  await expect(page.getByLabel("Drawing name")).toHaveValue("Untitled board")
+  await expect.poll(() => board.fetched).toEqual([pack])
+  await expect.poll(() => board.library.revision).toBe(1)
+  expect(prompts).toHaveLength(1)
+  expect(board.library.libraryItems).toEqual([expect.objectContaining({ id: "rack" })])
+  // The hand-off leaves no trace, or a reload would add the pack again.
+  expect(new URL(page.url()).hash).toBe("")
+
+  await page.reload()
+  await expect(page.getByLabel("Drawing name")).toHaveValue("Untitled board")
+  await page.waitForTimeout(1500)
+  expect(board.fetched).toHaveLength(1)
+  expect(board.library.revision).toBe(1)
+})
+
+test("editors on one drawing see each other's changes and save by merging them", async ({
+  page,
+}) => {
+  const board = await mockBoards(page)
+  const frames: Record<string, unknown>[] = []
+  let relay: { send: (message: string) => void } | undefined
+  await page.routeWebSocket(/\/api\/v1\/boards\/1\/live/, (socket) => {
+    relay = socket
+    socket.onMessage((message) => frames.push(JSON.parse(String(message))))
+    socket.send(
+      JSON.stringify({
+        type: "hello",
+        you: "me",
+        peers: [{ id: "ana", user: "ana", name: "Ana", canWrite: true }],
+      }),
+    )
+  })
+  await openBoard(page)
+  await expect(page.getByText("Live with Ana")).toBeVisible()
+
+  // Ana's rectangle is drawn here and left to Ana to save.
+  relay!.send(
+    JSON.stringify({
+      type: "scene",
+      from: "ana",
+      elements: [
+        {
+          type: "rectangle",
+          id: "ana-box",
+          x: 80,
+          y: 80,
+          width: 120,
+          height: 80,
+          version: 3,
+          versionNonce: 9,
+        },
+      ],
+    }),
+  )
+  await page.waitForTimeout(1500)
+  expect(board.puts).toHaveLength(0)
+
+  // A change made here goes to the room as it is made, and the save merges.
+  await page.getByLabel("Drawing name").fill("Shared map")
+  await page.getByRole("button", { name: "Add server item" }).click()
+  await page.getByRole("button", { name: /This server/ }).click()
+  await expect
+    .poll(() =>
+      frames.some(
+        (frame) =>
+          frame.type === "scene" &&
+          (frame.elements as { type: string }[]).some((element) => element.type === "embeddable"),
+      ),
+    )
+    .toBe(true)
+  await expect.poll(() => board.puts.at(-1)?.merge).toBe(true)
+  expect(board.puts.at(-1)!.scene.elements).toContainEqual(
+    expect.objectContaining({ id: "ana-box" }),
+  )
+  expect(board.name).toBe("Shared map")
+
+  // Somebody who joins is sent the scene, since the relay keeps none.
+  relay!.send(
+    JSON.stringify({
+      type: "joined",
+      peer: { id: "ion", user: "ion", name: "Ion", canWrite: false },
+    }),
+  )
+  await expect
+    .poll(() => frames.some((frame) => frame.type === "scene" && frame.to === "ion"))
+    .toBe(true)
+  await expect(page.getByText("Live with Ana and Ion")).toBeVisible()
+
+  relay!.send(JSON.stringify({ type: "deleted" }))
+  await expect(page.getByRole("status")).toContainText("This drawing was deleted")
+})
+
+test("an empty drawing offers what to draw, the menu stays on this server, and a description becomes a diagram", async ({
+  page,
+}) => {
+  const board = await mockBoards(page)
+  await openBoard(page)
+  await expect(
+    page.getByText("Draw this server: what runs on it, and how it connects."),
+  ).toBeVisible()
+
+  await page.getByRole("button", { name: /Add a project, database or this server/ }).click()
+  await expect(page.getByRole("complementary", { name: "Server items" })).toBeVisible()
+  await page.getByRole("button", { name: "Close" }).click()
+
+  await page.locator(".main-menu-trigger").click()
+  const menu = page.locator(".dropdown-menu")
+  await expect(menu).toContainText("Save to this server")
+  await expect(menu).not.toContainText(/GitHub|Discord|Follow us/)
+  await page.keyboard.press("Escape")
+
+  await page.getByRole("button", { name: /Describe a diagram/ }).click()
+  await page.locator(".ttd-dialog textarea").fill("Storefront talks to the Orders database")
+  await page.getByRole("button", { name: /Generate/ }).click()
+  await expect.poll(() => board.prompts).toEqual(["Storefront talks to the Orders database"])
+  // Excalidraw draws the Mermaid preview itself, under this page's CSP.
+  await expect(
+    page
+      .locator(
+        ".ttd-dialog-output-canvas-container svg, .ttd-dialog-output-canvas-container canvas",
+      )
+      .first(),
+  ).toBeVisible()
+  await page.getByRole("button", { name: /Insert/ }).click()
+  await expect
+    .poll(() => (board.scene.elements as { type: string }[]).map((element) => element.type).sort())
+    .toEqual(expect.arrayContaining(["arrow", "rectangle", "text"]))
 })

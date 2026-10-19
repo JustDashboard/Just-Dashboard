@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -34,16 +35,35 @@ type boardSummary struct {
 type boardDetail struct {
 	boardSummary
 	Scene json.RawMessage `json:"scene"`
+	// The images stored apart from the scene (boards_files.go).
+	FileIDs []string `json:"fileIds"`
+}
+
+// boardSaved is a save's answer.
+type boardSaved struct {
+	boardSummary
+	FileIDs []string `json:"fileIds"`
+	// Only a merge save answers it: the elements the saver does not hold as
+	// they are now, so a tab that missed a live frame still converges.
+	RemoteElements json.RawMessage `json:"remoteElements,omitempty"`
 }
 
 func (s *Server) mountBoardRoutes(r chi.Router) {
 	r.Route("/boards", func(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleBoardList))
+		// A static segment wins over {id} in chi, so "library" is never a board.
+		r.Method(http.MethodGet, "/library", s.handle(s.handleBoardLibraryGet))
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleBoardGet))
+		r.Method(http.MethodGet, "/{id}/files/{fileId}", s.handle(s.handleBoardFileGet))
+		r.Method(http.MethodGet, "/{id}/live", s.handle(s.handleBoardLive))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/", s.handle(s.handleBoardCreate))
+			r.Method(http.MethodPut, "/library", s.handle(s.handleBoardLibraryPut))
+			r.Method(http.MethodPost, "/library/fetch", s.handle(s.handleBoardLibraryFetch))
+			r.Method(http.MethodPost, "/diagram", s.handle(s.handleBoardDiagram))
 			r.Method(http.MethodPut, "/{id}", s.handle(s.handleBoardPut))
+			r.Method(http.MethodPut, "/{id}/files/{fileId}", s.handle(s.handleBoardFilePut))
 		})
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/{id}", s.handle(s.handleBoardDelete))
@@ -136,6 +156,9 @@ func (s *Server) handleBoardGet(w http.ResponseWriter, r *http.Request) error {
 	b.CreatedAt = time.Unix(created, 0).UTC()
 	b.UpdatedAt = time.Unix(updated, 0).UTC()
 	b.Scene = json.RawMessage(scene)
+	if b.FileIDs, err = boardFileIDs(r.Context(), s.Store.DB, id); err != nil {
+		return err
+	}
 	httpx.JSON(w, http.StatusOK, b)
 	return nil
 }
@@ -174,7 +197,7 @@ func (s *Server) handleBoardCreate(w http.ResponseWriter, r *http.Request) error
 	httpx.JSON(w, http.StatusCreated, boardDetail{
 		boardSummary: boardSummary{ID: id, Name: name, Revision: 1,
 			CreatedAt: time.Unix(now, 0).UTC(), UpdatedAt: time.Unix(now, 0).UTC()},
-		Scene: json.RawMessage(emptyBoardScene),
+		Scene: json.RawMessage(emptyBoardScene), FileIDs: []string{},
 	})
 	return nil
 }
@@ -225,6 +248,10 @@ func validBoardScene(raw json.RawMessage) bool {
 		len(scene.Files) > 0 && bytes.TrimSpace(scene.Files)[0] == '{'
 }
 
+// handleBoardPut saves a board. Everything that reads the stored board and
+// writes it back happens in one write transaction, so two saves cannot read
+// the same revision, and a merge cannot lose what a save between its read and
+// its write added.
 func (s *Server) handleBoardPut(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
@@ -234,6 +261,7 @@ func (s *Server) handleBoardPut(w http.ResponseWriter, r *http.Request) error {
 		Name     string          `json:"name"`
 		Scene    json.RawMessage `json:"scene"`
 		Revision int64           `json:"revision"`
+		Merge    bool            `json:"merge"`
 	}
 	if err := decodeBoardPut(w, r, &req); err != nil {
 		return err
@@ -248,34 +276,124 @@ func (s *Server) handleBoardPut(w http.ResponseWriter, r *http.Request) error {
 	if req.Revision < 1 || !validBoardScene(req.Scene) {
 		return httpx.BadRequest("board revision and scene are required; scene must contain elements, appState, and files")
 	}
-	now := time.Now().Unix()
-	result, err := s.Store.DB.ExecContext(r.Context(),
-		`UPDATE boards SET name = ?, scene = ?, preview = ?, revision = revision + 1, updated_at = ?
-		 WHERE id = ? AND revision = ?`, name, string(req.Scene), boardPreviewJSON(req.Scene), now, id, req.Revision)
-	if err != nil {
-		return httpx.Internal(err)
+	var top map[string]json.RawMessage
+	var files map[string]json.RawMessage
+	if json.Unmarshal(req.Scene, &top) != nil || json.Unmarshal(top["files"], &files) != nil {
+		return httpx.BadRequest("malformed board scene")
 	}
-	changed, err := result.RowsAffected()
+	incoming, err := decodeSceneElements(top["elements"])
 	if err != nil {
-		return httpx.Internal(err)
+		return httpx.BadRequest("malformed board scene: %v", err)
 	}
-	if changed == 0 {
-		var exists int
-		if err := s.Store.DB.QueryRowContext(r.Context(), `SELECT 1 FROM boards WHERE id = ?`, id).Scan(&exists); errors.Is(err, sql.ErrNoRows) {
-			return httpx.Err(http.StatusNotFound, "board_not_found", "board not found")
-		} else if err != nil {
-			return httpx.Internal(err)
+	if req.Merge {
+		for _, e := range incoming {
+			if !e.ok || e.meta.ID == "" {
+				return httpx.BadRequest("every element of a merged scene must be an object with an id")
+			}
 		}
+	}
+
+	ctx := r.Context()
+	now := time.Now()
+	tx, err := s.Store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	defer tx.Rollback()
+	var storedScene string
+	var revision, created int64
+	err = tx.QueryRowContext(ctx, `SELECT CASE WHEN ? THEN scene ELSE '' END, revision, created_at FROM boards WHERE id = ?`,
+		req.Merge, id).Scan(&storedScene, &revision, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errBoardNotFound()
+	}
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	if !req.Merge && revision != req.Revision {
 		return httpx.Err(http.StatusConflict, "board_conflict", "this board changed in another tab; reload it before saving")
 	}
-	var created int64
-	if err := s.Store.DB.QueryRowContext(r.Context(), `SELECT created_at FROM boards WHERE id = ?`, id).Scan(&created); err != nil {
+
+	elements := pruneTombstones(incoming, now)
+	var remote []json.RawMessage
+	if req.Merge {
+		merged, storedFiles, err := mergeWithStored(storedScene, incoming)
+		if err != nil {
+			return httpx.Internal(err)
+		}
+		elements = pruneTombstones(merged, now)
+		orderByIndex(elements)
+		remote = differingFrom(elements, incoming)
+		// A picture a drawing from before images moved out of scenes still
+		// carries inline stays while an element names it.
+		refs := fileRefs(elements)
+		for fileID, entry := range storedFiles {
+			if _, held := files[fileID]; !held && refs[fileID] {
+				files[fileID] = entry
+			}
+		}
+	}
+	kept, err := s.extractSceneFiles(ctx, tx, id, files, now)
+	if err != nil {
+		return err
+	}
+
+	scene := req.Scene
+	if req.Merge || len(elements) != len(incoming) || len(kept) != len(files) {
+		if top["elements"], err = elementsJSON(elements); err != nil {
+			return httpx.Internal(err)
+		}
+		if top["files"], err = json.Marshal(kept); err != nil {
+			return httpx.Internal(err)
+		}
+		if scene, err = json.Marshal(top); err != nil {
+			return httpx.Internal(err)
+		}
+		if len(scene) > maxBoardSceneBytes {
+			return errBoardTooLarge()
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE boards SET name = ?, scene = ?, preview = ?, revision = revision + 1, updated_at = ? WHERE id = ?`,
+		name, string(scene), boardPreviewJSON(scene), now.Unix(), id); err != nil {
+		return httpx.Internal(err)
+	}
+	fileIDs, err := collectBoardFiles(ctx, tx, id, fileRefs(elements), now)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
 		return httpx.Internal(err)
 	}
 	httpx.SetAudit(r, "board.save", name, nil)
-	httpx.JSON(w, http.StatusOK, boardSummary{ID: id, Name: name, Revision: req.Revision + 1,
-		CreatedAt: time.Unix(created, 0).UTC(), UpdatedAt: time.Unix(now, 0).UTC()})
+	saved := boardSaved{
+		boardSummary: boardSummary{ID: id, Name: name, Revision: revision + 1,
+			CreatedAt: time.Unix(created, 0).UTC(), UpdatedAt: time.Unix(now.Unix(), 0).UTC()},
+		FileIDs: fileIDs,
+	}
+	if req.Merge {
+		if saved.RemoteElements, err = json.Marshal(remote); err != nil {
+			return httpx.Internal(err)
+		}
+	}
+	httpx.JSON(w, http.StatusOK, saved)
 	return nil
+}
+
+// mergeWithStored reconciles an incoming element set with the stored scene's,
+// and answers the stored scene's inline files for the caller to carry over.
+func mergeWithStored(storedScene string, incoming []sceneElement) ([]sceneElement, map[string]json.RawMessage, error) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(storedScene), &top); err != nil {
+		return nil, nil, fmt.Errorf("read stored scene: %w", err)
+	}
+	stored, err := decodeSceneElements(top["elements"])
+	if err != nil {
+		return nil, nil, fmt.Errorf("read stored elements: %w", err)
+	}
+	var files map[string]json.RawMessage
+	_ = json.Unmarshal(top["files"], &files) // a stored scene without readable files has none to carry over
+	return mergeElements(stored, incoming), files, nil
 }
 
 func (s *Server) handleBoardDelete(w http.ResponseWriter, r *http.Request) error {
@@ -283,15 +401,27 @@ func (s *Server) handleBoardDelete(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return err
 	}
+	tx, err := s.Store.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	defer tx.Rollback()
 	var name string
-	if err := s.Store.DB.QueryRowContext(r.Context(), `SELECT name FROM boards WHERE id = ?`, id).Scan(&name); errors.Is(err, sql.ErrNoRows) {
-		return httpx.Err(http.StatusNotFound, "board_not_found", "board not found")
+	if err := tx.QueryRowContext(r.Context(), `SELECT name FROM boards WHERE id = ?`, id).Scan(&name); errors.Is(err, sql.ErrNoRows) {
+		return errBoardNotFound()
 	} else if err != nil {
 		return httpx.Internal(err)
 	}
-	if _, err := s.Store.DB.ExecContext(r.Context(), `DELETE FROM boards WHERE id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `DELETE FROM board_files WHERE board_id = ?`, id); err != nil {
 		return httpx.Internal(err)
 	}
+	if _, err := tx.ExecContext(r.Context(), `DELETE FROM boards WHERE id = ?`, id); err != nil {
+		return httpx.Internal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return httpx.Internal(err)
+	}
+	s.boards.hub.closeRoom(id)
 	httpx.SetAudit(r, "board.delete", name, nil)
 	httpx.NoContent(w)
 	return nil

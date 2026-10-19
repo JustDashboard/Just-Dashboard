@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { EMBED_FRAME_SOURCES } from "@/lib/board-embeds"
 
 function webSocketSource(raw: string | undefined): string | undefined {
   if (!raw) return undefined
@@ -49,7 +50,9 @@ export function proxy(request: NextRequest) {
     "font-src 'self' data:",
     `connect-src 'self' ${[...socketSources].join(" ")}`,
     "worker-src 'self' blob:",
-    "frame-src 'self' blob:",
+    // A drawing's embedded videos and Figma files; the frames are the
+    // providers' origins, sandboxed by Excalidraw and unable to reach this page.
+    `frame-src 'self' blob: ${EMBED_FRAME_SOURCES.join(" ")}`,
     "media-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",
