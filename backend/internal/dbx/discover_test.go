@@ -1303,6 +1303,14 @@ func TestFilesAreListedWithTheirHolder(t *testing.T) {
 			{Path: "/home/ubuntu/build/tmp/copy.db", Engine: "sqlite", Size: 4096, Modified: when},
 			{Path: "/srv/app/build_temp/seed.db", Engine: "sqlite", Size: 4096, Modified: when},
 			{Path: "/srv/templates/app.db", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/var/backups/just-dashboard/vpsd-before-repair/vpsd.db", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/home/ubuntu/pr136-evidence/backend-e2e/data/vpsd.db", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/srv/app/db-backups/app.db", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/srv/app/data/app.db.bak", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/home/ubuntu/jdt-scratch/jd-live-fixture.db", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/home/ubuntu/web/node_modules/pkg/test.db", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/home/ubuntu/web/test-results/run/app.db", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/srv/backupper/data/app.db", Engine: "sqlite", Size: 4096, Modified: when},
 		},
 		DataDirs: []DataDirFacts{
 			{Path: "/var/lib/docker/volumes/old-data/_data", Engine: "postgres", Version: "15\n", Modified: when},
@@ -1324,6 +1332,18 @@ func TestFilesAreListedWithTheirHolder(t *testing.T) {
 		"file:/home/ubuntu/build/tmp/copy.db": HolderTool,
 		"file:/srv/app/build_temp/seed.db":    HolderTool,
 		"file:/srv/templates/app.db":          HolderApplication,
+		// Copies kept aside: the store's own name elsewhere, a backups
+		// directory, a file named as a copy.
+		"file:/var/backups/just-dashboard/vpsd-before-repair/vpsd.db": HolderBackup,
+		"file:/home/ubuntu/pr136-evidence/backend-e2e/data/vpsd.db":   HolderBackup,
+		"file:/srv/app/db-backups/app.db":                             HolderBackup,
+		"file:/srv/app/data/app.db.bak":                               HolderBackup,
+		// A scratch directory and what a build or a test run fills.
+		"file:/home/ubuntu/jdt-scratch/jd-live-fixture.db": HolderTool,
+		"file:/home/ubuntu/web/node_modules/pkg/test.db":   HolderTool,
+		"file:/home/ubuntu/web/test-results/run/app.db":    HolderTool,
+		// A word only inside a name is not a backup.
+		"file:/srv/backupper/data/app.db": HolderApplication,
 	}
 	for key, want := range holders {
 		got := find(t, inv, key)

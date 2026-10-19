@@ -2532,6 +2532,17 @@ The passes, in order. Each one is a diff you can review on its own.
    sentence listed their names. *Found on this server* lists its servers in the order they can be
    connected — one press, a password, a start, nothing this page can do — and a file row's second
    line is the folder it is in, cut from its start, where it repeated the file's whole path.
+   In 0.8.2, at the operator's request, it lists only what there is to take: servers, and the files
+   an application keeps. A program's own state, a copy kept aside (a backup, the dashboard's store
+   under its own name elsewhere), a data directory no server runs on and what was ignored are behind
+   one *Set aside* fold, whose closed line counts each group and whose open body shows one group at
+   a time, picked by a chip; ignore marks whose instance is gone are one counted line with *Forget
+   them* rather than rows of bare keys. Every found row is the same two lines — where it is, then
+   after a dot why it waits — with its verb in one fixed width, so the readings line up; only a
+   connect that just failed adds a line, in full. The fleet's cards are one height whatever they
+   carry: the Stored track is drawn empty where no size is known, the failure block holds the
+   figures' height, and the facts are one line that cuts rather than wraps, so cards on shelves
+   standing side by side (separate grids) still line up.
 
    Three deployment pages took it in the same pass. A project's General settings did because the
    project identity line already is that page's reading line: each figure of the old Project

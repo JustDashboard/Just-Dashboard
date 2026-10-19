@@ -54,7 +54,7 @@ export type DbInstanceHost = {
 }
 
 export type DbFileHolder =
-  "self" | "container" | "deployment" | "compose" | "application" | "tool" | "system"
+  "self" | "container" | "deployment" | "compose" | "application" | "backup" | "tool" | "system"
 
 export type DbInstanceFile = {
   /** A host path; for an embedded file, the path inside its container. */

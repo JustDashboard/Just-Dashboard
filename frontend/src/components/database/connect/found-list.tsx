@@ -1,10 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Eye, EyeOff } from "@/components/icons"
 import { bytes, relativeTime } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
 import { Disclosure } from "@/components/form"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { EmptyNote } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -17,12 +19,14 @@ import {
   asSentence,
   foundActionWords,
   foundShelves,
+  instanceName,
   instanceState,
   instanceWhere,
   scanNotes,
   scanSilences,
   scanningFiles,
   whyWaiting,
+  type FoundShelves,
   type WaitingServer,
 } from "@/components/database/connect/inventory"
 import type { Found } from "@/components/database/connect/use-found"
@@ -34,7 +38,7 @@ import { useDatabases } from "@/components/database/shell/databases-context"
 
 /** How many of a shelf are drawn before the rest fold behind a count. */
 const SERVER_ROWS = 8
-const FILE_ROWS = 4
+const FILE_ROWS = 6
 
 /**
  * Everything discovery found on this machine that no saved connection points
@@ -44,10 +48,11 @@ const FILE_ROWS = 4
  * Each is something you take, so each is a lit row whose press is the one
  * thing to do with it — connect it, open the file, start what is down, or go
  * to the container or unit that owns it. What stops a row being connected is
- * the line under it, as a sentence. Files that are some program's private
- * state and what the operator said to leave alone are counted behind folds
- * rather than listed among things to act on, and a long shelf shows its first
- * rows and counts the rest.
+ * the second line of its row, after where it is. What is not something to
+ * take — a program's own state, a copy kept aside, a data directory with no
+ * server, what the operator ignored — is counted behind one fold rather than
+ * listed among things to act on, and a long shelf shows its first rows and
+ * counts the rest.
  *
  * A collector that could not read is said so above the list: an empty list
  * under a Docker that did not answer is not a server with no containers. And
@@ -171,58 +176,134 @@ export function FoundList({
         </div>
       )}
 
-      {shelves.kept.length > 0 && (
-        <Disclosure
-          quiet
-          summary={
-            <span className="flex items-baseline gap-2">
-              <span>Kept by other programs</span>
-              <span className="numeric text-hint text-muted-foreground">{shelves.kept.length}</span>
-            </span>
-          }
-        >
-          <ChoiceList>{shelves.kept.map((instance) => row(instance, 0))}</ChoiceList>
-        </Disclosure>
-      )}
-
-      {shelves.ignored.length + shelves.gone.length > 0 && (
-        <Disclosure
-          quiet
-          summary={
-            <span className="flex items-baseline gap-2">
-              <span>Ignored</span>
-              <span className="numeric text-hint text-muted-foreground">
-                {shelves.ignored.length + shelves.gone.length}
-              </span>
-            </span>
-          }
-        >
-          <ChoiceList>
-            {shelves.ignored.map((instance) => row(instance, 0))}
-            {shelves.gone.map((key) => (
-              <ChoiceRow
-                key={key}
-                disabled
-                verb={`Ignored ${key}`}
-                title={<span className="font-mono">{key}</span>}
-                description="No longer on this server."
-                actions={
-                  <DimActions>
-                    <IconAction
-                      label={`Stop ignoring ${key}`}
-                      onClick={() => void found.ignore(key, false)}
-                    >
-                      <Eye />
-                    </IconAction>
-                  </DimActions>
-                }
-              />
-            ))}
-          </ChoiceList>
-        </Disclosure>
-      )}
+      <SetAside shelves={shelves} found={found} row={row} />
     </div>
   )
+}
+
+/** The groups of what is set aside, in the order the fold lists them. */
+const ASIDE = [
+  {
+    key: "kept",
+    label: "Other programs",
+    fact: (n: number) => `${n} kept by other programs`,
+  },
+  {
+    key: "backups",
+    label: "Backups and copies",
+    fact: (n: number) => `${n} ${n === 1 ? "copy" : "copies"}`,
+  },
+  { key: "leftover", label: "No server", fact: (n: number) => `${n} without a server` },
+  { key: "ignored", label: "Ignored", fact: (n: number) => `${n} ignored` },
+] as const
+
+type AsideKey = (typeof ASIDE)[number]["key"]
+
+/**
+ * Everything found that is not something to take, behind one fold: a
+ * program's own state, copies kept aside, data directories no server runs on,
+ * and what the operator ignored. Closed, it is one line that says what it
+ * holds; open, one group at a time, picked by its chip, so twenty files of a
+ * browser's profile never push the ignored servers off the screen.
+ *
+ * An ignore mark is kept after the thing it names is gone — a container
+ * recreated under its name is still left alone — so those are not drawn as
+ * rows of bare keys but counted on one line, with the way to forget them.
+ */
+function SetAside({
+  shelves,
+  found,
+  row,
+}: {
+  shelves: FoundShelves
+  found: Found
+  row: (instance: DbInstance, index: number) => ReactNode
+}) {
+  const counts: Record<AsideKey, number> = {
+    kept: shelves.kept.length,
+    backups: shelves.backups.length,
+    leftover: shelves.leftover.length,
+    ignored: shelves.ignored.length + shelves.gone.length,
+  }
+  const groups = ASIDE.filter((group) => counts[group.key] > 0)
+  const [picked, setPicked] = useState<AsideKey | null>(null)
+  const [all, setAll] = useState(false)
+  if (groups.length === 0) return null
+  const current = groups.find((group) => group.key === picked) ?? groups[0]
+  const total = groups.reduce((sum, group) => sum + counts[group.key], 0)
+  const rows = current.key === "ignored" ? shelves.ignored : shelves[current.key]
+  const shown = all ? rows : rows.slice(0, ASIDE_ROWS)
+
+  return (
+    <Disclosure
+      quiet
+      summary={
+        <span className="flex items-baseline gap-2">
+          <span>Set aside</span>
+          <span className="numeric text-hint text-muted-foreground">{total}</span>
+        </span>
+      }
+      facts={groups.map((group) => group.fact(counts[group.key])).join(" · ")}
+    >
+      <div className="mt-2 space-y-3">
+        {groups.length > 1 && (
+          <ChipStrip role="group" aria-label="What is set aside">
+            {groups.map((group) => (
+              <FilterChip
+                key={group.key}
+                selected={group.key === current.key}
+                onClick={() => {
+                  setPicked(group.key)
+                  setAll(false)
+                }}
+              >
+                {group.label} <ChipCount>{counts[group.key]}</ChipCount>
+              </FilterChip>
+            ))}
+          </ChipStrip>
+        )}
+        <p className="text-hint text-muted-foreground">{ASIDE_WHY[current.key]}</p>
+        {shown.length > 0 && <ChoiceList>{shown.map((instance) => row(instance, 0))}</ChoiceList>}
+        {rows.length > ASIDE_ROWS && (
+          <More
+            all={all}
+            rest={rows.length - ASIDE_ROWS}
+            onToggle={() => setAll((held) => !held)}
+          />
+        )}
+        {current.key === "ignored" && shelves.gone.length > 0 && (
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-dashed px-3 py-2.5">
+            <span className="min-w-0 text-hint text-muted-foreground">
+              {shelves.gone.length === 1
+                ? "1 ignored item is no longer on this server."
+                : `${shelves.gone.length} ignored items are no longer on this server.`}
+            </span>
+            <Button
+              size="xs"
+              variant="outline"
+              pending={found.forgetting}
+              onClick={() => void found.forget(shelves.gone)}
+            >
+              Forget {shelves.gone.length === 1 ? "it" : "them"}
+            </Button>
+          </div>
+        )}
+      </div>
+    </Disclosure>
+  )
+}
+
+/** How many rows of one set-aside group are drawn before the rest fold behind a count. */
+const ASIDE_ROWS = 6
+
+/** What each set-aside group is, in a sentence above its rows. */
+const ASIDE_WHY: Record<AsideKey, string> = {
+  kept: "Files programs keep for themselves — browser profiles, caches, the dashboard's own store. Nothing to connect.",
+  backups:
+    "Copies kept aside: backups, and the dashboard's store under its own name somewhere else. They can still be opened.",
+  leftover:
+    "Data directories no server runs on — usually a volume a removed container left behind.",
+  ignored: "What you said to leave alone. Connecting all skips these.",
 }
 
 /** The rest of a long shelf, behind its count. */
@@ -304,19 +385,22 @@ function FoundRow({
 }) {
   const engine = found.engineOfInstance(instance)
   const action = found.actionOf(instance)
-  const words = foundActionWords(action, instance.name)
+  const name = instanceName(instance)
+  const words = foundActionWords(action, name)
   const where = instanceWhere(instance)
   const busy = found.busyWord(instance)
   const failure = found.failures[instance.key]
-  // What stands between it and a connection, as one sentence: what it just
-  // answered, what it answered the last time everything was tried, the
-  // password nothing here states, or why it cannot be connected at all. One
-  // that only needs its press has nothing to explain.
+  // What stands between it and a connection, as one sentence: what it
+  // answered the last time everything was tried, the password nothing here
+  // states, or why it cannot be connected at all. One that only needs its
+  // press has nothing to explain. It shares the second line with where the
+  // thing is, so every row is the same two lines; a failure just now is the
+  // exception, and is said in full under the row until it is tried again.
   const wantsPassword = action.kind === "connect" && Boolean(refusal?.includes("connect it with"))
   const why =
-    failure ??
     asSentence(refusal) ??
     (instance.connectable ? whyWaiting(instance) : asSentence(instance.reason))
+  const file = instance.file && instance.kind !== "embedded" ? instance.file : undefined
 
   return (
     <ChoiceRow
@@ -331,20 +415,35 @@ function FoundRow({
       verb={words.verb}
       leading={<EngineMark engine={engine} size="sm" />}
       title={
-        <>
-          {instance.name}
+        <span title={instance.name}>
+          {name}
           <span className="ml-2 text-hint font-normal text-muted-foreground">
             {engine.label}
             {instance.version ? ` ${instance.version}` : ""}
           </span>
-        </>
+        </span>
       }
       description={
-        instance.kind === "file" ? (
-          <FolderOf path={where.text} />
-        ) : (
-          <span className="font-mono">{where.text}</span>
-        )
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          {instance.kind === "file" ? (
+            <FolderOf path={where.text} className={why ? "max-w-[45%] shrink-0" : undefined} />
+          ) : (
+            <span
+              title={where.text}
+              className={cn("min-w-0 truncate font-mono", why && "max-w-[45%] shrink-0")}
+            >
+              {where.text}
+            </span>
+          )}
+          {why && (
+            <>
+              <span aria-hidden>·</span>
+              <span title={why} className="min-w-0 flex-1 truncate">
+                {why}
+              </span>
+            </>
+          )}
+        </span>
       }
       trailing={
         <span className="flex shrink-0 items-center gap-3">
@@ -353,10 +452,12 @@ function FoundRow({
           )}
           {busy ? (
             <TextShimmer className="text-xs font-medium">{`${busy}…`}</TextShimmer>
-          ) : instance.file && instance.kind !== "embedded" ? (
+          ) : file ? (
             <span className="numeric text-hint whitespace-nowrap text-muted-foreground max-sm:hidden">
-              {bytes(instance.file.size)}
-              {instance.file.wal ? " · in use" : ` · ${relativeTime(instance.file.modified)}`}
+              {/* A data directory is not measured: its size would read 0 B. */}
+              {instance.kind === "data"
+                ? `changed ${relativeTime(file.modified)}`
+                : `${bytes(file.size)}${file.wal ? " · in use" : ` · ${relativeTime(file.modified)}`}`}
             </span>
           ) : (
             <Status
@@ -366,7 +467,11 @@ function FoundRow({
             />
           )}
           {words.word && !busy && (
-            <span className="text-xs font-medium whitespace-nowrap">{words.word}</span>
+            // One width for every verb, so the readings beside them line up
+            // down the list instead of stepping with the word's length.
+            <span className="w-24 text-right text-xs font-medium whitespace-nowrap max-sm:w-auto">
+              {words.word}
+            </span>
           )}
         </span>
       }
@@ -374,9 +479,7 @@ function FoundRow({
         !instance.self && (
           <DimActions>
             <IconAction
-              label={
-                instance.ignored ? `Stop ignoring ${instance.name}` : `Ignore ${instance.name}`
-              }
+              label={instance.ignored ? `Stop ignoring ${name}` : `Ignore ${name}`}
               disabled={Boolean(busy)}
               onClick={() => void found.ignore(instance.key, !instance.ignored)}
             >
@@ -386,16 +489,8 @@ function FoundRow({
         )
       }
     >
-      {why && (
-        <p
-          className={
-            failure
-              ? "pl-11 text-hint leading-relaxed break-words text-destructive"
-              : "pl-11 text-hint leading-relaxed text-muted-foreground"
-          }
-        >
-          {why}
-        </p>
+      {failure && (
+        <p className="pl-11 text-hint leading-relaxed break-words text-destructive">{failure}</p>
       )}
     </ChoiceRow>
   )
@@ -407,10 +502,14 @@ function FoundRow({
  * row, it is cut from its start, because the folder nearest the file is what
  * tells two files of one name apart.
  */
-function FolderOf({ path }: { path: string }) {
+function FolderOf({ path, className }: { path: string; className?: string }) {
   const cut = path.lastIndexOf("/")
   return (
-    <span dir="rtl" title={path} className="block truncate text-left font-mono">
+    <span
+      dir="rtl"
+      title={path}
+      className={cn("block min-w-0 truncate text-left font-mono", className)}
+    >
       <bdi dir="ltr">{cut > 0 ? path.slice(0, cut) : "/"}</bdi>
     </span>
   )

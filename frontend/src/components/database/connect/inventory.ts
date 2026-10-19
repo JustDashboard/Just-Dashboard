@@ -55,6 +55,14 @@ function parentOf(path: string) {
   return cut > 0 ? path.slice(0, cut) : "/"
 }
 
+/**
+ * The name a row is titled with. An anonymous Docker volume is named by 64 hex
+ * digits, which is a row of noise; Docker's own listings cut an ID to twelve.
+ */
+export function instanceName(instance: DbInstance): string {
+  return /^[0-9a-f]{64}$/.test(instance.name) ? instance.name.slice(0, 12) : instance.name
+}
+
 /** Docker's and systemd's words for a server that exists and is not serving. */
 const STARTABLE = new Set(["exited", "created", "dead", "inactive", "failed"])
 
@@ -164,10 +172,14 @@ export function privateState(instance: DbInstance): boolean {
 export type FoundShelves = {
   /** Servers, running first, in the inventory's own order. */
   servers: DbInstance[]
-  /** Database files, data directories and files inside containers. */
+  /** Database files an application keeps, and files inside containers. */
   files: DbInstance[]
   /** Files that are a program's own state: counted, behind a fold. */
   kept: DbInstance[]
+  /** Copies kept aside — a backup, the dashboard's store under its own name elsewhere. */
+  backups: DbInstance[]
+  /** Data directories no server runs on: what a removed server left behind. */
+  leftover: DbInstance[]
   /** What the operator said to leave alone. */
   ignored: DbInstance[]
   /** Ignored keys whose instance is no longer on the machine. */
@@ -190,14 +202,25 @@ const READINESS: Record<FoundAction["kind"], number> = {
 
 /**
  * Everything discovery found that no saved connection points at, on the
- * shelves the list draws. Servers stand in the order they can be connected —
+ * shelves the list draws. Only servers and the files an application keeps are
+ * listed as things to take; a program's own state, a copy kept aside, a data
+ * directory with no server and what the operator ignored are set aside behind
+ * one fold, because on a real server they outnumbered what anybody came for. Servers stand in the order they can be connected —
  * the ones a press connects first, then the ones that want a password, then
  * what has to be started, then what nothing here can open — and otherwise the
  * inventory's order is kept inside each: it is stable between polls, so a row
  * moves only when what it needs has changed.
  */
 export function foundShelves(inventory: DbInventory | undefined): FoundShelves {
-  const shelves: FoundShelves = { servers: [], files: [], kept: [], ignored: [], gone: [] }
+  const shelves: FoundShelves = {
+    servers: [],
+    files: [],
+    kept: [],
+    backups: [],
+    leftover: [],
+    ignored: [],
+    gone: [],
+  }
   if (!inventory) return shelves
   const present = new Set<string>()
   for (const instance of inventory.instances) {
@@ -205,6 +228,8 @@ export function foundShelves(inventory: DbInventory | undefined): FoundShelves {
     if (instance.connections.length > 0) continue
     if (instance.ignored) shelves.ignored.push(instance)
     else if (privateState(instance)) shelves.kept.push(instance)
+    else if (instance.file?.holder === "backup") shelves.backups.push(instance)
+    else if (instance.kind === "data") shelves.leftover.push(instance)
     else if (instance.kind === "server") shelves.servers.push(instance)
     else shelves.files.push(instance)
   }
