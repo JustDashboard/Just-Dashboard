@@ -222,9 +222,11 @@ that does something.
   Environment tab hides. `build-dialog.tsx` is where the
   git panel and Docker stop being two products: a repository we already pull is a build context.
 
-Four deep links are worth preserving: `/files?path=`, `/git?repo=`, `/terminal?cwd=`, `/audit?action=`.
-Files and Git selections follow the address bar, while the terminal opens a session exactly once per
-mount because a shell is a process. Audit's settled filters are history entries; Back restores the
+Five deep links are worth preserving: `/files?path=`, `/git?repo=`, `/terminal?cwd=`,
+`/terminal?session=`, `/audit?action=`. Files and Git selections follow the address bar, while the
+terminal opens a session exactly once per mount because a shell is a process; `?session=` opens on an
+existing session instead (the Overview's shells link with it), remembered as if picked in the rail,
+and leaves the address once read. Audit's settled filters are history entries; Back restores the
 previous question. The audit link is how the Docker event feed hands off a correlated event.
 
 Packages use `?package=` for their inspector, and backup job pages use `?run=` for their selected run.

@@ -411,6 +411,18 @@ test("fits the pane again when the WebGL context is lost", async ({ page }) => {
 // A tab is named after what its shell is doing and marked while something
 // runs; the rail names a session after the window it is on. And the page
 // remembers which session and window were on screen across a navigation.
+test("a session named in the address is the one opened, and stays remembered", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await terminalFixture(page, "dom")
+  await expect(page.locator('[data-session="session-a"]')).toHaveAttribute("data-active", "true")
+  // The Overview's shells link here with the session they name.
+  await page.goto("/terminal?session=session-b")
+  await expect(page.locator('[data-session="session-b"]')).toHaveAttribute("data-active", "true")
+  await expect(page).toHaveURL(/\/terminal$/)
+  await page.goto("/terminal")
+  await expect(page.locator('[data-session="session-b"]')).toHaveAttribute("data-active", "true")
+})
+
 test("names windows after their work and remembers where you were", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const { connections, errors, strip } = await terminalFixture(page, "dom")
