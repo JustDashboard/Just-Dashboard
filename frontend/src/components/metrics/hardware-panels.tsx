@@ -8,7 +8,7 @@ import { bytes, percent, rate } from "@/lib/format"
 import type { DirEntry, NetStats, SensorReading, Snapshot } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import type { Tone } from "@/components/tone"
-import { Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Meter, utilisationTone } from "@/components/meter"
 import { EmptyState } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -22,15 +22,6 @@ import {
 } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  stickyTableHeader,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 
 /**
  * The parts of the machine, read from the newest frame.
@@ -38,9 +29,9 @@ import {
  * Everything here is live-only: per-core load, how memory is split, sensor
  * temperatures, mounts and interfaces are all in the socket's snapshot and
  * none of them survive a downsampled chart, so these are readings rather than
- * series. Plain panels, every one but the interfaces table — a title and a
- * hairline on the page's own ground — each set beside the chart of the same
- * resource, so the newest frame and its history are read side by side.
+ * series. Plain panels, every one — a title and a hairline on the page's own
+ * ground — each set beside the chart of the same resource, so the newest frame
+ * and its history are read side by side.
  */
 
 /** A figure in its tone: amber or red past the line, the ink otherwise. */
@@ -473,120 +464,117 @@ export function InterfacesPanel({
   const busiest = Math.max(1, ...interfaces.map((n) => n.recvRate + n.sendRate))
 
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader
         title="Interfaces"
         actions={
-          <span className="numeric text-hint text-muted-foreground">
-            {interfaces.filter((n) => n.isUp).length} up
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="numeric text-hint text-muted-foreground">
+              {interfaces.filter((n) => n.isUp).length} up
+            </span>
+            <ToggleGroup
+              type="single"
+              value={scope}
+              onValueChange={(next) => next && setScope(next as "real" | "all")}
+              variant="outline"
+              size="sm"
+              aria-label="Which interfaces to show"
+            >
+              <ToggleGroupItem value="real" className="px-2 text-hint">
+                Real devices
+              </ToggleGroupItem>
+              <ToggleGroupItem value="all" className="px-2 text-hint">
+                Everything {snapshot.net.length}
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
         }
       />
-      <PanelToolbar>
-        <ToggleGroup
-          type="single"
-          value={scope}
-          onValueChange={(next) => next && setScope(next as "real" | "all")}
-          variant="outline"
-          size="sm"
-          aria-label="Which interfaces to show"
-        >
-          <ToggleGroupItem value="real" className="px-2.5 text-hint">
-            Real devices
-          </ToggleGroupItem>
-          <ToggleGroupItem value="all" className="px-2.5 text-hint">
-            Everything {snapshot.net.length}
-          </ToggleGroupItem>
-        </ToggleGroup>
-      </PanelToolbar>
-      {/* The bleed is plain-only: inside this panel's frame the outer columns
-          take the gutter from their own cell padding instead, which lands them
-          in the title's column either way (§2). */}
-      <PanelBody flush className="group-data-[plain]/panel:-mx-4">
-        {/* Capped so "Everything" scrolls inside the frame rather than
-            stretching the Network section far past the charts above it. */}
-        <Table containerClassName="max-h-[26rem]">
-          <TableHeader className={stickyTableHeader}>
-            <TableRow>
-              <TableHead>Interface</TableHead>
-              <TableHead className="w-[28%]">Traffic</TableHead>
-              <TableHead className="text-right">In</TableHead>
-              <TableHead className="text-right">Out</TableHead>
-              {/* Drops next to errors: a link that is up, error-free and
-                  dropping packets is a queue that is too short, not a fault. */}
-              <TableHead className="text-right">Errors</TableHead>
-              <TableHead className="text-right">Drops</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+      <PanelBody>
+        {interfaces.length === 0 ? (
+          <EmptyState title="No interfaces reported" icon={Servers} />
+        ) : (
+          // Two to a row, as the charts above them are: "Everything" on a host
+          // running containers is thirty devices, which as one column was the
+          // page's longest block, and the table that held them had to scroll
+          // inside a frame of its own — the one box on a page of readings.
+          <ul aria-label="Interfaces" className="grid min-w-0 gap-x-10 gap-y-5 lg:grid-cols-2">
             {interfaces.map((iface) => (
-              <TableRow key={iface.interface}>
-                <TableCell>
-                  <div className="flex min-w-0 items-center gap-3">
-                    <ProductLogo
-                      id={interfaceProduct(iface.interface)}
-                      size="sm"
-                      fallback={KIND_GLYPH[iface.kind] ?? NetworkDevice}
-                    />
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span
-                          aria-label={iface.isUp ? "up" : "down"}
-                          className={cn(
-                            "size-1.5 shrink-0 rounded-full",
-                            iface.isUp ? "bg-success" : "bg-muted-foreground",
-                          )}
-                        />
-                        <span className="font-mono text-xs">{iface.interface}</span>
-                        <Tag>{iface.kind}</Tag>
-                      </div>
-                      <p
-                        className="max-w-[16rem] truncate font-mono text-hint text-muted-foreground"
-                        title={iface.addrs.join(", ")}
-                      >
-                        {iface.addrs.join(", ") || "no address"}
-                      </p>
-                    </div>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <TrafficBar iface={iface} busiest={busiest} colors={colors} />
-                </TableCell>
-                <TableCell className="numeric text-right font-mono">
-                  {rate(iface.recvRate)}
-                </TableCell>
-                <TableCell className="numeric text-right font-mono">
-                  {rate(iface.sendRate)}
-                </TableCell>
-                <TableCell
-                  className={cn(
-                    "numeric text-right font-mono text-xs",
-                    iface.errIn + iface.errOut > 0 ? "text-warning" : "text-muted-foreground",
-                  )}
-                >
-                  {iface.errIn + iface.errOut}
-                </TableCell>
-                <TableCell
-                  className={cn(
-                    "numeric text-right font-mono text-xs",
-                    iface.dropIn + iface.dropOut > 0 ? "text-warning" : "text-muted-foreground",
-                  )}
-                >
-                  {iface.dropIn + iface.dropOut}
-                </TableCell>
-              </TableRow>
+              <Interface key={iface.interface} iface={iface} busiest={busiest} colors={colors} />
             ))}
-            {interfaces.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="p-0">
-                  <EmptyState title="No interfaces reported" icon={Servers} />
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+          </ul>
+        )}
       </PanelBody>
     </Panel>
+  )
+}
+
+/**
+ * One interface in the order Filesystems draws a disk: which one and what it
+ * is carrying, the bar, then where it answers and what it has lost. The two
+ * rates are keyed by the bar's colours, as a chart's head keys its figures.
+ */
+function Interface({
+  iface,
+  busiest,
+  colors,
+}: {
+  iface: NetStats
+  busiest: number
+  colors: { in: string; out: string }
+}) {
+  const errors = iface.errIn + iface.errOut
+  const drops = iface.dropIn + iface.dropOut
+  return (
+    <li className="flex min-w-0 items-center gap-3">
+      <ProductLogo
+        id={interfaceProduct(iface.interface)}
+        size="sm"
+        fallback={KIND_GLYPH[iface.kind] ?? NetworkDevice}
+      />
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex min-w-0 items-baseline justify-between gap-3">
+          <span className="flex min-w-0 items-center gap-2">
+            <span
+              aria-label={iface.isUp ? "up" : "down"}
+              className={cn(
+                "size-1.5 shrink-0 rounded-full",
+                iface.isUp ? "bg-success" : "bg-muted-foreground",
+              )}
+            />
+            <span className="truncate font-mono text-body font-medium">{iface.interface}</span>
+            <Tag>{iface.kind}</Tag>
+          </span>
+          <span className="numeric flex shrink-0 gap-x-3 text-hint text-muted-foreground">
+            <span className="whitespace-nowrap">
+              <SeriesKey color={colors.in} />
+              <span className="font-medium text-foreground">{rate(iface.recvRate)}</span> in
+            </span>
+            <span className="whitespace-nowrap">
+              <SeriesKey color={colors.out} />
+              <span className="font-medium text-foreground">{rate(iface.sendRate)}</span> out
+            </span>
+          </span>
+        </div>
+        <TrafficBar iface={iface} busiest={busiest} colors={colors} />
+        <div className="numeric flex min-w-0 justify-between gap-3 text-hint text-muted-foreground">
+          <span className="truncate font-mono" title={iface.addrs.join(", ")}>
+            {iface.addrs.join(", ") || "no address"}
+          </span>
+          {/* Drops beside errors: a link that is up, error-free and dropping
+              packets is a queue that is too short, not a fault. */}
+          <span className="shrink-0">
+            <span className={cn(errors > 0 && "font-medium text-warning")}>
+              {errors.toLocaleString()} errors
+            </span>
+            {" · "}
+            <span className={cn(drops > 0 && "font-medium text-warning")}>
+              {drops.toLocaleString()} drops
+            </span>
+          </span>
+        </div>
+      </div>
+    </li>
   )
 }
 
