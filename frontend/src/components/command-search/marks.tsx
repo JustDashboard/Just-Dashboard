@@ -18,6 +18,7 @@ import {
   type Icon,
 } from "@/components/icons"
 import { hasProductLogo, ProductGlyph } from "@/components/product-logo"
+import { ProjectFavicon } from "@/components/deploy/project-mark"
 import { ExcalidrawGlyph } from "@/components/boards/glyphs"
 import type { SearchKind } from "./model"
 
@@ -71,9 +72,12 @@ export const COMMAND_ICONS: Record<string, Icon> = {
  */
 export function ResultMark({
   product,
+  projectId,
   icon: Glyph,
 }: {
   product?: string
+  /** A project, drawn by its website's icon where it has one. */
+  projectId?: number
   icon: React.ComponentType<{ className?: string }>
 }) {
   return (
@@ -81,11 +85,17 @@ export function ResultMark({
       aria-hidden="true"
       className="flex size-5 shrink-0 items-center justify-center text-muted-foreground transition-colors group-data-[selected=true]/result:text-foreground"
     >
-      {product && hasProductLogo(product) ? (
-        <ProductGlyph id={product} className="size-4" />
-      ) : (
-        <Glyph className="size-4" />
-      )}
+      <ProjectFavicon
+        projectId={projectId}
+        className="size-4"
+        fallback={
+          product && hasProductLogo(product) ? (
+            <ProductGlyph id={product} className="size-4" />
+          ) : (
+            <Glyph className="size-4" />
+          )
+        }
+      />
     </span>
   )
 }

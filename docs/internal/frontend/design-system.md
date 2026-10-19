@@ -1653,6 +1653,17 @@ scope head, the project identity line and the notification picture's source all 
 draws the product alone, at a step of opacity — a project at rest, the way Backups dims a paused
 job.
 
+**A project is drawn as itself wherever it appears, not only on Deploy's pages.** A database's
+reader was a cloud glyph and a site's application its container's image, so the one project read as
+three things across the product. Another section's payload names a project by its id alone, and
+`useProjects` reads the fleet once for every mark on the page. Where the row draws its own tile,
+`ProjectMarkOf` draws `ProjectMark` over the tile it had before; where the tile belongs to the
+picture — a `WireMark` with its state's tint, a 16px glyph inside a line, the palette's result mark
+— `ProjectFavicon` (or `ProductLogo`'s `favicon`) puts the icon in it, with the product or glyph it
+drew before wherever the project has no icon to serve. A site's application leads the engine's tile
+in its stack (`ProductLogos`' `lead`), and a backup job leads its products with the project it
+covers. A reader without Deploy's read keeps the old marks: the fleet is refused, not guessed.
+
 **Where a project comes from, and what builds it, are products too.** A Git remote, a clone URL, a
 registry host or an image reference is drawn as the forge or registry it names (`hostProduct`:
 GitHub, `ghcr.io` included, GitLab, Bitbucket, Codeberg, Gitea, Forgejo, Docker Hub, Quay, Harbor,

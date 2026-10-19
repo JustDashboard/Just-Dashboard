@@ -258,7 +258,7 @@ configuration and recovery controls retain their owner and capability boundaries
 a job could protect — the dashboard's data directory (with its SQLite file as a snapshot suggestion),
 the nginx directory and the Caddyfile's directory when they exist, local Docker volumes with the
 containers mounting them, compose stacks by working directory with their running containers, deployment
-checkouts, discovered Git repositories, and saved database connections (a SQLite connection also as its
+checkouts (by name, with the project's id for its mark), discovered Git repositories, and saved database connections (a SQLite connection also as its
 file). Each carries the job it suggests (name, sources, excludes, SQLite paths, native dumps, containers
 to pause) and the jobs that already cover it: a file resource is covered when every path sits under a
 job source, a database when a job dumps it or, for SQLite, snapshots its file; only an enabled covering

@@ -7,6 +7,7 @@ import { certPathProduct, siteProduct } from "@/components/proxy/marks"
 import type { BackendKind } from "@/components/proxy/route-map"
 import { FEATURE_LABEL, activeOwner } from "@/components/proxy/site-details"
 import { isDown } from "@/components/proxy/site-filters"
+import { useProjectFavicon } from "@/components/deploy/project-mark"
 
 const BACKEND_GLYPH = { app: Box, files: FolderOpen, redirect: CornerUpRight, config: FileText }
 
@@ -22,11 +23,12 @@ export function RouteMark({
   backend,
 }: {
   vhost: Pick<VHost, "kind">
-  backend: { kind: BackendKind; product?: string }
+  backend: { kind: BackendKind; product?: string; projectId?: number }
 }) {
+  const favicon = useProjectFavicon(backend.projectId)
   return (
     <span className="relative flex shrink-0">
-      <ProductLogo id={backend.product} fallback={BACKEND_GLYPH[backend.kind]} />
+      <ProductLogo id={backend.product} favicon={favicon} fallback={BACKEND_GLYPH[backend.kind]} />
       <span className="absolute -right-1 -bottom-1 flex size-4.5 items-center justify-center rounded-md border border-hairline bg-background">
         <ProductGlyph id={siteProduct(vhost)} className="size-3" />
       </span>

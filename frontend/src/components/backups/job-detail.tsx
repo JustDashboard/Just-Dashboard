@@ -5,7 +5,6 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import {
-  Archive,
   ArrowLeft,
   CloudDownload,
   Database,
@@ -35,7 +34,6 @@ import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
-import { ProductLogo, ProductLogos } from "@/components/product-logo"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Status } from "@/components/status-dot"
 import { Modal } from "@/components/modal"
@@ -59,7 +57,7 @@ import {
 } from "@/components/backups/shared"
 import { LastRun } from "@/components/backups/job-card"
 import { RunContents, RunEncryption, RunLog, RunRail } from "@/components/backups/job-runs"
-import { destinationProduct, jobProducts } from "@/components/backups/marks"
+import { JobMark, destinationProduct, jobProducts, jobProject } from "@/components/backups/marks"
 import { JobMap } from "@/components/backups/protection-map"
 import { FileIcon } from "@/components/files/file-icon"
 import { useJobVerbs } from "@/components/backups/job-verbs"
@@ -261,15 +259,7 @@ export function JobPage() {
             <HostIdentity
               className="animate-rise"
               logo={
-                products.length > 1 ? (
-                  <ProductLogos ids={products} size="md" />
-                ) : (
-                  <ProductLogo
-                    id={products[0]}
-                    fallback={Archive}
-                    className="size-12 rounded-xl [&_img]:size-7"
-                  />
-                )
+                <JobMark products={products} project={jobProject(job, resourceList)} size="lg" />
               }
               title={job.name}
               facts={

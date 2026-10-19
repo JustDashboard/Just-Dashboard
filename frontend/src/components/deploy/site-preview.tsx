@@ -6,7 +6,7 @@ import { API_BASE } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { DeploymentDomainRoute, DeploymentSummary } from "@/lib/types"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark, projectFavicon } from "@/components/deploy/project-mark"
 import { WorkloadMark, deploymentURL, hostOf } from "@/components/deploy/vocabulary"
 
 /**
@@ -220,6 +220,7 @@ function Glass({
       <WorkloadMark
         profile={deployment.profile}
         product={product}
+        favicon={projectFavicon(deployment)}
         className="size-14 rounded-xl [&_img]:size-8 [&_svg]:size-6"
       />
       {!deployment.liveReleaseId ? (

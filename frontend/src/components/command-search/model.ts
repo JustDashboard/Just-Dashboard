@@ -174,6 +174,8 @@ export type RecentDestination = {
   at?: number
   /** The product a resource opened from search is, so its row keeps the mark. */
   product?: string
+  /** The project it is, so its row keeps the website's icon. */
+  projectId?: number
 }
 
 function destinationKey(href: string) {

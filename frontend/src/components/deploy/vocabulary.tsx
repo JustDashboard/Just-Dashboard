@@ -591,18 +591,22 @@ export const WORKLOAD_GLYPH: Record<WorkloadProfile, Icon> = {
 export function WorkloadMark({
   profile,
   product,
+  favicon,
   size = "md",
   className,
 }: {
   profile: WorkloadProfile
   /** What the project is, when something names it — see `projectProduct`. */
   product?: string
+  /** The icon its website declares (`projectFavicon`), before the product. */
+  favicon?: string
   size?: "sm" | "md" | "lg"
   className?: string
 }) {
   return (
     <ProductLogo
       id={product}
+      favicon={favicon}
       size={size === "sm" ? "sm" : "md"}
       fallback={WORKLOAD_GLYPH[profile]}
       className={cn(size === "lg" && "size-12 rounded-xl [&_img]:size-7 [&_svg]:size-5", className)}

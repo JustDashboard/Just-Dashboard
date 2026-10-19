@@ -49,6 +49,8 @@ export type MapApp = {
   address: string
   /** The container's id, for its page. */
   container?: string
+  /** The project whose release the container is, drawn by its website's icon. */
+  projectId?: number
   /** The worst the upstream check found of it, where it was checked. */
   state?: UpstreamState
   ms?: number
@@ -108,7 +110,7 @@ export function backendOf(
   upstream: string,
   listeners: Listener[],
   owner?: string,
-): Pick<MapApp, "product" | "name" | "address" | "container"> {
+): Pick<MapApp, "product" | "name" | "address" | "container" | "projectId"> {
   const path = socketPath(upstream)
   if (path) {
     const file =
@@ -131,6 +133,7 @@ export function backendOf(
       name: holder.container.name,
       address,
       container: holder.container.id,
+      projectId: holder.container.deployment?.projectId,
     }
   }
   if (holder) {
@@ -171,7 +174,7 @@ export function siteBackend(
   vhost: VHost,
   listeners: Listener[],
   upstreams?: UpstreamReport,
-): Pick<MapApp, "kind" | "product" | "name" | "address" | "container"> {
+): Pick<MapApp, "kind" | "product" | "name" | "address" | "container" | "projectId"> {
   const upstream = vhost.upstreams[0]
   if (upstream) {
     const address = checkedAddress(upstream)
