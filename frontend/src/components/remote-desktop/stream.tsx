@@ -14,7 +14,9 @@ import {
   BRIDGE_SETTINGS_KEY,
   bridgeSettings,
   desktopApp,
+  screenShape,
   streamPageUrl,
+  streamSize,
   streamStage,
   SUNSHINE_PORT,
   type RdComputerView,
@@ -73,6 +75,8 @@ export function StreamPane({
   onPlayback,
   onStats,
   quality,
+  shape,
+  onShape,
   attempt,
   pointer,
   onFrame,
@@ -87,6 +91,9 @@ export function StreamPane({
   /** What the stream measures of itself each second; undefined once it stops. */
   onStats: (stats: StreamStats | undefined) => void
   quality: StreamQuality
+  /** The computer's screen's width over its height, once a stream has shown it. */
+  shape: number | undefined
+  onShape: (shape: number) => void
   attempt: number
   pointer: boolean
   onFrame: (frame: HTMLIFrameElement | null) => void
@@ -101,6 +108,8 @@ export function StreamPane({
         onPlayback={onPlayback}
         onStats={onStats}
         quality={quality}
+        shape={shape}
+        onShape={onShape}
         attempt={attempt}
         pointer={pointer}
         onFrame={onFrame}
@@ -562,15 +571,27 @@ export function PinCard({
   )
 }
 
+/** How wide a frame of the picture is scaled to before its padding is read. */
+const SAMPLE_WIDTH = 480
+
 /**
  * The stream itself: the bridge's page, framed. Its settings live in this
  * origin's storage, where the page reads them, so they are written just
- * before it loads; a change of quality loads it again.
+ * before it loads; a change of quality or of the screen's shape loads it
+ * again.
+ *
+ * The frame is the stream's own shape, as large as the space allows, so the
+ * bridge has nothing to letterbox; the space it leaves is the workspace's,
+ * not black. The stream is asked for in the shape of the computer's screen,
+ * once a stream has shown it: until then Sunshine pads the screen into 16:9,
+ * and the padding is read off the picture.
  */
 function StreamFrame({
   computer,
   stream,
   quality,
+  shape,
+  onShape,
   attempt,
   pointer,
   onFrame,
@@ -580,6 +601,8 @@ function StreamFrame({
   computer: RdComputerView
   stream: RdStream
   quality: StreamQuality
+  shape: number | undefined
+  onShape: (shape: number) => void
   attempt: number
   pointer: boolean
   onFrame: (frame: HTMLIFrameElement | null) => void
@@ -589,8 +612,14 @@ function StreamFrame({
   const app = desktopApp(stream.apps)
   const frame = useRef<HTMLIFrameElement>(null)
   const stopObserving = useRef<() => void>(() => {})
+  // A picture dark down both sides reads as padding; the stream asked for in
+  // that shape comes back padded the other way, which is read right. Twice
+  // is enough for that, and stops a dark picture from reloading it for ever.
+  const reshaped = useRef(0)
   const transport = stream.transport
-  const key = `${stream.hostId}:${app?.id}:${quality}:${transport}:${attempt}`
+  const size = streamSize(quality, shape)
+  const asked = size.width / size.height
+  const key = `${stream.hostId}:${app?.id}:${quality}:${size.width}x${size.height}:${transport}:${attempt}`
   const src = app ? streamPageUrl(stream.hostId, app.id) : undefined
   useEffect(() => {
     onPlayback(false)
@@ -610,10 +639,10 @@ function StreamFrame({
     } catch {}
     localStorage.setItem(
       BRIDGE_SETTINGS_KEY,
-      JSON.stringify(bridgeSettings(held, quality, transport)),
+      JSON.stringify(bridgeSettings(held, quality, transport, shape)),
     )
     frame.current.src = src
-  }, [key, src, quality, transport])
+  }, [key, src, quality, transport, shape])
   // The computer draws its own pointer into the picture. This one, over it,
   // was a second pointer a round trip ahead of the first, so it is hidden
   // over the screen unless asked for; the stream's menu keeps its own.
@@ -631,84 +660,128 @@ function StreamFrame({
       </Centered>
     )
   return (
-    <iframe
-      key={key}
-      ref={(node) => {
-        frame.current = node
-        onFrame(node)
-      }}
-      data-slot="remote-stream"
-      title={`The screen of ${computer.name}, streamed by Sunshine`}
-      allow="fullscreen; autoplay; gamepad; keyboard-map"
-      // The bridge draws its page on a blue gradient of its own; framed here
-      // it is a screen, so the margins round the picture go black.
-      onLoad={(event) => {
-        stopObserving.current()
-        onPlayback(false)
-        onStats(undefined)
-        const doc = event.currentTarget.contentDocument
-        if (!doc?.head) return
-        let interrupted = false
-        // The frames are counted on the first video the page draws; the
-        // page is this origin, so its element can be read.
-        let metered: HTMLVideoElement | null = null
-        let stopMetering = () => {}
-        const meter = () => {
-          const video = doc.querySelector("video")
-          if (video === metered) return
-          stopMetering()
-          metered = video
-          stopMetering = video ? meterVideo(video, onStats) : () => {}
-          if (!video) onStats(undefined)
-        }
-        const update = (event?: Event) => {
-          meter()
-          if (event && (event.target as HTMLElement | null)?.tagName !== "VIDEO") return
-          if (
-            event &&
-            ["pause", "ended", "waiting", "stalled", "error", "emptied"].includes(event.type)
-          )
-            interrupted = true
-          else if (event?.type === "playing") interrupted = false
-          onPlayback(
-            !interrupted &&
-              [...doc.querySelectorAll("video")].some(
-                (video) =>
-                  !video.paused &&
-                  !video.ended &&
-                  !video.error &&
-                  video.readyState >= 2 &&
-                  video.videoWidth > 0,
-              ),
-          )
-        }
-        const events = [
-          "playing",
-          "timeupdate",
-          "pause",
-          "ended",
-          "waiting",
-          "stalled",
-          "error",
-          "emptied",
-        ]
-        for (const name of events) doc.addEventListener(name, update, true)
-        const observer = new MutationObserver(() => update())
-        observer.observe(doc.body, { childList: true, subtree: true })
-        stopObserving.current = () => {
-          observer.disconnect()
-          stopMetering()
-          for (const name of events) doc.removeEventListener(name, update, true)
-        }
-        update()
-        const style = doc.createElement("style")
-        style.textContent = "body::before { background: #000 !important; }"
-        doc.head.append(style)
-        pointerStyle(doc, pointer)
-      }}
-      className="absolute inset-0 size-full border-0 bg-black"
-    />
+    <div className="[container-type:size] absolute inset-0 flex items-center justify-center">
+      <iframe
+        key={key}
+        ref={(node) => {
+          frame.current = node
+          onFrame(node)
+        }}
+        data-slot="remote-stream"
+        title={`The screen of ${computer.name}, streamed by Sunshine`}
+        allow="fullscreen; autoplay; gamepad; keyboard-map"
+        // The bridge draws its page on a blue gradient of its own; framed here
+        // it is a screen, so the margins round the picture go black.
+        onLoad={(event) => {
+          stopObserving.current()
+          onPlayback(false)
+          onStats(undefined)
+          const doc = event.currentTarget.contentDocument
+          if (!doc?.head) return
+          let interrupted = false
+          // The frames are counted on the first video the page draws; the
+          // page is this origin, so its element can be read.
+          let metered: HTMLVideoElement | null = null
+          let stopMetering = () => {}
+          const meter = () => {
+            const video = doc.querySelector("video")
+            if (video === metered) return
+            stopMetering()
+            metered = video
+            stopMetering = video ? meterVideo(video, onStats) : () => {}
+            if (!video) onStats(undefined)
+          }
+          const update = (event?: Event) => {
+            meter()
+            if (event && (event.target as HTMLElement | null)?.tagName !== "VIDEO") return
+            if (
+              event &&
+              ["pause", "ended", "waiting", "stalled", "error", "emptied"].includes(event.type)
+            )
+              interrupted = true
+            else if (event?.type === "playing") interrupted = false
+            onPlayback(
+              !interrupted &&
+                [...doc.querySelectorAll("video")].some(
+                  (video) =>
+                    !video.paused &&
+                    !video.ended &&
+                    !video.error &&
+                    video.readyState >= 2 &&
+                    video.videoWidth > 0,
+                ),
+            )
+          }
+          const events = [
+            "playing",
+            "timeupdate",
+            "pause",
+            "ended",
+            "waiting",
+            "stalled",
+            "error",
+            "emptied",
+          ]
+          for (const name of events) doc.addEventListener(name, update, true)
+          const observer = new MutationObserver(() => update())
+          observer.observe(doc.body, { childList: true, subtree: true })
+          // Read until three frames in a row agree, so a picture going dark for
+          // a moment is not taken for padding.
+          const sample = document.createElement("canvas")
+          const context = sample.getContext("2d", { willReadFrequently: true })
+          let reading: number | undefined
+          let agreed = 0
+          const shapeTimer = window.setInterval(() => {
+            const picture = doc.querySelector<HTMLVideoElement | HTMLCanvasElement>(".video-stream")
+            const next = picture && context ? readShape(picture, sample, context) : undefined
+            agreed =
+              next && reading && Math.abs(next / reading - 1) < 0.01 ? agreed + 1 : next ? 1 : 0
+            reading = next
+            if (!next || agreed < 3) return
+            window.clearInterval(shapeTimer)
+            if (Math.abs(next / asked - 1) < 0.01 || reshaped.current >= 2) return
+            reshaped.current += 1
+            onShape(next)
+          }, 1000)
+          stopObserving.current = () => {
+            observer.disconnect()
+            stopMetering()
+            window.clearInterval(shapeTimer)
+            for (const name of events) doc.removeEventListener(name, update, true)
+          }
+          update()
+          const style = doc.createElement("style")
+          style.textContent = "body::before { background: #000 !important; }"
+          doc.head.append(style)
+          pointerStyle(doc, pointer)
+        }}
+        style={{
+          width: `min(100cqw, 100cqh * ${asked})`,
+          aspectRatio: `${size.width} / ${size.height}`,
+        }}
+        className="max-h-full border-0 bg-black"
+      />
+    </div>
   )
+}
+
+/** The screen's shape in one frame of the bridge's picture, a video or its canvas. */
+function readShape(
+  picture: HTMLVideoElement | HTMLCanvasElement,
+  sample: HTMLCanvasElement,
+  context: CanvasRenderingContext2D,
+) {
+  // The picture is the bridge's page's element, so `instanceof` this page's
+  // classes is false for it.
+  const video = picture.tagName === "VIDEO" ? (picture as HTMLVideoElement) : undefined
+  const width = video ? video.videoWidth : picture.width
+  const height = video ? video.videoHeight : picture.height
+  if (!width || !height || (video && video.readyState < 2)) return undefined
+  sample.width = SAMPLE_WIDTH
+  sample.height = Math.round((SAMPLE_WIDTH * height) / width)
+  context.drawImage(picture, 0, 0, sample.width, sample.height)
+  const { data } = context.getImageData(0, 0, sample.width, sample.height)
+  return screenShape(data, sample.width, sample.height, width / height)
 }
 
 const POINTER_STYLE = "jd-hide-pointer"
