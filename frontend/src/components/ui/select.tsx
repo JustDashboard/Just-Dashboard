@@ -14,8 +14,26 @@ import {
 } from "@/components/ui/menu-styles"
 import { usePortalContainer } from "@/lib/portal-container"
 
-function Select({ ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) {
-  return <SelectPrimitive.Root data-slot="select" {...props} />
+/**
+ * No item in the product holds "" — a choice of nothing has its own word,
+ * "none" or "auto" — so an empty value is never something the reader chose.
+ * It is what the hidden native <select> Radix keeps inside a form reads back
+ * when the value is set to one it has no <option> for — a saved credential the
+ * picker does not offer, or any value whose item is drawn only in the render
+ * the value comes back in. Passed on, Discard putting such a value back was
+ * answered with a choice of "", and the form was dirty again however often it
+ * was pressed.
+ */
+function Select({ onValueChange, ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) {
+  return (
+    <SelectPrimitive.Root
+      data-slot="select"
+      onValueChange={(value) => {
+        if (value !== "") onValueChange?.(value)
+      }}
+      {...props}
+    />
+  )
 }
 
 function SelectGroup({ ...props }: React.ComponentProps<typeof SelectPrimitive.Group>) {
