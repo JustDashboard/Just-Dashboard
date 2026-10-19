@@ -102,9 +102,18 @@ func (m *Manager) startupArgv(keepCWD bool, agent, cwd string) []string {
 	if m.shellDir == "" {
 		return m.account.loginArgv(m.shell, keepCWD)
 	}
-	args := []string{shell, "-l"}
+	// The login half is the account's own shell, as it is over ssh, and $0 is
+	// the one the window runs. A bash account keeps ~/.local/bin and the rest
+	// of its PATH in ~/.profile, which a zsh login never reads, so a window
+	// opened in JD_TERMINAL_SHELL's zsh said "command not found" for what ssh
+	// ran. The bootstrap is POSIX, so any POSIX login shell can run it.
+	login := shell
+	if posixShell(m.account.Shell) {
+		login = m.account.Shell
+	}
+	args := []string{login, "-l"}
 	if !m.account.IsRoot() && os.Geteuid() == 0 {
-		args = []string{"su", "-s", shell}
+		args = []string{"su", "-s", login}
 		if !keepCWD {
 			args = append(args, "-l")
 		}
@@ -115,4 +124,14 @@ func (m *Manager) startupArgv(keepCWD bool, agent, cwd string) []string {
 		args = append(args, agent, cwd)
 	}
 	return args
+}
+
+// posixShell reports a login shell that reads a POSIX profile and runs the
+// bootstrap as written.
+func posixShell(shell string) bool {
+	switch filepath.Base(shell) {
+	case "bash", "sh", "dash", "zsh", "ksh", "mksh":
+		return true
+	}
+	return false
 }
