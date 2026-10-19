@@ -392,6 +392,25 @@ func (s *PlanningStore) RevealVariable(ctx context.Context, projectID, environme
 	return nil, fmt.Errorf("%w: %s", ErrVariableNotFound, name)
 }
 
+// LiteralVariableValues is the environment's active variables whose value is
+// written out rather than a typed reference, by name. It is for matching on
+// the server, never for a response: the values are the secrets the read model
+// masks.
+func (s *PlanningStore) LiteralVariableValues(ctx context.Context, projectID, environmentID int64) (map[string]string, error) {
+	values, err := s.activeVariableValues(ctx, s.db, projectID, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	literal := map[string]string{}
+	for _, value := range values {
+		if _, parseErr := ParseVariableReference(value.value); parseErr == nil && value.valueMode != "literal" {
+			continue
+		}
+		literal[value.name] = value.value
+	}
+	return literal, nil
+}
+
 func (s *PlanningStore) PutVariable(
 	ctx context.Context,
 	projectID, environmentID int64,

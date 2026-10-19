@@ -1736,7 +1736,8 @@ through the same sheet the creation flow uses — in a section of its own, since
 — and never commits a half-filled sibling row when a database is connected or removed. It draws each
 link as a card carrying its engine, database, managed hostname, observed status, the variables that carry
 it and the reason reconciliation recorded when it could not repair one, under a picture of how the
-application reaches them. Because runtime activation attaches a database by reading the variable that
+application reaches them. A saved database a literal variable names by address is a card of its own,
+reached by address, rather than missing from a page that said nothing was linked. Because runtime activation attaches a database by reading the variable that
 holds its address rather than the dependency row, removing a link offers to delete the variables that
 reference it, and says so plainly when it is bound by a value it cannot name. The backup job a release
 gates on is drawn as the Backups page draws it — its products, last run, destination, last fourteen

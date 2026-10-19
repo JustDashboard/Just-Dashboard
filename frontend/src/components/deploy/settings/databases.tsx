@@ -26,6 +26,7 @@ import type {
   DbConnection,
   DeploymentBackupGateEvidence,
   DeploymentBackupJob,
+  DeploymentDatabaseAddress,
   DeploymentDatabaseLink,
   DeploymentEnvironmentConfiguration,
   DeploymentRunSnapshot,
@@ -101,7 +102,9 @@ import { sectionHref } from "@/components/database/engine"
  *   connection, saying which variable carries it and whether the policy's job
  *   takes a native dump of it; above them, where there are any, a picture of
  *   how the application reaches them over its managed network, the line
- *   being the link's state.
+ *   being the link's state. A saved database a variable holds the address of
+ *   written out is a card too, reached by address: the application uses it,
+ *   and the page said no database was linked.
  *
  *   Backups & volumes — one form, one Save. The job a release gates on is
  *   drawn as the Backups page draws it (`JobCard`): its products, its last
@@ -149,6 +152,16 @@ export function DatabasesSettings({
   // gates on dumps the databases beside it is the question this page exists to
   // answer before a deployment answers it the hard way.
   const jobs = usePoll((signal) => get<BackupJob[]>("/backups/", undefined, signal), 15000)
+  const addresses = usePoll(
+    (signal) =>
+      get<DeploymentDatabaseAddress[]>(
+        `/deploy/${projectId}/environments/${environmentId}/database-addresses`,
+        undefined,
+        signal,
+      ),
+    15000,
+    [projectId, environmentId],
+  )
   return (
     <SettingsPage state={state} pageKinds={["dependency"]}>
       {(configuration) => (
@@ -160,6 +173,7 @@ export function DatabasesSettings({
           refresh={state.refresh}
           links={links}
           jobs={jobs}
+          addresses={addresses}
         />
       )}
     </SettingsPage>
@@ -176,6 +190,7 @@ function DatabasesBody({
   refresh,
   links,
   jobs,
+  addresses,
 }: {
   projectId: number
   environmentId: number
@@ -184,6 +199,7 @@ function DatabasesBody({
   refresh: () => void
   links: Poll<DeploymentDatabaseLink[]>
   jobs: Poll<BackupJob[]>
+  addresses: Poll<DeploymentDatabaseAddress[]>
 }) {
   const { can } = useAuth()
   const canAdmin = can("system.admin")
@@ -300,6 +316,7 @@ function DatabasesBody({
         scopes: existing ? [...new Set([...existing.scopes, "runtime"])] : ["runtime", "build"],
       })
       links.refresh()
+      addresses.refresh()
       refresh()
       notify.success("Database linked")
     } catch (error) {
@@ -350,6 +367,7 @@ function DatabasesBody({
         dependencies: [...savedOthers, ...nextDatabaseDeps],
       })
       links.refresh()
+      addresses.refresh()
       refresh()
     }
     if (carriers.length === 0 && !link) {
@@ -530,6 +548,32 @@ function DatabasesBody({
   const observedLinks = databaseDependencies
     .map((dependency) => linkFor(dependency.resourceId))
     .filter((link): link is DeploymentDatabaseLink => Boolean(link))
+  // A linked database is its own card already, whatever else names it.
+  const addressed = (addresses.data ?? []).filter(
+    (address) =>
+      !databaseDependencies.some(
+        (dependency) => dependency.resourceId === String(address.connectionId),
+      ),
+  )
+  const viaOf = (names: string[]) =>
+    names.length > 0 ? (
+      <span className="shrink-0">
+        via{" "}
+        {names.map((name, at) => (
+          <span key={name}>
+            {at > 0 && ", "}
+            <Link
+              href={`/deploy/${projectId}/settings/variables`}
+              className="rounded-sm font-mono text-foreground/90 focus-ring hover:underline"
+            >
+              {name}
+            </Link>
+          </span>
+        ))}
+      </span>
+    ) : (
+      <span className="shrink-0">no variable names it</span>
+    )
 
   return (
     <>
@@ -553,7 +597,7 @@ function DatabasesBody({
         actions={canAdmin && <ProjectDatabase target="container" onConnect={connect} />}
       >
         <div ref={column} className="min-w-0 space-y-5">
-          {databaseDependencies.length === 0 ? (
+          {databaseDependencies.length === 0 && addressed.length === 0 ? (
             <EmptyState
               icon={Database}
               mark={<ProductLogos ids={["postgres", "mysql", "redis", "mongodb"]} size="md" />}
@@ -636,25 +680,7 @@ function DatabasesBody({
                       className="animate-rise"
                     />
                   )
-                  const via =
-                    carriers.length > 0 ? (
-                      <span className="shrink-0">
-                        via{" "}
-                        {carriers.map((variable, at) => (
-                          <span key={variable.name}>
-                            {at > 0 && ", "}
-                            <Link
-                              href={`/deploy/${projectId}/settings/variables`}
-                              className="rounded-sm font-mono text-foreground/90 focus-ring hover:underline"
-                            >
-                              {variable.name}
-                            </Link>
-                          </span>
-                        ))}
-                      </span>
-                    ) : (
-                      <span className="shrink-0">no variable names it</span>
-                    )
+                  const via = viaOf(carriers.map((variable) => variable.name))
                   return (
                     <DatabaseRowGroup key={`${id}-${index}`}>
                       {/* One line where the column has room: the variable that
@@ -746,6 +772,60 @@ function DatabasesBody({
                         </p>
                       )}
                     </DatabaseRowGroup>
+                  )
+                })}
+                {addressed.map((address, at) => {
+                  const id = String(address.connectionId)
+                  // The application reaches it at an address written into a
+                  // variable — this server's and the port the container is
+                  // published on — so there is no binding to observe and no
+                  // verb here that would rewrite a value it did not write.
+                  // Add database links it under the same variable.
+                  const statusMark = (
+                    <Status tone="notice" label="Reached by address" className="animate-rise" />
+                  )
+                  const via = viaOf(address.variables)
+                  return (
+                    <ChoiceRow
+                      key={`address-${id}`}
+                      index={databaseDependencies.length + at}
+                      href={sectionHref(id)}
+                      verb={address.name}
+                      busy={busy === `ping-${id}`}
+                      leading={<ProductLogo size="sm" id={address.driver} fallback={Database} />}
+                      title={address.name}
+                      description={
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="min-w-0 truncate font-mono">{address.database}</span>
+                          {wide && <span aria-hidden>·</span>}
+                          {wide && via}
+                        </span>
+                      }
+                      trailing={wide && statusMark}
+                      actions={
+                        <VerbActions
+                          dim
+                          verbs={[
+                            {
+                              key: "test",
+                              label: "Test connection",
+                              icon: Lightning,
+                              inline: true,
+                              disabled: busy === `ping-${id}`,
+                              run: () => void testConnection(id, address.name),
+                            },
+                          ]}
+                          menuLabel={`Actions for ${address.name}`}
+                        />
+                      }
+                    >
+                      {!wide && (
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-hint text-muted-foreground sm:pl-11">
+                          {statusMark}
+                          {via}
+                        </div>
+                      )}
+                    </ChoiceRow>
                   )
                 })}
               </ChoiceList>
