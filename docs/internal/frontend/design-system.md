@@ -2751,8 +2751,8 @@ the page is one `Section` per resource rather than two long runs of charts with 
 third: **Processor** (the utilisation chart beside the cores, each a column filled to its share in
 the processor's colour, and the temperatures under them), **Memory** (where the memory is — what
 programs hold, the cache, what is free, as one bar with the span the kernel calls available drawn
-over it, and swap — beside its chart), **Network** (throughput beside sockets, and the interfaces
-table, each row as its owner's mark and a bar of its in and out against the busiest), **Storage**
+over it, and swap — beside its chart), **Network** (throughput beside sockets, and the interfaces,
+each as its owner's mark and a bar of its in and out against the busiest), **Storage**
 (the Overview's filesystem rows with their scan, beside capacity; throughput, operations, latency
 and inodes), and **Saturation** (pressure beside load). Every series takes its measurement's hue
 (§10). Neighbouring heads share a height so their hairlines meet (pass 9). The "Click a chart to
@@ -2760,6 +2760,17 @@ pin a moment" caption and the shortcuts button that stood as two lines above the
 gone: the shortcuts are its last control, and the pinned moment's strip appears only while a
 moment is pinned, held at the top of the scroll because the chart it was pinned from is usually a
 screen down.
+
+**The interfaces gave up their table in 0.8**, at the operator's request, because it was the one
+framed block on the page and read as another product's: a box with a toolbar strip, column heads and
+a scroll of its own under ten unframed charts. Nothing in it needed the table's reason for an edge
+(§2 — a grid that scrolls sideways and clips a row's actions): an interface has no actions, and the
+cap that made it scroll was there only because "Everything" ran to thirty rows. It is a plain block
+now, the Real devices / Everything toggle in its head beside the up count as Top processes keeps its
+order, and each interface is drawn the way Filesystems below it draws a disk — its mark, the name
+and kind with the two rates keyed by the bar's colours, the bar, then its addresses and its errors
+and drops, amber when there are any. Two to a row from `lg`, like the charts above them, so
+Everything is half the length it was and needs no scroll. Metrics now has no framed block at all.
 
 **A database's home took the deploy pages' shape in 0.7.5**, at the operator's request — "more alive,
 more colouring, real logs", with the deploy pages as the reference — because it read as a grey page:

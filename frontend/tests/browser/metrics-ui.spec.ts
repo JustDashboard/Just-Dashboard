@@ -8,8 +8,8 @@ test.use({ video: recordWorkspace ? "on" : "off" })
  * The metrics page after its overhaul, against a mocked host.
  *
  * What is checked is the shape the redesign settled on and the features it
- * added, not the chart library: every block on the page is plain but the one
- * holding a table, the five moving readings are tiles carrying their window
+ * added, not the chart library: every block on the page is plain, the
+ * interfaces included, the five moving readings are tiles carrying their window
  * as a trend, each resource is a section that reads what it is now beside
  * what it did, the moments list groups what happened together and pins or
  * zooms it, a zoom is a link, the
@@ -22,19 +22,15 @@ test.beforeEach(async ({ page }) => {
 })
 
 /**
- * §2: the only block on a page that may draw a frame is a table. A grid owns a
- * scroll region, and an edge is what says where it ends — a row whose actions
- * sit past the boundary otherwise reads as a row with no actions. Everything
- * else in the page's flow stays plain, which is what the frame is read against.
- *
- * Asserted structurally rather than as a count, so the rule keeps holding as
- * pages gain and lose tables.
+ * §2 lets a table keep a frame, for the scroll region it owns. Metrics has none
+ * left: the interfaces were its one table and are drawn as the filesystems are
+ * since 0.8, so every block in the page's flow is on the page's own ground.
  */
-async function framedNonTables(page: Page) {
+async function framedBlocks(page: Page) {
   return page.evaluate(() =>
-    Array.from(document.querySelectorAll("[data-slot=page] [data-slot=panel]:not([data-plain])"))
-      .filter((el) => !el.querySelector("[data-slot=table-container]"))
-      .map((el) => el.outerHTML.slice(0, 120)),
+    Array.from(
+      document.querySelectorAll("[data-slot=page] [data-slot=panel]:not([data-plain])"),
+    ).map((el) => el.outerHTML.slice(0, 120)),
   )
 }
 
@@ -53,9 +49,9 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
   await expect(page.getByText("Last hour", { exact: true })).toBeVisible()
   await expect(page.getByRole("img", { name: "4 cores, the busiest at 31%" })).toBeVisible()
 
-  // Nothing draws a frame but the Interfaces table (§2): the readings and the
-  // charts are all on the page's own ground.
-  expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
+  // Nothing draws a frame: the readings, the charts and the interfaces are all
+  // on the page's own ground.
+  expect(await framedBlocks(page), "a framed block").toEqual([])
 
   // What the machine is made of is the first visible row, and no sentence
   // stands above it: how to pin a moment is in the shortcuts.
@@ -195,7 +191,11 @@ test("the interfaces are the real devices until everything is asked for", async 
   await expect(panel.getByText("docker0", { exact: true })).toHaveCount(0)
   await expect(panel.getByText("veth4f14332", { exact: true })).toHaveCount(0)
 
-  await panel.getByRole("radio", { name: "Everything 3" }).click()
+  // The scope is the block's head, as Top processes keeps its order there.
+  await panel
+    .locator("[data-slot=panel-header]")
+    .getByRole("radio", { name: "Everything 3" })
+    .click()
   await expect(panel.getByText("docker0", { exact: true })).toBeVisible()
   await expect(panel.getByText("veth4f14332", { exact: true })).toBeVisible()
 })
