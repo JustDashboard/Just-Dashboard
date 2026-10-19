@@ -144,7 +144,7 @@ free.
 - A file manager with search, previews, Monaco and image editors
 - A full Git workspace: staging by line, history, branches, conflicts, PR reviews
 - GitHub, GitLab and Gitea pull requests and Actions logs
-- Excalidraw: drawings with live cards for the host, projects and databases, each listed as a thumbnail of itself
+- Excalidraw: drawings you edit together live, with live cards for the host, projects and databases, a shared shape library from libraries.excalidraw.com, diagrams written from a description, and each drawing listed as a thumbnail of itself
 - Remote Desktop: your Windows PCs, Macs and Linux desktops in a browser tab over Tailscale, unattended, with clipboard and file transfer, and a Stream mode that plays the screen as 60 fps video from Sunshine
 
 </td>

@@ -74,8 +74,13 @@ func TestBoardsPersistAndRejectStaleSaves(t *testing.T) {
 	if rec := admin.do(http.MethodPut, path, fmt.Sprintf(`{"name":"Production map","revision":2,"scene":%s}`, excalidraw), nil); rec.Code != http.StatusOK {
 		t.Fatalf("excalidraw file save = %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := admin.do(http.MethodGet, path, "", nil); !strings.Contains(rec.Body.String(), `"dataURL":"data:image/png;base64,AA=="`) {
-		t.Fatalf("saved image missing = %s", rec.Body.String())
+	// The save moves the embedded image out of the scene into the board's files.
+	if rec := admin.do(http.MethodGet, path, "", nil); strings.Contains(rec.Body.String(), "dataURL") ||
+		!strings.Contains(rec.Body.String(), `"fileIds":["f"]`) {
+		t.Fatalf("image not moved out of the scene = %s", rec.Body.String())
+	}
+	if rec := admin.do(http.MethodGet, path+"/files/f", "", nil); rec.Code != http.StatusOK || rec.Body.String() != "\x00" {
+		t.Fatalf("stored image = %d %q", rec.Code, rec.Body.String())
 	}
 	if rec := reader.do(http.MethodDelete, path, "", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("reader delete = %d %s", rec.Code, rec.Body.String())

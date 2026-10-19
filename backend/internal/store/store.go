@@ -509,6 +509,32 @@ CREATE TABLE IF NOT EXISTS boards (
 );
 CREATE INDEX IF NOT EXISTS idx_boards_updated ON boards(updated_at DESC, id DESC);
 
+-- Excalidraw's shape library. A board has no owner, so the library is one per
+-- install, the same for everyone who may draw; id is pinned to 1 so a second
+-- row cannot exist. Revision guards a stale tab the way boards' does. Items
+-- stay the JSON array the editor sent, because the server never reads inside
+-- them. A new table is additive for existing installations.
+CREATE TABLE IF NOT EXISTS board_library (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),
+  items      TEXT NOT NULL DEFAULT '[]',
+  revision   INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0
+);
+
+-- Images moved out of a board's scene, so a save does not carry every picture
+-- again and a board's size is not its pictures'. The file id is Excalidraw's
+-- own (a content hash, or random), so one id never names two different
+-- contents on a board; a board's files go with the board. A new table is
+-- additive for existing installations.
+CREATE TABLE IF NOT EXISTS board_files (
+  board_id   INTEGER NOT NULL,
+  file_id    TEXT NOT NULL,
+  mime_type  TEXT NOT NULL,
+  data       BLOB NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (board_id, file_id)
+);
+
 -- Stickyboards, from 0.7.2 to 0.7.5. The feature is gone and nothing reads
 -- this table, but it stays: schema changes are additive, and an install that
 -- made boards keeps their documents rather than losing them on an update.
