@@ -2,8 +2,11 @@ package api
 
 import (
 	"net/http"
+	"sort"
+	"strconv"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
 
@@ -76,6 +79,81 @@ func (s *Server) handleDeploymentDatabaseLinks(w http.ResponseWriter, r *http.Re
 	if err := rows.Err(); err != nil {
 		return httpx.Internal(err)
 	}
+	httpx.JSON(w, http.StatusOK, items)
+	return nil
+}
+
+// handleDeploymentDatabaseAddresses reports the saved databases the
+// environment's variables name by address rather than link: an application
+// handed postgres://…@203.0.113.7:5435/app reaches the container this server
+// publishes on 5435, and nothing the links report says so. The variables are
+// matched with the address book the database map reads containers' environments
+// with, and only their names leave the server.
+func (s *Server) handleDeploymentDatabaseAddresses(w http.ResponseWriter, r *http.Request) error {
+	projectID, environmentID, err := deploymentEnvironmentIDs(r)
+	if err != nil {
+		return err
+	}
+	values, err := s.modules.deployPlanning.LiteralVariableValues(r.Context(), projectID, environmentID)
+	if err != nil {
+		return mapDeploymentPlanningError(err)
+	}
+	type address struct {
+		ConnectionID int64  `json:"connectionId"`
+		Name         string `json:"name"`
+		Driver       string `json:"driver"`
+		Database     string `json:"database"`
+		// Variables are the names whose values hold its address.
+		Variables []string `json:"variables"`
+	}
+	items := []address{}
+	if len(values) == 0 {
+		httpx.JSON(w, http.StatusOK, items)
+		return nil
+	}
+	env := make([]string, 0, len(values))
+	for name, value := range values {
+		env = append(env, name+"="+value)
+	}
+	sort.Strings(env)
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	ctx = s.modules.docker.WithReadSnapshot(ctx)
+	conns, err := s.existingConnections(ctx)
+	if err != nil {
+		return err
+	}
+	hosts := hostAddresses()
+	for _, conn := range conns {
+		if conn.Driver == dbx.DriverSQLite {
+			continue
+		}
+		_, dsn, err := s.dbConnRow(ctx, conn.ID)
+		if err != nil {
+			continue
+		}
+		info, err := dbx.ParseDSN(conn.Driver, dsn)
+		if err != nil || info == nil {
+			continue
+		}
+		port, _ := strconv.Atoi(info.Port)
+		server := s.serverBehind(ctx, conn, info)
+		var serverIPs []string
+		if server != nil {
+			if detail, err := s.modules.docker.Inspect(ctx, server.container.ID); err == nil {
+				serverIPs = containerIPs(detail)
+			}
+		}
+		named := topoAddresses(conn, info, port, server, serverIPs, hosts).naming(env)
+		if len(named) == 0 {
+			continue
+		}
+		items = append(items, address{
+			ConnectionID: conn.ID, Name: conn.Name, Driver: string(conn.Driver),
+			Database: conn.Database, Variables: named,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	httpx.JSON(w, http.StatusOK, items)
 	return nil
 }

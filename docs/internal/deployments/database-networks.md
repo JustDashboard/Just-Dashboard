@@ -83,6 +83,16 @@ is the same sentence the routes performing these operations already return. A co
 binding reports no reason: staleness is the age of the last pass, not a failure. The additive
 `deploy_database_bindings.detail` column defaults to empty for existing installs.
 
+`GET /deploy/{project}/environments/{environment}/database-addresses` reports the saved databases that
+the environment's literal variables name by address, with the names of the variables that hold it: an
+application handed `postgres://…@<this server's address>:5435/app` at creation uses the container the
+dashboard dials at `127.0.0.1:5435`, has no dependency row and no binding, and Settings → Databases said
+no database was linked. The variables are decrypted and matched on the server with the address book the
+database map reads container environments with (`topoAddresses`, `naming`), and only the connection's
+identity and the variable names leave it. The page draws each one not already linked as a card reached
+by address — its engine, database and the variables holding it, Test connection, and its database's home
+— with no verb that rewrites the variable; Add database links it under the same name.
+
 ## Removal and existing installs
 
 The additive `deploy_database_networks` and `deploy_database_bindings` tables retain ownership across
@@ -100,8 +110,8 @@ data. Remove its deployment network first. Permanent project deletion remains re
 these bindings and stops reconciliation while leaving Docker resources intact. Use resource removal
 before permanent deletion when cleanup is intended.
 
-Existing literal IP values are not rewritten. Reconnect the database once in deployment setup/settings
-to save its typed reference. Saved non-loopback IP connections, remote servers and service URLs do not
+Existing literal IP values are not rewritten; Settings → Databases reports the saved database one names.
+Reconnect the database once in deployment setup/settings to save its typed reference. Saved non-loopback IP connections, remote servers and service URLs do not
 receive automatic container discovery. Application drivers must reconnect and resolve DNS after a
 database interruption; this feature does not preserve an existing TCP connection through replacement.
 

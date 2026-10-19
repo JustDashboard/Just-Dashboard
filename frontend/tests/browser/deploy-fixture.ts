@@ -2600,6 +2600,8 @@ export async function mockProject(
       body = gitPolicy
     } else if (path === "/deploy/7/environments/12/database-links" && method === "GET") {
       body = showcase ? showcaseLinks : []
+    } else if (path === "/deploy/7/environments/12/database-addresses" && method === "GET") {
+      body = []
     } else if (path === "/deploy/7/environments/12/triggers" && method === "GET") {
       body = automationTriggers
     } else if (path === "/deploy/7/environments/12/triggers" && method === "POST") {

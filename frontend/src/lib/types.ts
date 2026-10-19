@@ -4970,6 +4970,16 @@ export type DeploymentDatabaseLink = {
   checkedAt?: string
 }
 
+/** A saved database a variable names by its address rather than a link. */
+export type DeploymentDatabaseAddress = {
+  connectionId: number
+  name: string
+  driver: DbDriver
+  database: string
+  /** The variables whose values hold its address. */
+  variables: string[]
+}
+
 export type DeploymentRemovalTarget = {
   id: string
   kind: string
