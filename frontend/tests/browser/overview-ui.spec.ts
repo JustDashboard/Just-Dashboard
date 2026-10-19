@@ -4,9 +4,11 @@ import { iso, json, now, user } from "./host-fixture"
 
 /**
  * The host Overview, against a server with something in every place: the
- * machine drawn as itself, each moving reading carrying its last hour, the
- * projects as the fleet draws them, who is spending the machine beside the day's activity, and a
- * service tile per module naming what it counts with the products.
+ * machine drawn as itself, the shortcuts that start something, each moving
+ * reading carrying its last hour, the projects as the fleet draws them, the
+ * shells and drawings left open, the databases beside the backups, who is
+ * spending the machine beside the day's activity, and a service tile per
+ * module naming what it counts with the products.
  */
 
 test.beforeEach(async ({ page }) => {
@@ -239,7 +241,8 @@ test("a service tile names what it counts with the products", async ({ page }) =
   await page.goto("/")
   const main = page.locator("[data-slot=page]")
   const docker = main.getByRole("link", { name: "Docker", exact: true })
-  await expect(docker).toContainText("9 running")
+  await expect(docker).toContainText(/9\s*running/)
+  await expect(docker).toContainText("11 containers · 2 stopped")
   // The running images, not the stopped ones.
   await expect(docker.locator('img[src="/logos/postgresql.svg"]')).toBeAttached()
   await expect(docker.locator('img[src="/logos/redis.svg"]')).toBeAttached()
@@ -250,10 +253,22 @@ test("a service tile names what it counts with the products", async ({ page }) =
       .locator('img[src="/logos/tailscale.svg"]'),
   ).toBeAttached()
 
-  // Git took the Deployments tile, which has a section of its own now.
-  await expect(main.getByRole("link", { name: "Deployments", exact: true })).toHaveCount(0)
+  // Deployments, Databases and Backups have blocks of their own, so their
+  // tiles went to what systemd runs and the remote computers.
+  for (const name of ["Deployments", "Databases", "Backups"]) {
+    await expect(
+      main.locator("[data-slot=stat-grid]").getByRole("link", { name, exact: true }),
+    ).toHaveCount(0)
+  }
+  const units = main.getByRole("link", { name: "System services", exact: true })
+  await expect(units).toContainText(/1\s*failed/)
+  await expect(units).toContainText("6 running")
+  await expect(units.locator("[data-slot=stat-tile] .text-destructive")).toHaveText("1")
+  const remote = main.getByRole("link", { name: "Remote Desktop", exact: true })
+  await expect(remote).toContainText(/2\s*computers/)
+  await expect(remote).toContainText("1 open now")
   const git = main.getByRole("link", { name: "Git", exact: true })
-  await expect(git).toContainText("4 repositories")
+  await expect(git).toContainText(/4\s*repositories/)
   await expect(git).toContainText("1 uncommitted · 1 behind")
   for (const forge of ["gitlab", "codeberg", "github"]) {
     await expect(git.locator(`img[src="/logos/${forge}.svg"]`)).toBeAttached()
@@ -269,7 +284,10 @@ for (const width of [1280, 1720]) {
     await expect(page.getByRole("img", { name: "CPU over the last hour" })).toBeVisible({
       timeout: 20_000,
     })
-    await expect(page.getByText("4 repositories")).toBeVisible()
+    await expect(
+      page.locator("[data-slot=page]").getByRole("link", { name: "Git", exact: true }),
+    ).toContainText(/4\s*repositories/)
+    await expect(page.getByRole("list", { name: "Recent drawings and boards" })).toBeVisible()
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -288,3 +306,200 @@ for (const width of [1280, 1720]) {
     await page.screenshot({ path: `test-results/overview-${width}.png`, fullPage: true })
   })
 }
+
+test("the shortcuts start something, each counting what it adds to", async ({ page }) => {
+  let created: unknown
+  await page.route("**/api/v1/boards/", (route) => {
+    if (route.request().method() !== "POST") return route.fallback()
+    created = route.request().postDataJSON()
+    return json(route, { id: 9, name: "Untitled drawing", revision: 1, scene: {} })
+  })
+  await page.goto("/")
+  const shortcuts = page.locator("section", {
+    has: page.getByRole("heading", { name: "Shortcuts" }),
+  })
+  const cards = shortcuts.locator("[data-slot=choice-card]")
+  await expect(cards).toHaveText([
+    /New project.*6 projects/,
+    /Add a database.*4 databases/,
+    /New shell.*3 open · operator/,
+    /New drawing.*1 drawing/,
+    /New board.*2 boards/,
+    /Browse files.*atlas/,
+    /Add a computer.*2 computers/,
+    /Back up.*3 jobs/,
+  ])
+  // Four across at this width, as two even rows.
+  const [first, fifth] = await Promise.all([cards.nth(0).boundingBox(), cards.nth(4).boundingBox()])
+  expect(fifth?.x).toBe(first?.x)
+  expect(fifth!.y).toBeGreaterThan(first!.y)
+
+  // A drawing is made where the shortcut is pressed, and opened.
+  await cards.filter({ hasText: "New drawing" }).click()
+  await expect(page).toHaveURL(/\/excalidraw\/9$/)
+  expect(created).toEqual({ name: "Untitled drawing" })
+})
+
+test("a new shell opens in the account's home", async ({ page }) => {
+  await page.goto("/")
+  await page.locator("[data-slot=choice-card]", { hasText: "New shell" }).click()
+  await expect(page).toHaveURL(/\/terminal\?cwd=%2Fhome%2Foperator$/)
+})
+
+test("the shells left open lead with the one working, and open on themselves", async ({ page }) => {
+  await page.goto("/")
+  const panel = page.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Terminal", exact: true }),
+  })
+  await expect(panel).toContainText("3 sessions · 1 working")
+  const rows = panel.getByRole("list", { name: "Terminal sessions" }).locator(":scope > li")
+  await expect(rows).toHaveCount(3)
+  await expect(rows.first()).toContainText("claude")
+  await expect(rows.first()).toContainText("~/srv/shop")
+  await expect(rows.first()).toContainText("Working")
+  await expect(rows.first().locator('img[src="/logos/claude.svg"]')).toBeVisible()
+  await expect(rows.nth(1)).toContainText("Idle")
+  await expect(rows.first().getByRole("link", { name: "Open claude" })).toHaveAttribute(
+    "href",
+    "/terminal?session=s-agent",
+  )
+})
+
+test("drawings and boards are one list of what was edited last, each drawn as itself", async ({
+  page,
+}) => {
+  await page.goto("/")
+  const list = page.getByRole("list", { name: "Recent drawings and boards" })
+  const cards = list.locator(":scope > li")
+  await expect(cards).toHaveText([/Launch checklist/, /Production map/, /Retro — October/])
+  await expect(cards.first().getByRole("link", { name: "Open Launch checklist" })).toHaveAttribute(
+    "href",
+    "/stickyboard/2",
+  )
+  await expect(cards.nth(1).getByRole("link", { name: "Open Production map" })).toHaveAttribute(
+    "href",
+    "/excalidraw/4",
+  )
+  // The picture is the drawing's own shapes and the board's own notes.
+  await expect(cards.nth(1).locator("svg text", { hasText: "caddy" })).toBeAttached()
+  await cards.nth(1).click()
+  await expect(page).toHaveURL(/\/excalidraw\/4$/)
+})
+
+test("databases lead with the one not answering, and say what each holds", async ({ page }) => {
+  await page.goto("/")
+  const panel = page.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Databases", exact: true }),
+  })
+  await expect(panel).toContainText("4 databases · 1 not answering")
+  const rows = panel.getByRole("list", { name: "Databases" }).locator(":scope > li")
+  await expect(rows.first()).toContainText("blog")
+  await expect(rows.first()).toContainText("unreachable")
+  await expect(rows.first()).toContainText("connection refused")
+  await expect(rows.nth(3)).toContainText("PostgreSQL 16.4 · 2.1 GB · 42 tables")
+  await expect(rows.nth(3).getByRole("link", { name: "Open shop" })).toHaveAttribute(
+    "href",
+    "/databases/1",
+  )
+})
+
+test("a failed backup job leads even after a newer run elsewhere succeeded", async ({ page }) => {
+  let started = ""
+  await page.route("**/api/v1/backups/*/run", (route) => {
+    started = new URL(route.request().url()).pathname
+    return json(route, {})
+  })
+  await page.goto("/")
+  const panel = page.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Backups", exact: true }),
+  })
+  await expect(panel).toContainText("3 jobs · 1 failed")
+  const rows = panel.getByRole("list", { name: "Backup jobs" }).locator(":scope > li")
+  await expect(rows.first()).toContainText("Databases nightly")
+  await expect(rows.first()).toContainText(/failed 7h/)
+  await expect(rows.first().getByRole("link", { name: "Open Databases nightly" })).toHaveAttribute(
+    "href",
+    "/backups/1",
+  )
+  await rows.first().getByRole("button", { name: "Back up Databases nightly now" }).click()
+  await expect.poll(() => started).toBe("/api/v1/backups/1/run")
+  await expect(page).toHaveURL(/\/$/)
+})
+
+test("a reader without write access sees no shortcut that would refuse them", async ({ page }) => {
+  const requested: string[] = []
+  page.on("request", (request) => requested.push(new URL(request.url()).pathname))
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+  )
+  await page.goto("/")
+  await expect(page.locator("[data-slot=choice-card]")).toHaveText([/Browse files/])
+  // No terminal: its listing needs the terminal, and is never asked for.
+  await expect(page.getByRole("heading", { name: "Terminal", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("list", { name: "Recent drawings and boards" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Remote Desktop", exact: true })).toHaveCount(0)
+  expect(requested).not.toContain("/api/v1/terminal/")
+  expect(requested).not.toContain("/api/v1/remote-desktop/")
+})
+
+test("a section kept out of the sidebar is kept off the Overview, read and all", async ({
+  page,
+}) => {
+  const requested: string[] = []
+  page.on("request", (request) => requested.push(new URL(request.url()).pathname))
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, {
+      ...user,
+      user: { ...user.user, hiddenSections: ["terminal", "excalidraw", "stickyboard", "backups"] },
+    }),
+  )
+  await page.goto("/")
+  await expect(page.getByRole("heading", { name: "Databases", exact: true })).toBeVisible()
+  for (const name of ["Terminal", "Drawings & boards", "Backups"]) {
+    await expect(page.getByRole("heading", { name, exact: true })).toHaveCount(0)
+  }
+  // Alone in its row, the databases take the whole of it.
+  const panel = page.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Databases", exact: true }),
+  })
+  const width = (await panel.boundingBox())!.width
+  const page_ = (await page.locator("[data-slot=page] > [data-slot=host-identity]").boundingBox())!
+  expect(width).toBe(page_.width)
+  for (const path of [
+    "/api/v1/terminal/",
+    "/api/v1/boards/",
+    "/api/v1/stickyboards/",
+    "/api/v1/backups/",
+  ]) {
+    expect(requested).not.toContain(path)
+  }
+  await expect(page.locator("[data-slot=choice-card]", { hasText: "New shell" })).toHaveCount(0)
+})
+
+test("on a phone the tiles are two to a row and the fleet keeps its worst three", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto("/")
+  const cards = page.getByRole("list", { name: "Deployment projects" }).locator(":scope > li")
+  await expect(cards).toHaveCount(3)
+  await expect(cards.first()).toContainText("docs-site")
+  await expect(page.getByText("Showing 3 of 6")).toBeVisible()
+  const shortcuts = page.locator("[data-slot=choice-card]")
+  const [a, b] = await Promise.all([shortcuts.nth(0).boundingBox(), shortcuts.nth(1).boundingBox()])
+  expect(a?.y).toBe(b?.y)
+  const resources = page.locator("section", {
+    has: page.getByRole("heading", { name: "Resources" }),
+  })
+  const [cpu, memory] = await Promise.all(
+    ["CPU", "Memory"].map((name) =>
+      resources.locator("[data-slot=stat-tile]", { hasText: name }).first().boundingBox(),
+    ),
+  )
+  expect(cpu?.y).toBe(memory?.y)
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    ),
+  ).toBe(false)
+})
