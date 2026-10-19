@@ -233,15 +233,15 @@ describe("reading a report", () => {
 
   test("keeps each table's counts and the reasons rows were refused", () => {
     expect(report.tables[1].errors).toEqual([{ row: 3, message: "duplicate key" }])
-    expect(reportTitle(report)).toBe("Wrote 30 rows into 2 tables")
+    expect(reportTitle(report)).toBe("Inserted 30 rows into 2 tables")
     expect(report.tables.map(reportLine)).toEqual([
-      "25 written",
-      "5 written · 2 refused",
+      "25 inserted",
+      "5 inserted · 2 refused",
       "left out",
     ])
   })
 
   test("a seed that wrote nothing says so", () => {
-    expect(reportTitle(readSeedReport({ tables: [] }))).toBe("Nothing was written")
+    expect(reportTitle(readSeedReport({ tables: [] }))).toBe("Nothing was inserted")
   })
 })

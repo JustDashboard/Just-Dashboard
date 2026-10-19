@@ -5,6 +5,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react"
 import {
   ChevronDown,
   CheckCircle,
+  Information,
   Plus,
   RefreshClockwise,
   Table as TableIcon,
@@ -218,8 +219,10 @@ export function SeedPanel({
   const writeWhy = readOnly
     ? `${conn.name} is protected: nothing can be written to it from the dashboard.`
     : !can("service.control")
-      ? "Writing rows needs a role that may change data."
+      ? "Inserting rows needs a role that may change data."
       : undefined
+  const environment = conn.environment?.trim()
+  const live = Boolean(environment && /prod/i.test(environment))
   const write = async () => {
     setWriting(true)
     try {
@@ -229,7 +232,7 @@ export function SeedPanel({
       setReport(done)
       setReviewing(false)
     } catch (err) {
-      notify.error("The rows were not written", err)
+      notify.error("The rows were not inserted", err)
     } finally {
       setWriting(false)
       // The same number again would make the same rows: refused by a unique
@@ -250,7 +253,7 @@ export function SeedPanel({
         title={
           <span className="flex min-w-0 items-center gap-2.5">
             <span className="min-w-0 truncate">Seed data</span>
-            <Tag className="shrink-0">Rows</Tag>
+            <Tag className="shrink-0">Test rows</Tag>
           </span>
         }
         actions={
@@ -283,7 +286,7 @@ export function SeedPanel({
                     title={writeWhy}
                   >
                     <Plus />
-                    Write {total.toLocaleString("en-US")} {total === 1 ? "row" : "rows"}
+                    Insert {total.toLocaleString("en-US")} {total === 1 ? "row" : "rows"}
                   </Button>
                 )}
               </>
@@ -296,6 +299,17 @@ export function SeedPanel({
           generators
         ) : (
           <>
+            {/* Said before the controls, because a card beside the code
+                generators reads as one more of them until it says it writes. */}
+            <Notice
+              tone={live ? "warning" : "default"}
+              icon={live ? Warning : Information}
+              title={`Inserts made-up test rows into ${conn.name}${environment ? ` (${environment})` : ""}`}
+            >
+              Values suit each column&apos;s name and type, a table is filled after the ones it
+              references so its foreign keys point at real rows, and the rows already there stay.
+              Nothing is inserted until you review the statements and confirm.
+            </Notice>
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
               {scope}
               <TablePicker
@@ -369,18 +383,18 @@ export function SeedPanel({
       <SqlReview
         open={reviewing && plan !== undefined}
         onOpenChange={(open) => !writing && setReviewing(open)}
-        title={`Write ${total.toLocaleString("en-US")} rows into ${writable.length === 1 ? "1 table" : `${writable.length} tables`}`}
+        title={`Insert ${total.toLocaleString("en-US")} rows into ${writable.length === 1 ? "1 table" : `${writable.length} tables`}`}
         statements={writable.map((t) => t.statement).filter(Boolean)}
-        command={`Write ${total.toLocaleString("en-US")} ${total === 1 ? "row" : "rows"}`}
+        command={`Insert ${total.toLocaleString("en-US")} ${total === 1 ? "row" : "rows"}`}
         onRun={() => void write()}
         pending={writing}
         note={
           plan?.atomic === false
-            ? `${engine.label} has no transaction: each table is written on its own, and one written before a failure stays.`
-            : "One transaction: if any of it fails, nothing is written."
+            ? `${engine.label} has no transaction: each table is inserted on its own, and one inserted before a failure stays.`
+            : "One transaction: if any of it fails, nothing is inserted."
         }
       >
-        <ul aria-label="What is written" className="space-y-1 text-body">
+        <ul aria-label="What is inserted" className="space-y-1 text-body">
           {writable.map((t, index) => (
             <li key={seedKey(t.schema, t.name)} className="flex min-w-0 items-baseline gap-2">
               <span className="numeric w-5 shrink-0 text-right text-hint text-muted-foreground">
@@ -461,7 +475,7 @@ function SeedOutput({
         title="Nothing planned yet"
         description={
           problem ??
-          "Preview reads each table — what its columns hold, how many rows it has, the rows its foreign keys can point at — and shows the rows a seed would write. Nothing is written until you write them."
+          "Preview reads each table — what its columns hold, how many rows it has, the rows its foreign keys can point at — and shows the rows that would be inserted."
         }
       />
     )
@@ -557,7 +571,7 @@ function SeedOutput({
               table={open}
               onChoose={(column, generator) => onChoose(open, column, generator)}
             />
-            <Statement label="Each row is written with" sql={open.statement} placeholder="" />
+            <Statement label="Each row is inserted with" sql={open.statement} placeholder="" />
           </>
         )}
         {reading && (
@@ -570,7 +584,11 @@ function SeedOutput({
   )
 }
 
-/** What is true of the table open: where it falls in the order, what it holds, its rows. */
+/**
+ * What is true of the table open: where it falls in the order, and what it
+ * holds now beside what it will — the count after is what says the rows are
+ * added to the ones there rather than put in their place.
+ */
 function TableFacts({
   table,
   rows,
@@ -589,21 +607,23 @@ function TableFacts({
       <span>
         {table.after.length > 0 ? (
           <>
-            Written after{" "}
+            Inserted after{" "}
             {table.after.map((name, index) => (
               <span key={name}>
                 {index > 0 && (index === table.after.length - 1 ? " and " : ", ")}
                 <span className="font-mono text-foreground">{name}</span>
               </span>
             ))}
+            , which it references
           </>
         ) : (
-          "Points at no other table being filled"
+          "References no other table being filled"
         )}
       </span>
       {table.existing >= 0 && (
         <span className="numeric">
-          {table.existing.toLocaleString("en-US")} {table.existing === 1 ? "row" : "rows"} there now
+          {table.existing.toLocaleString("en-US")} {table.existing === 1 ? "row" : "rows"} now
+          {!table.problem && `, ${(table.existing + table.rows).toLocaleString("en-US")} after`}
         </span>
       )}
       {table.rows < table.asked && !table.problem && (
@@ -629,10 +649,12 @@ function TableFacts({
 }
 
 /**
- * The first rows, one column to a column of the table. Each column's head
- * names it, its type, and what fills it — which is where the reader changes
- * that. A value the write decides stands as what decides it, set apart from
- * a NULL the seed writes.
+ * The first rows, one column to a column of the table. Each column's head is
+ * two lines: its name with its type, and what fills it — which is where the
+ * reader changes that. Name, type and generator each on a line of their own
+ * made a head taller than three rows of the preview under it. A value the
+ * write decides stands as what decides it, set apart from a NULL the seed
+ * writes.
  */
 function PreviewGrid({
   table,
@@ -650,15 +672,20 @@ function PreviewGrid({
         <TableHeader className="sticky top-0 z-10 bg-card [&_tr]:border-b">
           <TableRow className="hover:bg-transparent">
             {table.columns.map((column) => (
-              <TableHead key={column.name} className="h-auto px-3 py-2 align-top">
-                <div className="flex min-w-32 flex-col gap-1">
+              <TableHead key={column.name} className="h-auto px-3 pt-2 pb-1 align-top">
+                <div className="flex max-w-64 min-w-32 flex-col">
                   <span className="flex min-w-0 items-baseline gap-1.5">
-                    <span className="truncate font-mono text-xs text-foreground">
+                    <span className="min-w-0 truncate font-mono text-xs text-foreground">
                       {column.name}
                     </span>
-                    {column.unique && <Tag>unique</Tag>}
+                    <span
+                      className="min-w-6 shrink-[3] truncate font-mono text-micro font-normal"
+                      title={column.type}
+                    >
+                      {column.type}
+                    </span>
+                    {column.unique && <Tag className="shrink-0">unique</Tag>}
                   </span>
-                  <span className="truncate font-mono text-micro">{column.type}</span>
                   <GeneratorPicker column={column} onChoose={(id) => onChoose(column, id)} />
                 </div>
               </TableHead>
@@ -705,13 +732,14 @@ function GeneratorPicker({
   const reference = column.reference
     ? `${column.reference.table}.${column.reference.columns.join(", ")}`
     : ""
+  // The fixed one takes the menu's height, so every column's generator sits on one line.
   if (column.choices.length <= 1) {
     return (
       <span
-        className="truncate text-hint font-normal text-muted-foreground"
+        className="flex h-6 min-w-0 items-center text-hint font-normal text-muted-foreground"
         title={reference || undefined}
       >
-        {column.label}
+        <span className="truncate">{column.label}</span>
       </span>
     )
   }
