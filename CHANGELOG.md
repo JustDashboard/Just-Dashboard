@@ -4,6 +4,17 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.8.1 — 19 October 2026
+
+**A streamed Mac that connects once and lines up**
+
+0.8 made a streamed Mac reconnect up to three times, come out stretched, and leave the pointer off where it was drawn. A stream now stays at one size for the whole session, Sunshine's black padding is cut off at the frame's edges instead of avoided by asking again, and the pointer lands where the screen is drawn.
+
+### Fixed
+
+- A streamed Mac connects once, unstretched, with the pointer where it is drawn
+  - 0.8 read the screen's shape off Sunshine's black padding and loaded the stream again at that shape. Sunshine kept the first session's capture for the overlapping new one, so the picture came out stretched, the stretched padding read as yet another shape, and the pointer met the Mac's own only at the centre. The stream is now asked for at the quality's 16:9 size and never loaded again for a new shape; the picture is drawn past the frame's edges by the padding, so the frame still takes the computer's shape and fills the content area. The shape is read for the whole session, and shapes remembered from 0.8's stretched streams are not reused.
+
 ## 0.8 — 19 October 2026
 
 **Drawings edited together, and an Overview that opens onto everything**
