@@ -103,6 +103,10 @@ type Server struct {
 	// the recorder's pass reads or writes them.
 	dbMetricThinnedAt time.Time
 	dbMetricThinnedTo int64
+	// The background repair of connections sealed under another master key
+	// (database_stranded.go).
+	dbStrandedStop context.CancelFunc
+	dbStrandedDone chan struct{}
 	// The statement recorder's readings between one and the next
 	// (database_statements.go).
 	dbStatements statementHistory
@@ -248,6 +252,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.modules.network.StartRouteHistory(ctx)
 	s.startDatabaseMetrics(ctx)
 	s.startDatabaseTLS(ctx)
+	s.startStrandedRepair(ctx)
 	// Two things, both of which have to happen at boot rather than on request.
 	// An upgrade that was in flight when this process started is settled here,
 	// because after a successful one *this* process is the evidence it worked
@@ -341,6 +346,7 @@ func (s *Server) Shutdown() {
 	s.stopProxyExtras()
 	s.stopDatabaseMetrics()
 	s.stopDatabaseTLS()
+	s.stopStrandedRepair()
 	s.modules.metrics.Stop()
 	s.modules.network.Stop()
 	if err := s.modules.dnsServices.Close(); err != nil && s.Log != nil {

@@ -187,7 +187,16 @@ func (s *Server) handleDBHostGrant(w http.ResponseWriter, r *http.Request) error
 	}
 	audit["ok"] = true
 	if conn != nil {
-		return s.resealConnection(ctx, w, r, conn, req.Driver, dsn, "database.connection.host.grant", audit)
+		return s.resealConnection(ctx, w, r, conn.ID, req.Driver, dsn, "database.connection.host.grant", audit)
+	}
+	origin := s.hostOrigin(ctx, cand)
+	stranded, ok, err := s.strandedFrom(ctx, origin, req.Driver)
+	if err != nil {
+		return err
+	}
+	if ok {
+		audit["repaired"] = true
+		return s.resealConnection(ctx, w, r, stranded.id, req.Driver, dsn, "database.connection.host.grant", audit)
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -197,7 +206,7 @@ func (s *Server) handleDBHostGrant(w http.ResponseWriter, r *http.Request) error
 		return httpx.BadRequest("name may contain letters, digits, spaces, dots, dashes and underscores")
 	}
 	name = uniqueConnectionName(name, names)
-	return s.saveConnectionFrom(w, r, s.hostOrigin(ctx, cand), name, req.Driver, dsn, "database.connection.host.grant", audit)
+	return s.saveConnectionFrom(w, r, origin, name, req.Driver, dsn, "database.connection.host.grant", audit)
 }
 
 // refuseGrantOnProtected keeps this route from resetting the account a

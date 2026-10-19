@@ -142,7 +142,8 @@ is connected by naming the instance found, not by typing its address again.
   because a ping is answered without authentication.
   `POST /databases/inventory/ignore` records a key in `db_inventory_ignored`. `POST /databases/sync`
   keeps its contract and now signs in before saving, records the origin, skips what is ignored and
-  reports it, and runs its host half with Docker absent; forgetting the last connection to a found
+  reports it, repairs a stranded connection rather than adding a second one (`repaired`), and runs its
+  host half with Docker absent; forgetting the last connection to a found
   server marks it ignored (`ignoreOriginOnForget`), so it stays forgotten. It signs in four at a time
   and remembers a refusal against what was tried (`database_inventory_signin.go`): the same container
   stating the same credentials is not asked again until either changes or the operator connects it by
@@ -320,6 +321,23 @@ tag floats only within that line's patch releases; Timescale is pinned to one re
   `database.connection.delete` and `database.drop`, `ignoredServers` in `deploy.resources.remove`. The
   connection's JSON carries `origin`, the inventory key of the found server or file it was made from, and
   `""` for one typed in by hand.
+- **A connection sealed under another master key is repaired from its server.** A reinstall that keeps
+  `/var/lib/just-dashboard` but writes a new `JD_MASTER_KEY` leaves every `dsn_enc` unreadable. Such a
+  row is not attached to its found server (`savedConnections` skips what will not unseal), so the
+  server used to be found as unconnected and connecting it added `name-2` beside the red row and the
+  jobs and deployments bound to it. `database_stranded.go` keeps the row instead: a row with an
+  `origin` whose DSN does not unseal is *stranded*, and the first sign-in to that server — `POST
+  /databases/inventory/connect`, `/adopt`, `/host`, `/host/grant` or the reconcile — reseals the DSN
+  that worked into it, under its own id and name (`repaired: true` in the route's audit detail,
+  `repaired` in the sync's report and audit). A background pass does the same a minute after boot and
+  every thirty minutes after, for servers that sign in with what they state (`signsInUnasked`, the
+  reconcile's rule), skipping a server another connection already opens and one marked ignored, honouring
+  the reconcile's refusal memory, and auditing `database.connection.repair` as `system`. Two stranded
+  rows from one server are left alone, since nothing says which account or database a sign-in stands
+  for. A row typed by hand has nothing to be read again from. The reason a stranded row is listed with
+  says which case it is: connect it again under *Found on this server*, forget it because another
+  connection now opens its server, or (no origin) enter it again. `install.sh` asks for the earlier key
+  when it finds the store without one (`docs/internal/operations/terminal-tools.md`).
 - **One connection's summary.** `GET /databases/{id}` (read surface) is one connection's reading without
   dialling any other: what the server says it is, whether it answers, where it runs, which power actions
   apply, its exposure, bound deployments and the capability flags for its driver and flavour. Where the

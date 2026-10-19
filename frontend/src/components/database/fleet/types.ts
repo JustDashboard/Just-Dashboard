@@ -141,6 +141,8 @@ export type DbInventoryConnectRequest = {
 /** `POST /databases/sync`: what connecting everything that states its credentials did. */
 export type DbSyncReport = {
   added: string[]
+  /** Connections sealed under another master key, signed in to again and kept under their own name. */
+  repaired: string[]
   already: string[]
   unreachable: { container: string; driver: string; reason: string }[]
   needsCredentials: { driver: string; host: string; port: number; name: string }[]

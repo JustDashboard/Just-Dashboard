@@ -149,9 +149,33 @@ func (s *Server) storedConnectionDSN(ctx context.Context, id int64) (*dbConnecti
 	if err != nil {
 		broken := rec.conn
 		broken.Broken, broken.BrokenReason = true, brokenReason(err)
+		if unsealable(err) && broken.Origin != "" {
+			broken.BrokenReason = strandedReason(s.connectedAs(ctx, broken.Origin, broken.ID))
+		}
 		return &broken, "", nil
 	}
 	return conn, dsn, nil
+}
+
+// connectedAs names a connection other than except, made from the same found
+// server, that opens; or nothing.
+func (s *Server) connectedAs(ctx context.Context, origin string, except int64) string {
+	rows, err := s.Store.DB.QueryContext(ctx,
+		`SELECT `+dbConnColumns+` FROM db_connections WHERE origin = ? AND id <> ? ORDER BY name`, origin, except)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	for rows.Next() {
+		rec, err := scanDBConn(rows.Scan)
+		if err != nil {
+			return ""
+		}
+		if _, _, err := s.openDBConn(rec); err == nil {
+			return rec.conn.Name
+		}
+	}
+	return ""
 }
 
 // siblingConnectionName names a connection to another database on the same
