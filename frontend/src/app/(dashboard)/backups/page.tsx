@@ -29,7 +29,7 @@ import { CoveragePanel, type CoverageFilter } from "@/components/backups/coverag
 import { BackupKeyPanel } from "@/components/backups/backup-key"
 import { JobCard } from "@/components/backups/job-card"
 import { ProtectionMap } from "@/components/backups/protection-map"
-import { jobProducts } from "@/components/backups/marks"
+import { jobProducts, jobProject } from "@/components/backups/marks"
 import { useJobVerbs } from "@/components/backups/job-verbs"
 
 /**
@@ -236,6 +236,7 @@ export default function BackupsPage() {
                     job={job}
                     index={index}
                     products={jobProducts(job, resources, containers)}
+                    project={jobProject(job, resources)}
                     verbs={verbsFor(job)}
                     working={job.lastRun?.status === "running"}
                   />

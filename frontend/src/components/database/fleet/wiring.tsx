@@ -7,6 +7,7 @@ import type { DbTopoEdge, DbTopoNode, DbTopology } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { WireHost, WireMark, WireNode } from "@/components/deploy/wire"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
+import { ProjectFavicon } from "@/components/deploy/project-mark"
 import { StatusDot, type DotTone, type Verdict } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import type { Engine } from "@/components/database/engine"
@@ -349,8 +350,15 @@ export function ConsumerMark({
         : undefined
   const product = node.product && hasProductLogo(node.product) ? node.product : undefined
   return (
-    <WireMark tone={wrong ?? (product ? "logo" : "neutral")} size={size} shape="square">
-      {product ? <ProductGlyph id={product} /> : <KindGlyph node={node} />}
+    <WireMark
+      tone={wrong ?? (product || node.projectId ? "logo" : "neutral")}
+      size={size}
+      shape="square"
+    >
+      <ProjectFavicon
+        projectId={node.projectId}
+        fallback={product ? <ProductGlyph id={product} /> : <KindGlyph node={node} />}
+      />
     </WireMark>
   )
 }

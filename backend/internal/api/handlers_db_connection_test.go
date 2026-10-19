@@ -2250,6 +2250,10 @@ func TestTopologyFindsADeploymentByThePublishedAddressItHolds(t *testing.T) {
 	if drawn == nil || drawn.Kind != "deployment" || drawn.Name != "storefront" || drawn.Href != pathf("/deploy/%d", projectID) {
 		t.Fatalf("nodes = %+v, want the release drawn as the storefront deployment", topo.Nodes)
 	}
+	// The project is what the reader's website icon is drawn by.
+	if drawn.ProjectID != projectID {
+		t.Errorf("reader's project = %d, want %d", drawn.ProjectID, projectID)
+	}
 	want := topoEdge{From: pathf("db:%d", id), To: reader, Via: []string{"env"}, Status: "observed"}
 	if len(topo.Edges) != 1 || topo.Edges[0].From != want.From || topo.Edges[0].To != want.To || strings.Join(topo.Edges[0].Via, ",") != "env" {
 		t.Errorf("edges = %+v, want only %+v", topo.Edges, want)

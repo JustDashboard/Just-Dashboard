@@ -535,10 +535,9 @@ CREATE TABLE IF NOT EXISTS board_files (
   PRIMARY KEY (board_id, file_id)
 );
 
--- Stickyboards: sticky notes, text, sections and the links between them, one
--- validated document per board. The counts and the preview are derived from
--- the document on every save, so the list never reads a whole board to draw
--- its thumbnail. A new table is additive for existing installations.
+-- Stickyboards, from 0.7.2 to 0.7.5. The feature is gone and nothing reads
+-- this table, but it stays: schema changes are additive, and an install that
+-- made boards keeps their documents rather than losing them on an update.
 CREATE TABLE IF NOT EXISTS sticky_boards (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT NOT NULL,

@@ -5,7 +5,6 @@ import {
   Archive,
   ArrowLeftRight,
   Box,
-  CloudUpload,
   Cpu,
   FileText,
   Globe,
@@ -32,6 +31,7 @@ import {
   imageProducts,
   platformProduct,
 } from "@/components/product-logo"
+import { ProjectMark } from "@/components/deploy/project-mark"
 
 /**
  * The groups, in the order somebody actually looks. The raw kind strings are
@@ -460,11 +460,11 @@ function RecordRow({
         selected ? "bg-accent text-foreground" : "hover:bg-row-hover",
       )}
     >
-      <ProductLogo
-        id={record.product}
-        size="sm"
-        fallback={record.deployment ? CloudUpload : Globe}
-      />
+      {record.deployment ? (
+        <ProjectMark deployment={record.deployment} product={record.product} size="sm" />
+      ) : (
+        <ProductLogo id={record.product} size="sm" fallback={Globe} />
+      )}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className={cn("truncate text-body leading-tight", selected && "font-medium")}>

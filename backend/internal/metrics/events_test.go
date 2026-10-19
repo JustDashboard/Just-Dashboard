@@ -75,6 +75,28 @@ func TestEventsEmptyWindow(t *testing.T) {
 	}
 }
 
+// A deploy marker names the project it released, so a row of it can carry
+// the project's own icon rather than a deploy glyph.
+func TestDeployEventsNameTheirProject(t *testing.T) {
+	r := testRecorder(t, DefaultInterval, DefaultRetention)
+	started := time.Now().Add(-10 * time.Minute).Unix()
+	project, err := r.db.Exec(`INSERT INTO deploy_projects(name, repo_path, hook_secret, hook_id, created_at) VALUES('storefront', '/srv/storefront', 'sealed', 'storefront-hook', 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	if _, err := r.db.Exec(`INSERT INTO deploy_runs(project_id, started_at, ended_at, status) VALUES(?, ?, ?, 'success')`, projectID, started, started+30); err != nil {
+		t.Fatal(err)
+	}
+	events, err := r.Events(context.Background(), time.Now().Add(-time.Hour), time.Now(), 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Kind != "deploy" || events[0].Title != "storefront" || events[0].ProjectID != projectID {
+		t.Fatalf("events = %+v, want one deploy of storefront naming project %d", events, projectID)
+	}
+}
+
 func TestSortEventsIsAscendingAndStable(t *testing.T) {
 	now := time.Now()
 	events := []Event{

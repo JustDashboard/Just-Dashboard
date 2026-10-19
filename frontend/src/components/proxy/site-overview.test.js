@@ -127,6 +127,19 @@ describe("upstreams", () => {
         { ...node, pid: 0, container: { id: "abc", name: "shop-web", image: "redis:7" } },
       ]),
     ).toEqual({ product: "redis", name: "shop-web", pid: undefined })
+    expect(
+      upstreamOwner("http://127.0.0.1:3000", "app", [
+        {
+          ...node,
+          container: {
+            id: "abc",
+            name: "jd-e4-r9",
+            image: "node:22",
+            deployment: { projectId: 12, project: "shop", environment: "production" },
+          },
+        },
+      ]),
+    ).toMatchObject({ name: "jd-e4-r9", projectId: 12 })
   })
 
   test("another machine's address is not this host's socket on the same port", () => {

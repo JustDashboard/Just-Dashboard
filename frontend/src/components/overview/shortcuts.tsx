@@ -13,10 +13,8 @@ import {
 import { post } from "@/lib/api"
 import type { Board } from "@/lib/boards"
 import { plural } from "@/lib/format"
-import type { StickyBoard } from "@/lib/stickyboard"
 import { notify } from "@/lib/toast"
 import { ProductCard } from "@/components/choice-card"
-import { StickyGlyph } from "@/components/stickyboard/glyphs"
 import { Section } from "@/components/page"
 
 /** One way to start something, and what it would add to. */
@@ -27,7 +25,7 @@ export type Shortcut = {
   detail?: string
   product?: string
   fallback?: Icon
-} & ({ href: string } | { create: "drawing" | "board" })
+} & ({ href: string } | { create: "drawing" })
 
 /**
  * The things a visit most often starts — a shell, a project, a drawing — as
@@ -35,9 +33,9 @@ export type Shortcut = {
  * on the page made of choices, so it is the only one with the lit edge of a
  * thing you take (§16); every other block reads.
  *
- * Two of them make the thing in place rather than sending the reader to a
- * list to press New there: an empty drawing or board is what both lists'
- * own New makes, and the editor is where it gets its name.
+ * New drawing makes the thing in place rather than sending the reader to a
+ * list to press New there: an empty drawing is what the list's own New makes,
+ * and the editor is where it gets its name.
  */
 export function Shortcuts({ shortcuts }: { shortcuts: Shortcut[] }) {
   const router = useRouter()
@@ -45,32 +43,23 @@ export function Shortcuts({ shortcuts }: { shortcuts: Shortcut[] }) {
 
   if (shortcuts.length === 0) return null
 
-  async function create(kind: "drawing" | "board") {
+  async function create(kind: "drawing") {
     if (making) return
     setMaking(kind)
     try {
-      if (kind === "drawing") {
-        const drawing = await post<Board>("/boards/", { name: "Untitled drawing" })
-        router.push(`/excalidraw/${drawing.id}`)
-      } else {
-        const board = await post<StickyBoard>("/stickyboards/", { name: "Untitled board" })
-        router.push(`/stickyboard/${board.id}`)
-      }
+      const drawing = await post<Board>("/boards/", { name: "Untitled drawing" })
+      router.push(`/excalidraw/${drawing.id}`)
     } catch (cause) {
-      notify.error(
-        kind === "drawing" ? "Could not create the drawing" : "Could not create the board",
-        cause,
-      )
+      notify.error("Could not create the drawing", cause)
       setMaking(undefined)
     }
   }
 
   return (
     <Section title="Shortcuts">
-      {/* Two to a row until the content is wide enough for four, so the
-          eight an administrator sees are always even rows: four across beside
-          the sidebar at a tablet's width cut every label to its first word,
-          and one to a row on a phone made the run a screen tall. */}
+      {/* Two to a row until the content is wide enough for four: four across
+          beside the sidebar at a tablet's width cut every label to its first
+          word, and one to a row on a phone made the run a screen tall. */}
       <div data-slot="shortcuts" className="grid min-w-0 grid-cols-2 gap-3 xl:grid-cols-4">
         {shortcuts.map((shortcut) => (
           <ProductCard
@@ -99,7 +88,6 @@ export function counted(n: number | undefined, singular: string, many?: string) 
 export const SHORTCUT_GLYPH = {
   deploy: Rocket,
   database: Database,
-  board: StickyGlyph,
   files: FolderOpen,
   computer: TerminalWindow,
   backup: Archive,

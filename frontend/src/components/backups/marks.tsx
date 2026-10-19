@@ -1,7 +1,9 @@
 import { Archive, CloudUpload, Layers, Servers } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { BackupJob, BackupResource, Container } from "@/lib/types"
+import { useProjects } from "@/hooks/use-projects"
 import { LogoGlyph } from "@/components/logo"
+import { ProjectMark, ProjectMarkOf } from "@/components/deploy/project-mark"
 import {
   ProductGlyph,
   ProductLogo,
@@ -23,7 +25,8 @@ import {
  * are joined to the container list: a volume's detail says which containers
  * mount it, a stack's containers carry its name. A container whose image
  * names no product is none, and neither is the volume it mounts — those keep
- * the kind's glyph on the same tile rather than a guessed logo.
+ * the kind's glyph on the same tile rather than a guessed logo. A deployment
+ * is its project (`ProjectMark`), its website's icon first.
  */
 
 const ENGINE: Record<string, string> = { postgres: "postgresql" }
@@ -99,6 +102,53 @@ export function jobProducts(
   ]
 }
 
+/** The project of a deployment the job covers, which leads its mark. */
+export function jobProject(job: BackupJob, resources: BackupResource[]) {
+  return resources.find(
+    (r) => r.kind === "deployment" && r.coveredBy.some((c) => c.jobId === job.id),
+  )?.projectId
+}
+
+/**
+ * A job as what it covers: its products, led by the project of a deployment
+ * it covers, and the archive's glyph on the tile where nothing names one.
+ * `lg` is the identity line's 48px tile, over a stack of the 40px ones.
+ */
+export function JobMark({
+  products,
+  project,
+  size = "sm",
+  ring,
+}: {
+  products: string[]
+  project?: number
+  size?: "sm" | "lg"
+  /** The ground a stack of marks sits on, as `ProductLogos` takes it. */
+  ring?: string
+}) {
+  const deployment = useProjects(Boolean(project)).get(project ?? 0)
+  const stack = size === "lg" ? "md" : "sm"
+  if (deployment && products.length === 0)
+    return <ProjectMark deployment={deployment} size={size} />
+  if (deployment || products.length > 1)
+    return (
+      <ProductLogos
+        lead={deployment && <ProjectMark deployment={deployment} size={stack} />}
+        ids={products}
+        size={stack}
+        ring={ring}
+      />
+    )
+  return (
+    <ProductLogo
+      id={products[0]}
+      size={stack}
+      fallback={Archive}
+      className={size === "lg" ? "size-12 rounded-xl [&_img]:size-7" : undefined}
+    />
+  )
+}
+
 const KIND_GLYPH = {
   volume: Archive,
   stack: Layers,
@@ -109,22 +159,26 @@ const KIND_GLYPH = {
 export function ResourceMark({
   ids,
   kind,
+  project,
   ring,
 }: {
   ids: string[]
   kind: BackupResource["kind"]
+  /** The project a deployment is (`BackupResource.projectId`). */
+  project?: number
   /** The ground a stack of marks sits on, as `ProductLogos` takes it. */
   ring?: string
 }) {
   if (kind === "dashboard") return <DashboardMark />
   if (ids.length > 1) return <ProductLogos ids={ids} ring={ring} />
-  return (
+  const tile = (
     <ProductLogo
       id={ids[0]}
       size="sm"
       fallback={KIND_GLYPH[kind as keyof typeof KIND_GLYPH] ?? Archive}
     />
   )
+  return <ProjectMarkOf projectId={project} size="sm" fallback={tile} />
 }
 
 /** The dashboard itself, on the tile a product's logo takes. */

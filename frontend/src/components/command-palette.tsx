@@ -427,6 +427,7 @@ function Palette({
         keywords: i === 0 ? ["previous", "back", "last page"] : [],
         icon: owner?.icon,
         product: entry.product ?? resource?.product ?? (owner && PAGE_PRODUCTS[owner.href]),
+        projectId: entry.projectId ?? resource?.projectId,
         state: resource?.state,
         facts: resource?.facts,
         links: resource?.links,
@@ -497,7 +498,13 @@ function Palette({
   }
   const choose = (item: PaletteItem) => {
     if (item.href && localDestination(item.href)) {
-      open({ href: item.href, title: item.title, detail: item.detail, product: item.product })
+      open({
+        href: item.href,
+        title: item.title,
+        detail: item.detail,
+        product: item.product,
+        projectId: item.projectId,
+      })
     } else if (item.run) {
       close(false)
       item.run()
@@ -671,7 +678,11 @@ function Palette({
                     arrived.has(item.id) && "animate-rise",
                   )}
                 >
-                  <ResultMark product={item.product} icon={item.icon ?? KINDS[item.kind].icon} />
+                  <ResultMark
+                    product={item.product}
+                    projectId={item.projectId}
+                    icon={item.icon ?? KINDS[item.kind].icon}
+                  />
                   <span className="flex min-w-0 flex-1 items-baseline gap-2">
                     <span className="max-w-[75%] shrink-0 truncate text-foreground">
                       {item.previous && "Back to "}

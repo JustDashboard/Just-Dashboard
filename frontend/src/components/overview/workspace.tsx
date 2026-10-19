@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation"
 import { ArrowRight } from "@/components/icons"
 import type { BoardSummary } from "@/lib/boards"
 import { plural, relativeTime } from "@/lib/format"
-import type { StickySummary } from "@/lib/stickyboard"
 import type { TerminalList } from "@/lib/types"
 import type { PollState } from "@/hooks/use-poll"
 import { sessionLabel, sessionProgram } from "@/lib/terminal-activity"
@@ -17,13 +16,11 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, programProduct } from "@/components/product-logo"
 import { EmptyState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { BoardPreview } from "@/components/stickyboard/board-preview"
-import { StickyGlyph } from "@/components/stickyboard/glyphs"
 import { Button } from "@/components/ui/button"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
-import { recentWork, shellOrder, type RecentWork } from "./order"
+import { recentDrawings, shellOrder } from "./order"
 import { SectionLink } from "./section-link"
 
 /** Enough to go back to what was open this morning without becoming the terminal's rail. */
@@ -139,35 +136,22 @@ function tilde(path: string, home: string | undefined) {
 }
 
 /**
- * The drawings and sticky boards edited last, as one list, each drawn as
- * itself: the picture is the thing, so a board of pink questions and the
- * network sketch are told apart before their names are read.
+ * The drawings edited last, each drawn as itself: the picture is the thing,
+ * so the network sketch and the launch plan are told apart before their names
+ * are read.
  */
-export function RecentWorkPanel({
-  drawings,
-  boards,
-}: {
-  /** Undefined where the section is kept out of the sidebar, which is not the same as none. */
-  drawings?: PollState<BoardSummary[]>
-  boards?: PollState<StickySummary[]>
-}) {
-  const work = useMemo(
-    () => recentWork(drawings?.data, boards?.data, SHOWN_WORK),
-    [drawings?.data, boards?.data],
-  )
-  const waiting =
-    (drawings?.loading && !drawings.data) || (boards?.loading && !boards.data) || false
-  const failed =
-    (drawings && !drawings.data && drawings.error) || (boards && !boards.data && boards.error)
+export function RecentWorkPanel({ drawings }: { drawings: PollState<BoardSummary[]> }) {
+  const work = useMemo(() => recentDrawings(drawings.data, SHOWN_WORK), [drawings.data])
+  const waiting = drawings.loading && !drawings.data
+  const failed = !drawings.data && drawings.error
 
   return (
     <Panel plain>
       <PanelHeader
-        title="Drawings & boards"
+        title="Drawings"
         actions={
           <div className="flex h-8 items-center gap-3 text-hint">
-            {drawings && <SectionLink href="/excalidraw">Excalidraw</SectionLink>}
-            {boards && <SectionLink href="/stickyboard">Stickyboard</SectionLink>}
+            <SectionLink href="/excalidraw">Excalidraw</SectionLink>
           </div>
         }
       />
@@ -182,21 +166,19 @@ export function RecentWorkPanel({
           </ul>
         ) : work.length === 0 ? (
           failed ? (
-            <p className="py-2 text-body text-muted-foreground">
-              The drawings and boards could not be read.
-            </p>
+            <p className="py-2 text-body text-muted-foreground">The drawings could not be read.</p>
           ) : (
             <EmptyState
               mark={<ProductLogo id="excalidraw" />}
               title="Nothing drawn yet"
-              description="A drawing or a board you edit is here the next time you open the Overview."
+              description="A drawing you edit is here the next time you open the Overview."
               className="py-8"
             />
           )
         ) : (
-          <ul aria-label="Recent drawings and boards" className="grid grid-cols-2 gap-3">
-            {work.map((item, index) => (
-              <WorkCard key={item.key} item={item} index={index} />
+          <ul aria-label="Recent drawings" className="grid grid-cols-2 gap-3">
+            {work.map((drawing, index) => (
+              <WorkCard key={drawing.id} drawing={drawing} index={index} />
             ))}
           </ul>
         )}
@@ -205,10 +187,10 @@ export function RecentWorkPanel({
   )
 }
 
-/** One drawing or board: its picture over its name, the tool it lives in and when it changed. */
-function WorkCard({ item, index }: { item: RecentWork; index: number }) {
+/** One drawing: its picture over its name, the tool it lives in and when it changed. */
+function WorkCard({ drawing, index }: { drawing: BoardSummary; index: number }) {
   const router = useRouter()
-  const Glyph = item.kind === "drawing" ? ExcalidrawGlyph : StickyGlyph
+  const href = `/excalidraw/${drawing.id}`
   return (
     <li className="min-w-0">
       <BlurFade delay={index * 0.04} className="h-full">
@@ -217,33 +199,26 @@ function WorkCard({ item, index }: { item: RecentWork; index: number }) {
             onClick={(event) => {
               const target = event.target as HTMLElement
               if (!event.currentTarget.contains(target) || target.closest(CONTROL)) return
-              router.push(item.href)
+              router.push(href)
             }}
             className="group/choice flex h-full min-w-0 cursor-pointer flex-col rounded-xl"
           >
-            {item.kind === "drawing" ? (
-              <DrawingPreview
-                preview={item.drawing.preview}
-                className="h-24 w-full overflow-hidden rounded-t-xl border-b border-hairline sm:h-28"
-              />
-            ) : (
-              <BoardPreview
-                preview={item.board.preview}
-                className="h-24 w-full rounded-t-xl border-b border-hairline bg-background sm:h-28"
-              />
-            )}
+            <DrawingPreview
+              preview={drawing.preview}
+              className="h-24 w-full overflow-hidden rounded-t-xl border-b border-hairline sm:h-28"
+            />
             <div className="flex min-w-0 items-start gap-2 px-3 py-2.5">
               <div className="min-w-0 flex-1">
                 <Link
-                  href={item.href}
-                  aria-label={`Open ${item.name}`}
+                  href={href}
+                  aria-label={`Open ${drawing.name}`}
                   className="block max-w-full truncate rounded-sm text-body font-medium focus-ring"
                 >
-                  {item.name}
+                  {drawing.name}
                 </Link>
                 <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
-                  <Glyph aria-hidden className="size-3 shrink-0" />
-                  <span className="truncate">edited {relativeTime(item.updatedAt)}</span>
+                  <ExcalidrawGlyph aria-hidden className="size-3 shrink-0" />
+                  <span className="truncate">edited {relativeTime(drawing.updatedAt)}</span>
                 </p>
               </div>
               <ArrowRight

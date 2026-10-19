@@ -18,6 +18,7 @@ import { StatusDot, type DotTone } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { WireMark, WireNode } from "@/components/deploy/wire"
+import { ProjectFavicon } from "@/components/deploy/project-mark"
 import { EndpointText } from "@/components/config/request-path"
 import { CertLife, expiryTone } from "@/components/proxy/expiry-status"
 import { certificateProduct, certPathProduct } from "@/components/proxy/marks"
@@ -182,7 +183,14 @@ export function SiteRouteMap({
               <WireNode
                 key={target.key}
                 nodeRef={ends[index]}
-                mark={<Mark product={target.product} fallback={target.glyph} tone={target.tone} />}
+                mark={
+                  <Mark
+                    product={target.product}
+                    projectId={target.projectId}
+                    fallback={target.glyph}
+                    tone={target.tone}
+                  />
+                }
                 eyebrow={index === 0 ? target.eyebrow : undefined}
                 title={target.title}
                 hint={target.hint}
@@ -309,16 +317,23 @@ function Features({ vhost, spec }: { vhost: VHost; spec?: SiteSpec }) {
 /** A product on its tile, and where it has one, its state in the corner as the request path draws it. */
 function Mark({
   product,
+  projectId,
   fallback: Fallback,
   tone,
 }: {
   product?: string
+  projectId?: number
   fallback: Icon
   tone?: DotTone
 }) {
   const tile = (
     <WireMark tone="logo">
-      {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Fallback aria-hidden />}
+      <ProjectFavicon
+        projectId={projectId}
+        fallback={
+          hasProductLogo(product) ? <ProductGlyph id={product} /> : <Fallback aria-hidden />
+        }
+      />
     </WireMark>
   )
   if (!tone) return tile
@@ -336,6 +351,7 @@ function Mark({
 type Target = {
   key: string
   product?: string
+  projectId?: number
   glyph: Icon
   tone?: DotTone
   eyebrow: string
@@ -421,6 +437,7 @@ function siteTargets(
     return {
       key: upstream,
       product: owner?.product,
+      projectId: owner?.projectId,
       glyph: Servers,
       tone: unheard ? "danger" : owner ? "running" : undefined,
       eyebrow: "Upstream",
@@ -451,6 +468,7 @@ function memberTarget(
   return {
     key: member.address,
     product: owner?.product,
+    projectId: owner?.projectId,
     glyph: Servers,
     tone: check.tone,
     eyebrow: pool ? `Pool · ${pool}` : "Upstream",

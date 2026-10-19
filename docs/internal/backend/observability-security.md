@@ -81,7 +81,8 @@ failed attempts and accept drops with peaks, and the mean median RTT with the hi
 as its peak; the metrics page charts them as Resent segments, Connection RTT and Failed connections.
 They are recorded and charted; with Health removed, nothing judges them into findings.
 `metrics.Events` (`GET /system/metrics/events`) is the annotation layer, answered from `deploy_runs`,
-`backup_runs` and `audit_log` — this dashboard *is* the thing that ran the deploy. Reboots need no
+`backup_runs` and `audit_log` — this dashboard *is* the thing that ran the deploy. A deploy event
+carries its project's id, so the Overview's activity row draws the project's own icon. Reboots need no
 storage: a sample whose `uptime_seconds` dropped means the machine went down, which also catches
 restarts nobody initiated here. Works with `JD_METRICS_RETENTION=0`; only reboot markers go quiet.
 

@@ -27,6 +27,9 @@ type Event struct {
 	// an instant, so a twenty-minute deploy can be drawn as the band it was
 	// instead of a line at the moment it started.
 	DurationSeconds int `json:"durationSeconds,omitempty"`
+	// ProjectID is the project a deploy event released, so its row can carry
+	// the project's own icon.
+	ProjectID int64 `json:"projectId,omitempty"`
 }
 
 // Events collects everything notable in a window, newest last so a client can
@@ -62,7 +65,7 @@ func (r *Recorder) Events(ctx context.Context, from, to time.Time, limit int) ([
 
 func (r *Recorder) deployEvents(ctx context.Context, from, to time.Time, limit int) []Event {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT d.started_at, d.ended_at, d.status, d.trigger, d.actor, p.name
+		SELECT d.started_at, d.ended_at, d.status, d.trigger, d.actor, p.id, p.name
 		  FROM deploy_runs d
 		  JOIN deploy_projects p ON p.id = d.project_id
 		 WHERE d.started_at >= ? AND d.started_at <= ?
@@ -75,17 +78,18 @@ func (r *Recorder) deployEvents(ctx context.Context, from, to time.Time, limit i
 
 	var out []Event
 	for rows.Next() {
-		var started, ended int64
+		var started, ended, project int64
 		var status, trigger, actor, name string
-		if err := rows.Scan(&started, &ended, &status, &trigger, &actor, &name); err != nil {
+		if err := rows.Scan(&started, &ended, &status, &trigger, &actor, &project, &name); err != nil {
 			return out
 		}
 		e := Event{
-			TS:       time.Unix(started, 0).UTC(),
-			Kind:     "deploy",
-			Title:    name,
-			Severity: statusSeverity(status),
-			Detail:   fmt.Sprintf("deploy %s (%s)", status, trigger),
+			TS:        time.Unix(started, 0).UTC(),
+			Kind:      "deploy",
+			Title:     name,
+			Severity:  statusSeverity(status),
+			Detail:    fmt.Sprintf("deploy %s (%s)", status, trigger),
+			ProjectID: project,
 		}
 		if actor != "" {
 			e.Detail += " by " + actor

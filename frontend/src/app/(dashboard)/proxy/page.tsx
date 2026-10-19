@@ -487,7 +487,7 @@ export default function ProxyOverviewPage() {
           certbot: status.certbot,
         }}
         errors={{ report: errorReport, error: nginxErrors.error }}
-        productOf={(site) => backends.get(site)?.product}
+        appOf={(site) => backends.get(site)}
         labelOf={labelOf}
       />
 

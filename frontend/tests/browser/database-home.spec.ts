@@ -166,6 +166,7 @@ const CONSUMERS = {
       product: "nodejs",
       detail: "production",
       href: "/deploy/7",
+      projectId: 7,
     },
     { id: "host", kind: "host", name: "This server", detail: "processes on the machine" },
   ],
@@ -822,6 +823,45 @@ test("the busiest statements are shapes on one line, and the largest tables are 
   // Two schemas can hold a table of one name: the row's name says which.
   await largest.getByRole("button", { name: "Open public.orders in Data" }).click()
   await expect.poll(() => where(page)).toBe("/databases/1/data?schema=public&table=orders")
+})
+
+test("a deployment that reads it is drawn by its website's own icon", async ({ page }) => {
+  await mockHome(page)
+  await page.route(
+    (url) => url.pathname === "/api/v1/deploy/" && url.searchParams.get("view") === "fleet",
+    (route) =>
+      route.fulfill({
+        json: {
+          deployments: [
+            { id: 7, name: "shop-api", endpoint: "https://shop.example.com", liveReleaseId: 3 },
+          ],
+          activeWork: [],
+        },
+      }),
+  )
+  await page.route("**/api/v1/deploy/7/favicon", (route) =>
+    route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" fill="#e11d48"/></svg>',
+    }),
+  )
+  await visit(page, "/databases/1")
+
+  const readers = block(page, "How it is used").getByRole("list", { name: "Read by" })
+  const reader = readers.getByRole("listitem").filter({ hasText: "shop-api" })
+  // The project's icon, where a cloud glyph or its framework's logo was drawn.
+  await expect(reader.locator('img[src$="/deploy/7/favicon"]')).toBeVisible()
+  await expect
+    .poll(() =>
+      reader
+        .locator('img[src$="/deploy/7/favicon"]')
+        .evaluate((image: HTMLImageElement) => image.naturalWidth),
+    )
+    .toBeGreaterThan(0)
+  // The machine itself is no project, and keeps its glyph.
+  await expect(
+    readers.getByRole("listitem").filter({ hasText: "This server" }).locator("img"),
+  ).toHaveCount(0)
 })
 
 test("the server's own log is followed live on its home, its failures counted and coloured", async ({

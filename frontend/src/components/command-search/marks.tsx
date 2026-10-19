@@ -18,8 +18,8 @@ import {
   type Icon,
 } from "@/components/icons"
 import { hasProductLogo, ProductGlyph } from "@/components/product-logo"
+import { ProjectFavicon } from "@/components/deploy/project-mark"
 import { ExcalidrawGlyph } from "@/components/boards/glyphs"
-import { StickyGlyph } from "@/components/stickyboard/glyphs"
 import type { SearchKind } from "./model"
 
 /**
@@ -47,7 +47,6 @@ export const KINDS: Record<SearchKind, { icon: Icon; noun: string }> = {
   app: { icon: ChartActivity, noun: "PM2 app" },
   backup: { icon: Archive, noun: "Backup job" },
   board: { icon: ExcalidrawGlyph, noun: "Excalidraw drawing" },
-  stickyboard: { icon: StickyGlyph, noun: "Stickyboard" },
 }
 
 /** The pages that are one product's own, drawn as that product. */
@@ -73,9 +72,12 @@ export const COMMAND_ICONS: Record<string, Icon> = {
  */
 export function ResultMark({
   product,
+  projectId,
   icon: Glyph,
 }: {
   product?: string
+  /** A project, drawn by its website's icon where it has one. */
+  projectId?: number
   icon: React.ComponentType<{ className?: string }>
 }) {
   return (
@@ -83,11 +85,17 @@ export function ResultMark({
       aria-hidden="true"
       className="flex size-5 shrink-0 items-center justify-center text-muted-foreground transition-colors group-data-[selected=true]/result:text-foreground"
     >
-      {product && hasProductLogo(product) ? (
-        <ProductGlyph id={product} className="size-4" />
-      ) : (
-        <Glyph className="size-4" />
-      )}
+      <ProjectFavicon
+        projectId={projectId}
+        className="size-4"
+        fallback={
+          product && hasProductLogo(product) ? (
+            <ProductGlyph id={product} className="size-4" />
+          ) : (
+            <Glyph className="size-4" />
+          )
+        }
+      />
     </span>
   )
 }

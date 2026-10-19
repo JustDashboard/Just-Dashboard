@@ -1653,6 +1653,17 @@ scope head, the project identity line and the notification picture's source all 
 draws the product alone, at a step of opacity — a project at rest, the way Backups dims a paused
 job.
 
+**A project is drawn as itself wherever it appears, not only on Deploy's pages.** A database's
+reader was a cloud glyph and a site's application its container's image, so the one project read as
+three things across the product. Another section's payload names a project by its id alone, and
+`useProjects` reads the fleet once for every mark on the page. Where the row draws its own tile,
+`ProjectMarkOf` draws `ProjectMark` over the tile it had before; where the tile belongs to the
+picture — a `WireMark` with its state's tint, a 16px glyph inside a line, the palette's result mark
+— `ProjectFavicon` (or `ProductLogo`'s `favicon`) puts the icon in it, with the product or glyph it
+drew before wherever the project has no icon to serve. A site's application leads the engine's tile
+in its stack (`ProductLogos`' `lead`), and a backup job leads its products with the project it
+covers. A reader without Deploy's read keeps the old marks: the fleet is refused, not guessed.
+
 **Where a project comes from, and what builds it, are products too.** A Git remote, a clone URL, a
 registry host or an image reference is drawn as the forge or registry it names (`hostProduct`:
 GitHub, `ghcr.io` included, GitLab, Bitbucket, Codeberg, Gitea, Forgejo, Docker Hub, Quay, Harbor,
@@ -1882,16 +1893,6 @@ because nothing in them is yours to edit. The picker is the folder drawn in each
 the chosen one `bg-accent` like every selection. The Files page is a workbench and, like the terminal
 and a Git working copy, has no page header: its commands sit in the strip across the workbench, beside
 the folder they act on.
-
-A sticky note's colour is a label by the same argument, so Stickyboard's nine (`--note-*`) are fixed
-hues, and `[data-note-color]`, `[data-note-style]` and `[data-note-kind]` mix every ground, ink and edge
-a note draws from its one value, as `[data-folder]` does for a folder. A paper note is the product's one
-large light surface, so the values sit low enough to read as paper against the ground rather than as
-a wall of lamps, with graphite the dark note whose ink turns light. On the board a note being carried
-is the one thing above it and the only one with a shadow, the format bar over a selection floats and
-takes a popover's ground, selection is drawn in the brand and a find result in the signal, and a note's
-type is in board units the canvas scales rather than on the ladder ([`stickyboard.md`](../stickyboard.md)).
-The list is a reading page: its readings over the boards as lit cards, each drawn as the board.
 
 Files and `/files/editor` take the **reading** register: their frames contain independently scrolling
 workbench panes, while directory and selection readings live in the status strip. Tiles use fixed,
@@ -2639,17 +2640,17 @@ shortcuts, project cards, shells, drawings, databases and jobs carry the lit edg
 which is not one. Everything that arrived, rose.
 
 **It took a third pass in 0.8**, at the operator's request, because it did not include what the
-product does: Terminal, Excalidraw, Stickyboard, Files and Remote Desktop were nowhere on it, Databases
+product does: Terminal, Excalidraw, Files and Remote Desktop were nowhere on it, Databases
 and Backups were one figure each, and the only thing it offered to *start* was a project. Nothing
 above was taken back; what the page gained is the answer to "what was I doing, and how do I start the
 next thing". **Shortcuts** opens the page under the identity line: a `ProductCard` per thing a visit
 starts, each counting what it adds to (*6 projects*, *3 open · operator*) so it is data rather than a
-caption (pass 8), two to a row on a phone and four across from `xl` so eight are even rows, and gated
+caption (pass 8), two to a row on a phone and four across from `xl`, and gated
 on the section and on the capability its destination checks — a shortcut that opens a refusal is a
-dead button. New drawing and New board make the thing where they are pressed, as each list's own New
-does, and open it. Under Deployments, three **pairs**: the shells open on the server (`workspace.tsx`
+dead button. New drawing makes the drawing where it is pressed, as the list's own New does, and
+opens it. Under Deployments, three **pairs**: the shells open on the server (`workspace.tsx`
 — working first, each drawn as the program in it, a row opening `/terminal?session=` on that session)
-beside the drawings and boards edited last as one list, each its own preview; the databases (the
+beside the drawings edited last, each its own preview; the databases (the
 control center's fleet read, its order, a row opening the database's home) beside every backup job
 (`data.tsx`); then the processes beside the activity, as before. A pair holding one block lets it take
 the row. Every row in the first two pairs is taken, so it is a `ChoiceRow` or a lit card (pass 3).

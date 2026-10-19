@@ -44,10 +44,13 @@ type backupResource struct {
 	Detail string `json:"detail,omitempty"`
 	// Paths are the directories on disk a file job would have to include.
 	// A database dumped natively has none.
-	Paths        []string         `json:"paths,omitempty"`
-	ConnectionID int64            `json:"connectionId,omitempty"`
-	Suggest      backupSuggestion `json:"suggest"`
-	CoveredBy    []backupCoverer  `json:"coveredBy"`
+	Paths        []string `json:"paths,omitempty"`
+	ConnectionID int64    `json:"connectionId,omitempty"`
+	// ProjectID is the project a deployment is, which the frontend draws its
+	// website's icon by; its id stays the name the jobs cover it by.
+	ProjectID int64            `json:"projectId,omitempty"`
+	Suggest   backupSuggestion `json:"suggest"`
+	CoveredBy []backupCoverer  `json:"coveredBy"`
 	// Protected means an enabled job covers it — every path of it, or its
 	// native dump. A paused job is listed under coveredBy but does not count.
 	Protected    bool       `json:"protected"`
@@ -179,7 +182,7 @@ func (s *Server) backupResources(ctx context.Context, jobs []*backups.Job) backu
 				continue
 			}
 			add(backupResource{
-				Kind: "deployment", ID: p.Name, Name: p.Name, Detail: p.RepoPath,
+				Kind: "deployment", ID: p.Name, Name: p.Name, Detail: p.RepoPath, ProjectID: p.ID,
 				Paths:   []string{p.RepoPath},
 				Suggest: backupSuggestion{Name: "Deployment " + p.Name, Sources: []string{p.RepoPath}},
 			})
