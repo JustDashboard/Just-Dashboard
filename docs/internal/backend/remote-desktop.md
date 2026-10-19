@@ -195,23 +195,30 @@ browser ──HTTPS / WebSocket──▶ backend ──HTTP 127.0.0.1──▶ M
   quality (Light 720p60 at 8 Mb/s, Smooth 1080p60 at 20, Sharp 1440p60 at 40, Max 1440p120 at 80,
   which are Moonlight's own defaults for those sizes; a computer whose screen runs at 60 Hz sends
   60), over whatever the reader changed in the stream's own menu.
-- **The stream is asked for in the screen's own shape.** Sunshine cannot change a Mac's resolution:
-  it fits the screen into whatever size the client asks for and pads the rest black, evenly, on one
-  axis, so a 16:10 Mac asked for 1920×1080 came back pillarboxed, and the bridge then letterboxed
-  that 16:9 picture again inside a frame of a third shape. The size is therefore the bridge's
-  `custom` one (`streamSize`): the quality's height at the screen's width-over-height, in even
-  pixels. Until a stream has shown the screen that shape is 16:9; while one plays, the session page
-  scales a frame of the bridge's picture (its `.video-stream` video or canvas, readable because the
-  page is this origin) down to 480 px wide once a second and reads the padding off it
-  (`screenShape`: near-black on both sides of one axis, the other lit to its edges). Three readings
-  in a row that agree and differ from the stream's shape by more than 1% are kept for that computer
-  in the browser's view state (`remote-desktop.screen-shape.<id>`), and the stream is loaded again
-  at it. A picture dark at one edge or on both axes says nothing; one dark down both sides is read
-  as padding once, and the next stream, padded the other way, corrects it, so a frame reshapes its
-  stream at most twice. The frame itself is the stream's shape, centred and as large as the space
-  allows (`min(100cqw, 100cqh × shape)` in a size container), so the bridge has nothing to
-  letterbox and what is left round a screen of another shape is the workspace's ground, black only
-  in fullscreen. The Mac's Sunshine steps end with
+- **The stream is always 16:9, and the frame is the screen's shape.** Sunshine cannot change a
+  Mac's resolution: it fits the screen into the size the client asks for and pads the rest black,
+  evenly, on one axis, so a 16:10 Mac comes back pillarboxed. The stream is still asked for at the
+  quality's 16:9 preset and never at the screen's own shape: a stream loaded again at a new size
+  overlaps the old session, which the bridge only drops on its timeout some 30 s later, and
+  Sunshine shares one capture between overlapping sessions, built at the first one's size. The new
+  stream came back as the old size's padded picture stretched to the new one, and Sunshine, which
+  maps the pointer as if the screen were fitted into the new size, put the computer's pointer off
+  the reader's, more so towards the edges. Instead, while a stream plays, the session page scales a
+  frame of the bridge's picture (its `.video-stream` video or canvas, readable because the page is
+  this origin) down to 480 px wide once a second and reads the padding off it (`screenShape`:
+  near-black on both sides of one axis, the other lit to its edges). Three readings in a row that
+  agree and differ from the shape on screen by more than 1% are kept for that computer in the
+  browser's view state (`remote-desktop.screen.<id>`; the earlier `screen-shape` key holds shapes
+  read off stretched streams and is left unread). The frame takes that shape, 16:9 until one is
+  read, centred and as large as the space allows (`min(100cqw, 100cqh × shape)` in a size
+  container), and a style in the bridge's page draws its picture larger than the page by the
+  padding (`streamOverscan`), lifting the bridge's own cap at the page's size, so the padding falls
+  outside the frame. The bridge maps the pointer over the picture's whole box, so it still meets
+  the screen. A new shape only redraws: the stream is never loaded again for it. A picture dark at
+  one edge or on both axes says nothing, and reading goes on for the whole session, so a picture
+  whose own black bars were taken for padding is framed right again once it changes. What is left
+  round the frame is the workspace's ground, black only in fullscreen. The Mac's Sunshine steps
+  end with
   choosing its software encoder: Sunshine's VideoToolbox path holds each frame about 120 ms, the
   software encoder about 10.
 
