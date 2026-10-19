@@ -2619,14 +2619,43 @@ The passes, in order. Each one is a diff you can review on its own.
 
 **What the Overview looks like after these passes**, as a checklist for the page you are on: the
 machine's identity line first (`HostIdentity` — its distribution drawn as itself, the processor and
-hypervisor as bare marks among its facts); a Resources `Section`
+hypervisor as bare marks among its facts); Shortcuts, a run of `ProductCard`s; a Resources `Section`
 whose head carries the socket's `Status live` and the way on to Metrics, holding a four-tile
 `StatGrid` of the readings that move — each carrying its last hour in the tile's `trend` slot where a
 meter would be, keyed before its name by its line's colour, its figure gliding to every frame — over
-the Storage band, a capacity bar per filesystem; the Deployments section; a plain top-processes list beside a
-plain activity list; and a `Section` holding a `StatGrid` of eight `StatLink` tiles, one per module,
-each naming what it counts with the products themselves. No frame anywhere on the page — the project
-cards carry the lit edge of a thing you take, which is not one. Everything that arrived, rose.
+the Storage band, a capacity bar per filesystem; the Deployments section; three pairs of plain blocks
+— the shells beside the drawings and boards, the databases beside the backup jobs, the top processes
+beside the activity list; and a `Section` holding a `StatGrid` of eight `StatLink` tiles, one per
+module, each naming what it counts with the products themselves. No frame anywhere on the page — the
+shortcuts, project cards, shells, drawings, databases and jobs carry the lit edge of a thing you take,
+which is not one. Everything that arrived, rose.
+
+**It took a third pass in 0.8**, at the operator's request, because it did not include what the
+product does: Terminal, Excalidraw, Stickyboard, Files and Remote Desktop were nowhere on it, Databases
+and Backups were one figure each, and the only thing it offered to *start* was a project. Nothing
+above was taken back; what the page gained is the answer to "what was I doing, and how do I start the
+next thing". **Shortcuts** opens the page under the identity line: a `ProductCard` per thing a visit
+starts, each counting what it adds to (*6 projects*, *3 open · operator*) so it is data rather than a
+caption (pass 8), two to a row on a phone and four across from `xl` so eight are even rows, and gated
+on the section and on the capability its destination checks — a shortcut that opens a refusal is a
+dead button. New drawing and New board make the thing where they are pressed, as each list's own New
+does, and open it. Under Deployments, three **pairs**: the shells open on the server (`workspace.tsx`
+— working first, each drawn as the program in it, a row opening `/terminal?session=` on that session)
+beside the drawings and boards edited last as one list, each its own preview; the databases (the
+control center's fleet read, its order, a row opening the database's home) beside every backup job
+(`data.tsx`); then the processes beside the activity, as before. A pair holding one block lets it take
+the row. Every row in the first two pairs is taken, so it is a `ChoiceRow` or a lit card (pass 3).
+
+Databases and Backups left the tiles for their blocks, and the System services tile (systemd's
+running services, or its failed units as the figure in red) and Remote Desktop took their places.
+The Backups tile had said *Last run OK* off the newest run on the server, so a nightly job that failed
+was hidden by an hourly one that succeeded after it; the block counts and orders every job by its own
+last run (`order.ts`, unit-tested). Every tile's figure is now a count with its word as the tile's
+`trailing`, as the readings write *6.5 GB free*, because the tiles went two to a row on a phone
+(`StatGrid dense`, the readings too) and *3 certificates* at 24px did not fit half of one; the
+products in a tile's hint are left out below `sm` for the same reason. On a phone the fleet keeps its
+worst three, so at 375 px the page holds its four new blocks and the shortcuts in about the height
+the old one spent on eight full-width tiles and six stacked projects.
 
 The 0.7.1 pass asked of each block whether it answered the question a reader opens the page with,
 and two did not. The Health panel that stood between the readings and the projects — the

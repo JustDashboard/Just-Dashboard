@@ -104,8 +104,9 @@ What a hidden section loses is exactly three things, each read through `useHidde
   panel's head, "Proxy & TLS is hidden from your sidebar. Show it", and Show it removes the section
   from the list. The line is in the rail rather than over the page so a `fill` page (the terminal, a
   database workbench) keeps its exact height; on a phone it is in the sheet.
-- **Its tiles and reads on the Overview.** Each Services tile, the Deployments section and the read
-  behind it are gated on the section, so the page asks the server only about what it draws.
+- **Its tiles, blocks, shortcuts and reads on the Overview.** Each Services tile, each block (Deployments,
+  Terminal, Drawings & boards, Databases, Backups), each shortcut and the read behind it are gated on the
+  section, so the page asks the server only about what it draws.
 - **Its pages in the palette's empty list.** They are `explicit`, listed as soon as a word is typed:
   search is how a hidden page is reached on purpose.
 
