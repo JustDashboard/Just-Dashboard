@@ -748,6 +748,21 @@ func (s *Server) connectInstance(ctx context.Context, w http.ResponseWriter, r *
 	}
 	// Whatever the reconcile remembered being refused, it has been let in now.
 	s.forgetRefusal(inst.Key)
+	detail := map[string]any{"key": inst.Key, "engine": inst.Engine, "source": inst.Source}
+	if inst.Container != nil {
+		detail["container"], detail["image"] = inst.Container.Name, inst.Container.Image
+	}
+	if inst.Host != nil && inst.Host.Process != "" {
+		detail["process"] = inst.Host.Process
+	}
+	stranded, ok, err := s.strandedFrom(ctx, inst.Key, cand.Driver)
+	if err != nil {
+		return err
+	}
+	if ok {
+		detail["repaired"] = true
+		return s.resealConnection(ctx, w, r, stranded.id, cand.Driver, dsn, opts.action, detail)
+	}
 	name := strings.TrimSpace(opts.name)
 	if name == "" {
 		name = defaultConnectionName(inst, cand)
@@ -756,13 +771,6 @@ func (s *Server) connectInstance(ctx context.Context, w http.ResponseWriter, r *
 		return httpx.BadRequest("name may contain letters, digits, spaces, dots, dashes and underscores")
 	}
 	name = uniqueConnectionName(name, names)
-	detail := map[string]any{"key": inst.Key, "engine": inst.Engine, "source": inst.Source}
-	if inst.Container != nil {
-		detail["container"], detail["image"] = inst.Container.Name, inst.Container.Image
-	}
-	if inst.Host != nil && inst.Host.Process != "" {
-		detail["process"] = inst.Host.Process
-	}
 	return s.saveConnectionFrom(w, r, inst.Key, name, cand.Driver, dsn, opts.action, detail)
 }
 

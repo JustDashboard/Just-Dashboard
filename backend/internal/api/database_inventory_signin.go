@@ -101,6 +101,28 @@ func (s *Server) rememberRefusal(key, fingerprint, says string, lasting bool) {
 	s.dbInventory.refused[key] = refusedSignIn{fingerprint: fingerprint, says: says, lasting: lasting, at: time.Now()}
 }
 
+// noteRefusal remembers a sign-in that did not let the dashboard in, against
+// what was tried, and returns what the reconcile says of it. A server
+// installed here is offered as one to type a password for instead, so it is
+// remembered with nothing to say.
+func (s *Server) noteRefusal(a *syncAttempt) string {
+	says, lasting := "", false
+	switch {
+	case a.secretErr != nil:
+		says = "its password is kept in " + a.access.SecretFile + " inside the container, which could not be read — connect it with the password"
+	case a.err != nil:
+		lasting = credentialRefusal(a.err)
+		if a.inst.Source != dbx.SourceHost {
+			says = refusalReason(a.err)
+		}
+	default:
+		// Not tried, or nothing to try with: nothing was refused.
+		return ""
+	}
+	s.rememberRefusal(a.inst.Key, a.fingerprint, says, lasting)
+	return says
+}
+
 // forgetRefusal drops what is remembered about one instance: it was signed in
 // to, or the operator is about to try it by hand.
 func (s *Server) forgetRefusal(key string) {

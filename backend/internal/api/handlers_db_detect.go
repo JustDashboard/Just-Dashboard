@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -354,8 +355,17 @@ func (s *Server) handleDBConnectHost(w http.ResponseWriter, r *http.Request) err
 			httpx.JSON(w, http.StatusOK, conn)
 			return nil
 		}
-		return s.resealConnection(ctx, w, r, conn, req.Driver, dsn, "database.connection.host",
+		return s.resealConnection(ctx, w, r, conn.ID, req.Driver, dsn, "database.connection.host",
 			map[string]any{"port": cand.Port, "driver": req.Driver, "user": cand.User, "refreshed": true})
+	}
+	origin := s.hostOrigin(ctx, cand)
+	stranded, ok, err := s.strandedFrom(ctx, origin, cand.Driver)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return s.resealConnection(ctx, w, r, stranded.id, cand.Driver, dsn, "database.connection.host",
+			map[string]any{"port": cand.Port, "driver": req.Driver, "user": cand.User, "repaired": true})
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -365,7 +375,7 @@ func (s *Server) handleDBConnectHost(w http.ResponseWriter, r *http.Request) err
 		return httpx.BadRequest("name may contain letters, digits, spaces, dots, dashes and underscores")
 	}
 	name = uniqueConnectionName(name, names)
-	return s.saveConnectionFrom(w, r, s.hostOrigin(ctx, cand), name, cand.Driver, dsn, "database.connection.host",
+	return s.saveConnectionFrom(w, r, origin, name, cand.Driver, dsn, "database.connection.host",
 		map[string]any{"process": cand.Process, "port": cand.Port})
 }
 
@@ -373,8 +383,24 @@ func (s *Server) handleDBConnectHost(w http.ResponseWriter, r *http.Request) err
 // been dialled, keeping the row and everything that references it.
 func (s *Server) resealConnection(
 	ctx context.Context, w http.ResponseWriter, r *http.Request,
-	conn *dbConnection, driver dbx.Driver, dsn, action string, detail map[string]any,
+	id int64, driver dbx.Driver, dsn, action string, detail map[string]any,
 ) error {
+	if err := s.resealDSN(ctx, id, driver, dsn); err != nil {
+		return err
+	}
+	conn, _, err := s.dbConnRow(ctx, id)
+	if err != nil {
+		return err
+	}
+	detail["connection"] = conn.Name
+	httpx.SetAudit(r, action, conn.Host, detail)
+	httpx.JSON(w, http.StatusOK, conn)
+	return nil
+}
+
+// resealDSN is resealConnection without the response, for a caller that
+// reports on its own.
+func (s *Server) resealDSN(ctx context.Context, id int64, driver dbx.Driver, dsn string) error {
 	contained, err := s.containDSN(driver, dsn)
 	if err != nil {
 		return err
@@ -383,18 +409,11 @@ func (s *Server) resealConnection(
 	if err != nil {
 		return httpx.Internal(err)
 	}
-	if _, err := s.Store.DB.ExecContext(ctx, `UPDATE db_connections SET dsn_enc = ? WHERE id = ?`, sealed, conn.ID); err != nil {
+	if _, err := s.Store.DB.ExecContext(ctx, `UPDATE db_connections SET dsn_enc = ? WHERE id = ?`, sealed, id); err != nil {
 		return httpx.Internal(err)
 	}
 	// The pool, if any, was dialled with the old DSN and would keep failing.
-	s.modules.dbs.Close(conn.ID)
-	conn, _, err = s.dbConnRow(ctx, conn.ID)
-	if err != nil {
-		return err
-	}
-	detail["connection"] = conn.Name
-	httpx.SetAudit(r, action, conn.Host, detail)
-	httpx.JSON(w, http.StatusOK, conn)
+	s.modules.dbs.Close(id)
 	return nil
 }
 
@@ -541,6 +560,10 @@ func (s *Server) handleDBSync(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	stranded, err := s.strandedConnections(ctx)
+	if err != nil {
+		return err
+	}
 	taken := map[string]string{}
 	for id, name := range names {
 		taken[strconv.FormatInt(id, 10)] = name
@@ -551,13 +574,30 @@ func (s *Server) handleDBSync(w http.ResponseWriter, r *http.Request) error {
 	// time; the third saves what worked and says the rest, in the order the
 	// servers were found — so the answer does not depend on which dial
 	// happened to finish first.
-	added, skipped, left, linked := []string{}, []string{}, []string{}, []string{}
+	added, skipped, left, linked, repaired := []string{}, []string{}, []string{}, []string{}, []string{}
 	unreachable := []unreachableServer{}
 	needsCredentials := []credentialServer{}
 	present := map[string]bool{}
 	attempts := []*syncAttempt{}
 	// outcomes holds, per instance, what the third pass reports for it.
 	outcomes := make([]func(), len(inv.Instances))
+	// keep stores what a sign-in let in: into the connection made from the
+	// same server under another master key when there is one, so it is
+	// repaired rather than joined by a second row, and as a new one otherwise.
+	keep := func(inst *dbx.Instance, name, dsn string) {
+		if row, ok := stranded[inst.Key]; ok && row.driver == inst.Driver {
+			if s.resealDSN(ctx, row.id, inst.Driver, dsn) == nil {
+				repaired = append(repaired, row.name)
+			}
+			return
+		}
+		name, err := s.insertConnection(ctx, inst.Key, uniqueConnectionName(name, taken), inst.Driver, dsn)
+		if err != nil {
+			return
+		}
+		taken["+"+name] = name
+		added = append(added, name)
+	}
 	for i := range inv.Instances {
 		inst := &inv.Instances[i]
 		present[inst.Key] = true
@@ -625,16 +665,11 @@ func (s *Server) handleDBSync(w http.ResponseWriter, r *http.Request) error {
 						Container: inst.Name, Driver: string(inst.Driver), Reason: syncOutOfTime,
 					})
 				case attempt.err != nil:
-					s.rememberRefusal(inst.Key, attempt.fingerprint, "", credentialRefusal(attempt.err))
+					s.noteRefusal(attempt)
 					asks()
 				case attempt.dsn != "":
 					s.forgetRefusal(inst.Key)
-					name, err := s.insertConnection(ctx, inst.Key, uniqueConnectionName(dbx.HostConnectionName(cand), taken), cand.Driver, attempt.dsn)
-					if err != nil {
-						return
-					}
-					taken["+"+name] = name
-					added = append(added, name)
+					keep(inst, dbx.HostConnectionName(cand), attempt.dsn)
 				}
 			}
 			continue
@@ -677,22 +712,11 @@ func (s *Server) handleDBSync(w http.ResponseWriter, r *http.Request) error {
 			switch {
 			case attempt.unattempted:
 				cannot(syncOutOfTime)()
-			case attempt.secretErr != nil:
-				says := "its password is kept in " + access.SecretFile + " inside the container, which could not be read — connect it with the password"
-				s.rememberRefusal(inst.Key, attempt.fingerprint, says, false)
-				cannot(says)()
-			case attempt.err != nil:
-				says := refusalReason(attempt.err)
-				s.rememberRefusal(inst.Key, attempt.fingerprint, says, credentialRefusal(attempt.err))
-				cannot(says)()
+			case attempt.secretErr != nil, attempt.err != nil:
+				cannot(s.noteRefusal(attempt))()
 			case attempt.dsn != "":
 				s.forgetRefusal(inst.Key)
-				name, err := s.insertConnection(ctx, inst.Key, uniqueConnectionName(container, taken), inst.Driver, attempt.dsn)
-				if err != nil {
-					return
-				}
-				taken["+"+name] = name
-				added = append(added, name)
+				keep(inst, container, attempt.dsn)
 			}
 		}
 	}
@@ -705,7 +729,7 @@ func (s *Server) handleDBSync(w http.ResponseWriter, r *http.Request) error {
 	}
 	s.pruneRefusals(present)
 
-	if len(added) == 0 && len(linked) == 0 {
+	if len(added) == 0 && len(linked) == 0 && len(repaired) == 0 {
 		// Nothing happened, so nothing is worth a line in the audit log. The
 		// alternative is an entry every time somebody opens the page.
 		httpx.SkipAudit(r)
@@ -713,11 +737,11 @@ func (s *Server) handleDBSync(w http.ResponseWriter, r *http.Request) error {
 		// A connection that learned which server it is changed too, once: it
 		// is what the next forget and the next reconcile will act on.
 		s.dropInventory()
-		httpx.SetAudit(r, "database.connection.sync", strings.Join(append(append([]string{}, added...), linked...), ", "),
-			map[string]any{"added": added, "linked": linked})
+		httpx.SetAudit(r, "database.connection.sync", strings.Join(slices.Concat(added, linked, repaired), ", "),
+			map[string]any{"added": added, "linked": linked, "repaired": repaired})
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
-		"added": added, "already": skipped, "unreachable": unreachable,
+		"added": added, "repaired": repaired, "already": skipped, "unreachable": unreachable,
 		"needsCredentials": needsCredentials, "ignored": left, "scans": scans,
 	})
 	return nil

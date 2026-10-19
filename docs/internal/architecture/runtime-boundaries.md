@@ -19,8 +19,8 @@ information (`ErrorState` in `components/state.tsx`), not an error.
 
 `Server.Start(ctx)` is separate from `New` so failing to schedule background work is reported by `main`
 rather than swallowed in construction. It starts the metrics recorder (here, not lazily — its whole
-purpose is to have been running while nobody was looking), the database activity recorder, the Docker
-event log, the network module's interface sampler and its daily blocklist refresh, the self-update
+purpose is to have been running while nobody was looking), the database activity recorder, the repair
+of connections sealed under another master key (`database_stranded.go`), the Docker event log, the network module's interface sampler and its daily blocklist refresh, the self-update
 check, the backup scheduler, `selfupdate.Installer.Reconcile`,
 `selfcfg.Applier.Reconcile`, Remote Desktop's `Reconcile` (closing the history of sessions a restart cut
 off) and the Tailscale certificate keeper. `Shutdown` releases what outlives a request:

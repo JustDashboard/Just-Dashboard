@@ -202,8 +202,18 @@ export function useFound({
             : `Connected ${report.added.length} databases`,
           { description: report.added.join(", ") },
         )
-      } else if (report.unreachable.length === 0) {
+      } else if (report.unreachable.length === 0 && report.repaired.length === 0) {
         notify.info("Nothing new could be connected")
+      }
+      if (report.repaired.length > 0) {
+        notify.success(
+          report.repaired.length === 1
+            ? `Repaired ${report.repaired[0]}`
+            : `Repaired ${report.repaired.length} connections`,
+          {
+            description: `${report.repaired.join(", ")} — sealed under a different JD_MASTER_KEY, and read again from the server`,
+          },
+        )
       }
       for (const refused of report.unreachable) {
         notify.warning(`${refused.container} was not connected`, { description: refused.reason })

@@ -729,6 +729,7 @@ export async function mockFleet(page: Page, options: FleetMock = {}) {
         return {
           body: {
             added: ["orders-db", "sessions"],
+            repaired: [],
             already: [],
             unreachable: [],
             needsCredentials: [],

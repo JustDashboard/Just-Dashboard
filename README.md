@@ -563,6 +563,10 @@ The dashboard's own state is a SQLite database in `JD_DATA_DIR` (`/var/lib/just-
 that directory **and** keep `JD_MASTER_KEY` somewhere separate; either alone will not restore. The
 Backups page lists the dashboard itself under Coverage and writes that job for you.
 
+If you install again on a server that still has that directory but no `.env`, `install.sh` asks for
+the earlier key. Without it, database connections the dashboard made from containers on the server
+repair themselves under the new key; other stored secrets have to be entered again.
+
 A backup job can encrypt its archives, and a new one that writes to S3 or B2 does unless you turn it
 off. They are sealed with [age](https://age-encryption.org) to one backup key this server keeps, itself
 sealed with `JD_MASTER_KEY`, and restores, recovery checks and downloads here decrypt them as they read.

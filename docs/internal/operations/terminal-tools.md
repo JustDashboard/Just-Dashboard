@@ -11,6 +11,13 @@ that kept its data left beside that data — the installer offers to restore it 
 continues as a re-run that keeps its settings, so the reinstall opens the secrets it kept. Declining
 starts fresh and says the kept data's secrets stay unreadable.
 
+When there is no `.env`, no kept copy, and `/var/lib/just-dashboard/vpsd.db` is still there — an install
+removed by hand, or a fresh clone after the old checkout was deleted — the installer says so and asks
+for the earlier `JD_MASTER_KEY` (default no). A pasted key (64 hex characters, a leading
+`JD_MASTER_KEY=` accepted, not echoed) is written to the new `.env` in place of a generated one. Without
+it the installer generates a key and says what comes back by itself — connections made from found
+servers that state their credentials, repaired by the backend — and what has to be entered again.
+
 The completion guide appears after backend health verification and shows the dashboard address,
 sign-in instructions and terminal command examples, including a shell-quoted checkout path.
 `scripts/manage.sh` owns the commands; `scripts/create-user.sh` and `scripts/reset-password.sh` are
@@ -70,7 +77,8 @@ automatic rollback.
 Run `scripts/test-changed.sh main`, plus `python3 scripts/test_manage.py` and
 `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`.
 The Python fixtures check command arguments, stdin preservation, root and input checks, checkout paths
-with spaces, Compose fallback, restoring a kept uninstall's `.env`, and the installer's successful/failing
+with spaces, Compose fallback, restoring a kept uninstall's `.env`, asking for the key of a store left
+without one, and the installer's successful/failing
 completion flows without changing
 host packages or the installed stack. Go tests use temporary stores to verify password strength,
 account creation, TOTP preservation, token/session revocation, transactional rollback, audit records,
