@@ -5884,6 +5884,16 @@ export type AttackSummary = {
   since?: string
 }
 
+/** `GET /terminal/`: who a new shell signs in as, and every session open on the server. */
+export type TerminalList = {
+  enabled: boolean
+  /** Whether new sessions can be protected across dashboard restarts. */
+  persistent: boolean
+  persistenceError?: string
+  login: { user: string; home: string; shell: string; error?: string }
+  sessions: TerminalWorkspace[]
+}
+
 /** One session: a named workspace containing one or more direct PTYs. */
 export type TerminalWorkspace = {
   id: string

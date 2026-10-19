@@ -27,7 +27,12 @@ import {
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, patch, post } from "@/lib/api"
-import type { TerminalActivity, TerminalWindow as Window, TerminalWorkspace } from "@/lib/types"
+import type {
+  TerminalActivity,
+  TerminalList,
+  TerminalWindow as Window,
+  TerminalWorkspace,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import {
   actionFor,
@@ -82,15 +87,6 @@ import { ResizeHandle } from "@/components/resize-handle"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-
-type TerminalList = {
-  enabled: boolean
-  /** Whether new sessions can be protected across dashboard restarts. */
-  persistent: boolean
-  persistenceError?: string
-  login: { user: string; home: string; shell: string; error?: string }
-  sessions: TerminalWorkspace[]
-}
 
 const AGENTS = {
   codex: { name: "Codex", command: "codex --yolo", logo: "openai" },
@@ -163,6 +159,7 @@ export default function TerminalPage() {
 
   const params = useSearchParams()
   const requestedCwd = params.get("cwd")
+  const requestedSession = params.get("session")
   const launched = useRef(false)
   // Five seconds rather than ten: the listing now carries whether each session
   // is working, and that is worth seeing sooner. The remembered windows of
@@ -220,6 +217,16 @@ export default function TerminalPage() {
     void openSession(requestedCwd)
   }, [requestedCwd, data, openSession])
 
+  // A session named in the address — the Overview's shells link to one — is
+  // picked as if from the rail, so it is also the one the next visit opens on.
+  useEffect(() => {
+    if (!requestedSession) return
+    setRemembered(requestedSession)
+    const url = new URL(window.location.href)
+    url.searchParams.delete("session")
+    window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash)
+  }, [requestedSession, setRemembered])
+
   useEffect(() => {
     const el = workspaceRef.current
     if (!el) return
@@ -238,8 +245,9 @@ export default function TerminalPage() {
   }, [])
 
   const sessions = data?.sessions ?? []
-  const active = sessions.some((session) => session.id === remembered)
-    ? remembered
+  const wanted = requestedSession ?? remembered
+  const active = sessions.some((session) => session.id === wanted)
+    ? wanted
     : (sessions[0]?.id ?? null)
   const activeSession = sessions.find((session) => session.id === active)
   const windows = usePoll<Window[]>(
