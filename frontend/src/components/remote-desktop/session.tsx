@@ -155,8 +155,10 @@ export function RemoteSession({
   )
   const [streamAttempt, setStreamAttempt] = useState(0)
   // The screen's shape belongs to the computer, and is learned from its stream.
+  // Not under `screen-shape`, where streams asked for at that shape, stretched
+  // by Sunshine, left shapes that were never the screen's.
   const [screenShape, setScreenShape] = useViewState<number | null>(
-    `remote-desktop.screen-shape.${id}`,
+    `remote-desktop.screen.${id}`,
     null,
   )
   const [pointer, setPointer] = useViewState("remote-desktop.stream-pointer", false)

@@ -14,7 +14,7 @@ import {
   sessionMode,
   sessionProblem,
   screenShape,
-  streamSize,
+  streamOverscan,
   streamPageUrl,
   streamStage,
 } from "./remote-desktop"
@@ -249,8 +249,7 @@ describe("bridgeSettings", () => {
       mouseMode: "relative",
       dataTransport: "websocket",
       videoCodec: "h264",
-      videoSize: "custom",
-      videoSizeCustom: { width: 2560, height: 1440 },
+      videoSize: "1440p",
       fps: 60,
       bitrate: 40000,
       videoFrameQueueSize: 3,
@@ -260,26 +259,40 @@ describe("bridgeSettings", () => {
   test("asks for WebRTC only where the backend says this browser can reach it, with a fallback", () => {
     expect(bridgeSettings({}, "max", "webrtc")).toMatchObject({
       dataTransport: "auto",
-      videoSize: "custom",
-      videoSizeCustom: { width: 2560, height: 1440 },
+      videoSize: "1440p",
       fps: 120,
       bitrate: 80000,
     })
   })
 
-  test("asks for the computer's screen in its own shape once it is known", () => {
+  test("asks for the same 16:9 size whatever the screen, over a size an older page asked for", () => {
     expect(
-      bridgeSettings({ videoSize: "1080p" }, "smooth", "websocket", 3024 / 1964),
-    ).toMatchObject({ videoSize: "custom", videoSizeCustom: { width: 1662, height: 1080 } })
+      bridgeSettings(
+        { videoSize: "custom", videoSizeCustom: { width: 1662, height: 1080 } },
+        "smooth",
+        "websocket",
+      ),
+    ).toMatchObject({ videoSize: "1080p" })
   })
 })
 
-describe("streamSize", () => {
-  test("is the quality's height at the screen's shape, in even pixels", () => {
-    expect(streamSize("smooth")).toEqual({ width: 1920, height: 1080 })
-    expect(streamSize("light", 16 / 10)).toEqual({ width: 1152, height: 720 })
-    expect(streamSize("sharp", 2560 / 1664)).toEqual({ width: 2216, height: 1440 })
-    expect(streamSize("max", 21 / 9)).toEqual({ width: 3360, height: 1440 })
+describe("streamOverscan", () => {
+  test("draws a narrower screen's picture wider than its frame, by its side padding", () => {
+    // A 16:10 Mac fitted into 16:9 is 90% of the picture's width.
+    const overscan = streamOverscan(1.6)
+    expect(overscan.width).toBeCloseTo(16 / 9 / 1.6, 10)
+    expect(overscan.height).toBe(1)
+    expect(1 / overscan.width).toBeCloseTo(0.9, 10)
+  })
+
+  test("draws a wider screen's picture taller than its frame, by its top and bottom padding", () => {
+    const overscan = streamOverscan(21 / 9)
+    expect(overscan.width).toBe(1)
+    expect(overscan.height).toBeCloseTo(21 / 9 / (16 / 9), 10)
+  })
+
+  test("leaves a 16:9 screen's picture the size of its frame", () => {
+    expect(streamOverscan(16 / 9)).toEqual({ width: 1, height: 1 })
   })
 })
 
