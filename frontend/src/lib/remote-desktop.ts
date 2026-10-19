@@ -438,35 +438,38 @@ export const STREAM_QUALITIES: {
   key: StreamQuality
   label: string
   size: string
-  height: number
   fps: number
   bitrate: number
 }[] = [
-  { key: "light", label: "Light", size: "720p", height: 720, fps: 60, bitrate: 8_000 },
-  { key: "smooth", label: "Smooth", size: "1080p", height: 1080, fps: 60, bitrate: 20_000 },
-  { key: "sharp", label: "Sharp", size: "1440p", height: 1440, fps: 60, bitrate: 40_000 },
+  { key: "light", label: "Light", size: "720p", fps: 60, bitrate: 8_000 },
+  { key: "smooth", label: "Smooth", size: "1080p", fps: 60, bitrate: 20_000 },
+  { key: "sharp", label: "Sharp", size: "1440p", fps: 60, bitrate: 40_000 },
   // Twice the frames, each one half as old, and twice the bits for them. A
   // computer whose screen runs at 60 Hz sends 60; the bits still go to the
   // picture.
-  { key: "max", label: "Max", size: "1440p", height: 1440, fps: 120, bitrate: 80_000 },
+  { key: "max", label: "Max", size: "1440p", fps: 120, bitrate: 80_000 },
 ]
 
 export function streamQuality(quality: StreamQuality) {
   return STREAM_QUALITIES.find((q) => q.key === quality) ?? STREAM_QUALITIES[1]
 }
 
-/** A screen's width over its height, until the stream has shown the computer's own. */
+/**
+ * The shape of every stream, whatever the computer's screen: Sunshine fits
+ * the screen into it and pads the rest black. Asking for the screen's own
+ * shape meant a second session at a new size, and Sunshine shares one capture
+ * between sessions that overlap, so the new stream came back as the old
+ * size's picture stretched, with a pointer that no longer met it.
+ */
 export const WIDE_SCREEN = 16 / 9
 
 /**
- * The size to ask Sunshine for: the quality's height at the screen's own
- * shape, in even pixels for the encoder. Sunshine cannot change a Mac's
- * resolution; it fits the screen into whatever it is asked for and pads the
- * rest black, so a 16:10 Mac asked for 1920×1080 came back pillarboxed.
+ * How much larger than a frame of the screen's shape the stream's picture is
+ * drawn, across and down, so Sunshine's padding falls outside the frame. The
+ * bridge maps the pointer over the whole picture, so it still meets the screen.
  */
-export function streamSize(quality: StreamQuality, shape = WIDE_SCREEN) {
-  const { height } = streamQuality(quality)
-  return { width: Math.round((height * shape) / 2) * 2, height }
+export function streamOverscan(screen: number, stream = WIDE_SCREEN) {
+  return { width: Math.max(1, stream / screen), height: Math.max(1, screen / stream) }
 }
 
 /** How dark a pixel of Sunshine's padding is, after the encoder has been at it. */
@@ -538,21 +541,19 @@ export const BRIDGE_SETTINGS_KEY = "mlSettings"
  * frame only past that many waiting, and asks Sunshine for a whole new
  * picture after one: a queue of one dropped frames on every hiccup and
  * spent the bitrate on keyframes, which was a rougher picture, not a
- * sooner one. The size is the quality's at the screen's own shape.
+ * sooner one.
  */
 export function bridgeSettings(
   held: Record<string, unknown>,
   quality: StreamQuality,
   transport: RdStream["transport"],
-  shape?: number,
 ) {
   const preset = streamQuality(quality)
   return {
     ...held,
     dataTransport: transport === "webrtc" ? "auto" : "websocket",
     videoCodec: "h264",
-    videoSize: "custom",
-    videoSizeCustom: streamSize(quality, shape),
+    videoSize: preset.size,
     fps: preset.fps,
     bitrate: preset.bitrate,
     videoFrameQueueSize: 3,

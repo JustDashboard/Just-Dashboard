@@ -15,10 +15,11 @@ import {
   bridgeSettings,
   desktopApp,
   screenShape,
+  streamOverscan,
   streamPageUrl,
-  streamSize,
   streamStage,
   SUNSHINE_PORT,
+  WIDE_SCREEN,
   type RdComputerView,
   type RdOS,
   type RdStream,
@@ -577,14 +578,14 @@ const SAMPLE_WIDTH = 480
 /**
  * The stream itself: the bridge's page, framed. Its settings live in this
  * origin's storage, where the page reads them, so they are written just
- * before it loads; a change of quality or of the screen's shape loads it
- * again.
+ * before it loads; a change of quality loads it again.
  *
- * The frame is the stream's own shape, as large as the space allows, so the
- * bridge has nothing to letterbox; the space it leaves is the workspace's,
- * not black. The stream is asked for in the shape of the computer's screen,
- * once a stream has shown it: until then Sunshine pads the screen into 16:9,
- * and the padding is read off the picture.
+ * The stream is always 16:9 and Sunshine pads the computer's screen into it.
+ * The frame is the screen's own shape, as large as the space allows, and the
+ * picture is drawn larger than the frame by its padding, so the padding is
+ * cut off rather than shown; the space the frame leaves is the workspace's.
+ * The screen's shape is read off the padding, and a new shape only redraws
+ * the picture: it never loads the stream again.
  */
 function StreamFrame({
   computer,
@@ -612,14 +613,9 @@ function StreamFrame({
   const app = desktopApp(stream.apps)
   const frame = useRef<HTMLIFrameElement>(null)
   const stopObserving = useRef<() => void>(() => {})
-  // A picture dark down both sides reads as padding; the stream asked for in
-  // that shape comes back padded the other way, which is read right. Twice
-  // is enough for that, and stops a dark picture from reloading it for ever.
-  const reshaped = useRef(0)
   const transport = stream.transport
-  const size = streamSize(quality, shape)
-  const asked = size.width / size.height
-  const key = `${stream.hostId}:${app?.id}:${quality}:${size.width}x${size.height}:${transport}:${attempt}`
+  const screen = shape ?? WIDE_SCREEN
+  const key = `${stream.hostId}:${app?.id}:${quality}:${transport}:${attempt}`
   const src = app ? streamPageUrl(stream.hostId, app.id) : undefined
   useEffect(() => {
     onPlayback(false)
@@ -639,10 +635,10 @@ function StreamFrame({
     } catch {}
     localStorage.setItem(
       BRIDGE_SETTINGS_KEY,
-      JSON.stringify(bridgeSettings(held, quality, transport, shape)),
+      JSON.stringify(bridgeSettings(held, quality, transport)),
     )
     frame.current.src = src
-  }, [key, src, quality, transport, shape])
+  }, [key, src, quality, transport])
   // The computer draws its own pointer into the picture. This one, over it,
   // was a second pointer a round trip ahead of the first, so it is hidden
   // over the screen unless asked for; the stream's menu keeps its own.
@@ -650,6 +646,10 @@ function StreamFrame({
     const doc = frame.current?.contentDocument
     if (doc?.readyState === "complete") pointerStyle(doc, pointer)
   }, [key, pointer])
+  useEffect(() => {
+    const doc = frame.current?.contentDocument
+    if (doc?.readyState === "complete") overscanStyle(doc, screen)
+  }, [key, screen])
   if (!app)
     return (
       <Centered>
@@ -725,10 +725,13 @@ function StreamFrame({
           for (const name of events) doc.addEventListener(name, update, true)
           const observer = new MutationObserver(() => update())
           observer.observe(doc.body, { childList: true, subtree: true })
-          // Read until three frames in a row agree, so a picture going dark for
-          // a moment is not taken for padding.
+          // A new shape takes three frames in a row that agree, so a picture
+          // going dark for a moment is not taken for padding. Reading goes on
+          // for the whole session: a picture whose own black bars were taken
+          // for padding is cut back to the screen once it changes.
           const sample = document.createElement("canvas")
           const context = sample.getContext("2d", { willReadFrequently: true })
+          let shown = screen
           let reading: number | undefined
           let agreed = 0
           const shapeTimer = window.setInterval(() => {
@@ -737,10 +740,8 @@ function StreamFrame({
             agreed =
               next && reading && Math.abs(next / reading - 1) < 0.01 ? agreed + 1 : next ? 1 : 0
             reading = next
-            if (!next || agreed < 3) return
-            window.clearInterval(shapeTimer)
-            if (Math.abs(next / asked - 1) < 0.01 || reshaped.current >= 2) return
-            reshaped.current += 1
+            if (!next || agreed < 3 || Math.abs(next / shown - 1) < 0.01) return
+            shown = next
             onShape(next)
           }, 1000)
           stopObserving.current = () => {
@@ -754,11 +755,9 @@ function StreamFrame({
           style.textContent = "body::before { background: #000 !important; }"
           doc.head.append(style)
           pointerStyle(doc, pointer)
+          overscanStyle(doc, screen)
         }}
-        style={{
-          width: `min(100cqw, 100cqh * ${asked})`,
-          aspectRatio: `${size.width} / ${size.height}`,
-        }}
+        style={{ width: `min(100cqw, 100cqh * ${screen})`, aspectRatio: `${screen}` }}
         className="max-h-full border-0 bg-black"
       />
     </div>
@@ -792,5 +791,29 @@ function pointerStyle(doc: Document, pointer: boolean) {
   const style = doc.createElement("style")
   style.id = POINTER_STYLE
   style.textContent = "#root, #root *, #input { cursor: none !important; }"
+  doc.head.append(style)
+}
+
+const OVERSCAN_STYLE = "jd-overscan"
+
+/**
+ * Draws the bridge's picture larger than its page by Sunshine's padding, so
+ * the page, which is the screen's shape, shows the screen and not the bars.
+ * The bridge's own sizing caps the picture at its page.
+ */
+function overscanStyle(doc: Document, screen: number) {
+  doc.getElementById(OVERSCAN_STYLE)?.remove()
+  if (!doc.head) return
+  const { width, height } = streamOverscan(screen)
+  const style = doc.createElement("style")
+  style.id = OVERSCAN_STYLE
+  style.textContent = `.video-stream {
+    width: ${width * 100}vw !important;
+    height: ${height * 100}vh !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    max-width: none !important;
+    max-height: none !important;
+  }`
   doc.head.append(style)
 }
