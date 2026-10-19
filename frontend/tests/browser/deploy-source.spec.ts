@@ -6,6 +6,7 @@ import {
   mockProject,
   now,
   project,
+  saveBar,
   saveSettings,
 } from "./deploy-fixture"
 
@@ -344,6 +345,50 @@ test.describe("Source setting card", () => {
     await saveSettings(page)
     await expect(card.getByText("Unknown credential.")).toBeVisible()
     await expect(page.getByText("Could not update source")).toHaveCount(0)
+  })
+
+  // A GitHub App credential is not one the Git picker offers. With no item of
+  // its own, Discard putting it back was read by Radix's hidden native
+  // <select> as a choice of "" — credential 0 — and the form was dirty again
+  // however often Discard was pressed.
+  test("Discard puts back a saved credential the picker does not offer", async ({ page }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/credentials", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback()
+      await json(route, [
+        ...credentials,
+        {
+          id: 7,
+          name: "GitHub App",
+          kind: "github_app",
+          target: "github.com",
+          createdAt: now,
+          updatedAt: now,
+          usedBy: 1,
+        },
+      ])
+    })
+    await mockConfiguration(page, {
+      source: {
+        kind: "git",
+        mode: "git_url",
+        url: "https://github.com/acme/api.git",
+        ref: "main",
+        credentialId: 7,
+      },
+    })
+
+    await page.goto("/deploy/7/settings/general")
+    const credential = sourceCard(page).getByRole("combobox", { name: "Credential" })
+    await expect(credential).toHaveText("Credential #7 · not found")
+    await credential.click()
+    await page.getByRole("option", { name: "Server default" }).click()
+    await expect(saveBar(page)).toBeVisible()
+
+    await saveBar(page).getByRole("button", { name: "Discard", exact: true }).click()
+    await expect(saveBar(page)).toHaveCount(0)
+    await expect(credential).toHaveText("Credential #7 · not found")
+    await expect(sourceCard(page).getByText("Unsaved changes", { exact: true })).toHaveCount(0)
   })
 
   test("shows the image fields, with a registry credential, for an image-sourced project", async ({

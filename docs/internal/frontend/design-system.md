@@ -768,6 +768,14 @@ Radix can flip it above or constrain it to the viewport when space runs out. Its
 the trigger and its options, without an ownership-specific minimum width. Arrow keys, typeahead,
 Home/End, Escape, focus restoration and scrolling remain the primitive's responsibility.
 
+**No option's value is `""`.** A choice of nothing has its own word — `none`, `auto`, `prefix` —
+mapped back to empty by the caller. `Select` never passes `""` to `onValueChange`. Inside a form,
+Radix keeps a hidden native `<select>`. When the value is set to one it has no `<option>` for, it
+reads that value back as `""` and reports it as a choice. Before 0.8, Discard on a deploy settings
+page restored the Source's GitHub App credential, which the Git credential picker does not offer.
+The picker turned the reported `""` into credential 0, and the form stayed dirty however often
+Discard was pressed.
+
 **An option has one text column.** `MenuItemText` draws an option's name and any useful metadata
 beneath it, never at the far end of a second column. `SelectItem` uses this for its `hint`, outside
 `ItemText`, so metadata is excluded from the option's accessible name and the value copied into the
