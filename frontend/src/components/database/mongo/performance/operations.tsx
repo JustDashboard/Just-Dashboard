@@ -192,6 +192,7 @@ export function OperationsView({
                               ? clientOf(operation.appName, known).product
                               : "mongodb"
                           }
+                          projectId={clientOf(operation.appName, known).projectId}
                         />
                         <span className="min-w-0">
                           {who ? (

@@ -120,7 +120,14 @@ export function clientProduct(name: string | undefined): string | undefined {
 }
 
 /** One of the things the consumers route says uses this database, as a session names it. */
-export type KnownClient = { name: string; product?: string; href?: string; kind: string }
+export type KnownClient = {
+  name: string
+  product?: string
+  href?: string
+  kind: string
+  /** The project a deployment is, which draws it by its website's icon. */
+  projectId?: number
+}
 
 /**
  * The deployments and containers the consumers route found for this
@@ -136,6 +143,7 @@ export function knownClients(topology: DbTopology | undefined, id: number) {
       product: node.product,
       href: node.href,
       kind: node.kind,
+      projectId: node.projectId,
     })
   }
   return known
@@ -145,8 +153,12 @@ export function knownClients(topology: DbTopology | undefined, id: number) {
 export function clientOf(
   name: string | undefined,
   known: ReadonlyMap<string, KnownClient>,
-): { product?: string; known?: KnownClient } {
+): { product?: string; projectId?: number; known?: KnownClient } {
   if (!name) return {}
   const match = known.get(name.toLowerCase())
-  return { product: match?.product ?? clientProduct(name), known: match }
+  return {
+    product: match?.product ?? clientProduct(name),
+    projectId: match?.projectId,
+    known: match,
+  }
 }

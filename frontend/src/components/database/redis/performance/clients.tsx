@@ -151,6 +151,7 @@ export function ClientsView({ redis }: { redis: Redis }) {
                         product={
                           clientOf(client.name, known).product ?? clientProduct(client.library)
                         }
+                        projectId={clientOf(client.name, known).projectId}
                         self={client.self}
                       />
                       <span className="font-mono">{client.addr}</span>

@@ -40,6 +40,8 @@ export type InventoryItem = SearchItem & {
    * by their marks before their names are read.
    */
   product?: string
+  /** The project a result is, drawn by its website's icon where it has one. */
+  projectId?: number
   /** A running state in Docker's, systemd's or PM2's own word, for `Status`. */
   state?: string
   /**
@@ -116,6 +118,7 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           [String(project.id), project.environmentName, project.environmentKind, project.health],
         ),
         product: product(projectProduct(project)),
+        projectId: project.id,
         facts: facts(
           { label: "Address", value: addressIdentity(project.endpoint), mono: true },
           { label: "Environment", value: project.environmentName },

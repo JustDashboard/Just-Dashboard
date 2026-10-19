@@ -46,6 +46,7 @@ describe("clientOf", () => {
         name: "shop-api",
         product: "nodejs",
         href: "/deploy/7",
+        projectId: 7,
       },
       { id: "container:grafana", kind: "container", name: "Grafana", product: "grafana" },
       { id: "host", kind: "host", name: "This server" },
@@ -58,6 +59,8 @@ describe("clientOf", () => {
     const client = clientOf("shop-api", known)
     expect(client.product).toBe("nodejs")
     expect(client.known?.href).toBe("/deploy/7")
+    // The project is what its website's icon is drawn by.
+    expect(client.projectId).toBe(7)
   })
 
   test("matches a known client whatever its case", () => {

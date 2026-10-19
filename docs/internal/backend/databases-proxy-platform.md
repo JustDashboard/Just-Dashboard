@@ -644,7 +644,8 @@ tag floats only within that line's patch releases; Timescale is pinned to one re
   machine. A container that is a deployment's release (`io.just-dashboard.managed` and
   `io.just-dashboard.environment-id` on a live environment) is drawn as that deployment — the
   project, and the environment where it is not production — whether the environment or a session
-  revealed it, never as `jd-e<id>-r<n>`. What "names the server" means is an address book
+  revealed it, never as `jd-e<id>-r<n>` — and carries the project's id (`projectId`), which is
+  what the frontend draws its website's icon by. What "names the server" means is an address book
   (`topoAddresses`): the `db-N.jd.internal` alias, the address the connection was saved with, the
   container's name, compose service and own addresses with the engine's port, and — for a server
   saved at loopback or a container that publishes its port — every address of this machine

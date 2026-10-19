@@ -228,6 +228,7 @@ export function NowPicture({
                             <span ref={refFor(key)} className="flex">
                               <DbClientMark
                                 product={client.product}
+                                projectId={client.projectId}
                                 self={group.self}
                                 size="md"
                                 tone={markTone(group)}

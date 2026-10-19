@@ -6,6 +6,7 @@ import { Archive, ArrowRight, CloudUpload, Servers } from "@/components/icons"
 import { ActionMark, ActionName, auditSection } from "@/components/audit/marks"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
+import { ProjectMarkOf } from "@/components/deploy/project-mark"
 import { Row, RowList } from "@/components/row-list"
 import { Status } from "@/components/status-dot"
 import { useAuth } from "@/hooks/use-auth"
@@ -80,7 +81,13 @@ function ActivityRow({ event }: { event: MetricEvent }) {
           {action ? (
             <ActionMark action={action.action} />
           ) : (
-            <ProductLogo size="sm" fallback={source.glyph} className="[&_svg]:text-inherit" />
+            <ProjectMarkOf
+              projectId={event.projectId}
+              size="sm"
+              fallback={
+                <ProductLogo size="sm" fallback={source.glyph} className="[&_svg]:text-inherit" />
+              }
+            />
           )}
         </span>
       }

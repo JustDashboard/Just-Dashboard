@@ -3,6 +3,7 @@
 import { duration } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { ProductLogo } from "@/components/product-logo"
+import { ProjectMarkOf } from "@/components/deploy/project-mark"
 import { Status } from "@/components/status-dot"
 import { KEYCAP, Keycaps } from "./keycaps"
 import { KINDS, ResultMark } from "./marks"
@@ -14,6 +15,7 @@ type Glyph = React.ComponentType<{ className?: string }>
 export type PreviewItem = SearchItem & {
   icon?: Glyph
   product?: string
+  projectId?: number
   state?: string
   keys?: string
   facts?: Fact[]
@@ -31,7 +33,13 @@ export type PreviewItem = SearchItem & {
   current?: boolean
 }
 
-export type Destination = { href: string; title: string; detail?: string; product?: string }
+export type Destination = {
+  href: string
+  title: string
+  detail?: string
+  product?: string
+  projectId?: number
+}
 
 /** "4m ago": one unit is enough for a row, and it does not tick while it is read. */
 export function visited(at: number) {
@@ -72,7 +80,12 @@ export function Preview({
         className="flex min-h-0 flex-1 animate-rise flex-col gap-5 overflow-y-auto px-5 pt-5 pb-4"
       >
         <div className="flex items-start gap-3">
-          <ProductLogo id={item.product} fallback={item.icon ?? KINDS[item.kind].icon} />
+          <ProjectMarkOf
+            projectId={item.projectId}
+            fallback={
+              <ProductLogo id={item.product} fallback={item.icon ?? KINDS[item.kind].icon} />
+            }
+          />
           <div className="min-w-0 flex-1 pt-0.5">
             <p className="truncate text-hint text-muted-foreground">{eyebrow(item)}</p>
             <h3 className="text-title font-semibold break-words text-foreground">
@@ -134,11 +147,16 @@ export function Preview({
                           title: other.title,
                           detail: other.detail,
                           product: other.product,
+                          projectId: other.projectId,
                         })
                     : undefined
                 }
               >
-                <ResultMark product={other.product} icon={other.icon ?? KINDS[other.kind].icon} />
+                <ResultMark
+                  product={other.product}
+                  projectId={other.projectId}
+                  icon={other.icon ?? KINDS[other.kind].icon}
+                />
                 <span className="min-w-0 truncate text-foreground">{other.title}</span>
                 <span className="ml-auto shrink-0 text-hint text-muted-foreground">
                   {KINDS[other.kind].noun}

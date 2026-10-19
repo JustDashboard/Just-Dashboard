@@ -359,6 +359,8 @@ export type MetricEvent = {
   severity: "info" | "warning" | "error"
   /** Non-zero for events that occupied a span, so a long deploy can be a band. */
   durationSeconds?: number
+  /** The project a deploy event released. */
+  projectId?: number
 }
 
 export type MetricsHistory = {
@@ -2826,6 +2828,8 @@ export type BackupResource = {
   detail?: string
   paths?: string[]
   connectionId?: number
+  /** The project a deployment is; its `id` is the name jobs cover it by. */
+  projectId?: number
   suggest: {
     name: string
     sources: string[]
@@ -6577,6 +6581,8 @@ export type DbTopoNode = {
   status?: string
   href?: string
   connId?: number
+  /** The project a deployment node is an environment of. */
+  projectId?: number
 }
 
 export type DbTopoEdge = {

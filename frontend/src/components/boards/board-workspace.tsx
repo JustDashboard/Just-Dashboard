@@ -42,6 +42,7 @@ import type { Board, BoardScene, BoardSummary } from "@/lib/boards"
 import type { DbFleet, DeployProject } from "@/lib/types"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
+import { ProjectFavicon } from "@/components/deploy/project-mark"
 
 type SaveState = "saved" | "pending" | "saving" | "error" | "unnamed" | "conflict" | "missing"
 
@@ -571,6 +572,7 @@ function LoadedBoard({ board }: { board: Board }) {
                   <ResourceButton
                     key={project.id}
                     icon={CloudUpload}
+                    projectId={project.id}
                     title={project.name}
                     detail={project.enabled ? "Active project" : "Paused project"}
                     onClick={() =>
@@ -648,11 +650,14 @@ function LoadedBoard({ board }: { board: Board }) {
 
 function ResourceButton({
   icon: Icon,
+  projectId,
   title,
   detail,
   onClick,
 }: {
   icon: React.ComponentType<{ className?: string }>
+  /** A project, drawn by its website's icon where it has one. */
+  projectId?: number
   title: string
   detail: string
   onClick: () => void
@@ -663,7 +668,11 @@ function ResourceButton({
       onClick={onClick}
       className="flex w-full items-start gap-3 rounded-lg px-2 py-2.5 text-left focus-ring transition-colors hover:bg-control-hover"
     >
-      <Icon className="mt-0.5 size-4 shrink-0 text-brand" />
+      <ProjectFavicon
+        projectId={projectId}
+        className="mt-0.5 size-4"
+        fallback={<Icon className="mt-0.5 size-4 shrink-0 text-brand" />}
+      />
       <span className="min-w-0">
         <span className="block truncate text-sm font-medium">{title}</span>
         <span className="block text-xs text-muted-foreground">{detail}</span>

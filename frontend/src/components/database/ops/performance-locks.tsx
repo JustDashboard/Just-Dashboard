@@ -52,6 +52,7 @@ import { useDatabase } from "@/components/database/shell/database-context"
 import { clientOf, type KnownClient } from "@/components/database/clients"
 import { useKnownClients } from "@/components/database/use-known-clients"
 import { ProductGlyph } from "@/components/product-logo"
+import { ProjectFavicon } from "@/components/deploy/project-mark"
 
 /**
  * Who is holding whom up.
@@ -202,7 +203,7 @@ function LockRow({
     ? SESSION_STATES.find((entry) => entry.id === statusOf(session))?.label.toLowerCase()
     : node.state
   const user = node.user ?? session?.user
-  const product = clientOf(session?.application, known).product
+  const client = clientOf(session?.application, known)
   const late = !root && (node.seconds ?? 0) >= THRESHOLDS.blocked
   const subject = {
     pid: node.pid,
@@ -230,7 +231,11 @@ function LockRow({
                   ·
                 </span>
                 <span className="flex min-w-0 items-center gap-1.5">
-                  {product && <ProductGlyph id={product} />}
+                  <ProjectFavicon
+                    projectId={client.projectId}
+                    className="size-3.5"
+                    fallback={client.product && <ProductGlyph id={client.product} />}
+                  />
                   <Named name={session.application} className="text-xs" />
                 </span>
               </>

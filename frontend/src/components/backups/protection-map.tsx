@@ -601,7 +601,11 @@ function jobSources(
   containers: Container[],
 ): Source[] {
   const mark = (resource: BackupResource) => (
-    <ResourceMark kind={resource.kind} ids={resourceProducts(resource, containers, resources)} />
+    <ResourceMark
+      kind={resource.kind}
+      ids={resourceProducts(resource, containers, resources)}
+      project={resource.projectId}
+    />
   )
   const paths: Source[] = job.sources.map((path) => {
     // The thing on the server whose directory this is, or that it is inside.

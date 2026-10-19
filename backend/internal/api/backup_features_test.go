@@ -109,6 +109,17 @@ func TestBackupResourcesReportCoverageAndSuggestAJob(t *testing.T) {
 		t.Fatalf("no Docker in the test, yet not reported unavailable: %+v", report.Unavailable)
 	}
 
+	// A deployment is covered by its name and drawn by its project.
+	project, err := s.Store.DB.Exec(`INSERT INTO deploy_projects(name, repo_path, hook_secret, hook_id, created_at) VALUES('storefront', ?, 'sealed', 'storefront-hook', 1)`,
+		filepath.Join(s.Cfg.FileRoots[0], "storefront"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	if deployment := find(read(), "deployment"); deployment == nil || deployment.ID != "storefront" || deployment.ProjectID != projectID {
+		t.Fatalf("deployment resource: %+v, want storefront of project %d", deployment, projectID)
+	}
+
 	// A job whose source contains the proxy's configuration covers it; a
 	// paused job is listed but does not protect.
 	nginx := filepath.Join(s.Cfg.FileRoots[0], "etc", "nginx")

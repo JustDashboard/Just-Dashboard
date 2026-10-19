@@ -170,7 +170,13 @@ export function upstreamAddress(raw: string): { host: string; port?: number } | 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "0.0.0.0"])
 
 /** What answers at an upstream: the program or container holding its socket. */
-export type UpstreamOwner = { product?: string; name: string; pid?: number }
+export type UpstreamOwner = {
+  product?: string
+  name: string
+  pid?: number
+  /** The project whose release holds the socket, drawn by its website's icon. */
+  projectId?: number
+}
 
 /**
  * The socket that holds an upstream's address: the one the server already
@@ -219,6 +225,7 @@ export function upstreamOwner(
     product,
     name: listener.container?.name ?? listener.displayName ?? listener.process,
     pid: listener.container ? undefined : listener.pid || undefined,
+    projectId: listener.container?.deployment?.projectId,
   }
 }
 

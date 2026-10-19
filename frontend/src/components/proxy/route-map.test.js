@@ -83,6 +83,12 @@ describe("what answers behind a route", () => {
     })
   })
 
+  test("a deployment's release names the project its website's icon is drawn by", () => {
+    const release = container(3002, "jd-e4-r9", "3f2a1b0c9d8e")
+    release.container.deployment = { projectId: 12, project: "shop", environment: "production" }
+    expect(backendOf("http://127.0.0.1:3002", [release])).toMatchObject({ projectId: 12 })
+  })
+
   test("a name on Docker's network is its container, else the product it names", () => {
     const ports = [container(5678, "n8n", "n8nio/n8n:1.62")]
     expect(backendOf("http://n8n:5678", ports)).toMatchObject({ product: "n8n", name: "n8n" })
