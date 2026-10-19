@@ -101,9 +101,6 @@ test("live search projects explicit metadata and encodes identities without inde
       },
     ],
     "/boards/": [{ id: 6, name: "Shop plan", scene: secret }],
-    "/stickyboards/": [
-      { id: 9, name: "Launch wall", notes: 3, links: 1, preview: secret, document: secret },
-    ],
   }
   const calls = []
   const fetch = spyOn(globalThis, "fetch").mockImplementation((url, options) => {
@@ -121,7 +118,7 @@ test("live search projects explicit metadata and encodes identities without inde
     const results = await Promise.all(
       INVENTORY_SOURCES.map((source) => source.read(new AbortController().signal)),
     )
-    expect(results.flat()).toHaveLength(11)
+    expect(results.flat()).toHaveLength(10)
     expect(JSON.stringify(results)).not.toContain(secret)
     expect(results[0][0].detail).toBe("shop.test")
     expect(results[1][0].href).toBe("/proxy/sites/a%20%26%20b")
@@ -129,10 +126,6 @@ test("live search projects explicit metadata and encodes identities without inde
     expect(results[5][0].href).toBe("/git?repo=%2Fsrv%2Fa%20%26%20b")
     expect(results[7][0].href).toBe("/processes/pm2?app=a%3Ab%3A0")
     expect(results[9][0].href).toBe("/excalidraw/6")
-    expect(results[10][0]).toMatchObject({
-      href: "/stickyboard/9",
-      detail: "3 notes · 1 link",
-    })
     for (const call of calls) {
       expect(call.options.method).toBe("GET")
       expect(call.options.credentials).toBe("include")
@@ -173,7 +166,6 @@ test("resources name what they are wired to by exact values and say the rest as 
       { id: 3, name: "nightly", targetKind: "b2", sources: ["/srv/shop/"], schedule: "" },
     ],
     "/boards/": [],
-    "/stickyboards/": [],
   }
   const fetch = spyOn(globalThis, "fetch").mockImplementation((url) => {
     const path = String(url)

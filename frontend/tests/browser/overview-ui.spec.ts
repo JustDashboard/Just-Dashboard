@@ -287,7 +287,7 @@ for (const width of [1280, 1720]) {
     await expect(
       page.locator("[data-slot=page]").getByRole("link", { name: "Git", exact: true }),
     ).toContainText(/4\s*repositories/)
-    await expect(page.getByRole("list", { name: "Recent drawings and boards" })).toBeVisible()
+    await expect(page.getByRole("list", { name: "Recent drawings" })).toBeVisible()
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -324,12 +324,11 @@ test("the shortcuts start something, each counting what it adds to", async ({ pa
     /Add a database.*4 databases/,
     /New shell.*3 open · operator/,
     /New drawing.*1 drawing/,
-    /New board.*2 boards/,
     /Browse files.*atlas/,
     /Add a computer.*2 computers/,
     /Back up.*3 jobs/,
   ])
-  // Four across at this width, as two even rows.
+  // Four across at this width.
   const [first, fifth] = await Promise.all([cards.nth(0).boundingBox(), cards.nth(4).boundingBox()])
   expect(fifth?.x).toBe(first?.x)
   expect(fifth!.y).toBeGreaterThan(first!.y)
@@ -365,24 +364,18 @@ test("the shells left open lead with the one working, and open on themselves", a
   )
 })
 
-test("drawings and boards are one list of what was edited last, each drawn as itself", async ({
-  page,
-}) => {
+test("the drawings edited last are each drawn as themselves", async ({ page }) => {
   await page.goto("/")
-  const list = page.getByRole("list", { name: "Recent drawings and boards" })
+  const list = page.getByRole("list", { name: "Recent drawings" })
   const cards = list.locator(":scope > li")
-  await expect(cards).toHaveText([/Launch checklist/, /Production map/, /Retro — October/])
-  await expect(cards.first().getByRole("link", { name: "Open Launch checklist" })).toHaveAttribute(
-    "href",
-    "/stickyboard/2",
-  )
-  await expect(cards.nth(1).getByRole("link", { name: "Open Production map" })).toHaveAttribute(
+  await expect(cards).toHaveText([/Production map/])
+  await expect(cards.first().getByRole("link", { name: "Open Production map" })).toHaveAttribute(
     "href",
     "/excalidraw/4",
   )
-  // The picture is the drawing's own shapes and the board's own notes.
-  await expect(cards.nth(1).locator("svg text", { hasText: "caddy" })).toBeAttached()
-  await cards.nth(1).click()
+  // The picture is the drawing's own shapes.
+  await expect(cards.first().locator("svg text", { hasText: "caddy" })).toBeAttached()
+  await cards.first().click()
   await expect(page).toHaveURL(/\/excalidraw\/4$/)
 })
 
@@ -436,7 +429,7 @@ test("a reader without write access sees no shortcut that would refuse them", as
   await expect(page.locator("[data-slot=choice-card]")).toHaveText([/Browse files/])
   // No terminal: its listing needs the terminal, and is never asked for.
   await expect(page.getByRole("heading", { name: "Terminal", exact: true })).toHaveCount(0)
-  await expect(page.getByRole("list", { name: "Recent drawings and boards" })).toBeVisible()
+  await expect(page.getByRole("list", { name: "Recent drawings" })).toBeVisible()
   await expect(page.getByRole("link", { name: "Remote Desktop", exact: true })).toHaveCount(0)
   expect(requested).not.toContain("/api/v1/terminal/")
   expect(requested).not.toContain("/api/v1/remote-desktop/")
@@ -450,12 +443,12 @@ test("a section kept out of the sidebar is kept off the Overview, read and all",
   await page.route("**/api/v1/auth/session", (route) =>
     json(route, {
       ...user,
-      user: { ...user.user, hiddenSections: ["terminal", "excalidraw", "stickyboard", "backups"] },
+      user: { ...user.user, hiddenSections: ["terminal", "excalidraw", "backups"] },
     }),
   )
   await page.goto("/")
   await expect(page.getByRole("heading", { name: "Databases", exact: true })).toBeVisible()
-  for (const name of ["Terminal", "Drawings & boards", "Backups"]) {
+  for (const name of ["Terminal", "Drawings", "Backups"]) {
     await expect(page.getByRole("heading", { name, exact: true })).toHaveCount(0)
   }
   // Alone in its row, the databases take the whole of it.
@@ -465,12 +458,7 @@ test("a section kept out of the sidebar is kept off the Overview, read and all",
   const width = (await panel.boundingBox())!.width
   const page_ = (await page.locator("[data-slot=page] > [data-slot=host-identity]").boundingBox())!
   expect(width).toBe(page_.width)
-  for (const path of [
-    "/api/v1/terminal/",
-    "/api/v1/boards/",
-    "/api/v1/stickyboards/",
-    "/api/v1/backups/",
-  ]) {
+  for (const path of ["/api/v1/terminal/", "/api/v1/boards/", "/api/v1/backups/"]) {
     expect(requested).not.toContain(path)
   }
   await expect(page.locator("[data-slot=choice-card]", { hasText: "New shell" })).toHaveCount(0)

@@ -66,7 +66,7 @@ can still describe the previous folder while native history is moving. Run
 
 Editor-owned board Back and resource-link navigation drains every dirty snapshot through
 acknowledgement; further edits during a save must also be acknowledged before those controls leave. Failed save/duplicate attempts retain the workspace and
-its leave warning. Drawing and Stickyboard documents also retain dirty snapshots and their original
+its leave warning. Drawing documents also retain dirty snapshots and their original
 revision in RAM across every SPA exit, including sidebar, palette and native history navigation.
 Returning waits for the previous editor's outstanding save to settle before restoring the retained
 snapshot; later acknowledgements update the saved revision without clearing newer edits. Raw proxy
@@ -75,7 +75,7 @@ a query-selected editor and Forward reopening it preserves the draft. The shared
 stays active even while these editors are closed or their pages are unmounted. Explicit discard,
 successful save/deletion and `jd-working-state-cleared` clear retained contents. Cleanup increments
 a generation so an old request cannot recreate or remove a new account's draft. These buffers are
-never persisted in Web Storage and a confirmed reload discards them. Escape cancels Stickyboard renaming without its blur handler committing the draft.
+never persisted in Web Storage and a confirmed reload discards them.
 Git file drafts stay in memory per checkout/path across SPA previews, with an unload guard across
 repositories; cron builder drafts keep their captured crontab revision in memory per account. Their
 explicit Close/discard and sign-out paths clear the retained content. File Cut clipboard entries are

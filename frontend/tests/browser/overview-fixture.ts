@@ -349,50 +349,6 @@ export const drawings = [
   },
 ]
 
-export const stickyboards = [
-  {
-    id: 2,
-    name: "Launch checklist",
-    revision: 14,
-    notes: 6,
-    links: 2,
-    createdAt: iso(now - 86_400_000 * 3),
-    updatedAt: iso(now - 12 * 60_000),
-    preview: {
-      notes: [
-        ["Ship billing v3", "yellow", 0, 0],
-        ["Rotate S3 keys", "pink", 260, 0],
-        ["Load test shop", "blue", 520, 0],
-        ["Update DNS", "green", 0, 220],
-        ["Write runbook", "violet", 260, 220],
-        ["Announce", "orange", 520, 220],
-      ].map(([text, color, x, y]) => ({ x, y, w: 200, h: 180, kind: "sticky", color, text })),
-      links: [
-        [0, 1],
-        [1, 2],
-      ],
-    },
-  },
-  {
-    id: 3,
-    name: "Retro — October",
-    revision: 3,
-    notes: 4,
-    links: 0,
-    createdAt: iso(now - 86_400_000 * 6),
-    updatedAt: iso(now - 26 * 3_600_000),
-    preview: {
-      notes: [
-        ["Went well", "green", 0, 0],
-        ["To improve", "red", 240, 0],
-        ["Ideas", "teal", 480, 0],
-        ["Thanks", "yellow", 120, 220],
-      ].map(([text, color, x, y]) => ({ x, y, w: 200, h: 180, kind: "sticky", color, text })),
-      links: [],
-    },
-  },
-]
-
 export const units = {
   available: true,
   units: [
@@ -483,7 +439,6 @@ export async function mockOverview(
   await page.route("**/api/v1/databases/fleet", (route) => json(route, databaseFleet))
   await page.route("**/api/v1/terminal/", (route) => json(route, terminal))
   await page.route("**/api/v1/boards/", (route) => json(route, drawings))
-  await page.route("**/api/v1/stickyboards/", (route) => json(route, stickyboards))
   await page.route("**/api/v1/systemd/", (route) => json(route, units))
   await page.route("**/api/v1/remote-desktop/", (route) => json(route, remoteDesktop))
   await page.route("**/api/v1/certificates/", (route) => json(route, certificates))

@@ -70,7 +70,7 @@ test("a new account is asked what the server is for, and the answer shapes the s
   await expect(page.getByRole("button", { name: "Go to dashboard" })).toBeInViewport()
   expect(saved).toHaveLength(1)
   expect([...saved[0]].sort()).toEqual(
-    ["excalidraw", "files", "git", "network", "remote-desktop", "stickyboard", "terminal"].sort(),
+    ["excalidraw", "files", "git", "network", "remote-desktop", "terminal"].sort(),
   )
 
   await page.getByRole("button", { name: "Go to dashboard" }).click()

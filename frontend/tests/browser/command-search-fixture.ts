@@ -135,7 +135,6 @@ export async function mockCommandSearch(page: Page, auth = user) {
       },
     ],
     "/boards/": [{ id: 2, name: "Shop architecture" }],
-    "/stickyboards/": [{ id: 3, name: "Shop launch", notes: 4, links: 1 }],
     "/databases/": [
       {
         id: 1,
