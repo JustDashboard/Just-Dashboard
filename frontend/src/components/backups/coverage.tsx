@@ -170,7 +170,14 @@ function CoverageCard({
   return (
     <ChoiceRow
       index={index}
-      leading={<ResourceMark kind={resource.kind} ids={ids} ring="ring-choice-surface" />}
+      leading={
+        <ResourceMark
+          kind={resource.kind}
+          ids={ids}
+          project={resource.projectId}
+          ring="ring-choice-surface"
+        />
+      }
       title={resource.name}
       verb={job ? `${resource.name}: open ${job.jobName}` : `Back up ${resource.name}`}
       href={job ? `/backups/${job.jobId}` : undefined}

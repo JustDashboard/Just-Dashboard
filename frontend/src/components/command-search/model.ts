@@ -13,7 +13,6 @@ export const SEARCH_SCOPES = [
   ["app", "PM2 apps"],
   ["backup", "Backups"],
   ["board", "Excalidraw drawings"],
-  ["stickyboard", "Stickyboards"],
 ] as const
 
 export type SearchScope = (typeof SEARCH_SCOPES)[number][0]
@@ -40,7 +39,6 @@ const aliases: Record<string, SearchScope> = {
   repository: "repo",
   repositories: "repo",
   pm2: "app",
-  sticky: "stickyboard",
   excalidraw: "board",
   drawing: "board",
   drawings: "board",
@@ -176,6 +174,8 @@ export type RecentDestination = {
   at?: number
   /** The product a resource opened from search is, so its row keeps the mark. */
   product?: string
+  /** The project it is, so its row keeps the website's icon. */
+  projectId?: number
 }
 
 function destinationKey(href: string) {

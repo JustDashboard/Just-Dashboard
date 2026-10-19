@@ -142,7 +142,8 @@ is connected by naming the instance found, not by typing its address again.
   because a ping is answered without authentication.
   `POST /databases/inventory/ignore` records a key in `db_inventory_ignored`. `POST /databases/sync`
   keeps its contract and now signs in before saving, records the origin, skips what is ignored and
-  reports it, and runs its host half with Docker absent; forgetting the last connection to a found
+  reports it, repairs a stranded connection rather than adding a second one (`repaired`), and runs its
+  host half with Docker absent; forgetting the last connection to a found
   server marks it ignored (`ignoreOriginOnForget`), so it stays forgotten. It signs in four at a time
   and remembers a refusal against what was tried (`database_inventory_signin.go`): the same container
   stating the same credentials is not asked again until either changes or the operator connects it by
@@ -320,6 +321,23 @@ tag floats only within that line's patch releases; Timescale is pinned to one re
   `database.connection.delete` and `database.drop`, `ignoredServers` in `deploy.resources.remove`. The
   connection's JSON carries `origin`, the inventory key of the found server or file it was made from, and
   `""` for one typed in by hand.
+- **A connection sealed under another master key is repaired from its server.** A reinstall that keeps
+  `/var/lib/just-dashboard` but writes a new `JD_MASTER_KEY` leaves every `dsn_enc` unreadable. Such a
+  row is not attached to its found server (`savedConnections` skips what will not unseal), so the
+  server used to be found as unconnected and connecting it added `name-2` beside the red row and the
+  jobs and deployments bound to it. `database_stranded.go` keeps the row instead: a row with an
+  `origin` whose DSN does not unseal is *stranded*, and the first sign-in to that server — `POST
+  /databases/inventory/connect`, `/adopt`, `/host`, `/host/grant` or the reconcile — reseals the DSN
+  that worked into it, under its own id and name (`repaired: true` in the route's audit detail,
+  `repaired` in the sync's report and audit). A background pass does the same a minute after boot and
+  every thirty minutes after, for servers that sign in with what they state (`signsInUnasked`, the
+  reconcile's rule), skipping a server another connection already opens and one marked ignored, honouring
+  the reconcile's refusal memory, and auditing `database.connection.repair` as `system`. Two stranded
+  rows from one server are left alone, since nothing says which account or database a sign-in stands
+  for. A row typed by hand has nothing to be read again from. The reason a stranded row is listed with
+  says which case it is: connect it again under *Found on this server*, forget it because another
+  connection now opens its server, or (no origin) enter it again. `install.sh` asks for the earlier key
+  when it finds the store without one (`docs/internal/operations/terminal-tools.md`).
 - **One connection's summary.** `GET /databases/{id}` (read surface) is one connection's reading without
   dialling any other: what the server says it is, whether it answers, where it runs, which power actions
   apply, its exposure, bound deployments and the capability flags for its driver and flavour. Where the
@@ -644,7 +662,8 @@ tag floats only within that line's patch releases; Timescale is pinned to one re
   machine. A container that is a deployment's release (`io.just-dashboard.managed` and
   `io.just-dashboard.environment-id` on a live environment) is drawn as that deployment — the
   project, and the environment where it is not production — whether the environment or a session
-  revealed it, never as `jd-e<id>-r<n>`. What "names the server" means is an address book
+  revealed it, never as `jd-e<id>-r<n>` — and carries the project's id (`projectId`), which is
+  what the frontend draws its website's icon by. What "names the server" means is an address book
   (`topoAddresses`): the `db-N.jd.internal` alias, the address the connection was saved with, the
   container's name, compose service and own addresses with the engine's port, and — for a server
   saved at loopback or a container that publishes its port — every address of this machine
@@ -1401,49 +1420,6 @@ the page.
   not compile, because Oracle keeps it enabled and then refuses every write to its table (ORA-04098).
   A save reply carries the routine's catalogue `signature` where the engine has them, so a page that
   addressed it by signature can follow it.
-- **Two schemas are compared, and the migration between them is written, never run.** `GET
-  /databases/{id}/schema-diff?to=<id>&schema=&toSchema=` reads this connection's schema (*from*) and
-  another's (*to*) — a saved connection to the same driver, this one's other schemas included — and
-  answers what differs and the ordered steps that turn *from* into *to*; the page writes the
-  script from the steps, so the statements travel once. It is on the read surface and leaves no audit entry: the statements are text, and the
-  Query tab classifies and records them if they are run. A protected connection is compared like any
-  other. The flag is `schemaDiff` (`dbx/schema_diff_capabilities.go`): PostgreSQL, MySQL (MariaDB and
-  Percona included), SQL Server and SQLite, and not TimescaleDB, CockroachDB, YugabyteDB, TiDB or
-  Azure SQL Edge, whose statements differ from their driver's. Each side is read once
-  (`ReadSchemaSnapshot`): the tables through `dbx.Detail` — up to 400 a side, and 1500 objects of all
-  kinds, past which the route refuses by name — and the views, materialized views, sequences, enum types, functions and
-  procedures through the catalogue, with their definitions as the engine writes them. A kind of
-  object the login cannot read whole — or whose definition the server will not give (no privilege, an
-  encrypted module, an empty answer) — is left out of both sides and named under `notes`, so it is
-  never reported as missing or dropped and made again with nothing. Triggers, events, grants, comments, storage options and rows are not
-  compared.
-  - *The diff* (`DiffSchemas`) matches objects by name and the parts of a table — columns, primary
-    key, indexes, unique and check constraints, foreign keys — by name and then by definition, so an
-    index or key that differs only by an engine-generated name is not a difference. Where the two
-    schemas have different names, text that spells the schema out (`"alpha".mood`, a default's
-    `nextval('alpha.t_id_seq')`, a view's `FROM alpha.t`) is compared with the name taken away and
-    written for the *from* schema when it is planned; only where it qualifies a name, never inside a
-    quoted text or a comment (a relation named by `nextval('alpha.seq')` or `::regclass` is a name).
-    A renamed table or column reads as one dropped
-    and one added.
-  - *The plan* (`PlanMigration`) reuses the generators the schema forms use — `PlanAddColumn`,
-    `PlanAlterColumn`, `PlanDropColumn`, `PlanCreateIndex`, `PlanAddConstraint`, `PlanAddForeignKey`,
-    the drops, `PlanCreateEnum` and `PlanAddEnumValue`, `PlanCreateView` and `PlanDropView` — and
-    writes a new table with the same renderer the schema page shows a table's DDL with (SQLite's and
-    MySQL's own text, with MySQL's foreign keys taken out). The order: enum types and sequences, and
-    the routines that a default, check or generated column calls, first; then the views that read
-    what will change are dropped — an unchanged view is dropped and made again when it reads a
-    dropped view or a table that loses a column or changes a column's type — then foreign keys
-    (on MySQL and SQL Server also the unchanged ones on a column that changes type),
-    indexes and constraints that hold the old shape; new tables; column changes; dropped tables
-    (a table before the ones it references, a key of a cycle dropped first); then primary keys,
-    indexes, constraints and foreign keys, sequence ownership, the other routines (made when their
-    tables and columns exist), views, and the routines, sequences and enum types that went. A name
-    reaches the script only quoted or in a comment line of its own: a control character or line
-    break in a title is a space, and a name the engine will not quote makes the step a manual one. A step the generator refuses — a NOT NULL column with no default, an
-    identity column, an expression default it does not write, anything SQLite cannot alter in place —
-    is a *manual* step: no statements, and a comment in the script saying why. Every drop, and a
-    column's change of type, is marked destructive in the script and in the answer.
 - **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
   connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
   and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the
@@ -2243,10 +2219,14 @@ the detail of each classifier is below, with the surface it guards.
   every write, whether or not it succeeded.
   A request may name 100 tables and 10,000 rows a table, 100,000 in all.
 - **The page** is a card of its own on the Generate page (`components/database/generate/seed.tsx`,
-  `seed-model.ts`), gated on `seed`: the tables (every one, or the ones ticked), the rows each and a
-  table's own count, a tab per table in the order they are written with its first rows under column
-  heads that name each column's type and generator, the statement a row is written with, and
-  `SqlReview` before the write. Tests: `dbx/seed_test.go` (SQLite, and the pure parts),
+  `seed-model.ts`), gated on `seed`: a `Notice` that says what it does — made-up test rows inserted
+  into the connection, named with its environment label and amber where that label says production,
+  the rows already there kept, nothing inserted before the review — then the tables (every one, or
+  the ones ticked), the rows each and a table's own count, a tab per table in the order they are
+  inserted with what it references and its rows now and after, its first rows under two-line column
+  heads (the name with its type, then the generator, a menu or fixed on the same line), the statement
+  a row is inserted with, and `SqlReview` before the write. The command is *Insert N rows*, the data
+  workbench's verb for adding a row. Tests: `dbx/seed_test.go` (SQLite, and the pure parts),
   `dbx/seed_live_test.go` (PostgreSQL, MariaDB, MySQL 8, SQL Server, Oracle and ClickHouse; the tables
   are named `jdt_seed_…`), `api/handlers_db_seed_test.go` and `tests/browser/database-seed.spec.ts`.
 
@@ -3037,7 +3017,6 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/outline` | read | — | — | — |
 | `GET` | `/databases/{id}/program` | read | — | — | — |
 | `GET` | `/databases/{id}/relations` | read | — | — | — |
-| `GET` | `/databases/{id}/schema-diff` | read | — | — | — |
 | `GET` | `/databases/{id}/rls` | read | — | — | — |
 | `POST` | `/databases/{id}/rls/test` | `service.control` | — | `database.rls.test` | by content |
 

@@ -111,6 +111,50 @@ exit 17
 	}
 }
 
+// A window opened in zsh for an account whose login shell is bash finds what
+// ssh finds. Its PATH is in ~/.profile, which only the bash login reads, and
+// the per-account bin directories are there even when no profile adds them.
+func TestZshWindowFindsWhatTheAccountsLoginFinds(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip(err)
+	}
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip(err)
+	}
+	stub := "#!/bin/sh\nprintf 'agent-ran:%s\\n' \"$1\"\n"
+	for _, tc := range []struct {
+		name, login, bin, profile string
+	}{
+		{name: "profile", login: bash, bin: "profile-bin", profile: `export PATH="$HOME/profile-bin:$PATH"` + "\n"},
+		{name: "local-bin", login: "", bin: ".local/bin"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			bin := filepath.Join(home, tc.bin)
+			if err := os.MkdirAll(bin, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(stub), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if tc.profile != "" {
+				if err := os.WriteFile(filepath.Join(home, ".profile"), []byte(tc.profile), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			m := &Manager{shell: zsh, clipboard: newClipboardStore(filepath.Join(home, "terminal")),
+				account: Account{UID: os.Geteuid(), Shell: tc.login}}
+			if err := m.SetupShell(); err != nil {
+				t.Fatal(err)
+			}
+			out, _ := startAgentShell(t, m, "claude", home, home)
+			await(t, out, "", "agent-ran:--dangerously-skip-permissions")
+		})
+	}
+}
+
 func TestMissingAgentLeavesNativeShellUsable(t *testing.T) {
 	for _, shell := range []string{"bash", "zsh"} {
 		t.Run(shell, func(t *testing.T) {

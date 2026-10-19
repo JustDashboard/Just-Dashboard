@@ -123,7 +123,6 @@ const SURFACES = [
   "/account/users",
   "/account/workspace",
   "/welcome",
-  "/stickyboard",
   "/remote-desktop",
   "/remote-desktop/new",
 ] as const

@@ -104,8 +104,9 @@ What a hidden section loses is exactly three things, each read through `useHidde
   panel's head, "Proxy & TLS is hidden from your sidebar. Show it", and Show it removes the section
   from the list. The line is in the rail rather than over the page so a `fill` page (the terminal, a
   database workbench) keeps its exact height; on a phone it is in the sheet.
-- **Its tiles and reads on the Overview.** Each Services tile, the Deployments section and the read
-  behind it are gated on the section, so the page asks the server only about what it draws.
+- **Its tiles, blocks, shortcuts and reads on the Overview.** Each Services tile, each block (Deployments,
+  Terminal, Drawings & boards, Databases, Backups), each shortcut and the read behind it are gated on the
+  section, so the page asks the server only about what it draws.
 - **Its pages in the palette's empty list.** They are `explicit`, listed as soon as a word is typed:
   search is how a hidden page is reached on purpose.
 
@@ -233,7 +234,7 @@ row's slot made the heading read as one more row to press.
 
 The groups run in the order a day on the server runs, and the rail names each group:
 **Server** (Overview, and Monitoring: Metrics, Processes, Logs), **Apps** (Deployments first,
-then Databases, Docker), **Workspace** (Excalidraw, Stickyboard, Terminal, Files, Git, Remote Desktop), **Protection** (Security, Backups),
+then Databases, Docker), **Workspace** (Excalidraw, Terminal, Files, Git, Remote Desktop), **Protection** (Security, Backups),
 **Advanced** (Server configuration: Proxy & TLS, Packages, System users, Audit log) and **System**
 (Settings). The top-level list is twelve rows rather than seventeen: the three monitoring pages answer
 one question, and the four configuration pages are opened to change the server rather than to use it.
@@ -290,8 +291,8 @@ a distinct destination. Reload and sign-out discard it.
 
 `components/command-search/inventory.ts` projects explicitly selected metadata from eleven existing
 authenticated GET routes: the deployment fleet, proxy vhosts, saved database connections, Docker
-containers and stacks, Git repositories, systemd services, PM2 applications, backup jobs, Excalidraw drawings
-and stickyboards.
+containers and stacks, Git repositories, systemd services, PM2 applications, backup jobs and Excalidraw
+drawings.
 The dialog mounts its index only while open, with at most four concurrent inventory requests and
 an eight-second timeout per source. Closing aborts reads; reopening reads fresh inventory rather
 than retaining deleted resources. Reads settle independently; a failed source contributes no

@@ -347,7 +347,8 @@ function ClientTile({
   session: DbActivity
   known: ReadonlyMap<string, KnownClient>
 }) {
-  return <DbClientMark product={clientOf(session.application, known).product} self={session.self} />
+  const client = clientOf(session.application, known)
+  return <DbClientMark product={client.product} projectId={client.projectId} self={session.self} />
 }
 
 /** Who a session is: the account and the application, each in its own hue. */

@@ -113,7 +113,6 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		// the schema
 		"ddl":               "sql -clickhouse",
 		"schemas":           "sql -sqlite",
-		"schemaDiff":        "postgres mysql sqlserver sqlite -timescaledb -cockroachdb -yugabytedb -tidb -azure-sql-edge",
 		"catalog":           "sql",
 		"views":             "sql " + mongoProper,
 		"materializedViews": "postgres oracle clickhouse",

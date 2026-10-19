@@ -39,6 +39,7 @@ import {
 } from "@/components/deploy/deployment-defaults"
 import { useProject } from "@/components/deploy/project-context"
 import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { ProjectFavicon } from "@/components/deploy/project-mark"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import {
   SettingForm,
@@ -967,6 +968,7 @@ function ListenPicture({
   const bind = runtime.bindAddress || "127.0.0.1"
   const exposed = hostPort > 0 && publicBind(bind)
   const hostNetwork = Boolean(runtime.hostNetwork)
+  const { deployment } = useProject().detail
 
   const domainNode = (
     <WireNode
@@ -1070,7 +1072,7 @@ function ListenPicture({
       mark={
         port > 0 ? (
           <WireMark key="listens" size="md" tone="logo" className="animate-rise">
-            <Box />
+            <ProjectFavicon deployment={deployment} fallback={<Box />} />
           </WireMark>
         ) : (
           <WirePlaceholder key="none" size="md" className="animate-rise">

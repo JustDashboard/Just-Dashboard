@@ -169,6 +169,7 @@ const LOGOS: Record<string, string> = {
   gradio: "gradio.svg",
   grafana: "grafana.svg",
   guacamole: "guacamole.svg",
+  h3: "h3.svg",
   harbor: "harbor.svg",
   haskell: "haskell.svg",
   headscale: "headscale.svg",
@@ -185,6 +186,7 @@ const LOGOS: Record<string, string> = {
   jellyfin: "jellyfin.svg",
   jenkins: "jenkins.svg",
   jupyter: "jupyter.svg",
+  jwt: "jwt.svg",
   kafka: "kafka.svg",
   kavita: "kavita.svg",
   koa: "koa.svg",
@@ -245,6 +247,7 @@ const LOGOS: Record<string, string> = {
   pnpm: "pnpm-light.svg",
   portainer: "portainer.svg",
   postgis: "postgresql.svg",
+  "postgis-extension": "postgis.webp",
   postgres: "postgresql.svg",
   postgresql: "postgresql.svg",
   posthog: "posthog.svg",
@@ -311,6 +314,7 @@ const LOGOS: Record<string, string> = {
   ubuntu: "ubuntu.svg",
   unbound: "unbound.svg",
   "uptime-kuma": "uptime-kuma.svg",
+  v8: "v8.svg",
   valkey: "valkey.svg",
   vaultwarden: "vaultwarden.svg",
   vim: "vim.svg",
@@ -1093,12 +1097,18 @@ export function variableProduct(name: string): string | undefined {
  */
 export function ProductLogo({
   id,
+  favicon,
   size = "md",
   fallback: Fallback = Box,
   className,
 }: {
   /** A blueprint id, an engine or driver key, or nothing for a thing with no product. */
   id?: string
+  /**
+   * The icon a project's website declares (`useProjectFavicon`), drawn before
+   * the product's file, which stands in where it does not load.
+   */
+  favicon?: string
   size?: "sm" | "md"
   /**
    * The glyph for a thing that is no product — a volume, a network — so it
@@ -1107,10 +1117,11 @@ export function ProductLogo({
   fallback?: React.ComponentType<{ className?: string }>
   className?: string
 }) {
-  // Which file failed, rather than whether one did: the settings panel's mark
+  // Which files failed, rather than whether one did: the settings panel's mark
   // changes product under the same component, and the next one may load.
-  const [failed, setFailed] = useState<string>()
+  const [failed, setFailed] = useState<string[]>([])
   const file = id ? own(LOGOS, id) : undefined
+  const src = [favicon, file && `/logos/${file}`].find((path) => path && !failed.includes(path))
   return (
     <span
       aria-hidden="true"
@@ -1120,17 +1131,17 @@ export function ProductLogo({
         className,
       )}
     >
-      {file && file !== failed ? (
+      {src ? (
         // Same-origin and already sized for the tile: a plain element, as
         // `ProjectMark`'s favicon is. Not lazy: the page scrolls an inner
         // column, which lazy loading does not see into, so a tile below the
         // fold stayed empty until it was scrolled to — for a 3 KB file.
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={`/logos/${file}`}
+          src={src}
           alt=""
           className={cn("object-contain", size === "sm" ? "size-4.5" : "size-6")}
-          onError={() => setFailed(file)}
+          onError={() => setFailed((paths) => [...paths, src])}
         />
       ) : (
         <Fallback className="size-4 text-muted-foreground" />
@@ -1193,27 +1204,42 @@ export function ProductGlyphs({ ids, max = 5 }: { ids: string[]; max?: number })
  */
 export function ProductLogos({
   ids,
+  lead,
   size = "sm",
   ring = "ring-[var(--panel-ground,var(--background))]",
 }: {
   ids: string[]
+  /**
+   * A tile no product's file draws — a project as itself (`ProjectMark`), at
+   * the stack's size — standing first, where nothing covers it.
+   */
+  lead?: React.ReactNode
   size?: "sm" | "md"
   /** The ring colour, as a class: the ground the stack sits on. */
   ring?: string
 }) {
-  const shown = ids.slice(0, 3)
-  const more = ids.length - shown.length
+  const tiles = [
+    ...(lead
+      ? [{ key: "lead", tile: <span className={cn("flex rounded-lg ring-2", ring)}>{lead}</span> }]
+      : []),
+    ...ids.map((id) => ({
+      key: id,
+      tile: <ProductLogo id={id} size={size} className={cn("ring-2", ring)} />,
+    })),
+  ]
+  const shown = tiles.slice(0, 3)
+  const more = tiles.length - shown.length
   return (
     <span aria-hidden="true" className="flex shrink-0 items-center">
-      {shown.map((id, index) => (
+      {shown.map(({ key, tile }, index) => (
         // Stacked against document order, so the first — the one the stack
         // is named for — is the tile nothing covers.
         <span
-          key={id}
+          key={key}
           className={cn("relative", index > 0 && (size === "sm" ? "-ml-3" : "-ml-4"))}
           style={{ zIndex: shown.length - index }}
         >
-          <ProductLogo id={id} size={size} className={cn("ring-2", ring)} />
+          {tile}
         </span>
       ))}
       {more > 0 && <span className="numeric ml-1 text-micro text-muted-foreground">+{more}</span>}

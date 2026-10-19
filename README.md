@@ -9,7 +9,7 @@
 Deploy apps, run Docker, manage databases, shape the network, open a real shell and keep it all
 backed up — behind one login that lives on your private network.
 
-**Version 0.7.5** · Go backend · Next.js frontend · one `docker compose` stack
+**Version 0.8** · Go backend · Next.js frontend · one `docker compose` stack
 
 [![Website](https://img.shields.io/badge/website-just--dashboard.com-CAE9FF?style=flat-square&labelColor=16181d)](https://just-dashboard.com)
 [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FJustDashboard%2FJust-Dashboard%2Fmain%2Fbackend%2Finternal%2Fselfupdate%2Fchangelog.json&query=%24.latest&label=version&style=flat-square&color=CAE9FF&labelColor=16181d)](CHANGELOG.md)
@@ -121,7 +121,7 @@ free.
 - Table editor with staged, reviewed edits and a SQL editor with plans and stored programs
   (DELIMITER, GO and PL/SQL scripts)
 - An optional SQL assistant on your own Anthropic key or local model, told the schema and never the rows
-- Schema browser, diagram, schema comparison with its migration SQL, code generation, mock seed data
+- Schema browser, diagram, code generation, mock seed data
   written parents first, performance
 - Key browser and console for Redis, documents and pipelines for MongoDB
 - Protected connections, dump backups, PostgreSQL major-version upgrades with a way back, accounts,
@@ -144,8 +144,7 @@ free.
 - A file manager with search, previews, Monaco and image editors
 - A full Git workspace: staging by line, history, branches, conflicts, PR reviews
 - GitHub, GitLab and Gitea pull requests and Actions logs
-- Excalidraw: drawings with live cards for the host, projects and databases, each listed as a thumbnail of itself
-- Stickyboard: endless boards of sticky notes you colour, group into sections and link together
+- Excalidraw: drawings you edit together live, with live cards for the host, projects and databases, a shared shape library from libraries.excalidraw.com, diagrams written from a description, and each drawing listed as a thumbnail of itself
 - Remote Desktop: your Windows PCs, Macs and Linux desktops in a browser tab over Tailscale, unattended, with clipboard and file transfer, and a Stream mode that plays the screen as 60 fps video from Sunshine
 
 </td>
@@ -304,19 +303,15 @@ free.
 </tr>
 <tr>
 <td width="50%" valign="top">
-<img src="docs/readme/database-schema-diff.png" alt="Two schemas compared, six differences listed beside the migration SQL and its destructive-step warning">
-<p align="center"><b>Schema comparison</b> — the differences, and the SQL that closes them</p>
-</td>
-<td width="50%" valign="top">
 <img src="docs/readme/database-rls.png" alt="A PostgreSQL table's row-level security policies, tried as a role that sees two rows">
 <p align="center"><b>Row-level security</b> — write the policies, then try them as a role</p>
 </td>
-</tr>
-<tr>
 <td width="50%" valign="top">
 <img src="docs/readme/database-seed.png" alt="The Generate page filling tables with believable mock rows, parents first">
 <p align="center"><b>Seed data</b> — believable rows, written parents first</p>
 </td>
+</tr>
+<tr>
 <td width="50%" valign="top">
 <img src="docs/readme/database-pitr.png" alt="Point-in-time recovery for PostgreSQL: the recoverable window, base backups, a restore point and a recovered copy">
 <p align="center"><b>Point-in-time recovery</b> — any second, not only the last dump</p>
@@ -427,7 +422,7 @@ disk.
 
 ## Version, and updating
 
-This is **0.7.5**. It is not 1.0 because the API is still moving. Every release is in
+This is **0.8**. It is not 1.0 because the API is still moving. Every release is in
 [CHANGELOG.md](CHANGELOG.md) and in the dashboard itself, where **Update now** pulls, rebuilds and
 restarts from a container that outlives the restart. The update check is one unauthenticated GET of
 one file from GitHub; `JD_UPDATE_CHECK=false` turns it off.
@@ -468,7 +463,7 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | --- | --- | --- |
 | `JD_REQUIRE_2FA` | `false` | Whether an account with no authenticator may sign in. An account that *has* enrolled is always asked for its code, whatever this says. |
 | `JD_TERMINAL_ENABLED` | `true` | The web terminal. |
-| `JD_TERMINAL_SHELL` | account's shell | The shell the web terminal opens. Empty honours `chsh`. `install.sh` sets it to the host's zsh, which the bundled startup gives inline history suggestions and command colouring; ssh is unaffected. |
+| `JD_TERMINAL_SHELL` | account's shell | The shell the web terminal opens. Empty honours `chsh`. `install.sh` sets it to the host's zsh, which the bundled startup gives inline history suggestions and command colouring; ssh is unaffected. The account's own login shell still reads its profile first, so a window finds the commands ssh finds. |
 | `JD_TERMINAL_USER` | lowest regular account | Host account a terminal session logs in as. |
 | `JD_REMOTE_DESKTOP_BRIDGE` | none | A Moonlight Web stream bridge on another tailnet machine, as `host:port`, used in place of the container this server would run. Remote Desktop's picture always passes through the bridge; one near you and your computers spares it the trip to this server and back. The bridge must trust the dashboard's account header from this server only. |
 | `JD_SESSION_TTL` | `12h` | Absolute session lifetime. |
@@ -567,6 +562,10 @@ dashboard stops; the whole transcript is in `/var/log/just-dashboard-uninstall.l
 The dashboard's own state is a SQLite database in `JD_DATA_DIR` (`/var/lib/just-dashboard`). Back up
 that directory **and** keep `JD_MASTER_KEY` somewhere separate; either alone will not restore. The
 Backups page lists the dashboard itself under Coverage and writes that job for you.
+
+If you install again on a server that still has that directory but no `.env`, `install.sh` asks for
+the earlier key. Without it, database connections the dashboard made from containers on the server
+repair themselves under the new key; other stored secrets have to be entered again.
 
 A backup job can encrypt its archives, and a new one that writes to S3 or B2 does unless you turn it
 off. They are sealed with [age](https://age-encryption.org) to one backup key this server keeps, itself

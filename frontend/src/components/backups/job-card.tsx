@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
-import { Archive } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -9,11 +8,11 @@ import type { BackupJob, BackupRun } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { ChoiceRow } from "@/components/flow"
 import { OutcomeStrip } from "@/components/outcome-strip"
-import { ProductGlyph, ProductLogo, ProductLogos } from "@/components/product-logo"
+import { ProductGlyph } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { contentsLabel, scheduleLabel, targetLabel } from "@/components/backups/shared"
-import { destinationProduct } from "@/components/backups/marks"
+import { JobMark, destinationProduct } from "@/components/backups/marks"
 
 /** How many runs a card draws. Two weeks of a daily job, a day of an hourly one. */
 const STRIP = 14
@@ -42,6 +41,7 @@ const STRIP = 14
 export function JobCard({
   job,
   products,
+  project,
   verbs,
   verb = job.name,
   note,
@@ -51,6 +51,8 @@ export function JobCard({
   job: BackupJob
   /** The products of what the job covers, from the coverage report. */
   products: string[]
+  /** The project of a deployment it covers (`jobProject`), which leads its mark. */
+  project?: number
   verbs: Verb[]
   /**
    * The card's accessible name where the page around it says more than the
@@ -118,11 +120,7 @@ export function JobCard({
       className={cn(!job.enabled && job.schedule && "opacity-80")}
       leading={
         <span ref={mark} className="flex">
-          {products.length > 1 ? (
-            <ProductLogos ids={products} ring="ring-choice-surface" />
-          ) : (
-            <ProductLogo id={products[0]} size="sm" fallback={Archive} />
-          )}
+          <JobMark products={products} project={project} ring="ring-choice-surface" />
         </span>
       }
       title={job.name}

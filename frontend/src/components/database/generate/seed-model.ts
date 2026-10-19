@@ -345,18 +345,18 @@ export function planLine(plan: SeedPlan): string {
     .join(" · ")
 }
 
-/** What a seed wrote, as a notice's title. */
+/** What a seed inserted, as a notice's title. */
 export function reportTitle(report: SeedReport): string {
   const tables = report.tables.filter((t) => t.inserted > 0).length
-  if (report.inserted === 0) return "Nothing was written"
-  return `Wrote ${count(report.inserted, "row")} into ${count(tables, "table")}`
+  if (report.inserted === 0) return "Nothing was inserted"
+  return `Inserted ${count(report.inserted, "row")} into ${count(tables, "table")}`
 }
 
-/** One table of a report, in a line: "25 written · 2 refused". */
+/** One table of a report, in a line: "25 inserted · 2 refused". */
 export function reportLine(table: SeedTableReport): string {
   if (table.problem) return "left out"
   return [
-    `${table.inserted.toLocaleString("en-US")} written`,
+    `${table.inserted.toLocaleString("en-US")} inserted`,
     table.skipped > 0 ? `${table.skipped.toLocaleString("en-US")} refused` : "",
   ]
     .filter(Boolean)

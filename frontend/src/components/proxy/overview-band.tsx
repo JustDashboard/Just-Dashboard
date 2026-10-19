@@ -17,6 +17,7 @@ import { ShareBar } from "@/components/procs/workloads"
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { certificateProduct } from "@/components/proxy/marks"
+import { ProjectFavicon } from "@/components/deploy/project-mark"
 import { errorFinding, isActionableProxyError } from "@/components/proxy/site-errors"
 import { useAuth } from "@/hooks/use-auth"
 import { compactCount, errorRateTone, readingHref, share } from "@/components/proxy/site-traffic"
@@ -44,7 +45,7 @@ export function OverviewBand({
   traffic,
   certificates,
   errors,
-  productOf,
+  appOf,
   labelOf,
 }: {
   /** Some engine here writes access records the dashboard reads. */
@@ -61,8 +62,8 @@ export function OverviewBand({
     certbot: boolean
   }
   errors: { report?: ErrorReport; error?: Error }
-  /** The product a site's visitors reach, for its mark. */
-  productOf: (site: string) => string | undefined
+  /** What a site's visitors reach — its product, the project it is — for its mark. */
+  appOf: (site: string) => { product?: string; projectId?: number } | undefined
   /** The name a site's visitors type, which says more than its file's. */
   labelOf: (site: string) => string
 }) {
@@ -74,7 +75,7 @@ export function OverviewBand({
         traffics && "lg:grid-cols-2 xl:grid-cols-3",
       )}
     >
-      {traffics && <TrafficBlock {...traffic} productOf={productOf} labelOf={labelOf} />}
+      {traffics && <TrafficBlock {...traffic} appOf={appOf} labelOf={labelOf} />}
       <CertificatesBlock {...certificates} />
       {traffics && (
         <ErrorsBlock
@@ -154,12 +155,12 @@ function Headline({
 function TrafficBlock({
   sites,
   error,
-  productOf,
+  appOf,
   labelOf,
 }: {
   sites?: SiteTrafficReading[]
   error?: Error
-  productOf: (site: string) => string | undefined
+  appOf: (site: string) => { product?: string; projectId?: number } | undefined
   labelOf: (site: string) => string
 }) {
   const router = useRouter()
@@ -215,7 +216,8 @@ function TrafficBlock({
                 />
                 <ul aria-label="Busiest sites" className="-mx-2">
                   {top.map((s, rank) => {
-                    const product = productOf(s.site)
+                    const app = appOf(s.site)
+                    const product = app?.product
                     const tone = errorRateTone(s.errorRate)
                     const label = labelOf(s.site)
                     return (
@@ -233,11 +235,17 @@ function TrafficBlock({
                             style={{ background: LANES[rank % LANES.length] }}
                           />
                           <span className="flex size-4 shrink-0 items-center justify-center">
-                            {hasProductLogo(product) ? (
-                              <ProductGlyph id={product} />
-                            ) : (
-                              <Box aria-hidden className="size-3.5 text-muted-foreground" />
-                            )}
+                            <ProjectFavicon
+                              projectId={app?.projectId}
+                              className="size-3.5"
+                              fallback={
+                                hasProductLogo(product) ? (
+                                  <ProductGlyph id={product} />
+                                ) : (
+                                  <Box aria-hidden className="size-3.5 text-muted-foreground" />
+                                )
+                              }
+                            />
                           </span>
                           <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
                           {s.errorRate > 0 && (

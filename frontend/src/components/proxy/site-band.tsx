@@ -8,6 +8,9 @@ import { ShareBar } from "@/components/procs/workloads"
 import { Status } from "@/components/status-dot"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { certificateProduct, siteProduct } from "@/components/proxy/marks"
+import { activeOwner } from "@/components/proxy/site-details"
+import { ProjectFavicon, ProjectMark, ProjectMarkOf } from "@/components/deploy/project-mark"
+import { useProjects } from "@/hooks/use-projects"
 import {
   certCounts,
   certRows,
@@ -32,7 +35,8 @@ const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFracti
 
 /**
  * A site as the things it is made of: the application it hands requests to,
- * drawn as itself, tucked over the engine that serves it. A site that
+ * drawn as itself — the deployment that writes it as the project, its
+ * website's icon first — tucked over the engine that serves it. A site that
  * proxies nothing — files, a redirect — or whose application this host
  * cannot name is its engine alone, never a guessed logo (§14).
  */
@@ -46,6 +50,17 @@ export function SiteMark({
   size?: "sm" | "md"
 }) {
   const engine = siteProduct(vhost)
+  const project = activeOwner(vhost)?.projectId
+  const deployment = useProjects(Boolean(project)).get(project ?? 0)
+  if (deployment)
+    return (
+      <ProductLogos
+        lead={<ProjectMark deployment={deployment} size={size} />}
+        ids={[engine]}
+        size={size}
+        ring="ring-(--choice-surface)"
+      />
+    )
   if (!app?.product || app.product === engine) return <ProductLogo id={engine} size={size} />
   return <ProductLogos ids={[app.product, engine]} size={size} ring="ring-(--choice-surface)" />
 }
@@ -181,7 +196,11 @@ function TrafficBlock({
                     >
                       <HueKey name={vhost.name} />
                       <span className="flex size-4 shrink-0 items-center justify-center">
-                        <ProductGlyph id={app?.product ?? siteProduct(vhost)} />
+                        <ProjectFavicon
+                          projectId={activeOwner(vhost)?.projectId}
+                          className="size-3.5"
+                          fallback={<ProductGlyph id={app?.product ?? siteProduct(vhost)} />}
+                        />
                       </span>
                       <span className="min-w-0 flex-1 truncate font-medium">{vhost.name}</span>
                       {tone && (
@@ -405,7 +424,11 @@ function ApplicationsBlock({
                   aria-label={`Open ${sites[0].name}`}
                   className="flex min-w-0 items-center gap-2.5 rounded-md px-2 py-2 focus-ring-inset transition-colors hover:bg-row-hover"
                 >
-                  <ProductLogo id={app.product} size="sm" fallback={Connection} />
+                  <ProjectMarkOf
+                    projectId={sites.map(activeOwner).find(Boolean)?.projectId}
+                    size="sm"
+                    fallback={<ProductLogo id={app.product} size="sm" fallback={Connection} />}
+                  />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-body font-medium">
                       {app.name ?? app.address}

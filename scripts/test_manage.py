@@ -144,7 +144,7 @@ if args == ["compose", "build"]:
                 process.kill()
                 process.wait()
 
-    def run_installer(self, build_fail=False, env_file=True):
+    def run_installer(self, build_fail=False, env_file=True, answers="\n"):
         script = (REPO / "install.sh").read_text()
         # Every writable absolute host path is confined to this disposable fixture.
         for prefix in ("/var/lib/", "/var/backups/", "/tmp/just-dashboard"):
@@ -176,7 +176,7 @@ JD_FRONTEND_PORT=42002
         self.tool("chown", '#!/bin/bash\nexit 0\n')
         self.tool("logname", '#!/bin/bash\necho operator\n')
         (pathlib.Path(self.temp.name) / "host/tmp").mkdir(parents=True)
-        return subprocess.run([str(installer)], input="\n", capture_output=True, text=True,
+        return subprocess.run([str(installer)], input=answers, capture_output=True, text=True,
                               cwd=self.temp.name, env={**self.env, "TEST_BUILD_FAIL": "1" if build_fail else "0"})
 
     def test_installer_completion_shows_stages_access_and_terminal_commands(self):
@@ -206,6 +206,33 @@ JD_FRONTEND_PORT=42002
         self.assertTrue(restored.startswith(kept.read_text()), restored)
         self.assertEqual(restored.count("JD_MASTER_KEY="), 1)
         self.assertEqual((self.root / ".env").stat().st_mode & 0o777, 0o600)
+
+    def leave_earlier_store(self):
+        store = pathlib.Path(self.temp.name) / "host/var/lib/just-dashboard/vpsd.db"
+        store.parent.mkdir(parents=True)
+        store.write_bytes(b"SQLite format 3\x00")
+
+    def test_installer_takes_the_key_of_data_an_earlier_install_left(self):
+        self.leave_earlier_store()
+        key = "ab" * 32
+        result = self.run_installer(env_file=False, answers=f"y\nJD_MASTER_KEY={key}\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Data from an earlier install", result.stdout)
+        self.assertNotIn(key, result.stdout)
+        self.assertIn(f"JD_MASTER_KEY={key}\n", (self.root / ".env").read_text())
+
+    def test_installer_says_what_a_new_key_leaves_unreadable(self):
+        self.leave_earlier_store()
+        result = self.run_installer(env_file=False, answers="n\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Continuing with a new key", result.stdout)
+        written = (self.root / ".env").read_text()
+        self.assertRegex(written, r"JD_MASTER_KEY=[0-9a-f]{64}\n")
+
+    def test_installer_does_not_ask_for_a_key_on_a_fresh_server(self):
+        result = self.run_installer(env_file=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Data from an earlier install", result.stdout)
 
     def test_installer_build_failure_never_claims_success(self):
         result = self.run_installer(build_fail=True)

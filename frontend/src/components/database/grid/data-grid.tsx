@@ -1608,7 +1608,9 @@ export function DataGrid({
     >
       {hasStrip && (
         <PaneHeader className="flex-wrap">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">{toolbar}</div>
+          {(toolbar !== undefined || !findable) && (
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">{toolbar}</div>
+          )}
           {findable && (
             <SearchInput
               ref={findRef}
@@ -1616,7 +1618,9 @@ export function DataGrid({
               value={find}
               placeholder="Find in these rows"
               aria-label="Find in these rows"
-              containerClassName="sm:w-56"
+              className="h-6"
+              // Alone in the strip it spans it; beside a toolbar it keeps a fixed width.
+              containerClassName={toolbar === undefined ? "flex-1 sm:w-auto" : "sm:w-56"}
               onChange={(event) => setFind(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key !== "Escape") return

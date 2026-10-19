@@ -4,6 +4,58 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.8 — 19 October 2026
+
+**Drawings edited together, and an Overview that opens onto everything**
+
+Excalidraw becomes the Workspace's one board: a drawing is edited together live, keeps its images and the shape library on the server, and can hold live cards of your hosts, projects and databases, YouTube, Vimeo and Figma embeds, and diagrams written from a description. The Overview opens on shortcuts to every part of the dashboard, with the open shells, the drawings edited last, the databases and every backup job. A project is drawn by its website's icon wherever the dashboard names it, the web terminal finds what ssh finds, and a reinstall that lost its master key repairs its saved database connections instead of adding a second copy of each. Stickyboard and the schema comparison page are gone.
+
+### Added
+
+- Edit a drawing together with everyone who has it open
+  - Everyone with a drawing open joins its live room, a relay that keeps nothing: changes, pointers and names reach the others as they are made. Once an editor has joined, its saves merge with the stored drawing element by element instead of being refused because another editor saved first, and an element someone deleted stays deleted.
+- Keep a drawing's images and the shape library on the server
+  - Images are stored apart from the drawing and sent once, as soon as they are placed; an older drawing's embedded images move out on its next save. The shape library is kept on the server, one per install, and packs from libraries.excalidraw.com are downloaded by the server, since the page's security policy keeps the browser from fetching them.
+- Put live cards of hosts, projects and databases in a drawing, embed YouTube, Vimeo and Figma, and describe a diagram to have it drawn
+  - A server card reads its host, project or database as it is now, each time the drawing is open. Describe a diagram writes Mermaid through the SQL assistant's provider and places it on the canvas, and the menu and the empty canvas are the dashboard's own.
+- Open the Overview on shortcuts to everything the dashboard does
+  - Terminal, Excalidraw, Files, Remote Desktop, Databases and Backups were nowhere on the landing page, or one figure each. It now opens on shortcuts that count what each adds to, pairs the open shells with the drawings edited last and the databases with every backup job, and each row opens the thing it names; a shell opens the terminal on that session.
+- Draw a project by its website's icon wherever the dashboard names it
+  - A database's reader, a site's application, a port's owner, a backup's source and job, the Overview's activity, the logs' request records, the command palette and a drawing's card picker drew a deployment as a cloud or its container's image. They now show the project's icon, and keep the old mark where a project has none.
+- Show a database a deployment variable reaches by its address
+  - A project whose DATABASE_URL was written out as this server's address and the port its database publishes had no link to that database, so Settings → Databases & backups said none was linked. The page now matches the project's variables against the databases on the server and draws each one it names as a card reached by address.
+
+### Changed
+
+- The web terminal logs in through the account's own shell, so it finds what ssh finds
+  - A bash account keeps ~/.local/bin in ~/.profile, which the terminal's zsh never read, so commands such as claude were not found in the dashboard while ssh ran them. The login now runs the account's own shell first, and the bundled zsh adds ~/bin and ~/.local/bin when they exist.
+- A remote desktop session takes the whole content area, and a stream keeps the computer's screen shape
+  - A 16:10 Mac was letterboxed twice, by Sunshine and again by the bridge. The stream is now asked for in the computer's own shape, read once and remembered per computer, and drawn in a frame of that shape.
+- Seed data says what it inserts before it inserts anything
+  - The panel opens with a notice that it inserts made-up test rows, keeps the rows already there and inserts nothing before the review, named with the connection's environment label and amber where that is production. Each table says what it references and its row count now and after, and each column head fits on two lines.
+- Server parameters are readable and say which ones can be changed, and Extensions shows each project's own mark
+  - Extensions are grouped under category glyphs with the real logos of the projects behind them.
+- Metrics draws its network interfaces on the page's own ground, two to a row, the way it draws disks
+- A person with no picture is drawn as a silhouette on a solid colour
+- The database import page is centred with its step bar sized to the panel, and the results find strip matches the buttons beside it
+- The SQL assistant no longer shows a privacy note under the composer at all times
+
+### Fixed
+
+- Database connections sealed under another master key are repaired instead of saved again beside the broken one
+  - A reinstall that kept the data directory but not the .env left every saved connection unreadable, and connecting its server again added a second connection beside the red one. A connection made from a server the dashboard found is now resealed in place from that server's own credentials, whenever it is signed in to and by a background pass, and the installer asks for the earlier key when it finds the data without one.
+- Discard on a deployment's settings works when the saved Git credential is a GitHub App credential
+  - The credential picker does not list GitHub App credentials, so restoring one made the form dirty again however often Discard was pressed. A select no longer reports an empty choice when its value is one its items do not hold yet.
+- The Overview's Backups figure no longer hides a failed job behind another job that succeeded after it
+  - It read the newest run on the server, so a failed nightly job vanished under an hourly one; every job is now ordered and counted by its own last run.
+
+### Removed
+
+- Stickyboard
+  - Excalidraw is the Workspace's board. Stickyboard's pages, routes and place in the sidebar, command palette and Overview are gone; the boards made with it in 0.7.2 to 0.7.5 stay in the dashboard's database through the update.
+- The database schema comparison page
+  - Schema → Compare, added in 0.7.5, and the backend that wrote its migrations are gone.
+
 ## 0.7.5 — 18 October 2026
 
 **Remote Desktop, and databases you can run end to end**

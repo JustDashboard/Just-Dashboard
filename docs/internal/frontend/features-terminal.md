@@ -222,9 +222,11 @@ that does something.
   Environment tab hides. `build-dialog.tsx` is where the
   git panel and Docker stop being two products: a repository we already pull is a build context.
 
-Four deep links are worth preserving: `/files?path=`, `/git?repo=`, `/terminal?cwd=`, `/audit?action=`.
-Files and Git selections follow the address bar, while the terminal opens a session exactly once per
-mount because a shell is a process. Audit's settled filters are history entries; Back restores the
+Five deep links are worth preserving: `/files?path=`, `/git?repo=`, `/terminal?cwd=`,
+`/terminal?session=`, `/audit?action=`. Files and Git selections follow the address bar, while the
+terminal opens a session exactly once per mount because a shell is a process; `?session=` opens on an
+existing session instead (the Overview's shells link with it), remembered as if picked in the rail,
+and leaves the address once read. Audit's settled filters are history entries; Back restores the
 previous question. The audit link is how the Docker event feed hands off a correlated event.
 
 Packages use `?package=` for their inspector, and backup job pages use `?run=` for their selected run.
@@ -613,7 +615,13 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   `SAVEHIST` only when the account left them unset — a bash-by-default account has no `.zshrc`, and
   suggestions drawn from history need one. `install.sh` installs those packages and writes
   `JD_TERMINAL_SHELL` so a fresh install has the ghost text without touching the account's login shell.
-  Account profiles and interactive configuration still load; account dotfiles are never edited.
+  Account profiles and interactive configuration still load; account dotfiles are never edited. The
+  login half runs the account's own shell from `/etc/passwd` when it is a POSIX one (bash, sh, dash,
+  zsh, ksh, mksh), as ssh does, and then execs the window's shell: a bash account's `~/.profile` —
+  where Debian and Ubuntu put `~/.local/bin` — used to go unread by the zsh `JD_TERMINAL_SHELL`
+  selects, so a command ssh ran was "not found" in the dashboard. The bundled `.zshenv` also adds
+  `~/bin` and `~/.local/bin` when they exist and are missing, as Debian's profile does, for root (whose
+  profile does not) and for a PATH line an installer wrote to `~/.bashrc`, which zsh never reads.
   `term.SetupShell` atomically installs readable scripts in the process-owned shared terminal root's
   `.shell` directory, rejecting symlink or foreign-owned directories. A constant login bootstrap passes
   shell and startup paths as positional arguments; unsupported shells retain their ordinary startup.

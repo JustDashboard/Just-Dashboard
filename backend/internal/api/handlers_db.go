@@ -332,6 +332,7 @@ func (s *Server) allConnections(ctx context.Context) ([]*dbConnection, error) {
 	}
 	defer rows.Close()
 	out := []*dbConnection{}
+	stranded := []*dbConnection{}
 	for rows.Next() {
 		rec, err := scanDBConn(rows.Scan)
 		if err != nil {
@@ -342,11 +343,23 @@ func (s *Server) allConnections(ctx context.Context) ([]*dbConnection, error) {
 			broken := rec.conn
 			broken.Broken, broken.BrokenReason = true, brokenReason(err)
 			conn = &broken
+			if unsealable(err) && broken.Origin != "" {
+				stranded = append(stranded, conn)
+			}
 		}
 		out = append(out, conn)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, httpx.Internal(err)
+	}
+	connectedAs := map[string]string{}
+	for _, conn := range out {
+		if !conn.Broken && conn.Origin != "" && connectedAs[conn.Origin] == "" {
+			connectedAs[conn.Origin] = conn.Name
+		}
+	}
+	for _, conn := range stranded {
+		conn.BrokenReason = strandedReason(connectedAs[conn.Origin])
 	}
 	return out, nil
 }
@@ -360,7 +373,29 @@ func brokenReason(err error) string {
 	if errors.As(err, &apiErr) && apiErr.Status < http.StatusInternalServerError {
 		return apiErr.Message
 	}
-	return "its stored connection string could not be decrypted; JD_MASTER_KEY is not the key it was saved under"
+	return sealedElsewhere + ", so it has to be entered again"
+}
+
+// sealedElsewhere is the start of what is said of a connection string this
+// install cannot unseal. A reinstall that kept the data directory but not the
+// .env is how a server gets here.
+const sealedElsewhere = "its connection string was sealed under a different JD_MASTER_KEY"
+
+// unsealable reports an openDBConn failure that is the master key's rather
+// than a containment refusal.
+func unsealable(err error) bool {
+	var apiErr *httpx.APIError
+	return !errors.As(err, &apiErr) || apiErr.Status >= http.StatusInternalServerError
+}
+
+// strandedReason is brokenReason for a connection made from a found server,
+// whose secret can be read from the server again (database_stranded.go): it
+// says what repairs it, or that a second connection already has.
+func strandedReason(connectedAs string) string {
+	if connectedAs != "" {
+		return sealedElsewhere + "; its server is connected again as " + connectedAs + ", so this copy can be forgotten"
+	}
+	return sealedElsewhere + "; connecting it again under Found on this server repairs it"
 }
 
 // connNameRe deliberately excludes "/" and ".." so a connection name cannot

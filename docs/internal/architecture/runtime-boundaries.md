@@ -19,8 +19,8 @@ information (`ErrorState` in `components/state.tsx`), not an error.
 
 `Server.Start(ctx)` is separate from `New` so failing to schedule background work is reported by `main`
 rather than swallowed in construction. It starts the metrics recorder (here, not lazily — its whole
-purpose is to have been running while nobody was looking), the database activity recorder, the Docker
-event log, the network module's interface sampler and its daily blocklist refresh, the self-update
+purpose is to have been running while nobody was looking), the database activity recorder, the repair
+of connections sealed under another master key (`database_stranded.go`), the Docker event log, the network module's interface sampler and its daily blocklist refresh, the self-update
 check, the backup scheduler, `selfupdate.Installer.Reconcile`,
 `selfcfg.Applier.Reconcile`, Remote Desktop's `Reconcile` (closing the history of sessions a restart cut
 off) and the Tailscale certificate keeper. `Shutdown` releases what outlives a request:
@@ -223,7 +223,7 @@ and another SQLite closing its connection afterwards would believe it was the la
 `-wal` and `-shm` the store is still writing through, corrupting the database. Inspect a live store
 read-only: `sqlite3 'file:/var/lib/just-dashboard/vpsd.db?mode=ro'`.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
-`api_tokens`, `api_token_connections` — the databases an MCP key reaches —, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`, the statement history's `db_statement_intervals`, `db_statement_shapes` and `db_statement_samples`, point-in-time recovery's `db_wal_archives` — with the destination's keys and the archive's private key sealed — `db_wal_restore_points` and `db_wal_restores`, `db_upgrades`, and `db_tls_ca` and `db_server_tls` for the certificate authority, whose key is sealed, and the certificates issued from it); boards (`boards`, `sticky_boards`); Remote Desktop (`remote_desktop_computers`, with sealed passwords and the stream bridge's id once paired, and
+`api_tokens`, `api_token_connections` — the databases an MCP key reaches —, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`, the statement history's `db_statement_intervals`, `db_statement_shapes` and `db_statement_samples`, point-in-time recovery's `db_wal_archives` — with the destination's keys and the archive's private key sealed — `db_wal_restore_points` and `db_wal_restores`, `db_upgrades`, and `db_tls_ca` and `db_server_tls` for the certificate authority, whose key is sealed, and the certificates issued from it); boards (`boards`, the images placed on them in `board_files`, the install's shape library in `board_library`, and `sticky_boards`, which nothing reads since Stickyboard was removed in 0.8 but which stays so the boards made with it in 0.7.2–0.7.5 survive an update); Remote Desktop (`remote_desktop_computers`, with sealed passwords and the stream bridge's id once paired, and
 `remote_desktop_sessions`); backups
 (`backup_jobs`, `backup_runs`, `backup_restore_tests`); legacy deployment compatibility (`deploy_projects`, `deploy_env`,
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,

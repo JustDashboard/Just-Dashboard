@@ -359,6 +359,8 @@ export type MetricEvent = {
   severity: "info" | "warning" | "error"
   /** Non-zero for events that occupied a span, so a long deploy can be a band. */
   durationSeconds?: number
+  /** The project a deploy event released. */
+  projectId?: number
 }
 
 export type MetricsHistory = {
@@ -1897,7 +1899,6 @@ export type DbCapabilityFlag =
   | "indexes"
   | "extensions"
   | "rowSecurity" // GET /rls, the policy forms and the role tester
-  | "schemaDiff" // GET /schema-diff: two schemas compared and the migration between them written
   | "pooler" // a PgBouncer can be run in front of the server
   // Watching and maintaining a server.
   | "stats" // GET /stats: one snapshot of counters and gauges
@@ -2827,6 +2828,8 @@ export type BackupResource = {
   detail?: string
   paths?: string[]
   connectionId?: number
+  /** The project a deployment is; its `id` is the name jobs cover it by. */
+  projectId?: number
   suggest: {
     name: string
     sources: string[]
@@ -4971,6 +4974,16 @@ export type DeploymentDatabaseLink = {
   checkedAt?: string
 }
 
+/** A saved database a variable names by its address rather than a link. */
+export type DeploymentDatabaseAddress = {
+  connectionId: number
+  name: string
+  driver: DbDriver
+  database: string
+  /** The variables whose values hold its address. */
+  variables: string[]
+}
+
 export type DeploymentRemovalTarget = {
   id: string
   kind: string
@@ -5885,6 +5898,16 @@ export type AttackSummary = {
   since?: string
 }
 
+/** `GET /terminal/`: who a new shell signs in as, and every session open on the server. */
+export type TerminalList = {
+  enabled: boolean
+  /** Whether new sessions can be protected across dashboard restarts. */
+  persistent: boolean
+  persistenceError?: string
+  login: { user: string; home: string; shell: string; error?: string }
+  sessions: TerminalWorkspace[]
+}
+
 /** One session: a named workspace containing one or more direct PTYs. */
 export type TerminalWorkspace = {
   id: string
@@ -6568,6 +6591,8 @@ export type DbTopoNode = {
   status?: string
   href?: string
   connId?: number
+  /** The project a deployment node is an environment of. */
+  projectId?: number
 }
 
 export type DbTopoEdge = {

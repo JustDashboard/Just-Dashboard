@@ -14,7 +14,7 @@ import type {
   VHost,
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { CloudUpload, Globe } from "@/components/icons"
+import { Globe } from "@/components/icons"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import type { LogWindow } from "@/components/logs/service-logs"
 import { Pane } from "@/components/panel"
@@ -31,6 +31,7 @@ import {
 import { containerAt, liveStack, orderedServices, type Lead } from "@/components/deploy/logs-model"
 import type { ProjectDetail } from "@/components/deploy/project-context"
 import { serviceProduct } from "@/components/deploy/service-product"
+import { ProjectMark } from "@/components/deploy/project-mark"
 import { siteLogPlan } from "@/components/proxy/site-log-plan"
 import { FailedRequestLines } from "@/components/proxy/site-logs"
 import { requestRecords, type RequestRecord } from "@/components/logs/service-views-model"
@@ -145,7 +146,7 @@ export function RecordColumn({
 
 /**
  * The record being read, as the line the logs page opens on — a source's
- * shape (`SourceIdentity`): the deployment as its product or the site as its
+ * shape (`SourceIdentity`): the deployment as its project mark or the site as its
  * engine, its name, and what owns it, where it answers and its last hour.
  */
 export function RecordIdentity({
@@ -159,7 +160,12 @@ export function RecordIdentity({
     <HostIdentity
       className="animate-rise pb-4"
       mark={record.product}
-      fallback={record.deployment ? CloudUpload : Globe}
+      logo={
+        record.deployment && (
+          <ProjectMark deployment={record.deployment} product={record.product} size="lg" />
+        )
+      }
+      fallback={Globe}
       title={record.label}
       facts={
         <>

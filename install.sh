@@ -232,6 +232,44 @@ else
 	KEEP_ENV=0
 fi
 
+# ── data an earlier install left without its key ────────────────────────────
+
+# The data directory outlives a checkout: an install removed by hand, or a
+# fresh clone after the old one was deleted, leaves the store behind with no
+# .env and no kept copy of one. Writing a new key over it is what turned every
+# saved connection into "cannot be opened". The old key is asked for here,
+# while it can still be used; a run without it says what will and will not
+# come back, so the red rows are not the first anybody hears of it.
+EARLIER_KEY=""
+if [ "$KEEP_ENV" -eq 0 ] && [ ! -f "$KEPT_ENV" ] && [ -s /var/lib/just-dashboard/vpsd.db ]; then
+	step "Data from an earlier install"
+	say "  /var/lib/just-dashboard holds that install's accounts, connections and settings."
+	say "  Its stored secrets were sealed with that install's JD_MASTER_KEY, and there is"
+	say "  no .env here with it."
+	say ""
+	if yes_no "Do you have the earlier JD_MASTER_KEY to paste?" n; then
+		while true; do
+			read -r -s -p "  JD_MASTER_KEY (64 hex characters, not echoed): " EARLIER_KEY || true
+			say ""
+			EARLIER_KEY="$(printf '%s' "$EARLIER_KEY" | tr -d '[:space:]')"
+			EARLIER_KEY="${EARLIER_KEY#JD_MASTER_KEY=}"
+			if [[ "$EARLIER_KEY" =~ ^[0-9a-fA-F]{64}$ ]]; then
+				ok "the earlier key is used, so what it sealed opens again"
+				break
+			fi
+			EARLIER_KEY=""
+			warn "that is not 64 hex characters"
+			yes_no "Try again?" y || break
+		done
+	fi
+	if [ -z "$EARLIER_KEY" ]; then
+		warn "Continuing with a new key. Databases found in containers, and servers that need"
+		warn "no password, reconnect by themselves. Other database passwords, deploy variables"
+		warn "and backup credentials have to be entered again, and an account with two-factor"
+		warn "signs in with one of its recovery codes and sets its authenticator up again."
+	fi
+fi
+
 # ── reachability ────────────────────────────────────────────────────────────
 
 if [ "$KEEP_ENV" -eq 0 ]; then
@@ -465,7 +503,7 @@ random_port "frontend (internal)";                    JD_FRONTEND_PORT="$PICKED"
 
 step "Writing configuration"
 
-MASTER_KEY="$(openssl rand -hex 32)"
+MASTER_KEY="${EARLIER_KEY:-$(openssl rand -hex 32)}"
 
 umask 077
 cat > .env <<EOF

@@ -254,6 +254,35 @@ test.describe("Storage", () => {
 })
 
 test.describe("Databases & backups", () => {
+  // DATABASE_URL held this server's address and the port the database's
+  // container is published on, written out at creation: no link, no binding,
+  // and the page said no database was linked to an application using one.
+  test("a database a variable reaches by its address is drawn as a card", async ({ page }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/environments/12/database-addresses", (route) =>
+      json(route, [
+        {
+          connectionId: 19,
+          name: "Decor",
+          driver: "postgres",
+          database: "app",
+          variables: ["DATABASE_URL"],
+        },
+      ]),
+    )
+    await page.goto("/deploy/7/settings/databases")
+
+    const linked = page.getByRole("list", { name: "Linked databases" })
+    await expect(linked).toBeVisible()
+    await expect(page.getByText("No database is linked", { exact: false })).toHaveCount(0)
+    await expect(page.getByRole("link", { name: "Decor", exact: true })).toHaveAttribute(
+      "href",
+      "/databases/19",
+    )
+    await expect(linked.getByText("Reached by address", { exact: true })).toBeVisible()
+    await expect(linked.getByRole("link", { name: "DATABASE_URL", exact: true })).toBeVisible()
+  })
+
   test("linking an existing database saves the dependency and the variable, then can be removed", async ({
     page,
   }) => {

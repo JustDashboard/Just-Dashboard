@@ -17,6 +17,7 @@ import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { ProjectFavicon } from "@/components/deploy/project-mark"
 import { sitePath } from "@/components/proxy/site-verbs"
 import { compactCount, errorRateTone, share } from "@/components/proxy/site-traffic"
 import { upstreamLabel, upstreamTone } from "@/components/proxy/upstream-health"
@@ -334,11 +335,16 @@ function AppNode({ app, nodeRef }: { app: MapApp; nodeRef?: RefObject<HTMLSpanEl
       mark={
         <span ref={nodeRef} className="relative flex">
           <WireMark tone="logo" size="md">
-            {hasProductLogo(app.product) ? (
-              <ProductGlyph id={app.product} />
-            ) : (
-              <Glyph aria-hidden />
-            )}
+            <ProjectFavicon
+              projectId={app.projectId}
+              fallback={
+                hasProductLogo(app.product) ? (
+                  <ProductGlyph id={app.product} />
+                ) : (
+                  <Glyph aria-hidden />
+                )
+              }
+            />
           </WireMark>
           {tone && (
             <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">

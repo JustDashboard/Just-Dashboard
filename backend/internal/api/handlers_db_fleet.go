@@ -601,6 +601,9 @@ type topoNode struct {
 	Href    string `json:"href,omitempty"`
 	// ConnID is the connection a database node stands for.
 	ConnID int64 `json:"connId,omitempty"`
+	// ProjectID is the project a deployment node is an environment of, which
+	// is what the frontend draws its website's icon by.
+	ProjectID int64 `json:"projectId,omitempty"`
 }
 
 type topoEdge struct {
@@ -822,7 +825,7 @@ func (s *Server) topology(ctx context.Context, conns []*dbConnection) (*topology
 			addNode(topoNode{
 				ID: id, Kind: "deployment", Name: deploymentName(env.project, env.environment),
 				Product: c.product, Detail: c.c.Name, Status: c.c.State,
-				Href: "/deploy/" + strconv.FormatInt(env.projectID, 10),
+				Href: "/deploy/" + strconv.FormatInt(env.projectID, 10), ProjectID: env.projectID,
 			})
 			return id
 		}
@@ -871,6 +874,7 @@ func (s *Server) topology(ctx context.Context, conns []*dbConnection) (*topology
 			addNode(topoNode{
 				ID: depID, Kind: "deployment", Name: deploymentName(b.project, b.environment), Product: product,
 				Detail: b.container, Status: b.status, Href: "/deploy/" + strconv.FormatInt(b.projectID, 10),
+				ProjectID: b.projectID,
 			})
 			addEdge(dbID, depID, "binding", b.status, 0)
 		}
@@ -1138,31 +1142,51 @@ func hostAddresses() []string {
 // namedIn reports an environment that names the server: a value holding one
 // of its addresses whole, or one variable holding a host and another its port.
 func (book topoAddressBook) namedIn(env []string) bool {
-	values := map[string]bool{}
+	return len(book.naming(env)) > 0
+}
+
+// naming is the variables of an environment that name the server, in the
+// environment's order: each whose value holds one of its addresses whole, and
+// both halves of a host and port kept apart.
+func (book topoAddressBook) naming(env []string) []string {
+	holders := map[string][]string{}
+	named := map[string]bool{}
+	out := []string{}
+	name := func(key string) {
+		if !named[key] {
+			named[key] = true
+			out = append(out, key)
+		}
+	}
 	for _, kv := range env {
-		_, value, ok := strings.Cut(kv, "=")
+		key, value, ok := strings.Cut(kv, "=")
 		if !ok || value == "" {
 			continue
 		}
-		values[value] = true
+		holders[value] = append(holders[value], key)
 		for _, needle := range book.needles {
 			if bare, ok := strings.CutPrefix(needle, "="); ok {
 				if value == bare {
-					return true
+					name(key)
 				}
 				continue
 			}
 			if containsAddress(value, needle) {
-				return true
+				name(key)
 			}
 		}
 	}
 	for _, pair := range book.pairs {
-		if values[pair[0]] && values[pair[1]] {
-			return true
+		if len(holders[pair[0]]) == 0 || len(holders[pair[1]]) == 0 {
+			continue
+		}
+		for _, half := range pair {
+			for _, key := range holders[half] {
+				name(key)
+			}
 		}
 	}
-	return false
+	return out
 }
 
 // containsAddress finds an address in a value as a whole: 10.0.0.3:5432 is

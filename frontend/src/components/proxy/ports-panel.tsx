@@ -43,6 +43,7 @@ import { IconAction } from "@/components/icon-action"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
+import { useProjectFavicon } from "@/components/deploy/project-mark"
 import { ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
@@ -1178,9 +1179,15 @@ function OwnerLine({ socket, tagged }: { socket: Socket; tagged?: boolean }) {
   )
 }
 
-/** The owner as the product it is, on the tile the identity line draws a host's facts with. */
+/**
+ * The owner as the product it is, on the tile the identity line draws a host's
+ * facts with — a deployment's release by its project's website icon first.
+ */
 function ProcessMark({ listener }: { listener: Listener }) {
-  return <ProductLogo id={listenerProduct(listener)} size="sm" fallback={Router} />
+  const favicon = useProjectFavicon(listener.container?.deployment?.projectId)
+  return (
+    <ProductLogo id={listenerProduct(listener)} favicon={favicon} size="sm" fallback={Router} />
+  )
 }
 
 /**

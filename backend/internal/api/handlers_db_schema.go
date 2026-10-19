@@ -25,9 +25,6 @@ func (s *Server) mountDatabaseSchemaRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/{id}/catalog", s.handle(s.handleDBCatalog))
 	r.Method(http.MethodGet, "/{id}/object", s.handle(s.handleDBObject))
 	r.Method(http.MethodGet, "/{id}/program", s.handle(s.handleDBProgram))
-	// Two schemas compared and the migration between them written out. It
-	// changes nothing: the statements are text for the Query tab.
-	r.Method(http.MethodGet, "/{id}/schema-diff", s.handle(s.handleDBSchemaDiff))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapServiceControl))
 		// Changes that add to a schema or adjust it without discarding

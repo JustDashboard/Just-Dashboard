@@ -42,9 +42,12 @@ export function OperationProgress({
   const count = measured && showCount ? `${completed} of ${total} processed` : undefined
 
   return (
-    // Where the buttons leave it less than its minimum — a phone, a long
-    // confirm label — it takes the footer's first line and they the second.
-    <div data-slot="operation-progress" className="mr-auto min-w-32 flex-1">
+    // Where the buttons leave it less than its minimum — a narrow phone, a
+    // long confirm label — it takes the footer's first line and they the
+    // second. At 390px, Cancel and a pending Delete sat within a few pixels of
+    // a 128px minimum, so a renderer whose glyphs ran wider wrapped the footer
+    // and moved the dialog; 112px leaves them room to spare.
+    <div data-slot="operation-progress" className="mr-auto min-w-28 flex-1">
       <p role="status" className="text-body leading-tight">
         <TextShimmer className="block truncate">{label}</TextShimmer>
       </p>

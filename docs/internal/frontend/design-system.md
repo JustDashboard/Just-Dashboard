@@ -768,6 +768,14 @@ Radix can flip it above or constrain it to the viewport when space runs out. Its
 the trigger and its options, without an ownership-specific minimum width. Arrow keys, typeahead,
 Home/End, Escape, focus restoration and scrolling remain the primitive's responsibility.
 
+**No option's value is `""`.** A choice of nothing has its own word — `none`, `auto`, `prefix` —
+mapped back to empty by the caller. `Select` never passes `""` to `onValueChange`. Inside a form,
+Radix keeps a hidden native `<select>`. When the value is set to one it has no `<option>` for, it
+reads that value back as `""` and reports it as a choice. Before 0.8, Discard on a deploy settings
+page restored the Source's GitHub App credential, which the Git credential picker does not offer.
+The picker turned the reported `""` into credential 0, and the form stayed dirty however often
+Discard was pressed.
+
 **An option has one text column.** `MenuItemText` draws an option's name and any useful metadata
 beneath it, never at the far end of a second column. `SelectItem` uses this for its `hint`, outside
 `ItemText`, so metadata is excluded from the option's accessible name and the value copied into the
@@ -1645,6 +1653,17 @@ scope head, the project identity line and the notification picture's source all 
 draws the product alone, at a step of opacity — a project at rest, the way Backups dims a paused
 job.
 
+**A project is drawn as itself wherever it appears, not only on Deploy's pages.** A database's
+reader was a cloud glyph and a site's application its container's image, so the one project read as
+three things across the product. Another section's payload names a project by its id alone, and
+`useProjects` reads the fleet once for every mark on the page. Where the row draws its own tile,
+`ProjectMarkOf` draws `ProjectMark` over the tile it had before; where the tile belongs to the
+picture — a `WireMark` with its state's tint, a 16px glyph inside a line, the palette's result mark
+— `ProjectFavicon` (or `ProductLogo`'s `favicon`) puts the icon in it, with the product or glyph it
+drew before wherever the project has no icon to serve. A site's application leads the engine's tile
+in its stack (`ProductLogos`' `lead`), and a backup job leads its products with the project it
+covers. A reader without Deploy's read keeps the old marks: the fleet is refused, not guessed.
+
 **Where a project comes from, and what builds it, are products too.** A Git remote, a clone URL, a
 registry host or an image reference is drawn as the forge or registry it names (`hostProduct`:
 GitHub, `ghcr.io` included, GitLab, Bitbucket, Codeberg, Gitea, Forgejo, Docker Hub, Quay, Harbor,
@@ -1874,16 +1893,6 @@ because nothing in them is yours to edit. The picker is the folder drawn in each
 the chosen one `bg-accent` like every selection. The Files page is a workbench and, like the terminal
 and a Git working copy, has no page header: its commands sit in the strip across the workbench, beside
 the folder they act on.
-
-A sticky note's colour is a label by the same argument, so Stickyboard's nine (`--note-*`) are fixed
-hues, and `[data-note-color]`, `[data-note-style]` and `[data-note-kind]` mix every ground, ink and edge
-a note draws from its one value, as `[data-folder]` does for a folder. A paper note is the product's one
-large light surface, so the values sit low enough to read as paper against the ground rather than as
-a wall of lamps, with graphite the dark note whose ink turns light. On the board a note being carried
-is the one thing above it and the only one with a shadow, the format bar over a selection floats and
-takes a popover's ground, selection is drawn in the brand and a find result in the signal, and a note's
-type is in board units the canvas scales rather than on the ladder ([`stickyboard.md`](../stickyboard.md)).
-The list is a reading page: its readings over the boards as lit cards, each drawn as the board.
 
 Files and `/files/editor` take the **reading** register: their frames contain independently scrolling
 workbench panes, while directory and selection readings live in the status strip. Tiles use fixed,
@@ -2619,14 +2628,43 @@ The passes, in order. Each one is a diff you can review on its own.
 
 **What the Overview looks like after these passes**, as a checklist for the page you are on: the
 machine's identity line first (`HostIdentity` — its distribution drawn as itself, the processor and
-hypervisor as bare marks among its facts); a Resources `Section`
+hypervisor as bare marks among its facts); Shortcuts, a run of `ProductCard`s; a Resources `Section`
 whose head carries the socket's `Status live` and the way on to Metrics, holding a four-tile
 `StatGrid` of the readings that move — each carrying its last hour in the tile's `trend` slot where a
 meter would be, keyed before its name by its line's colour, its figure gliding to every frame — over
-the Storage band, a capacity bar per filesystem; the Deployments section; a plain top-processes list beside a
-plain activity list; and a `Section` holding a `StatGrid` of eight `StatLink` tiles, one per module,
-each naming what it counts with the products themselves. No frame anywhere on the page — the project
-cards carry the lit edge of a thing you take, which is not one. Everything that arrived, rose.
+the Storage band, a capacity bar per filesystem; the Deployments section; three pairs of plain blocks
+— the shells beside the drawings and boards, the databases beside the backup jobs, the top processes
+beside the activity list; and a `Section` holding a `StatGrid` of eight `StatLink` tiles, one per
+module, each naming what it counts with the products themselves. No frame anywhere on the page — the
+shortcuts, project cards, shells, drawings, databases and jobs carry the lit edge of a thing you take,
+which is not one. Everything that arrived, rose.
+
+**It took a third pass in 0.8**, at the operator's request, because it did not include what the
+product does: Terminal, Excalidraw, Files and Remote Desktop were nowhere on it, Databases
+and Backups were one figure each, and the only thing it offered to *start* was a project. Nothing
+above was taken back; what the page gained is the answer to "what was I doing, and how do I start the
+next thing". **Shortcuts** opens the page under the identity line: a `ProductCard` per thing a visit
+starts, each counting what it adds to (*6 projects*, *3 open · operator*) so it is data rather than a
+caption (pass 8), two to a row on a phone and four across from `xl`, and gated
+on the section and on the capability its destination checks — a shortcut that opens a refusal is a
+dead button. New drawing makes the drawing where it is pressed, as the list's own New does, and
+opens it. Under Deployments, three **pairs**: the shells open on the server (`workspace.tsx`
+— working first, each drawn as the program in it, a row opening `/terminal?session=` on that session)
+beside the drawings edited last, each its own preview; the databases (the
+control center's fleet read, its order, a row opening the database's home) beside every backup job
+(`data.tsx`); then the processes beside the activity, as before. A pair holding one block lets it take
+the row. Every row in the first two pairs is taken, so it is a `ChoiceRow` or a lit card (pass 3).
+
+Databases and Backups left the tiles for their blocks, and the System services tile (systemd's
+running services, or its failed units as the figure in red) and Remote Desktop took their places.
+The Backups tile had said *Last run OK* off the newest run on the server, so a nightly job that failed
+was hidden by an hourly one that succeeded after it; the block counts and orders every job by its own
+last run (`order.ts`, unit-tested). Every tile's figure is now a count with its word as the tile's
+`trailing`, as the readings write *6.5 GB free*, because the tiles went two to a row on a phone
+(`StatGrid dense`, the readings too) and *3 certificates* at 24px did not fit half of one; the
+products in a tile's hint are left out below `sm` for the same reason. On a phone the fleet keeps its
+worst three, so at 375 px the page holds its four new blocks and the shortcuts in about the height
+the old one spent on eight full-width tiles and six stacked projects.
 
 The 0.7.1 pass asked of each block whether it answered the question a reader opens the page with,
 and two did not. The Health panel that stood between the readings and the projects — the
@@ -2722,8 +2760,8 @@ the page is one `Section` per resource rather than two long runs of charts with 
 third: **Processor** (the utilisation chart beside the cores, each a column filled to its share in
 the processor's colour, and the temperatures under them), **Memory** (where the memory is — what
 programs hold, the cache, what is free, as one bar with the span the kernel calls available drawn
-over it, and swap — beside its chart), **Network** (throughput beside sockets, and the interfaces
-table, each row as its owner's mark and a bar of its in and out against the busiest), **Storage**
+over it, and swap — beside its chart), **Network** (throughput beside sockets, and the interfaces,
+each as its owner's mark and a bar of its in and out against the busiest), **Storage**
 (the Overview's filesystem rows with their scan, beside capacity; throughput, operations, latency
 and inodes), and **Saturation** (pressure beside load). Every series takes its measurement's hue
 (§10). Neighbouring heads share a height so their hairlines meet (pass 9). The "Click a chart to
@@ -2731,6 +2769,17 @@ pin a moment" caption and the shortcuts button that stood as two lines above the
 gone: the shortcuts are its last control, and the pinned moment's strip appears only while a
 moment is pinned, held at the top of the scroll because the chart it was pinned from is usually a
 screen down.
+
+**The interfaces gave up their table in 0.8**, at the operator's request, because it was the one
+framed block on the page and read as another product's: a box with a toolbar strip, column heads and
+a scroll of its own under ten unframed charts. Nothing in it needed the table's reason for an edge
+(§2 — a grid that scrolls sideways and clips a row's actions): an interface has no actions, and the
+cap that made it scroll was there only because "Everything" ran to thirty rows. It is a plain block
+now, the Real devices / Everything toggle in its head beside the up count as Top processes keeps its
+order, and each interface is drawn the way Filesystems below it draws a disk — its mark, the name
+and kind with the two rates keyed by the bar's colours, the bar, then its addresses and its errors
+and drops, amber when there are any. Two to a row from `lg`, like the charts above them, so
+Everything is half the length it was and needs no scroll. Metrics now has no framed block at all.
 
 **A database's home took the deploy pages' shape in 0.7.5**, at the operator's request — "more alive,
 more colouring, real logs", with the deploy pages as the reference — because it read as a grey page:
@@ -3129,7 +3178,7 @@ the reader through it.
 | Deploy settings, credentials, notifications | Reading | Editable readings of state, not a sequence with an end. |
 | Sign-in, first-run setup, `/welcome` — the first-run question | **Flow** | A sequence with an outcome: the account's sidebar. |
 | Remote Desktop — the computers (`/remote-desktop`) | Reading | The reader arrives to find out which computers can be opened now. |
-| A Remote Desktop session (`/remote-desktop/[id]`) | Reading, as a workbench | The terminal's frame held to the window around the live screen, drawn by guacd (Control) or streamed by Sunshine (Stream); what a stream waits on (its bridge, Sunshine, the PIN) is said in the screen's place, with Sunshine's own mark. |
+| A Remote Desktop session (`/remote-desktop/[id]`) | Reading, as a workbench | The terminal's columns held to the window around the live screen, but edge to edge: no measure, gutter or frame, since every pixel of those was taken from the screen; a stream's frame is the computer's own shape, so the space left round it is the workspace's ground rather than black bars; drawn by guacd (Control) or streamed by Sunshine (Stream); what a stream waits on (its bridge, Sunshine, the PIN) is said in the screen's place, with Sunshine's own mark. |
 | `/remote-desktop/new` — add a computer | **Flow** | Which computer, is its remote desktop on, and the sign-in: ending in the one command that saves it and opens the screen. |
 
 A section does not pick a register — a *page* does. The deployment section has pages in both, which

@@ -72,6 +72,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/environments/{env}/triggers", s.handle(s.handleDeploymentTriggers))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/git-watch", s.handle(s.handleDeploymentGitWatch))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/database-links", s.handle(s.handleDeploymentDatabaseLinks))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/database-addresses", s.handle(s.handleDeploymentDatabaseAddresses))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/schedules", s.handle(s.handleDeploymentSchedules))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/schedules/{schedule}/runs", s.handle(s.handleDeploymentScheduleRuns))
 		r.Method(http.MethodGet, "/{id}/previews", s.handle(s.handleDeploymentPreviews))

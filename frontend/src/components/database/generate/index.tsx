@@ -334,13 +334,13 @@ export function Generate() {
               data-target={SEED}
             >
               <span
-                title="Rows of mock data written into the tables, parents first"
+                title="Inserts made-up test rows into the tables, parents first"
                 className="max-w-full truncate text-body font-medium"
               >
                 Seed data
               </span>
               <Tag icon={Table} className="max-w-full">
-                Rows
+                Test rows
               </Tag>
             </ChoiceCard>
           </div>

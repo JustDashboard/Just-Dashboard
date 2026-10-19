@@ -425,7 +425,7 @@ function nameOf(resource: BoardResource, linked: Linked) {
 }
 
 /** "a, b and 3 more", short enough for one line under a card. */
-function listOf(names: string[]) {
+export function listOf(names: string[]) {
   if (names.length <= 3) {
     return names.length === 1
       ? names[0]

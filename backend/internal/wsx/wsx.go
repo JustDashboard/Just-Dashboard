@@ -193,6 +193,11 @@ func (c *Conn) write(kind int, b []byte) error {
 
 func (c *Conn) ReadMessage() (int, []byte, error) { return c.ws.ReadMessage() }
 
+// SetReadLimit raises or lowers the largest message the peer may send. The
+// default suits pasted terminal text; a socket that carries documents asks
+// for more, and says so where it opens.
+func (c *Conn) SetReadLimit(n int64) { c.ws.SetReadLimit(n) }
+
 func (c *Conn) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

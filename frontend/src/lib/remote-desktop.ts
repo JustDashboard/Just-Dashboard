@@ -438,20 +438,92 @@ export const STREAM_QUALITIES: {
   key: StreamQuality
   label: string
   size: string
+  height: number
   fps: number
   bitrate: number
 }[] = [
-  { key: "light", label: "Light", size: "720p", fps: 60, bitrate: 8_000 },
-  { key: "smooth", label: "Smooth", size: "1080p", fps: 60, bitrate: 20_000 },
-  { key: "sharp", label: "Sharp", size: "1440p", fps: 60, bitrate: 40_000 },
+  { key: "light", label: "Light", size: "720p", height: 720, fps: 60, bitrate: 8_000 },
+  { key: "smooth", label: "Smooth", size: "1080p", height: 1080, fps: 60, bitrate: 20_000 },
+  { key: "sharp", label: "Sharp", size: "1440p", height: 1440, fps: 60, bitrate: 40_000 },
   // Twice the frames, each one half as old, and twice the bits for them. A
   // computer whose screen runs at 60 Hz sends 60; the bits still go to the
   // picture.
-  { key: "max", label: "Max", size: "1440p", fps: 120, bitrate: 80_000 },
+  { key: "max", label: "Max", size: "1440p", height: 1440, fps: 120, bitrate: 80_000 },
 ]
 
 export function streamQuality(quality: StreamQuality) {
   return STREAM_QUALITIES.find((q) => q.key === quality) ?? STREAM_QUALITIES[1]
+}
+
+/** A screen's width over its height, until the stream has shown the computer's own. */
+export const WIDE_SCREEN = 16 / 9
+
+/**
+ * The size to ask Sunshine for: the quality's height at the screen's own
+ * shape, in even pixels for the encoder. Sunshine cannot change a Mac's
+ * resolution; it fits the screen into whatever it is asked for and pads the
+ * rest black, so a 16:10 Mac asked for 1920×1080 came back pillarboxed.
+ */
+export function streamSize(quality: StreamQuality, shape = WIDE_SCREEN) {
+  const { height } = streamQuality(quality)
+  return { width: Math.round((height * shape) / 2) * 2, height }
+}
+
+/** How dark a pixel of Sunshine's padding is, after the encoder has been at it. */
+const PADDING_LEVEL = 12
+
+/**
+ * The computer's screen's width over its height, read off one frame of its
+ * stream: RGBA pixels, `width` by `height`, of a picture `aspect` wide.
+ *
+ * Sunshine pads evenly and on one axis only, so a frame lit to every edge is
+ * the screen's own shape and one dark on both sides of one axis gives the
+ * screen's shape away. Dark at a single edge, or on both axes, is the picture
+ * being dark rather than padding, and says nothing.
+ */
+export function screenShape(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  aspect = width / height,
+) {
+  const lit = (x: number, y: number) => {
+    const at = (y * width + x) * 4
+    return (
+      pixels[at] > PADDING_LEVEL || pixels[at + 1] > PADDING_LEVEL || pixels[at + 2] > PADDING_LEVEL
+    )
+  }
+  const litColumn = (x: number) => {
+    for (let y = 0; y < height; y++) if (lit(x, y)) return true
+    return false
+  }
+  const litRow = (y: number) => {
+    for (let x = 0; x < width; x++) if (lit(x, y)) return true
+    return false
+  }
+  let left = 0
+  while (left < width && !litColumn(left)) left++
+  if (left === width) return undefined
+  let right = width - 1
+  while (!litColumn(right)) right--
+  let top = 0
+  while (!litRow(top)) top++
+  let bottom = height - 1
+  while (!litRow(bottom)) bottom--
+
+  // A sample is a scaled-down frame, whose edge pixels are blends.
+  const slack = 2
+  const bare = (near: number, far: number) => Math.max(near, far) <= slack
+  const padded = (near: number, far: number) =>
+    Math.min(near, far) > slack && Math.abs(near - far) <= slack
+  const sides = [left, width - 1 - right] as const
+  const ends = [top, height - 1 - bottom] as const
+  const across = (right - left + 1) / width
+  const down = (bottom - top + 1) / height
+  if (bare(...sides) && bare(...ends)) return aspect
+  if (padded(...sides) && bare(...ends)) return aspect * across
+  if (padded(...ends) && bare(...sides)) return aspect / down
+  return undefined
 }
 
 /** Where the bridge's stream page keeps its settings, in this origin's storage. */
@@ -466,19 +538,21 @@ export const BRIDGE_SETTINGS_KEY = "mlSettings"
  * frame only past that many waiting, and asks Sunshine for a whole new
  * picture after one: a queue of one dropped frames on every hiccup and
  * spent the bitrate on keyframes, which was a rougher picture, not a
- * sooner one.
+ * sooner one. The size is the quality's at the screen's own shape.
  */
 export function bridgeSettings(
   held: Record<string, unknown>,
   quality: StreamQuality,
   transport: RdStream["transport"],
+  shape?: number,
 ) {
   const preset = streamQuality(quality)
   return {
     ...held,
     dataTransport: transport === "webrtc" ? "auto" : "websocket",
     videoCodec: "h264",
-    videoSize: preset.size,
+    videoSize: "custom",
+    videoSizeCustom: streamSize(quality, shape),
     fps: preset.fps,
     bitrate: preset.bitrate,
     videoFrameQueueSize: 3,

@@ -1,56 +1,46 @@
 "use client"
 
-import { useMemo } from "react"
+import { Children, useMemo } from "react"
 import Link from "next/link"
-import {
-  Archive,
-  ArrowRight,
-  Box,
-  Database,
-  GitHubMark,
-  Globe,
-  Plus,
-  Puzzle,
-  SettingsGear,
-  Shield,
-} from "@/components/icons"
-import { ApiError, get } from "@/lib/api"
-import { unusableCount } from "@/lib/db-connections"
-import { bytes, duration, percent, plural, rate, relativeTime } from "@/lib/format"
+import { Plus } from "@/components/icons"
+import { get } from "@/lib/api"
+import { bytes, duration, percent, rate } from "@/lib/format"
+import type { BoardSummary } from "@/lib/boards"
+import type { RdOverview } from "@/lib/remote-desktop"
 import type {
   BackupJob,
-  BackupRun,
   Certificate,
   Container,
-  DbConnection,
+  DbFleet,
   DeploymentFleet,
   Exposure,
   GitRepo,
+  SystemdList,
+  TerminalList,
   TrafficPulse,
   UpdateReport,
 } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import type { SectionKey } from "@/lib/sidebar-sections"
 import { type PollState, usePoll } from "@/hooks/use-poll"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useMetricEvents, useMetricsHistory } from "@/hooks/use-metrics-history"
-import { useSelfUpdate } from "@/hooks/use-self-update"
 import type { MetricsWindow } from "@/lib/metrics-range"
 import { Page, PageContext, PageState, Section } from "@/components/page"
-import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
+import { StatGrid, StatTile } from "@/components/stat-tile"
 import { utilisationTone } from "@/components/meter"
-import type { Tone } from "@/components/tone"
 import { EmptyState } from "@/components/state"
 import { useConfirm } from "@/components/confirm-dialog"
 import { TopProcesses } from "@/components/metrics/top-processes"
-import { EXPOSURE_GRADE } from "@/components/security/exposure-panel"
 import { TileTrend } from "@/components/metrics/sparkline"
-import { engineFor } from "@/components/database/engine"
+import { lastFleet, readFleet } from "@/components/database/fleet/read"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import { ProjectCard } from "@/components/deploy/fleet-card"
 import { sortFleet } from "@/components/deploy/fleet"
 import { ActivityPanel } from "@/components/overview/activity"
+import { BackupsPanel, DatabasesPanel } from "@/components/overview/data"
 import {
   CoreBars,
   HUE,
@@ -59,13 +49,23 @@ import {
   SeriesKey,
   StreamState,
 } from "@/components/overview/readings"
-import { StorageBand } from "@/components/overview/storage"
+import { SectionLink } from "@/components/overview/section-link"
 import {
-  ProductGlyphs,
+  DockerTile,
+  GitTile,
+  PackagesTile,
+  ProxyTile,
+  RemoteDesktopTile,
+  SecurityTile,
+  SettingsTile,
+  UnitsTile,
+} from "@/components/overview/services"
+import { SHORTCUT_GLYPH, Shortcuts, counted, type Shortcut } from "@/components/overview/shortcuts"
+import { StorageBand } from "@/components/overview/storage"
+import { RecentWorkPanel, ShellsPanel, newShellHref } from "@/components/overview/workspace"
+import {
   ProductLogos,
-  containerProducts,
   cpuProduct,
-  hostProduct,
   platformProduct,
   virtualizationProduct,
 } from "@/components/product-logo"
@@ -81,8 +81,13 @@ const HOUR: MetricsWindow = { key: "1h" }
 // and an hour was "Nothing in the last hour" on most visits.
 const DAY: MetricsWindow = { key: "24h" }
 
-/** Two rows of three: the projects that need the reader most, then the way to the rest. */
+/**
+ * Two rows of three: the projects that need the reader most, then the way to
+ * the rest. One column on a phone, where six cards were a screen and a half
+ * before anything else on the page, so it keeps the worst three.
+ */
 const SHOWN_PROJECTS = 6
+const SHOWN_PROJECTS_NARROW = 3
 
 /** Each reading's line, and the key before its name that says which line is whose. */
 const SERIES = HUE
@@ -96,7 +101,8 @@ export default function OverviewPage() {
   // about what it is going to draw.
   const { hidden } = useHiddenSections()
   const shows = (key: SectionKey) => !hidden.has(key)
-  const reads = useModuleReads(shows)
+  const { can } = useAuth()
+  const reads = useModuleReads(shows, can)
   const { confirm, dialog } = useConfirm()
 
   const trends = useMemo(() => {
@@ -192,6 +198,8 @@ export default function OverviewPage() {
         }
       />
 
+      <Shortcuts shortcuts={shortcutsFor(reads, shows, can, host.hostname)} />
+
       {/* The machine's readings, under a head that says they are arriving
           and leads to the page that records them. The way to Metrics stood
           at the identity line's end as a button, a second control beside the
@@ -212,7 +220,7 @@ export default function OverviewPage() {
               of the socket rather than jumping. The fullest filesystem was a
               fifth tile here that filled rather than moved; the disks are a
               band of their own under the four now. */}
-          <StatGrid columns={4}>
+          <StatGrid columns={4} dense>
             <StatTile
               label={
                 <>
@@ -298,29 +306,45 @@ export default function OverviewPage() {
         <DeploymentsSection fleet={reads.fleet} traffic={reads.traffic.data} confirm={confirm} />
       )}
 
+      {/* What was being worked on — the shells left open, the last things
+          drawn — so a visit can go straight back to it. */}
+      <Pair>
+        {reads.terminal.enabled && <ShellsPanel read={reads.terminal} />}
+        {reads.drawings.enabled && <RecentWorkPanel drawings={reads.drawings} />}
+      </Pair>
+
+      {/* The data on the machine and the copies of it, side by side: a
+          database's row says when it answered, a job's when it last ran. */}
+      <Pair>
+        {shows("databases") && <DatabasesPanel read={reads.databases} />}
+        {shows("backups") && <BackupsPanel read={reads.backups} />}
+      </Pair>
+
       {/* Who is spending the machine and what changed on it — the two
           questions the tiles raise — side by side, as /metrics pairs its
           process list with its notable moments. */}
-      <div className="grid items-start gap-8 lg:grid-cols-2 [&>*]:min-w-0">
+      <Pair>
         <TopProcesses />
         <ActivityPanel events={events} />
-      </div>
+      </Pair>
 
       {/* The same run of readings as the tiles at the top, one per module,
           because a module's headline figure *is* a reading. Each says what
           it counts with the products themselves — the images running, the
-          engines connected — after its words. Deployments has its own
-          section above, so its tile went to Git. */}
+          forges pushed to — after its words. Deployments, Databases and
+          Backups have blocks of their own above, so their tiles went to the
+          services systemd runs and the remote computers. Two to a row on a
+          phone, where eight full-width tiles were a screen of their own. */}
       <Section title="Services">
-        <StatGrid columns={4}>
-          {shows("docker") && <DockerCard read={reads.docker} />}
-          {shows("databases") && <DatabasesCard read={reads.databases} />}
-          {shows("proxy") && <ProxyCard read={reads.certificates} />}
-          {shows("security") && <SecurityCard read={reads.exposure} />}
-          {shows("packages") && <PackagesCard read={reads.packages} platform={host.platform} />}
-          {shows("backups") && <BackupsCard read={reads.backups} />}
-          {shows("git") && <GitCard read={reads.git} />}
-          <UpdatesCard />
+        <StatGrid columns={4} dense>
+          {shows("docker") && <DockerTile read={reads.docker} />}
+          {shows("proxy") && <ProxyTile read={reads.certificates} />}
+          {shows("security") && <SecurityTile read={reads.exposure} />}
+          {shows("packages") && <PackagesTile read={reads.packages} platform={host.platform} />}
+          <UnitsTile read={reads.units} />
+          {shows("git") && <GitTile read={reads.git} />}
+          {reads.remote.enabled && <RemoteDesktopTile read={reads.remote} />}
+          <SettingsTile />
         </StatGrid>
       </Section>
       {dialog}
@@ -329,11 +353,18 @@ export default function OverviewPage() {
 }
 
 /**
- * Every module's own read, once, at the page: the Services tiles draw them,
- * and the Deployments section shares the fleet and its traffic. A read whose
- * section is hidden is never made.
+ * Every module's own read, once, at the page: the blocks and tiles draw them,
+ * and the shortcuts count what each would add to. A read whose section is
+ * hidden is never made, and neither is one the account may not make — the
+ * terminal's listing needs the terminal, and the remote computers an
+ * administrator — so `enabled` says whether there is a block to draw at all.
  */
-function useModuleReads(shows: (key: SectionKey) => boolean) {
+function useModuleReads(
+  shows: (key: SectionKey) => boolean,
+  can: ReturnType<typeof useAuth>["can"],
+) {
+  const terminal = shows("terminal") && can("terminal")
+  const remote = shows("remote-desktop") && can("system.admin")
   return {
     docker: usePoll<Container[]>(
       (signal) => get<Container[]>("/docker/containers/", undefined, signal),
@@ -341,12 +372,13 @@ function useModuleReads(shows: (key: SectionKey) => boolean) {
       [],
       { enabled: shows("docker") },
     ),
-    databases: usePoll<DbConnection[]>(
-      (signal) => get<DbConnection[]>("/databases/", undefined, signal),
-      60_000,
-      [],
-      { enabled: shows("databases") },
-    ),
+    // The control center's own read, and its last answer drawn at once
+    // while this one is asked: a database's state, size and version are
+    // what a row says, which the saved connections alone could not.
+    databases: usePoll<DbFleet>(readFleet, 60_000, [], {
+      enabled: shows("databases"),
+      seed: lastFleet(),
+    }),
     certificates: usePoll<Certificate[]>(
       (signal) => get<Certificate[]>("/certificates/", undefined, signal),
       300_000,
@@ -391,7 +423,133 @@ function useModuleReads(shows: (key: SectionKey) => boolean) {
       [],
       { enabled: shows("git") },
     ),
+    units: usePoll<SystemdList>(
+      (signal) => get<SystemdList>("/systemd/", undefined, signal),
+      60_000,
+    ),
+    // Fifteen seconds, the terminal page's own cadence tripled: whether a
+    // shell is working is the one thing in its row that changes by itself.
+    terminal: {
+      ...usePoll<TerminalList>(
+        (signal) => get<TerminalList>("/terminal/", undefined, signal),
+        15_000,
+        [],
+        { enabled: terminal },
+      ),
+      enabled: terminal,
+    },
+    drawings: {
+      ...usePoll<BoardSummary[]>(
+        (signal) => get<BoardSummary[]>("/boards/", undefined, signal),
+        120_000,
+        [],
+        { enabled: shows("excalidraw") },
+      ),
+      enabled: shows("excalidraw"),
+    },
+    remote: {
+      ...usePoll<RdOverview>(
+        (signal) => get<RdOverview>("/remote-desktop/", undefined, signal),
+        120_000,
+        [],
+        { enabled: remote },
+      ),
+      enabled: remote,
+    },
   }
+}
+
+/**
+ * The shortcuts this account can take, in the sidebar's order, each counting
+ * what it would add to. Only what the account may do and keeps in its
+ * sidebar: a shortcut that opens a refusal is a dead button.
+ */
+function shortcutsFor(
+  reads: ReturnType<typeof useModuleReads>,
+  shows: (key: SectionKey) => boolean,
+  can: ReturnType<typeof useAuth>["can"],
+  hostname: string,
+): Shortcut[] {
+  const admin = can("system.admin")
+  const write = can("service.control")
+  const list: (Shortcut | false)[] = [
+    shows("deploy") &&
+      admin && {
+        key: "deploy",
+        label: "New project",
+        detail: counted(reads.fleet.data?.deployments.length, "project"),
+        fallback: SHORTCUT_GLYPH.deploy,
+        href: "/deploy/new",
+      },
+    shows("databases") &&
+      admin && {
+        key: "database",
+        label: "Add a database",
+        detail: counted(reads.databases.data?.connections.length, "database"),
+        fallback: SHORTCUT_GLYPH.database,
+        href: "/databases/new",
+      },
+    reads.terminal.enabled && {
+      key: "shell",
+      label: "New shell",
+      // The count first: the account it signs in as is the part a narrow
+      // card can lose.
+      detail: reads.terminal.data
+        ? reads.terminal.data.sessions.length > 0
+          ? `${reads.terminal.data.sessions.length} open · ${reads.terminal.data.login.user}`
+          : `as ${reads.terminal.data.login.user}`
+        : undefined,
+      product: "terminal",
+      href: newShellHref(reads.terminal.data),
+    },
+    reads.drawings.enabled &&
+      write && {
+        key: "drawing",
+        label: "New drawing",
+        detail: counted(reads.drawings.data?.length, "drawing"),
+        product: "excalidraw",
+        create: "drawing",
+      },
+    shows("files") && {
+      key: "files",
+      label: "Browse files",
+      detail: hostname,
+      fallback: SHORTCUT_GLYPH.files,
+      href: "/files",
+    },
+    reads.remote.enabled && {
+      key: "computer",
+      label: "Add a computer",
+      detail: counted(reads.remote.data?.computers.length, "computer"),
+      fallback: SHORTCUT_GLYPH.computer,
+      href: "/remote-desktop/new",
+    },
+    shows("backups") &&
+      admin && {
+        key: "backup",
+        label: "Back up",
+        detail: counted(reads.backups.data?.length, "job"),
+        fallback: SHORTCUT_GLYPH.backup,
+        href: "/backups",
+      },
+  ]
+  return list.filter((shortcut): shortcut is Shortcut => Boolean(shortcut))
+}
+
+/**
+ * Two plain blocks side by side from `lg`, their heads on one hairline; one
+ * alone takes the row, where half of it beside nothing read as a missing twin.
+ */
+function Pair({ children }: { children: React.ReactNode }) {
+  const blocks = Children.toArray(children)
+  if (blocks.length === 0) return null
+  return (
+    <div
+      className={cn("grid items-start gap-8 [&>*]:min-w-0", blocks.length > 1 && "lg:grid-cols-2")}
+    >
+      {blocks}
+    </div>
+  )
 }
 
 /**
@@ -412,7 +570,8 @@ function DeploymentsSection({
   const { can } = useAuth()
   const admin = can("system.admin")
   const deployments = useMemo(() => sortFleet(fleet.data?.deployments ?? []), [fleet.data])
-  const shown = deployments.slice(0, SHOWN_PROJECTS)
+  const wide = useMediaQuery("(min-width: 1024px)")
+  const shown = deployments.slice(0, wide ? SHOWN_PROJECTS : SHOWN_PROJECTS_NARROW)
 
   return (
     <Section
@@ -478,351 +637,5 @@ function DeploymentsSection({
   )
 }
 
-/** The way on to the page a section stands for, at the end of its head. */
-function SectionLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-    >
-      {children} <ArrowRight className="size-3" />
-    </Link>
-  )
-}
-
 /** The fleet's own grid, one column short of it at the widest: two rows of three. */
 const PROJECT_GRID = "grid gap-3 lg:grid-cols-2 xl:grid-cols-3"
-
-/**
- * A module that is genuinely absent on this host, as opposed to a poll that
- * failed once. The dashboard returns a precise code for the former; a dropped
- * VPN tunnel — which is a normal Tuesday here — is anything else, and must not
- * turn a card that read "12 running" into a false claim about the host.
- */
-function moduleGone(error: Error | undefined): boolean {
-  return (
-    error instanceof ApiError &&
-    (error.code === "docker_unavailable" ||
-      error.code === "not_installed" ||
-      error.code === "no_proxy")
-  )
-}
-
-/**
- * One module, its headline figure, and the way to its page — a `StatTile`
- * behind a `StatLink`, exactly as the Docker overview draws its own run, so
- * the Services row reads as the top row does: figures on the page, hairlines
- * between them, and an arrow that says the tile goes somewhere.
- *
- * The glyph before the name is wayfinding, not decoration: it is the same
- * mark the sidebar entry carries, so the eye finds "Docker" without reading.
- * The figure rises once when its poll lands, so a page of eight tiles fills in
- * rather than flickering from bone to number.
- */
-function ServiceTile({
-  icon: Icon,
-  title,
-  href,
-  value,
-  hint,
-  tone = "default",
-  loading,
-  unavailable,
-  products = [],
-}: {
-  icon: React.ComponentType<{ className?: string }>
-  title: string
-  href: string
-  value?: React.ReactNode
-  hint?: React.ReactNode
-  /** What the figure counts, as the products themselves — `product-logo` ids. */
-  products?: string[]
-  /** Colours the figure as a reading of state, never as decoration. */
-  tone?: Tone
-  loading?: boolean
-  unavailable?: boolean
-}) {
-  const settled = !loading
-  const figure = loading ? (
-    <Skeleton className="my-1.5 h-5 w-24" />
-  ) : unavailable ? (
-    "Not available"
-  ) : value == null ? (
-    "Unreachable"
-  ) : (
-    value
-  )
-  return (
-    <StatLink href={href} label={title}>
-      <StatTile
-        className="h-full transition-colors group-hover:bg-row-hover"
-        label={
-          <>
-            <Icon aria-hidden className="mr-1.5 inline-block size-3 align-[-1.5px] text-brand" />
-            {title}
-          </>
-        }
-        value={
-          <span
-            key={settled ? "figure" : "skeleton"}
-            className={cn(
-              "inline-block max-w-full truncate align-bottom",
-              settled && "animate-rise",
-            )}
-          >
-            {figure}
-          </span>
-        }
-        tone={unavailable || value == null ? "default" : tone}
-        hint={
-          unavailable ? (
-            "on this host"
-          ) : (
-            <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-              {hint && <span className="truncate">{hint}</span>}
-              {settled && <ProductGlyphs ids={products} />}
-            </span>
-          )
-        }
-      />
-    </StatLink>
-  )
-}
-
-function DockerCard({ read }: { read: PollState<Container[]> }) {
-  const { data, error, loading } = read
-  const running = data?.filter((c) => c.state === "running")
-  const products = containerProducts(running ?? [])
-  return (
-    <ServiceTile
-      icon={Box}
-      title="Docker"
-      href="/docker"
-      products={products}
-      loading={loading && !data}
-      unavailable={moduleGone(error)}
-      value={running === undefined ? undefined : `${running.length} running`}
-      hint={data ? `${data.length} container${data.length === 1 ? "" : "s"}` : undefined}
-    />
-  )
-}
-
-function DatabasesCard({ read }: { read: PollState<DbConnection[]> }) {
-  const { data, error, loading } = read
-  // Drawn as what each one is, in the registry's words: the glyph of its
-  // flavour where the server has said one, of its driver otherwise.
-  const engines = [...new Set((data ?? []).flatMap((conn) => engineFor(conn).logo ?? []))]
-  return (
-    <ServiceTile
-      icon={Database}
-      title="Databases"
-      href="/databases"
-      products={engines}
-      loading={loading && !data}
-      unavailable={moduleGone(error)}
-      value={data ? (data.length === 0 ? "None yet" : `${data.length} connections`) : undefined}
-      hint={
-        // A saved connection that no longer opens is counted, and said to be one.
-        unusableCount(data) > 0
-          ? `${unusableCount(data)} cannot be opened`
-          : data && data.length === 1
-            ? "1 connection"
-            : undefined
-      }
-    />
-  )
-}
-
-function ProxyCard({ read }: { read: PollState<Certificate[]> }) {
-  const { data, error, loading } = read
-  const soonest = useMemo(() => {
-    if (!data || data.length === 0) return undefined
-    return [...data].sort((a, b) => a.daysLeft - b.daysLeft)[0]
-  }, [data])
-  return (
-    <ServiceTile
-      icon={Globe}
-      title="Proxy & TLS"
-      href="/proxy"
-      products={data && data.length > 0 ? ["nginx-static", "lets-encrypt"] : ["nginx-static"]}
-      loading={loading && !data}
-      unavailable={moduleGone(error)}
-      value={data ? `${data.length} certificate${data.length === 1 ? "" : "s"}` : undefined}
-      hint={
-        soonest
-          ? soonest.expired
-            ? "One expired"
-            : `Renews in ${soonest.daysLeft}d`
-          : data
-            ? "None issued"
-            : undefined
-      }
-    />
-  )
-}
-
-function SecurityCard({ read }: { read: PollState<Exposure> }) {
-  const { data, error, loading } = read
-  const grade = data ? EXPOSURE_GRADE[data.grade] : undefined
-  return (
-    <ServiceTile
-      icon={Shield}
-      title="Security"
-      href="/security"
-      products={data?.grade === "tailscale" ? ["tailscale"] : []}
-      loading={loading && !data}
-      unavailable={moduleGone(error)}
-      value={grade?.label}
-      tone={
-        grade?.verdict === "critical"
-          ? "danger"
-          : grade?.verdict === "warning"
-            ? "warning"
-            : "default"
-      }
-      hint={
-        data
-          ? `${data.allowlist.length} allowed range${data.allowlist.length === 1 ? "" : "s"} · ${data.interfaces.length} interface${data.interfaces.length === 1 ? "" : "s"}`
-          : undefined
-      }
-    />
-  )
-}
-
-function PackagesCard({ read, platform }: { read: PollState<UpdateReport>; platform: string }) {
-  const { data, error, loading } = read
-  const pending = data?.packages.length ?? 0
-  return (
-    <ServiceTile
-      icon={Puzzle}
-      title="Packages"
-      href="/packages"
-      products={[platformProduct(platform)].filter((id): id is string => Boolean(id))}
-      loading={loading && !data}
-      unavailable={moduleGone(error) || data?.available === false}
-      value={
-        data
-          ? pending === 0
-            ? "Up to date"
-            : `${pending} update${pending === 1 ? "" : "s"}`
-          : undefined
-      }
-      tone={data?.rebootRequired || (data?.securityCount ?? 0) > 0 ? "warning" : "default"}
-      hint={
-        data?.rebootRequired
-          ? "Reboot required"
-          : data && data.securityCount > 0
-            ? `${data.securityCount} security`
-            : data && pending > 0 && data.securityFiltering
-              ? "None are security updates"
-              : undefined
-      }
-    />
-  )
-}
-
-function BackupsCard({ read }: { read: PollState<BackupJob[]> }) {
-  const { data, error, loading } = read
-  const latest = useMemo(() => {
-    if (!data) return undefined
-    return data
-      .map((j) => j.lastRun)
-      .filter((r): r is BackupRun => Boolean(r))
-      .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0]
-  }, [data])
-  const next = useMemo(() => {
-    if (!data) return undefined
-    return data
-      .filter((j) => j.enabled && j.nextRun)
-      .map((j) => j.nextRun as string)
-      .sort()[0]
-  }, [data])
-  // A job that has gone quiet is as much a finding as one that failed: the
-  // schedule stopped delivering, and nothing else on the page would say so.
-  return (
-    <ServiceTile
-      icon={Archive}
-      title="Backups"
-      href="/backups"
-      loading={loading && !data}
-      unavailable={moduleGone(error)}
-      value={
-        !data
-          ? undefined
-          : data.length === 0
-            ? "None yet"
-            : !latest
-              ? "No runs yet"
-              : latest.status === "failed"
-                ? "Last run failed"
-                : latest.status === "running"
-                  ? "Running"
-                  : "Last run OK"
-      }
-      tone={latest?.status === "failed" ? "danger" : "default"}
-      hint={
-        latest
-          ? `${relativeTime(latest.startedAt)}${next ? ` · next ${relativeTime(next)}` : ""}`
-          : data && data.length > 0
-            ? `${data.length} job${data.length === 1 ? "" : "s"} scheduled`
-            : undefined
-      }
-    />
-  )
-}
-
-/**
- * The working copies on this server, drawn as the forges they push to, and
- * what is waiting in them: uncommitted work first, because it is the one
- * thing here a deploy or a restore cannot bring back.
- */
-function GitCard({ read }: { read: PollState<{ available: boolean; repos: GitRepo[] }> }) {
-  const { data, error, loading } = read
-  const repos = data?.repos ?? []
-  const dirty = repos.filter((repo) => repo.dirty).length
-  const behind = repos.filter((repo) => repo.behind > 0).length
-  const conflicted = repos.filter((repo) => repo.conflicts > 0).length
-  const forges = [...new Set(repos.flatMap((repo) => hostProduct(repo.remote) ?? []))]
-  return (
-    <ServiceTile
-      icon={GitHubMark}
-      title="Git"
-      href="/git"
-      products={forges}
-      loading={loading && !data}
-      unavailable={moduleGone(error) || data?.available === false}
-      value={
-        !data
-          ? undefined
-          : repos.length === 0
-            ? "None yet"
-            : conflicted > 0
-              ? `${conflicted} in conflict`
-              : plural(repos.length, "repository", "repositories")
-      }
-      tone={conflicted > 0 ? "warning" : "default"}
-      hint={
-        !data || repos.length === 0
-          ? undefined
-          : [dirty > 0 ? `${dirty} uncommitted` : "All committed", behind > 0 && `${behind} behind`]
-              .filter(Boolean)
-              .join(" · ")
-      }
-    />
-  )
-}
-
-function UpdatesCard() {
-  const { report, loading } = useSelfUpdate()
-  const behind = report?.releases.length ?? 0
-  return (
-    <ServiceTile
-      icon={SettingsGear}
-      title="Settings"
-      href="/dashboard"
-      loading={loading && !report}
-      value={report ? (behind === 0 ? "Up to date" : `${behind} behind`) : undefined}
-      hint={report ? `v${report.version}${report.breaking ? " · breaking change" : ""}` : undefined}
-    />
-  )
-}

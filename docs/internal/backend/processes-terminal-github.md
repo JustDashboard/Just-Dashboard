@@ -185,7 +185,9 @@ one window leaves its siblings running.
 **`su -l` cannot open a shell in a chosen directory**, because login *is* chdir-to-home; tmux's `-c` is
 not enough, since su walks straight back out. `loginArgv(shell, keepCWD)` moves the chdir off su onto the
 shell: `su -s <shell> <user> -- -l` switches user without `-l`, and the `-l` after `--` reaches the shell
-and still reads the profile. The other half is `hostexec.CommandOnHostInDir`.
+and still reads the profile. The other half is `hostexec.CommandOnHostInDir`. With the bundled startup,
+the shell su runs is the account's own POSIX login shell, so the profile read is the one ssh reads, and
+its bootstrap execs the window's shell (`JD_TERMINAL_SHELL` or the account's) for the interactive half.
 
 **A requested directory is validated on the host, never with `os.Stat`.** The dashboard process sees the
 container's filesystem, in which only `/home`, `/opt`, `/srv`, `/root`, `/etc` and a few others are the
@@ -221,7 +223,8 @@ the exact approved command. A missing tool prints the native shell error and lea
 an agent that exits also returns to that shell. Nested shells never inherit the launch variables, so
 they do not restart the agent. The create audit records the source window, agent and starting directory.
 
-The shell tests cover both agents in bash and zsh, native interactive PATH, quoted directory names,
+The shell tests cover both agents in bash and zsh, a zsh window for a bash account whose PATH is in
+`~/.profile`, `~/.local/bin` with no profile, native interactive PATH, quoted directory names,
 an rc that changes directory, a nonzero agent exit, a missing tool and removal of the launch variables
 before native configuration runs. Their cleanup requests a native shell exit and drains PTY output,
 including asynchronous editor helpers, before removing temporary HOME directories.

@@ -103,6 +103,10 @@ type Server struct {
 	// the recorder's pass reads or writes them.
 	dbMetricThinnedAt time.Time
 	dbMetricThinnedTo int64
+	// The background repair of connections sealed under another master key
+	// (database_stranded.go).
+	dbStrandedStop context.CancelFunc
+	dbStrandedDone chan struct{}
 	// The statement recorder's readings between one and the next
 	// (database_statements.go).
 	dbStatements statementHistory
@@ -110,6 +114,8 @@ type Server struct {
 	// The SQL editor's assistant: its conversations, its install-wide budget
 	// and how it reaches its provider (handlers_db_assistant.go).
 	assistant *assistantState
+	// The drawings' shared-library downloads and live rooms (boards_live.go).
+	boards *boardsState
 	// The tool calls each MCP key has in flight (handlers_mcp.go).
 	mcp mcpState
 
@@ -144,6 +150,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, svc *auth.Servic
 		streamLim: httpx.NewLimiter(3000, 600),
 		diskScans: make(chan struct{}, 2),
 		assistant: newAssistantState(),
+		boards:    newBoardsState(),
 	}
 	s.initModules()
 	return s
@@ -245,6 +252,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.modules.network.StartRouteHistory(ctx)
 	s.startDatabaseMetrics(ctx)
 	s.startDatabaseTLS(ctx)
+	s.startStrandedRepair(ctx)
 	// Two things, both of which have to happen at boot rather than on request.
 	// An upgrade that was in flight when this process started is settled here,
 	// because after a successful one *this* process is the evidence it worked
@@ -338,6 +346,7 @@ func (s *Server) Shutdown() {
 	s.stopProxyExtras()
 	s.stopDatabaseMetrics()
 	s.stopDatabaseTLS()
+	s.stopStrandedRepair()
 	s.modules.metrics.Stop()
 	s.modules.network.Stop()
 	if err := s.modules.dnsServices.Close(); err != nil && s.Log != nil {

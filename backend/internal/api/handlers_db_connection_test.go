@@ -1645,7 +1645,7 @@ var gatedCapabilities = []string{
 	"mcp",
 	// the schema
 	"ddl", "schemas", "catalog", "views", "materializedViews", "routines", "triggers", "sequences", "enums",
-	"comments", "indexes", "extensions", "rowSecurity", "schemaDiff", "pooler",
+	"comments", "indexes", "extensions", "rowSecurity", "pooler",
 	// watching and maintaining a server
 	"stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats", "maintenance",
 	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "statementsSetup", "statementHistory",
@@ -2249,6 +2249,10 @@ func TestTopologyFindsADeploymentByThePublishedAddressItHolds(t *testing.T) {
 	}
 	if drawn == nil || drawn.Kind != "deployment" || drawn.Name != "storefront" || drawn.Href != pathf("/deploy/%d", projectID) {
 		t.Fatalf("nodes = %+v, want the release drawn as the storefront deployment", topo.Nodes)
+	}
+	// The project is what the reader's website icon is drawn by.
+	if drawn.ProjectID != projectID {
+		t.Errorf("reader's project = %d, want %d", drawn.ProjectID, projectID)
 	}
 	want := topoEdge{From: pathf("db:%d", id), To: reader, Via: []string{"env"}, Status: "observed"}
 	if len(topo.Edges) != 1 || topo.Edges[0].From != want.From || topo.Edges[0].To != want.To || strings.Join(topo.Edges[0].Via, ",") != "env" {

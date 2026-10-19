@@ -68,4 +68,18 @@ export type BoardScene = {
   [key: string]: unknown
 }
 
-export type Board = BoardSummary & { scene: BoardScene }
+export type Board = BoardSummary & {
+  scene: BoardScene
+  /** The images stored beside the scene (`/boards/{id}/files/{fileId}`). */
+  fileIds: string[]
+}
+
+/** What a save answers: the stored images after it, and in a live room what the server merged in. */
+export type BoardSaved = BoardSummary & {
+  fileIds: string[]
+  /** Only for `merge: true`: the elements the server kept over the ones sent, or had alone. */
+  remoteElements?: unknown[]
+}
+
+/** The install's Excalidraw library: one, shared by every drawing and every operator. */
+export type BoardLibrary = { libraryItems: unknown[]; revision: number }

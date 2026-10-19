@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Puzzle } from "@/components/icons"
+import { Plus, Puzzle } from "@/components/icons"
 import { plural } from "@/lib/format"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -28,15 +28,16 @@ import { powerConfirmation } from "@/components/database/home/power-subject"
 import { read } from "@/components/database/home/read"
 import { usePower } from "@/components/database/home/verbs"
 import {
+  CategoryGlyph,
   DisableExtension,
   EnableExtension,
+  ExtensionMark,
   UpdateExtension,
 } from "@/components/database/ops/extension-dialogs"
 import { PreloadExtension } from "@/components/database/ops/extension-preload"
 import {
   extensionCategories,
   extensionCounts,
-  extensionLogo,
   groupExtensions,
   hasUpdate,
   listWords,
@@ -62,15 +63,15 @@ const LISTED = 12
 const EVERY_CATEGORY = "__every_category__"
 
 /**
- * One extension or module as a row you read: led by what it is — the
- * engine's own mark for what ships with it, a project's logo where one is
- * bundled — then its name as the engine spells it, its version, the sentence
- * that says what it does, what it needs to work, and its commands at the
- * row's edge.
+ * One extension or module as a row you read: led by what it is — its
+ * project's mark where one is bundled, the engine's own for its plugins and
+ * modules, and the glyph of what it does for the rest — then its name as the
+ * engine spells it, its version, the sentence that says what it does, what it
+ * needs to work, and its commands at the row's edge.
  */
 function ExtensionRow({
   name,
-  logo,
+  mark,
   version,
   newer,
   where,
@@ -79,7 +80,7 @@ function ExtensionRow({
   action,
 }: {
   name: string
-  logo?: string
+  mark: React.ReactNode
   version?: string | number
   /** A later version the server could update it to. */
   newer?: string
@@ -91,17 +92,17 @@ function ExtensionRow({
   action?: React.ReactNode
 }) {
   return (
-    <li data-extension={name} className="flex min-w-0 items-center gap-3 py-2.5">
-      <ProductLogo id={logo} size="sm" fallback={Puzzle} />
-      <div className="min-w-0 flex-1 space-y-0.5">
+    <li data-extension={name} className="flex min-w-0 items-center gap-3.5 py-3">
+      {mark}
+      <div className="min-w-0 flex-1 space-y-1">
         <p className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5">
-          <span className="min-w-0 font-mono text-xs font-medium wrap-anywhere">{name}</span>
+          <span className="min-w-0 font-mono text-body font-medium wrap-anywhere">{name}</span>
           {version !== undefined && version !== "" && <Tag mono>{version}</Tag>}
           {newer && <Tag tone="warning">{newer} available</Tag>}
           {where && <span className="text-hint text-muted-foreground">in {where}</span>}
         </p>
         {about && (
-          <p className="line-clamp-2 text-hint leading-relaxed text-muted-foreground first-letter:uppercase">
+          <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground first-letter:uppercase">
             {about}
           </p>
         )}
@@ -239,6 +240,7 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
             })
           }
         >
+          <Plus />
           Enable
         </Button>
       )
@@ -428,6 +430,12 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
                   <div key={group.category}>
                     {groups.length > 1 && (
                       <GroupRule
+                        leading={
+                          <CategoryGlyph
+                            category={group.category === OTHER ? undefined : group.category}
+                            className="size-3.5 text-muted-foreground"
+                          />
+                        }
                         label={group.category}
                         count={
                           shown.filter((one) => (one.category ?? OTHER) === group.category).length
@@ -443,7 +451,13 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
                           // A plugin catalogue lists one name once per kind of plugin.
                           key={`${extension.schema ?? ""}:${extension.name}`}
                           name={extension.name}
-                          logo={extensionLogo(extension.name, engine.logo, !data.editable)}
+                          mark={
+                            data.editable ? (
+                              <ExtensionMark extension={extension} size="md" />
+                            ) : (
+                              <ProductLogo id={engine.logo} size="md" fallback={Puzzle} />
+                            )
+                          }
                           version={extension.version ?? extension.availableVersion}
                           newer={hasUpdate(extension) ? extension.availableVersion : undefined}
                           where={extension.installed ? extension.schema : undefined}
@@ -545,7 +559,7 @@ function Modules() {
               <ExtensionRow
                 key={module.name}
                 name={module.name}
-                logo={engine.logo}
+                mark={<ProductLogo id={engine.logo} size="md" fallback={Puzzle} />}
                 version={module.version}
               />
             ))}

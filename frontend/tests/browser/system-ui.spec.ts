@@ -320,8 +320,8 @@ test.describe("system users", () => {
     // The account that needs no password leads the list.
     await expect(cards.first()).toContainText("mira")
     const ion = cards.filter({ hasText: "ion" }).first()
-    // A person is their initials; an administrator's group is said first.
-    await expect(ion).toContainText("IO")
+    // A person is their silhouette; an administrator's group is said first.
+    await expect(ion.locator("[data-slot='initials-mark'] svg")).toHaveCount(1)
     await expect(ion).toContainText("sudo")
     await expect(ion.locator("img[src='/logos/docker.svg']")).toHaveCount(1)
     // Where they last signed in from is drawn as the network it is on.

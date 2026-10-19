@@ -1645,9 +1645,15 @@ applies its normal cookie and mixed-content policies. Sites that disallow embedd
 or use an insecure URL under an HTTPS dashboard may require the direct website link. A preview is
 not a deployment health check and does not bypass the site's own framing policy.
 
-`GET /deploy/{id}/favicon` is the one request the backend makes to a deployed website, so a project
-card, the project identity line, the rail's scope head and the source end of the Notifications picture can
-carry the site's own icon (the dashboard's image policy allows only its own origin). It reads the recorded endpoint's page for `<link rel="icon">` (then
+`GET /deploy/{id}/favicon` is the one request the backend makes to a deployed website, so every place
+the dashboard draws a project can carry the site's own icon (the dashboard's image policy allows only
+its own origin): the project's own pages, and wherever another section names one — a database's
+readers and sessions, a site's application and upstreams, a port's owner, a backup's source and job,
+the Overview's activity, the logs' request records, the command palette and a drawing's card picker.
+Those payloads carry the project's id (`projectId` on a topology node, a backup resource, a deploy
+event; `deployment.projectId` on a listener; `owner.projectId` on a site), and the frontend reads the
+fleet once per page to learn whether the project has a website and a live release to ask about
+(`useProjects`, `projectFavicon`). It reads the recorded endpoint's page for `<link rel="icon">` (then
 `apple-touch-icon`), falling back to `/favicon.ico`, `/favicon.png` and `/apple-touch-icon.png`.
 Every request stays on the recorded scheme and host, port included: a declared icon or a redirect
 anywhere else is refused, not followed. It reads at most 512 KB of page and 1 MB of icon within five
@@ -1736,7 +1742,8 @@ through the same sheet the creation flow uses — in a section of its own, since
 — and never commits a half-filled sibling row when a database is connected or removed. It draws each
 link as a card carrying its engine, database, managed hostname, observed status, the variables that carry
 it and the reason reconciliation recorded when it could not repair one, under a picture of how the
-application reaches them. Because runtime activation attaches a database by reading the variable that
+application reaches them. A saved database a literal variable names by address is a card of its own,
+reached by address, rather than missing from a page that said nothing was linked. Because runtime activation attaches a database by reading the variable that
 holds its address rather than the dependency row, removing a link offers to delete the variables that
 reference it, and says so plainly when it is bound by a value it cannot name. The backup job a release
 gates on is drawn as the Backups page draws it — its products, last run, destination, last fourteen

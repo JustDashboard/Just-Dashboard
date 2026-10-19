@@ -69,6 +69,32 @@ export const databases = [
   origin: "",
 }))
 
+/** The control center's read of the same databases: each answers but the MySQL one. */
+export const databaseFleet = {
+  connections: databases.map((db, i) => ({
+    ...db,
+    ok: db.driver !== "mysql",
+    error:
+      db.driver === "mysql" ? "dial tcp 127.0.0.1:3306: connect: connection refused" : undefined,
+    version: "",
+    versionNumber: ["16.4", "8.4.2", "7.4.1", "8.0.3"][i],
+    flavor: db.driver,
+    state: db.driver === "mysql" ? "unreachable" : "running",
+    latencyMs: 2,
+    bytes: [2.1, 0, 0.04, 0.6][i] * 1024 ** 3,
+    sizesKnown: true,
+    objects: [42, 0, 1_830, 12][i],
+    objectWord: db.driver === "redis" ? "keys" : db.driver === "mongodb" ? "collections" : "tables",
+    sessions: 3,
+    source: "docker",
+    exposure: "local",
+    consumers: 1,
+    lastBackup: iso(now - 7 * 3_600_000),
+  })),
+  unreachable: [],
+  needsCredentials: [],
+}
+
 export const certificates = [
   ["shop.example.test", 61],
   ["status.example.test", 12],
@@ -100,10 +126,13 @@ const backupRun = (jobId: number, hoursAgo: number, status = "success") => ({
   trigger: "schedule",
 })
 
+// The newest run on the server succeeded, and an older job's last run
+// failed: the Overview must still say so.
 export const backups = [
-  [1, "Databases nightly", 7],
-  [2, "App data", 3],
-].map(([id, name, hoursAgo]) => ({
+  [1, "Databases nightly", 7, "failed"],
+  [2, "App data", 3, "success"],
+  [3, "Grafana volumes", 20, "success"],
+].map(([id, name, hoursAgo, status]) => ({
   id,
   name,
   sources: ["/srv"],
@@ -116,7 +145,7 @@ export const backups = [
   enabled: true,
   createdAt: iso(now - 86_400_000 * 40),
   hasCredentials: true,
-  lastRun: backupRun(Number(id), Number(hoursAgo)),
+  lastRun: backupRun(Number(id), Number(hoursAgo), String(status)),
   nextRun: iso(now + 86_400_000 - Number(hoursAgo) * 3_600_000),
   overdue: false,
   stored: { runs: 7, bytes: 7 * 1024 ** 3 },
@@ -230,6 +259,146 @@ export const exposure = {
   interfaces: ["tailscale0"],
 }
 
+export const terminal = {
+  enabled: true,
+  persistent: true,
+  login: { user: "operator", home: "/home/operator", shell: "/bin/zsh" },
+  sessions: [
+    [
+      "s-agent",
+      "shop",
+      "/home/operator/srv/shop",
+      2,
+      { working: true, busy: true, process: "claude" },
+    ],
+    ["s-logs", "logs", "/var/log", 1, { busy: true, process: "htop" }],
+    ["s-home", "operator@atlas: ~", "/home/operator", 1, {}],
+  ].map(([id, title, cwd, windows, activity], i) => ({
+    id,
+    title,
+    favourite: false,
+    live: true,
+    cwd,
+    windows,
+    attached: 0,
+    createdAt: iso(now - (i + 1) * 3 * 3_600_000),
+    ...(activity as object),
+    current: { id: `${id}-w`, name: String(title), ...(activity as object) },
+  })),
+}
+
+export const drawings = [
+  {
+    id: 4,
+    name: "Production map",
+    revision: 9,
+    createdAt: iso(now - 86_400_000 * 9),
+    updatedAt: iso(now - 50 * 60_000),
+    preview: {
+      background: "#ffffff",
+      count: 7,
+      resources: [],
+      elements: [
+        {
+          type: "rectangle",
+          x: 0,
+          y: 0,
+          w: 220,
+          h: 100,
+          stroke: "#1971c2",
+          fill: "#a5d8ff",
+          round: true,
+        },
+        { type: "text", x: 70, y: 35, w: 100, h: 30, text: "caddy", fontSize: 24, fontFamily: 5 },
+        {
+          type: "rectangle",
+          x: 360,
+          y: -60,
+          w: 200,
+          h: 90,
+          stroke: "#2f9e44",
+          fill: "#b2f2bb",
+          round: true,
+        },
+        { type: "text", x: 420, y: -30, w: 100, h: 30, text: "shop", fontSize: 24, fontFamily: 5 },
+        { type: "ellipse", x: 380, y: 90, w: 170, h: 100, stroke: "#e8590c", fill: "#ffd8a8" },
+        {
+          type: "text",
+          x: 420,
+          y: 125,
+          w: 100,
+          h: 30,
+          text: "postgres",
+          fontSize: 20,
+          fontFamily: 5,
+        },
+        {
+          type: "arrow",
+          x: 220,
+          y: 50,
+          w: 140,
+          h: -60,
+          endArrow: true,
+          points: [
+            [0, 0],
+            [140, -60],
+          ],
+        },
+      ],
+    },
+  },
+]
+
+export const units = {
+  available: true,
+  units: [
+    ...["nginx", "docker", "ssh", "cron", "tailscaled", "postgresql"].map((name) => ({
+      name: `${name}.service`,
+      activeState: "active",
+    })),
+    { name: "certbot-renew.service", activeState: "failed" },
+  ].map((unit) => ({
+    description: "",
+    loadState: "loaded",
+    subState: unit.activeState === "active" ? "running" : "failed",
+    unitFileState: "enabled",
+    enabled: true,
+    ...unit,
+  })),
+}
+
+export const remoteDesktop = {
+  engine: { state: "running", image: "guacamole/guacd", version: "1.5.5", pulled: true },
+  stream: { state: "missing", image: "", version: "", pulled: false },
+  tailnet: { installed: true, peers: [] },
+  computers: [
+    ["studio", "windows", 1],
+    ["mac-mini", "macos", 0],
+  ].map(([name, os, live]) => ({
+    id: String(name),
+    name,
+    os,
+    host: `${name}.tail.ts.net`,
+    protocol: os === "windows" ? "rdp" : "vnc",
+    port: os === "windows" ? 3389 : 5900,
+    username: "operator",
+    domain: "",
+    hasPassword: true,
+    security: "any",
+    layout: "en-us-qwerty",
+    peerId: "",
+    createdAt: now,
+    updatedAt: now,
+    lastSessionAt: now,
+    streamHostId: 0,
+    gfx: false,
+    reach: { ok: true },
+    live,
+  })),
+  sessions: [],
+  layouts: [],
+}
+
 export const selfUpdate = {
   version: "0.7.1",
   available: false,
@@ -267,6 +436,11 @@ export async function mockOverview(
   })
   await page.route("**/api/v1/docker/containers/**", (route) => json(route, containers))
   await page.route("**/api/v1/databases/", (route) => json(route, databases))
+  await page.route("**/api/v1/databases/fleet", (route) => json(route, databaseFleet))
+  await page.route("**/api/v1/terminal/", (route) => json(route, terminal))
+  await page.route("**/api/v1/boards/", (route) => json(route, drawings))
+  await page.route("**/api/v1/systemd/", (route) => json(route, units))
+  await page.route("**/api/v1/remote-desktop/", (route) => json(route, remoteDesktop))
   await page.route("**/api/v1/certificates/", (route) => json(route, certificates))
   await page.route("**/api/v1/backups/", (route) => json(route, backups))
   await page.route("**/api/v1/git/", (route) => json(route, { available: true, repos }))
