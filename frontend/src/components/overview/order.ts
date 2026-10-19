@@ -1,5 +1,4 @@
 import type { BoardSummary } from "@/lib/boards"
-import type { StickySummary } from "@/lib/stickyboard"
 import type { BackupJob, SystemdUnit, TerminalWorkspace } from "@/lib/types"
 
 /**
@@ -8,54 +7,12 @@ import type { BackupJob, SystemdUnit, TerminalWorkspace } from "@/lib/types"
  * order is the whole of what decides which rows a reader ever sees there.
  */
 
-/** A drawing or a sticky board, as one list of the things last worked on. */
-export type RecentWork =
-  | {
-      kind: "drawing"
-      key: string
-      name: string
-      updatedAt: string
-      href: string
-      drawing: BoardSummary
-    }
-  | {
-      kind: "board"
-      key: string
-      name: string
-      updatedAt: string
-      href: string
-      board: StickySummary
-    }
-
-/**
- * The drawings and boards edited most recently, newest first, as one list:
- * which tool a thing was made in is a property of it, not a reason to look in
- * two places for what was open yesterday.
- */
-export function recentWork(
+/** The drawings edited most recently, newest first. */
+export function recentDrawings(
   drawings: readonly BoardSummary[] | undefined,
-  boards: readonly StickySummary[] | undefined,
   limit: number,
-): RecentWork[] {
-  const work: RecentWork[] = [
-    ...(drawings ?? []).map((drawing) => ({
-      kind: "drawing" as const,
-      key: `drawing:${drawing.id}`,
-      name: drawing.name,
-      updatedAt: drawing.updatedAt,
-      href: `/excalidraw/${drawing.id}`,
-      drawing,
-    })),
-    ...(boards ?? []).map((board) => ({
-      kind: "board" as const,
-      key: `board:${board.id}`,
-      name: board.name,
-      updatedAt: board.updatedAt,
-      href: `/stickyboard/${board.id}`,
-      board,
-    })),
-  ]
-  return work
+): BoardSummary[] {
+  return [...(drawings ?? [])]
     .sort(
       (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.name.localeCompare(b.name),
     )

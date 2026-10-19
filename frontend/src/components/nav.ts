@@ -54,7 +54,6 @@ import {
 import type { Capability } from "@/lib/types"
 import { sectionOf, type SectionKey } from "@/lib/sidebar-sections"
 import { ExcalidrawGlyph } from "@/components/boards/glyphs"
-import { StickyGlyph } from "@/components/stickyboard/glyphs"
 
 /**
  * Every destination in the product, once.
@@ -210,7 +209,6 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
     label: "Workspace",
     items: [
       { title: "Excalidraw", href: "/excalidraw", icon: ExcalidrawGlyph },
-      { title: "Stickyboard", href: "/stickyboard", icon: StickyGlyph },
       { title: "Terminal", href: "/terminal", icon: Terminal, capability: "terminal" },
       { title: "Files", href: "/files", icon: FolderOpen },
       { title: "Git", href: "/git", icon: GitHubMark },

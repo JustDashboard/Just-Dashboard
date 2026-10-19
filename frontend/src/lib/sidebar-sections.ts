@@ -22,7 +22,6 @@ export const SECTION_KEYS = [
   "databases",
   "docker",
   "excalidraw",
-  "stickyboard",
   "terminal",
   "files",
   "git",
@@ -78,7 +77,7 @@ export const PURPOSES = [
     title: "Work on the server",
     stage: "stable",
     products: ["terminal", "git", "excalidraw"],
-    sections: ["terminal", "files", "git", "excalidraw", "stickyboard", "remote-desktop"],
+    sections: ["terminal", "files", "git", "excalidraw", "remote-desktop"],
   },
   {
     key: "containers",

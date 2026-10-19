@@ -1,29 +1,24 @@
 import { expect, test } from "bun:test"
-import { backupOrder, failedBackups, recentWork, shellOrder, unitCounts } from "./order"
+import { backupOrder, failedBackups, recentDrawings, shellOrder, unitCounts } from "./order"
 
 const at = (minutesAgo) =>
   new Date(Date.parse("2026-10-19T12:00:00Z") - minutesAgo * 60_000).toISOString()
 
-test("drawings and boards are one list, newest first, capped", () => {
-  const work = recentWork(
+test("drawings are newest first, capped", () => {
+  const drawings = recentDrawings(
     [
       { id: 1, name: "Network map", updatedAt: at(30) },
       { id: 2, name: "Old sketch", updatedAt: at(9_000) },
-    ],
-    [
       { id: 7, name: "Launch plan", updatedAt: at(5) },
       { id: 8, name: "Retro", updatedAt: at(600) },
     ],
     3,
   )
-  expect(work.map((item) => item.key)).toEqual(["board:7", "drawing:1", "board:8"])
-  expect(work[0].href).toBe("/stickyboard/7")
-  expect(work[1].href).toBe("/excalidraw/1")
+  expect(drawings.map((drawing) => drawing.id)).toEqual([7, 1, 8])
 })
 
-test("either list may be missing while the other is hidden or unread", () => {
-  expect(recentWork(undefined, [{ id: 1, name: "Only", updatedAt: at(1) }], 4)).toHaveLength(1)
-  expect(recentWork(undefined, undefined, 4)).toEqual([])
+test("the list may be missing while it is hidden or unread", () => {
+  expect(recentDrawings(undefined, 4)).toEqual([])
 })
 
 test("a working shell leads, then a busy one, then idle, then ended", () => {

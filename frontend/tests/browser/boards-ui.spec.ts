@@ -382,8 +382,8 @@ test("drawing drafts survive failed saves, sidebar and palette exits, and histor
   await openBoard(page)
   await page.getByLabel("Drawing name").fill("Retained drawing draft")
   await expect(page.getByRole("status")).toContainText("Save failed")
-  await page.locator('a[href="/stickyboard"]').first().click()
-  await expect(page).toHaveURL(/\/stickyboard$/)
+  await page.locator('a[href="/files"]').first().click()
+  await expect(page).toHaveURL(/\/files$/)
   expect(
     await page.evaluate(() => {
       const event = new Event("beforeunload", { cancelable: true })
@@ -400,12 +400,9 @@ test("drawing drafts survive failed saves, sidebar and palette exits, and histor
     .focus()
   await page.keyboard.press("Control+k")
   const palette = page.getByRole("dialog", { name: "Command palette" })
-  await palette.getByRole("combobox").fill("page: stickyboard")
-  await palette
-    .getByRole("option", { name: /Stickyboard/i })
-    .first()
-    .click()
-  await expect(page).toHaveURL(/\/stickyboard$/)
+  await palette.getByRole("combobox").fill("page: files")
+  await palette.getByRole("option", { name: /Files/i }).first().click()
+  await expect(page).toHaveURL(/\/files$/)
   await page.goBack()
   await expect(page.getByLabel("Drawing name")).toHaveValue("Retained drawing draft")
   board.refuse = null
@@ -451,8 +448,8 @@ test("returning to a drawing waits for departing saves and keeps the acknowledge
   await page.getByRole("button", { name: "Save", exact: true }).click()
   await expect.poll(() => writes).toBe(1)
   await page.getByLabel("Drawing name").fill("Newer retained snapshot")
-  await page.locator('a[href="/stickyboard"]').first().click()
-  await expect(page).toHaveURL(/\/stickyboard$/)
+  await page.locator('a[href="/files"]').first().click()
+  await expect(page).toHaveURL(/\/files$/)
   await page.goBack()
   await expect(page.getByLabel("Drawing name")).toHaveCount(0)
   release()

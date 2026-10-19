@@ -7,7 +7,6 @@ import { get } from "@/lib/api"
 import { bytes, duration, percent, rate } from "@/lib/format"
 import type { BoardSummary } from "@/lib/boards"
 import type { RdOverview } from "@/lib/remote-desktop"
-import type { StickySummary } from "@/lib/stickyboard"
 import type {
   BackupJob,
   Certificate,
@@ -311,12 +310,7 @@ export default function OverviewPage() {
           drawn — so a visit can go straight back to it. */}
       <Pair>
         {reads.terminal.enabled && <ShellsPanel read={reads.terminal} />}
-        {(reads.drawings.enabled || reads.boards.enabled) && (
-          <RecentWorkPanel
-            drawings={reads.drawings.enabled ? reads.drawings : undefined}
-            boards={reads.boards.enabled ? reads.boards : undefined}
-          />
-        )}
+        {reads.drawings.enabled && <RecentWorkPanel drawings={reads.drawings} />}
       </Pair>
 
       {/* The data on the machine and the copies of it, side by side: a
@@ -453,15 +447,6 @@ function useModuleReads(
       ),
       enabled: shows("excalidraw"),
     },
-    boards: {
-      ...usePoll<StickySummary[]>(
-        (signal) => get<StickySummary[]>("/stickyboards/", undefined, signal),
-        120_000,
-        [],
-        { enabled: shows("stickyboard") },
-      ),
-      enabled: shows("stickyboard"),
-    },
     remote: {
       ...usePoll<RdOverview>(
         (signal) => get<RdOverview>("/remote-desktop/", undefined, signal),
@@ -524,14 +509,6 @@ function shortcutsFor(
         detail: counted(reads.drawings.data?.length, "drawing"),
         product: "excalidraw",
         create: "drawing",
-      },
-    reads.boards.enabled &&
-      write && {
-        key: "board",
-        label: "New board",
-        detail: counted(reads.boards.data?.length, "board"),
-        fallback: SHORTCUT_GLYPH.board,
-        create: "board",
       },
     shows("files") && {
       key: "files",
