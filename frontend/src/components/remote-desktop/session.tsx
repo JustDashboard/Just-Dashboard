@@ -90,13 +90,15 @@ const DISCONNECTED = 5
  *
  * Laid out as the terminal is: the computers down the left, the session in
  * the middle under a strip of its commands, and its tools — the clipboard,
- * files and the keys a browser keeps for itself — on the right. The screen
- * is drawn by Guacamole's own browser client from the protocol the backend
- * relays; the backend did the connection's handshake, so the password never
- * reached this page. The remote screen is asked to be the size of the frame
- * and follows it as the window changes, and the pointer is the computer's
- * own cursor drawn by the browser, so it moves without waiting for the
- * network.
+ * files and the keys a browser keeps for itself — on the right. Unlike the
+ * terminal it takes the shell's whole content area, edge to edge: the page's
+ * measure and gutter were space taken from the screen, which is the one
+ * thing here worth every pixel. The screen is drawn by Guacamole's own
+ * browser client from the protocol the backend relays; the backend did the
+ * connection's handshake, so the password never reached this page. The
+ * remote screen is asked to be the size of the frame and follows it as the
+ * window changes, and the pointer is the computer's own cursor drawn by the
+ * browser, so it moves without waiting for the network.
  *
  * Keys go to the computer while the screen has focus; fullscreen also asks
  * the browser for the keyboard, so Alt+Tab and the Windows key reach the
@@ -152,6 +154,11 @@ export function RemoteSession({
     "smooth",
   )
   const [streamAttempt, setStreamAttempt] = useState(0)
+  // The screen's shape belongs to the computer, and is learned from its stream.
+  const [screenShape, setScreenShape] = useViewState<number | null>(
+    `remote-desktop.screen-shape.${id}`,
+    null,
+  )
   const [pointer, setPointer] = useViewState("remote-desktop.stream-pointer", false)
   const [density, setDensity] = useViewState<ControlDensity>(
     "remote-desktop.control-density",
@@ -519,6 +526,10 @@ export function RemoteSession({
       ? sessionProblem(phase.code, phase.message, computer)
       : undefined
 
+  // Around a screen whose shape is not the window's: the workspace's own
+  // ground in the page, and black in fullscreen, where the window is the monitor.
+  const screenGround = immersive ? "bg-black" : "bg-surface-sunken"
+
   const sessionPanel = computer ? (
     <SessionPanel
       computer={computer}
@@ -561,7 +572,7 @@ export function RemoteSession({
   ) : null
 
   return (
-    <Page fill className="gap-2 px-2 py-2 md:px-3 md:py-3">
+    <Page fill className="max-w-none gap-0 p-0 md:gap-0 md:p-0">
       <h1 className="sr-only">
         {computer ? `Remote Desktop: ${computer.name}` : "Remote Desktop"}
       </h1>
@@ -569,8 +580,8 @@ export function RemoteSession({
         ref={workspace}
         data-slot="remote-workspace"
         className={cn(
-          "relative flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border bg-card",
-          immersive && "fixed inset-0 z-50 rounded-none border-0 bg-background",
+          "relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-card",
+          immersive && "fixed inset-0 z-50 bg-background",
         )}
       >
         {!immersive && rail && data && (
@@ -685,7 +696,7 @@ export function RemoteSession({
           </PaneHeader>
 
           {!control && computer ? (
-            <div className="relative min-h-0 flex-1 bg-surface-sunken">
+            <div className={cn("relative min-h-0 flex-1", screenGround)}>
               <StreamPane
                 computer={computer}
                 stream={stream}
@@ -694,6 +705,8 @@ export function RemoteSession({
                 onPlayback={setPlaying}
                 onStats={setStreamStats}
                 quality={quality}
+                shape={screenShape ?? undefined}
+                onShape={setScreenShape}
                 attempt={streamAttempt}
                 pointer={pointer}
                 onFrame={(node) => {
@@ -705,7 +718,7 @@ export function RemoteSession({
             </div>
           ) : (
             <div
-              className="relative min-h-0 flex-1 bg-surface-sunken"
+              className={cn("relative min-h-0 flex-1", screenGround)}
               onDragOver={(event) => {
                 if (drive) event.preventDefault()
               }}

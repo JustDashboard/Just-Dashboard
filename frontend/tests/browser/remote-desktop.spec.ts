@@ -316,14 +316,17 @@ test("Stream pairs with Sunshine, keeps the PIN over Control while it is typed, 
   expect(await settings()).toMatchObject({
     dataTransport: "websocket",
     videoCodec: "h264",
-    videoSize: "1080p",
+    videoSize: "custom",
+    videoSizeCustom: { width: 1920, height: 1080 },
     fps: 60,
     bitrate: 20000,
     videoFrameQueueSize: 3,
   })
 
   await page.getByRole("radio", { name: "Sharp" }).click()
-  await expect.poll(async () => (await settings()).videoSize).toBe("1440p")
+  await expect
+    .poll(async () => (await settings()).videoSizeCustom)
+    .toEqual({ width: 2560, height: 1440 })
   expect((await settings()).bitrate).toBe(40000)
 })
 
@@ -537,10 +540,87 @@ test("a browser on the tailnet is sent the stream over WebRTC, at up to Max", as
   await panel.getByRole("radio", { name: "Max" }).click()
   await expect.poll(async () => (await settings()).fps).toBe(120)
   expect(await settings()).toMatchObject({
-    videoSize: "1440p",
+    videoSize: "custom",
+    videoSizeCustom: { width: 2560, height: 1440 },
     bitrate: 80000,
     videoFrameQueueSize: 3,
   })
+})
+
+/**
+ * Sunshine's part, played by the bridge's page: a 16:10 screen fitted into
+ * the size the stream asks for, padded black, drawn the way the bridge draws
+ * its picture — fixed in the middle of its page, contained.
+ */
+const SIXTEEN_TEN_BRIDGE = `<!doctype html><title>Stream</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; }
+  .video-stream {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 100%; height: 100%; object-fit: contain;
+  }
+</style>
+<div id="input" tabindex="0"></div><div id="root"></div>
+<script>
+  const settings = JSON.parse(localStorage.getItem("mlSettings") || "{}")
+  const { width, height } = settings.videoSizeCustom
+  const canvas = document.createElement("canvas")
+  canvas.className = "video-stream"
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext("2d")
+  context.fillStyle = "#000"
+  context.fillRect(0, 0, width, height)
+  const screen = Math.min(width / 1.6, height)
+  context.fillStyle = "#3a6ea5"
+  context.fillRect((width - screen * 1.6) / 2, (height - screen) / 2, screen * 1.6, screen)
+  document.getElementById("root").append(canvas)
+</script>`
+
+test("a stream takes the whole content area, in the computer's own shape, with nothing letterboxed", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await mockRemoteDesktop(page, { stream: streamView(PAIRED) })
+  await page.route("**/api/v1/remote-desktop/bridge/**", (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: SIXTEEN_TEN_BRIDGE }),
+  )
+  await page.goto(`/remote-desktop/${MAC}?mode=stream`)
+  await page.getByRole("button", { name: "Hide the computers" }).click()
+  await page.getByRole("button", { name: "Hide the session tools" }).click()
+
+  // The session is the shell's content area, edge to edge: no measure, no gutter.
+  const workspace = await page.locator("[data-slot=remote-workspace]").boundingBox()
+  const area = await page.locator("[data-workspace-shell-scroll]").boundingBox()
+  expect(workspace).toEqual(area)
+
+  // Sunshine padded the Mac into 16:9; the stream is asked for again at 16:10.
+  const settings = async () =>
+    page.evaluate(() => JSON.parse(localStorage.getItem("mlSettings") ?? "{}").videoSizeCustom)
+  await expect.poll(settings).toEqual({ width: 1920, height: 1080 })
+  await expect.poll(settings, { timeout: 10_000 }).toEqual({ width: 1728, height: 1080 })
+
+  // The frame is the stream's own shape, as large as the space under the strip.
+  const frame = page.locator('iframe[data-slot="remote-stream"]')
+  const ground = frame.locator("xpath=..")
+  await expect
+    .poll(async () => {
+      const box = await frame.boundingBox()
+      return box ? Math.round((box.width / box.height) * 100) / 100 : 0
+    })
+    .toBe(1.6)
+  const [frameBox, groundBox] = [await frame.boundingBox(), await ground.boundingBox()]
+  expect(
+    Math.min(
+      Math.abs(frameBox!.width - groundBox!.width),
+      Math.abs(frameBox!.height - groundBox!.height),
+    ),
+  ).toBeLessThanOrEqual(1)
+
+  // The computer's shape is remembered: the next session asks for it at once.
+  await page.reload()
+  await expect(frame).toBeVisible()
+  await expect.poll(settings, { timeout: 1500 }).toEqual({ width: 1728, height: 1080 })
 })
 
 for (const width of [390, 1024]) {

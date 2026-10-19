@@ -13,6 +13,8 @@ import {
   reachability,
   sessionMode,
   sessionProblem,
+  screenShape,
+  streamSize,
   streamPageUrl,
   streamStage,
 } from "./remote-desktop"
@@ -247,7 +249,8 @@ describe("bridgeSettings", () => {
       mouseMode: "relative",
       dataTransport: "websocket",
       videoCodec: "h264",
-      videoSize: "1440p",
+      videoSize: "custom",
+      videoSizeCustom: { width: 2560, height: 1440 },
       fps: 60,
       bitrate: 40000,
       videoFrameQueueSize: 3,
@@ -257,10 +260,78 @@ describe("bridgeSettings", () => {
   test("asks for WebRTC only where the backend says this browser can reach it, with a fallback", () => {
     expect(bridgeSettings({}, "max", "webrtc")).toMatchObject({
       dataTransport: "auto",
-      videoSize: "1440p",
+      videoSize: "custom",
+      videoSizeCustom: { width: 2560, height: 1440 },
       fps: 120,
       bitrate: 80000,
     })
+  })
+
+  test("asks for the computer's screen in its own shape once it is known", () => {
+    expect(
+      bridgeSettings({ videoSize: "1080p" }, "smooth", "websocket", 3024 / 1964),
+    ).toMatchObject({ videoSize: "custom", videoSizeCustom: { width: 1662, height: 1080 } })
+  })
+})
+
+describe("streamSize", () => {
+  test("is the quality's height at the screen's shape, in even pixels", () => {
+    expect(streamSize("smooth")).toEqual({ width: 1920, height: 1080 })
+    expect(streamSize("light", 16 / 10)).toEqual({ width: 1152, height: 720 })
+    expect(streamSize("sharp", 2560 / 1664)).toEqual({ width: 2216, height: 1440 })
+    expect(streamSize("max", 21 / 9)).toEqual({ width: 3360, height: 1440 })
+  })
+})
+
+/** A frame `width` by `height` lit in `rect` and black elsewhere, as Sunshine pads one. */
+function frame(width, height, rect = { x: 0, y: 0, width, height }, level = 200) {
+  const pixels = new Uint8ClampedArray(width * height * 4)
+  for (let y = rect.y; y < rect.y + rect.height; y++)
+    for (let x = rect.x; x < rect.x + rect.width; x++) {
+      const at = (y * width + x) * 4
+      pixels[at] = level
+      pixels[at + 1] = level
+      pixels[at + 2] = level
+      pixels[at + 3] = 255
+    }
+  return pixels
+}
+
+describe("screenShape", () => {
+  test("a frame lit to every edge is the screen's own shape", () => {
+    expect(screenShape(frame(160, 90), 160, 90, 16 / 9)).toBe(16 / 9)
+  })
+
+  test("padding down both sides gives away a narrower screen", () => {
+    // A 16:10 Mac fitted into 16:9 is 144 of 160 columns wide.
+    const shape = screenShape(frame(160, 90, { x: 8, y: 0, width: 144, height: 90 }), 160, 90)
+    expect(shape).toBeCloseTo(1.6, 5)
+  })
+
+  test("padding above and below gives away a wider screen", () => {
+    // 21:9 fitted into 16:9 is 69 of 90 rows tall, give or take a row.
+    const shape = screenShape(frame(160, 90, { x: 0, y: 10, width: 160, height: 70 }), 160, 90)
+    expect(shape).toBeCloseTo(160 / 70, 5)
+  })
+
+  test("reads against the picture's own aspect, not the sample's rounding", () => {
+    const shape = screenShape(frame(160, 90, { x: 8, y: 0, width: 144, height: 90 }), 160, 90, 1.8)
+    expect(shape).toBeCloseTo(1.8 * (144 / 160), 5)
+  })
+
+  test("dark at one edge, on both axes, or everywhere is the picture, not padding", () => {
+    expect(screenShape(frame(160, 90, { x: 20, y: 0, width: 140, height: 90 }), 160, 90)).toBe(
+      undefined,
+    )
+    expect(screenShape(frame(160, 90, { x: 20, y: 10, width: 120, height: 70 }), 160, 90)).toBe(
+      undefined,
+    )
+    expect(screenShape(frame(160, 90, undefined, 0), 160, 90)).toBe(undefined)
+  })
+
+  test("a dark-grey picture is still lit; only near-black is padding", () => {
+    expect(screenShape(frame(160, 90, undefined, 30), 160, 90)).toBe(160 / 90)
+    expect(screenShape(frame(160, 90, undefined, 8), 160, 90)).toBe(undefined)
   })
 })
 
