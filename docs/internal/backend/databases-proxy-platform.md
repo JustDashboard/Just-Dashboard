@@ -2200,10 +2200,14 @@ the detail of each classifier is below, with the surface it guards.
   every write, whether or not it succeeded.
   A request may name 100 tables and 10,000 rows a table, 100,000 in all.
 - **The page** is a card of its own on the Generate page (`components/database/generate/seed.tsx`,
-  `seed-model.ts`), gated on `seed`: the tables (every one, or the ones ticked), the rows each and a
-  table's own count, a tab per table in the order they are written with its first rows under column
-  heads that name each column's type and generator, the statement a row is written with, and
-  `SqlReview` before the write. Tests: `dbx/seed_test.go` (SQLite, and the pure parts),
+  `seed-model.ts`), gated on `seed`: a `Notice` that says what it does — made-up test rows inserted
+  into the connection, named with its environment label and amber where that label says production,
+  the rows already there kept, nothing inserted before the review — then the tables (every one, or
+  the ones ticked), the rows each and a table's own count, a tab per table in the order they are
+  inserted with what it references and its rows now and after, its first rows under two-line column
+  heads (the name with its type, then the generator, a menu or fixed on the same line), the statement
+  a row is inserted with, and `SqlReview` before the write. The command is *Insert N rows*, the data
+  workbench's verb for adding a row. Tests: `dbx/seed_test.go` (SQLite, and the pure parts),
   `dbx/seed_live_test.go` (PostgreSQL, MariaDB, MySQL 8, SQL Server, Oracle and ClickHouse; the tables
   are named `jdt_seed_…`), `api/handlers_db_seed_test.go` and `tests/browser/database-seed.spec.ts`.
 

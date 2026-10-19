@@ -321,17 +321,30 @@ test("Seed data plans every table when it is chosen, parents first, and shows ea
   const tabs = page.getByRole("tablist", { name: "Tables seeded" }).getByRole("tab")
   await expect(tabs).toHaveText(["customers25", "orders25", "Mixed Case Table, left out"])
   await expect(page.getByText("2 tables · 50 rows · 1 table left out")).toBeVisible()
+  // What it does is said before anything is pressed.
+  await expect(page.getByText("Inserts made-up test rows into shop", { exact: true })).toBeVisible()
   const grid = page.getByRole("table", { name: "The first rows of customers" })
   await expect(grid.getByRole("row")).toHaveCount(9)
+  // What fills a column sits on one line across the heads, whether it is a menu or fixed.
+  const heads = grid.getByRole("columnheader")
+  const centre = (box: { y: number; height: number } | null) => box!.y + box!.height / 2
+  const fixed = centre(await heads.nth(0).getByText("Numbered by the server").boundingBox())
+  const menu = centre(
+    await heads
+      .nth(1)
+      .getByRole("button", { name: "email is filled with Email address" })
+      .boundingBox(),
+  )
+  expect(Math.abs(fixed - menu)).toBeLessThan(1)
   await expect(grid).toContainText(`ann.${first.seed % 100}.4@example.com`)
   // What the server decides stands as what decides it; a NULL the seed writes is a NULL.
   await expect(grid.getByText("numbered by the server").first()).toBeVisible()
   await expect(grid.getByText("NULL").first()).toBeVisible()
-  await expect(page.getByText("3 rows there now")).toBeVisible()
-  await expect(page.getByText("Points at no other table being filled")).toBeVisible()
+  await expect(page.getByText("3 rows now, 28 after")).toBeVisible()
+  await expect(page.getByText("References no other table being filled")).toBeVisible()
 
   await tabs.nth(1).click()
-  await expect(page.getByText("Written after customers")).toBeVisible()
+  await expect(page.getByText("Inserted after customers, which it references")).toBeVisible()
   await expect(
     page
       .getByRole("table", { name: "The first rows of orders" })
@@ -398,9 +411,9 @@ test("rows, tables and a column's generator are asked for again by themselves", 
   // A table's own count the server would refuse holds the plan, and the write.
   await page.getByLabel("Rows for customers").fill("0")
   await expect(page.getByText("Rows for customers: a whole number from 1 to 10,000.")).toBeVisible()
-  await expect(page.getByRole("button", { name: /^Write \d+ rows?$/ })).toBeDisabled()
+  await expect(page.getByRole("button", { name: /^Insert \d+ rows?$/ })).toBeDisabled()
   await page.getByLabel("Rows for customers").fill("7")
-  await expect(page.getByRole("button", { name: /^Write \d+ rows?$/ })).toBeEnabled()
+  await expect(page.getByRole("button", { name: /^Insert \d+ rows?$/ })).toBeEnabled()
 
   // New values: the same tables with another seed.
   const seed = sent.plans.at(-1)!.seed
@@ -435,24 +448,24 @@ test("writing shows the statements, sends the plan on screen, and says what went
   await page.goto("/databases/1/generate")
   await seedCard(page).click()
   await page.getByLabel("Rows per table").fill("10")
-  await expect(page.getByRole("button", { name: "Write 20 rows" })).toBeEnabled()
-  await page.getByRole("button", { name: "Write 20 rows" }).click()
+  await expect(page.getByRole("button", { name: "Insert 20 rows" })).toBeEnabled()
+  await page.getByRole("button", { name: "Insert 20 rows" }).click()
 
-  const review = page.getByRole("dialog", { name: "Write 20 rows into 2 tables" })
-  await expect(review.getByRole("list", { name: "What is written" })).toContainText("customers")
+  const review = page.getByRole("dialog", { name: "Insert 20 rows into 2 tables" })
+  await expect(review.getByRole("list", { name: "What is inserted" })).toContainText("customers")
   await expect(review.getByText('INSERT INTO "public"."customers"')).toBeVisible()
   await expect(
-    review.getByText("One transaction: if any of it fails, nothing is written."),
+    review.getByText("One transaction: if any of it fails, nothing is inserted."),
   ).toBeVisible()
   const planned = sent.plans.at(-1)!
-  await review.getByRole("button", { name: "Write 20 rows" }).click()
+  await review.getByRole("button", { name: "Insert 20 rows" }).click()
   await expect.poll(() => sent.writes.length).toBe(1)
   expect(sent.writes[0]).toEqual(planned)
 
   await expect(review).toBeHidden()
   const written = page.getByRole("list", { name: "What was written" })
-  await expect(page.getByText("Wrote 19 rows into 2 tables")).toBeVisible()
-  await expect(written).toContainText("9 written · 1 refused")
+  await expect(page.getByText("Inserted 19 rows into 2 tables")).toBeVisible()
+  await expect(written).toContainText("9 inserted · 1 refused")
   await expect(written).toContainText("Row 4: violates check constraint")
   await expect(written.getByRole("link", { name: "customers" })).toHaveAttribute(
     "href",
@@ -470,7 +483,7 @@ test("a protected connection and a read-only role are shown the rows and cannot 
   await mockSeed(page, { rows: { 1: { readOnly: true } } })
   await page.goto("/databases/1/generate")
   await seedCard(page).click()
-  const command = page.getByRole("button", { name: "Write 50 rows" })
+  const command = page.getByRole("button", { name: "Insert 50 rows" })
   await expect(command).toBeDisabled()
   await expect(command).toHaveAttribute("title", /shop is protected/)
 
@@ -478,9 +491,20 @@ test("a protected connection and a read-only role are shown the rows and cannot 
   await mockSeed(page2, { capabilities: ["read"] })
   await page2.goto("/databases/1/generate")
   await seedCard(page2).click()
-  const viewer = page2.getByRole("button", { name: "Write 50 rows" })
+  const viewer = page2.getByRole("button", { name: "Insert 50 rows" })
   await expect(viewer).toBeDisabled()
-  await expect(viewer).toHaveAttribute("title", "Writing rows needs a role that may change data.")
+  await expect(viewer).toHaveAttribute("title", "Inserting rows needs a role that may change data.")
+})
+
+test("a connection labelled production is named so where the rows are explained", async ({
+  page,
+}) => {
+  await mockSeed(page, { rows: { 1: { environment: "production" } } })
+  await page.goto("/databases/1/generate")
+  await seedCard(page).click()
+  await expect(
+    page.getByText("Inserts made-up test rows into shop (production)", { exact: true }),
+  ).toBeVisible()
 })
 
 test("an engine without seed data has no card for it", async ({ page }) => {
