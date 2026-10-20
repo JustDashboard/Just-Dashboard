@@ -766,8 +766,11 @@ test.describe("found on this server", () => {
     await expect(foundRow(page, "data.db")).toContainText("/srv/app")
     await expect(foundRow(page, "data.db")).not.toContainText("/srv/app/data.db")
 
-    // The dashboard's own store is counted behind a fold, with no way to connect it.
-    await found.getByText("Kept by other programs").click()
+    // The dashboard's own store is counted behind the one fold of what is
+    // set aside, with no way to connect it.
+    await expect(found.getByText("1 kept by other programs", { exact: false })).toBeVisible()
+    await found.getByText("Set aside", { exact: true }).click()
+    await found.getByRole("button", { name: /^Other programs/ }).click()
     await expect(foundRow(page, "vpsd.db")).toContainText("never connected")
     await expect(found.getByRole("button", { name: "Open vpsd.db" })).toHaveCount(0)
   })
@@ -967,10 +970,12 @@ test.describe("found on this server", () => {
     await expect
       .poll(() => server.bodies("POST /databases/inventory/ignore"))
       .toEqual([{ key: "docker:sessions", ignored: true }])
-    await page.getByText("Ignored", { exact: true }).click()
+    await page.getByText("Set aside", { exact: true }).click()
+    await page.getByRole("button", { name: /^Ignored/ }).click()
     await expect(page.getByRole("button", { name: "Stop ignoring sessions" })).toBeVisible()
-    // A key whose server is gone can still be taken off the list.
-    await page.getByRole("button", { name: "Stop ignoring docker:long-gone" }).click()
+    // Keys whose server is gone are counted, not listed, and forgotten together.
+    await expect(page.getByText("1 ignored item is no longer on this server.")).toBeVisible()
+    await page.getByRole("button", { name: "Forget it" }).click()
     await expect
       .poll(() => server.bodies("POST /databases/inventory/ignore").at(-1))
       .toEqual({
@@ -1591,9 +1596,10 @@ for (const [label, viewport] of [
     await page.goto("/databases")
     await expect(card(page, "shop")).toBeVisible()
     await keepsTheRules(page, "/databases", "reading")
-    await page.getByText("Ignored", { exact: true }).click()
-    await page.getByText("Kept by other programs").click()
-    await keepsTheRules(page, "/databases with its folds open", "reading")
+    await page.getByText("Set aside", { exact: true }).click()
+    await keepsTheRules(page, "/databases with what is set aside open", "reading")
+    await page.getByRole("button", { name: /^Ignored/ }).click()
+    await keepsTheRules(page, "/databases with the ignored ones shown", "reading")
 
     await card(page, "shop").getByRole("button", { name: "Actions for shop" }).click()
     await page.getByRole("menuitem", { name: "Forget" }).click()

@@ -5,6 +5,7 @@ import {
   foundAction,
   foundActionWords,
   foundShelves,
+  instanceName,
   hostInstance,
   instanceAddress,
   instanceHref,
@@ -239,6 +240,25 @@ describe("the shelves of what was found", () => {
         file: { ...file.file, holder: "tool" },
       }),
       instance({ key: "docker:skip", name: "skip", ignored: true }),
+      instance({
+        ...file,
+        key: "file:/var/backups/jd/vpsd.db",
+        name: "vpsd.db",
+        file: { ...file.file, path: "/var/backups/jd/vpsd.db", holder: "backup" },
+      }),
+      instance({
+        key: "data:/var/lib/docker/volumes/old/_data",
+        kind: "data",
+        name: "old",
+        driver: "",
+        connectable: false,
+        file: {
+          path: "/var/lib/docker/volumes/old/_data",
+          size: 0,
+          modified: "",
+          holder: "container",
+        },
+      }),
     ],
     scans: [],
     ignored: ["docker:skip", "docker:long-gone"],
@@ -246,11 +266,15 @@ describe("the shelves of what was found", () => {
     checkedAt: "",
   }
 
-  test("connected ones are left out; the rest are servers, files, kept and ignored", () => {
+  test("connected ones are left out; the rest are servers, files, and what is set aside", () => {
     const shelves = foundShelves(inventory)
     expect(shelves.servers.map((one) => one.name)).toEqual(["shop-db", "old-db", "mc"])
     expect(shelves.files.map((one) => one.name)).toEqual(["data.db"])
     expect(shelves.kept).toHaveLength(2)
+    // A copy kept aside and a data directory with no server are not offered
+    // as things to take.
+    expect(shelves.backups.map((one) => one.key)).toEqual(["file:/var/backups/jd/vpsd.db"])
+    expect(shelves.leftover.map((one) => one.name)).toEqual(["old"])
     expect(shelves.ignored.map((one) => one.name)).toEqual(["skip"])
     expect(shelves.gone).toEqual(["docker:long-gone"])
     expect(foundShelves(undefined).servers).toEqual([])
@@ -267,6 +291,12 @@ describe("the shelves of what was found", () => {
       "old-db",
       "mc",
     ])
+  })
+
+  test("an anonymous volume is titled by its ID cut to twelve, as Docker lists it", () => {
+    const hash = "c85d8585e2dad6a12ee3408eda77d915155437414dd871baf02c286d27b07714"
+    expect(instanceName(instance({ name: hash }))).toBe("c85d8585e2da")
+    expect(instanceName(instance({ name: "pg-data" }))).toBe("pg-data")
   })
 
   test("private state is a tool's, the system's or the dashboard's own", () => {

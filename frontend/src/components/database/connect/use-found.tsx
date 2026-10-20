@@ -58,6 +58,7 @@ export function useFound({
   const ask = (instance: DbInstance, message?: string) =>
     setAsking((held) => ({ instance, message, open: true, turn: (held?.turn ?? 0) + 1 }))
   const [syncing, setSyncing] = useState(false)
+  const [forgetting, setForgetting] = useState(false)
   const refreshInventory = inventory.refresh
 
   const engineOfInstance = useCallback(
@@ -187,6 +188,25 @@ export function useFound({
     }
   }
 
+  /**
+   * Take back the ignore marks of things no longer on this machine. A mark
+   * outlives what it names on purpose — a container recreated under its old
+   * name is still left alone — so they go only when the operator says.
+   */
+  const forget = async (keys: string[]) => {
+    setForgetting(true)
+    try {
+      await Promise.all(
+        keys.map((key) => post("/databases/inventory/ignore", { key, ignored: false })),
+      )
+    } catch (err) {
+      notify.error("Could not forget them", err)
+    } finally {
+      refreshInventory()
+      setForgetting(false)
+    }
+  }
+
   /** Connect every server that states its own credentials, in one request. */
   const connectAll = async () => {
     setSyncing(true)
@@ -268,6 +288,8 @@ export function useFound({
      */
     askHost: (server: DbCredentialServer) => ask(hostInstance(server)),
     ignore,
+    forget,
+    forgetting,
     connectAll,
     syncing,
     busyWord,

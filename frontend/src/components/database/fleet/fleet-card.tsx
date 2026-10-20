@@ -194,9 +194,10 @@ export function FleetCard({
             {failed ? (
               // What the server said, where its figures would be: a failure
               // is never drawn as three zeros. Two whole lines and no part
-              // of a third: the block is the height of two lines of its own
-              // leading, inside the height the figures take on other cards.
-              <div className="flex min-h-10 min-w-0 items-start">
+              // of a third, in a block that holds the height the figures take
+              // on other cards: shorter, a failed card stood shorter than its
+              // neighbours wherever a row did not stretch it.
+              <div className="flex min-h-12 min-w-0 items-start">
                 <p
                   data-slot="fleet-error"
                   title={status.error}
@@ -210,20 +211,22 @@ export function FleetCard({
               // the three words ("Collections"), so it takes the larger share.
               <div
                 className={cn(
-                  "grid min-h-10 grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-x-2.5 [&>*+*]:border-l [&>*+*]:border-hairline [&>*+*]:pl-2.5",
+                  "grid min-h-12 grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-x-2.5 [&>*+*]:border-l [&>*+*]:border-hairline [&>*+*]:pl-2.5",
                   down && "opacity-60",
                 )}
               >
                 <Metric
                   label="Stored"
                   value={stored !== undefined ? bytes(stored) : "—"}
+                  // The track is drawn on every card, empty where nothing
+                  // reports a size: without it a card whose size is unknown
+                  // stood a bar's height shorter than its neighbours.
                   hint={
-                    stored !== undefined &&
-                    largest > 0 && (
-                      <span
-                        aria-hidden
-                        className="mt-1.5 block h-1 w-full max-w-20 overflow-hidden rounded-full bg-meter-track"
-                      >
+                    <span
+                      aria-hidden
+                      className="mt-1.5 block h-1 w-full max-w-20 overflow-hidden rounded-full bg-meter-track"
+                    >
+                      {stored !== undefined && largest > 0 && (
                         <span
                           data-slot="fleet-size"
                           className="block h-full rounded-full transition-[width] duration-700 ease-out"
@@ -232,8 +235,8 @@ export function FleetCard({
                             background: hue,
                           }}
                         />
-                      </span>
-                    )
+                      )}
+                    </span>
                   }
                 />
                 <Metric
@@ -250,9 +253,13 @@ export function FleetCard({
             {/* Gaps separate the facts rather than a middle dot, which is left
                 dangling at the end of a line wherever this wraps. */}
             <div className="mt-auto flex min-w-0 flex-col gap-2 border-t border-hairline pt-3 text-hint text-muted-foreground">
+              {/* One line on every card, held open when it has nothing to
+                  say: wrapped onto a second, it made one card of a row taller
+                  than the rest. A fact that does not fit is cut, and its
+                  whole sentence is in the card's own pages. */}
               <div
                 data-slot="fleet-facts"
-                className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"
+                className="flex h-5 min-w-0 items-center gap-x-3 overflow-hidden whitespace-nowrap [&>*]:min-w-0 [&>*]:truncate"
               >
                 {feeds && feeds.count > 0 && (
                   <span className="flex shrink-0 items-center gap-1.5">
@@ -264,6 +271,7 @@ export function FleetCard({
                 {backup?.newest ? (
                   <span
                     className={cn("shrink-0", factTone(concernLevel(concerns, "stale-backup")))}
+                    title={`backed up ${relativeTime(backup.newest)}`}
                   >
                     backed up {relativeTime(backup.newest)}
                   </span>
@@ -280,7 +288,7 @@ export function FleetCard({
                   )
                 )}
                 {entry.exposure !== "unknown" && (
-                  <span className={cn("shrink-0", factTone(concernLevel(concerns, "public")))}>
+                  <span className={factTone(concernLevel(concerns, "public"))}>
                     {has("public") ? "open to the internet" : reachWord(entry.exposure)}
                   </span>
                 )}

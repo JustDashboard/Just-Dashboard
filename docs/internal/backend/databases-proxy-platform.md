@@ -165,12 +165,17 @@ is connected by naming the instance found, not by typing its address again.
   twenty seconds (`dbInventoryFresh`), kept apart for administrators and for everybody else because they
   are different readings, not one filtered into the other. A file says whose it is (`file.holder`): the
   dashboard's own store, a container's volume, a deployment's or a compose stack's directory, the
-  system's (`/var/lib`, `/var/cache`, an NSS `nssdb`), a tool's, or an application's. A tool's is a
-  program's own state — anything under a hidden directory, a browser's or a browser driver's profile
-  (a directory naming Playwright, Puppeteer, Chrome, Chromium, Firefox or Mozilla), or a scratch
-  directory below the top of the tree (`tmp`, `temp`, or a name ending in either) — and the control
-  center folds a tool's and the system's under *Kept by other programs* rather than offering them to
-  open.
+  system's (`/var/lib`, `/var/cache`, an NSS `nssdb`), a backup, a tool's, or an application's. A
+  backup is a copy kept aside — a file with the store's own name anywhere but the store (a copy taken
+  before a repair, one a test run kept), anything under a directory with `backup`, `backups` or `bak`
+  as one of its words (`/var/backups`, `db-backups`), or a file named as a copy (`.bak`, `.backup`,
+  `.old`, `.orig`). A tool's is a program's own state — anything under a hidden directory, a
+  browser's or a browser driver's profile (a directory naming Playwright, Puppeteer, Chrome,
+  Chromium, Firefox or Mozilla), a scratch directory below the top of the tree (`tmp`, `temp`,
+  `scratch`, or a name ending in one), or what a build or a test run fills (`node_modules`,
+  `testdata`, `fixtures`, `test-results`, `playwright-report`, `coverage`). The control center lists
+  only servers and the files an application keeps; a tool's, the system's, a backup, a data
+  directory with no server and what was ignored are counted behind its one *Set aside* fold.
 - **Testing and saving a connection typed by hand.** `POST /databases/test` uses the same probe for every
   engine (Redis used to be reported unreachable for having no SQL dialect), and `POST /databases/` takes
   `probe: true` to dial before saving.
