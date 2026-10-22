@@ -1077,12 +1077,8 @@ func (s *Server) handleCertbotInstall(w http.ResponseWriter, r *http.Request) er
 		Kind: "certbot.install", Title: "Installing " + what, Target: pkg, Timeout: time.Hour,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		defer s.modules.updates.Invalidate()
-		code, err := out.RunEnv(ctx, env, name, args...)
-		if err != nil {
+		if err := s.runPackageCommand(ctx, out, env, name, args); err != nil {
 			return err
-		}
-		if code != 0 {
-			return fmt.Errorf("%s exited %d — the last lines above say why", name, code)
 		}
 		ready, err := proxysvc.CertbotInstalled(ctx, req.Plugin)
 		if err != nil {

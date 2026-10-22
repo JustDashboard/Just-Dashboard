@@ -154,11 +154,13 @@ func (aptManager) List(ctx context.Context) ([]Package, error) {
 }
 
 func (aptManager) UpgradeCommand(securityOnly bool) (string, []string, []string) {
-	args := []string{"-y", "--no-install-recommends", "-o", "Dpkg::Options::=--force-confold", "upgrade"}
+	args := append([]string{"-y", "--no-install-recommends", "-o", "Dpkg::Options::=--force-confold"}, aptLockWait...)
+	args = append(args, "upgrade")
 	if securityOnly {
 		// The service fills exact security-version targets after simulation.
 		// An empty target list is harmless; a suite preference is not a filter.
-		args = []string{"-y", "--no-install-recommends", "--only-upgrade", "--no-remove", "-o", "Dpkg::Options::=--force-confold", "install"}
+		args = append([]string{"-y", "--no-install-recommends", "--only-upgrade", "--no-remove", "-o", "Dpkg::Options::=--force-confold"}, aptLockWait...)
+		args = append(args, "install")
 	}
 	// NEEDRESTART_MODE=a stops needrestart opening a full-screen prompt on
 	// Ubuntu, which in a non-interactive run is a command that never returns.

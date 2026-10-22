@@ -5641,6 +5641,23 @@ running and the transcript complete.
   under one lock. `Emitter` gives runners `Status`, `Line`, `Run`/`RunEnv` through
   `hostexec.CommandOnHost`, and `RunCmd` for a command the caller built on the side it chose. A slow subscriber is skipped rather than allowed to stall
   the command — the buffer is the record, the channel only the tail.
+- **`RunDetached` is for work that must finish even if the dashboard does not** — today every package
+  install, upgrade and removal (`api.runPackageCommand`). A child of the backend lives in its container's
+  cgroup and dies when the container stops, and an apt upgrade that configures docker-ce stops it:
+  dpkg was killed mid-configure and every later apt command refused with "dpkg was interrupted". So the
+  command runs as a transient host unit, `just-dashboard-job-<id>.service`, via `systemd-run` with stdout
+  and stderr written to `<data dir>/jobs/<id>.out|.err` rather than to a pipe (a dead reader would kill
+  the writer with SIGPIPE). Every argument's `$` is doubled, because systemd expands `$VAR` and `${VAR}` in
+  a unit's command line and `$$` is its literal dollar. The job tails the files every 200 ms and asks `systemctl show` once a second;
+  cancelling or the timeout runs `systemctl stop` and still waits for the unit to end. A `<id>.json`
+  record (job, shown argv, deadline, boot id) written after the unit starts lets `Manager.Adopt`, called
+  at startup, re-register the job under the same id — the watching console reconnects to it — and follow
+  the unit to its end, or replay a unit that finished while nothing watched. Failed units stay loaded
+  until their code is read and `reset-failed`; a successful one is collected by systemd and reads as
+  success. A different boot id means the server rebooted under the command, which is reported as a
+  failure. Without root, a host systemd or the data directory at the same path on the host, the
+  command runs as a child exactly as `RunEnv` would, and a failed `systemd-run` says so in the console.
+  `JD_DETACHED_JOBS_LIVE=1` (as root) runs `detached_live_test.go` against the real host systemd.
 - Bounded: 5000 lines a job, 64 KB a line, 50 jobs. `prune` runs on finish as well as on start, or a burst
   ending after the last `Start` sits over the cap until something else happens, which on an idle dashboard
   is never. A running job is never pruned.

@@ -545,6 +545,19 @@ details were each confirmed by running the tool in a container of its distributi
   restrict the upgrade set to security fixes. With no eligible candidates the request is refused, never
   broadened to a full upgrade.
 
+**Package commands survive the dashboard and repair what an earlier run left.** Install, upgrade and
+removal (and certbot's install) go through `api.runPackageCommand`, which runs them with
+`jobs.RunDetached` as host systemd units: a docker-ce upgrade restarts Docker, which used to kill the
+backend container and, with it, the dpkg it had started — the host was then stuck on "dpkg was
+interrupted, you must manually run 'dpkg --configure -a'" for every later apt command. When
+`updates.DpkgInterrupted` sees apt's own sign of that state (a numbered entry in
+`/var/lib/dpkg/updates`, read through `hostexec.HostPath`) while neither `lock-frontend` nor `lock` is
+held, the command is wrapped by `FinishingDpkgFirst` in a constant script that runs
+`dpkg --force-confold --configure -a` and then execs the command, in one unit so the Docker restart the
+repair usually causes cannot separate the two. Every mutating apt-get also carries
+`-o DPkg::Lock::Timeout=600`, so one started while unattended-upgrades holds the lock waits instead of
+refusing.
+
 Reboot detection: Debian's flag file, then `needs-restarting -r`, then "cannot tell". **Exactly exit 1**
 means yes — every other non-zero is the tool failing, and reading those as yes puts a permanent reboot
 warning on a host that never asked for one.
