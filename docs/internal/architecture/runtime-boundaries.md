@@ -77,6 +77,12 @@ transfer, a `compose up --build`) descends from `context.Background()` and is no
 — a deploy killed halfway is worse than one finishing into a dashboard that is gone. Its timeout is the
 only bound.
 
+That outlives the process, not the container: a host command started through `nsenter` stays in the
+backend container's cgroup and is killed when the container stops. Package commands can stop it
+themselves (docker-ce's maintainer script restarts Docker), so they run as transient units of the host's
+systemd through `jobs.RunDetached`, and a restarted backend adopts them; see
+[streaming and jobs](../backend/databases-proxy-platform.md#streaming-jobs-secrets-agent-mode).
+
 ## Reaching the host, and containing paths
 
 `internal/hostexec`:

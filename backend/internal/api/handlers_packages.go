@@ -175,12 +175,8 @@ func (s *Server) handlePackageUpgrade(w http.ResponseWriter, r *http.Request) er
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		finish := s.modules.updates.BeginMutation()
 		defer finish()
-		code, err := out.RunEnv(ctx, env, name, args...)
-		if err != nil {
+		if err := s.runPackageCommand(ctx, out, env, name, args); err != nil {
 			return err
-		}
-		if code != 0 {
-			return fmt.Errorf("%s exited %d — the last lines above say why", name, code)
 		}
 		// The reboot flag is only meaningful after the packages have landed,
 		// and it is the one thing an operator needs to know that the
@@ -257,12 +253,8 @@ func (s *Server) handlePackageInstall(w http.ResponseWriter, r *http.Request) er
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		finish := s.modules.updates.BeginMutation()
 		defer finish()
-		code, err := out.RunEnv(ctx, env, name, args...)
-		if err != nil {
+		if err := s.runPackageCommand(ctx, out, env, name, args); err != nil {
 			return err
-		}
-		if code != 0 {
-			return fmt.Errorf("%s exited %d — the last lines above say why", name, code)
 		}
 		// The commands a package installs are almost never its own name, and
 		// this is the moment somebody is actually looking. Saying it here
@@ -315,14 +307,32 @@ func (s *Server) handlePackageRemove(w http.ResponseWriter, r *http.Request) err
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		finish := s.modules.updates.BeginMutation()
 		defer finish()
-		code, err := out.RunEnv(ctx, env, name, args...)
-		if err != nil {
-			return err
-		}
-		if code != 0 {
-			return fmt.Errorf("%s exited %d — the last lines above say why", name, code)
-		}
-		return nil
+		return s.runPackageCommand(ctx, out, env, name, args)
 	})
+	return nil
+}
+
+// runPackageCommand runs a command that changes the host's packages.
+//
+// It is detached (jobs.RunDetached) because a package transaction can stop
+// this container by itself: docker-ce's maintainer script restarts Docker,
+// and as a child of the dashboard dpkg died with it halfway through, leaving
+// every later apt command refusing with "dpkg was interrupted". And it
+// finishes such an interruption first — one this guarantee came too late
+// for, or a power cut — because the fix apt names is a command nobody can
+// type into a job.
+func (s *Server) runPackageCommand(ctx context.Context, out jobs.Emitter, env []string, name string, args []string) error {
+	shown := append([]string{name}, args...)
+	if s.modules.updates.DpkgInterrupted() {
+		out.Status("An earlier package run stopped partway through, so dpkg --configure -a finishes it before %s runs.", name)
+		name, args = updates.FinishingDpkgFirst(name, args)
+	}
+	code, err := out.RunDetached(ctx, env, shown, name, args...)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("%s exited %d — the last lines above say why", shown[0], code)
+	}
 	return nil
 }

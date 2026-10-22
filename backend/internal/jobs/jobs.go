@@ -32,8 +32,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // Status is where a job has got to.
@@ -108,6 +106,11 @@ type Emitter interface {
 	// RunEnv is Run with extra environment, for the tools that need
 	// DEBIAN_FRONTEND or a plain progress renderer.
 	RunEnv(ctx context.Context, env []string, name string, args ...string) (int, error)
+	// RunDetached is RunEnv for a command that must finish even if this
+	// process does not: it runs as a unit of the host's systemd, and a
+	// restarted dashboard takes the job back. shown, when set, is what the
+	// console prints instead of the argv. See detached.go.
+	RunDetached(ctx context.Context, env, shown []string, name string, args ...string) (int, error)
 	// RunCmd streams a command the caller built, for a tool whose side of the
 	// namespace boundary is the caller's decision rather than always the
 	// host's: certbot runs wherever the page read it from. The command must
@@ -155,10 +158,13 @@ type Manager struct {
 	entries map[string]*entry
 	order   []string // newest last, for pruning and listing
 	log     *slog.Logger
+	// detachDir holds detached commands' transcripts; empty until Detach.
+	detachDir string
+	units     units
 }
 
 func New(log *slog.Logger) *Manager {
-	return &Manager{entries: map[string]*entry{}, order: []string{}, log: log}
+	return &Manager{entries: map[string]*entry{}, order: []string{}, log: log, units: &systemdUnits{}}
 }
 
 // Start begins a job and returns immediately.
@@ -182,7 +188,6 @@ func (m *Manager) start(spec Spec, run Runner, exclusive string) (Job, bool) {
 	if spec.Timeout <= 0 {
 		spec.Timeout = defaultTimeout
 	}
-	id := newID()
 
 	m.mu.Lock()
 	if exclusive != "" {
@@ -196,37 +201,53 @@ func (m *Manager) start(spec Spec, run Runner, exclusive string) (Job, bool) {
 	// From Background, not from the request: the whole point is that this
 	// outlives the call that asked for it.
 	ctx, cancel := context.WithTimeout(context.Background(), spec.Timeout)
+	e := m.registerLocked(Job{
+		ID: newID(), Kind: spec.Kind, Title: spec.Title, Target: spec.Target,
+		Status: StatusRunning, StartedAt: time.Now().UTC(), StartedBy: spec.StartedBy,
+	}, cancel, exclusive != "")
+	m.mu.Unlock()
+
+	go m.run(ctx, cancel, e, run)
+	return e.snapshotJob(), true
+}
+
+// register adds a running job. Adopt uses it for a job whose id and start
+// time an earlier run of this process chose.
+func (m *Manager) register(job Job, cancel context.CancelFunc, exclusive bool) *entry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.registerLocked(job, cancel, exclusive)
+}
+
+func (m *Manager) registerLocked(job Job, cancel context.CancelFunc, exclusive bool) *entry {
 	e := &entry{
-		job: Job{
-			ID: id, Kind: spec.Kind, Title: spec.Title, Target: spec.Target,
-			Status: StatusRunning, StartedAt: time.Now().UTC(), StartedBy: spec.StartedBy,
-		},
+		job:       job,
 		lines:     make([]Line, 0, 64),
 		subs:      map[chan Line]struct{}{},
 		cancel:    cancel,
-		exclusive: exclusive != "",
+		exclusive: exclusive,
 	}
-	m.entries[id] = e
-	m.order = append(m.order, id)
+	m.entries[job.ID] = e
+	m.order = append(m.order, job.ID)
+	m.prune()
+	return e
+}
+
+func (m *Manager) run(ctx context.Context, cancel context.CancelFunc, e *entry, run Runner) {
+	defer cancel()
+	err := run(ctx, &emitter{entry: e, manager: m})
+	e.finish(err, ctx.Err())
+	// Pruned here as well as at Start. A burst of jobs can finish after
+	// the last one began, and pruning only on the way in left the cap
+	// exceeded until something else was started — which, on a dashboard
+	// nobody is currently using, is never.
+	m.mu.Lock()
 	m.prune()
 	m.mu.Unlock()
-
-	go func() {
-		defer cancel()
-		err := run(ctx, &emitter{entry: e})
-		e.finish(err, ctx.Err())
-		// Pruned here as well as at Start. A burst of jobs can finish after
-		// the last one began, and pruning only on the way in left the cap
-		// exceeded until something else was started — which, on a dashboard
-		// nobody is currently using, is never.
-		m.mu.Lock()
-		m.prune()
-		m.mu.Unlock()
-		if err != nil && m.log != nil {
-			m.log.Warn("job failed", "id", id, "kind", spec.Kind, "target", spec.Target, "err", err)
-		}
-	}()
-	return e.snapshotJob(), true
+	if err != nil && m.log != nil {
+		job := e.snapshotJob()
+		m.log.Warn("job failed", "id", job.ID, "kind", job.Kind, "target", job.Target, "err", err)
+	}
 }
 
 // prune drops the oldest finished jobs. Must be called with m.mu held.
@@ -442,7 +463,8 @@ func (e *entry) finish(runErr, ctxErr error) {
 }
 
 type emitter struct {
-	entry *entry
+	entry   *entry
+	manager *Manager
 	// lastCode is what the most recent command exited with. A job that runs
 	// several — a pull and then an up — is reported by the one that decided
 	// the outcome, which is the last one to run.
@@ -467,16 +489,16 @@ func (em *emitter) Run(ctx context.Context, name string, args ...string) (int, e
 // everywhere else in this codebase — every caller builds it from validated
 // pieces.
 func (em *emitter) RunEnv(ctx context.Context, env []string, name string, args ...string) (int, error) {
-	cmd := hostexec.CommandOnHost(ctx, name, args...)
-	if len(env) > 0 {
-		cmd.Env = append(cmd.Environ(), env...)
-	}
-	return em.RunCmd(cmd, append([]string{name}, args...))
+	return em.RunCmd(hostCommand(ctx, env, name, args), append([]string{name}, args...))
 }
 
 func (em *emitter) RunCmd(cmd *exec.Cmd, shown []string) (int, error) {
-	name := shown[0]
 	em.Status("$ %s", strings.Join(shown, " "))
+	return em.runCmd(cmd, shown[0])
+}
+
+// runCmd is RunCmd without the heading, for a caller that already printed it.
+func (em *emitter) runCmd(cmd *exec.Cmd, name string) (int, error) {
 	// The code the last command exited with is recorded on the job, because
 	// it is a field the API has always carried and nothing ever wrote: every
 	// failed job reported "exit 0", which next to "failed" is a contradiction

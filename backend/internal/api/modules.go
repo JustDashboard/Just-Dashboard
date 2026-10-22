@@ -254,6 +254,13 @@ func (s *Server) initModules() {
 	s.modules.netsec.UseOwnedFirewall(ownedFirewall{net: s.modules.network})
 	s.modules.ipam = netipam.New(s.Store, s.ipamInventory)
 	s.modules.jobs = jobs.New(s.Log)
+	// Package commands run as units of the host's systemd, so the Docker
+	// restart an upgrade can cause does not cut dpkg off halfway; any still
+	// running, or finished while nothing watched, are taken back here.
+	if err := s.modules.jobs.Detach(filepath.Join(s.Cfg.DataDir, "jobs")); err != nil {
+		s.Log.Warn("package commands will run under the dashboard, where a Docker restart can interrupt them", "error", err)
+	}
+	s.modules.jobs.Adopt(s.modules.updates.BeginMutation)
 	s.modules.diagnostics = netdiag.New(netdiag.NewStore(s.Store.DB), s.modules.jobs, s.executeNetworkProbe, netdiag.WithInvestigator(s.executeNetworkInvestigation))
 	s.modules.captureNative = netcapture.NewNative()
 	s.modules.captures = netcapture.New(s.Store.DB, s.modules.jobs, s.modules.captureNative.Capture)

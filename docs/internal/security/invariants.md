@@ -97,7 +97,9 @@ A change that weakens any of these has to say so explicitly.
    a second request-defined shell, and do not "fix" that one into an argv. A git clone's parent and an
    `init` target go through `gitx.ResolveDir` against `JD_GIT_ROOTS` — the Git page's own boundary — and a
    clone can only create a directory that does not exist. Terminal startup also uses
-   a bundled constant bootstrap to load the native prompt; paths remain separate positional arguments. `dockerx` invokes the `docker` binary in three places
+   a bundled constant bootstrap to load the native prompt; paths remain separate positional arguments. An
+   apt command that must first finish an interrupted dpkg run is wrapped in the constant
+   `updates.finishDpkgScript`, with the command and its validated arguments as positional arguments. `dockerx` invokes the `docker` binary in three places
    (compose, the streaming runner, `Build`) because the Engine API has no equivalent; all three build argv
    explicitly. A database dump that is a SQL script is replayed by `dbx` over the dashboard's own
    connection (`dump_script.go`) and never piped to `psql` or `mysql`: each of those runs a shell for a
