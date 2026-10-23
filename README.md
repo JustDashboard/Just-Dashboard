@@ -24,9 +24,9 @@ backed up — behind one login that lives on your private network.
 
 <br>
 
-![The server overview: the machine drawn as itself, live resources with their last hour, storage and the deployed projects](docs/readme/overview.png)
+![The server overview: the machine drawn as itself, shortcuts to every section, live resources with their last hour, storage and the deployed projects](docs/readme/overview.png)
 
-<p align="center"><sub>Screenshots show version 0.7.5 with example data. The Overview has opened on shortcuts to every section since 0.8.</sub></p>
+<p align="center"><sub>Screenshots show example data: the Overview and Excalidraw at 0.8.1, the rest at 0.7.5.</sub></p>
 
 ---
 
@@ -281,6 +281,9 @@ free.
 </table>
 
 ### New in 0.8
+
+<img src="docs/readme/excalidraw.png" alt="An Excalidraw drawing of a release path from the internet through Caddy to a Next.js app, its PostgreSQL database and a nightly backup">
+<p align="center"><b>Excalidraw</b> — drawings kept on the server and edited together live</p>
 
 - **Drawings edited together:** Excalidraw is the Workspace's one board. Everyone with a drawing open
   edits it live; its images and the shape library are kept on the server; and a drawing can hold live
