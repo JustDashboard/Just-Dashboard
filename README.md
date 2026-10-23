@@ -26,7 +26,7 @@ backed up — behind one login that lives on your private network.
 
 ![The server overview: the machine drawn as itself, live resources with their last hour, storage and the deployed projects](docs/readme/overview.png)
 
-<p align="center"><sub>Screenshots show version 0.7.5 with example data.</sub></p>
+<p align="center"><sub>Screenshots show version 0.7.5 with example data. The Overview has opened on shortcuts to every section since 0.8.</sub></p>
 
 ---
 
@@ -54,7 +54,7 @@ login, two-factor is per account, and every change is audited.
 
 **One server, done properly**
 
-No fleet, no cloud account, no AI model or API key. One `docker compose` stack that knows the
+No fleet, no cloud account, no AI model or API key required. One `docker compose` stack that knows the
 machine it runs on, end to end.
 
 </td>
@@ -78,6 +78,8 @@ free.
 ### 🖥️ Overview & monitoring
 
 - A live overview of the machine: CPU, memory, load, network, storage and disk I/O
+- Shortcuts to every section, with the open shells, the drawings edited last, the databases and
+  every backup job one press away
 - Metrics with seven days of history the backend records itself, and CSV export
 - Notable moments, top processes and the day's activity at a glance
 - Processes, PM2 apps, systemd services and scheduled jobs, each with its verbs
@@ -278,7 +280,23 @@ free.
 </tr>
 </table>
 
-### New in 0.7.5
+### New in 0.8
+
+- **Drawings edited together:** Excalidraw is the Workspace's one board. Everyone with a drawing open
+  edits it live; its images and the shape library are kept on the server; and a drawing can hold live
+  cards of your hosts, projects and databases, YouTube, Vimeo and Figma embeds, and diagrams written
+  from a description.
+- **An Overview that opens onto everything:** shortcuts to every section, the open shells beside the
+  drawings edited last, and the databases beside every backup job.
+- **Projects drawn by their own icon** wherever the dashboard names them, a web terminal that finds
+  what ssh finds, and saved database connections that repair themselves after a reinstall lost the
+  master key.
+- **Gone:** Stickyboard (its boards stay in the database) and the schema comparison page.
+
+0.8.1 made a streamed Mac connect once, unstretched, with the pointer where it is drawn. Every change
+is in [CHANGELOG.md](CHANGELOG.md).
+
+### Added in 0.7.5
 
 <table>
 <tr>

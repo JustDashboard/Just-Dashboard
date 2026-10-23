@@ -17,28 +17,11 @@ tester run on the page and draw no working bar.
   `Field`, `GLOSSARY` — written for somebody who has never run a container and phrased around the decision
   rather than the mechanism. The rule it enforces is that **explanation is quiet**: a form that shouts
   every caveat is as unusable as one that explains nothing.
-- `create-container.tsx`'s three entry points matter more than the form, and they are the *first* thing
-  on the panel rather than three stacked sections: three cards on one line, and only the route you picked
-  spends any height. **Paste a command** covers the common case: `lib/docker-run.ts` parses leniently and
-  returns three things — the spec, warnings about what it could not read, and `unsupported`, the flags it
-  *understood* and the form has nowhere to put. The last is kept separate on purpose. `--gpus all`
-  dropped without a word produces a container that starts and then has no GPU, and the operator finds out
-  from the application failing; the panel says so and keeps the original command beside the form.
-  **Start from a template** is `lib/docker-templates.ts` — images almost every server runs across
-  five categories, every one bound to 127.0.0.1; a set of starting points, not an app store, which is
-  what goes stale and becomes the maintenance burden in Yacht and CasaOS. A template's setup
-  requirement is one word on its card and a full notice at the top of the form the moment it is picked,
-  which is the only place the instruction can actually be followed. **Custom** is for people who
-  know what they want. The Command tab shows the server-rendered `docker run` and compose, live. Port
-  bindings are offered as *who should reach this* rather than as an address, populated from the machine's
-  real interfaces so the LAN option names one rather than gesturing at the idea.
-
-  The form's explanations are `?` hover cards on the section headings, the field labels and the
-  behaviour switches, not paragraphs printed beside them. Six sections of three lines each is eighteen
-  lines of prose around twelve controls: an expert scrolls past all of it every visit and a newcomer
-  reads it once. Prose survives in exactly two places — a warning that depends on what you just typed
-  (a missing image tag, a port on every interface, an unnamed volume) and the `privileged` switch, which
-  can hand the server away and should not need a hover to say so.
+- Docker has no standalone create flow. Containers are deployed from `/deploy/new`, which owns images,
+  Compose, templates and the rest of a workload's setup (see
+  [`../deployments/implementation.md`](../deployments/implementation.md)). `lib/docker-templates.ts`
+  was removed on 2026-09-12 and `create-container.tsx` on 2026-09-15. `lib/docker-run.ts`, the lenient `docker run` parser that form used, is
+  kept for its unit tests only and has no caller in a page.
 - `run-console.tsx` deliberately **does not** let `useSocket` reconnect: reconnecting re-issues the GET,
   and re-issuing the GET runs the command again — a redeploy fired twice because a VPN blinked is not a
   re-render. A dropped socket ends the run and says so.

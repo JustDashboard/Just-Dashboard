@@ -8,8 +8,9 @@ brand-coloured command buttons, typography, flat surfaces, status vocabulary and
 Use existing components and APIs where possible; the backend remains the authority for execution,
 secrets, resource ownership, confirmation and audit.
 
-The referenced `docs/plans/0.6.7-deployments/` directory is absent from this checkout. The checked-in
-implementation documentation, security invariants and source contracts govern this change.
+The checked-in implementation documentation, security invariants and source contracts govern this
+change. This file is a dated record: each section describes the pages as they were on its date, and a
+later section says what replaced them.
 
 ## Delivery plan
 
@@ -58,7 +59,8 @@ removes the containers:
   transcript keeps its frame because it is a scrolling console.
 - **Archive:** a plain list with the search in its toolbar.
 
-`deploy-ui.spec.ts` passes unchanged (56 checks) against these surfaces.
+`deploy-ui.spec.ts` passed unchanged (56 checks) against these surfaces; it was retired in the
+rebuild of 2026-09-17 below.
 
 ## Acceptance evidence
 
@@ -79,8 +81,8 @@ must be described as unavailable, never fabricated as a successful deployment or
 | Focused settings | Dedicated build, runtime, variables, domains, storage, dependencies, automation and lifecycle views. Editors use sheets; resource pickers use names; secret masking and destructive confirmations remain covered. Game console output has numbered lines and raw settings use disclosure. |
 
 Desktop and mobile renders were inspected for project cards, source import, setup, the overview,
-completed build transcript, runtime services and settings. Browser captures are produced by
-`frontend/tests/browser/deploy-ui.spec.ts`, including `fleet-grid.png`, `create-desktop.png`,
+completed build transcript, runtime services and settings. Browser captures were produced by
+`frontend/tests/browser/deploy-ui.spec.ts` (retired on 2026-09-17), including `fleet-grid.png`, `create-desktop.png`,
 `configure-mobile.png`, `overview-desktop.png`, `completed-build-mobile.png` and
 `build-settings-desktop.png`.
 

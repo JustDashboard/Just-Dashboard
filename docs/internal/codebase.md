@@ -10,7 +10,6 @@ The main entry points are:
   authentication, secrets, and persistent state.
 - [`backend/`](backend/) for every feature backend and cross-feature platform service.
 - [`deployments/`](deployments/) for the checked-in deployment architecture and delivery limits.
-  The historical `docs/plans/0.6.7-deployments/` directory is absent from this checkout.
 - [`frontend/`](frontend/) for the application shell, design system, feature panels, terminal, data, and
   theming.
 - [`security/invariants.md`](security/invariants.md) for the security and compatibility invariants that

@@ -14,7 +14,6 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
 - Read the relevant sections of [`docs/internal/README.md`](docs/internal/README.md) before changing
   architecture, security, backend features, frontend behavior, releases, or deployment code. For the
   deployment subsystem, follow [`docs/internal/deployments/`](docs/internal/deployments/README.md).
-  The historical `docs/plans/0.6.7-deployments/` directory is absent from this checkout.
 - A request to *redesign a page with the design system* means running that page's register's ordered
   passes in [`docs/internal/frontend/design-system.md`](docs/internal/frontend/design-system.md).
   **Decide the register first** — §16 has the table and the test, which is what the reader came to do

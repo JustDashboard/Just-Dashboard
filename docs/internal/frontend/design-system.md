@@ -5,12 +5,8 @@ are mechanical — typing a value where a token exists, and re-deriving a patter
 and `tests/browser/design-system.spec.ts` checks three structural properties in a browser. Everything
 below is judgement, and this is where it is written down.
 
-Two earlier documents and the lint plugin's own header pointed at
-`docs/plans/design-system-unification/reference.md`, which was never committed on any branch. This
-file replaces that reference.
-
-Current product behavior (0.7.5): automatic Attention/Needs attention sections, recommendation
-comparisons, Advisor and navigation attention marks have been removed. Historical layout examples
+Since 0.7.5, automatic Attention/Needs attention sections, recommendation comparisons, Advisor and
+navigation attention marks have been removed. Historical layout examples
 below describe the earlier pages; their attention blocks are no longer part of those page passes.
 Requested diagnostic reports and operational validation remain.
 
@@ -1468,10 +1464,9 @@ speak, with the line as the state (dashed where a layer is missing, red where on
 where it works but should not be relied on, moving where it carries). The overview's
 (`perimeter.tsx`) is the two ways onto the machine — the internet's through the firewall, fail2ban
 and sshd, and this browser's through the allowlist to the dashboard — and it describes the layers
-and their states, not the reach of every port. Above it the posture is a strip of its seven checks
-(`posture-strip.tsx`), a segment each in the colour of what that check found and dashed where it
-could not run, and a segment narrows the findings to its area. Findings carry their severity counts
-in their head. Firewall's (`firewall-picture.tsx`) folds the rules by where they lead — in from the
+and their states, not the reach of every port. The strip of seven posture checks above it
+(`posture-strip.tsx`) and the findings it narrowed went with the automatic posture findings in
+0.7.5. Firewall's (`network/firewall-picture.tsx`) folds the rules by where they lead — in from the
 internet, through the firewall, out to each admitted port drawn as the product that answers there,
 or into the default (`firewall-reading.ts`, unit-tested) — and its rule table names each action in
 a `--tag-*` hue down the row's edge, ending on the default as its last row. SSH's
