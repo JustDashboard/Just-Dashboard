@@ -404,6 +404,12 @@ deploy pages use for the repository a project deploys.
   the repository's previews through the trusted identity (`reconcileCheckoutMerge`) and drops the deploy
   pages' caches, and signing the dashboard's own account in or out (`/auth/device/{id}`, `/auth/token`,
   `/auth/logout` with no path) drops their cached "not signed in" answer (`ForgetLogin`).
+  The one place a login crosses accounts is the install checkout's handover: when selfupdate gives a
+  root-owned checkout to the owner of its directory, the checkout loses root's login with root's
+  ownership, so `CarryLogin` signs that owner in with the dashboard's own token through
+  `LoginWithToken` (helper and identity included). It runs only at the handover, and only for an owner
+  with no login of their own; one who signs out afterwards stays signed out. It grants nothing new for
+  the reason the handover does not: that owner can already replace what the next upgrade builds as root.
 - **gh is in the image, not borrowed from the host** — the host's copy runs as the host's root in the
   host's namespaces, and the account that pushes would see neither token nor helper. From this image both
   land in the same account's home, bind-mounted. `gh auth setup-git` writes the helper as its own
