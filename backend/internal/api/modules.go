@@ -209,6 +209,7 @@ func (s *Server) initModules() {
 		Health:      s.healthURL(),
 		List:        s.listSiblings,
 		Log:         s.Log,
+		Adopted:     s.carryGitHubLogin,
 	})
 	// The settings half of the same idea, and it shares the update module's
 	// answer to "where is this install" rather than working it out again: two
@@ -599,4 +600,19 @@ func (s *Server) dashboardEndpoint() string {
 	}
 	s.endpointCache, s.endpointCachedAt = endpoint, time.Now()
 	return endpoint
+}
+
+// carryGitHubLogin follows the install checkout's handover to the owner of
+// its directory: the checkout was using root's GitHub login, and without this
+// it would read signed out the moment it changed hands.
+func (s *Server) carryGitHubLogin(ctx context.Context, dir string) {
+	carried, err := s.modules.github.CarryLogin(ctx, dir)
+	if s.Log == nil {
+		return
+	}
+	if err != nil {
+		s.Log.Warn("could not carry the GitHub login to the install checkout's new owner", "dir", dir, "err", err)
+	} else if carried {
+		s.Log.Info("carried the GitHub login to the install checkout's new owner", "dir", dir)
+	}
 }

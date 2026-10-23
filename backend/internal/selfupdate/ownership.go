@@ -45,6 +45,11 @@ func (s *Service) adoptCheckout(ctx context.Context) {
 		return
 	}
 	n, err := hostexec.Adopt(loc.Visible, owner)
+	// Only at the handover itself: an account that signs out afterwards
+	// meant to, and is not signed back in at the next start.
+	if err == nil && n > 0 && s.adopted != nil {
+		s.adopted(ctx, loc.Visible)
+	}
 	if s.log == nil {
 		return
 	}

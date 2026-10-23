@@ -19,6 +19,10 @@ type Service struct {
 	store     *Store
 	log       *slog.Logger
 
+	// adopted is told about a checkout this package has just given to the
+	// owner of its directory; see Options.Adopted.
+	adopted func(ctx context.Context, dir string)
+
 	// list is how this package sees the host's containers. It is a function
 	// rather than a Docker client so that locating an install — the part with
 	// all the decisions in it — is testable without a daemon.
@@ -51,6 +55,11 @@ type Options struct {
 	Health string
 	List   Lister
 	Log    *slog.Logger
+	// Adopted runs after the install checkout has been handed to the owner of
+	// its directory, with the checkout as this process sees it — which is
+	// where the API carries the dashboard's GitHub login across, since the
+	// login it was using belonged to root.
+	Adopted func(ctx context.Context, dir string)
 	// BaseURL overrides the raw-content host the changelog is read from.
 	// Empty everywhere but the tests, and deliberately not reachable from the
 	// environment: JD_UPDATE_REPO covers running a fork, while an arbitrary
@@ -75,6 +84,7 @@ func New(o Options) *Service {
 		list:      o.List,
 		health:    o.Health,
 		log:       o.Log,
+		adopted:   o.Adopted,
 	}
 }
 
