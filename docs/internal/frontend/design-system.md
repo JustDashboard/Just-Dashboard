@@ -2675,7 +2675,10 @@ starts, each counting what it adds to (*6 projects*, *3 open · operator*) so it
 caption (pass 8), two to a row on a phone and four across from `xl`, and gated
 on the section and on the capability its destination checks — a shortcut that opens a refusal is a
 dead button. New drawing makes the drawing where it is pressed, as the list's own New does, and
-opens it. Under Deployments, three **pairs**: the shells open on the server (`workspace.tsx`
+opens it. When Stickyboard left in 0.8 its card went with it, and Add a site took the place,
+after New project as the Proxy section follows Deploy in the sidebar: the next thing an app needs
+is a name in front of it, and it opens the Sites form from `?new=1`. Under Deployments, three
+**pairs**: the shells open on the server (`workspace.tsx`
 — working first, each drawn as the program in it, a row opening `/terminal?session=` on that session)
 beside the drawings edited last, each its own preview; the databases (the
 control center's fleet read, its order, a row opening the database's home) beside every backup job
