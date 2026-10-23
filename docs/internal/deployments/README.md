@@ -16,5 +16,4 @@
 - [`gap-closure-plan.md`](../../audits/2026-09-16-deployments/gap-closure-plan.md) — second-pass re-evaluation, defects D1–D7, competitive position and remaining phases.
 - [`third-pass-plan.md`](../../audits/2026-09-16-deployments/third-pass-plan.md) — third-pass review: defects D10–D16, blueprint deployment, native database dumps, delivery insights, notification retries, and evidence.
 - [`2026-09-16 deployment audit`](../../audits/2026-09-16-deployments/README.md) — point-in-time capability map, fresh test evidence, confirmed gaps, competitor comparison, and prioritized acceptance criteria.
-- The historical `docs/plans/0.6.7-deployments/` directory is absent. Missing frozen contracts and checkpoint evidence have not been reconstructed or verified.
 - [`permanent-deletion.md`](permanent-deletion.md) — archived record deletion and resource-retention contract.

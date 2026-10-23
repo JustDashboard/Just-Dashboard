@@ -31,6 +31,8 @@ strategy, and feature ownership behind those rules.
   independent recovery, prerequisites and verification limits.
 - [`backend/network-native-managers.md`](backend/network-native-managers.md) — selected native profile
   ownership, bounded persistent edits, reconnection confirmation and terminal cleanup.
+- [`backend/network-native-structure.md`](backend/network-native-structure.md) — the preparatory
+  contract for editing an existing native bond or VRF; structural writes stay refused until verified.
 - [`backend/network-boot-recovery.md`](backend/network-boot-recovery.md) — reconstructing prior managed
   dependencies before interrupted-change recovery after a cold start.
 - [`backend/gateway-health.md`](backend/gateway-health.md) — checked firewall layers, per-family
@@ -47,6 +49,8 @@ strategy, and feature ownership behind those rules.
 - [`backend/network-ipam.md`](backend/network-ipam.md) — shared IPv4/IPv6 pools, overlap coverage and native-owner reservation handoffs.
 - [`backend/network-dns-evidence.md`](backend/network-dns-evidence.md) — retained native split-DNS policy, fresh-network answers and scoped resolver trust evidence.
 - [`backend/network-dns-services.md`](backend/network-dns-services.md) — sealed native engine connections, reviewed changes, bounded filter metadata and owned Docker provisions.
+- [`backend/network-dns-domain-decisions-fixture.md`](backend/network-dns-domain-decisions-fixture.md) — the opt-in test-only fixture prepared for measured native custom-domain decisions; not an engine pass.
+- [`backend/evidence/`](backend/evidence/) — dated native-manager and DNS-service run evidence (2026-10-09) that the network guides cite.
 - [`backend/network-sqm.md`](backend/network-sqm.md) — explicit IFB/CAKE download queues, provenance and independent recovery.
 - [`backend/network-egress.md`](backend/network-egress.md) — monitored egress groups, hysteresis, guarded failover/failback, connection handling and the gating simulation.
 - [`backend/wireguard-dual-stack.md`](backend/wireguard-dual-stack.md) — opt-in IPv6 peer addressing and separately verified dual-family egress.
@@ -91,8 +95,9 @@ strategy, and feature ownership behind those rules.
   compatibility after removing existing-workload import.
 - [`deployments/redesign-plan.md`](deployments/redesign-plan.md) — deployment experience redesign,
   delivered workflows, and validation evidence.
-- The historical `docs/plans/0.6.7-deployments/` directory is absent from this checkout. Use the
-  checked-in deployment guides above; missing checkpoint evidence must not be treated as verified.
+- [`deployments/README.md`](deployments/README.md) — the index of the deployment subsystem's other
+  guides: preview isolation, backup coverage, restore verification, recipes, Git policy, database
+  networks, request observability, notifications, the GitHub App and permanent deletion.
 - [`frontend/design-system.md`](frontend/design-system.md) — the design system's rules in full: one mode,
   no lift, the colour roles, the component vocabulary, and which surface to reach for.
 - [`frontend/shell-design.md`](frontend/shell-design.md) — App Router shell, navigation, the sections an

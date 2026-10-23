@@ -231,8 +231,9 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
 
 ## Overview
 
-Files: `overview.go`, `identity.go`, `topology_flows*.go`, `incidents.go`; the api's
-`handlers_network_overview.go` gathers the readings concurrently.
+Files: `overview.go`, `identity.go`, `topology_flows*.go`; the api's
+`handlers_network_overview.go` gathers the readings concurrently. `incidents.go` went with the
+incident history in 0.7.5; `store/network_incident_schema.go` keeps its table for upgrades.
 
 - `identity` is each family's way out from `ip route get` of the same anchors the guards use (only the
   kernel is asked): device, gateway, the NIC source and its scope, and the family's forwarding switch
