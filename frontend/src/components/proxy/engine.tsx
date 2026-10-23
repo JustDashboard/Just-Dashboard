@@ -556,9 +556,9 @@ function Blocked({ reason, children }: { reason: string; children: React.ReactNo
 
 /**
  * The line under the engine's: which of the modules a proxy is usually asked
- * for this nginx has, and the package manager's part — installing the engine
- * and certbot where they are missing, and upgrading nginx where the host has
- * a newer one waiting. Each install runs as a job whose output streams below.
+ * for this nginx has, and the package manager's part — installing certbot
+ * where nginx has none, and upgrading nginx where the host has a newer one
+ * waiting. A host with no engine at all is `EngineSetup`'s. Each install runs as a job whose output streams below.
  *
  * The modules come from GET /proxy/modules; a host whose nginx cannot be read
  * that way, or a server without the route, answers an error and the line
@@ -576,14 +576,14 @@ export function EngineExtras({
   onChanged: () => void
 }) {
   const nginx = status.nginx
-  const noEngine = !status.nginx && !status.caddy
   // certbot's nginx plugin is for nginx; Caddy issues its own certificates.
-  const wantsCertbot = !status.certbot && !status.caddy
+  // A host with no engine at all is offered both by `EngineSetup` instead.
+  const wantsCertbot = nginx && !status.certbot
   const updates = usePoll(
     (signal) => get<UpdateReport>("/packages/updates", undefined, signal),
     0,
     [],
-    { enabled: nginx || (admin && (noEngine || wantsCertbot)) },
+    { enabled: nginx },
   )
   const console_ = useJobConsole({
     onSuccess: () => {
@@ -630,9 +630,8 @@ export function EngineExtras({
       action: () => install("upgrade", [pkg.name], pkg.name),
     })
 
-  const offersNginx = admin && noEngine && Boolean(manager)
   const offersCertbot = admin && wantsCertbot && Boolean(certbotPackages)
-  if (!upgrade && !offersNginx && !offersCertbot && !console_.job) {
+  if (!upgrade && !offersCertbot && !console_.job) {
     return null
   }
 
@@ -660,29 +659,22 @@ export function EngineExtras({
             )}
           </span>
         )}
-        {offersNginx && (
-          <Button
-            size="xs"
-            variant="outline"
-            title={`${manager} install nginx`}
-            onClick={() => void install("nginx", ["nginx"], "nginx")}
-            pending={starting === "nginx"}
-            disabled={starting !== "" || running}
-          >
-            Install nginx
-          </Button>
-        )}
         {offersCertbot && certbotPackages && (
-          <Button
-            size="xs"
-            variant="outline"
-            title={`${manager} install ${certbotPackages.join(" ")}`}
-            onClick={() => void install("certbot", certbotPackages, "certbot")}
-            pending={starting === "certbot"}
-            disabled={starting !== "" || running}
-          >
-            Install certbot + nginx plugin
-          </Button>
+          <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span className="text-body">
+              No certbot here, so no site can get a Let&rsquo;s Encrypt certificate yet.
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              title={`${manager} install ${certbotPackages.join(" ")}`}
+              onClick={() => void install("certbot", certbotPackages, "certbot")}
+              pending={starting === "certbot"}
+              disabled={starting !== "" || running}
+            >
+              Install certbot and its nginx plugin
+            </Button>
+          </span>
         )}
       </div>
       <JobConsole
@@ -823,7 +815,7 @@ const NGINX_PACKAGES = ["nginx", "nginx-core", "nginx-full", "nginx-light", "ngi
  * certbot and its nginx plugin, per package manager. zypper is absent because
  * openSUSE names them by Python version, which this page cannot know.
  */
-const CERTBOT_PACKAGES: Record<string, string[]> = {
+export const CERTBOT_PACKAGES: Record<string, string[]> = {
   apt: ["certbot", "python3-certbot-nginx"],
   dnf: ["certbot", "python3-certbot-nginx"],
   yum: ["certbot", "python3-certbot-nginx"],

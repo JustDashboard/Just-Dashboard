@@ -2165,3 +2165,110 @@ test("a raw editor cannot test or publish its buffer after working-state cleanup
   expect(tests).toBe(0)
   expect(writes).toBe(0)
 })
+
+test("a host with no reverse proxy is asked to install nginx, certbot riding along", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockStatus(page, {
+    ...availability,
+    nginx: false,
+    nginxVersion: "",
+    caddy: false,
+    certbot: false,
+  })
+  await page.route("**/api/v1/packages/updates", (route) =>
+    json(route, {
+      available: true,
+      manager: "apt",
+      packages: [],
+      securityCount: 0,
+      securityFiltering: true,
+      rebootRequired: false,
+      lastChecked: new Date().toISOString(),
+    }),
+  )
+  const installs: string[][] = []
+  await page.route("**/api/v1/packages/install", (route) => {
+    installs.push(route.request().postDataJSON().packages)
+    return route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "internal", message: "stopped by the test" } }),
+    })
+  })
+  await page.goto("/proxy")
+
+  const setup = page.locator("[data-slot='engine-setup']")
+  await expect(
+    setup.getByRole("heading", { name: "Put nginx in front of this server" }),
+  ).toBeVisible()
+  await expect(setup.getByText("apt install nginx certbot python3-certbot-nginx")).toBeVisible()
+  // Nothing the host does not have yet is drawn empty beside the question.
+  await expect(page.getByRole("region", { name: "Certificates" })).toHaveCount(0)
+  await expect(page.getByText("Nothing configured yet")).toHaveCount(0)
+  // The identity line keeps what is true without an engine and drops its zeros.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText(/internet-facing/)).toBeVisible()
+  await expect(identity.getByText(/^0 sites/)).toHaveCount(0)
+
+  await setup.getByRole("button", { name: "Install nginx and certbot" }).click()
+  await expect.poll(() => installs).toEqual([["nginx", "certbot", "python3-certbot-nginx"]])
+
+  await setup.getByRole("switch", { name: "Also install certbot" }).click()
+  await expect(setup.getByText("apt install nginx", { exact: true })).toBeVisible()
+  await setup.getByRole("button", { name: "Install nginx", exact: true }).click()
+  await expect.poll(() => installs.at(-1)).toEqual(["nginx"])
+
+  await page.setViewportSize({ width: 390, height: 900 })
+  const overflow = await page
+    .locator("[data-slot='page']")
+    .evaluate((element) => element.scrollWidth > element.clientWidth + 1)
+  expect(overflow).toBe(false)
+})
+
+test("a host whose sites keep no access log says so once and claims no zero", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/traffic", (route) =>
+    json(route, {
+      observedAt: new Date().toISOString(),
+      sites: vhosts
+        .filter((v) => v.kind === "nginx")
+        .map((v) => ({
+          site: v.name,
+          file: v.path,
+          engine: "nginx",
+          status: "unavailable",
+          reason: "access_log off",
+          requests: 0,
+          errorRate: 0,
+          bytes: 0,
+          complete: true,
+          points: [],
+        })),
+    }),
+  )
+  await page.route("**/api/v1/proxy/errors?**", (route) =>
+    json(route, {
+      scope: "main",
+      path: "/var/log/nginx/error.log",
+      exists: true,
+      since: new Date().toISOString(),
+      complete: true,
+      lines: 0,
+      groups: [],
+    }),
+  )
+  await page.goto("/proxy")
+
+  await expect(
+    page.getByRole("region", { name: "Live traffic" }).getByText("No traffic to count yet"),
+  ).toBeVisible()
+  // The band does not say it a second time.
+  await expect(page.getByRole("region", { name: "Traffic", exact: true })).toHaveCount(0)
+  const errors = page.getByRole("region", { name: "Recent errors" })
+  await expect(errors).toContainText("nginx error-log lines")
+  await expect(errors).not.toContainText("server errors this hour")
+  await expect(errors.getByText("Nothing failed in the last hour")).toHaveCount(0)
+  await expect(errors.getByText("No problems found", { exact: false })).toHaveCount(0)
+})

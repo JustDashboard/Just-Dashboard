@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Box, CheckCircle } from "@/components/icons"
+import { ArrowRight, Box, CheckCircle, FileText, ShieldCheck } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { LANES } from "@/lib/hue"
 import { plural } from "@/lib/format"
@@ -15,6 +15,8 @@ import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { ShareBar } from "@/components/procs/workloads"
 import { ErrorState } from "@/components/state"
+import { Button } from "@/components/ui/button"
+import { OverviewEmpty } from "@/components/proxy/overview-empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { certificateProduct } from "@/components/proxy/marks"
 import { ProjectFavicon } from "@/components/deploy/project-mark"
@@ -67,15 +69,22 @@ export function OverviewBand({
   /** The name a site's visitors type, which says more than its file's. */
   labelOf: (site: string) => string
 }) {
+  // With no access log read anywhere, Live traffic above already says why
+  // there is nothing to count; a second block saying it again was the
+  // emptiest third of the band.
+  const logged = (traffic.sites ?? []).some((s) => s.status === "available")
+  const showTraffic = traffics && (logged || !traffic.sites || Boolean(traffic.error))
+  const blocks = 1 + (showTraffic ? 1 : 0) + (traffics ? 1 : 0)
   return (
     <div
       data-slot="overview-band"
       className={cn(
-        "grid min-w-0 gap-x-10 gap-y-8 [&>*]:min-w-0",
-        traffics && "lg:grid-cols-2 xl:grid-cols-3",
+        "grid min-w-0 gap-x-12 gap-y-10 [&>*]:min-w-0",
+        blocks === 2 && "lg:grid-cols-2",
+        blocks === 3 && "lg:grid-cols-2 xl:grid-cols-3",
       )}
     >
-      {traffics && <TrafficBlock {...traffic} appOf={appOf} labelOf={labelOf} />}
+      {showTraffic && <TrafficBlock {...traffic} appOf={appOf} labelOf={labelOf} />}
       <CertificatesBlock {...certificates} />
       {traffics && (
         <ErrorsBlock
@@ -186,9 +195,9 @@ function TrafficBlock({
         ) : !sites ? (
           <Bones />
         ) : read.length === 0 ? (
-          <p className="py-2 text-body text-muted-foreground">
+          <OverviewEmpty icon={FileText} title="No access log to read">
             No site writes an access log the dashboard can read.
-          </p>
+          </OverviewEmpty>
         ) : (
           <div className="animate-rise space-y-4">
             <Headline
@@ -331,6 +340,7 @@ function CertificatesBlock({
   certbot: boolean
 }) {
   const router = useRouter()
+  const { can } = useAuth()
   const all = list ?? []
   const wrong = all.filter((c) => standing(c) !== "fine").length
   const severe = all.some((c) => standing(c) === "wrong")
@@ -389,11 +399,22 @@ function CertificatesBlock({
         ) : error ? (
           <ErrorState error={error} onRetry={onRetry} className="mt-2" />
         ) : all.length === 0 ? (
-          <p className="py-2 text-hint text-muted-foreground">
+          <OverviewEmpty
+            icon={ShieldCheck}
+            title={certbot ? "No certificates yet" : "No certificates on this host"}
+            action={
+              <Button asChild size="sm" variant="outline">
+                <Link href="/proxy/certificates">
+                  {certbot && can("system.admin") ? "Issue a certificate" : "Open Certificates"}
+                  <ArrowRight />
+                </Link>
+              </Button>
+            }
+          >
             {certbot
-              ? "Nothing issued yet — issue a certificate from the Certificates tab."
-              : "No certificates were found on this host."}
-          </p>
+              ? "Every site is on plain HTTP. Issue one from Let's Encrypt and certbot renews it before it runs out."
+              : "No certificates were found on this host. Install certbot to issue free ones, or bring your own on the Certificates page."}
+          </OverviewEmpty>
         ) : (
           <div className="animate-rise space-y-4">
             {wrong > 0 ? (
@@ -497,8 +518,8 @@ function ErrorsBlock({
 }) {
   const router = useRouter()
   const { can } = useAuth()
-  const failing = (sites ?? [])
-    .filter((s) => s.status === "available")
+  const read = (sites ?? []).filter((s) => s.status === "available")
+  const failing = read
     .map((s) => ({ reading: s, failed: Math.round(s.errorRate * s.requests) }))
     .filter((s) => s.failed > 0)
     .sort((a, b) => b.failed - a.failed)
@@ -506,7 +527,32 @@ function ErrorsBlock({
   const errorGroups = report?.groups.filter(isActionableProxyError) ?? []
   const logged = errorGroups.reduce((sum, g) => sum + g.count, 0)
   const waiting = (!sites && !trafficError) || (nginx && !report && !error)
+  // A 5xx is counted from an access log. With none read anywhere the count
+  // is unknown, not zero: the block said "0 server errors this hour" and
+  // "Nothing failed" about a host whose requests it could not see.
+  const counted = !trafficError && read.length > 0
+  const errorLog = nginx && !error && report && !report.note
   const quiet = failed === 0 && logged === 0
+  const mayConfigure = can("system.admin")
+
+  const errorLogLine =
+    nginx &&
+    (error ? (
+      <p className="text-hint text-muted-foreground" title={errorMessage(error)}>
+        {"Couldn't read nginx's error log."}
+      </p>
+    ) : report?.note ? (
+      <p className="text-hint text-muted-foreground">{report.note}</p>
+    ) : (
+      // Only groups worth acting on are drawn: a log whose every line was
+      // a notice drew an empty finding list, whose own "No problems found"
+      // stood under the block's all-clear and said it a second time.
+      errorGroups.length > 0 && (
+        <FindingList
+          findings={errorGroups.slice(0, 4).map((group) => errorFinding(group, { mayConfigure }))}
+        />
+      )
+    ))
 
   return (
     <Panel plain aria-label="Recent errors">
@@ -517,26 +563,46 @@ function ErrorsBlock({
       <PanelBody className="space-y-4 pt-4">
         {waiting ? (
           <Bones />
+        ) : !counted && !errorLog ? (
+          <>
+            <OverviewEmpty icon={FileText} title="Nothing to read errors from">
+              {trafficError
+                ? "Couldn't read the sites' access logs, so this hour's server errors are unknown."
+                : "Server errors are counted from access logs, and no site here writes one the dashboard reads."}
+            </OverviewEmpty>
+            {errorLogLine}
+          </>
         ) : (
           <div className="animate-rise space-y-4">
-            <Headline
-              value={failed.toLocaleString()}
-              unit={failed === 1 ? "server error this hour" : "server errors this hour"}
-              tone={failed > 0 ? "danger" : undefined}
-              caption={
-                trafficError
-                  ? "Couldn't read the sites' access logs"
-                  : nginx && !error && report && !report.note
+            {counted ? (
+              <Headline
+                value={failed.toLocaleString()}
+                unit={failed === 1 ? "server error this hour" : "server errors this hour"}
+                tone={failed > 0 ? "danger" : undefined}
+                caption={
+                  errorLog
                     ? `${logged.toLocaleString()} nginx error-log ${logged === 1 ? "line" : "lines"}`
                     : failed > 0
                       ? `across ${plural(failing.length, "site")}`
                       : undefined
-              }
-            />
-            {quiet && !trafficError && !error && !report?.note ? (
+                }
+              />
+            ) : (
+              <Headline
+                value={logged.toLocaleString()}
+                unit={logged === 1 ? "nginx error-log line" : "nginx error-log lines"}
+                tone={logged > 0 ? "danger" : undefined}
+                caption={
+                  trafficError
+                    ? "Couldn't read the sites' access logs"
+                    : "5xx answers need an access log, which no site writes"
+                }
+              />
+            )}
+            {quiet && (counted || errorLog) ? (
               <p className="flex items-center gap-2.5 text-body text-muted-foreground">
                 <CheckCircle aria-hidden className="size-4 shrink-0 text-success" />
-                Nothing failed in the last hour
+                {counted ? "Nothing failed in the last hour" : "nginx logged nothing this hour"}
               </p>
             ) : (
               failing.length > 0 && (
@@ -569,23 +635,7 @@ function ErrorsBlock({
                 </ul>
               )
             )}
-            {nginx &&
-              (error ? (
-                <p className="text-hint text-muted-foreground" title={errorMessage(error)}>
-                  {"Couldn't read nginx's error log."}
-                </p>
-              ) : report?.note ? (
-                <p className="text-hint text-muted-foreground">{report.note}</p>
-              ) : (
-                report &&
-                report.groups.length > 0 && (
-                  <FindingList
-                    findings={errorGroups
-                      .slice(0, 4)
-                      .map((group) => errorFinding(group, { mayConfigure: can("system.admin") }))}
-                  />
-                )
-              ))}
+            {errorLogLine}
           </div>
         )}
       </PanelBody>

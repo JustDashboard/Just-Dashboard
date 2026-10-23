@@ -1,7 +1,8 @@
 "use client"
 
 import { useMemo, useRef, useState } from "react"
-import { Warning } from "@/components/icons"
+import Link from "next/link"
+import { ArrowRight, ChartActivity, Warning } from "@/components/icons"
 import { ApiError, errorMessage, get, put } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -16,7 +17,10 @@ import type { ChartRowLike, Series } from "@/components/metrics/metric-chart"
 import { Status } from "@/components/status-dot"
 import { ErrorState, Notice } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { OverviewEmpty } from "@/components/proxy/overview-empty"
+import { sitePath } from "@/components/proxy/site-verbs"
 import {
   connectionStates,
   mergeSeries,
@@ -105,9 +109,7 @@ export function LiveTraffic({
             <Skeleton className="h-40 w-full" />
           </div>
         ) : read.length === 0 ? (
-          <p className="py-2 text-body text-muted-foreground">
-            No site keeps an access log the dashboard can read, so there is no traffic to count.
-          </p>
+          <QuietEdge sites={sites} />
         ) : (
           <div className="animate-rise space-y-4">
             <StatGrid columns={4} framed>
@@ -338,4 +340,45 @@ function Readings({
       )}
     </span>
   )
+}
+
+/**
+ * Live traffic on a host where no site keeps a record the dashboard reads:
+ * why there is nothing to count, and the page that says what each site
+ * logs — the site's own where there is one, Sites otherwise.
+ */
+function QuietEdge({ sites }: { sites: SiteTrafficReading[] }) {
+  const only = sites.length === 1 ? sites[0] : undefined
+  return (
+    <OverviewEmpty
+      icon={ChartActivity}
+      title="No traffic to count yet"
+      action={
+        sites.length > 0 && (
+          <Button asChild size="sm" variant="outline">
+            <Link href={only ? sitePath(only.site) : "/proxy/sites"}>
+              {only ? `Open ${only.site}` : "Open Sites"}
+              <ArrowRight />
+            </Link>
+          </Button>
+        )
+      }
+    >
+      {sites.length === 0
+        ? "No site is configured yet. Each site's requests are counted here, minute by minute, from its access log."
+        : `${
+            only
+              ? `${only.site} writes no access log`
+              : `None of ${plural(sites.length, "site")} writes an access log`
+          } the dashboard can read, so there are no requests to count.${
+            only?.reason ? ` ${sentence(only.reason)}` : ""
+          }`}
+    </OverviewEmpty>
+  )
+}
+
+/** A reason the server words in lower case without a stop, as a sentence. */
+function sentence(text: string): string {
+  const trimmed = text.trim().replace(/\.$/, "")
+  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}.`
 }
