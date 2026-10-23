@@ -6,6 +6,7 @@ import {
   Archive,
   Database,
   FolderOpen,
+  Globe,
   Rocket,
   TerminalWindow,
   type Icon,
@@ -87,6 +88,7 @@ export function counted(n: number | undefined, singular: string, many?: string) 
 
 export const SHORTCUT_GLYPH = {
   deploy: Rocket,
+  site: Globe,
   database: Database,
   files: FolderOpen,
   computer: TerminalWindow,
