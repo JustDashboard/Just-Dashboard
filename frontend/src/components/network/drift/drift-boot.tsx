@@ -177,7 +177,7 @@ function CommandStep({ command }: { command: Command }) {
         {product ? (
           <ProductGlyph id={product} className="size-3.5" />
         ) : (
-          <LogoGlyph className="h-3.5 shrink-0 text-brand" />
+          <LogoGlyph small className="h-3.5 shrink-0 text-brand" />
         )}
         <span className="truncate font-mono">{name}</span>
       </span>

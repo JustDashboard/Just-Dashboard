@@ -15,6 +15,7 @@ import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { LiveBytes } from "@/components/overview/readings"
+import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph, containerProduct, hasProductLogo } from "@/components/product-logo"
 import { WireHost, WireMark, WireNode } from "@/components/deploy/wire"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
@@ -447,7 +448,9 @@ function Picture({
                       nodeRef={refs.get(member.id)}
                       mark={
                         <WireMark tone="logo" shape="square" size="sm">
-                          {product && hasProductLogo(product) ? (
+                          {member.dashboard ? (
+                            <LogoGlyph small className="text-brand" />
+                          ) : product && hasProductLogo(product) ? (
                             <ProductGlyph id={product} />
                           ) : (
                             <ProductGlyph id="docker" />

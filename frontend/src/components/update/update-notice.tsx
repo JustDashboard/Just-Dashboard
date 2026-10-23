@@ -280,7 +280,7 @@ function Mark({ mode }: { mode: "available" | "running" | "success" | "failed" }
       ) : mode === "failed" ? (
         <CrossCircle className="size-4" />
       ) : (
-        <LogoGlyph className="h-4 w-auto" />
+        <LogoGlyph small className="h-4 w-auto" />
       )}
     </span>
   )

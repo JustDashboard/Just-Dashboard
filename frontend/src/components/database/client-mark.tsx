@@ -39,7 +39,7 @@ export function DbClientMark({
           aria-hidden
           className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-hairline bg-background text-brand"
         >
-          <LogoGlyph className="size-4" />
+          <LogoGlyph small className="size-4" />
         </span>
       )
     }

@@ -191,7 +191,7 @@ export function DashboardMark({ className }: { className?: string }) {
         className,
       )}
     >
-      <LogoGlyph className="h-4 w-auto text-brand" />
+      <LogoGlyph small className="h-4 w-auto text-brand" />
     </span>
   )
 }

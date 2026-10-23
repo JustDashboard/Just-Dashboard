@@ -1,6 +1,6 @@
 <div align="center">
 
-<a href="https://just-dashboard.com"><img src="docs/readme/logo.svg" width="88" height="88" alt="Just Dashboard"></a>
+<a href="https://just-dashboard.com"><img src="frontend/public/brand-logo/just-tile-ink.svg" width="88" height="88" alt="Just Dashboard"></a>
 
 # Just Dashboard
 
@@ -600,7 +600,7 @@ owners' trademarks and keep their own licences, listed in that directory's `NOTI
 
 <div align="center">
 <br>
-<a href="https://just-dashboard.com"><img src="docs/readme/logo.svg" width="40" height="40" alt="Just Dashboard"></a>
+<a href="https://just-dashboard.com"><img src="frontend/public/brand-logo/just-tile-ink.svg" width="40" height="40" alt="Just Dashboard"></a>
 <br>
 <sub><a href="https://just-dashboard.com">just-dashboard.com</a></sub>
 </div>

@@ -43,6 +43,7 @@ import { IconAction } from "@/components/icon-action"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
+import { DashboardMark } from "@/components/backups/marks"
 import { useProjectFavicon } from "@/components/deploy/project-mark"
 import { ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -1185,6 +1186,7 @@ function OwnerLine({ socket, tagged }: { socket: Socket; tagged?: boolean }) {
  */
 function ProcessMark({ listener }: { listener: Listener }) {
   const favicon = useProjectFavicon(listener.container?.deployment?.projectId)
+  if (listener.self) return <DashboardMark />
   return (
     <ProductLogo id={listenerProduct(listener)} favicon={favicon} size="sm" fallback={Router} />
   )
