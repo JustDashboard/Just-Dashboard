@@ -2220,7 +2220,28 @@ The passes, in order. Each one is a diff you can review on its own.
    need attention, server errors this hour), and a site's row opens its traffic, or for an ingress
    route, its site page, which reads the deployment's record. The
    route cards lead with the application's own mark and the engine in the tile's corner
-   (`RouteMark`), their route one line (names → upstream) rather than two labelled columns.
+   (`RouteMark`), and are one line: what serves the route and the way a request goes (its names,
+   only where they differ from the route's own, then the upstream or folder) under the name, and
+   the hour's traffic, the ports said once each (`listenPorts`: `80` and `[::]:80` are one), TLS
+   and the serving state at the far end. nginx's `_` reads "any host" (`routeNames`). They were
+   two lines with the listen addresses spelled out at the far edge, twice the height of what they
+   said.
+
+   The overview took a second pass on 2026-10-23, at the operator's request, for its quiet
+   states. A host with no reverse proxy opens, under the identity line, on `EngineSetup`
+   (`components/proxy/engine-setup.tsx`): the question at the 24px rung ("Put nginx in front of
+   this server"), the brand command at `size="lg"` with the exact package-manager line beside it,
+   certbot riding along on an `OptionRow` that is on by default, the job streaming under it, and
+   a rail of what the page draws once nginx runs. It was two `xs` outline buttons over an empty
+   Certificates block, an empty Routes list and a Recent changes rail; none of those are drawn
+   without an engine, and the identity line drops its zero counts (the open ports stay). Where a
+   block has nothing to read it says so in one shape, `OverviewEmpty` (an icon, what is missing,
+   why, and the one way forward as an outline button where there is one), rather than a grey
+   sentence at whichever size each block had chosen. With no access log read anywhere, Live
+   traffic says why and opens the site (or Sites), the band drops its Traffic block rather than
+   saying it a second time, and Recent errors leads on nginx's error-log lines, since a 5xx count
+   with no log to count from is unknown, not zero; an error log whose every group is a notice no
+   longer draws an empty finding list's "No problems found" under the block's own all-clear.
 
    Docker networks took the same exit on 2026-10-08, at the operator's request, because it was the
    still page of the section: a column of grey cards, each a name, a subnet and a count, with the

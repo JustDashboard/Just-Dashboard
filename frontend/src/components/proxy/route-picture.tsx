@@ -137,7 +137,9 @@ export function RoutePicture({
   const appPort = 26
 
   return (
-    <div data-slot="route-picture" className="relative animate-rise py-4">
+    // The engine's words hang under its tile, so with one or two domains the
+    // lanes end above them and the next heading ran into the front door line.
+    <div data-slot="route-picture" className="relative animate-rise pt-4 pb-10">
       <div ref={container} className="relative">
         {edges.map((edge, index) => {
           const into = edge.to === "hub"

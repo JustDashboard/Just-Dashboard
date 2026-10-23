@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { ROUTE_LIMIT, overviewRoutes, routeKind, routeTarget } from "./overview-routes"
+import {
+  ROUTE_LIMIT,
+  isDefaultServer,
+  listenPorts,
+  overviewRoutes,
+  routeKind,
+  routeNames,
+  routeTarget,
+} from "./overview-routes"
 
 const vhost = (overrides) => ({
   name: "app.example.com",
@@ -84,5 +92,23 @@ describe("what pressing a route does", () => {
       href: "/proxy/sites/just-dashboard-shop",
       verb: "Open just-dashboard-shop",
     })
+  })
+})
+
+describe("a route's ports and names", () => {
+  test("one port per number, across both address families", () => {
+    expect(listenPorts(["80 default_server", "[::]:80 default_server"])).toEqual(["80"])
+    expect(listenPorts(["443 ssl", "[::]:443 ssl", "80"])).toEqual(["443", "80"])
+    expect(listenPorts(["127.0.0.1:8080"])).toEqual(["8080"])
+    expect(listenPorts([])).toEqual([])
+  })
+
+  test("nginx's catch-all name reads as words", () => {
+    const fallback = vhost({ serverNames: ["_"], listen: ["80 default_server"] })
+    expect(isDefaultServer(fallback)).toBe(true)
+    expect(routeNames(fallback)).toBe("any host")
+    expect(routeNames(vhost({}))).toBe("app.example.com")
+    expect(isDefaultServer(vhost({}))).toBe(false)
+    expect(routeNames(vhost({ serverNames: ["a.example.com", "_"] }))).toBe("a.example.com")
   })
 })

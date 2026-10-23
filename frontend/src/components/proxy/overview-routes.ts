@@ -35,3 +35,38 @@ export function routeKind(vhost: VHost): string {
 export function routeTarget(vhost: VHost): { href: string; verb: string } {
   return { href: sitePath(vhost.name), verb: `Open ${vhost.name}` }
 }
+
+/**
+ * The ports a route listens on, said once each: `80 default_server` and
+ * `[::]:80 default_server` are one port on two families, and the row spent a
+ * third of its width spelling both out.
+ */
+export function listenPorts(listen: string[]): string[] {
+  const ports: string[] = []
+  for (const entry of listen) {
+    const port = entry
+      .trim()
+      .split(/\s+/)[0]
+      ?.match(/(\d+)$/)?.[1]
+    if (port && !ports.includes(port)) ports.push(port)
+  }
+  return ports
+}
+
+/** Whether nginx answers on this route for any name nobody else claims. */
+export function isDefaultServer(vhost: Pick<VHost, "listen" | "serverNames">): boolean {
+  return (
+    vhost.listen.some((entry) => /\bdefault(_server)?\b/.test(entry)) ||
+    vhost.serverNames.every((name) => name === "_" || name === "")
+  )
+}
+
+/**
+ * The names a route answers to, in words: nginx's `_` is the catch-all, which
+ * a reader saw as a stray underscore in front of the arrow.
+ */
+export function routeNames(vhost: Pick<VHost, "listen" | "serverNames">): string {
+  const named = vhost.serverNames.filter((name) => name !== "_" && name !== "")
+  if (named.length > 0) return named.join(", ")
+  return isDefaultServer(vhost) ? "any host" : "no name"
+}
