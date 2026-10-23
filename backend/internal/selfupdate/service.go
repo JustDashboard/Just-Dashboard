@@ -80,9 +80,12 @@ func New(o Options) *Service {
 
 // Start begins the periodic check and settles any upgrade that was in flight
 // when this process began — which, after a successful upgrade, is every time.
+// It is also when the checkout is handed back to its directory's owner, so
+// what an upgrade's root `git pull` wrote is settled by the restart after it.
 func (s *Service) Start(ctx context.Context) {
 	s.installer.Reconcile(ctx, s.current, s.list)
 	s.checker.Start(ctx)
+	go s.adoptCheckout(ctx)
 }
 
 func (s *Service) Stop() { s.checker.Stop() }

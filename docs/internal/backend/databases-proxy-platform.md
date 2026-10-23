@@ -5778,7 +5778,18 @@ done by hand, and the UI refuses to fold it away.
   as root, so afterwards the updater hands back to the checkout's owner everything root-owned in `.git`
   and each file the update changed with the folders above it (`handBack`, through `hostexec.GiveBack`).
   Until 0.7.1 an update's new folders stayed root's, and the operator's own next pull stopped halfway in
-  them. And it **waits
+  them. A checkout cloned with sudo has no owner but root for `handBack` to return to, so at every start
+  the backend gives the checkout's root-owned entries to the owner of the directory holding it
+  (`Service.adoptCheckout`, through `hostexec.Adopt`), when that is not root: whoever owns `/home/ubuntu`
+  can already replace `/home/ubuntu/Just-Dashboard` with a tree of their own, so this grants nothing, and
+  a checkout in `/opt` or `/srv` stays root's. Without it that account's git refused the repository as
+  of dubious ownership, `git worktree add` with it, and agents cloned beside it instead — a clone the
+  Git page rightly lists as a second repository. The walk never follows a link (directories opened
+  `O_NOFOLLOW` relative to their parent, everything else `O_PATH` and re-checked on the descriptor),
+  hands a directory over only after its contents, and leaves alone another account's files, a file with
+  more than one link, anything only its owner can read (the installer's `.env`) and other filesystems.
+  It runs under the lifecycle lock and skips a start with an upgrade, reconfiguration or uninstall in
+  flight; the restart after it settles the tree. And it **waits
   for the health URL to answer** before calling itself finished, since `compose up -d` returns as soon as
   containers start and a backend that starts then dies looks identical from there.
 - **The transcript is read two ways.** The report carries `Store.Tail()` — the last 64 KB, with a
