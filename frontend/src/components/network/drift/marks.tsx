@@ -82,7 +82,7 @@ export function DriftMark({ row, className }: { row: DriftRow; className?: strin
           className,
         )}
       >
-        <LogoGlyph className="h-4" />
+        <LogoGlyph small className="h-4" />
       </span>
     )
   return <ProductLogo id={row.product} size="sm" fallback={FileText} className={className} />

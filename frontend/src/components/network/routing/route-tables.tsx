@@ -8,6 +8,7 @@ import type { NetworkRoute, NetworkRouting, NetworkRule } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Tag } from "@/components/tag"
+import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Button } from "@/components/ui/button"
@@ -160,6 +161,9 @@ export function RouteTable({
                     {OWNER_PRODUCT[route.owner] && (
                       <ProductGlyph id={OWNER_PRODUCT[route.owner]!} />
                     )}
+                    {route.owner === "just-dashboard" && (
+                      <LogoGlyph small className="h-3.5 w-auto shrink-0 text-brand" />
+                    )}
                     <span className={cn(route.managed ? "text-brand" : "text-muted-foreground")}>
                       {OWNER_WORD[route.owner]}
                     </span>
@@ -291,6 +295,9 @@ export function RuleTable({
                 <TableCell>
                   <span className="inline-flex items-center gap-1.5 text-xs">
                     {rule.owner === "tailscale" && <ProductGlyph id="tailscale" />}
+                    {rule.owner === "just-dashboard" && (
+                      <LogoGlyph small className="h-3.5 w-auto shrink-0 text-brand" />
+                    )}
                     <span className={cn(rule.managed ? "text-brand" : "text-muted-foreground")}>
                       {rule.owner === "just-dashboard" ? "made here" : rule.owner}
                     </span>

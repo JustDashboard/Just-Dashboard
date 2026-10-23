@@ -6,7 +6,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { MetricsStream } from "@/hooks/use-metrics"
 import { SelfUpdateProvider } from "@/hooks/use-self-update"
 import { AppSidebar } from "@/components/app-sidebar"
-import { Logo } from "@/components/logo"
+import { Logo, LogoStacked } from "@/components/logo"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { CommandPaletteProvider, useCommandPalette } from "@/components/command-palette"
 import { MagnifyingGlass } from "@/components/icons"
@@ -124,7 +124,7 @@ function ShellSplash() {
   return (
     <div className="auth-backdrop flex min-h-svh flex-col items-center justify-center gap-4 bg-background">
       <div className="flex flex-col items-center gap-2.5">
-        <Logo size="lg" />
+        <LogoStacked className="h-18" />
         <div className="h-0.5 w-24 overflow-hidden rounded-full bg-muted">
           <div className="h-full w-1/3 animate-[loading_1.2s_ease-in-out_infinite] rounded-full bg-primary" />
         </div>

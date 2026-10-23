@@ -76,7 +76,7 @@ function DangerRow({
 
 /** The dashboard's own mark, for the one act that touches only what the dashboard keeps. */
 function DashboardGlyph({ className }: { className?: string }) {
-  return <LogoGlyph className={cn(className, "w-auto text-brand")} />
+  return <LogoGlyph small className={cn(className, "w-auto text-brand")} />
 }
 
 /**

@@ -46,6 +46,7 @@ import { StackHistory } from "@/components/docker/stack-history"
 import { StackLogs } from "@/components/docker/stack-logs"
 import { StackMap } from "@/components/docker/stack-map"
 import { StackPreview } from "@/components/docker/stack-preview"
+import { DASHBOARD_STACK } from "@/components/docker/stack-readings"
 import { ServiceRows } from "@/components/docker/stack-services-table"
 import { StackUsageBand } from "@/components/docker/stack-usage-band"
 import {
@@ -62,6 +63,7 @@ import {
   type ServiceReading,
 } from "@/components/docker/stack-service-readings"
 import { useConfirm } from "@/components/confirm-dialog"
+import { LogoGlyph } from "@/components/logo"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
@@ -788,8 +790,19 @@ function StackBody({ name }: { name: string }) {
 /**
  * The stack as what it is made of: its services' products overlapping, the
  * tile's size the identity line's, or Compose's own mark when none has one.
+ * The dashboard's own stack is the dashboard, so it takes the dashboard's mark.
  */
 function StackMark({ stack, containers }: { stack: StackDetail; containers?: Container[] }) {
+  if (stack.name === DASHBOARD_STACK) {
+    return (
+      <span
+        aria-hidden
+        className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-hairline bg-background"
+      >
+        <LogoGlyph className="h-6 w-auto text-brand" />
+      </span>
+    )
+  }
   const ids =
     containers && containers.length > 0
       ? containers.map(containerProduct)

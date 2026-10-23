@@ -17,6 +17,7 @@ import { useNow } from "@/components/deploy/vocabulary"
 import { HUE } from "@/components/overview/readings"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { RowLink } from "@/components/page"
+import { DashboardMark } from "@/components/backups/marks"
 import {
   ProductLogo,
   ProductLogos,
@@ -56,6 +57,7 @@ import {
 } from "@/components/docker/container-actions"
 import { stackLabel, stackTone } from "@/components/docker/stack-state"
 import {
+  DASHBOARD_STACK,
   exitCode,
   stackLane,
   type ServiceLine,
@@ -148,6 +150,11 @@ function stackProducts(line: StackLine) {
   return images.length > 0 ? imageProducts(images) : ["docker-compose"]
 }
 
+/** The dashboard's own stack is drawn as the dashboard: its images alone read as a Caddy. */
+function stackLead(line: StackLine) {
+  return line.stack.name === DASHBOARD_STACK ? <DashboardMark /> : undefined
+}
+
 /**
  * One stack in the wide table: its own row, then its containers. A body per
  * stack, so a screen reader hears where one application ends and the next
@@ -172,7 +179,7 @@ function WideStack({ line, ...shared }: Shared & { line: StackLine }) {
         <TableCell className="py-2.5 pl-2" style={{ boxShadow: `inset 3px 0 0 ${lane}` }}>
           <div className="flex w-full min-w-0 items-center gap-2">
             <CollapseToggle stack={stack.name} open={open} onToggle={shared.onToggle} />
-            <ProductLogos ids={stackProducts(line)} />
+            <ProductLogos ids={stackProducts(line)} lead={stackLead(line)} />
             <div className="min-w-0 pl-1">
               <div className="flex min-w-0 items-center gap-2">
                 <RowLink
@@ -763,7 +770,7 @@ function NarrowStack({ line, ...shared }: Shared & { line: StackLine }) {
         }}
       >
         <CollapseToggle stack={stack.name} open={open} onToggle={shared.onToggle} />
-        <ProductLogos ids={stackProducts(line)} />
+        <ProductLogos ids={stackProducts(line)} lead={stackLead(line)} />
         <div className="min-w-0 flex-1 pl-1">
           <div className="flex min-w-0 items-center gap-2">
             <RowLink

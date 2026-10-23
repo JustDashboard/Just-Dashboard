@@ -165,7 +165,7 @@ export function UninstallDialog({
               aria-hidden
               className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-hairline bg-surface-sunken"
             >
-              <LogoGlyph className="h-4 w-auto text-brand" />
+              <LogoGlyph small className="h-4 w-auto text-brand" />
             </span>
             <div className="min-w-0 space-y-0.5">
               <p className="truncate text-body font-medium">Just Dashboard on {plan.phrase}</p>

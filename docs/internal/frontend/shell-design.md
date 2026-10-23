@@ -519,20 +519,34 @@ takes the sidebar accent fill, a brand-blue icon and a `font-medium` label again
 the rest. The rail is the one surface dense enough to need three weights, and the group labels above the
 entries are the third. `SidebarMenu`/`SidebarMenuSub` ship at `gap-0.5`.
 
-`components/logo.tsx` is the logo and nothing else — `LogoGlyph`, the J mark in `text-brand`, then
-"Dashboard" in the text colour and the version as small muted text beside it. No tile, no strapline.
-The mark *is* the "Just", so the word is not also set in type next to it; it carries that word in
-`aria-label` instead, and the sidebar's home link still announces "Just Dashboard". The glyph is an
-inline `<svg>` on `currentColor` — two straight-edged subpaths, no raster, no second colour — so it
-tints with the palette and stays crisp in the sidebar and on a retina sign-in alike. This is the
-only rendering of the product's name, so sidebar, sign-in and splash agree and a rename is one file.
-`LogoMark` is the glyph alone.
+The brand ships as files in `public/brand-logo/`: the J mark (`just-mark*.svg`, with a `-small` cut
+for 16px and under), the horizontal and stacked lockups of the mark with "Just Dashboard"
+(`just-dashboard-*.svg`), each in ink, white and brand blue, and the app-icon tiles
+(`just-tile-*.svg`). The `just-hub-*` files are the same system for Just Hub and are not drawn by the
+dashboard. Anything outside the app — the README, a slide — uses those files as they are.
 
-The same two paths are the browser icons: `app/icon.svg` (and `favicon.ico` / `apple-icon.png`
-rasterised from it at 16–180px) put the mark in the tab, on the dashboard's dark ground rather than
-transparent because the pale mark would vanish on a light tab strip. `public/LOGO.svg` is the file
-the mark ships as — the same two paths, already filled `#CAE9FF` — for anything outside the app that
-needs it, and the source `logo.tsx` inlines.
+`components/logo.tsx` is how the app draws them, and nothing else does. `Logo` is the horizontal
+lockup with the version as small muted text beside it: the lettering is the brand's own, outlined, not
+"Dashboard" set in Source Sans beside a glyph, because the lockup fixes how large the mark is against
+the words. It is one colour, `text-brand`, as `just-dashboard-on-dark.svg` draws it on this ground.
+`LogoStacked` is the stacked lockup, for the start-up splash where the composition is centred.
+`LogoGlyph` is the mark alone and `LogoMark` the mark as the collapsed rail's home link. All of them
+are inline `<svg>` on `currentColor` — the same paths as the files, no raster — so they tint with the
+palette and stay crisp in the sidebar and on a retina sign-in alike, and the glyph takes whatever
+tone the surface it sits on gives it. `LogoGlyph small` draws the `-small` cut: at 16px and under,
+the regular mark's gap between tittle and stem antialiases shut, so every call site at `h-4` or
+below passes it. This is the only rendering of the product's name, so sidebar, sign-in and splash
+agree and a rename is one file.
+
+Where the UI draws the dashboard *itself* as one thing among others — the `just-dashboard` Compose
+stack, its containers on a network, the sockets it listens on, the routes and rules it made, the
+audit log's machine actors, a backup of its own store — it takes the mark (`DashboardMark` on a
+product tile, `LogoGlyph` bare), not the Docker or Caddy logo its images would otherwise resolve to.
+
+The browser icons are `just-tile-ink.svg`: `app/icon.svg` is the file itself, and `favicon.ico`
+(16–128px) is rasterised from it, an ink tile rather than the bare mark because the pale mark would
+vanish on a light tab strip. `apple-icon.png` is the tile's mark on a full-bleed ink square, because
+iOS rounds the corners itself and fills transparency with black.
 
 **Selection is `bg-accent`, everywhere.** The active session in the terminal rail, a pressed
 `ToggleGroupItem`, an applied `FilterChip`, a highlighted command row, a selected table row, the current

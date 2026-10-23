@@ -63,7 +63,7 @@
    * value.
    *
    * Both are the same hue, because the product has a mark and the mark is
-   * one colour: #CAE9FF, the pale blue the J in `public/LOGO.svg` is drawn in.
+   * one colour: #CAE9FF, the brand blue of the files in `public/brand-logo/`.
    * A focus ring in some other hue would be a second identity nobody chose.
    *
    * What separates the two roles is chroma, not hue. `--brand` is the logo's
@@ -525,14 +525,6 @@
   --text-hint: 0.6875rem; /* 11px — a row's secondary line */
   --text-body: 0.8125rem; /* 13px — body and row text; the product's default */
   --text-title: 0.9375rem; /* 15px — the title of a surface that opens */
-
-  /* The wordmark's own ramp. A logo is not body type — it is a drawing of the
-     product's name — so it gets its own three sizes rather than borrowing steps
-     from the reading scale it has no relationship to. Named here only so the
-     one file that uses them is not the one place still typing a raw pixel. */
-  --text-mark-sm: 0.9375rem;
-  --text-mark-md: 1.0625rem;
-  --text-mark-lg: 1.375rem;
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

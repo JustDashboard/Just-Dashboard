@@ -266,7 +266,7 @@ White is still a fill, but it is no longer the command face. `--primary` is the 
 filled state can never be mistaken for the one thing you press.
 
 The two blue tokens are one hue, because the product has a mark and the mark is one colour:
-`#CAE9FF`, the pale blue the J in `public/LOGO.svg` (inlined in `components/logo.tsx`) is drawn in.
+`#CAE9FF`, the brand blue of the files in `public/brand-logo/` (inlined in `components/logo.tsx`).
 **What separates the two is chroma, not lightness**: `--brand` is the logo's own value, the colour at
 rest, and at L 0.92 it is already among the lightest things on this ground, so there is no brighter
 step left for attention to take. `--signal` is the same blue saturated instead — a step deeper and
