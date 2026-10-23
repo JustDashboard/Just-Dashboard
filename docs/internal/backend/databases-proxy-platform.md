@@ -5784,7 +5784,9 @@ done by hand, and the UI refuses to fold it away.
   can already replace `/home/ubuntu/Just-Dashboard` with a tree of their own, so this grants nothing, and
   a checkout in `/opt` or `/srv` stays root's. Without it that account's git refused the repository as
   of dubious ownership, `git worktree add` with it, and agents cloned beside it instead — a clone the
-  Git page rightly lists as a second repository. The walk never follows a link (directories opened
+  Git page rightly lists as a second repository. A walk that changed anything then calls
+  `Options.Adopted`, which the API uses to carry root's GitHub login to the new owner
+  (`ghx.CarryLogin`; see [GitHub sign-in](processes-terminal-github.md#github-sign-in)). The walk never follows a link (directories opened
   `O_NOFOLLOW` relative to their parent, everything else `O_PATH` and re-checked on the descriptor),
   hands a directory over only after its contents, and leaves alone another account's files, a file with
   more than one link, anything only its owner can read (the installer's `.env`) and other filesystems.
