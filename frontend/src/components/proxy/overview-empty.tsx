@@ -12,6 +12,11 @@ import { cn } from "@/lib/utils"
  * because a 16px glyph in a column of its own over 12px grey text left a
  * gutter of white down the block and read as nothing at all. The tile holds
  * the words' top line, so the icon and the title stand on one line.
+ *
+ * It is the size of those rows too — a 12px inset, the name over one
+ * hint-sized line, a small outline verb at the far end like a channel card's
+ * — because a 16px inset, body-sized prose and a filled button made each one
+ * a slab twice the height of every card around it.
  */
 export function OverviewEmpty({
   mark,
@@ -31,26 +36,25 @@ export function OverviewEmpty({
   return (
     // Sized by its own width rather than the window's, because it stands
     // full-width under Live traffic and in a half of the band beside Errors:
-    // the action goes beside the words only where both fit.
+    // the action stands at the card's far end where the line has room for it,
+    // and under the words — never under the tile — where it has not.
     <div
       data-slot="overview-empty"
       className={cn(
-        "@container min-w-0 animate-rise rounded-xl border bg-choice-surface p-4",
+        "@container min-w-0 animate-rise rounded-xl border bg-choice-surface px-3 py-2.5",
         tone === "warning" && "border-rule-warning",
         tone === "success" && "border-rule-success",
       )}
     >
-      <div className="flex min-w-0 flex-col gap-4 @xl:flex-row @xl:items-center">
-        <div className="flex min-w-0 flex-1 items-start gap-3.5">
+      <div className="grid min-h-9 min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 @xl:grid-cols-[auto_minmax(0,1fr)_auto]">
+        <span className="row-span-2 flex self-start pt-0.5 @xl:row-span-1 @xl:self-center @xl:pt-0">
           {mark}
-          <div className="min-w-0 space-y-1">
-            <p className="text-body leading-snug font-medium">{title}</p>
-            <p className="max-w-prose text-body leading-relaxed text-pretty text-muted-foreground">
-              {children}
-            </p>
-          </div>
+        </span>
+        <div className="min-w-0">
+          <p className="text-body leading-snug font-medium">{title}</p>
+          <p className="text-hint leading-snug text-pretty text-muted-foreground">{children}</p>
         </div>
-        {action && <div className="flex shrink-0 pl-13.5 @xl:pl-2">{action}</div>}
+        {action && <div className="mt-2.5 flex @xl:mt-0">{action}</div>}
       </div>
     </div>
   )
@@ -81,7 +85,7 @@ export function EmptyMark({
         <span
           aria-hidden
           className={cn(
-            "absolute -right-1 -bottom-1 flex size-5 rounded-md border bg-background",
+            "absolute -right-1 -bottom-1 flex size-4 rounded-sm border bg-background",
             tone === "warning" && "border-rule-warning text-warning",
             tone === "success" && "border-rule-success text-success",
             tone === "danger" && "border-rule-danger text-destructive",
@@ -96,7 +100,7 @@ export function EmptyMark({
               tone === "danger" && "bg-wash-danger",
             )}
           >
-            <Corner className="size-3" />
+            <Corner className="size-2.5" />
           </span>
         </span>
       )}

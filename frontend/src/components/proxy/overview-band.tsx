@@ -422,11 +422,7 @@ function CertificatesBlock({
             tone="warning"
             title={certbot ? "No certificates yet" : "No certificates on this host"}
             action={
-              <Button
-                asChild
-                size="sm"
-                variant={certbot && can("system.admin") ? "default" : "outline"}
-              >
+              <Button asChild size="sm" variant="outline">
                 <Link href="/proxy/certificates">
                   {certbot && can("system.admin") ? "Issue a certificate" : "Open Certificates"}
                   <ArrowRight />

@@ -782,7 +782,7 @@ function AllClear({ rules, every }: { rules: number; every: number }) {
   return (
     <div
       className={cn(
-        "flex min-w-0 animate-rise items-center gap-3.5 rounded-xl border bg-choice-surface p-4",
+        "flex min-h-14 min-w-0 animate-rise items-center gap-3 rounded-xl border bg-choice-surface px-3 py-2.5",
         good && "border-rule-success",
       )}
     >
@@ -805,11 +805,11 @@ function AllClear({ rules, every }: { rules: number; every: number }) {
           )}
         </span>
       </span>
-      <div className="min-w-0 space-y-0.5">
-        <p className="text-body font-medium">
+      <div className="min-w-0">
+        <p className="text-body leading-snug font-medium">
           {good ? "Nothing is firing" : "No rules yet, so nothing is followed"}
         </p>
-        <p className="text-body text-pretty text-muted-foreground">
+        <p className="text-hint leading-snug text-pretty text-muted-foreground">
           {good
             ? `${plural(rules, "rule")} checked every ${every} minutes; you are told once when one starts and once when it stops.`
             : "Add a rule below and it is checked from the next pass."}
@@ -877,13 +877,13 @@ function SubjectCard({
   return (
     <li
       className={cn(
-        "flex min-w-0 items-center gap-3.5 rounded-xl border bg-choice-surface px-4 py-3",
+        "flex min-h-14 min-w-0 items-center gap-3 rounded-xl border bg-choice-surface px-3 py-2.5",
         tone === "danger" && "border-rule-danger",
         tone === "warning" && "border-rule-warning",
       )}
     >
       <KindTile kind={subject.kind} engine={engine} tone={tone} />
-      <div className="min-w-0 flex-1 space-y-0.5">
+      <div className="min-w-0 flex-1">
         <p className="min-w-0 text-body leading-snug">
           <span className="font-medium break-all">{subject.label || subject.subject}</span>{" "}
           <span className="text-muted-foreground">· {KINDS[subject.kind].label}</span>

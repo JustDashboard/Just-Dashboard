@@ -2266,12 +2266,11 @@ The passes, in order. Each one is a diff you can review on its own.
    where they had been a row of their own over a band of empty ground. Every quiet block is
    `OverviewEmpty`'s card now, the Routes row's shape: a tile drawn as the product the block is
    about with what is missing in its corner (`EmptyMark` — nginx with a log for no access log,
-   Let's Encrypt with an open lock for no certificates), the title and a readable 14px reason
-   beside it on one line, and the way forward at the card's far end where the card is wide enough
+   Let's Encrypt with an open lock for no certificates), the title and its reason beside it
+   on one line, and the way forward at the card's far end where the card is wide enough
    (a container query, since it stands full-width under Live traffic and in half the band). The
    16px glyph in a column of its own over 12px grey text left a gutter down each block. No
-   certificates is amber-edged, with **Issue a certificate** in the command face for an
-   administrator; an hour in which nothing failed is a green-edged card with a tick on nginx —
+   certificates is amber-edged, with **Issue a certificate** at its end for an administrator; an hour in which nothing failed is a green-edged card with a tick on nginx —
    *Nothing failed in the last hour* where an access log counts 5xx, *nginx logged no errors this
    hour* where none does, since a 5xx count with no log is still unknown, not zero. The nginx
    counters are a card the same shape whose whole surface is the switch's `<label>`, so a press
@@ -2284,7 +2283,12 @@ The passes, in order. Each one is a diff you can review on its own.
    this server to each channel as its own service; under it what is firing as cards in their
    state's edge with Mute, the rules as `ChoiceRow`s (each kind's product with its glyph in the
    corner) that open their form in a sheet, and beside them what was told lately and a test per
-   channel.
+   channel. The same day the cards were brought down to the size of a `ChoiceRow` and a
+   notification channel's card, because the operator found them too big with their verb not part
+   of them: a 12px inset and a 56px floor, the title over a hint-sized reason, and the verb a small
+   outline button at the far end (under the words, never the tile, where the card is narrow), the
+   amber edge rather than a filled button carrying that no certificate is a problem. The alerts
+   page's all-clear and firing cards take the same size.
 
    Docker networks took the same exit on 2026-10-08, at the operator's request, because it was the
    still page of the section: a column of grey cards, each a name, a subnet and a count, with the

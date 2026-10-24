@@ -288,18 +288,18 @@ function NginxCounters({ admin }: { admin: boolean }) {
       <Card
         {...(switchable ? { htmlFor: switchId } : {})}
         className={cn(
-          "flex min-w-0 items-center gap-3.5 rounded-xl border bg-choice-surface px-4 py-3.5",
+          "flex min-h-14 min-w-0 items-center gap-3 rounded-xl border bg-choice-surface px-3 py-2.5",
           switchable && "cursor-pointer transition-colors hover:bg-row-hover",
         )}
       >
         {/* Named for what it counts; stub_status is the module, said in the tooltip. */}
         <ProductLogo id="nginx" />
-        <div className="min-w-0 flex-1 space-y-0.5">
-          <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-body leading-snug font-medium">
+        <div className="min-w-0 flex-1">
+          <p className="flex min-w-0 flex-wrap items-center gap-x-3 text-body leading-snug font-medium">
             nginx counters
             {state && <span className="text-hint font-normal">{state}</span>}
           </p>
-          <div className="min-w-0 text-body leading-relaxed text-muted-foreground">
+          <div className="min-w-0 text-hint leading-snug text-pretty text-muted-foreground">
             {description}
           </div>
         </div>
