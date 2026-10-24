@@ -747,12 +747,16 @@ function Freshness({
   const now = useNow(1000, at !== undefined && !refreshing && late.length === 0)
   return (
     <>
+      {/* The age is the button's tooltip: "Updated just now" spent the bar's
+          width on the one reading that is nearly always fine. A source that
+          has not answered is not fine, and says so. */}
       {late.length > 0 ? (
         <span className="px-1 text-hint font-medium text-warning" title={late.join(", ")}>
           {noAnswerLabel(late)}
         </span>
       ) : (
-        <span className="numeric px-1 text-hint text-muted-foreground">
+        // Still read out, so a screen reader hears how old the page is.
+        <span className="sr-only">
           {refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)}
         </span>
       )}
@@ -768,7 +772,13 @@ function Freshness({
             <RefreshClockwise className="size-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Read every source again</TooltipContent>
+        <TooltipContent>
+          {refreshing
+            ? "Refreshing…"
+            : at !== undefined
+              ? `${updatedLabel(at, now)}. Read every source again`
+              : "Read every source again"}
+        </TooltipContent>
       </Tooltip>
     </>
   )

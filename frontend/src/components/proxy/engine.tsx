@@ -109,7 +109,15 @@ export function EngineStatus({
   return (
     <Status
       state={unit.activeState}
-      label={running ? `running${since > 60 ? ` for ${duration(since)}` : ""}` : stoppedLabel(unit)}
+      // The green dot already says running; the uptime in its largest unit
+      // is what the words add, and "running for 2h 1s" was a third longer.
+      label={
+        running
+          ? since > 60
+            ? `up ${duration(since).split(" ")[0]}`
+            : "running"
+          : stoppedLabel(unit)
+      }
     />
   )
 }
@@ -197,7 +205,15 @@ export function EngineIdentity({
       fallback={Globe}
       title={
         <>
-          {name}
+          {/* The directory it reads is nearly always the default, so it is the
+              name's tooltip rather than a fact the line spends width on. */}
+          <span
+            title={
+              engine && !ingress ? (status.nginx ? status.nginxDir : status.caddyFile) : undefined
+            }
+          >
+            {name}
+          </span>
           {version && (
             <>
               {" "}
@@ -229,18 +245,6 @@ export function EngineIdentity({
           ) : (
             <span>nothing found on this host</span>
           )}
-          {engine && !ingress && (
-            <>
-              <FactDot />
-              <HostFact>
-                {/* The mono face runs larger than Source Sans at one size, so a
-                    path in the line stood taller than the words round it. */}
-                <span className="font-mono text-[0.9em]">
-                  {status.nginx ? status.nginxDir : status.caddyFile}
-                </span>
-              </HostFact>
-            </>
-          )}
           {status.ingressContainer && (
             <>
               <FactDot />
@@ -262,8 +266,15 @@ export function EngineIdentity({
               own; only a renewal nobody schedules stands apart, in warning. */}
           {status.certbot ? (
             <HostFact product="lets-encrypt">
-              {certbotVersion ?? "certbot"}
-              {renewSource && `, renews via ${renewSource}`}
+              {/* Its version and who renews are the expected answers, so they
+                  are its tooltip; only a renewal nobody schedules is said. */}
+              <span
+                title={[certbotVersion, renewSource && `renews via ${renewSource}`]
+                  .filter(Boolean)
+                  .join(", ")}
+              >
+                certbot
+              </span>
             </HostFact>
           ) : (
             <span>no certbot</span>
@@ -325,7 +336,8 @@ function EngineBoot({
   busy?: EngineAction
 }) {
   const boot = bootState(unit)
-  if (!boot) return null
+  // Starting at boot is what a service does; only its absence is worth a word.
+  if (!boot?.warn) return null
   return (
     <>
       <FactDot />
@@ -746,8 +758,8 @@ export function EngineExtras({
 
 /**
  * The modules a reverse proxy is asked for, beside the engine's version:
- * "6 modules" when every one is there, "2 modules missing" in warning when
- * some are not, and each module's state a press away. A module a package on this
+ * nothing when every one is there, "2 modules missing" in warning when some
+ * are not, and each module's state a press away. A module a package on this
  * host provides is installed from that list, through the overview's one
  * package console: "installable" with nothing to press sent the reader to a
  * terminal to type what the list already knew.
@@ -779,6 +791,8 @@ export function ModulesFact({
   const chips = modules.error ? [] : moduleChips(modules.data)
   if (chips.length === 0) return null
   const missing = chips.filter((c) => c.tone !== "running").length
+  // A build with every module is the expected one, and says nothing.
+  if (missing === 0) return null
   const installable = admin
     ? [...new Set(chips.flatMap((c) => (c.package ? [c.package] : [])))]
     : []
@@ -798,7 +812,7 @@ export function ModulesFact({
             // geometric precision, and at 12px on Linux "2 modules" read as
             // "2modules".
             "ml-1 rounded-sm align-middle text-xs font-normal text-muted-foreground focus-ring transition-colors [text-rendering:inherit] hover:text-foreground hover:underline",
-            missing > 0 && "font-medium text-warning",
+            "font-medium text-warning",
           )}
         >
           {missing > 0 ? `${plural(missing, "module")} missing` : plural(chips.length, "module")}

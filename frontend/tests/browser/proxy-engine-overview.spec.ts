@@ -530,7 +530,8 @@ test("an engine that won't start at boot says so, and Start at boot enables it",
   await expect(identity.getByText("won't start at boot")).toBeVisible()
   await identity.getByRole("button", { name: "Start at boot" }).click()
   await expect(page.getByText("nginx starts at boot")).toBeVisible()
-  await expect(identity.getByText("starts at boot", { exact: true })).toBeVisible()
+  // Starting at boot is the expected state, so the line no longer spends width on it.
+  await expect(identity.getByText("starts at boot", { exact: true })).toHaveCount(0)
   await expect(identity.getByText("won't start at boot")).toHaveCount(0)
   await expect(identity.getByRole("button", { name: "Start at boot" })).toHaveCount(0)
   expect(enabled).toEqual(["POST"])
@@ -1199,14 +1200,14 @@ test("a service state that cannot be read is not drawn from its last answer", as
   )
   await page.goto("/proxy")
   const identity = page.locator("[data-slot='host-identity']")
-  await expect(identity.getByText(/running for/)).toBeVisible()
+  await expect(identity.getByText(/^up \d/)).toBeVisible()
 
   unitFails = true
   await page.locator("[data-slot='host-identity']").getByRole("button", { name: "Refresh" }).click()
   const unread = identity.getByText("couldn't read nginx.service")
   await expect(unread).toBeVisible()
   await expect(unread).toHaveAttribute("title", "systemd did not answer")
-  await expect(identity.getByText(/running for/)).toHaveCount(0)
+  await expect(identity.getByText(/^up \d/)).toHaveCount(0)
   await expect(identity.getByText("no service unit")).toHaveCount(0)
 })
 

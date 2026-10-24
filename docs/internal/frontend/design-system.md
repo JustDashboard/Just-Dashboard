@@ -1508,8 +1508,8 @@ own stub_status counters are a one-line strip under the chart, because they coun
 answers: its switch is a `Switch` beside a `Status` rather than a button, because whether nginx is
 counting is a state of the engine; a switch in flight reads "Switching on…", readings that stop lose
 their figures and say why, and nothing on it breathes as live, since it is a poll. The nginx modules
-a reverse proxy is asked for sit beside the version in the engine line's title ("6 modules", or "2
-modules missing" in warning) whose popover lists each, a module a host package provides with its own
+a reverse proxy is asked for sit beside the version in the engine line's title, said only when some are missing ("2 modules
+missing" in warning), whose popover lists each, a module a host package provides with its own
 Install (and Install all when there are several) that runs through the overview's one package console
 under the bar; they were a row of six status dots that read as findings, then the last fact of the
 line, the one item that wrapped onto a row of its own. Recent changes in the rail is five two-line rows, so the rail ends near the routes it
@@ -1517,15 +1517,15 @@ stands beside. A source the overview could not read is never drawn as an empty o
 healthy one: its fact in the engine line reads "couldn't read sites" with the reason as its tooltip,
 its panel shows the `ErrorState`, the picture is not drawn from sites it cannot read, and attention
 carries it as a finding whose button is Try again, so the all-clear line cannot appear over it. The
-overview's context row is its age and one ghost Refresh: "Updated 14s ago" is the oldest reading on
-the page, and while a refresh is out the line reads "Refreshing…" until every source has answered,
-or, after twenty seconds, names the source that has not ("No answer from sites") and Refresh can be
-pressed again. A status that fails after answering keeps its age in the line, since the engine
+overview's context control is one ghost Refresh whose tooltip carries the age ("Updated 14s ago", the
+oldest reading on the page, or "Refreshing…" while a refresh is out); only a source that has not
+answered after twenty seconds is said in the bar ("No answer from sites"), and Refresh can be pressed
+again. A status that fails after answering keeps its age in the line, since the engine
 identity still draws it. The engine line's one brand command follows the unit: Reload while it
 runs, Start once it is stopped or failed, with Reload beside it disabled and its reason on a tooltip
 (a disabled button takes no hover, so the reason hangs on a focusable wrapper). Whether it starts at
-boot is a fact on the line, a warning with an inline Start at boot where `systemctl enable` would fix
-it. A failed unit is the one `Notice` the overview draws under the line — the reader has to act on it
+boot is said only when it does not: a warning with an inline Start at boot where `systemctl enable`
+would fix it. A failed unit is the one `Notice` the overview draws under the line — the reader has to act on it
 — holding systemd's reason in words, a fold that reads the journal when opened and opens scrolled to
 its newest line, and its two verbs. A start or restart the config test refuses keeps its dialog
 open on the test's diagnostics as rows (level as a `Status` verdict, file:line in mono, Open at line
@@ -2244,6 +2244,12 @@ The passes, in order. Each one is a diff you can review on its own.
    saying it a second time, and Recent errors leads on nginx's error-log lines, since a 5xx count
    with no log to count from is unknown, not zero; an error log whose every group is a notice no
    longer draws an empty finding list's "No problems found" under the block's own all-clear.
+
+   A fourth pass on 2026-10-24 cut the engine line to what is not the expected answer, because
+   the bar still ran to a second row on a laptop: "starts at boot" is gone (only "won't start at
+   boot" is said); the config directory is the name's tooltip, certbot's version and renewal timer
+   the certbot fact's, and "Updated 14s ago" Refresh's; the uptime reads *up 2h* beside the green
+   dot rather than *running for 2h 1s*; and a build with every module says nothing.
 
    A third pass on 2026-10-24, from an operator's screenshot of a one-site host, took out what
    the page said twice. The title is *nginx 1.24.0*, not `nginx -v`'s "nginx nginx/1.24.0"; who
