@@ -1775,6 +1775,14 @@ language (`languages` on the repository summary) as one bar in the `--language-*
 largest three by their own logos (`git/languages.tsx`, over `lib/git-languages.ts`). The owner's
 face stays on the shelf rule, said once for every card under it.
 
+**The workspace strip folds, it does not wrap.** It is one row from a 56rem strip (`@4xl` on its own
+container, not the viewport, since the sidebar decides the width): who, then where HEAD is, the sync
+verbs, the menu, and the account across a rule. Below that it is exactly two full rows — the checkout
+with the menu, the account and help at its end, then the branch stretched beside fetch, pull and push
+— because a free `flex-wrap` stacked it four rows deep on a phone with half of each row empty. Folded,
+the path gives way to the forge slug (it stays on the title's tooltip), the sync verbs drop their
+words below 32rem, and the account is its avatar alone below 36rem (`compact="fit"`).
+
 **Text a person wrote on a forge is drawn as the Markdown it is.** A pull request's description and
 each comment on it are rendered by `git/markdown.tsx` from the tree `lib/markdown.ts` reads, on this
 product's type ladder rather than GitHub's, with a `#123` and an `@mention` linking to the forge. It is
