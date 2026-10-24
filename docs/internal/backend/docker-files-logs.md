@@ -338,7 +338,18 @@ basename. A copy error leaves an existing regular destination intact.
 the a.txt already there. `Move` also refuses a directory into its own subtree with a sentence rather
 than rename's EINVAL, and treats a move onto itself as a no-op. `Touch` and `Mkdir` are the "New file"
 and "New folder" verbs and refuse an existing path the same way (`Mkdir` still creates missing
-parents). Uploads go through `Upload`, which writes to a temporary sibling and publishes it atomically:
+parents).
+
+**A new entry belongs to the folder's owner.** The backend is root, so a folder or file made by
+`Mkdir`, `Touch`, `Write`, `Upload`, `Copy` or `Extract` in a folder another account owns is handed to
+that account (`files/owner.go`) — what the verb typed in that account's shell would have left. Without
+it a folder made in `/home/ubuntu/app` was root's: its owner could not write into it, and the Git page,
+which runs git as the checkout's owner, could neither clean nor pull into it. A folder root owns keeps
+getting root's entries, a replaced file keeps its own owner, and a symbolic link stays root's. A single
+new file is changed through its own descriptor before it is published; the folders and files of a
+`Mkdir`, `Copy` or `Extract` are recorded as they are created (not ones they replace or merge into) and
+handed over afterwards through `hostexec.GiveBack`, deepest first, so each folder stays closed to its
+owner until what is in it has been changed. `owner_test.go` checks every verb under `sudo go test`. Uploads go through `Upload`, which writes to a temporary sibling and publishes it atomically:
 without overwrite, a no-replace rename (or a hard link where unsupported) claims the destination only
 if it is still free after the transfer; with overwrite, a rename replaces it. An interrupted transfer
 never leaves a truncated file. An existing file keeps its owner and mode across the replacement

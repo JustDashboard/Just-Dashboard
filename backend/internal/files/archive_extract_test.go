@@ -43,7 +43,7 @@ func TestZipExtractionEnforcesActualBytesAndEntryCount(t *testing.T) {
 			t.Fatal(err)
 		}
 		budget := &extractBudget{ctx: context.Background(), maxBytes: 64, maxEntries: 10}
-		if _, err := extractZip(archive, dest, budget); !errors.Is(err, ErrArchiveTooLarge) {
+		if _, err := extractZip(archive, dest, budget, new([]string)); !errors.Is(err, ErrArchiveTooLarge) {
 			t.Fatalf("extract error = %v, want ErrArchiveTooLarge", err)
 		}
 		if _, err := os.Stat(filepath.Join(dest, "large")); !os.IsNotExist(err) {
@@ -57,7 +57,7 @@ func TestZipExtractionEnforcesActualBytesAndEntryCount(t *testing.T) {
 			t.Fatal(err)
 		}
 		budget := &extractBudget{ctx: context.Background(), maxBytes: 2048, maxEntries: 1}
-		if _, err := extractZip(archive, dest, budget); !errors.Is(err, ErrArchiveTooManyEntries) {
+		if _, err := extractZip(archive, dest, budget, new([]string)); !errors.Is(err, ErrArchiveTooManyEntries) {
 			t.Fatalf("extract error = %v, want ErrArchiveTooManyEntries", err)
 		}
 	})
@@ -88,7 +88,7 @@ func TestZipExtractionHonoursCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	budget := &extractBudget{ctx: ctx, maxBytes: 1024, maxEntries: 10}
-	if _, err := extractZip(archive, root, budget); !errors.Is(err, context.Canceled) {
+	if _, err := extractZip(archive, root, budget, new([]string)); !errors.Is(err, context.Canceled) {
 		t.Fatalf("extract error = %v, want context.Canceled", err)
 	}
 }
