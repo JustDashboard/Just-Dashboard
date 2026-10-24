@@ -19,7 +19,11 @@ export function writeClip(data: Writable, clip: HeldClip) {
 }
 
 export type Pasted =
-  { kind: "paths"; clip: HeldClip } | { kind: "files" } | { kind: "text"; text: string } | null
+  | { kind: "paths"; clip: HeldClip }
+  | { kind: "files" }
+  | { kind: "locations" }
+  | { kind: "text"; text: string }
+  | null
 
 /**
  * What a paste should do. The system clipboard is the newest thing the
@@ -38,8 +42,20 @@ export function readPaste(data: Readable | null, held: HeldClip | null): Pasted 
   if (data.files.length > 0 || types.includes("Files")) return { kind: "files" }
   const text = types.includes("text/plain") ? data.getData("text/plain") : ""
   if (held && text === held.paths.join("\n")) return { kind: "paths", clip: held }
+  // Some desktops (Chrome on Linux among them) hand over where a copied file
+  // lives rather than the file; its bytes cannot be read from a web page.
+  const uris = types.includes("text/uri-list") ? data.getData("text/uri-list") : text
+  if (onlyFileUris(uris)) return { kind: "locations" }
   if (text.length > 0) return { kind: "text", text }
   return held ? { kind: "paths", clip: held } : null
+}
+
+function onlyFileUris(list: string): boolean {
+  const lines = list
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+  return lines.length > 0 && lines.every((line) => line.startsWith("file://"))
 }
 
 function parseClip(raw: string): HeldClip | null {

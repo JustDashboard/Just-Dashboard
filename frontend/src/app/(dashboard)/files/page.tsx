@@ -1268,7 +1268,11 @@ export default function FilesPage() {
       const dir = path
       const at = new Date()
       if (pasted.kind === "paths") void paste(pasted.clip)
-      else if (pasted.kind === "text") {
+      else if (pasted.kind === "locations") {
+        notify.warning("This browser passed on where the files are, not the files", {
+          description: "Drag them onto the listing, or use Upload, to send them.",
+        })
+      } else if (pasted.kind === "text") {
         const name = pastedTextName(at)
         const file = new File([pasted.text], name, { type: "text/plain" })
         void handleIncoming([{ file, rel: name }], dir)

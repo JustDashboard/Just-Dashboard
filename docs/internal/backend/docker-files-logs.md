@@ -525,7 +525,8 @@ A paste is decided by the system clipboard, the newest thing copied: our format 
 through the guarded copy/move; files (desktop files, a copied picture, a screenshot) upload into the
 current folder through the normal upload review; other text uploads as `Pasted text <time>.txt`. A
 screenshot's generic `image.png` is renamed `Pasted image <time>.png`. A copied folder cannot be read
-from a paste event and is reported rather than uploaded empty. The browser cannot place a server file on
+from a paste event and is reported rather than uploaded empty; so is a clipboard holding only
+`file://` locations (Chrome on Linux), which are never turned into a text file. The browser cannot place a server file on
 the desktop as a file, so copying out of the dashboard gives paths, not contents. A browser that sends no
 clipboard event falls back on a zero-delay timer to the in-memory clipboard.
 

@@ -41,6 +41,19 @@ describe("system clipboard", () => {
     expect(readPaste(transfer(), null)).toBeNull()
   })
 
+  test("file locations without the files are not pasted as text", () => {
+    expect(readPaste(transfer({ "text/uri-list": "file:///home/me/a.png\r\n" }), null)).toEqual({
+      kind: "locations",
+    })
+    expect(readPaste(transfer({ "text/plain": "file:///home/me/a.png" }), null)).toEqual({
+      kind: "locations",
+    })
+    expect(readPaste(transfer({ "text/plain": "see file:///x" }), null)).toEqual({
+      kind: "text",
+      text: "see file:///x",
+    })
+  })
+
   test("a malformed clip of ours is not trusted", () => {
     const data = transfer({ [CLIP_TYPE]: '{"mode":"move","paths":["x"]}', "text/plain": "x" })
     expect(readPaste(data, null)).toEqual({ kind: "text", text: "x" })
