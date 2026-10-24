@@ -829,7 +829,8 @@ A **table header** is `text-hint`, medium weight, muted — not the eyebrow's sm
 tracked-out caps a nine-column header was the loudest line in the table, above rows it exists only to
 name. It is opaque, so rows scroll *under* a sticky header rather than through it, and the ground it
 is opaque with is `--panel-ground` — declared by the panel (`--card` framed, `--background` plain),
-never assumed by the table. Reading `--card` there put a faint unexplained band across every table on
+never assumed by the table. A card that frames a table without being a `Panel` (the Files browser)
+declares `--panel-ground` itself; left undeclared, the header is transparent. Reading `--card` there put a faint unexplained band across every table on
 a plain panel, overhanging the header hairline by the table's own `-mx-4` bleed.
 
 **A row's text shares one centre line.** A bare `span`, `div` or `Link` placed in a flex row is a

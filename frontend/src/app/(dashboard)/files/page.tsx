@@ -1360,6 +1360,9 @@ export default function FilesPage() {
             {
               "--jd-files-rail": `${railPx}px`,
               "--jd-files-inspector": `${inspectorPx}px`,
+              // Not a Panel, so it declares the ground its sticky table header
+              // is opaque with; without it the rows show through the header.
+              "--panel-ground": "var(--card)",
             } as React.CSSProperties
           }
           className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card"

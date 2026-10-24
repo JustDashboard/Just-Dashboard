@@ -636,6 +636,27 @@ test("large listings retain find, selection and keyboard menu focus", async ({ p
   await expect(name).toBeFocused()
 })
 
+test("the list header stays opaque while rows scroll under it", async ({ page }) => {
+  await mockFiles(page)
+  const many = Array.from({ length: 60 }, (_, i) => entry(`row-${String(i).padStart(2, "0")}.txt`))
+  await page.route("**/api/v1/files/list**", (route) =>
+    json(route, { path: home, parent: "/home", entries: many, roots: ["/"] }),
+  )
+  await openFiles(page)
+  const head = page.locator("[data-file-listing] thead")
+  await page.locator("[data-file-listing] [data-slot='table-container']").evaluate((el) => {
+    el.scrollTop = 400
+  })
+  // A transparent header let the scrolled rows read through the column names.
+  const ground = await head.evaluate((el) => getComputedStyle(el).backgroundColor)
+  expect(ground).not.toBe("rgba(0, 0, 0, 0)")
+  expect(ground).not.toBe("transparent")
+  if (process.env.SHOT) {
+    await page.emulateMedia({ colorScheme: "dark" })
+    await page.locator("[data-file-listing]").screenshot({ path: process.env.SHOT })
+  }
+})
+
 test("the sidebar is a fixed list of places that stays put while browsing", async ({ page }) => {
   await mockFiles(page)
   await openFiles(page)

@@ -899,14 +899,17 @@
  * the header hairline above it by the table's own `-mx-4` bleed. Declaring
  * the ground on the panel rather than reading it at the table means the
  * nearest panel wins, so a framed block nested in a plain section is still
- * opaque with its own card. */
+ * opaque with its own card. A surface that frames a table without being a
+ * panel — the Files browser's card — declares the ground itself; an
+ * undeclared ground leaves the header transparent, which is what let rows
+ * show through the Files header while scrolling. */
 [data-slot="panel"] {
   --panel-ground: var(--card);
 }
 [data-slot="panel"][data-plain] {
   --panel-ground: var(--background);
 }
-[data-slot="panel"] [data-slot="table-container"] thead {
+[data-slot="table-container"] thead {
   background-color: var(--panel-ground);
 }
 
