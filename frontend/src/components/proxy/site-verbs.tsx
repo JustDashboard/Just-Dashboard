@@ -19,8 +19,9 @@ import {
   Warning,
   Wrench,
 } from "@/components/icons"
-import { downloadUrl } from "@/lib/api"
-import type { VHost } from "@/lib/types"
+import { del, downloadUrl } from "@/lib/api"
+import { notify } from "@/lib/toast"
+import type { RetiredRoute, VHost } from "@/lib/types"
 import type { Verb } from "@/components/verbs"
 import { activeOwner } from "@/components/proxy/site-details"
 
@@ -115,6 +116,63 @@ export function siteDeletable(vhost: VHost): boolean {
 }
 
 /**
+ * A deployment's route that nothing deploys any more: its project deleted
+ * (no owner at all) or archived. Delete never applied to a Docker Caddy
+ * route, which has no file here, and the route stayed after its project,
+ * serving its domain with nothing to remove it. Told by the name deploy
+ * gives every route, as the server checks it.
+ */
+export function siteRetirable(vhost: VHost): boolean {
+  return (
+    /^just-dashboard-env-[1-9][0-9]{0,17}\.conf$/.test(vhost.name) &&
+    !activeOwner(vhost) &&
+    !siteDeletable(vhost)
+  )
+}
+
+/** What Remove route asks before it runs. */
+export function routeRetirement(vhost: VHost) {
+  const names = vhost.serverNames.filter((n) => n && n !== "_")
+  return {
+    title: `Remove ${vhost.name}`,
+    confirmLabel: "Remove route",
+    description: (
+      <p>
+        {vhost.owner ? (
+          <>
+            <b>{vhost.owner.project}</b> is archived and will not write this route again.
+          </>
+        ) : (
+          "The deployment that wrote this route is gone."
+        )}{" "}
+        {names.length > 0 ? <b>{names.join(", ")}</b> : "It"} stops answering once the engine
+        reloads, and the certificate kept only for it is removed with it.
+      </p>
+    ),
+  }
+}
+
+/**
+ * Removes the route the way a deployment would, with Caddy's certificates
+ * for the names only it served. The server refuses one a deployment still
+ * writes. The outcome is announced here, so a confirmation's own "completed"
+ * is not added to it.
+ */
+export async function retireRoute(vhost: VHost): Promise<"reported"> {
+  const res = await del<RetiredRoute>(
+    `/proxy/vhosts/${encodeURIComponent(vhost.name)}/deployment-route`,
+  )
+  if (res.certificateError) {
+    notify.warning(`${vhost.name} removed, but not its certificate`, {
+      description: res.certificateError,
+    })
+  } else {
+    notify.success(`${vhost.name} removed`)
+  }
+  return "reported"
+}
+
+/**
  * Whether Rename applies: an nginx site file of its own in sites-available or
  * conf.d. Not a deployment's route, archived or not — a deploy writes that
  * file again by its name — nor a file that resolves elsewhere, which renaming
@@ -148,6 +206,7 @@ export function useSiteVerbs({
   onRename,
   onUnlink,
   onOverride,
+  onRetire,
 }: {
   vhost: VHost
   admin: boolean
@@ -177,6 +236,8 @@ export function useSiteVerbs({
   onUnlink: (vhost: VHost) => void
   /** Asks first, then opens a deployment's route for editing all the same. */
   onOverride: (vhost: VHost) => void
+  /** Removes a deployment's route nothing deploys; left out where the verb has no place. */
+  onRetire?: (vhost: VHost) => void
 }): Verb[] {
   const router = useRouter()
   const verbs: Verb[] = []
@@ -413,6 +474,17 @@ export function useSiteVerbs({
       danger: true,
       disabled: Boolean(busy),
       run: () => onDelete(vhost),
+    })
+  }
+  if (admin && onRetire && siteRetirable(vhost)) {
+    verbs.push({
+      key: "retire",
+      label: "Remove route",
+      icon: Trash,
+      danger: true,
+      progressive: "Removing",
+      disabled: Boolean(busy),
+      run: () => onRetire(vhost),
     })
   }
   return verbs

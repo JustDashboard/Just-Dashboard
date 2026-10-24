@@ -394,6 +394,56 @@ func TestVHostListNamesTheDeploymentThatWritesARoute(t *testing.T) {
 	}
 }
 
+// A route outlived the project that wrote it: the proxy pages offered no
+// Delete on a deployment's route, and nothing else removed it. One whose
+// environment is gone or archived can be removed now; one a deployment still
+// writes is refused, since the next deploy would write it again.
+func TestDeploymentRouteRetireRemovesOnlyARouteNothingDeploys(t *testing.T) {
+	c, s, root := vhostServer(t, func(string) string { return "exit 0" })
+	s.modules.proxy = proxysvc.New(root, filepath.Join(root, "Caddyfile"))
+	_, environmentID := seedDeployment(t, s, "shop")
+	live := fmt.Sprintf("just-dashboard-env-%d.conf", environmentID)
+	gone := "just-dashboard-env-999999.conf"
+	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
+	for _, name := range []string{live, gone} {
+		if err := os.WriteFile(available(name), []byte("server { server_name shop.example.com; }\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(available(name), filepath.Join(root, "sites-enabled", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	w := c.do(http.MethodDelete, "/api/v1/proxy/vhosts/"+live+"/deployment-route", "", nil)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "shop still deploys") {
+		t.Fatalf("a live deployment's route: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(available(live)); err != nil {
+		t.Errorf("the live route was removed: %v", err)
+	}
+
+	w = c.do(http.MethodDelete, "/api/v1/proxy/vhosts/"+gone+"/deployment-route", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("a route nothing deploys: %d %s", w.Code, w.Body.String())
+	}
+	for _, path := range []string{available(gone), filepath.Join(root, "sites-enabled", gone)} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Errorf("%s is still there: %v", path, err)
+		}
+	}
+	if entry := lastAudit(t, s, "proxy.deployment_route.remove"); !entry.Success || entry.Target != gone {
+		t.Errorf("audit = %+v", entry)
+	}
+
+	if w := c.do(http.MethodDelete, "/api/v1/proxy/vhosts/default/deployment-route", "", nil); w.Code != http.StatusBadRequest {
+		t.Errorf("a site no deployment writes: %d %s", w.Code, w.Body.String())
+	}
+	gates := routeGates(t, c.h)
+	if got := gates["DELETE /api/v1/proxy/vhosts/{name}/deployment-route"]; got != [2]int{2, 2} {
+		t.Errorf("gates = %v, want two capability checks and two budgets", got)
+	}
+}
+
 // Access log and Error log went to the Logs page for any absolute path a
 // site named, and the page, which opens only the files it lists, answered
 // "Requested log source unavailable" for a log outside JD_LOG_ROOTS or one

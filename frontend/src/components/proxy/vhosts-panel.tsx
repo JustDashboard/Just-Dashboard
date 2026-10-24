@@ -134,6 +134,8 @@ import { engineUnit, useProxy, useProxyRead } from "@/components/proxy/proxy-con
 import {
   downloadFrom,
   opensFile,
+  retireRoute,
+  routeRetirement,
   siteDeletable,
   sitePath,
   siteSwitchable,
@@ -784,6 +786,19 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       },
     })
 
+  const retire = (vhost: VHost) =>
+    confirm({
+      ...routeRetirement(vhost),
+      action: async () => {
+        setBusy(vhost.name, "Removing")
+        try {
+          return await retireRoute(vhost)
+        } finally {
+          reread(vhost.name, false)
+        }
+      },
+    })
+
   /**
    * Moves a site to a new name. A refusal is thrown back into the dialog,
    * which keeps the typed name; on success whatever pointed at the old name
@@ -927,6 +942,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     onRename: setRenaming,
     onUnlink: unlink,
     onOverride: override,
+    onRetire: retire,
     traffic: hasTraffic,
     history: hasHistory,
   }
@@ -1660,6 +1676,7 @@ type CardProps = {
   onRename: (v: VHost) => void
   onUnlink: (v: VHost) => void
   onOverride: (v: VHost) => void
+  onRetire: (v: VHost) => void
 }
 
 /**

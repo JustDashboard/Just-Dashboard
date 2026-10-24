@@ -4839,6 +4839,21 @@ containers/volumes/networks.
   of Edit, Disable, Duplicate and Delete, opens it read-only (its card and a `?site=` link alike), and
   keeps Edit anyway behind a confirmation; an archived owner's route is the operator's again. The backend does not refuse
   those verbs on a route, since deployments call proxysvc directly and an administrator may override.
+  A deployment route nothing deploys any more — no owner (its project deleted) or an archived one — and
+  that Delete does not apply to (every Docker Caddy route, which has no host file) has **Remove route**,
+  on its card and its page: `DELETE /proxy/vhosts/{name}/deployment-route` (system.admin, destructive,
+  audited as `proxy.deployment_route.remove`) accepts only a name `deploy.RouteNameFor` spells, answers
+  409 `deployment_active` while an unarchived environment still owns it, and runs
+  `proxysvc.RetireDeploymentRoute`: `RemoveDeploymentRoute`'s snapshot/restore removal, then on the
+  Docker ingress `rm -rf <caddy certificates>/*/<name>` for each plain domain (checked against
+  `certDomainRe`; wildcards are left) that only that route served, since Caddy goes on renewing and the
+  Certificates page goes on listing a certificate it holds whether or not a route asks for it. A
+  certificate it could not remove is reported as `certificateError` beside a removal that succeeded.
+  Without this a route outlived its project, serving its domain, with nothing on any page to remove it.
+  The overview draws such a route's application as its owner when no socket names its upstream — a
+  deployment's container is dialled at its network address (`10.0.0.3:3000`), which no listener holds —
+  so the route list, the route map and the traffic band carry the project's name and website icon
+  (`ownedBackend`, `route-map.ts`), as the Sites cards already did.
   listing and `SetVHostEnabled`) reads sites-available where it exists and conf.d where it does not
   (every RPM distro, Alpine, Arch — most of the servers this runs on); the difference reaches the UI as an
   empty `EnabledPath`, because conf.d has no symlink and a switch that can only error is worse than none. `confdPath` stops `app.conf` becoming `app.conf.conf`, and `ReadSiteSpec` reads the listing's `app.conf` back as a spec called `app`, the name a save writes to — the spec kept `.conf` once, and the next save renamed the site's logs to `app.conf.access.log`. The listing

@@ -225,3 +225,33 @@ describe("how fast a pulse runs", () => {
     expect(requestPulse(10_000_000)).toBe(1.5)
   })
 })
+
+describe("a deployment's route", () => {
+  const owner = { projectId: 7, environmentId: 175, project: "frontend", environment: "production" }
+  const routed = (extra = {}) =>
+    site("just-dashboard-env-175.conf", {
+      kind: "caddy",
+      serverNames: ["just-dashboard.com"],
+      upstreams: ["http://10.0.0.3:3000"],
+      owner,
+      ...extra,
+    })
+
+  test("is drawn as its project where no socket names the container's address", () => {
+    const backend = siteBackend(routed(), [])
+    expect(backend.projectId).toBe(7)
+    expect(backend.name).toBe("frontend")
+    expect(backend.address).toBe("10.0.0.3:3000")
+    const map = routeMap({ vhosts: [routed()], listeners: [] })
+    expect(map.apps[0]).toMatchObject({ projectId: 7, name: "frontend" })
+  })
+
+  test("keeps the name the sockets give, and an archived project names nothing", () => {
+    const held = routed({ upstreams: ["http://127.0.0.1:3000"] })
+    const sockets = [container(3000, "web-1", "node:22")]
+    expect(siteBackend(held, sockets)).toMatchObject({ name: "web-1", projectId: 7 })
+    const gone = siteBackend(routed({ owner: { ...owner, archived: true } }), [])
+    expect(gone.name).toBe("10.0.0.3:3000")
+    expect(gone.projectId).toBeUndefined()
+  })
+})

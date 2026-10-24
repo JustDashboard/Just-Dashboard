@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react"
 import Link from "next/link"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import { ArrowLeft, Globe, Logs, Pencil } from "@/components/icons"
 import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
@@ -27,7 +27,8 @@ import { SiteRouteMap } from "@/components/proxy/site-route-map"
 import { siteVerdict, type SiteVerdict } from "@/components/proxy/site-overview"
 import { activeOwner } from "@/components/proxy/site-details"
 import { SiteForm } from "@/components/proxy/site-form"
-import { useSiteVerbs } from "@/components/proxy/site-verbs"
+import { retireRoute, routeRetirement, useSiteVerbs } from "@/components/proxy/site-verbs"
+import { useConfirm } from "@/components/confirm-dialog"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { SiteFileVerbs } from "@/components/proxy/vhosts-panel"
 import { SiteBalancing } from "@/components/proxy/site-balancing"
@@ -38,7 +39,7 @@ import { poolsOfSite } from "@/components/proxy/upstream-pools"
 type SiteRead = { spec: SiteSpec; managed: boolean; warnings: string[] }
 
 /** The site's verbs its page draws: the way here is the page itself. */
-const PAGE_VERBS = ["edit", "raw", "open", "scan"]
+const PAGE_VERBS = ["edit", "raw", "open", "scan", "retire"]
 
 const BACK = (
   <Link
@@ -81,6 +82,8 @@ export function SitePage() {
 function SiteBody({ name }: { name: string }) {
   const { can } = useAuth()
   const admin = can("system.admin")
+  const router = useRouter()
+  const { confirm, dialog } = useConfirm()
   const { status, loading, refresh: refreshStatus } = useProxy()
   const [form, setForm] = useState({ open: false, session: 0 })
   const [raw, setRaw] = useState(false)
@@ -149,6 +152,17 @@ function SiteBody({ name }: { name: string }) {
     onUnlink: () => {},
     onOverride: () => {},
     onRename: () => {},
+    // The page is the route's own, so once it is gone the list is where to be.
+    onRetire: (v) =>
+      confirm({
+        ...routeRetirement(v),
+        action: async () => {
+          const reported = await retireRoute(v)
+          vhosts.refresh()
+          router.push("/proxy/sites")
+          return reported
+        },
+      }),
   }).filter((verb) => PAGE_VERBS.includes(verb.key))
 
   // A route on the Docker Caddy ingress is read through the ingress the
@@ -197,6 +211,7 @@ function SiteBody({ name }: { name: string }) {
 
   return (
     <Page className="animate-rise">
+      {dialog}
       <PageContext
         eyebrow={BACK}
         title={name}
