@@ -1145,7 +1145,14 @@ func (s *PlanningStore) Commit(
 		}
 	}
 	for _, domain := range configuration.Domains {
-		config := mustJSON(map[string]any{"hostname": domain.Hostname, "https": domain.HTTPS})
+		domainConfig := map[string]any{"hostname": domain.Hostname, "https": domain.HTTPS}
+		if domain.RedirectTo != "" {
+			domainConfig["redirectTo"] = domain.RedirectTo
+			if domain.RedirectCode != 0 {
+				domainConfig["redirectCode"] = domain.RedirectCode
+			}
+		}
+		config := mustJSON(domainConfig)
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO deploy_dependencies(
 			  environment_id, release_id, kind, ownership, resource_kind,

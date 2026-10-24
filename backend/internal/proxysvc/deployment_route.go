@@ -37,6 +37,90 @@ type DeploymentRoute struct {
 	// 1 MB, which refused a phone photo before the application saw it, so
 	// its routes get DefaultDeploymentMaxBodyMB; Caddy sets no limit.
 	MaxBodyMB int `json:"maxBodyMb,omitempty"`
+	// Redirects are the route's other names, each sending visitors to one of
+	// Domains: the www. a bare domain keeps for old links, or the reverse.
+	// They are not in Domains, which are the names that reach the
+	// application, but the route's certificate covers them (Hostnames).
+	Redirects []HostRedirect `json:"redirects,omitempty"`
+	// ResponseHeaders are set on every answer the route gives, replacing any
+	// header of the same name the application sent.
+	ResponseHeaders []HeaderValue `json:"responseHeaders,omitempty"`
+	// AllowFrom, when it names any address or range, is the only place the
+	// route answers; everyone else is refused with 403 before the password,
+	// if there is one, is asked for.
+	AllowFrom []string `json:"allowFrom,omitempty"`
+}
+
+// Hostnames is every name the route answers, served and redirecting, which
+// is what its certificate has to cover.
+func (route DeploymentRoute) Hostnames() []string {
+	names := append([]string(nil), route.Domains...)
+	for _, redirect := range route.Redirects {
+		names = append(names, redirect.From)
+	}
+	return names
+}
+
+// Limits on a deployment route's own rules. A deployment has one route, so
+// these bound a typo or a paste rather than a use case.
+const (
+	MaxDeploymentHeaders = 32
+	MaxDeploymentAllow   = 64
+)
+
+// deploymentReservedHeaders are response headers a deployment route cannot
+// set: the framing and hop-by-hop headers belong to the connection rather
+// than the answer, and nginx writes Date and Server itself, so a second copy
+// would be sent beside its own.
+var deploymentReservedHeaders = []string{
+	"Connection", "Content-Length", "Date", "Keep-Alive", "Proxy-Authenticate",
+	"Proxy-Connection", "Server", "TE", "Trailer", "Transfer-Encoding", "Upgrade",
+}
+
+// ValidateDeploymentHeaders checks a deployment route's response headers by
+// the rules a Proxy site's own are held to, on the nginx spelling a
+// deployment route gets — security headers on — so a plan that saves is a
+// plan that renders on either proxy, whichever this host turns out to run.
+func ValidateDeploymentHeaders(headers []HeaderValue) error {
+	if len(headers) > MaxDeploymentHeaders {
+		return fmt.Errorf("at most %d response headers", MaxDeploymentHeaders)
+	}
+	for _, header := range headers {
+		if containsFold(deploymentReservedHeaders, header.Name) {
+			return fmt.Errorf("the %s header belongs to the connection and cannot be set", header.Name)
+		}
+	}
+	spec := deploymentSiteSpec(DeploymentRoute{ResponseHeaders: headers}, "")
+	return validateHeaders(spec)
+}
+
+// NormalizeAccessEntry reads an allowed address or range the way an access
+// list does, and returns it in its canonical spelling.
+func NormalizeAccessEntry(raw string) (string, error) {
+	entry, _, err := accessEntry(raw)
+	return entry, err
+}
+
+// validateDeploymentRules checks what both proxies render from a route
+// beyond its names: the redirects, the headers and the allowed addresses.
+func validateDeploymentRules(route DeploymentRoute) error {
+	if err := validateHostRedirects(route.Domains, route.Redirects); err != nil {
+		return err
+	}
+	if err := ValidateDeploymentHeaders(route.ResponseHeaders); err != nil {
+		return err
+	}
+	if len(route.AllowFrom) > MaxDeploymentAllow {
+		return fmt.Errorf("at most %d allowed addresses", MaxDeploymentAllow)
+	}
+	for _, entry := range route.AllowFrom {
+		if normalized, err := NormalizeAccessEntry(entry); err != nil {
+			return err
+		} else if normalized != entry {
+			return fmt.Errorf("%s is written %s", entry, normalized)
+		}
+	}
+	return nil
 }
 
 // DefaultDeploymentMaxBodyMB is the request-body ceiling an nginx
@@ -114,6 +198,9 @@ type DeploymentRouteResult struct {
 // a deployment-owned nginx route. If apply or reload fails, the exact prior
 // bytes/link are restored and reloaded before the failure is returned.
 func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRoute) (DeploymentRouteResult, error) {
+	if err := validateDeploymentRules(route); err != nil {
+		return DeploymentRouteResult{}, err
+	}
 	if edge, err := s.dockerCaddy(ctx); err != nil {
 		return DeploymentRouteResult{}, err
 	} else if edge != nil {
@@ -302,9 +389,48 @@ func (s *Service) ResolveDeploymentCertificate(ctx context.Context, domains []st
 		return "", "", err
 	}
 	if len(pairs) == 0 {
+		if pair, ok := s.caddyEvidenceForEach(ctx, domains); ok {
+			return pair.Path, pair.KeyPath, nil
+		}
 		return "", "", errors.New("no available certificate covers every deployment domain")
 	}
 	return pairs[0].Path, pairs[0].KeyPath, nil
+}
+
+// caddyEvidenceForEach answers for a route on the Docker Caddy ingress,
+// where each name has a certificate of its own and none covers them all. It
+// returns the first name's release copy once every name has one, which is
+// enough because a Caddy route never reads the path: Caddy serves what it
+// holds. On an nginx host that path would be served as the certificate for
+// every name, so it is not offered there.
+func (s *Service) caddyEvidenceForEach(ctx context.Context, domains []string) (certificatePair, bool) {
+	if len(domains) < 2 {
+		return certificatePair{}, false
+	}
+	if edge, err := s.dockerCaddy(ctx); err != nil || edge == nil {
+		return certificatePair{}, false
+	}
+	var first certificatePair
+	for index, domain := range domains {
+		pairs, err := s.coveringCertificates(ctx, []string{domain})
+		if err != nil {
+			return certificatePair{}, false
+		}
+		found := false
+		for _, pair := range pairs {
+			if pair.CaddyEvidence() {
+				if index == 0 {
+					first = pair
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			return certificatePair{}, false
+		}
+	}
+	return first, true
 }
 
 // certificatePair is a usable certificate with the key that goes with it.
@@ -387,8 +513,21 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 		ManagedACME: true,
 		HTTP2:       route.TLS,
 		WebSockets:  true, Gzip: true, SecurityHeaders: true, AccessLog: true,
-		AllowFrom: []string{}, DenyFrom: []string{}, Locations: []SiteLocation{},
+		AllowFrom: append([]string{}, route.AllowFrom...), DenyFrom: []string{}, Locations: []SiteLocation{},
 		ClientMaxBody: deploymentBodyLimit(route),
+		HostRedirects: append([]HostRedirect(nil), route.Redirects...),
+	}
+	if len(route.ResponseHeaders) > 0 {
+		// Hidden as well as added: add_header only appends, so without the
+		// hide an application that sends the header itself would answer with
+		// two, where Caddy's deferred header replaces the application's.
+		headers := &SiteHeaders{Response: append([]HeaderValue(nil), route.ResponseHeaders...)}
+		for _, header := range route.ResponseHeaders {
+			if !containsFold(nginxHiddenHeaders, header.Name) {
+				headers.Hide = append(headers.Hide, header.Name)
+			}
+		}
+		spec.Headers = headers
 	}
 	if authFile != "" {
 		spec.BasicAuthFile, spec.BasicAuthRealm = authFile, "Protected deployment"

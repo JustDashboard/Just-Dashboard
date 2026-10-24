@@ -54,6 +54,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 		l.blank()
 	}
 	renderCanonicalServers(l, spec)
+	renderHostRedirectServers(l, spec)
 
 	l.add("server {")
 	renderListen(l, spec)

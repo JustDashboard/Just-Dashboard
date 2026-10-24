@@ -864,19 +864,14 @@ func decodeStoredPlanInputs(
 			})
 			continue
 		}
-		var config struct {
-			Hostname   string            `json:"hostname"`
-			HTTPS      bool              `json:"https"`
-			Protection *DomainProtection `json:"protection"`
-		}
+		var config PlannedDomain
 		if stored.ResourceKind != "proxy_site" || json.Unmarshal(stored.Config, &config) != nil ||
 			!strings.EqualFold(strings.TrimSpace(config.Hostname), strings.TrimSpace(stored.ResourceID)) {
 			return nil, nil, nil, fmt.Errorf("%w: domain dependency snapshot is inconsistent", ErrInvalidPlan)
 		}
-		domains = append(domains, PlannedDomain{
-			Hostname: config.Hostname, HTTPS: config.HTTPS, Ownership: stored.Ownership,
-			Protection: canonicalDomainProtection(config.Protection),
-		})
+		config.Ownership = stored.Ownership
+		config.Protection = canonicalDomainProtection(config.Protection)
+		domains = append(domains, config)
 	}
 	checks := make([]PlannedCheck, 0, len(plan.Checks))
 	for _, raw := range plan.Checks {

@@ -346,7 +346,58 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		}
 		authDirective = "  basic_auth {\n" + strings.Join(lines, "\n") + "\n  }\n"
 	}
-	return "# Managed by Just Dashboard\n" + strings.Join(names, ", ") + " {\n" + tlsDirective + logDirective + authDirective + bodyDirective + "  " + directive + "\n}\n", nil
+	if err := validateDeploymentRules(route); err != nil {
+		return "", err
+	}
+	headerDirective := ""
+	if len(route.ResponseHeaders) > 0 {
+		lines := make([]string, 0, len(route.ResponseHeaders)+1)
+		for _, header := range route.ResponseHeaders {
+			lines = append(lines, "    "+header.Name+" "+strconv.Quote(header.Value))
+		}
+		// Deferred, so the header is set as the answer is written and
+		// replaces the application's own rather than being sent beside it.
+		lines = append(lines, "    defer")
+		headerDirective = "  header {\n" + strings.Join(lines, "\n") + "\n  }\n"
+	}
+	handling := authDirective + bodyDirective + "  " + directive + "\n"
+	if len(route.AllowFrom) > 0 {
+		// Caddy orders a site's directives itself and puts basic_auth before
+		// respond, which would ask a refused address for the password first.
+		// A route block runs in the order written, so the fence comes first.
+		fence := "  @outside not remote_ip " + strings.Join(route.AllowFrom, " ") + "\n" +
+			"  respond @outside \"Forbidden\" 403\n"
+		handling = "  route {\n" + indentCaddy(fence+handling) + "  }\n"
+	}
+	out := "# Managed by Just Dashboard\n" + strings.Join(names, ", ") + " {\n" + tlsDirective + logDirective + headerDirective + handling + "}\n"
+	redirects := append([]HostRedirect(nil), route.Redirects...)
+	sort.Slice(redirects, func(i, j int) bool { return redirects[i].From < redirects[j].From })
+	for _, redirect := range redirects {
+		from, scheme := strings.ToLower(redirect.From), "https://"
+		if !certDomainRe.MatchString(from) {
+			return "", errors.New("invalid managed Caddy domain")
+		}
+		if !route.TLS {
+			from, scheme = "http://"+from, "http://"
+		}
+		// The redirecting name gets the same certificate handling as the
+		// route and nothing else: it serves no application, so it has no
+		// password, fence or request record of its own.
+		out += "\n" + from + " {\n" + tlsDirective +
+			"  redir " + scheme + strings.ToLower(redirect.To) + "{uri} " + strconv.Itoa(redirect.HostRedirectCode()) + "\n}\n"
+	}
+	return out, nil
+}
+
+// indentCaddy moves every line of a block one level in.
+func indentCaddy(block string) string {
+	lines := strings.SplitAfter(block, "\n")
+	for index, line := range lines {
+		if line != "" {
+			lines[index] = "  " + line
+		}
+	}
+	return strings.Join(lines, "")
 }
 
 // renderAccessLogDirective is the `log` block a managed route carries. One
@@ -627,10 +678,36 @@ func (s *Service) applyDockerCaddyRoute(ctx context.Context, c *dockerCaddy, rou
 	return result, nil
 }
 
+// ensureDockerCaddyCertificate has Caddy obtain a certificate for each name.
+// Caddy orders and renews one certificate per name rather than one covering
+// them all, so a route with a second name — the www. that redirects to the
+// bare domain — is each name issued in turn. The first name's copy is the
+// release's evidence; the route itself never reads it, because Caddy serves
+// the certificates it holds.
 func (s *Service) ensureDockerCaddyCertificate(ctx context.Context, c *dockerCaddy, names []string, log func(string, string)) (DeploymentCertificate, error) {
-	if len(names) != 1 {
-		return DeploymentCertificate{}, errors.New("automatic Caddy ingress currently requires one hostname per deployment")
+	if len(names) == 0 {
+		return DeploymentCertificate{}, errors.New("a TLS deployment route needs at least one domain")
 	}
+	var evidence DeploymentCertificate
+	outcome := CertificateReused
+	for index, name := range names {
+		got, err := s.ensureDockerCaddyName(ctx, c, name, log)
+		if err != nil {
+			return DeploymentCertificate{}, err
+		}
+		if got.Outcome == CertificateIssued {
+			outcome = CertificateIssued
+		}
+		if index == 0 {
+			evidence = got
+		}
+	}
+	evidence.Outcome, evidence.Domains = outcome, names
+	return evidence, nil
+}
+
+func (s *Service) ensureDockerCaddyName(ctx context.Context, c *dockerCaddy, hostname string, log func(string, string)) (DeploymentCertificate, error) {
+	names := []string{hostname}
 	directory := acmeDirectory()
 	if err := directory.validate(); err != nil {
 		return DeploymentCertificate{}, err

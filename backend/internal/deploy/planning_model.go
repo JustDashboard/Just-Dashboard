@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/distribution/reference"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
 type DraftStep string
@@ -622,6 +624,19 @@ type RuntimePlanConfig struct {
 	// MaxRequestBodyMB is the largest request body the managed route lets
 	// through, in megabytes. Zero is DefaultMaxRequestBodyMB.
 	MaxRequestBodyMB int `json:"maxRequestBodyMb,omitempty"`
+	// AllowFrom, when it names any address or range, is the only place the
+	// public route answers; everyone else gets 403. The plan keeps each
+	// entry in its canonical spelling.
+	AllowFrom []string `json:"allowFrom,omitempty"`
+	// ResponseHeaders are set on every answer the public route gives,
+	// replacing any header of the same name the application sent.
+	ResponseHeaders []RouteHeader `json:"responseHeaders,omitempty"`
+}
+
+// RouteHeader is one response header the public route sets.
+type RouteHeader struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // PublishedPort is a container port published on the host next to the routed
@@ -735,6 +750,33 @@ type PlannedDomain struct {
 	// Protection asks the proxy for a password before it serves this
 	// deployment. It applies to the deployment's route as a whole.
 	Protection *DomainProtection `json:"protection,omitempty"`
+	// RedirectTo is another of the plan's hostnames that this one sends
+	// visitors to, path and query kept, instead of serving the application:
+	// www.example.com to example.com, or the reverse. RedirectCode is 301,
+	// 302, 307 or 308; zero is 308.
+	RedirectTo   string `json:"redirectTo,omitempty"`
+	RedirectCode int    `json:"redirectCode,omitempty"`
+}
+
+// Redirects says whether the domain sends visitors to another rather than
+// serving the application.
+func (d PlannedDomain) Redirects() bool { return d.RedirectTo != "" }
+
+// domainConfig is the domain as its dependency row stores it. The redirect
+// is written only when there is one, so a domain saved before redirects
+// existed keeps the bytes, and the digest, it had.
+func (d PlannedDomain) domainConfig() map[string]any {
+	config := map[string]any{"hostname": d.Hostname, "https": d.HTTPS}
+	if d.Protection != nil {
+		config["protection"] = d.Protection
+	}
+	if d.RedirectTo != "" {
+		config["redirectTo"] = d.RedirectTo
+		if d.RedirectCode != 0 {
+			config["redirectCode"] = d.RedirectCode
+		}
+	}
+	return config
 }
 
 type PlanConfiguration struct {
@@ -1597,6 +1639,82 @@ func (c PlanConfiguration) Validate() error {
 			return err
 		}
 	}
+	if err := validateDomainRedirects(c.Domains); err != nil {
+		return err
+	}
+	return validateRouteRules(c.Runtime)
+}
+
+// validateDomainRedirects checks that every redirect lands on a domain that
+// serves the application: a name of this plan, not a wildcard, and not
+// itself a redirect, so a visitor is never sent round in a chain.
+func validateDomainRedirects(domains []PlannedDomain) error {
+	byName := map[string]PlannedDomain{}
+	for _, domain := range domains {
+		byName[strings.ToLower(strings.TrimSpace(domain.Hostname))] = domain
+	}
+	served := 0
+	for index, domain := range domains {
+		field := fmt.Sprintf("domains[%d].redirectTo", index)
+		if !domain.Redirects() {
+			served++
+			if domain.RedirectCode != 0 {
+				return invalidField(fmt.Sprintf("domains[%d].redirectCode", index), "a redirect code needs a domain to redirect to")
+			}
+			continue
+		}
+		hostname := strings.ToLower(strings.TrimSpace(domain.Hostname))
+		target := strings.ToLower(strings.TrimSpace(domain.RedirectTo))
+		if strings.HasPrefix(hostname, "*.") {
+			return invalidField(field, "a wildcard domain cannot redirect")
+		}
+		destination, ok := byName[target]
+		switch {
+		case target == hostname:
+			return invalidField(field, "%s cannot redirect to itself", domain.Hostname)
+		case !ok:
+			return invalidField(field, "%s has to redirect to another of this deployment's domains", domain.Hostname)
+		case strings.HasPrefix(target, "*."):
+			return invalidField(field, "%s cannot redirect to a wildcard", domain.Hostname)
+		case destination.Redirects():
+			return invalidField(field, "%s redirects to %s, which redirects too; point it at a domain that serves the application", domain.Hostname, domain.RedirectTo)
+		}
+		switch domain.RedirectCode {
+		case 0, 301, 302, 307, 308:
+		default:
+			return invalidField(fmt.Sprintf("domains[%d].redirectCode", index), "a redirect answers 301, 302, 307 or 308")
+		}
+	}
+	if len(domains) > 0 && served == 0 {
+		return invalidField("domains", "at least one domain has to serve the application rather than redirect")
+	}
+	return nil
+}
+
+// validateRouteRules checks the public route's allowed addresses and
+// response headers by the rules Proxy holds its own sites to.
+func validateRouteRules(runtime RuntimePlanConfig) error {
+	if len(runtime.AllowFrom) > proxysvc.MaxDeploymentAllow {
+		return invalidField("runtime.allowFrom", "at most %d allowed addresses", proxysvc.MaxDeploymentAllow)
+	}
+	seen := map[string]bool{}
+	for index, entry := range runtime.AllowFrom {
+		normalized, err := proxysvc.NormalizeAccessEntry(entry)
+		if err != nil {
+			return invalidField(fmt.Sprintf("runtime.allowFrom[%d]", index), "%v", err)
+		}
+		if seen[normalized] {
+			return invalidField(fmt.Sprintf("runtime.allowFrom[%d]", index), "%s is listed twice", normalized)
+		}
+		seen[normalized] = true
+	}
+	headers := make([]proxysvc.HeaderValue, 0, len(runtime.ResponseHeaders))
+	for _, header := range runtime.ResponseHeaders {
+		headers = append(headers, proxysvc.HeaderValue{Name: header.Name, Value: header.Value})
+	}
+	if err := proxysvc.ValidateDeploymentHeaders(headers); err != nil {
+		return invalidField("runtime.responseHeaders", "%v", err)
+	}
 	return nil
 }
 
@@ -2272,6 +2390,25 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 	for index := range c.Domains {
 		c.Domains[index].Hostname = strings.ToLower(strings.TrimSpace(c.Domains[index].Hostname))
 		c.Domains[index].Protection = canonicalDomainProtection(c.Domains[index].Protection)
+		c.Domains[index].RedirectTo = strings.ToLower(strings.TrimSpace(c.Domains[index].RedirectTo))
+	}
+	// Spelled the way the proxy writes them, so 10.0.0.1/32 and 10.0.0.1 are
+	// one entry and an edit that changes nothing changes no digest. Empty
+	// lists stay absent for the same reason.
+	for index, entry := range c.Runtime.AllowFrom {
+		if normalized, err := proxysvc.NormalizeAccessEntry(entry); err == nil {
+			c.Runtime.AllowFrom[index] = normalized
+		}
+	}
+	if len(c.Runtime.AllowFrom) == 0 {
+		c.Runtime.AllowFrom = nil
+	}
+	for index := range c.Runtime.ResponseHeaders {
+		c.Runtime.ResponseHeaders[index].Name = strings.TrimSpace(c.Runtime.ResponseHeaders[index].Name)
+		c.Runtime.ResponseHeaders[index].Value = strings.TrimSpace(c.Runtime.ResponseHeaders[index].Value)
+	}
+	if len(c.Runtime.ResponseHeaders) == 0 {
+		c.Runtime.ResponseHeaders = nil
 	}
 	sort.Slice(c.Domains, func(i, j int) bool { return c.Domains[i].Hostname < c.Domains[j].Hostname })
 	return c

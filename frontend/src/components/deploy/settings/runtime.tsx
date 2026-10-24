@@ -112,7 +112,15 @@ function linesOf(text: string) {
     .filter(Boolean)
 }
 
-function runtimeDraftOf(runtime: RuntimePlan): RuntimeDraft {
+/**
+ * The route's allowed addresses and response headers are in `runtime` but are
+ * the Domains page's to edit, so this form neither holds them nor writes them:
+ * a Runtime save keeps whatever the latest copy has.
+ */
+function runtimeDraftOf(saved: RuntimePlan): RuntimeDraft {
+  const runtime = { ...saved }
+  delete runtime.allowFrom
+  delete runtime.responseHeaders
   return {
     ...runtime,
     commandText: (runtime.command ?? []).join("\n"),
@@ -338,7 +346,13 @@ function RuntimeForm({
     }
     setSaving(true)
     try {
-      await save({ runtime: runtimePlanOf(runtime) })
+      await save({
+        runtime: (latest) => ({
+          ...runtimePlanOf(runtime),
+          allowFrom: latest.runtime.allowFrom,
+          responseHeaders: latest.runtime.responseHeaders,
+        }),
+      })
       // The lists go to the server one entry per line, trimmed; the draft
       // takes the same shape, or a stray blank line would read as an edit
       // the save did not make.

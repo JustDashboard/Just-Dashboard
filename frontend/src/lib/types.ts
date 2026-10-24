@@ -4845,6 +4845,10 @@ export type DeploymentConfiguration = {
     drainSeconds?: number
     /** The largest request body the route lets through, in MB; empty is 64. */
     maxRequestBodyMb?: number
+    /** The only addresses and ranges the public route answers; empty answers everyone. */
+    allowFrom?: string[]
+    /** Set on every answer the public route gives, replacing the application's own. */
+    responseHeaders?: { name: string; value: string }[]
     mounts?: {
       source: string
       target: string
@@ -4896,7 +4900,13 @@ export type DeploymentPlannedDomain = {
   https: boolean
   ownership: "managed" | "linked"
   protection?: DeploymentDomainProtection
+  /** Another of the plan's hostnames this one sends visitors to, instead of serving the app. */
+  redirectTo?: string
+  /** Empty is 308, permanent and keeping the method. */
+  redirectCode?: DeploymentRedirectCode
 }
+
+export type DeploymentRedirectCode = 301 | 302 | 307 | 308
 
 export type DeploymentVariable = {
   name: string

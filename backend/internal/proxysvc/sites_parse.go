@@ -464,6 +464,12 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			kinds.skipServer = true
 			continue
 		}
+		if m := hostRedirectMarkerRe.FindStringSubmatch(raw); m != nil && depth == 0 {
+			code, _ := strconv.Atoi(m[1])
+			spec.HostRedirects = append(spec.HostRedirects, HostRedirect{From: m[2], To: m[3], Code: code})
+			kinds.skipServer = true
+			continue
+		}
 		if sso.comment(raw) {
 			continue
 		}
