@@ -1269,7 +1269,7 @@ export default function FilesPage() {
       const at = new Date()
       if (pasted.kind === "paths") void paste(pasted.clip)
       else if (pasted.kind === "locations") {
-        notify.warning("This browser passed on where the files are, not the files", {
+        notify.warning("The browser passed on where the files are, not the files", {
           description: "Drag them onto the listing, or use Upload, to send them.",
         })
       } else if (pasted.kind === "text") {

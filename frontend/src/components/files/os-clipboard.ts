@@ -42,8 +42,8 @@ export function readPaste(data: Readable | null, held: HeldClip | null): Pasted 
   if (data.files.length > 0 || types.includes("Files")) return { kind: "files" }
   const text = types.includes("text/plain") ? data.getData("text/plain") : ""
   if (held && text === held.paths.join("\n")) return { kind: "paths", clip: held }
-  // Some desktops (Chrome on Linux among them) hand over where a copied file
-  // lives rather than the file; its bytes cannot be read from a web page.
+  // A browser that cannot read a copied file hands over only where it lives;
+  // its bytes cannot be read from a web page, so this is not text to save.
   const uris = types.includes("text/uri-list") ? data.getData("text/uri-list") : text
   if (onlyFileUris(uris)) return { kind: "locations" }
   if (text.length > 0) return { kind: "text", text }
