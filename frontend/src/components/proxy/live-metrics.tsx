@@ -240,10 +240,12 @@ function NginxCounters({ admin }: { admin: boolean }) {
   ) : report?.enabled ? (
     report.error ? (
       <Status verdict="warning" label="No answer" />
-    ) : (
+    ) : // The switch beside it already says on or off; a word saying it again
+    // is kept for the reader who has no switch.
+    admin ? undefined : (
       <Status verdict="ok" label="On" />
     )
-  ) : report ? (
+  ) : report && !admin ? (
     <Status tone="stopped" label="Off" />
   ) : undefined
 
@@ -253,7 +255,8 @@ function NginxCounters({ admin }: { admin: boolean }) {
       className="flex min-w-0 flex-col gap-2 rounded-lg border border-hairline px-4 py-3"
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
-        <span className="eyebrow">nginx stub_status</span>
+        {/* Named for what it counts; stub_status is the module, said in the tooltip. */}
+        <span className="eyebrow">nginx counters</span>
         <div className="min-w-0 flex-1 text-hint text-muted-foreground">
           {metrics.loading ? (
             <Skeleton className="h-4 w-48" />
@@ -349,6 +352,10 @@ function Readings({
  */
 function QuietEdge({ sites }: { sites: SiteTrafficReading[] }) {
   const only = sites.length === 1 ? sites[0] : undefined
+  // The server's reason, where it gives one, is the why: led by our own
+  // "writes no access log the dashboard can read", a reason that said the
+  // requests go to nginx's shared log read as the opposite.
+  const why = only?.reason ? sentence(only.reason) : undefined
   return (
     <OverviewEmpty
       icon={ChartActivity}
@@ -357,7 +364,7 @@ function QuietEdge({ sites }: { sites: SiteTrafficReading[] }) {
         sites.length > 0 && (
           <Button asChild size="sm" variant="outline">
             <Link href={only ? sitePath(only.site) : "/proxy/sites"}>
-              {only ? `Open ${only.site}` : "Open Sites"}
+              {only ? `Open the ${only.site} site` : "Open Sites"}
               <ArrowRight />
             </Link>
           </Button>
@@ -366,13 +373,13 @@ function QuietEdge({ sites }: { sites: SiteTrafficReading[] }) {
     >
       {sites.length === 0
         ? "No site is configured yet. Each site's requests are counted here, minute by minute, from its access log."
-        : `${
-            only
-              ? `${only.site} writes no access log`
-              : `None of ${plural(sites.length, "site")} writes an access log`
-          } the dashboard can read, so there are no requests to count.${
-            only?.reason ? ` ${sentence(only.reason)}` : ""
-          }`}
+        : why
+          ? `${why} Add an access_log line to it and its requests are counted here.`
+          : `${
+              only
+                ? `${only.site} writes no access log`
+                : `None of ${plural(sites.length, "site")} writes an access log`
+            } the dashboard can read, so there are no requests to count.`}
     </OverviewEmpty>
   )
 }

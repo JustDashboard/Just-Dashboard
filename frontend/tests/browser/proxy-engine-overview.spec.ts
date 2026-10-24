@@ -149,7 +149,9 @@ test("the overview says why when the proxy status cannot be read", async ({ page
 
   statusFails = false
   await page.getByRole("button", { name: "Try again" }).click()
-  await expect(page.locator("[data-slot='host-identity']").getByText("nginx/1.26.3")).toBeVisible()
+  await expect(
+    page.locator("[data-slot='host-identity']").getByText("1.26.3", { exact: true }),
+  ).toBeVisible()
   await expect(
     page.getByRole("alert").filter({ hasText: "The proxy status could not be read" }),
   ).toHaveCount(0)
@@ -1162,7 +1164,7 @@ test("a status that fails after answering is reported rather than drawn as curre
   await page.goto("/proxy")
   const identity = page.locator("[data-slot='host-identity']")
   const header = page.locator("[data-slot='page-context']")
-  await expect(identity.getByText("nginx/1.26.3")).toBeVisible()
+  await expect(identity.getByText("1.26.3", { exact: true })).toBeVisible()
   await expect(header.getByText(/^Updated (just now|[5-9]s ago)$/)).toBeVisible()
   await page.clock.fastForward(20_000)
 
@@ -1170,7 +1172,7 @@ test("a status that fails after answering is reported rather than drawn as curre
   await header.getByRole("button", { name: "Refresh" }).click()
   // The engine line stays — it is the last answer — and the list says so.
   await expect(page.getByText("The proxy status could not be read")).toBeVisible()
-  await expect(identity.getByText("nginx/1.26.3")).toBeVisible()
+  await expect(identity.getByText("1.26.3", { exact: true })).toBeVisible()
   await expect(page.getByText(/all within limits/)).toHaveCount(0)
   // Every other source answered just now, but the engine line is still the
   // status's last answer, and the page is as old as that. It read "Updated
@@ -2271,4 +2273,60 @@ test("a host whose sites keep no access log says so once and claims no zero", as
   await expect(errors).not.toContainText("server errors this hour")
   await expect(errors.getByText("Nothing failed in the last hour")).toHaveCount(0)
   await expect(errors.getByText("No problems found", { exact: false })).toHaveCount(0)
+})
+
+test("one site without a log of its own is told why, and the quiet header drops its zeros", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const site = vhosts.find((v) => v.name === "legacy.example.com")!
+  await page.route("**/api/v1/proxy/vhosts", (route) => json(route, [site]))
+  await page.route("**/api/v1/certificates/", (route) => json(route, []))
+  await page.route("**/api/v1/proxy/traffic", (route) =>
+    json(route, {
+      observedAt: new Date().toISOString(),
+      sites: [
+        {
+          site: site.name,
+          file: site.path,
+          engine: "nginx",
+          status: "unavailable",
+          reason:
+            "This site writes no access log of its own, so its requests are mixed into nginx's shared one, which does not say which site each was for.",
+          requests: 0,
+          errorRate: 0,
+          bytes: 0,
+          complete: true,
+          points: [],
+        },
+      ],
+    }),
+  )
+  await page.route("**/api/v1/proxy/errors?**", (route) =>
+    json(route, {
+      scope: "main",
+      path: "/var/log/nginx/error.log",
+      exists: true,
+      since: new Date().toISOString(),
+      complete: true,
+      lines: 0,
+      groups: [],
+    }),
+  )
+  await page.goto("/proxy")
+
+  // The server's reason is the why, not a contradiction of our own sentence.
+  const live = page.getByRole("region", { name: "Live traffic" })
+  await expect(live).toContainText("mixed into nginx's shared one")
+  await expect(live).not.toContainText("writes no access log the dashboard can read")
+  await expect(live.getByRole("link", { name: "Open the legacy.example.com site" })).toBeVisible()
+  // Zero certificates and zero streams are the blocks' to say, not the line's.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByRole("link", { name: /^1 site, 0 on TLS$/ })).toBeVisible()
+  await expect(identity.getByText(/^0 certificates/)).toHaveCount(0)
+  await expect(identity.getByText(/^0 streams/)).toHaveCount(0)
+  // The error log's zero is said once, for the hour.
+  const errors = page.getByRole("region", { name: "Recent errors" })
+  await expect(errors).toContainText("nginx error-log lines this hour")
+  await expect(errors.getByText("nginx logged nothing this hour")).toHaveCount(0)
 })

@@ -31,7 +31,9 @@ test("the reverse proxy is named once, in the identity line", async ({ page }) =
   // beside its name and drawn as its own logo. It used to be on a tile and
   // in the page description, and both copies were wrong.
   const identity = page.locator("[data-slot='host-identity']")
-  await expect(identity.getByText("nginx/1.26.3")).toHaveCount(1)
+  // The version without nginx's own "nginx/" in front, beside the name.
+  await expect(identity.getByText("1.26.3", { exact: true })).toHaveCount(1)
+  await expect(identity.getByText("nginx/1.26.3")).toHaveCount(0)
   await expect(identity.locator("img[src='/logos/nginx.svg']")).toHaveCount(1)
   await expect(page.getByText(/nginx version:/)).toHaveCount(0)
   // The unit's state sits beside it, read through the Services API, and
@@ -125,7 +127,8 @@ test("the overview draws each domain wired through nginx to what answers it", as
   await expect(apps.locator("img[src='/logos/nodejs.svg']")).toHaveCount(1)
   await expect(apps.getByText("up 2 ms")).toBeVisible()
   await expect(apps.getByText("refused")).toBeVisible()
-  await expect(picture.getByText(":443 nginx")).toBeVisible()
+  // A port the engine itself holds is "open": the line hangs under nginx's tile.
+  await expect(picture.getByText(":443 open")).toBeVisible()
 
   // The hour's traffic is shared out by site, and a site opens its traffic.
   const traffic = page.getByRole("region", { name: "Traffic", exact: true })

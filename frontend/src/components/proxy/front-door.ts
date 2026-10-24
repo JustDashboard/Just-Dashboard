@@ -37,17 +37,23 @@ export function frontDoors(ports: Listener[]): FrontDoor[] {
   })
 }
 
-/** ":80 nginx · :443 docker-proxy", with a closed port said as such. */
-export function frontDoorLine(doors: FrontDoor[]): string {
+/**
+ * ":80 open · :443 docker-proxy", with a closed port said as such. A port the
+ * engine itself holds — `self`, the process the line hangs under — is "open":
+ * ":80 nginx" under the nginx tile named it a third time.
+ */
+export function frontDoorLine(doors: FrontDoor[], self?: string): string {
   return doors
-    .map(
-      (door) =>
-        `:${door.port} ${
-          door.holders.length === 0
-            ? "closed"
-            : door.holders.map((h) => h.process || "unknown").join(" + ")
-        }`,
-    )
+    .map((door) => {
+      const names = door.holders.map((h) => h.process || "unknown")
+      const state =
+        names.length === 0
+          ? "closed"
+          : self && names.every((name) => name === self)
+            ? "open"
+            : names.join(" + ")
+      return `:${door.port} ${state}`
+    })
     .join(" · ")
 }
 

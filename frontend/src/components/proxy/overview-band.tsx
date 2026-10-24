@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Box, CheckCircle, FileText, ShieldCheck } from "@/components/icons"
+import { ArrowRight, Box, CheckCircle, FileText, LockOpen } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { LANES } from "@/lib/hue"
 import { plural } from "@/lib/format"
@@ -399,8 +399,10 @@ function CertificatesBlock({
         ) : error ? (
           <ErrorState error={error} onRetry={onRetry} className="mt-2" />
         ) : all.length === 0 ? (
+          // The open lock the picture draws a plain-HTTP domain with: a
+          // shield with a tick in it said "all well" about having none.
           <OverviewEmpty
-            icon={ShieldCheck}
+            icon={LockOpen}
             title={certbot ? "No certificates yet" : "No certificates on this host"}
             action={
               <Button asChild size="sm" variant="outline">
@@ -590,19 +592,25 @@ function ErrorsBlock({
             ) : (
               <Headline
                 value={logged.toLocaleString()}
-                unit={logged === 1 ? "nginx error-log line" : "nginx error-log lines"}
+                unit={
+                  logged === 1
+                    ? "nginx error-log line this hour"
+                    : "nginx error-log lines this hour"
+                }
                 tone={logged > 0 ? "danger" : undefined}
                 caption={
                   trafficError
                     ? "Couldn't read the sites' access logs"
-                    : "5xx answers need an access log, which no site writes"
+                    : "Server errors (5xx) are not counted: no site writes an access log"
                 }
               />
             )}
-            {quiet && (counted || errorLog) ? (
+            {/* Without a 5xx count the headline is the error log's own zero,
+                and "nginx logged nothing this hour" under it said it twice. */}
+            {quiet && counted ? (
               <p className="flex items-center gap-2.5 text-body text-muted-foreground">
                 <CheckCircle aria-hidden className="size-4 shrink-0 text-success" />
-                {counted ? "Nothing failed in the last hour" : "nginx logged nothing this hour"}
+                Nothing failed in the last hour
               </p>
             ) : (
               failing.length > 0 && (

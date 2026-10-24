@@ -2238,6 +2238,24 @@ The passes, in order. Each one is a diff you can review on its own.
    with no log to count from is unknown, not zero; an error log whose every group is a notice no
    longer draws an empty finding list's "No problems found" under the block's own all-clear.
 
+   A third pass on 2026-10-24, from an operator's screenshot of a one-site host, took out what
+   the page said twice. The title is *nginx 1.24.0*, not `nginx -v`'s "nginx nginx/1.24.0"; who
+   renews rides on the certbot fact (*certbot 2.9.0, renews via certbot.timer*), with only an
+   unscheduled renewal standing apart in warning; a zero count of certificates or streams leaves
+   the line, since the Certificates block says it with the way forward; a path in the line is set
+   at `0.9em` so the mono face does not stand taller than the words round it; and the modules
+   fact carries a chevron, because it opens a list. The command is *Reload nginx*, which beside
+   the page's Refresh had read as reloading the page. In the picture the lanes' headings hang
+   above their lists and the engine's caption under its tile, each column padded evenly to hold
+   them, so every mark sits on one line and a one-to-one route is a straight wire rather than an
+   S bent to meet marks the headings had pushed down; the front door names the engine's own port
+   *open* (`frontDoorLine(doors, self)`) rather than "nginx" a third time. Live traffic leads on
+   the server's reason where it gives one instead of a sentence of ours it contradicted, and its
+   button says it opens a site; the stub_status strip is *nginx counters* and drops the "On"/"Off"
+   word where the switch beside it already says it; the empty Certificates block draws the open
+   lock the picture uses for plain HTTP rather than a shield with a tick; and Recent errors,
+   without an access log, gives the error log's zero for the hour once rather than again under it.
+
    Docker networks took the same exit on 2026-10-08, at the operator's request, because it was the
    still page of the section: a column of grey cards, each a name, a subnet and a count, with the
    members one press away and nothing on it that moved. The page had no tiles to give up; its three
