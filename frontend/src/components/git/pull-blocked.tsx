@@ -133,7 +133,7 @@ export function PullBlockedDialog({
               ))}
             </PathList>
             <FormNote>
-              Folders like these are left by git run here as another account — an update or a
+              Folders like these are left by something run here as another account, such as a
               command run with sudo.
             </FormNote>
           </>

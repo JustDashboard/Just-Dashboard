@@ -467,6 +467,8 @@ func (s *Service) WriteChecked(path, content string, expected *string) error {
 		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
 			uid, gid = int(sys.Uid), int(sys.Gid)
 		}
+	} else if folder, err := os.Stat(dir); err == nil {
+		uid, gid = heir(folder)
 	}
 	tmp, err := os.CreateTemp(dir, ".vpsd-*")
 	if err != nil {
@@ -479,18 +481,21 @@ func (s *Service) WriteChecked(path, content string, expected *string) error {
 		tmp.Close()
 		return err
 	}
+	// Through the descriptor rather than the name: the folder may be one its
+	// owner can write, who could swap the name for a link to anything root's.
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return err
+	}
+	if uid >= 0 {
+		tmp.Chown(uid, gid)
+	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return err
-	}
-	if err := os.Chmod(tmpName, perm); err != nil {
-		return err
-	}
-	if uid >= 0 {
-		os.Chown(tmpName, uid, gid)
 	}
 	resolved, err := s.Resolve(path)
 	if err != nil {
@@ -572,7 +577,11 @@ func (s *Service) Mkdir(path string, mode os.FileMode) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return os.MkdirAll(full, mode)
+	made := unmade(full)
+	if err := os.MkdirAll(full, mode); err != nil {
+		return err
+	}
+	return handDown(madeBase(full, made), made)
 }
 
 // Touch is the "New file" verb, not the shell command of the same name: an
@@ -585,9 +594,19 @@ func (s *Service) Touch(path string) error {
 	if err != nil {
 		return err
 	}
+	folder, err := os.Stat(filepath.Dir(full))
+	if err != nil {
+		return err
+	}
 	f, err := os.OpenFile(full, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
+	}
+	if uid, gid := heir(folder); uid >= 0 {
+		if err := f.Chown(uid, gid); err != nil {
+			f.Close()
+			return err
+		}
 	}
 	return f.Close()
 }
@@ -889,7 +908,9 @@ func (s *Service) UploadChecked(path string, r io.Reader, overwrite bool, expect
 		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
 			uid, gid = int(sys.Uid), int(sys.Gid)
 		}
-	} else if !os.IsNotExist(err) {
+	} else if os.IsNotExist(err) {
+		uid, gid = heir(parentInfo)
+	} else {
 		return 0, err
 	}
 	token := make([]byte, 16)

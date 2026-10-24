@@ -153,7 +153,8 @@ submodules and patch containment. A loopback Git daemon verifies branch/shallow/
 ambiguity, existing/gone upstreams, detached HEAD, lookup failures and preservation of local work.
 `pullblock_test.go` covers reading git's refusal, stash-and-pull and discard-and-pull and, under
 `sudo go test`, a pull refused before writing into a root-owned folder and completed once it is given
-back; `hostexec/owned_test.go` proves `GiveBack` will not follow a link out of the tree.
+back, including a folder holding only untracked copies of what the pull adds, which then goes on to
+Discard; `hostexec/owned_test.go` proves `GiveBack` will not follow a link out of the tree.
 `TestLFSLifecycleUsesRepositoryConfig` needs `git-lfs` on PATH and uses only a temporary repository.
 GitHub tests replace the CLI runner; GitLab/Gitea tests use local HTTP fixtures to prove payloads,
 credential isolation, encryption, head checks and redirect refusal. They do not post live reviews.
