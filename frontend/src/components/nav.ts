@@ -299,6 +299,7 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
           { title: "Streams", href: "/proxy/streams", icon: ArrowLeftRight },
           { title: "Ports", href: "/proxy/ports", icon: Router },
           { title: "Traffic", href: "/proxy/traffic", icon: ChartActivity },
+          { title: "Alerts", href: "/proxy/alerts", icon: Bell, capability: "system.admin" },
           { title: "Configuration", href: "/proxy/config", icon: FileText },
         ],
       },

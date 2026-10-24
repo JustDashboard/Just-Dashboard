@@ -140,6 +140,7 @@ export function EngineIdentity({
   renewSource,
   inventory,
   verdict,
+  controls,
   actions,
 }: {
   status: ProxyStatus
@@ -163,6 +164,12 @@ export function EngineIdentity({
   inventory?: React.ReactNode
   /** How its routes are answering, at the line's right end before the commands. */
   verdict?: React.ReactNode
+  /**
+   * The page's own controls — how old it is, Refresh, Alerts — drawn in the
+   * line's bar before the engine's commands, where they stood in a row of
+   * their own over it.
+   */
+  controls?: React.ReactNode
   actions?: React.ReactNode
 }) {
   const engine = status.nginx || status.caddy
@@ -177,6 +184,7 @@ export function EngineIdentity({
   )?.replace(/^(nginx|caddy)\//i, "")
   return (
     <HostIdentity
+      bar
       mark={engineProduct(status)}
       fallback={Globe}
       title={
@@ -261,9 +269,13 @@ export function EngineIdentity({
         </>
       }
       aside={
-        (verdict || actions) && (
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+        (verdict || controls || actions) && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {verdict}
+            {controls && <div className="flex flex-wrap items-center gap-1">{controls}</div>}
+            {controls && actions && (
+              <span aria-hidden className="h-5 w-px bg-hairline max-sm:hidden" />
+            )}
             {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
           </div>
         )

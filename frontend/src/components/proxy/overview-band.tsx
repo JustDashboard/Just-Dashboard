@@ -16,7 +16,7 @@ import { Sparkline } from "@/components/metrics/sparkline"
 import { ShareBar } from "@/components/procs/workloads"
 import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { OverviewEmpty } from "@/components/proxy/overview-empty"
+import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { certificateProduct } from "@/components/proxy/marks"
 import { ProjectFavicon } from "@/components/deploy/project-mark"
@@ -97,6 +97,11 @@ export function OverviewBand({
       )}
     </div>
   )
+}
+
+/** The engine whose access records a block reads, for its empty tile. */
+function nginxOrCaddy(sites: SiteTrafficReading[] | undefined) {
+  return (sites ?? []).some((s) => s.engine === "caddy-ingress") ? "caddy" : "nginx"
 }
 
 function HeadLink({ href, children }: { href: string; children: React.ReactNode }) {
@@ -195,7 +200,10 @@ function TrafficBlock({
         ) : !sites ? (
           <Bones />
         ) : read.length === 0 ? (
-          <OverviewEmpty icon={FileText} title="No access log to read">
+          <OverviewEmpty
+            mark={<EmptyMark product={nginxOrCaddy(sites)} corner={FileText} />}
+            title="No access log to read"
+          >
             No site writes an access log the dashboard can read.
           </OverviewEmpty>
         ) : (
@@ -399,10 +407,19 @@ function CertificatesBlock({
         ) : error ? (
           <ErrorState error={error} onRetry={onRetry} className="mt-2" />
         ) : all.length === 0 ? (
-          // The open lock the picture draws a plain-HTTP domain with: a
-          // shield with a tick in it said "all well" about having none.
+          // Let's Encrypt as the issuer certbot asks, with the open lock the
+          // picture draws a plain-HTTP domain with in its corner: a shield with
+          // a tick in it said "all well" about having none.
           <OverviewEmpty
-            icon={LockOpen}
+            mark={
+              <EmptyMark
+                product={certbot ? "lets-encrypt" : undefined}
+                fallback={LockOpen}
+                corner={certbot ? LockOpen : undefined}
+                tone="warning"
+              />
+            }
+            tone="warning"
             title={certbot ? "No certificates yet" : "No certificates on this host"}
             action={
               <Button asChild size="sm" variant="outline">
@@ -432,6 +449,7 @@ function CertificatesBlock({
                   value={next.daysLeft}
                   unit={next.daysLeft === 1 ? "day to the next expiry" : "days to the next expiry"}
                   caption={`${next.name} · all ${plural(all.length, "certificate")} valid`}
+                  tone="success"
                 />
               )
             )}
@@ -567,10 +585,41 @@ function ErrorsBlock({
           <Bones />
         ) : !counted && !errorLog ? (
           <>
-            <OverviewEmpty icon={FileText} title="Nothing to read errors from">
+            <OverviewEmpty
+              mark={<EmptyMark product={nginx ? "nginx" : "caddy"} corner={FileText} />}
+              title="Nothing to read errors from"
+            >
               {trafficError
                 ? "Couldn't read the sites' access logs, so this hour's server errors are unknown."
                 : "Server errors are counted from access logs, and no site here writes one the dashboard reads."}
+            </OverviewEmpty>
+            {errorLogLine}
+          </>
+        ) : quiet ? (
+          // An hour with nothing failed is good news, said as a card of the
+          // empties' own shape beside them, rather than a grey 0 over a line
+          // saying the same thing.
+          <>
+            <OverviewEmpty
+              mark={
+                <EmptyMark
+                  product={nginx ? "nginx" : "caddy"}
+                  corner={CheckCircle}
+                  tone="success"
+                />
+              }
+              tone="success"
+              // Without an access log the 5xx count is unknown, so the card
+              // vouches only for what it read: the error log.
+              title={
+                counted ? "Nothing failed in the last hour" : "nginx logged no errors this hour"
+              }
+            >
+              {counted
+                ? `No 5xx answers from ${plural(read.length, "site")}${errorLog ? ", and nginx's error log is quiet" : ""}.`
+                : trafficError
+                  ? "Couldn't read the sites' access logs, so their server errors (5xx) are unknown."
+                  : "Server errors (5xx) are not counted: no site writes an access log."}
             </OverviewEmpty>
             {errorLogLine}
           </>
@@ -607,41 +656,34 @@ function ErrorsBlock({
             )}
             {/* Without a 5xx count the headline is the error log's own zero,
                 and "nginx logged nothing this hour" under it said it twice. */}
-            {quiet && counted ? (
-              <p className="flex items-center gap-2.5 text-body text-muted-foreground">
-                <CheckCircle aria-hidden className="size-4 shrink-0 text-success" />
-                Nothing failed in the last hour
-              </p>
-            ) : (
-              failing.length > 0 && (
-                <ul aria-label="Sites answering 5xx" className="-mx-2">
-                  {failing.slice(0, SHOWN).map(({ reading, failed }) => {
-                    const label = labelOf(reading.site)
-                    return (
-                      <li key={reading.site}>
-                        <button
-                          type="button"
-                          title={`Open ${label}'s requests`}
-                          onClick={() => router.push(readingHref(reading))}
-                          className="flex h-9 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body focus-ring-inset transition-colors hover:bg-row-hover"
-                        >
-                          <span
-                            aria-hidden
-                            className="size-1.5 shrink-0 rounded-full bg-destructive"
-                          />
-                          <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
-                          <span className="numeric shrink-0 text-hint text-muted-foreground">
-                            {share(reading.errorRate)}
-                          </span>
-                          <span className="numeric w-12 shrink-0 text-right font-medium text-destructive">
-                            {failed.toLocaleString()}
-                          </span>
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )
+            {failing.length > 0 && (
+              <ul aria-label="Sites answering 5xx" className="-mx-2">
+                {failing.slice(0, SHOWN).map(({ reading, failed }) => {
+                  const label = labelOf(reading.site)
+                  return (
+                    <li key={reading.site}>
+                      <button
+                        type="button"
+                        title={`Open ${label}'s requests`}
+                        onClick={() => router.push(readingHref(reading))}
+                        className="flex h-9 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body focus-ring-inset transition-colors hover:bg-row-hover"
+                      >
+                        <span
+                          aria-hidden
+                          className="size-1.5 shrink-0 rounded-full bg-destructive"
+                        />
+                        <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+                        <span className="numeric shrink-0 text-hint text-muted-foreground">
+                          {share(reading.errorRate)}
+                        </span>
+                        <span className="numeric w-12 shrink-0 text-right font-medium text-destructive">
+                          {failed.toLocaleString()}
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
             )}
             {errorLogLine}
           </div>

@@ -11,10 +11,10 @@ import { reading } from "@/components/proxy/freshness"
 import { useConfigTest } from "@/components/proxy/test-result"
 
 /**
- * The proxy is eight pages — the overview, the sites, the certificates, what
+ * The proxy is nine pages — the overview, the sites, the certificates, what
  * a visitor actually gets over TLS, the non-HTTP streams, every listening
- * port, the traffic, and nginx's configuration as files. The rail lists
- * them; this layout holds what they share.
+ * port, the traffic, the alerts, and nginx's configuration as files. The
+ * rail lists them; this layout holds what they share.
  *
  * It polls which proxy this host runs, because the site builder needs nginx
  * and both it and the Overview read that. It does not gate the section:
