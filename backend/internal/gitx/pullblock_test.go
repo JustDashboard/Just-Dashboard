@@ -164,6 +164,46 @@ func TestPullRefusesBeforeWritingIntoAnotherAccountsFolder(t *testing.T) {
 	}
 }
 
+// The folder git cannot write into here holds no tracked file yet, only
+// copies of what the pull adds, put there by something running as root. Git
+// names those copies as in its way, and Discard could not delete them either,
+// so the folder has to be the first thing the operator is shown.
+func TestPullRefusesAnotherAccountsFolderHoldingOnlyUntrackedFiles(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root to own a folder for another account")
+	}
+	source, checkout := pullFixture(t)
+	write(t, source, "logos/mark.svg", "<svg/>\n")
+	pullGit(t, source, "add", "-A")
+	pullGit(t, source, "commit", "-qm", "add logos")
+	write(t, checkout, "logos/mark.svg", "<svg/>\n")
+
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "safe.directory")
+	t.Setenv("GIT_CONFIG_VALUE_0", "*")
+	const owner = 4242
+	chownTree(t, filepath.Dir(filepath.Dir(checkout)), owner)
+	chownTree(t, filepath.Join(checkout, "logos"), 0)
+	s := New([]string{checkout})
+	_, err := s.Pull(context.Background(), checkout)
+	var blocked *PullBlocked
+	if !errors.As(err, &blocked) || len(blocked.Unwritable) != 1 || blocked.Unwritable[0].Path != "logos" {
+		t.Fatalf("Pull err = %v (%+v), want logos blocked", err, blocked)
+	}
+
+	_, _, err = s.OwnAndPull(context.Background(), checkout)
+	if !errors.As(err, &blocked) || !reflect.DeepEqual(blocked.Untracked, []string{"logos/mark.svg"}) {
+		t.Fatalf("OwnAndPull err = %v (%+v), want the untracked copy named next", err, blocked)
+	}
+	res, err := s.DiscardAndPull(context.Background(), checkout)
+	if err != nil || !res.OK {
+		t.Fatalf("DiscardAndPull: %+v %v", res, err)
+	}
+	if got, want := pullGit(t, checkout, "rev-parse", "HEAD"), pullGit(t, source, "rev-parse", "HEAD"); got != want {
+		t.Errorf("HEAD = %s, want %s", got, want)
+	}
+}
+
 func chownTree(t *testing.T, root string, uid int) {
 	t.Helper()
 	err := filepath.Walk(root, func(p string, _ os.FileInfo, err error) error {

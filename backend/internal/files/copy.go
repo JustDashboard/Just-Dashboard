@@ -45,10 +45,15 @@ func (s *Service) copyPath(src, dst string) error {
 	if st.IsDir() && (src == dst || strings.HasPrefix(dst, src+string(filepath.Separator))) {
 		return fmt.Errorf("cannot copy a directory into itself")
 	}
-	return copyRootEntry(source, sourceName, target, targetName)
+	made := unmade(filepath.Dir(dst))
+	base := madeBase(filepath.Dir(dst), made)
+	err = copyRootEntry(source, sourceName, target, targetName, &made)
+	return errors.Join(err, handDown(base, made))
 }
 
-func copyRootEntry(source *os.Root, src string, target *os.Root, dst string) error {
+// copyRootEntry records in made each folder and file it creates, rather than
+// replaces, for handDown.
+func copyRootEntry(source *os.Root, src string, target *os.Root, dst string, made *[]string) error {
 	st, err := source.Lstat(src)
 	if err != nil {
 		return err
@@ -76,6 +81,9 @@ func copyRootEntry(source *os.Root, src string, target *os.Root, dst string) err
 		if err := target.MkdirAll(dst, st.Mode().Perm()); err != nil {
 			return err
 		}
+		if destination == nil {
+			*made = append(*made, filepath.Join(target.Name(), dst))
+		}
 		dir, err := source.OpenFile(src, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_DIRECTORY, 0)
 		if err != nil {
 			return err
@@ -86,7 +94,7 @@ func copyRootEntry(source *os.Root, src string, target *os.Root, dst string) err
 			return err
 		}
 		for _, entry := range entries {
-			if err := copyRootEntry(source, filepath.Join(src, entry.Name()), target, filepath.Join(dst, entry.Name())); err != nil {
+			if err := copyRootEntry(source, filepath.Join(src, entry.Name()), target, filepath.Join(dst, entry.Name()), made); err != nil {
 				return err
 			}
 		}
@@ -160,7 +168,13 @@ func copyRootEntry(source *os.Root, src string, target *os.Root, dst string) err
 		if closeErr != nil {
 			return closeErr
 		}
-		return target.Rename(tmpName, dst)
+		if err := target.Rename(tmpName, dst); err != nil {
+			return err
+		}
+		if destination == nil {
+			*made = append(*made, filepath.Join(target.Name(), dst))
+		}
+		return nil
 	}
 }
 

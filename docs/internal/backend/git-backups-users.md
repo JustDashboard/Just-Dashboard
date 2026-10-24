@@ -95,8 +95,11 @@ Lookup failures stop the pull. The whole operation keeps its three-minute deadli
 refuses divergent history or overwriting local edits. A pull refused for local work, or one that would
 write into a folder another account owns, answers `409 pull_blocked` with `blocked` beside the error:
 git's own `changed` and `untracked` lists, or the `unwritable` folders (path and owner) with the `owner`
-git runs as. The folder check runs only when a directory holding tracked files belongs to someone else;
-it then fetches what the pull would merge and refuses only when the incoming paths land in such a
+git runs as. The folder check runs only when a directory holding a file — tracked, or untracked and not
+ignored, listed by `ls-files --cached --others --exclude-standard --directory` so an untracked or empty
+folder counts once — belongs to someone else; untracked files count because a folder holding only copies
+of what the pull adds is where the pull lands them, and missing it offered Discard, which git could not
+carry out in that folder either. It then fetches what the pull would merge and refuses only when the incoming paths land in such a
 folder, because git writes every file it can, stops at the first it cannot, and leaves the written
 ones as local changes that block every later pull. Three routes take the ways past it: `POST
 /git/pull/stash` stashes everything, untracked included, and pulls; `POST /git/pull/discard` (inside
