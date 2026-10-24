@@ -4,6 +4,7 @@ import { useState } from "react"
 import { CheckCircle, Copy, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
+import { notify } from "@/lib/toast"
 import type { ProxyTestRecord, ProxyValidation } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Disclosure } from "@/components/form"
@@ -44,7 +45,10 @@ export type ConfigTest = {
   /** Why the kept test could not be read, when it could not. */
   lastError: Error | undefined
   running: boolean
-  /** Runs the test and opens the panel on it. */
+  /**
+   * Runs the test. A clean pass is said in a toast, with its output a press
+   * away; a warning, a failure or a test that could not run opens the panel.
+   */
   run: () => void
   /** Opens the panel on the kept test, as it was, without running another. */
   showLast: () => void
@@ -56,12 +60,16 @@ export type ConfigTest = {
 }
 
 /**
- * The engine's config test, in a panel of its own rather than a toast.
+ * The engine's config test: a toast when it passes clean, a panel of its own
+ * when there is something to read.
  *
  * Test config said "valid" in a toast whatever nginx warned, and cut a
  * failure to four hundred characters. The panel keeps the verdict in three
  * words, a row for each thing the test said with its file a press away, the
- * whole output to copy, and Test again. The server keeps the last test,
+ * whole output to copy, and Test again. A clean pass has none of that to
+ * show, and a side panel the height of the window holding one green line was
+ * all ground and no answer, so it is a toast whose Show output opens the
+ * panel on it. Once the panel is open, a test run from it answers there. The server keeps the last test,
  * whichever command ran it, and the overview reads it back so a warning
  * stays in Needs attention until a test comes back clean.
  */
@@ -92,16 +100,36 @@ export function useConfigTest({
   const [editing, setEditing] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  const run = async () => {
+  /** Runs the test; `inPanel` answers in the panel however it comes out. */
+  const run = async (inPanel = open) => {
     if (!kind || running) return
-    setOpen(true)
+    if (inPanel) setOpen(true)
     setRunning(true)
     setError(undefined)
     try {
       const validation = await post<ProxyValidation>("/proxy/test", { kind })
-      setShown({ validation, checkedAt: Date.now(), origin: "test" })
+      const next: Shown = { validation, checkedAt: Date.now(), origin: "test" }
+      setShown(next)
+      const verdict = testVerdict(validation)
+      if (inPanel || verdict.tone !== "success") {
+        setOpen(true)
+      } else {
+        notify.success(`${engine} config is valid`, {
+          description: testMeaning(engine, validation, "test"),
+          action: validation.output
+            ? {
+                label: "Show output",
+                onClick: () => {
+                  setShown(next)
+                  setOpen(true)
+                },
+              }
+            : undefined,
+        })
+      }
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))
+      setOpen(true)
     } finally {
       setRunning(false)
       lastPoll.refresh()
@@ -129,7 +157,7 @@ export function useConfigTest({
         error={error}
         canOpen={(file) => openableFile(file, roots)}
         returnTo={opened}
-        onTest={() => void run()}
+        onTest={() => void run(true)}
         onOpenFile={(place) => {
           if (!place.file) return
           setOpen(false)
@@ -146,7 +174,7 @@ export function useConfigTest({
           // A file saved there has changed what the result on show says
           // about it, so the panel comes back on a new test rather than an
           // old one with the keyboard on a line that may be gone.
-          if (saved) void run()
+          if (saved) void run(true)
           else setOpen(true)
         }}
         path={opened?.file ?? ""}
@@ -302,7 +330,12 @@ function TestResult({
         />
       )}
       {validation.output && (
-        <Disclosure quiet summary={`${validation.command || "Test"} output`}>
+        // With no lines to place, the output is all there is to read.
+        <Disclosure
+          quiet
+          open={diagnostics.length === 0}
+          summary={`${validation.command || "Test"} output`}
+        >
           <Well className="max-h-64 break-words whitespace-pre-wrap">{validation.output}</Well>
         </Disclosure>
       )}

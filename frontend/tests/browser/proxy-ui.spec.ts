@@ -38,7 +38,7 @@ test("the reverse proxy is named once, in the identity line", async ({ page }) =
   await expect(page.getByText(/nginx version:/)).toHaveCount(0)
   // The unit's state sits beside it, read through the Services API, and
   // certbot is drawn as what it issues.
-  await expect(identity.getByText(/running for/)).toBeVisible()
+  await expect(identity.getByText(/^up \d/)).toBeVisible()
   await expect(identity.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(1)
   // And the engine's verbs are at the line's right end.
   await expect(identity.getByRole("button", { name: "Test config" })).toBeVisible()

@@ -8,6 +8,7 @@ import {
   nginxUnit,
   passingTest,
 } from "./fixtures/proxy/engine"
+import { modules as streamModules } from "./fixtures/proxy/streams"
 
 /**
  * The overview and the engine it drives, for the ways they told an operator
@@ -529,7 +530,8 @@ test("an engine that won't start at boot says so, and Start at boot enables it",
   await expect(identity.getByText("won't start at boot")).toBeVisible()
   await identity.getByRole("button", { name: "Start at boot" }).click()
   await expect(page.getByText("nginx starts at boot")).toBeVisible()
-  await expect(identity.getByText("starts at boot", { exact: true })).toBeVisible()
+  // Starting at boot is the expected state, so the line no longer spends width on it.
+  await expect(identity.getByText("starts at boot", { exact: true })).toHaveCount(0)
   await expect(identity.getByText("won't start at boot")).toHaveCount(0)
   await expect(identity.getByRole("button", { name: "Start at boot" })).toHaveCount(0)
   expect(enabled).toEqual(["POST"])
@@ -1198,14 +1200,14 @@ test("a service state that cannot be read is not drawn from its last answer", as
   )
   await page.goto("/proxy")
   const identity = page.locator("[data-slot='host-identity']")
-  await expect(identity.getByText(/running for/)).toBeVisible()
+  await expect(identity.getByText(/^up \d/)).toBeVisible()
 
   unitFails = true
   await page.locator("[data-slot='host-identity']").getByRole("button", { name: "Refresh" }).click()
   const unread = identity.getByText("couldn't read nginx.service")
   await expect(unread).toBeVisible()
   await expect(unread).toHaveAttribute("title", "systemd did not answer")
-  await expect(identity.getByText(/running for/)).toHaveCount(0)
+  await expect(identity.getByText(/^up \d/)).toHaveCount(0)
   await expect(identity.getByText("no service unit")).toHaveCount(0)
 })
 
@@ -2332,4 +2334,54 @@ test("one site without a log of its own is told why, and the quiet header drops 
   const errors = page.getByRole("region", { name: "Recent errors" })
   await expect(errors.getByText("nginx logged no errors this hour")).toHaveCount(1)
   await expect(errors.getByText("nginx logged nothing this hour")).toHaveCount(0)
+})
+
+test("a clean config test is a toast, and Show output opens the panel on it", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const runs = await mockTests(page, [passingTest])
+  await page.goto("/proxy")
+
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: "Test config" })
+    .click()
+  // A window-high panel holding one green line was all ground and no answer.
+  const toast = page.locator("[data-sonner-toast]").filter({ hasText: "nginx config is valid" })
+  await expect(toast).toContainText("A reload would succeed.")
+  const panel = page.getByRole("dialog", { name: "nginx config test" })
+  await expect(panel).toHaveCount(0)
+  expect(runs).toEqual(["nginx"])
+
+  // The output is the one thing left to read, so it opens unfolded.
+  await toast.getByRole("button", { name: "Show output" }).click()
+  await expect(panel.getByText("Valid", { exact: true })).toBeVisible()
+  await expect(panel.getByText(/test is successful/)).toBeVisible()
+  // Run from the open panel, it answers there.
+  await panel.getByRole("button", { name: "Test again" }).click()
+  await expect(panel.getByText("Valid", { exact: true })).toBeVisible()
+  expect(runs).toEqual(["nginx", "nginx"])
+})
+
+test("the modules sit beside the version, and one a package provides installs from the list", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/modules/**", (route) => json(route, streamModules))
+  const installs: unknown[] = []
+  await page.route("**/api/v1/packages/install", (route) => {
+    installs.push(route.request().postDataJSON())
+    return route.fulfill({ status: 500, contentType: "application/json", body: "{}" })
+  })
+  await page.goto("/proxy")
+
+  const identity = page.locator("[data-slot='host-identity']")
+  // In the line of facts it was the one item that wrapped, onto a row of its own.
+  const trigger = identity.getByRole("button", { name: /^1 module missing/ })
+  const title = identity.locator("p").filter({ hasText: "nginx" }).first()
+  await expect(title.getByRole("button", { name: /module missing/ })).toBeVisible()
+  await trigger.click()
+  const list = page.getByRole("list", { name: "nginx modules" })
+  await list.getByRole("button", { name: "Install stream (libnginx-mod-stream)" }).click()
+  await expect.poll(() => installs).toEqual([{ packages: ["libnginx-mod-stream"] }])
+  await expect(list).toHaveCount(0)
 })

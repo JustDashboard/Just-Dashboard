@@ -32,6 +32,7 @@ import {
   EngineExtras,
   EngineIdentity,
   ModulesFact,
+  usePackageInstall,
   useEngineUnit,
 } from "@/components/proxy/engine"
 import { EngineLog } from "@/components/proxy/engine-log"
@@ -191,6 +192,7 @@ export default function ProxyOverviewPage() {
     configTest.refreshLast()
   }
   const control = useEngineControl({ status, unit: engine, onChanged: refreshAll })
+  const installer = usePackageInstall(refreshAll)
 
   // certbot being absent is a fact about the host, not a failure to report.
   const certbotGone =
@@ -412,30 +414,29 @@ export default function ProxyOverviewPage() {
         serviceBusy={control.pending}
         certbotVersion={renewal?.version}
         renewSource={renewal ? (renewal.renewSource ?? null) : undefined}
-        inventory={inventory
-          .map((fact) => (
-            <Fragment key={fact.key}>
-              <FactDot />
-              {fact.error ? (
-                <span className="font-medium text-warning" title={errorMessage(fact.error)}>
-                  {`couldn't read ${fact.key}`}
-                </span>
-              ) : (
-                <Link
-                  href={fact.href}
-                  title={fact.title}
-                  className={cn(
-                    "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
-                    fact.tone === "danger" && "font-medium text-destructive",
-                    fact.tone === "warning" && "font-medium text-warning",
-                  )}
-                >
-                  {fact.text}
-                </Link>
-              )}
-            </Fragment>
-          ))
-          .concat(status.nginx ? [<ModulesFact key="modules" />] : [])}
+        inventory={inventory.map((fact) => (
+          <Fragment key={fact.key}>
+            <FactDot />
+            {fact.error ? (
+              <span className="font-medium text-warning" title={errorMessage(fact.error)}>
+                {`couldn't read ${fact.key}`}
+              </span>
+            ) : (
+              <Link
+                href={fact.href}
+                title={fact.title}
+                className={cn(
+                  "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
+                  fact.tone === "danger" && "font-medium text-destructive",
+                  fact.tone === "warning" && "font-medium text-warning",
+                )}
+              >
+                {fact.text}
+              </Link>
+            )}
+          </Fragment>
+        ))}
+        modules={status.nginx && <ModulesFact admin={admin} installer={installer} />}
         verdict={verdict && <Status verdict={verdict.tone} label={verdict.label} />}
         controls={
           <>
@@ -465,7 +466,7 @@ export default function ProxyOverviewPage() {
         }
       />
 
-      <EngineExtras status={status} admin={admin} onChanged={refreshAll} />
+      <EngineExtras status={status} admin={admin} installer={installer} />
 
       {engine.unit?.activeState === "failed" && !underWay && (
         <EngineFailure
@@ -746,12 +747,16 @@ function Freshness({
   const now = useNow(1000, at !== undefined && !refreshing && late.length === 0)
   return (
     <>
+      {/* The age is the button's tooltip: "Updated just now" spent the bar's
+          width on the one reading that is nearly always fine. A source that
+          has not answered is not fine, and says so. */}
       {late.length > 0 ? (
         <span className="px-1 text-hint font-medium text-warning" title={late.join(", ")}>
           {noAnswerLabel(late)}
         </span>
       ) : (
-        <span className="numeric px-1 text-hint text-muted-foreground">
+        // Still read out, so a screen reader hears how old the page is.
+        <span className="sr-only">
           {refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)}
         </span>
       )}
@@ -767,7 +772,13 @@ function Freshness({
             <RefreshClockwise className="size-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Read every source again</TooltipContent>
+        <TooltipContent>
+          {refreshing
+            ? "Refreshing…"
+            : at !== undefined
+              ? `${updatedLabel(at, now)}. Read every source again`
+              : "Read every source again"}
+        </TooltipContent>
       </Tooltip>
     </>
   )
