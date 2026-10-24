@@ -38,7 +38,9 @@ const maxEditBytes = 8 << 20
 
 type Service struct {
 	roots     []string
-	extractMu sync.Mutex
+	extractMu *sync.Mutex
+	// run, when set, is where every operation runs: see OnHost.
+	run func(fn func())
 }
 
 func New(roots []string) *Service {
@@ -51,7 +53,38 @@ func New(roots []string) *Service {
 	if len(cleaned) == 0 {
 		cleaned = []string{"/"}
 	}
-	return &Service{roots: cleaned}
+	return &Service{roots: cleaned, extractMu: &sync.Mutex{}}
+}
+
+// OnHost returns this Service with every operation, Resolve first, run
+// through run — hostexec.InHostMounts for the Files page, which has to show
+// the server's filesystem and not this container's. The roots are the same
+// and so is every check: only the tree they are evaluated against moves, and
+// it moves for the whole operation, so a path resolved in one view is never
+// opened in another.
+func (s *Service) OnHost(run func(fn func())) *Service {
+	return &Service{roots: s.roots, extractMu: s.extractMu, run: run}
+}
+
+// inPlace is this Service as an operation already moved by run sees it, so
+// the Resolve inside a List does not move again.
+func (s *Service) inPlace() *Service {
+	return &Service{roots: s.roots, extractMu: s.extractMu}
+}
+
+func hosted1[A any](s *Service, op func(*Service) A) (a A) {
+	s.run(func() { a = op(s.inPlace()) })
+	return a
+}
+
+func hosted2[A, B any](s *Service, op func(*Service) (A, B)) (a A, b B) {
+	s.run(func() { a, b = op(s.inPlace()) })
+	return a, b
+}
+
+func hosted3[A, B, C any](s *Service, op func(*Service) (A, B, C)) (a A, b B, c C) {
+	s.run(func() { a, b, c = op(s.inPlace()) })
+	return a, b, c
 }
 
 func (s *Service) Roots() []string { return s.roots }
@@ -61,6 +94,9 @@ func (s *Service) Roots() []string { return s.roots }
 // a root pointing outside it must not become a way out, even when several path
 // components below that link do not exist yet.
 func (s *Service) Resolve(path string) (string, error) {
+	if s.run != nil {
+		return hosted2(s, func(s *Service) (string, error) { return s.Resolve(path) })
+	}
 	if path == "" {
 		path = s.roots[0]
 	}
@@ -92,6 +128,9 @@ func (s *Service) Resolve(path string) (string, error) {
 // guarantee is unchanged: the parent chain is still resolved and still has to
 // land inside the roots.
 func (s *Service) ResolveEntry(path string) (string, error) {
+	if s.run != nil {
+		return hosted2(s, func(s *Service) (string, error) { return s.ResolveEntry(path) })
+	}
 	if path == "" {
 		path = s.roots[0]
 	}
@@ -189,6 +228,9 @@ type Listing struct {
 }
 
 func (s *Service) List(path string, showHidden bool) (*Listing, error) {
+	if s.run != nil {
+		return hosted2(s, func(s *Service) (*Listing, error) { return s.List(path, showHidden) })
+	}
 	dir, err := s.Resolve(path)
 	if err != nil {
 		return nil, err
@@ -390,6 +432,9 @@ type FileContent struct {
 }
 
 func (s *Service) Read(path string) (*FileContent, error) {
+	if s.run != nil {
+		return hosted2(s, func(s *Service) (*FileContent, error) { return s.Read(path) })
+	}
 	full, err := s.Resolve(path)
 	if err != nil {
 		return nil, err
@@ -446,6 +491,9 @@ func (s *Service) Write(path, content string) error {
 // again before publishing, so a native edit during staging is also detected.
 // An empty expected revision requires a destination that does not yet exist.
 func (s *Service) WriteChecked(path, content string, expected *string) error {
+	if s.run != nil {
+		return hosted1(s, func(s *Service) error { return s.WriteChecked(path, content, expected) })
+	}
 	full, err := s.Resolve(path)
 	if err != nil {
 		return err
@@ -565,6 +613,9 @@ func checkFileRevisionLimit(path string, expected *string, limit int64) error {
 // nothing having happened, and the same name typed twice is the common way
 // to arrive here.
 func (s *Service) Mkdir(path string, mode os.FileMode) error {
+	if s.run != nil {
+		return hosted1(s, func(s *Service) error { return s.Mkdir(path, mode) })
+	}
 	full, err := s.Resolve(path)
 	if err != nil {
 		return err
@@ -590,6 +641,9 @@ func (s *Service) Mkdir(path string, mode os.FileMode) error {
 // handed the operator somebody else's contents under the name they had just
 // typed as new.
 func (s *Service) Touch(path string) error {
+	if s.run != nil {
+		return hosted1(s, func(s *Service) error { return s.Touch(path) })
+	}
 	full, err := s.Resolve(path)
 	if err != nil {
 		return err
@@ -612,6 +666,9 @@ func (s *Service) Touch(path string) error {
 }
 
 func (s *Service) Delete(path string, recursive bool) error {
+	if s.run != nil {
+		return hosted1(s, func(s *Service) error { return s.Delete(path, recursive) })
+	}
 	full, err := s.ResolveEntry(path)
 	if err != nil {
 		return err
@@ -636,6 +693,9 @@ func (s *Service) Delete(path string, recursive bool) error {
 // it to carry what it keeps about a path — a folder's colour — along with the
 // entry.
 func (s *Service) MoveEnds(from, to string) (src, dst string, err error) {
+	if s.run != nil {
+		return hosted3(s, func(s *Service) (string, string, error) { return s.MoveEnds(from, to) })
+	}
 	src, err = s.ResolveEntry(from)
 	if err != nil {
 		return "", "", err
@@ -655,6 +715,9 @@ func (s *Service) MoveEnds(from, to string) (src, dst string, err error) {
 }
 
 func (s *Service) Move(from, to string, overwrite bool) error {
+	if s.run != nil {
+		return hosted1(s, func(s *Service) error { return s.Move(from, to, overwrite) })
+	}
 	src, dst, err := s.MoveEnds(from, to)
 	if err != nil {
 		return err
@@ -706,6 +769,9 @@ func (s *Service) Move(from, to string, overwrite bool) error {
 // the replacement itself, when asked for, is the atomic one copyRootEntry
 // does.
 func (s *Service) Copy(from, to string, overwrite bool) error {
+	if s.run != nil {
+		return hosted1(s, func(s *Service) error { return s.Copy(from, to, overwrite) })
+	}
 	src, err := s.ResolveEntry(from)
 	if err != nil {
 		return err
@@ -728,6 +794,9 @@ func (s *Service) Copy(from, to string, overwrite bool) error {
 }
 
 func (s *Service) Chmod(path string, mode string, recursive bool) error {
+	if s.run != nil {
+		return hosted1(s, func(s *Service) error { return s.Chmod(path, mode, recursive) })
+	}
 	full, err := s.ResolveEntry(path)
 	if err != nil {
 		return err
@@ -763,6 +832,9 @@ func (s *Service) Chmod(path string, mode string, recursive bool) error {
 }
 
 func (s *Service) Chown(path, owner, group string, recursive bool) error {
+	if s.run != nil {
+		return hosted1(s, func(s *Service) error { return s.Chown(path, owner, group, recursive) })
+	}
 	full, err := s.ResolveEntry(path)
 	if err != nil {
 		return err
@@ -804,6 +876,9 @@ func (s *Service) Chown(path, owner, group string, recursive bool) error {
 }
 
 func (s *Service) Symlink(target, link string) error {
+	if s.run != nil {
+		return hosted1(s, func(s *Service) error { return s.Symlink(target, link) })
+	}
 	full, err := s.ResolveEntry(link)
 	if err != nil {
 		return err
@@ -823,6 +898,9 @@ func (s *Service) Symlink(target, link string) error {
 
 // Stat is the single-entry form used by the details panel.
 func (s *Service) Stat(path string) (*Entry, error) {
+	if s.run != nil {
+		return hosted2(s, func(s *Service) (*Entry, error) { return s.Stat(path) })
+	}
 	full, err := s.ResolveEntry(path)
 	if err != nil {
 		return nil, err
@@ -832,6 +910,9 @@ func (s *Service) Stat(path string) (*Entry, error) {
 
 // Open returns a handle for download. The caller closes it.
 func (s *Service) Open(path string) (*os.File, os.FileInfo, error) {
+	if s.run != nil {
+		return hosted3(s, func(s *Service) (*os.File, os.FileInfo, error) { return s.Open(path) })
+	}
 	full, err := s.Resolve(path)
 	if err != nil {
 		return nil, nil, err
@@ -865,6 +946,9 @@ func (s *Service) Upload(path string, r io.Reader, overwrite bool) (int64, error
 // UploadChecked shares the Files/Compose path lock and checks the opened bytes
 // again after staging. Native edits made during the transfer refuse publication.
 func (s *Service) UploadChecked(path string, r io.Reader, overwrite bool, expected *string) (int64, error) {
+	if s.run != nil {
+		return hosted2(s, func(s *Service) (int64, error) { return s.UploadChecked(path, r, overwrite, expected) })
+	}
 	full, err := s.Resolve(path)
 	if err != nil {
 		return 0, err

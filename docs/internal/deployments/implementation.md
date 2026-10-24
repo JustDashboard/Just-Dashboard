@@ -1539,7 +1539,9 @@ non-document responses, plus Permissions-Policy. Caddy rewrites
 `X-Forwarded-For` to the real client address (what makes `JD_TRUSTED_PROXIES` safe); `flush_interval -1`
 and zero read/write timeouts keep the long-lived streams alive. The backend container runs `privileged`,
 `pid: host`, `network_mode: host` with the Docker socket and real host paths mounted **at their real
-names** — remove a mount and the file manager silently browses the container's own empty filesystem.
+names** — remove a mount and git discovery, compose scanning and the other path-taking features
+silently operate on the container's own empty filesystem. The Files page alone does not depend on them:
+it runs in the host's mount namespace.
 
 ## Deployment workspace
 

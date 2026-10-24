@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
@@ -76,6 +77,15 @@ type moduleSet struct {
 	uninstall     *uninstall.Service
 	certKeeper    *selfcfg.CertKeeper
 	proxy         *proxysvc.Service
+
+	// hostFiles is files with every operation run in the host's mount
+	// namespace. The Files page, and only it, uses it: its paths are typed by
+	// someone reading the server's tree in the terminal beside it, while the
+	// other callers resolve a path and then open it themselves, from here.
+	hostFiles *files.Service
+	// onHost is what moves hostFiles: hostexec.InHostMounts, warning once
+	// when the namespace cannot be entered.
+	onHost func(fn func())
 	// proxyExtras is the proxy pages' own state; see modules_proxy.go.
 	proxyExtras proxyExtras
 	// requests holds what every deployment's ingress and every proxy site
@@ -189,6 +199,15 @@ func (s *Server) initModules() {
 		}
 	}
 	s.modules.files = files.New(s.Cfg.FileRoots)
+	var hostMountsWarning sync.Once
+	s.modules.onHost = func(fn func()) {
+		if err := hostexec.InHostMounts(fn); err != nil {
+			hostMountsWarning.Do(func() {
+				s.Log.Warn("the Files page is showing this container's filesystem, not the server's", "error", err)
+			})
+		}
+	}
+	s.modules.hostFiles = s.modules.files.OnHost(s.modules.onHost)
 	s.modules.gameVersions = gameserver.New()
 	s.modules.git = gitx.New(s.Cfg.GitRoots)
 	s.modules.github = ghx.New()

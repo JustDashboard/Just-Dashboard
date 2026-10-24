@@ -82,6 +82,9 @@ const (
 )
 
 func (s *Service) Find(ctx context.Context, opts FindOptions) (*FindResult, error) {
+	if s.run != nil {
+		return hosted2(s, func(s *Service) (*FindResult, error) { return s.Find(ctx, opts) })
+	}
 	root, err := s.Resolve(opts.Root)
 	if err != nil {
 		return nil, err

@@ -184,7 +184,9 @@ func (s *Server) handleDiskBreakdown(w http.ResponseWriter, r *http.Request) err
 	if limit > 100 {
 		limit = 100
 	}
-	resolved, err := s.modules.files.Resolve(path)
+	// The server's mount, not this container's: it is the same question the
+	// Files page asks, so it is answered from the same tree.
+	resolved, err := s.modules.hostFiles.Resolve(path)
 	if err != nil {
 		return mapFileError(err)
 	}
@@ -197,7 +199,8 @@ func (s *Server) handleDiskBreakdown(w http.ResponseWriter, r *http.Request) err
 	}
 	ctx, cancel := timeoutCtx(r, 45*time.Second)
 	defer cancel()
-	entries, err := sysinfo.DirBreakdown(ctx, resolved, limit)
+	var entries []sysinfo.DirEntry
+	s.modules.onHost(func() { entries, err = sysinfo.DirBreakdown(ctx, resolved, limit) })
 	if err != nil {
 		if errors.Is(err, sysinfo.ErrDirScanLimit) {
 			return httpx.Err(http.StatusUnprocessableEntity, "disk_scan_limit",
