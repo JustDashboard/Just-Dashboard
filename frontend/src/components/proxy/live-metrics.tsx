@@ -1,8 +1,8 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useId, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowRight, ChartActivity, Warning } from "@/components/icons"
+import { ArrowRight, FileText, Warning } from "@/components/icons"
 import { ApiError, errorMessage, get, put } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -19,7 +19,9 @@ import { ErrorState, Notice } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import { OverviewEmpty } from "@/components/proxy/overview-empty"
+import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
+import { ProductLogo } from "@/components/product-logo"
+import { cn } from "@/lib/utils"
 import { sitePath } from "@/components/proxy/site-verbs"
 import {
   connectionStates,
@@ -37,7 +39,9 @@ import { compactCount, edgeTraffic, errorRateTone, share } from "@/components/pr
  * rebuilt per render is a chart rebuilt per render.
  */
 const EDGE_SERIES: Series[] = [
-  { key: "total", label: "Requests", color: "var(--chart-1)", kind: "area" },
+  // The chart ramp's blue rather than the brand, which is near white and drew
+  // the hour as a grey wash under the coloured error lines.
+  { key: "total", label: "Requests", color: "var(--chart-2)", kind: "area" },
   { key: "refused", label: "4xx client error", color: "var(--warning)", kind: "line" },
   { key: "failed", label: "5xx server error", color: "var(--destructive)", kind: "line" },
 ]
@@ -120,6 +124,7 @@ export function LiveTraffic({
                 trend={
                   <TileTrend
                     values={points.map((p) => p.total)}
+                    color="var(--chart-2)"
                     label="Requests a minute over the last hour"
                   />
                 }
@@ -249,51 +254,70 @@ function NginxCounters({ admin }: { admin: boolean }) {
     <Status tone="stopped" label="Off" />
   ) : undefined
 
+  const switchId = useId()
+  const switchable = Boolean(
+    admin && report && !report.foreign && (report.supported || report.enabled),
+  )
+  const description = metrics.loading ? (
+    <Skeleton className="h-4 w-48" />
+  ) : !report ? (
+    metrics.error && <ErrorState error={metrics.error} onRetry={metrics.refresh} />
+  ) : report.foreign ? (
+    "Left alone: the status file is somebody else's."
+  ) : !report.enabled ? (
+    !report.supported ? (
+      report.reason
+    ) : admin ? (
+      <span
+        title={`Switching on adds a loopback-only status server to conf.d, tests the configuration and reloads nginx; its counters are then read every ${report.interval} seconds.`}
+      >
+        Off. Switch on to count requests and open connections as nginx itself answers them.
+      </span>
+    ) : (
+      "Off. An administrator can switch these counters on."
+    )
+  ) : (
+    <Readings report={report} failure={metrics.error} />
+  )
+  // The whole card is the switch's label, so a press anywhere on it flips
+  // it: only the 36px switch at the far end answered, beside a strip of text
+  // that looked as pressable and did nothing.
+  const Card = switchable ? "label" : "div"
   return (
-    <section
-      aria-label="nginx counters"
-      className="flex min-w-0 flex-col gap-2 rounded-lg border border-hairline px-4 py-3"
-    >
-      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+    <section aria-label="nginx counters" className="flex min-w-0 flex-col gap-3">
+      <Card
+        {...(switchable ? { htmlFor: switchId } : {})}
+        className={cn(
+          "flex min-w-0 items-center gap-3.5 rounded-xl border bg-choice-surface px-4 py-3.5",
+          switchable && "cursor-pointer transition-colors hover:bg-row-hover",
+        )}
+      >
         {/* Named for what it counts; stub_status is the module, said in the tooltip. */}
-        <span className="eyebrow">nginx counters</span>
-        <div className="min-w-0 flex-1 text-hint text-muted-foreground">
-          {metrics.loading ? (
-            <Skeleton className="h-4 w-48" />
-          ) : !report ? (
-            metrics.error && <ErrorState error={metrics.error} onRetry={metrics.refresh} />
-          ) : report.foreign ? null : !report.enabled ? (
-            !report.supported ? (
-              report.reason
-            ) : admin ? (
-              <span
-                title={`Switching on adds a loopback-only status server to conf.d, tests the configuration and reloads nginx; its counters are then read every ${report.interval} seconds.`}
-              >
-                Off — counts only what nginx itself answers.
-              </span>
-            ) : (
-              "Off. An administrator can switch these counters on."
-            )
-          ) : (
-            <Readings report={report} failure={metrics.error} />
-          )}
+        <ProductLogo id="nginx" />
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-body leading-snug font-medium">
+            nginx counters
+            {state && <span className="text-hint font-normal">{state}</span>}
+          </p>
+          <div className="min-w-0 text-body leading-relaxed text-muted-foreground">
+            {description}
+          </div>
         </div>
-        <span className="flex shrink-0 items-center gap-3">
-          {state}
-          {admin && report && (
-            <Switch
-              aria-label="Live metrics"
-              checked={switching ? switching === "on" : report.enabled}
-              disabled={
-                switching !== undefined ||
-                Boolean(report.foreign) ||
-                (!report.supported && !report.enabled)
-              }
-              onCheckedChange={flip}
-            />
-          )}
-        </span>
-      </div>
+        {admin && report && (
+          <Switch
+            id={switchId}
+            aria-label="Live metrics"
+            className="shrink-0"
+            checked={switching ? switching === "on" : report.enabled}
+            disabled={
+              switching !== undefined ||
+              Boolean(report.foreign) ||
+              (!report.supported && !report.enabled)
+            }
+            onCheckedChange={flip}
+          />
+        )}
+      </Card>
       {report?.foreign && (
         <Notice tone="warning" icon={Warning} title="The status file is not the dashboard's">
           <span className="font-mono">{report.path}</span> was written by somebody else, so it is
@@ -323,15 +347,17 @@ function Readings({
   if (stopped) return <span className="text-warning">{stopped}</span>
   return (
     <span
-      className="numeric flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1"
+      className="numeric flex min-w-0 flex-wrap items-center gap-x-5 gap-y-1"
       title={`nginx's stub_status on ${statusAddress(report)}, read every ${report.interval} seconds; the dashboard's own reads are left out.`}
     >
       <span>
-        <span className="font-medium text-foreground">{rate != null ? perSecond(rate) : "—"}</span>{" "}
+        <span className="font-semibold text-foreground">
+          {rate != null ? perSecond(rate) : "—"}
+        </span>{" "}
         requests a second
       </span>
       <span>
-        <span className="font-medium text-foreground">
+        <span className="font-semibold text-foreground">
           {current ? current.active.toLocaleString() : "—"}
         </span>{" "}
         connections open{current && ` (${connectionStates(current)})`}
@@ -358,7 +384,15 @@ function QuietEdge({ sites }: { sites: SiteTrafficReading[] }) {
   const why = only?.reason ? sentence(only.reason) : undefined
   return (
     <OverviewEmpty
-      icon={ChartActivity}
+      // The engine whose log is missing, with the log in its corner: the
+      // chart glyph said "traffic" about a block whose news is that there is
+      // none to draw.
+      mark={
+        <EmptyMark
+          product={sites.some((s) => s.engine === "caddy-ingress") ? "caddy" : "nginx"}
+          corner={FileText}
+        />
+      }
       title="No traffic to count yet"
       action={
         sites.length > 0 && (

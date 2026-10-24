@@ -1607,7 +1607,9 @@ boundary; forms and sections remain plain.
 navigation, site-kind choices and read-only access; `proxy-engine-overview.spec.ts` covers the
 overview's failure states, its freshness and Refresh, its routes by role and the engine controls,
 including a stopped, failed, masked and boot-disabled unit, a refused start, restart or reload, and
-the config test panel; `proxy-insights.spec.ts` covers Live traffic, the ingress's routes in it, Recent errors, the nginx counters' switch and a phone.
+the config test panel; `proxy-insights.spec.ts` covers Live traffic, the ingress's routes in it, Recent errors, the nginx counters' switch (pressed on the card as well as the switch) and a phone;
+`proxy-alerts.spec.ts` covers the Alerts page — its picture, what fires, the rule form — and the
+overview bar's firing count.
 
 **What a host has installed, who is on it and what they changed are products too.** Packages
 draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:
@@ -2255,6 +2257,34 @@ The passes, in order. Each one is a diff you can review on its own.
    word where the switch beside it already says it; the empty Certificates block draws the open
    lock the picture uses for plain HTTP rather than a shield with a tick; and Recent errors,
    without an access log, gives the error log's zero for the hour once rather than again under it.
+
+   A fourth pass on 2026-10-24, at the operator's request, made the page read as one product with
+   the Routes cards they liked. The header is one bar: the identity line (`HostIdentity bar`, a
+   40px tile on a framed `bg-card` bar rather than a 48px tile over a hairline) now carries the
+   page's own controls — how old the page is, Refresh as an icon button, and **Alerts** as a link
+   whose firing count stands beside it in red (holding in amber) — before the engine's commands,
+   where they had been a row of their own over a band of empty ground. Every quiet block is
+   `OverviewEmpty`'s card now, the Routes row's shape: a tile drawn as the product the block is
+   about with what is missing in its corner (`EmptyMark` — nginx with a log for no access log,
+   Let's Encrypt with an open lock for no certificates), the title and a readable 14px reason
+   beside it on one line, and the way forward at the card's far end where the card is wide enough
+   (a container query, since it stands full-width under Live traffic and in half the band). The
+   16px glyph in a column of its own over 12px grey text left a gutter down each block. No
+   certificates is amber-edged, with **Issue a certificate** in the command face for an
+   administrator; an hour in which nothing failed is a green-edged card with a tick on nginx —
+   *Nothing failed in the last hour* where an access log counts 5xx, *nginx logged no errors this
+   hour* where none does, since a 5xx count with no log is still unknown, not zero. The nginx
+   counters are a card the same shape whose whole surface is the switch's `<label>`, so a press
+   anywhere flips it, with the readings at the body size; Live traffic's requests draw in
+   `--chart-2` rather than the near-white brand. Alerts left the sheet for a page of its own,
+   `/proxy/alerts` (`components/proxy/alerts-page.tsx`, in the rail for administrators), drawn the
+   way Notifications is: a picture of what the rules watch — certificates as Let's Encrypt, the
+   engine as itself, upstreams, sites and watched endpoints, each wire red while something there
+   fires, amber while one holds, dashed and pressable where no rule watches it — wired through
+   this server to each channel as its own service; under it what is firing as cards in their
+   state's edge with Mute, the rules as `ChoiceRow`s (each kind's product with its glyph in the
+   corner) that open their form in a sheet, and beside them what was told lately and a test per
+   channel.
 
    Docker networks took the same exit on 2026-10-08, at the operator's request, because it was the
    still page of the section: a column of grey cards, each a name, a subnet and a count, with the

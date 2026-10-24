@@ -7,7 +7,13 @@ import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
-import type { CertbotState, ErrorReport, SiteTrafficSummary, UpstreamReport } from "@/lib/types"
+import type {
+  CertbotState,
+  ErrorReport,
+  ProxyAlerts,
+  SiteTrafficSummary,
+  UpstreamReport,
+} from "@/lib/types"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext, PageState } from "@/components/page"
@@ -17,6 +23,7 @@ import { FactDot } from "@/components/metrics/host-identity"
 import { Status, type DotTone } from "@/components/status-dot"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useNow } from "@/components/deploy/vocabulary"
 import { useProxy } from "@/components/proxy/proxy-context"
@@ -56,7 +63,6 @@ import {
 } from "@/components/proxy/overview-routes"
 import { upstreamLabel, upstreamsOf, upstreamTone } from "@/components/proxy/upstream-health"
 import { trafficLabel } from "@/components/proxy/site-traffic"
-import { AlertsPanel } from "@/components/proxy/alerts-panel"
 import { RecentChanges } from "@/components/proxy/activity"
 import { frontDoorLine, frontDoors } from "@/components/proxy/front-door"
 import { foldDualStack, privateNetworksHint, tallyReach } from "@/components/proxy/ports"
@@ -122,7 +128,14 @@ export default function ProxyOverviewPage() {
   const { can } = useAuth()
   const admin = can("system.admin")
   const engine = useEngineUnit(status)
-  const [alertsOpen, setAlertsOpen] = useState(false)
+  // What is firing, for the Alerts link's count: the rules themselves are
+  // their own page now, where they were a sheet over this one.
+  const alerts = usePoll(
+    (signal) => get<ProxyAlerts>("/proxy/alerts", undefined, signal),
+    60_000,
+    [],
+    { enabled: admin },
+  )
 
   const certbot = usePoll(
     (signal) => reading(get<CertbotState>("/certificates/certbot", undefined, signal)),
@@ -384,28 +397,8 @@ export default function ProxyOverviewPage() {
 
   return (
     <Page className="animate-rise">
-      <PageContext
-        title="Proxy & TLS"
-        className="justify-end"
-        actions={
-          <>
-            <Freshness
-              at={updatedAt}
-              refreshing={refreshing}
-              late={late}
-              onRefresh={refreshEverything}
-            />
-            {admin && (
-              <Button size="xs" variant="ghost" onClick={() => setAlertsOpen(true)}>
-                <Bell />
-                Alerts
-              </Button>
-            )}
-          </>
-        }
-      />
+      <PageContext title="Proxy & TLS" />
       {statusError && <ErrorState error={statusError} onRetry={refreshStatus} />}
-      {admin && <AlertsPanel open={alertsOpen} onOpenChange={setAlertsOpen} />}
 
       <EngineIdentity
         status={status}
@@ -444,6 +437,17 @@ export default function ProxyOverviewPage() {
           ))
           .concat(status.nginx ? [<ModulesFact key="modules" />] : [])}
         verdict={verdict && <Status verdict={verdict.tone} label={verdict.label} />}
+        controls={
+          <>
+            <Freshness
+              at={updatedAt}
+              refreshing={refreshing}
+              late={late}
+              onRefresh={refreshEverything}
+            />
+            {admin && <AlertsLink alerts={alerts.error ? undefined : alerts.data} />}
+          </>
+        }
         actions={
           admin &&
           hasEngine && (
@@ -743,18 +747,62 @@ function Freshness({
   return (
     <>
       {late.length > 0 ? (
-        <span className="text-hint font-medium text-warning" title={late.join(", ")}>
+        <span className="px-1 text-hint font-medium text-warning" title={late.join(", ")}>
           {noAnswerLabel(late)}
         </span>
       ) : (
-        <span className="numeric text-hint text-muted-foreground">
+        <span className="numeric px-1 text-hint text-muted-foreground">
           {refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)}
         </span>
       )}
-      <Button size="xs" variant="ghost" onClick={onRefresh} pending={refreshing}>
-        <RefreshClockwise />
-        Refresh
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Refresh"
+            onClick={onRefresh}
+            pending={refreshing}
+          >
+            <RefreshClockwise className="size-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Read every source again</TooltipContent>
+      </Tooltip>
     </>
+  )
+}
+
+/**
+ * The way to the Alerts page, with what is firing counted in its tone: a
+ * bell with nothing beside it said nothing about whether anybody was being
+ * told something right now.
+ */
+function AlertsLink({ alerts }: { alerts?: ProxyAlerts }) {
+  const subjects = alerts?.subjects ?? []
+  const firing = subjects.filter((s) => s.state === "firing").length
+  const holding = subjects.filter((s) => s.state === "pending").length
+  return (
+    <Button asChild size="sm" variant="ghost">
+      <Link
+        href="/proxy/alerts"
+        aria-label={firing > 0 ? `Alerts, ${firing} firing` : "Alerts"}
+        className="gap-1.5"
+      >
+        <Bell className="size-3.5" />
+        Alerts
+        {firing > 0 ? (
+          <span className="numeric flex items-center gap-1 text-hint font-medium text-destructive">
+            <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-destructive" />
+            {firing}
+          </span>
+        ) : holding > 0 ? (
+          <span className="numeric flex items-center gap-1 text-hint font-medium text-warning">
+            <span aria-hidden className="size-1.5 rounded-full bg-warning" />
+            {holding}
+          </span>
+        ) : null}
+      </Link>
+    </Button>
   )
 }

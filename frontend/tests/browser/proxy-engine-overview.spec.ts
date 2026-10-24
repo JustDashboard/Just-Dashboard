@@ -80,7 +80,7 @@ test("a source the overview cannot read is reported, never cleared", async ({ pa
   await expect(page.getByText("No certificates were found on this host.")).toHaveCount(0)
 
   sitesFail = false
-  await page.locator("[data-slot=page-context]").getByRole("button", { name: "Refresh" }).click()
+  await page.locator("[data-slot='host-identity']").getByRole("button", { name: "Refresh" }).click()
   await expect(
     page.getByRole("list", { name: "Sites" }).locator("[data-slot='choice-row']"),
   ).toHaveCount(3)
@@ -674,7 +674,10 @@ test("a reader sees a failed engine's reason and journal, and none of its contro
 
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("won't start at boot")).toBeVisible()
-  await expect(identity.getByRole("button")).toHaveCount(0)
+  // The bar holds the page's own Refresh, which a reader may press; none of
+  // the engine's commands.
+  await expect(identity.getByRole("button")).toHaveCount(1)
+  await expect(identity.getByRole("button", { name: "Refresh" })).toBeVisible()
   await expect(page.getByText("nginx exited with an error")).toBeVisible()
   await expect(page.getByRole("button", { name: "Clear failed state" })).toHaveCount(0)
   await page.getByRole("button", { name: "Last 30 journal lines" }).click()
@@ -1015,7 +1018,7 @@ test("the header says how old the page is, and Refresh reads every source again"
   })
   await page.goto("/proxy")
 
-  const header = page.locator("[data-slot='page-context']")
+  const header = page.locator("[data-slot='host-identity']")
   // Fresh reads carry a few seconds' age at most — the clock runs on while a
   // busy machine renders.
   const fresh = header.getByText(/^Updated (just now|[5-9]s ago)$/)
@@ -1059,7 +1062,7 @@ test("the age is the oldest reading's, which is the five-minute certificate list
   // No certbot, so the certificate list is the only reading on a five-minute poll.
   await mockStatus(page, { ...availability, certbot: false })
   await page.goto("/proxy")
-  const header = page.locator("[data-slot='page-context']")
+  const header = page.locator("[data-slot='host-identity']")
   await expect(header.getByText(/^Updated (just now|[5-9]s ago)$/)).toBeVisible()
 
   // Answered, not only asked: until the answers land every reading is as
@@ -1111,7 +1114,7 @@ test("a source that never answers a refresh is named, and Refresh asks it again"
     return json(route, vhosts)
   })
   await page.goto("/proxy")
-  const header = page.locator("[data-slot='page-context']")
+  const header = page.locator("[data-slot='host-identity']")
   const refresh = header.getByRole("button", { name: "Refresh" })
   await expect(header.getByText(/^Updated (just now|[5-9]s ago)$/)).toBeVisible()
 
@@ -1163,7 +1166,7 @@ test("a status that fails after answering is reported rather than drawn as curre
   )
   await page.goto("/proxy")
   const identity = page.locator("[data-slot='host-identity']")
-  const header = page.locator("[data-slot='page-context']")
+  const header = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("1.26.3", { exact: true })).toBeVisible()
   await expect(header.getByText(/^Updated (just now|[5-9]s ago)$/)).toBeVisible()
   await page.clock.fastForward(20_000)
@@ -1198,7 +1201,7 @@ test("a service state that cannot be read is not drawn from its last answer", as
   await expect(identity.getByText(/running for/)).toBeVisible()
 
   unitFails = true
-  await page.locator("[data-slot='page-context']").getByRole("button", { name: "Refresh" }).click()
+  await page.locator("[data-slot='host-identity']").getByRole("button", { name: "Refresh" }).click()
   const unread = identity.getByText("couldn't read nginx.service")
   await expect(unread).toBeVisible()
   await expect(unread).toHaveAttribute("title", "systemd did not answer")
@@ -2269,7 +2272,7 @@ test("a host whose sites keep no access log says so once and claims no zero", as
   // The band does not say it a second time.
   await expect(page.getByRole("region", { name: "Traffic", exact: true })).toHaveCount(0)
   const errors = page.getByRole("region", { name: "Recent errors" })
-  await expect(errors).toContainText("nginx error-log lines")
+  await expect(errors).toContainText("nginx logged no errors this hour")
   await expect(errors).not.toContainText("server errors this hour")
   await expect(errors.getByText("Nothing failed in the last hour")).toHaveCount(0)
   await expect(errors.getByText("No problems found", { exact: false })).toHaveCount(0)
@@ -2327,6 +2330,6 @@ test("one site without a log of its own is told why, and the quiet header drops 
   await expect(identity.getByText(/^0 streams/)).toHaveCount(0)
   // The error log's zero is said once, for the hour.
   const errors = page.getByRole("region", { name: "Recent errors" })
-  await expect(errors).toContainText("nginx error-log lines this hour")
+  await expect(errors.getByText("nginx logged no errors this hour")).toHaveCount(1)
   await expect(errors.getByText("nginx logged nothing this hour")).toHaveCount(0)
 })

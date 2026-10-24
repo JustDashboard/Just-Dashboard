@@ -223,7 +223,9 @@ test("switching off takes the readings away", async ({ page }) => {
 
   const panel = counters(page)
   await expect(panel).toContainText("requests a second")
-  await panel.getByRole("switch", { name: "Live metrics" }).click()
+  // The whole card is the switch's label: a press on its words flips it, as
+  // a press on the 36px switch at its end does.
+  await panel.getByText("nginx counters", { exact: true }).click()
   await expect(page.getByText("Live metrics off")).toBeVisible()
   expect(sent).toEqual([{ enabled: false }])
   await expect(panel).not.toContainText("requests a second")
@@ -344,10 +346,10 @@ test("metrics that cannot be read are an error, not an empty panel", async ({ pa
 
   const panel = counters(page)
   await expect(panel.getByRole("alert").filter({ hasText: "metrics went missing" })).toBeVisible()
-  await expect(panel.getByText(/^Off —/)).toHaveCount(0)
+  await expect(panel.getByText(/^Off\. Switch on/)).toHaveCount(0)
   fail = false
   await panel.getByRole("button", { name: "Try again" }).click()
-  await expect(panel.getByText(/^Off —/)).toBeVisible()
+  await expect(panel.getByText(/^Off\. Switch on/)).toBeVisible()
 })
 
 test("a host with neither nginx nor the ingress has no live traffic to show", async ({ page }) => {
