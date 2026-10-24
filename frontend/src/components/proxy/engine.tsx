@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   CheckCircle,
+  ChevronDown,
   Globe,
   ListOrdered,
   Logs,
@@ -169,11 +170,11 @@ export function EngineIdentity({
   // dashboard is configured with, so that path says nothing about it.
   const ingress = !status.nginx && Boolean(status.ingressContainer)
   const name = status.nginx ? "nginx" : status.caddy ? "Caddy" : "No reverse proxy"
-  const version = status.nginx
-    ? status.nginxVersion
-    : status.caddy
-      ? status.caddyVersion
-      : undefined
+  // `nginx -v` answers "nginx/1.24.0", and beside the name that was
+  // "nginx nginx/1.24.0": the version alone says it.
+  const version = (
+    status.nginx ? status.nginxVersion : status.caddy ? status.caddyVersion : undefined
+  )?.replace(/^(nginx|caddy)\//i, "")
   return (
     <HostIdentity
       mark={engineProduct(status)}
@@ -215,7 +216,9 @@ export function EngineIdentity({
             <>
               <FactDot />
               <HostFact>
-                <span className="font-mono">
+                {/* The mono face runs larger than Source Sans at one size, so a
+                    path in the line stood taller than the words round it. */}
+                <span className="font-mono text-[0.9em]">
                   {status.nginx ? status.nginxDir : status.caddyFile}
                 </span>
               </HostFact>
@@ -225,7 +228,7 @@ export function EngineIdentity({
             <>
               <FactDot />
               <HostFact product="docker">
-                ingress <span className="font-mono">{status.ingressContainer}</span>
+                ingress <span className="font-mono text-[0.9em]">{status.ingressContainer}</span>
               </HostFact>
             </>
           )}
@@ -238,17 +241,20 @@ export function EngineIdentity({
           <FactDot />
           {/* certbot is Let's Encrypt's client, and the mark says what it
               issues rather than who wrote it. */}
+          {/* Who renews is said with certbot rather than as a fact of its
+              own; only a renewal nobody schedules stands apart, in warning. */}
           {status.certbot ? (
-            <HostFact product="lets-encrypt">{certbotVersion ?? "certbot"}</HostFact>
+            <HostFact product="lets-encrypt">
+              {certbotVersion ?? "certbot"}
+              {renewSource && `, renews via ${renewSource}`}
+            </HostFact>
           ) : (
             <span>no certbot</span>
           )}
-          {renewSource !== undefined && status.certbot && (
+          {renewSource === null && status.certbot && (
             <>
               <FactDot />
-              <span className={renewSource ? undefined : "font-medium text-warning"}>
-                {renewSource ? `renews via ${renewSource}` : "renewal not scheduled"}
-              </span>
+              <span className="font-medium text-warning">renewal not scheduled</span>
             </>
           )}
           {inventory}
@@ -493,11 +499,13 @@ export function EngineActions({
         <CheckCircle className="size-3.5" />
         Test config
       </Button>
+      {/* Named after the engine: beside the page's Refresh, a bare Reload
+          read as reloading the page. */}
       {reloadBlocked ? (
         <Blocked reason={reloadBlocked}>
           <Button size="sm" variant="outline" disabled>
             <RefreshClockwise className="size-3.5" />
-            Reload
+            Reload {engine}
           </Button>
         </Blocked>
       ) : (
@@ -508,7 +516,7 @@ export function EngineActions({
           disabled={busy !== "" || lifecycle}
         >
           <RefreshClockwise className="size-3.5" />
-          Reload
+          Reload {engine}
         </Button>
       )}
       {run === "stopped" &&
@@ -716,6 +724,9 @@ export function ModulesFact() {
           {missing > 0
             ? `${missing} of ${plural(chips.length, "module")} missing`
             : plural(chips.length, "module")}
+          {/* It opens a list rather than a page, and in warning it read as a
+              status word rather than something to press. */}
+          <ChevronDown aria-hidden className="ml-0.5 inline size-3 align-[-0.1em]" />
         </PopoverTrigger>
         <PopoverContent align="start" className="w-64 p-3">
           <p className="eyebrow mb-2">nginx modules</p>

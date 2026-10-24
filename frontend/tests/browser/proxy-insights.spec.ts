@@ -137,7 +137,7 @@ test("the nginx counters read requests and connections", async ({ page }) => {
   await page.goto("/proxy")
 
   const strip = counters(page)
-  await expect(strip.getByText("On", { exact: true })).toBeVisible()
+  await expect(strip.getByRole("switch", { name: "Live metrics" })).toBeChecked()
   await expect(strip).toContainText("4.2 requests a second")
   await expect(strip).toContainText("31 connections open (1 reading · 5 writing · 25 idle)")
   await expect(
@@ -187,7 +187,7 @@ test("switching on sends the switch, says it is under way and draws the readings
 
   const panel = counters(page)
   const toggle = panel.getByRole("switch", { name: "Live metrics" })
-  await expect(panel.getByText("Off", { exact: true })).toBeVisible()
+  await expect(toggle).not.toBeChecked()
   await expect(
     panel.locator("[title^='Switching on adds a loopback-only status server to conf.d']"),
   ).toHaveCount(1)
@@ -202,7 +202,8 @@ test("switching on sends the switch, says it is under way and draws the readings
   await expect(page.getByText("Live metrics on")).toBeVisible()
   await expect(page.getByText("nginx answers on 127.0.0.1:19081/jd-status")).toBeVisible()
   await expect(toggle).toBeChecked()
-  await expect(panel.getByText("On", { exact: true })).toBeVisible()
+  // The switch says it is on; a word beside it said it twice.
+  await expect(panel.getByText("On", { exact: true })).toHaveCount(0)
   await expect(panel).toContainText("31 connections open")
 })
 
@@ -226,7 +227,7 @@ test("switching off takes the readings away", async ({ page }) => {
   await expect(page.getByText("Live metrics off")).toBeVisible()
   expect(sent).toEqual([{ enabled: false }])
   await expect(panel).not.toContainText("requests a second")
-  await expect(panel.getByText("Off", { exact: true })).toBeVisible()
+  await expect(panel.getByText("Off", { exact: true })).toHaveCount(0)
   await expect(panel.getByRole("switch", { name: "Live metrics" })).not.toBeChecked()
 })
 
@@ -251,7 +252,6 @@ test("a switch the server refused says why and leaves the metrics off", async ({
   await expect(page.getByText("nginx does not read conf.d/*.conf")).toBeVisible()
   await expect(toggle).not.toBeChecked()
   await expect(toggle).toBeEnabled()
-  await expect(liveTraffic(page).getByText("Off", { exact: true })).toBeVisible()
 })
 
 test("readings that stopped lose their figures and say why", async ({ page }) => {

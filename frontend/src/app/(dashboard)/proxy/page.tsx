@@ -369,9 +369,15 @@ export default function ProxyOverviewPage() {
   ]
   // With no engine, "0 sites, 0 on TLS · 0 certificates · 0 streams" says
   // what the setup under the line says better; the open ports still matter.
+  // With one, a zero count of certificates or streams is dropped too: the
+  // Certificates block says "No certificates yet" with the way to issue one,
+  // and a host with no streams has nothing to open on Streams.
+  const none = (fact: Fact) =>
+    (fact.key === "certificates" && certificates?.length === 0) ||
+    (fact.key === "streams" && streamStatus?.streams.length === 0)
   const inventory = facts
     .filter((fact) => hasEngine || fact.key === "ports")
-    .filter((fact) => fact.error || fact.text)
+    .filter((fact) => fact.error || (fact.text && !none(fact)))
   // A route's file name is the dashboard's; the name its visitors type is
   // what the Traffic and Errors rows lead with.
   const labelOf = (site: string) => hosts.find((v) => v.name === site)?.serverNames[0] ?? site
@@ -482,7 +488,13 @@ export default function ProxyOverviewPage() {
                   engine={status.nginx ? "nginx" : "Caddy"}
                   engineMark={engineProduct(status)}
                   engineTone={engineTone}
-                  engineHint={doors && <span className="font-mono">{frontDoorLine(doors)}</span>}
+                  engineHint={
+                    doors && (
+                      <span className="font-mono">
+                        {frontDoorLine(doors, status.nginx ? "nginx" : "caddy")}
+                      </span>
+                    )
+                  }
                 />
               )
             ))}
