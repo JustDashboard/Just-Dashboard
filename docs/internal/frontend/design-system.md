@@ -1508,9 +1508,11 @@ own stub_status counters are a one-line strip under the chart, because they coun
 answers: its switch is a `Switch` beside a `Status` rather than a button, because whether nginx is
 counting is a state of the engine; a switch in flight reads "Switching on…", readings that stop lose
 their figures and say why, and nothing on it breathes as live, since it is a poll. The nginx modules
-a reverse proxy is asked for are one fact at the end of the engine line ("6 modules", or how many
-are missing in warning) whose popover lists each; they were a row of six status dots that read as
-findings. Recent changes in the rail is five two-line rows, so the rail ends near the routes it
+a reverse proxy is asked for sit beside the version in the engine line's title ("6 modules", or "2
+modules missing" in warning) whose popover lists each, a module a host package provides with its own
+Install (and Install all when there are several) that runs through the overview's one package console
+under the bar; they were a row of six status dots that read as findings, then the last fact of the
+line, the one item that wrapped onto a row of its own. Recent changes in the rail is five two-line rows, so the rail ends near the routes it
 stands beside. A source the overview could not read is never drawn as an empty or
 healthy one: its fact in the engine line reads "couldn't read sites" with the reason as its tooltip,
 its panel shows the `ErrorState`, the picture is not drawn from sites it cannot read, and attention
@@ -1528,9 +1530,12 @@ it. A failed unit is the one `Notice` the overview draws under the line — the 
 its newest line, and its two verbs. A start or restart the config test refuses keeps its dialog
 open on the test's diagnostics as rows (level as a `Status` verdict, file:line in mono, Open at line
 N), not a toast of nginx's output; the editor a row opens closes back into that dialog, with the
-keyboard on the row's button. Test config is a `SidePanel` of the same rows under a verdict `Notice`
+keyboard on the row's button. A clean Test config is a success toast ("nginx config is valid", what it means, and Show output),
+because a window-high panel holding one green line was all ground; a warning, a failure or a test that
+gives no verdict opens the panel, and a test run from the open panel answers there. That panel is a
+`SidePanel` of the same rows under a verdict `Notice`
 (success, warning or danger: "Valid", "Valid with 1 warning", "Fails"), with the output in a quiet
-fold, Copy output and Test again in the footer beside how long ago it ran, and a conflicting server
+fold (open when there are no rows to place), Copy output and Test again in the footer beside how long ago it ran, and a conflicting server
 name's claimants as rows indented under it behind a rule, "served by" and "ignored in" each with its
 own button (a name taken from a shared snippet adds "server_name in" the snippet's line under the
 site's); while it runs it says "Testing…" rather than keep the last verdict under a new run, and a

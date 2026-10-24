@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   CheckCircle,
   ChevronDown,
+  Download,
   Globe,
   ListOrdered,
   Logs,
@@ -140,6 +141,7 @@ export function EngineIdentity({
   renewSource,
   inventory,
   verdict,
+  modules,
   controls,
   actions,
 }: {
@@ -162,6 +164,12 @@ export function EngineIdentity({
   renewSource?: string | null
   /** What the engine serves — its sites, certificates, streams and open ports — after its own facts. */
   inventory?: React.ReactNode
+  /**
+   * The build's modules, beside the version they belong to. In the line of
+   * facts they were the one item that wrapped, and a bar of two buttons'
+   * height grew a third row holding nothing else.
+   */
+  modules?: React.ReactNode
   /** How its routes are answering, at the line's right end before the commands. */
   verdict?: React.ReactNode
   /**
@@ -198,6 +206,7 @@ export function EngineIdentity({
               </span>
             </>
           )}
+          {modules}
         </>
       }
       facts={
@@ -575,25 +584,64 @@ function Blocked({ reason, children }: { reason: string; children: React.ReactNo
 }
 
 /**
- * The line under the engine's: which of the modules a proxy is usually asked
- * for this nginx has, and the package manager's part — installing certbot
- * where nginx has none, and upgrading nginx where the host has a newer one
- * waiting. A host with no engine at all is `EngineSetup`'s. Each install runs as a job whose output streams below.
- *
- * The modules come from GET /proxy/modules; a host whose nginx cannot be read
- * that way, or a server without the route, answers an error and the line
- * says nothing about modules rather than guessing.
+ * The package manager's part of the overview: one install at a time, its
+ * output streamed under the engine's line. Certbot, an nginx upgrade and a
+ * module the modules list offers all run through it, so two of them never
+ * race for the package manager's lock and there is one console to read.
+ */
+export type PackageInstaller = {
+  console: ReturnType<typeof useJobConsole>
+  /** The key of the install being started, while its request is in flight. */
+  starting: string
+  /** Whether a new install would have to wait behind one. */
+  busy: boolean
+  /** Counts the installs that landed, so a list they change reads itself again. */
+  landed: number
+  install: (key: string, packages: string[], what: string) => Promise<void>
+}
+
+export function usePackageInstall(onChanged: () => void): PackageInstaller {
+  const [landed, setLanded] = useState(0)
+  const console_ = useJobConsole({
+    onSuccess: () => {
+      setLanded((n) => n + 1)
+      onChanged()
+    },
+  })
+  const [starting, setStarting] = useState("")
+  return {
+    console: console_,
+    starting,
+    busy: starting !== "" || console_.job?.status === "running",
+    landed,
+    install: async (key, packages, what) => {
+      setStarting(key)
+      try {
+        console_.attach(await post<Job>("/packages/install", { packages }))
+      } catch (err) {
+        notify.error(`Could not install ${what}`, err)
+      } finally {
+        setStarting("")
+      }
+    },
+  }
+}
+
+/**
+ * The line under the engine's: the package manager's part — installing
+ * certbot where nginx has none, and upgrading nginx where the host has a
+ * newer one waiting — and the console of whichever install is running,
+ * a module's included. A host with no engine at all is `EngineSetup`'s.
  */
 export function EngineExtras({
   status,
   admin,
-  onChanged,
+  installer,
 }: {
   status: ProxyStatus
   /** May install packages (system.admin). */
   admin: boolean
-  /** Reads the status and the engine again once an install lands. */
-  onChanged: () => void
+  installer: PackageInstaller
 }) {
   const nginx = status.nginx
   // certbot's nginx plugin is for nginx; Caddy issues its own certificates.
@@ -605,14 +653,12 @@ export function EngineExtras({
     [],
     { enabled: nginx },
   )
-  const console_ = useJobConsole({
-    onSuccess: () => {
-      onChanged()
-      updates.refresh()
-    },
-  })
+  const { landed, install, starting, busy, console: console_ } = installer
+  const refreshUpdates = updates.refresh
+  useEffect(() => {
+    if (landed > 0) refreshUpdates()
+  }, [landed, refreshUpdates])
   const { confirm, dialog } = useConfirm()
-  const [starting, setStarting] = useState("")
 
   const report = updates.error ? undefined : updates.data
   const manager = report?.available ? report.manager : undefined
@@ -623,18 +669,6 @@ export function EngineExtras({
     nginx && manager === "apt"
       ? report?.packages.find((p) => NGINX_PACKAGES.includes(p.name))
       : undefined
-  const running = console_.job?.status === "running"
-
-  const install = async (key: string, packages: string[], what: string) => {
-    setStarting(key)
-    try {
-      console_.attach(await post<Job>("/packages/install", { packages }))
-    } catch (err) {
-      notify.error(`Could not install ${what}`, err)
-    } finally {
-      setStarting("")
-    }
-  }
 
   const askUpgrade = (pkg: UpdatePackage) =>
     confirm({
@@ -657,46 +691,48 @@ export function EngineExtras({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-        {upgrade && (
-          <span className="inline-flex flex-wrap items-center gap-2">
-            <span>
-              {upgrade.name}{" "}
-              <span className="font-mono">
-                {upgrade.current} → {upgrade.candidate}
+      {(upgrade || offersCertbot) && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+          {upgrade && (
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <span>
+                {upgrade.name}{" "}
+                <span className="font-mono">
+                  {upgrade.current} → {upgrade.candidate}
+                </span>
               </span>
+              {admin && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => askUpgrade(upgrade)}
+                  pending={starting === "upgrade"}
+                  disabled={busy}
+                >
+                  Upgrade
+                </Button>
+              )}
             </span>
-            {admin && (
+          )}
+          {offersCertbot && certbotPackages && (
+            <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-2">
+              <span className="text-body">
+                No certbot here, so no site can get a Let&rsquo;s Encrypt certificate yet.
+              </span>
               <Button
-                size="xs"
+                size="sm"
                 variant="outline"
-                onClick={() => askUpgrade(upgrade)}
-                pending={starting === "upgrade"}
-                disabled={starting !== "" || running}
+                title={`${manager} install ${certbotPackages.join(" ")}`}
+                onClick={() => void install("certbot", certbotPackages, "certbot")}
+                pending={starting === "certbot"}
+                disabled={busy}
               >
-                Upgrade
+                Install certbot and its nginx plugin
               </Button>
-            )}
-          </span>
-        )}
-        {offersCertbot && certbotPackages && (
-          <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-2">
-            <span className="text-body">
-              No certbot here, so no site can get a Let&rsquo;s Encrypt certificate yet.
             </span>
-            <Button
-              size="sm"
-              variant="outline"
-              title={`${manager} install ${certbotPackages.join(" ")}`}
-              onClick={() => void install("certbot", certbotPackages, "certbot")}
-              pending={starting === "certbot"}
-              disabled={starting !== "" || running}
-            >
-              Install certbot and its nginx plugin
-            </Button>
-          </span>
-        )}
-      </div>
+          )}
+        </div>
+      )}
       <JobConsole
         job={console_.job}
         lines={console_.lines}
@@ -709,51 +745,116 @@ export function EngineExtras({
 }
 
 /**
- * The modules a reverse proxy is asked for, as one fact in the engine's line:
- * "6 modules" when every one is there, the count missing in warning when one
- * is not, and each module's state a press away. They were a row of six status
- * dots of their own between the engine and the picture, which read as six
- * findings about a build that had nothing wrong with it.
+ * The modules a reverse proxy is asked for, beside the engine's version:
+ * "6 modules" when every one is there, "2 modules missing" in warning when
+ * some are not, and each module's state a press away. A module a package on this
+ * host provides is installed from that list, through the overview's one
+ * package console: "installable" with nothing to press sent the reader to a
+ * terminal to type what the list already knew.
  */
-export function ModulesFact() {
+export function ModulesFact({
+  admin,
+  installer,
+}: {
+  /** May install packages (system.admin). */
+  admin: boolean
+  installer: PackageInstaller
+}) {
+  // A module package that just went in changes the build's answer, which
+  // the server otherwise keeps for a minute.
+  const fresh = useRef(false)
   const modules = usePoll(
-    (signal) => get<ModuleReport>("/proxy/modules/", undefined, signal),
+    (signal) =>
+      get<ModuleReport>("/proxy/modules/", fresh.current ? { fresh: "1" } : undefined, signal),
     300_000,
   )
+  const { landed, install, starting, busy } = installer
+  const refreshModules = modules.refresh
+  useEffect(() => {
+    if (landed === 0) return
+    fresh.current = true
+    refreshModules()
+  }, [landed, refreshModules])
+  const [open, setOpen] = useState(false)
   const chips = modules.error ? [] : moduleChips(modules.data)
   if (chips.length === 0) return null
   const missing = chips.filter((c) => c.tone !== "running").length
+  const installable = admin
+    ? [...new Set(chips.flatMap((c) => (c.package ? [c.package] : [])))]
+    : []
+  const run = (key: string, packages: string[]) => {
+    // The console under the line is where the install is read, and an open
+    // list would sit over it.
+    setOpen(false)
+    void install(key, packages, packages.join(" "))
+  }
   return (
     <>
-      <FactDot />
-      <Popover>
+      {" "}
+      <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           className={cn(
-            "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
+            // A button takes the browser's own text-rendering, not the body's
+            // geometric precision, and at 12px on Linux "2 modules" read as
+            // "2modules".
+            "ml-1 rounded-sm align-middle text-xs font-normal text-muted-foreground focus-ring transition-colors [text-rendering:inherit] hover:text-foreground hover:underline",
             missing > 0 && "font-medium text-warning",
           )}
         >
-          {missing > 0
-            ? `${missing} of ${plural(chips.length, "module")} missing`
-            : plural(chips.length, "module")}
+          {missing > 0 ? `${plural(missing, "module")} missing` : plural(chips.length, "module")}
           {/* It opens a list rather than a page, and in warning it read as a
               status word rather than something to press. */}
           <ChevronDown aria-hidden className="ml-0.5 inline size-3 align-[-0.1em]" />
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-64 p-3">
+        <PopoverContent align="start" className="w-72 p-3">
           <p className="eyebrow mb-2">nginx modules</p>
           <ul aria-label="nginx modules" className="space-y-1.5 text-xs">
             {chips.map((chip) => (
               <li
                 key={chip.key}
                 title={chip.detail}
-                className="flex min-w-0 items-center justify-between gap-3"
+                className="flex min-h-6 min-w-0 items-center justify-between gap-3"
               >
                 <span className="truncate font-mono">{chip.label}</span>
-                <Status tone={chip.tone} label={chip.state} />
+                {admin && chip.package ? (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    title={`Install ${chip.package}`}
+                    aria-label={`Install ${chip.label} (${chip.package})`}
+                    onClick={() => run(`module:${chip.package}`, [chip.package!])}
+                    pending={starting === `module:${chip.package}`}
+                    disabled={busy}
+                  >
+                    <Download className="size-3" />
+                    Install
+                  </Button>
+                ) : (
+                  <Status tone={chip.tone} label={chip.state} />
+                )}
               </li>
             ))}
           </ul>
+          {installable.length > 0 && (
+            <div className="mt-3 space-y-2 border-t border-hairline pt-3">
+              {installable.length > 1 && (
+                <Button
+                  size="sm"
+                  className="w-full"
+                  onClick={() => run("module:all", installable)}
+                  pending={starting === "module:all"}
+                  disabled={busy}
+                >
+                  <Download className="size-3.5" />
+                  Install all {installable.length}
+                </Button>
+              )}
+              <p className="text-hint text-muted-foreground">
+                The package adds its <code className="font-mono">load_module</code> line; reload
+                nginx afterwards to start using it.
+              </p>
+            </div>
+          )}
         </PopoverContent>
       </Popover>
     </>
@@ -782,7 +883,15 @@ const WATCHED_MODULES: { key: string; label: string }[] = [
   { key: "http_auth_request_module", label: "auth_request" },
 ]
 
-type ModuleChip = { key: string; label: string; state: string; tone: DotTone; detail?: string }
+type ModuleChip = {
+  key: string
+  label: string
+  state: string
+  tone: DotTone
+  detail?: string
+  /** The package that provides it, when one on this host does. */
+  package?: string
+}
 
 /**
  * One reading per watched module. A module missing from the build list was
@@ -816,6 +925,7 @@ function moduleChips(report: ModuleReport | undefined): ModuleChip[] {
               state: "installable",
               tone: "notice",
               detail: `The ${m.package} package provides it`,
+              package: m.package,
             }
           : {
               key,
