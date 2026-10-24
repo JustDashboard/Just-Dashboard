@@ -516,6 +516,21 @@ tile arrows follow the actual rendered columns. Escape clears the selection/acti
 canceling the internal clipboard. The footer's Files shortcuts control (also `?`) opens
 `shortcuts-dialog.tsx`. New keyboard mutation paths invoke the existing guarded operations.
 
+Ctrl/Cmd+C, X and V reach the system clipboard (`os-clipboard.ts`). The keydown handler does not
+`preventDefault` them; it marks the shortcut as pending, and the `copy`, `cut` or `paste` event it
+causes takes that mark, so only a shortcut the listing owns touches the clipboard and a field keeps its
+own text paste. Copy and cut write the paths as `text/plain` (one per line, for a terminal or editor on
+the desktop) and as `application/x-just-dashboard-files` JSON, so another dashboard tab can paste them.
+A paste is decided by the system clipboard, the newest thing copied: our format pastes those paths
+through the guarded copy/move; files (desktop files, a copied picture, a screenshot) upload into the
+current folder through the normal upload review; other text uploads as `Pasted text <time>.txt`. A
+screenshot's generic `image.png` is renamed `Pasted image <time>.png`. A copied folder cannot be read
+from a paste event and is reported rather than uploaded empty; so is a clipboard holding only
+`file://` locations without the files, which are never turned into a text file. Chromium reads a file
+manager's copied files (`text/uri-list`) as real files on Linux as well as Windows and macOS. The browser cannot place a server file on
+the desktop as a file, so copying out of the dashboard gives paths, not contents. A browser that sends no
+clipboard event falls back on a zero-delay timer to the in-memory clipboard.
+
 `file-icon.tsx` is the vocabulary (~200 extensions, the files with none — Dockerfile, authorized_keys,
 lockfiles — and ~90 folders whose name says what they hold) and draws it itself rather than from an icon
 set: a folder is a two-tone folder in its colour (its label from `FolderColourProvider`, else the
