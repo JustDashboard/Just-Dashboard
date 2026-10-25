@@ -173,6 +173,9 @@ start. Cleanup removes only objects carrying its run's label and verifies none r
   `container_down` reads it, with `exit.go`'s `LastExit` (one inspect of a stopped container for its
   start, finish, exit code and OOM verdict), to tell a crash from a stop
   ([Host alerts](observability-security.md#host-alerts-told-when-the-machine-itself-goes-wrong)).
+  `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveLastExitAndEventsTellACrashFromAStop -count=1 -v`
+  asks a real daemon: a container that exits 3 on its own has no kill in the log, one `docker stop`
+  ended has one, and the log covers the window it followed.
   `Event.Container` is the container a network's `connect` or `disconnect` moved, by id — Docker puts
   nothing else of it in the event, so the Networks page names it from the container listing.
 - **A container's and a stack's output are log sources**, `docker:<id>` and `stack:<project>` on the
