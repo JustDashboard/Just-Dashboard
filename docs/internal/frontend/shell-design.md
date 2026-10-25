@@ -67,8 +67,8 @@ shows** — "Browse", "Live", "Version", otherwise "Overview" — so every desti
 and "where am I" points at exactly one row. The palette skips the child whose href is the section's own,
 which is how one array serves both.
 
-A **group** (`NavGroup`) is a row with a chevron and no page: Monitoring holds Metrics, Processes and
-Logs, and Server configuration holds Proxy & TLS, Packages, System users and Audit log. There is nothing
+A **group** (`NavGroup`) is a row with a chevron and no page: Monitoring holds Metrics, its Alerts
+(administrators only), Processes and Logs, and Server configuration holds Proxy & TLS, Packages, System users and Audit log. There is nothing
 that is "Monitoring" as such, so pressing the row opens its panel over the page you are on rather than
 navigating, and a group owns a path only through its entries (`navOwns`) — Metrics, Processes and Logs
 share no prefix. `sectionsFor` returns the chain of groups and sections a path sits inside, and the rail

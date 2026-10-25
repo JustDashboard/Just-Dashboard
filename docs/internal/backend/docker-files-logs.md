@@ -168,6 +168,11 @@ start. Cleanup removes only objects carrying its run's label and verifies none r
   it reads the buffered past, so an event recorded between the two is sent rather than lost — one
   recorded in that instant arrives twice, and every reader drops the copy. `Event.Service` is the compose
   service (`db`, where the event's name is `shop-db-1`), which is what a stack's log calls a container.
+  `Covers(t)` says whether the ring still holds everything since `t` — followed since before it and
+  nothing that old overwritten — which is when a kill missing from it is evidence; the host alerts'
+  `container_down` reads it, with `exit.go`'s `LastExit` (one inspect of a stopped container for its
+  start, finish, exit code and OOM verdict), to tell a crash from a stop
+  ([Host alerts](observability-security.md#host-alerts-told-when-the-machine-itself-goes-wrong)).
   `Event.Container` is the container a network's `connect` or `disconnect` moved, by id — Docker puts
   nothing else of it in the event, so the Networks page names it from the container listing.
 - **A container's and a stack's output are log sources**, `docker:<id>` and `stack:<project>` on the

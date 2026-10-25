@@ -125,6 +125,7 @@ const SURFACES = [
   "/welcome",
   "/remote-desktop",
   "/remote-desktop/new",
+  "/metrics/alerts",
 ] as const
 
 /**

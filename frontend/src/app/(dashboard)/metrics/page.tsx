@@ -64,6 +64,7 @@ import {
 import { ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
+import { HostAlertsLink } from "@/components/metrics/alerts-link"
 import { cpuProduct, platformProduct, virtualizationProduct } from "@/components/product-logo"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
@@ -380,6 +381,7 @@ export default function MetricsPage() {
           }
           aside={
             <div className="flex max-w-full flex-wrap items-center gap-2">
+              <HostAlertsLink />
               {live && (
                 <IconAction
                   label={paused ? "Resume live feed" : "Pause live feed"}

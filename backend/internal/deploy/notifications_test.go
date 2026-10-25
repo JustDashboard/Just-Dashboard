@@ -231,6 +231,43 @@ func TestRenderDatabaseAlertNamesTheDatabaseAndReading(t *testing.T) {
 	}
 }
 
+func TestRenderHostAlertNamesTheSubjectServerAndReading(t *testing.T) {
+	since := time.Date(2026, 10, 25, 4, 5, 0, 0, time.UTC)
+	envelope := NotificationEnvelope{
+		Event: NotificationEventHostFiring, URL: "https://dash.example.test/metrics/alerts",
+		Host: &HostAlertEnvelope{
+			Kind: "disk_filling", Subject: "/var", Label: "/var", Server: "web-01",
+			Detail: "93% of /var is used (186.0 GB of 200.0 GB); the line is 90%.", Since: since,
+		},
+	}
+	message := renderNotification(envelope)
+	if message.Title != "Disk filling up — /var" || message.Summary != envelope.Host.Detail ||
+		strings.Join(flattenFields(message.Fields), "|") != "Filesystem=/var|Server=web-01|Since=2026-10-25 04:05 UTC" {
+		t.Fatalf("disk alert message = %+v", message)
+	}
+	envelope.Event = NotificationEventHostRecovered
+	if recovered := renderNotification(envelope); recovered.Title != "Resolved: "+message.Title || recovered.Emoji != "✅" {
+		t.Fatalf("disk recovery message = %+v", recovered)
+	}
+	// A CPU rule's subject is the server itself, so it is not named twice.
+	envelope.Event = NotificationEventHostFiring
+	envelope.Host = &HostAlertEnvelope{Kind: "cpu_high", Subject: "cpu", Label: "web-01", Server: "web-01", Detail: "CPU averaged 97%.", Test: true}
+	cpu := renderNotification(envelope)
+	if cpu.Title != "[test] CPU high — web-01" || strings.Join(flattenFields(cpu.Fields), "|") != "Server=web-01" {
+		t.Fatalf("cpu alert message = %+v", cpu)
+	}
+	envelope.Host = &HostAlertEnvelope{Kind: "container_down", Label: "shop-api-1", Server: "web-01"}
+	if container := renderNotification(envelope); container.Title != "Container down — shop-api-1" ||
+		flattenFields(container.Fields)[0] != "Container=shop-api-1" {
+		t.Fatalf("container alert message = %+v", container)
+	}
+	_, mail := emailMessage(NotificationConfig{From: "ops@example.test", To: []string{"team@example.test"}}, message, since)
+	if !strings.Contains(string(mail), "Open it in Just Dashboard: https://dash.example.test/metrics/alerts") ||
+		strings.Contains(string(mail), "Open the run") {
+		t.Fatalf("a host alert's mail sends its reader to a run:\n%s", mail)
+	}
+}
+
 func flattenFields(fields [][2]string) []string {
 	out := make([]string, 0, len(fields))
 	for _, field := range fields {

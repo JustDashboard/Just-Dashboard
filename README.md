@@ -81,6 +81,7 @@ free.
 - Shortcuts to every section, with the open shells, the drawings edited last, the databases and
   every backup job one press away
 - Metrics with seven days of history the backend records itself, and CSV export
+- Alerts when the CPU or memory stays high, a disk fills, a container goes down or a backup fails
 - Notable moments, top processes and the day's activity at a glance
 - Processes, PM2 apps, systemd services and scheduled jobs, each with its verbs
 - One log viewer for files, containers, stacks, PM2 and the journal, with insights

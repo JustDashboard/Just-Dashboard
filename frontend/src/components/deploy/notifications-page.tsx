@@ -156,6 +156,8 @@ const EVENT_WORD: Record<string, string> = {
   "proxy.alert.recovered": "Proxy alert resolved",
   "database.alert.firing": "Database alert fired",
   "database.alert.recovered": "Database alert resolved",
+  "host.alert.firing": "Host alert fired",
+  "host.alert.recovered": "Host alert resolved",
 }
 
 /** How the far end answered, as the dispatcher records it. */

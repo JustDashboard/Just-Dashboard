@@ -718,7 +718,7 @@ func alertBytes(n int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
-// dbAlertJob is a backup job that dumps saved databases, with the runs an
+// dbAlertJob is a backup job, with the databases it dumps and the runs an
 // alert reads.
 type dbAlertJob struct {
 	ID        int64
@@ -756,10 +756,28 @@ func (j dbAlertJob) dumps(conn *int64) bool {
 }
 
 // backupJobs reads every job that dumps a database, with its newest finished
-// run, its newest success and whether a run is in flight, in three
-// statements whatever the number of jobs.
+// run, its newest success and whether a run is in flight.
 func (a *dbAlerts) backupJobs(ctx context.Context) ([]dbAlertJob, error) {
-	rows, err := a.db.QueryContext(ctx, `SELECT id, name, schedule, enabled, created_at, database_dumps FROM backup_jobs ORDER BY id`)
+	all, err := readAlertBackupJobs(ctx, a.db)
+	if err != nil {
+		return nil, err
+	}
+	jobs := []dbAlertJob{}
+	for _, job := range all {
+		if len(job.Databases) > 0 {
+			jobs = append(jobs, job)
+		}
+	}
+	return jobs, nil
+}
+
+// readAlertBackupJobs reads every backup job — files, volumes and database
+// dumps alike — with its newest finished run, its newest success and whether
+// a run is in flight, in three statements whatever the number of jobs. The
+// database alerts keep the jobs that dump a database; the host alerts read
+// them all (host_alert_readings.go).
+func readAlertBackupJobs(ctx context.Context, db *sql.DB) ([]dbAlertJob, error) {
+	rows, err := db.QueryContext(ctx, `SELECT id, name, schedule, enabled, created_at, database_dumps FROM backup_jobs ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -775,9 +793,6 @@ func (a *dbAlerts) backupJobs(ctx context.Context) ([]dbAlertJob, error) {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(dumps), &job.Databases)
-		if len(job.Databases) == 0 {
-			continue
-		}
 		job.Enabled, job.CreatedAt = enabled == 1, time.Unix(created, 0).UTC()
 		index[job.ID] = len(jobs)
 		jobs = append(jobs, job)
@@ -786,7 +801,7 @@ func (a *dbAlerts) backupJobs(ctx context.Context) ([]dbAlertJob, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	rows, err = a.db.QueryContext(ctx, `SELECT job_id, MAX(status='running'), MAX(CASE WHEN status='success' THEN started_at END)
+	rows, err = db.QueryContext(ctx, `SELECT job_id, MAX(status='running'), MAX(CASE WHEN status='success' THEN started_at END)
 		FROM backup_runs GROUP BY job_id`)
 	if err != nil {
 		return nil, err
@@ -811,7 +826,7 @@ func (a *dbAlerts) backupJobs(ctx context.Context) ([]dbAlertJob, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	rows, err = a.db.QueryContext(ctx, `SELECT r.job_id, r.id, r.status, r.started_at, substr(r.log, -2000) FROM backup_runs r
+	rows, err = db.QueryContext(ctx, `SELECT r.job_id, r.id, r.status, r.started_at, substr(r.log, -2000) FROM backup_runs r
 		WHERE r.id = (SELECT MAX(x.id) FROM backup_runs x WHERE x.job_id = r.job_id AND x.status <> 'running')`)
 	if err != nil {
 		return nil, err

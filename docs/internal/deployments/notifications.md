@@ -52,6 +52,18 @@ rules and their history; see [Alerts](../backend/databases-proxy-platform.md#ale
 Like the proxy's and the traffic alerts' messages they are run-less deliveries (run 0), recorded in a
 channel's history and never deduplicated or retried.
 
+Host alert rules send `host.alert.firing` and `host.alert.recovered` the same way: to the channels the
+rule names, or every enabled one. A webhook receives the envelope's `host` block (rule, kind, subject —
+`cpu`, `memory`, a mountpoint, a container's name or `job:<id>` — label, `server`, the machine's name
+since one channel often hears from several dashboards, the reading with its line, the threshold, since
+when, `test`); chat and e-mail render "Disk filling up — /var" with the reading as the summary, a
+field naming the subject (Server, Filesystem, Container or Backup job) and one naming the server unless
+the subject already is it, and an e-mail's link line reads "Open it in Just Dashboard". The link opens
+Metrics for CPU, memory and disks, the container's own page, or the backup job's. The host's Alerts page
+under Metrics owns these rules and their history; see
+[Host alerts](../backend/observability-security.md#host-alerts-told-when-the-machine-itself-goes-wrong).
+They are run-less deliveries too.
+
 Run events selectable on a channel are a closed vocabulary: `run.started`, `run.succeeded`, `run.failed` (includes
 `failed_activation` and `rolled_back`), `run.cancelled` (includes `superseded`). An empty list
 selects everything. The historical `run.finished` value remains valid as "every terminal outcome",
@@ -139,6 +151,7 @@ is excluded from the policy decision key, so toggling it cannot invalidate cache
 
 - `notifications_test.go`: validation matrix, legacy event alias, rendering for every outcome,
   a TLS grade alert's firing and recovery titles, a database alert's title, fields and e-mail link,
+  a host alert's title, subject and server fields (the server named once) and e-mail link,
   dispatcher delivery of a failed run with deduplication, disabled channel and start-only
   selection, Discord/Slack/Telegram payload shapes through a rewriting transport, e-mail through a
   captured mailer, credential masking in listings, and the notify step's new contract.
