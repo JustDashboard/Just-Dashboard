@@ -170,6 +170,8 @@ test("replacing an MCP key makes another MCP key for the same databases, at its 
           { connectionId: 1, access: "write" },
           { connectionId: 7, access: "read" },
         ],
+        // The deployments as the key had them: none.
+        deployments: "",
       },
     })
   const secret = page.getByRole("dialog", { name: "Your new key" })
@@ -206,6 +208,7 @@ test("an MCP key replaced by an owner who can no longer change a database only r
       role: "readonly",
       ttlDays: 90,
       connections: [{ connectionId: 1, access: "read" }],
+      deployments: "",
     })
 })
 
