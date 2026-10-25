@@ -173,3 +173,40 @@ func TestRemoteDesktopBridgeMustBeHostAndPort(t *testing.T) {
 		t.Fatalf("no bridge: %q, %v", c.RemoteDesktopBridge, err)
 	}
 }
+
+func TestAccountLinkDefaultsToOnAtTheProjectsSiteAndRefusesAnythingButAnOrigin(t *testing.T) {
+	t.Setenv("JD_MASTER_KEY", strings.Repeat("ab", 32))
+	t.Setenv("JD_ADDR", "127.0.0.1:0")
+	c, err := Load()
+	if err != nil || !c.AccountLink || c.AccountURL != "https://just-dashboard.com" {
+		t.Fatalf("defaults: link %v, url %q, %v", c.AccountLink, c.AccountURL, err)
+	}
+
+	// One spelling of the origin, so the site's own address compares equal to it.
+	t.Setenv("JD_ACCOUNT_URL", "https://Just-Dashboard.COM:443/")
+	if c, err := Load(); err != nil || c.AccountURL != "https://just-dashboard.com" {
+		t.Fatalf("a default port and capitals in the host: %q, %v", c.AccountURL, err)
+	}
+
+	t.Setenv("JD_ACCOUNT_LINK", "false")
+	t.Setenv("JD_ACCOUNT_URL", "http://localhost:3000/")
+	c, err = Load()
+	if err != nil || c.AccountLink || c.AccountURL != "http://localhost:3000" {
+		t.Fatalf("switched off, loopback site: link %v, url %q, %v", c.AccountLink, c.AccountURL, err)
+	}
+
+	for _, bad := range []string{
+		"http://just-dashboard.com", "https://u:p@just-dashboard.com", "https://just-dashboard.com/link",
+		"https://just-dashboard.com?x=1", "just-dashboard.com", "ftp://just-dashboard.com",
+	} {
+		t.Setenv("JD_ACCOUNT_URL", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "JD_ACCOUNT_URL") {
+			t.Fatalf("%q must refuse to start, got %v", bad, err)
+		}
+	}
+	t.Setenv("JD_ACCOUNT_URL", "")
+	t.Setenv("JD_ACCOUNT_LINK", "maybe")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "JD_ACCOUNT_LINK") {
+		t.Fatalf("a malformed switch must refuse to start, got %v", err)
+	}
+}

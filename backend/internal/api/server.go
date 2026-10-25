@@ -303,6 +303,9 @@ func (s *Server) Start(ctx context.Context) error {
 	s.modules.previewReconciler.Start(ctx)
 	s.modules.deployDatabases.Start(ctx)
 	s.modules.poolers.Start(ctx)
+	// Last, because a link's first heartbeat reads nearly everything above. A
+	// no-op until the dashboard is linked, and always when linking is off.
+	s.modules.accountLink.Start(ctx)
 	return nil
 }
 
@@ -329,6 +332,7 @@ func (s *Server) startDeployEngine(ctx context.Context) error {
 // Shutdown releases the resources that outlive a request: database pools,
 // live PTY sessions, the metrics sampler and the backup scheduler.
 func (s *Server) Shutdown() {
+	s.modules.accountLink.Stop()
 	s.modules.deployPreviews.Stop()
 	s.modules.deployGit.Stop()
 	s.modules.previewReconciler.Stop()

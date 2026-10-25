@@ -10,6 +10,20 @@
 # reachability: this thing is root-equivalent, so where it listens is the most
 # consequential decision in the whole install, and the script will not make it
 # quietly on your behalf.
+#
+# Flags (all optional; with none, it asks):
+#
+#   --link             link this server to your just-dashboard.com account once it
+#                      is running, without asking
+#   --no-link          do not link it, and do not ask
+#   --link-scope S     what the site may see and do once linked: observe (the
+#                      default), operate or maintain
+#
+# Linking is optional, never blocks the install and never makes it fail: the
+# last stage runs `manage.sh link` and carries on whether it is approved, declined
+# or the site cannot be reached. JD_ACCOUNT_LINK=false in .env (or in this run's
+# environment) removes the question and the flags. The installer handles no key
+# or token: it prints what the dashboard prints, and that code is only a pointer.
 
 set -euo pipefail
 
@@ -60,6 +74,21 @@ yes_no() {
 	done
 }
 
+# account_link_off is true when linking to a just-dashboard.com account is
+# switched off for this install: JD_ACCOUNT_LINK=false in the environment of
+# this run, or in the .env being kept. Only the values the backend itself reads
+# as false count, so the installer and the dashboard cannot disagree.
+account_link_off() {
+	local v="${JD_ACCOUNT_LINK:-}"
+	if [ -z "$v" ] && [ "${KEEP_ENV:-0}" -eq 1 ] && [ -f .env ]; then
+		# Compose reads a ` #` after an unquoted value as a comment, so the
+		# installer does too; `false # off` is false.
+		v="$(grep -E '^JD_ACCOUNT_LINK=' .env | tail -1 | cut -d= -f2- | sed -E 's/[[:space:]]+#.*$//' | tr -d "[:space:]\"'" || true)"
+	fi
+	case "${v,,}" in 0|f|false) return 0 ;; esac
+	return 1
+}
+
 # ── preflight ───────────────────────────────────────────────────────────────
 
 # Read rather than repeated, so the installer cannot announce a version this
@@ -68,26 +97,62 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd -- "$ROOT"
 version="$(sed -n 's/^const Version = "\(.*\)"$/\1/p' backend/internal/version/version.go 2>/dev/null || true)"
 
-case "${1:-}" in
+# LINK_FLAG is 1 for --link, 0 for --no-link, empty when the question is to be asked.
+LINK_FLAG=""
+LINK_SCOPE="observe"
+while [ "$#" -gt 0 ]; do
+	case "$1" in
 	--help|-h)
 		cat <<'EOF'
 Just Dashboard · setup
 
-Usage: sudo ./install.sh
+Usage: sudo ./install.sh [--link | --no-link] [--link-scope observe|operate|maintain]
 
   1. Prepare the host and required tools
   2. Configure private access and your administrator account
   3. Build and start the Docker Compose stack
   4. Verify startup and show sign-in and terminal commands
 
+Linking this server to a just-dashboard.com account is optional. Without a flag
+setup asks (default: no); --link and --no-link answer for unattended runs, and
+--link-scope names what the site may see and do (default: observe). Setup
+finishes whether or not the link is approved.
+
 Re-running keeps existing configuration by default. Set NO_COLOR=1 for
 plain output. Run ./scripts/manage.sh --help for terminal admin tools.
 EOF
 		exit 0
 		;;
-	"") ;;
+	--link)
+		[ "$LINK_FLAG" != "0" ] || die "--link and --no-link contradict each other."
+		LINK_FLAG=1
+		;;
+	--no-link)
+		[ "$LINK_FLAG" != "1" ] || die "--link and --no-link contradict each other."
+		LINK_FLAG=0
+		;;
+	--link-scope)
+		[ "$#" -ge 2 ] || die "--link-scope needs observe, operate or maintain."
+		LINK_SCOPE="$2"
+		shift
+		;;
+	--link-scope=*)
+		LINK_SCOPE="${1#--link-scope=}"
+		;;
 	*) die "unknown option; use --help for usage." ;;
+	esac
+	shift
+done
+case "$LINK_SCOPE" in
+observe|operate|maintain) ;;
+*) die "--link-scope must be observe, operate or maintain." ;;
 esac
+
+# LINK is whether the last stage links this server; LINK_SUMMARY is the line the
+# summary ends on, set only when linking was on the table.
+LINK=0
+LINK_SUMMARY=""
+LINK_LATER="Not linked. Later: sudo ./scripts/manage.sh link, or Settings → just-dashboard.com"
 
 say ""
 say "${BLUE}${BOLD}Just Dashboard${RESET}${version:+  $version}"
@@ -435,6 +500,29 @@ yes_no "Enable the web terminal? (a real shell with this process's privileges)" 
 REQUIRE_2FA=false
 yes_no "Require an authenticator app for every account? (you can enrol later either way)" n && REQUIRE_2FA=true
 
+# Linking to a just-dashboard.com account is optional, and the answer is No
+# unless given. It only decides whether the last stage runs the link command:
+# the install finishes whatever the site says. JD_ACCOUNT_LINK=false removes the
+# question altogether, and is written into the new .env so the choice outlives
+# this shell.
+ACCOUNT_LINK_ENV=""
+if account_link_off; then
+	if [ "$LINK_FLAG" = "1" ]; then
+		warn "--link ignored: JD_ACCOUNT_LINK=false switches linking off."
+	fi
+	ACCOUNT_LINK_ENV="# Whether this server may be linked to a just-dashboard.com account at all.
+JD_ACCOUNT_LINK=false"
+else
+	LINK_SUMMARY="$LINK_LATER"
+	if [ "$LINK_FLAG" = "1" ]; then
+		LINK=1
+	elif [ -z "$LINK_FLAG" ]; then
+		if yes_no "Link this server to your just-dashboard.com account? (see its status and reach it from the site; optional)" n; then
+			LINK=1
+		fi
+	fi
+fi
+
 # ── ports ───────────────────────────────────────────────────────────────────
 #
 # Only one of these three is ever typed by a person: JD_PORT, the one in the
@@ -556,6 +644,7 @@ JD_TERMINAL_ENABLED=$TERMINAL
 # Whether an account with no authenticator may sign in. An account that has
 # enrolled one is always asked for its code, whatever this says.
 JD_REQUIRE_2FA=$REQUIRE_2FA
+$ACCOUNT_LINK_ENV
 
 # Used once, to create the first account. Safe to remove afterwards.
 JD_BOOTSTRAP_USER=$ADMIN_USER
@@ -631,6 +720,26 @@ if [ "$KEEP_ENV" -eq 1 ]; then
 		yes_no "Keep requiring an authenticator for every account?" n && KEEP_REQUIRE_2FA=true
 		printf 'JD_REQUIRE_2FA=%s\n' "$KEEP_REQUIRE_2FA" >> .env
 		ok "JD_REQUIRE_2FA=$KEEP_REQUIRE_2FA"
+	fi
+fi
+
+# ── linking, on a re-run ────────────────────────────────────────────────────
+#
+# The question is for a new install: one that has been running may be linked
+# already, and asking again would suggest it is not. --link is the way to link
+# on a re-run from here; otherwise a line says how to later.
+if [ "$KEEP_ENV" -eq 1 ]; then
+	if account_link_off; then
+		if [ "$LINK_FLAG" = "1" ]; then
+			warn "--link ignored: JD_ACCOUNT_LINK=false switches linking off."
+		fi
+	elif [ "$LINK_FLAG" = "1" ]; then
+		LINK=1
+		LINK_SUMMARY="$LINK_LATER"
+	elif [ -z "$LINK_FLAG" ]; then
+		say ""
+		say "  ${DIM}Linking this server to a just-dashboard.com account is optional:${RESET}"
+		say "  ${DIM}sudo ./scripts/manage.sh link, or Settings → just-dashboard.com.${RESET}"
 	fi
 fi
 
@@ -773,6 +882,35 @@ else
 	exit 1
 fi
 
+# ── linking ─────────────────────────────────────────────────────────────────
+#
+# The dashboard does all of it: it prints a code, waits for the person to
+# approve it on just-dashboard.com, and says how it went. This relays that
+# output and nothing more, and a decline, a timeout or a site that cannot be
+# reached only changes the last line of the summary: the install is already
+# done, and is never failed from here.
+if [ "$LINK" -eq 1 ]; then
+	step "Linking to just-dashboard.com"
+	LINK_OUT="$(mktemp)"
+	LINK_RC=0
+	$COMPOSE run --rm --no-deps -T backend --admin link --scope "$LINK_SCOPE" --wait 15m </dev/null 2>&1 | tee "$LINK_OUT" || LINK_RC=$?
+	LINKED_LINE="$(grep -m1 '^Linked to ' "$LINK_OUT" || true)"
+	# A re-run with --link on a server that is already linked is not a failure
+	# to link: the dashboard says who it is linked to, and so does the summary.
+	ALREADY_LINE="$(grep -m1 -o 'already linked to [^;]*' "$LINK_OUT" || true)"
+	rm -f "$LINK_OUT"
+	if [ "$LINK_RC" -eq 0 ] && [ -n "$LINKED_LINE" ]; then
+		LINK_SUMMARY="$LINKED_LINE"
+	elif [ -n "$ALREADY_LINE" ]; then
+		ok "this server is $ALREADY_LINE"
+		LINK_SUMMARY="This server is $ALREADY_LINE. To link a different account: sudo ./scripts/manage.sh unlink, then link again."
+	else
+		warn "This server was not linked (the install itself is finished). You can try again with"
+		warn "  sudo ./scripts/manage.sh link"
+		LINK_SUMMARY="$LINK_LATER"
+	fi
+fi
+
 # ── how to get in ───────────────────────────────────────────────────────────
 
 say ""
@@ -861,6 +999,11 @@ if [ "${KEEP_ENV:-0}" -eq 0 ]; then
 	fi
 fi
 
+if [ -n "$LINK_SUMMARY" ]; then
+	say ""
+	say "  $LINK_SUMMARY"
+fi
+
 say ""
 say "  ${BOLD}Terminal tools${RESET} · run on this server"
 printf '    cd %q\n' "$ROOT"
@@ -869,6 +1012,11 @@ say "    sudo ./scripts/reset-password.sh USER        # recover a dashboard acco
 say "    sudo ./scripts/create-user.sh USER limited   # create a dashboard account"
 say "    sudo ./scripts/manage.sh users               # list accounts and roles"
 say "    sudo ./scripts/manage.sh revoke-sessions USER # sign out an account"
+if ! account_link_off; then
+	say "    sudo ./scripts/manage.sh link [scope]        # link to your just-dashboard.com account"
+	say "    sudo ./scripts/manage.sh unlink              # unlink it"
+	say "    sudo ./scripts/manage.sh link-status         # is it linked?"
+fi
 say "    sudo ./scripts/manage.sh status              # containers and health"
 say "    sudo ./scripts/manage.sh logs                # follow backend logs"
 say "    sudo ./scripts/manage.sh restart             # apply .env edits; use SSH"

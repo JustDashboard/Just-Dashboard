@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/accountlink"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
@@ -77,6 +78,9 @@ type moduleSet struct {
 	uninstall     *uninstall.Service
 	certKeeper    *selfcfg.CertKeeper
 	proxy         *proxysvc.Service
+	// accountLink links this dashboard to a just-dashboard.com account. Nil in
+	// agent mode, where the only caller is the hub and nothing here applies.
+	accountLink *accountlink.Service
 
 	// hostFiles is files with every operation run in the host's mount
 	// namespace. The Files page, and only it, uses it: its paths are typed by
@@ -403,6 +407,22 @@ func (s *Server) initModules() {
 
 	s.initProxyExtras()
 	s.initUninstall()
+	s.initAccountLink()
+}
+
+// initAccountLink makes the connector to a linked just-dashboard.com account.
+// It is built whether or not linking is switched on, because the Settings page
+// still has to say that it is off; with JD_ACCOUNT_LINK=false it opens no
+// connection and starts nothing.
+func (s *Server) initAccountLink() {
+	if s.Cfg.AgentMode {
+		return
+	}
+	s.modules.accountLink = accountlink.New(accountlink.Options{
+		Store: s.Store, Sealer: s.Sealer, Audit: s.Audit, Log: s.Log,
+		SiteURL: s.Cfg.AccountURL, Enabled: s.Cfg.AccountLink,
+		Host: newAccountHost(s), Version: version.Version,
+	})
 }
 
 // tailnetPublisher adapts selfcfg's `tailscale serve` driver to the deploy

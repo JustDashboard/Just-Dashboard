@@ -789,10 +789,14 @@ func mergeDeclared(running []dockerx.ComposeService, declared []string) []docker
 // what the repository list is keyed by; linking to the subdirectory opens
 // nothing.
 func (s *Server) stackGit(r *http.Request, dir string) *StackGit {
+	return s.stackGitIn(r.Context(), dir)
+}
+
+func (s *Server) stackGitIn(parent context.Context, dir string) *StackGit {
 	if !s.modules.git.Available() {
 		return nil
 	}
-	ctx, cancel := timeoutCtx(r, 15*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
 	root, err := s.modules.git.Toplevel(ctx, dir)
 	if err != nil {
@@ -1051,6 +1055,12 @@ func (s *Server) handleStackRun(w http.ResponseWriter, r *http.Request) error {
 // worth deploying, and a history table that could fail a deploy would be a
 // worse feature than no history at all. Failures are logged and dropped.
 func (s *Server) recordStackDeployment(r *http.Request, stack *dockerx.ComposeStack, action string) {
+	s.recordStackDeploymentAs(r.Context(), httpx.MustPrincipal(r).Username(), stack, action)
+}
+
+// recordStackDeploymentAs is recordStackDeployment for a caller that is not a
+// request: the actor is whoever started the change.
+func (s *Server) recordStackDeploymentAs(ctx context.Context, actor string, stack *dockerx.ComposeStack, action string) {
 	if s.modules.dockerDeploys == nil || !composeChangesState(dockerx.ComposeAction(action)) {
 		return
 	}
@@ -1058,9 +1068,9 @@ func (s *Server) recordStackDeployment(r *http.Request, stack *dockerx.ComposeSt
 	if len(stack.ConfigFiles) > 0 {
 		config, _ = dockerx.ReadComposeFile(stack.ConfigFiles[0])
 	}
-	snap := s.modules.docker.SnapshotStack(r.Context(), stack, config)
+	snap := s.modules.docker.SnapshotStack(ctx, stack, config)
 	snap.Action = action
-	snap.Actor = httpx.MustPrincipal(r).Username()
+	snap.Actor = actor
 	snap.Source = "dashboard"
 	snap.Result = "replaced"
 	// Environment values are hashed, never stored: an .env file beside a
@@ -1071,10 +1081,10 @@ func (s *Server) recordStackDeployment(r *http.Request, stack *dockerx.ComposeSt
 			snap.EnvHash = dockerx.HashConfig(env)
 		}
 	}
-	if git := s.stackGit(r, stack.WorkingDir); git != nil {
+	if git := s.stackGitIn(ctx, stack.WorkingDir); git != nil {
 		snap.GitCommit, snap.GitBranch, snap.GitDirty = git.Commit, git.Branch, git.Dirty
 	}
-	if _, err := s.modules.dockerDeploys.Record(r.Context(), snap); err != nil {
+	if _, err := s.modules.dockerDeploys.Record(ctx, snap); err != nil {
 		s.Log.Warn("could not record stack deployment history", "stack", stack.Name, "error", err)
 	}
 }

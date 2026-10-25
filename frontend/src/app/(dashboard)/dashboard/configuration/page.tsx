@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { External, LockOpen, ShieldCheck, Warning, type Icon } from "@/components/icons"
@@ -764,6 +765,19 @@ export default function DashboardConfigurationPage() {
           </SettingsRow>
         </PanelBody>
       </Panel>
+
+      {admin && !removing && (
+        <p className="text-xs text-muted-foreground">
+          Link this server to your just-dashboard.com account under{" "}
+          <Link
+            href="/dashboard/link"
+            className="rounded-sm text-foreground underline-offset-4 focus-ring hover:underline"
+          >
+            Settings → just-dashboard.com
+          </Link>
+          .
+        </p>
+      )}
 
       {admin && removal.report?.supported && !removing && !running && (
         <Panel plain>
