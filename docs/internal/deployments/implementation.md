@@ -1366,6 +1366,26 @@ only renderer/executor/validation authority for their feature.
   `auth_basic` with an htpasswd file beside the site written before the site and removed with it. The
   Domains settings and the public-address step offer **Ask visitors for a password**; the overview tags a
   protected domain. Previews inherit the plan's protection.
+- Domain redirects and route rules. `domains[].redirectTo` names another of the plan's hostnames
+  (`redirectCode` 301, 302, 307 or 308; empty is 308) that this one sends visitors to, with the path and
+  query kept, instead of serving the application: the www. a bare domain keeps for old links, or the
+  reverse. `validateDomainRedirects` refuses a redirect to itself, to a name the plan lacks, to or from a
+  wildcard, or to a name that redirects too, and a plan in which no name serves. `runtime.allowFrom`
+  (addresses and ranges, kept in `proxysvc.NormalizeAccessEntry`'s spelling, at most 64) is the only
+  place the route answers, with 403 for everyone else ahead of any password; `runtime.responseHeaders`
+  (at most 32) are set on every answer and replace the application's header of the same name. Headers are
+  checked by the rules a Proxy site's are (`proxysvc.ValidateDeploymentHeaders`, on the nginx spelling a
+  deployment gets), so quotes, `$`, `;`, braces and the connection's own headers are refused before either
+  proxy sees them. The redirect is kept in the domain's dependency row only when present, and the two
+  runtime fields only when non-empty, so a plan without them keeps its digest. Activation hands the proxy
+  the redirecting names apart from the served ones (`DeploymentRoute.Redirects`); its certificate is
+  resolved for every name the route answers (`Hostnames`), and public-route checks ask only the served
+  names. nginx writes each redirecting name a server of its own marked `# Host redirect (<code>): …`,
+  which keeps the ACME path and which the site parser reads back; Caddy writes it a site block of its own
+  with `redir`. The release comparison lists the redirect on the domain's line and the two runtime fields
+  as their own. The Domains settings offer **Redirect to another domain** in each row's menu and an
+  **Access and headers** form under the list, which writes only those two runtime fields; the Runtime form
+  neither holds nor writes them.
 - The [GitHub App](github-app.md): one App per dashboard through the manifest flow, installation tokens
   for private clones through a `github_app` credential per installation, triggers on `delivery: "app"`
   fed by the App's single webhook (`POST /api/v1/hooks/github-app`, routed by repository through the

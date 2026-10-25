@@ -4037,7 +4037,11 @@ containers/volumes/networks.
   other form marked `# Canonical host (<mode>): …` that the parser skips whole; it listens on 80 (and
   443 with the site's certificate when TLS), keeps the ACME path, and 301s to the site's name; a name
   that is already a domain is refused, and a TLS site gets a warning that the certificate must cover
-  the other names. Static sites gain `Autoindex` (warned), `GzipStatic` and `IndexFiles` (also PHP;
+  the other names. `HostRedirects` (`from`, `to`, `code`, at most 16) name redirecting servers outright
+  rather than deriving them: each `from` is a name the site does not serve, sent to one it does, with
+  308 when `code` is 0, in a server marked `# Host redirect (<code>): <from> is sent to <to>.` that
+  keeps the ACME path. The marker carries the whole redirect, so the parser skips the server and still
+  reads it back. Deployment routes use it for a plan's redirecting domains. Static sites gain `Autoindex` (warned), `GzipStatic` and `IndexFiles` (also PHP;
   empty = the kind's order, a default read back as empty). Kind `php` needs `Root` and `PHPSocket`
   and renders `location ~ \.php$ { try_files $uri =404; include fastcgi_params; fastcgi_param
   SCRIPT_FILENAME …; fastcgi_pass unix:<socket>; }` plus `location ~ /\.ht { deny all; }`, with

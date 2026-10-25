@@ -1835,13 +1835,16 @@ function DomainChecks({ checks }: { checks: SitePreflightCheck[] }) {
   )
 }
 
-function ListField({
+/** Single values, added one at a time. The deployment Domains page uses it too. */
+export function ListField({
   id,
   label,
   placeholder,
   values,
   onChange,
   hint,
+  error,
+  disabled,
 }: {
   id: string
   label: string
@@ -1849,6 +1852,9 @@ function ListField({
   values: string[]
   onChange: (values: string[]) => void
   hint?: string
+  error?: string
+  /** Read-only: the values without the controls that change them. */
+  disabled?: boolean
 }) {
   const [draft, setDraft] = useState("")
   const add = () => {
@@ -1857,49 +1863,55 @@ function ListField({
     setDraft("")
   }
   return (
-    <Field label={label} htmlFor={id} hint={hint}>
+    <Field label={label} htmlFor={id} hint={hint} error={error}>
       <div className="space-y-2">
         {values.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
             {values.map((value, i) => (
               <Tag key={`${value}-${i}`} mono className="gap-1.5 pr-0.5">
                 {value}
-                <IconAction
-                  label={`Remove ${value}`}
-                  size="icon-xs"
-                  className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
-                  onClick={() => onChange(values.filter((_, j) => j !== i))}
-                >
-                  <Trash />
-                </IconAction>
+                {!disabled && (
+                  <IconAction
+                    type="button"
+                    label={`Remove ${value}`}
+                    size="icon-xs"
+                    className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
+                    onClick={() => onChange(values.filter((_, j) => j !== i))}
+                  >
+                    <Trash />
+                  </IconAction>
+                )}
               </Tag>
             ))}
           </div>
         )}
-        <div className="flex items-center gap-2">
-          <Input
-            id={id}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault()
-                add()
-              }
-            }}
-            placeholder={placeholder}
-            className="font-mono text-xs"
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={add}
-            disabled={!draft.trim()}
-            aria-label={`Add to ${label.toLowerCase()}`}
-          >
-            <Plus className="size-3.5" />
-          </Button>
-        </div>
+        {!disabled && (
+          <div className="flex items-center gap-2">
+            <Input
+              id={id}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  add()
+                }
+              }}
+              placeholder={placeholder}
+              className="font-mono text-xs"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={add}
+              disabled={!draft.trim()}
+              aria-label={`Add to ${label.toLowerCase()}`}
+            >
+              <Plus className="size-3.5" />
+            </Button>
+          </div>
+        )}
       </div>
     </Field>
   )
@@ -3528,19 +3540,24 @@ function HeadersSection({
   )
 }
 
-/** Name and value pairs, added one at a time. */
-function HeaderListField({
+/** Name and value pairs, added one at a time. The deployment Domains page uses it too. */
+export function HeaderListField({
   id,
   label,
   values,
   onChange,
   hint,
+  error,
+  disabled,
 }: {
   id: string
   label: string
   values: HeaderValue[]
   onChange: (values: HeaderValue[]) => void
   hint?: string
+  error?: string
+  /** Read-only: the values without the controls that change them. */
+  disabled?: boolean
 }) {
   const [name, setName] = useState("")
   const [value, setValue] = useState("")
@@ -3551,57 +3568,63 @@ function HeaderListField({
     setValue("")
   }
   return (
-    <Field label={label} htmlFor={id} hint={hint}>
+    <Field label={label} htmlFor={id} hint={hint} error={error}>
       <div className="space-y-2">
         {values.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
             {values.map((header, i) => (
               <Tag key={`${header.name}-${i}`} mono className="gap-1.5 pr-0.5">
                 {header.name}: {header.value || "(empty)"}
-                <IconAction
-                  label={`Remove ${header.name}`}
-                  size="icon-xs"
-                  className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
-                  onClick={() => onChange(values.filter((_, j) => j !== i))}
-                >
-                  <Trash />
-                </IconAction>
+                {!disabled && (
+                  <IconAction
+                    type="button"
+                    label={`Remove ${header.name}`}
+                    size="icon-xs"
+                    className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
+                    onClick={() => onChange(values.filter((_, j) => j !== i))}
+                  >
+                    <Trash />
+                  </IconAction>
+                )}
               </Tag>
             ))}
           </div>
         )}
-        <div className="flex gap-2">
-          <Input
-            id={id}
-            aria-label={`${label}: name`}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="X-Robots-Tag"
-            className="font-mono text-xs"
-          />
-          <Input
-            aria-label={`${label}: value`}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault()
-                add()
-              }
-            }}
-            placeholder="noindex"
-            className="font-mono text-xs"
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={add}
-            disabled={!name.trim()}
-            aria-label={`Add to ${label.toLowerCase()}`}
-          >
-            <Plus className="size-3.5" />
-          </Button>
-        </div>
+        {!disabled && (
+          <div className="flex gap-2">
+            <Input
+              id={id}
+              aria-label={`${label}: name`}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="X-Robots-Tag"
+              className="font-mono text-xs"
+            />
+            <Input
+              aria-label={`${label}: value`}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  add()
+                }
+              }}
+              placeholder="noindex"
+              className="font-mono text-xs"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={add}
+              disabled={!name.trim()}
+              aria-label={`Add to ${label.toLowerCase()}`}
+            >
+              <Plus className="size-3.5" />
+            </Button>
+          </div>
+        )}
       </div>
     </Field>
   )

@@ -1263,19 +1263,14 @@ func (s *PlanningStore) EnvironmentConfiguration(
 		}
 		dependency.Config = json.RawMessage(config)
 		if dependency.Kind == "domain" {
-			var domain struct {
-				Hostname   string            `json:"hostname"`
-				HTTPS      bool              `json:"https"`
-				Protection *DomainProtection `json:"protection"`
-			}
+			var domain PlannedDomain
 			if json.Unmarshal(dependency.Config, &domain) != nil {
 				rows.Close()
 				return nil, fmt.Errorf("%w: domain dependency is malformed", ErrInvalidPlan)
 			}
-			result.Domains = append(result.Domains, PlannedDomain{
-				Hostname: domain.Hostname, HTTPS: domain.HTTPS, Ownership: dependency.Ownership,
-				Protection: canonicalDomainProtection(domain.Protection),
-			})
+			domain.Ownership = dependency.Ownership
+			domain.Protection = canonicalDomainProtection(domain.Protection)
+			result.Domains = append(result.Domains, domain)
 		} else {
 			result.Dependencies = append(result.Dependencies, dependency)
 		}
@@ -1432,11 +1427,7 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 		}
 	}
 	for _, domain := range configuration.Domains {
-		domainConfig := map[string]any{"hostname": domain.Hostname, "https": domain.HTTPS}
-		if domain.Protection != nil {
-			domainConfig["protection"] = domain.Protection
-		}
-		config := mustJSON(domainConfig)
+		config := mustJSON(domain.domainConfig())
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO deploy_dependencies(environment_id, release_id, kind, ownership, resource_kind, resource_id, config_json, created_at)
 			VALUES(?, 0, 'domain', ?, 'proxy_site', ?, ?, ?)`, environmentID, domain.Ownership,

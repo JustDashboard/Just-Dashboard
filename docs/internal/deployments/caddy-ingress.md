@@ -58,6 +58,19 @@ keeps its bytes until the next activation rewrites it; the reconcile pass does n
 Because zero means different things on the two drivers, preflight's `request_body_limit`, release
 comparison and the settings hints state it as "64 MB on nginx, no limit on Caddy" rather than one number.
 
+## Redirects, response headers and allowed addresses
+
+A route's redirecting names (`DeploymentRoute.Redirects`) are site blocks of their own after the
+route's, holding the route's certificate handling and `redir <scheme>://<target>{uri} <code>` and
+nothing else: no password, fence or request record, because they serve no application. Response headers
+are a `header` block with `defer`, so each is set as the answer is written and replaces the
+application's header of that name. nginx's `add_header` only appends, so its routes also
+`proxy_hide_header` each name. Allowed addresses are `@outside not remote_ip …` and a 403 `respond`.
+Caddy sorts a site's directives itself and puts `basic_auth` before `respond`, which would ask a refused
+address for the password first, so a route with an allow list wraps its handling in a `route` block,
+which runs in the order written. A route with none of these renders byte for byte what it did before
+they existed, so no live route reads as changed after an upgrade.
+
 ## Certificates and application networking
 
 Caddy owns issuance and renewal on its existing public listener. A deterministic, temporary site
@@ -69,9 +82,13 @@ renewed certificate storage. These evidence copies refresh when issuing again; t
 certificate-expiry measurement. The TLS scanner reports what a visitor actually receives.
 
 Existing imported certificates use immutable, content-addressed private certificate/key copies in Caddy's
-volume, so rotation cannot overwrite the keypair needed by a previous route snapshot. Automatic Caddy
-orders currently support one non-wildcard hostname per deployment. Multi-name existing imported pairs
-remain usable. Wildcards require DNS-01 credentials for a domain the operator controls.
+volume, so rotation cannot overwrite the keypair needed by a previous route snapshot. Caddy orders and
+renews one certificate per name, so a deployment with several non-wildcard names — the www. that
+redirects to the bare domain — has each name prepared in turn, and the first name's copy is the
+release's evidence. Activation then accepts, on a Docker Caddy host only, one Caddy copy per name in
+place of one certificate covering them all (`caddyEvidenceForEach`): a Caddy route never reads that
+path, while nginx would serve it for every name. Multi-name existing imported pairs remain usable.
+Wildcards require DNS-01 credentials for a domain the operator controls.
 
 The application remains published on loopback. Proxy resolves that publication to a running Docker
 container and an internal network address, then connects Caddy to that network. Managed route comments
@@ -98,7 +115,11 @@ preservation, hostname collision refusal, private imported certificates, API-onl
 protection, Caddy recreation/network repair, storage-identity fencing and snapshot restoration, and — since the reconcile pass upgrades a route written before request recording
 existed — that the first pass after recreation both repairs the network and adds the access-log block
 as one recorded repair, and that the next pass leaves the route alone. It does
-not order a public production certificate. The deployment C5 live gate and deployment/API/Proxy race
+not order a public production certificate.
+`JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules -count=1 -v`
+checks what a real Caddy answers for a route's rules: the redirecting name's 308 keeps the path and
+query, an address off the list gets 403, an allowed one gets the application with the route's header in
+place of the application's own, and the inventory lists both names under the route. The deployment C5 live gate and deployment/API/Proxy race
 tests remain required. The browser regression covers automatic Caddy HTTPS without a Certbot warning.
 
 References: [Caddy commands](https://caddyserver.com/docs/command-line),

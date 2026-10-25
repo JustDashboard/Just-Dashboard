@@ -181,6 +181,77 @@ test.describe("Domains", () => {
   })
 })
 
+test.describe("Redirects, access and headers", () => {
+  test("a second name redirects to the first, and the route's addresses and headers save beside the runtime", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/hostname**", (route) =>
+      json(route, { hostname: "www.api.example.test", covered: true, method: "custom" }),
+    )
+    const puts: Record<string, unknown>[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
+        puts.push(request.postDataJSON())
+      }
+    })
+    await page.goto("/deploy/7/settings/domains")
+    await page.getByRole("button", { name: "Add domain", exact: true }).click()
+    const sheet = page.getByRole("dialog", { name: "Add domain" })
+    await sheet.getByRole("textbox", { name: "Hostname" }).fill("www.api.example.test")
+    await sheet.getByRole("button", { name: "Add domain", exact: true }).click()
+    await expect(page.getByText("Domains saved", { exact: true })).toBeVisible()
+
+    // The menu offers the redirect only towards a name that serves the app,
+    // and the row then says where it sends visitors.
+    await page.getByRole("button", { name: "Actions for www.api.example.test" }).click()
+    await page.getByRole("menuitem", { name: "Redirect to another domain" }).click()
+    const row = page.getByRole("list", { name: "Domains" }).getByRole("listitem").nth(1)
+    await expect(row.getByText("Redirects to")).toBeVisible()
+    await expect(page.getByRole("combobox", { name: "Sends visitors to" })).toHaveText(
+      "api.example.test",
+    )
+    await expect(page.getByRole("combobox", { name: "Answer" })).toHaveText("Permanent · 308")
+    await page.getByRole("combobox", { name: "Answer" }).click()
+    await page.getByRole("option", { name: "Temporary · 307" }).click()
+
+    // The route's rules are one form under the list, for every name at once.
+    const access = page.getByRole("form", { name: "Access and headers" })
+    await expect(access.getByText("Everyone · every domain above")).toBeVisible()
+    await access.getByRole("textbox", { name: "Only these addresses" }).fill("203.0.113.7")
+    await access.getByRole("button", { name: "Add to only these addresses" }).click()
+    await access.getByRole("textbox", { name: "Response headers: name" }).fill("X-Robots-Tag")
+    await access.getByRole("textbox", { name: "Response headers: value" }).fill("noindex")
+    await access.getByRole("button", { name: "Add to response headers" }).click()
+    await expect(access.getByText("Only 1 address · every domain above")).toBeVisible()
+
+    await saveSettings(page)
+    await expectSaved(page)
+    await expect.poll(() => puts.length).toBe(3)
+    expect(puts[1].domains).toEqual([
+      { hostname: "api.example.test", https: true, ownership: "managed" },
+      {
+        hostname: "www.api.example.test",
+        https: true,
+        ownership: "managed",
+        redirectTo: "api.example.test",
+        redirectCode: 307,
+      },
+    ])
+    // The rules form writes its two fields and keeps the rest of the runtime.
+    const runtime = puts[2].runtime as Record<string, unknown>
+    expect(runtime.allowFrom).toEqual(["203.0.113.7"])
+    expect(runtime.responseHeaders).toEqual([{ name: "X-Robots-Tag", value: "noindex" }])
+    expect(runtime.internalPort).toBe((puts[1].runtime as Record<string, unknown>).internalPort)
+    expect((puts[2].domains as unknown[]).length).toBe(2)
+
+    // Removing the name redirected to puts the other back to serving.
+    await page.getByRole("button", { name: "Actions for api.example.test" }).click()
+    await page.getByRole("menuitem", { name: "Remove" }).click()
+    await expect(page.getByText("Redirects to")).toHaveCount(0)
+  })
+})
+
 test.describe("Storage", () => {
   test("mounts render, a new one saves, and evidence reflects operations", async ({ page }) => {
     await mockProject(page)

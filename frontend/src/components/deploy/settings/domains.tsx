@@ -7,6 +7,7 @@ import { useSessionState } from "@/lib/view-state"
 import {
   ArrowUpRight,
   Copy,
+  CornerUpRight,
   External,
   Globe,
   Key,
@@ -27,6 +28,7 @@ import type {
   DeploymentDomainRoute,
   DeploymentEnvironmentConfiguration,
   DeploymentHostnameSuggestion,
+  DeploymentRedirectCode,
 } from "@/lib/types"
 import { Field, FieldCheck, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Well } from "@/components/panel"
@@ -38,6 +40,13 @@ import { VerbActions, type Verb } from "@/components/verbs"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   InputGroup,
   InputGroupAddon,
@@ -56,6 +65,7 @@ import {
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import { OwnershipSelect } from "@/components/deploy/settings/mounts"
 import { useProject } from "@/components/deploy/project-context"
+import { HeaderListField, ListField } from "@/components/proxy/site-form"
 
 /**
  * Domains — the hostnames this environment answers on.
@@ -88,6 +98,17 @@ type DomainValue = DeploymentEnvironmentConfiguration["domains"][number]
 /** A hostname is made by the project or linked to it; it is never only watched. */
 const DOMAIN_OWNERSHIP: DomainValue["ownership"][] = ["managed", "linked"]
 
+/**
+ * The answers a redirecting name can give, permanent first. 308 and 307 keep
+ * a form's POST a POST; 301 and 302 are for clients older than that.
+ */
+const REDIRECT_CODES: [DeploymentRedirectCode, string][] = [
+  [308, "Permanent · 308"],
+  [301, "Permanent · 301"],
+  [307, "Temporary · 307"],
+  [302, "Temporary · 302"],
+]
+
 export function DomainsSettings({
   projectId,
   environmentId,
@@ -98,7 +119,18 @@ export function DomainsSettings({
   const state = useConfiguration(projectId, environmentId)
   return (
     <SettingsPage state={state}>
-      {(configuration) => <DomainsForm configuration={configuration} save={state.save} />}
+      {(configuration) => (
+        <>
+          <DomainsForm configuration={configuration} save={state.save} />
+          {/* Rules for a route that does not exist yet would be a form with
+              nothing to act on; one already saved stays editable. */}
+          {(configuration.domains.length > 0 ||
+            Boolean(configuration.runtime.allowFrom?.length) ||
+            Boolean(configuration.runtime.responseHeaders?.length)) && (
+            <RouteRulesForm configuration={configuration} save={state.save} />
+          )}
+        </>
+      )}
     </SettingsPage>
   )
 }
@@ -197,13 +229,39 @@ function DomainsForm({
         icon: LockClosed,
         run: () => router.push(route.certificateLink!),
       })
+    const target = servedNames(domains).find((name) => name !== domain.hostname)
+    if (canAdmin && !domain.redirectTo && target)
+      verbs.push({
+        key: "redirect",
+        label: "Redirect to another domain",
+        icon: CornerUpRight,
+        run: () => update(index, { redirectTo: target, redirectCode: undefined }),
+      })
+    if (canAdmin && domain.redirectTo)
+      verbs.push({
+        key: "serve",
+        label: "Serve the application here",
+        icon: Globe,
+        run: () => update(index, { redirectTo: undefined, redirectCode: undefined }),
+      })
     if (canAdmin)
       verbs.push({
         key: "remove",
         label: "Remove",
         icon: Trash,
         danger: true,
-        run: () => setDomains(domains.filter((_, i) => i !== index)),
+        // A name redirecting to the one removed would point nowhere, so it
+        // goes back to serving the application rather than failing the save.
+        run: () =>
+          setDomains(
+            domains
+              .filter((_, i) => i !== index)
+              .map((item) =>
+                item.redirectTo === domain.hostname
+                  ? { ...item, redirectTo: undefined, redirectCode: undefined }
+                  : item,
+              ),
+          ),
       })
     return verbs
   }
@@ -280,6 +338,7 @@ function DomainsForm({
                   unsaved={!saved.has(domain.hostname.toLowerCase())}
                   canAdmin={canAdmin}
                   error={rowError?.index === index ? rowError.message : undefined}
+                  targets={servedNames(domains).filter((name) => name !== domain.hostname)}
                   verbs={verbsFor(domain, index)}
                   onChange={(next) => update(index, next)}
                 />
@@ -336,6 +395,7 @@ function DomainRow({
   canAdmin,
   error,
   index,
+  targets,
   verbs,
   onChange,
 }: {
@@ -346,6 +406,8 @@ function DomainRow({
   canAdmin: boolean
   error?: string
   index: number
+  /** The other names that serve the application, which this one may redirect to. */
+  targets: string[]
   verbs: Verb[]
   onChange: (next: Partial<DomainValue>) => void
 }) {
@@ -399,6 +461,17 @@ function DomainRow({
             11px beside 12px readings, two baselines for one row of facts. */}
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           <Status key={routeLabel} tone={routeTone} label={routeLabel} className="animate-rise" />
+          {domain.redirectTo && (
+            <span
+              key={domain.redirectTo}
+              className="flex min-w-0 animate-rise items-center gap-1 text-muted-foreground"
+            >
+              <CornerUpRight aria-hidden className="size-3 shrink-0" />
+              <span className="truncate">
+                Redirects to <span className="font-mono">{domain.redirectTo}</span>
+              </span>
+            </span>
+          )}
           {/* The issuer is the row's mark, so the line carries the state and the
               days left and not the issuer's glyph a second time. */}
           {route && !unsaved && httpsChanging && (
@@ -524,6 +597,65 @@ function DomainRow({
                   placeholder={protection.hash ? "Unchanged" : ""}
                   onChange={(event) => setProtection({ password: event.target.value })}
                 />
+              </Field>
+            </FieldRow>
+          </div>
+        </div>
+      )}
+      {domain.redirectTo && (
+        <div className="col-span-full min-w-0 animate-rise pl-11">
+          <div className="ml-1 border-l border-hairline pl-4">
+            <FieldRow>
+              <Field
+                label="Sends visitors to"
+                htmlFor={`domain-redirect-${index}`}
+                info="Every path and query on this name is answered with a redirect to the same path on the other. It serves no application of its own."
+              >
+                <Select
+                  value={domain.redirectTo}
+                  onValueChange={(redirectTo) => onChange({ redirectTo })}
+                  disabled={!canAdmin}
+                >
+                  <SelectTrigger id={`domain-redirect-${index}`} className="w-full font-mono">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* The saved target stays listed even once it has stopped
+                        serving, so the field shows what the server refused. */}
+                    {[...new Set([domain.redirectTo, ...targets])].map((name) => (
+                      <SelectItem key={name} value={name} className="font-mono">
+                        {name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field
+                label="Answer"
+                htmlFor={`domain-redirect-code-${index}`}
+                info="Browsers remember a permanent redirect, so use a temporary one while trying it out."
+              >
+                <Select
+                  value={String(domain.redirectCode ?? 308)}
+                  onValueChange={(code) =>
+                    onChange({
+                      redirectCode:
+                        code === "308" ? undefined : (Number(code) as DeploymentRedirectCode),
+                    })
+                  }
+                  disabled={!canAdmin}
+                >
+                  <SelectTrigger id={`domain-redirect-code-${index}`} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REDIRECT_CODES.map(([code, label]) => (
+                      <SelectItem key={code} value={String(code)}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
             </FieldRow>
           </div>
@@ -817,5 +949,123 @@ function AddDomainPanel({
         </OptionList>
       </div>
     </SidePanel>
+  )
+}
+
+/** The names that serve the application rather than redirect, in list order. */
+function servedNames(domains: DomainValue[]) {
+  return domains.filter((domain) => !domain.redirectTo).map((domain) => domain.hostname)
+}
+
+type RouteRules = {
+  allowFrom: string[]
+  responseHeaders: { name: string; value: string }[]
+}
+
+/** Which of the form's fields a refusal names. */
+function refusedRule(field: string | undefined): keyof RouteRules | undefined {
+  if (field?.startsWith("runtime.allowFrom")) return "allowFrom"
+  if (field?.startsWith("runtime.responseHeaders")) return "responseHeaders"
+  return undefined
+}
+
+/**
+ * Who reaches the domains above, and what every answer carries: the route's
+ * allowed addresses and response headers. They are the route's rather than a
+ * hostname's — the proxy serves every name from one site — so they are one
+ * form under the list instead of a control repeated on every row.
+ *
+ * They live in the plan's runtime, beside the upload limit, and this form
+ * writes only those two fields of it, so a Runtime save never undoes them
+ * and this save never undoes a Runtime edit.
+ */
+function RouteRulesForm({
+  configuration,
+  save,
+}: {
+  configuration: DeploymentEnvironmentConfiguration
+  save: ReturnType<typeof useConfiguration>["save"]
+}) {
+  const { can } = useAuth()
+  const canAdmin = can("system.admin")
+  const project = useProject()
+  const saved: RouteRules = {
+    allowFrom: configuration.runtime.allowFrom ?? [],
+    responseHeaders: configuration.runtime.responseHeaders ?? [],
+  }
+  const draft = useSettingDraft(`deploy.${project.projectId}.settings.route-rules`, saved)
+  const rules = draft.value
+  const [saving, setSaving] = useState(false)
+  const [refusal, setRefusal] = useState<{ field: keyof RouteRules; message: string }>()
+
+  const onSave = async () => {
+    setSaving(true)
+    setRefusal(undefined)
+    try {
+      await save({
+        runtime: (latest) => ({
+          ...latest.runtime,
+          allowFrom: rules.allowFrom.length > 0 ? rules.allowFrom : undefined,
+          responseHeaders: rules.responseHeaders.length > 0 ? rules.responseHeaders : undefined,
+        }),
+      })
+      return true
+    } catch (error) {
+      const field = error instanceof ApiError ? refusedRule(error.field) : undefined
+      if (error instanceof ApiError && field) {
+        setRefusal({ field, message: error.message })
+      } else {
+        notify.error("Could not save access and headers", error)
+      }
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const fenced = rules.allowFrom.length > 0
+  return (
+    <SettingForm
+      name="Access and headers"
+      onSave={onSave}
+      dirty={draft.dirty}
+      changes={draft.changes}
+      saving={saving}
+      canEdit={canAdmin}
+      onDiscard={() => {
+        setRefusal(undefined)
+        draft.discard()
+      }}
+    >
+      <SettingSection
+        title="Access and headers"
+        state={
+          fenced
+            ? `Only ${plural(rules.allowFrom.length, "address", "addresses")} · every domain above`
+            : "Everyone · every domain above"
+        }
+        status={settingStatus({ dirty: draft.dirty, refused: Boolean(refusal) })}
+      >
+        <ListField
+          id="route-allow-from"
+          label="Only these addresses"
+          placeholder="203.0.113.7 or 10.0.0.0/8"
+          values={rules.allowFrom}
+          onChange={(allowFrom) => draft.set({ ...rules, allowFrom })}
+          hint="Anyone else is refused with 403, before the password is asked for. Empty lets everyone in."
+          error={refusal?.field === "allowFrom" ? refusal.message : undefined}
+          disabled={!canAdmin}
+        />
+        <HeaderListField
+          id="route-response-headers"
+          label="Response headers"
+          values={rules.responseHeaders}
+          onChange={(responseHeaders) => draft.set({ ...rules, responseHeaders })}
+          hint="Set on every answer, replacing a header of the same name the application sends."
+          error={refusal?.field === "responseHeaders" ? refusal.message : undefined}
+          disabled={!canAdmin}
+        />
+      </SettingSection>
+    </SettingForm>
   )
 }

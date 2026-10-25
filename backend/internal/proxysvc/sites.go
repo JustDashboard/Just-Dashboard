@@ -64,6 +64,11 @@ type SiteSpec struct {
 	// Canonical is "www" or "apex": the other form of each domain gets a
 	// server of its own redirecting to the site's. Empty adds none.
 	Canonical string `json:"canonical,omitempty"`
+	// HostRedirects are names, not among Domains, that each get a server of
+	// their own sending visitors to one of the site's domains. Canonical
+	// derives its names from the domains; these are named outright, which is
+	// what a deployment route needs: its www. is a domain the plan lists.
+	HostRedirects []HostRedirect `json:"hostRedirects,omitempty"`
 
 	TLS        bool   `json:"tls"`
 	CertPath   string `json:"certPath,omitempty"`

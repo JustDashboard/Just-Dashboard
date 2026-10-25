@@ -133,6 +133,8 @@ func compareReleaseSnapshots(from, to *ReleaseWithArtifacts) ReleaseDetailCompar
 	field("cpu limit", cpuLimitLabel(fromSnapshot.Plan.CPUs), cpuLimitLabel(toSnapshot.Plan.CPUs))
 	field("pid limit", countLimitLabel(fromSnapshot.Plan.PidsLimit), countLimitLabel(toSnapshot.Plan.PidsLimit))
 	field("request body limit", fromSnapshot.Plan.requestBodyLimitLabel(), toSnapshot.Plan.requestBodyLimitLabel())
+	field("allowed addresses", allowFromLabel(fromSnapshot.Plan.AllowFrom), allowFromLabel(toSnapshot.Plan.AllowFrom))
+	field("response headers", responseHeadersLabel(fromSnapshot.Plan.ResponseHeaders), responseHeadersLabel(toSnapshot.Plan.ResponseHeaders))
 	field("restart policy", fromSnapshot.Plan.EffectiveRestartPolicy(), toSnapshot.Plan.EffectiveRestartPolicy())
 	field("host network", boolLabel(fromSnapshot.Plan.HostNetwork), boolLabel(toSnapshot.Plan.HostNetwork))
 	field("privileged", boolLabel(fromSnapshot.Plan.Privileged), boolLabel(toSnapshot.Plan.Privileged))
@@ -228,8 +230,35 @@ func domainPairs(domains []PlannedDomain) map[string]string {
 			scheme = "https"
 		}
 		pairs[domain.Hostname] = scheme + " · " + string(domain.Ownership)
+		if domain.Redirects() {
+			code := domain.RedirectCode
+			if code == 0 {
+				code = 308
+			}
+			pairs[domain.Hostname] += fmt.Sprintf(" · redirects to %s (%d)", domain.RedirectTo, code)
+		}
 	}
 	return pairs
+}
+
+func allowFromLabel(entries []string) string {
+	if len(entries) == 0 {
+		return "everyone"
+	}
+	return strings.Join(entries, ", ")
+}
+
+// responseHeadersLabel compares headers by name and value; neither is a
+// secret, since every visitor is sent them.
+func responseHeadersLabel(headers []RouteHeader) string {
+	if len(headers) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(headers))
+	for _, header := range headers {
+		parts = append(parts, header.Name+": "+header.Value)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func snapshotImageLabel(snapshot runtimeReleaseSnapshot) string {
