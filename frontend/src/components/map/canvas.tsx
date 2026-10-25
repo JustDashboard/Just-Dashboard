@@ -238,8 +238,10 @@ export function MapCanvas({
   // What stays lit while something is chosen or searched: the things
   // themselves, and the shelves and branches they hang from, so the reader
   // can still see where each one lives.
+  // A box chosen outranks the search that found it: following a link from the
+  // inspector must light the new box, not the words still in the search.
   const lit = useMemo(() => {
-    const things = matches ?? related
+    const things = related ?? matches
     if (!things) return null
     const out = new Set(things)
     for (const node of laid.nodes) {
@@ -609,7 +611,12 @@ export function MapCanvas({
             ref={searchRef}
             dense
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              // Typing asks a new question: what was chosen lets go, so the
+              // search's own answer is what lights.
+              setQuery(e.target.value)
+              setSelected(null)
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && matches && matches.size > 0) {
                 const first = matches.values().next().value as string

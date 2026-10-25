@@ -204,6 +204,11 @@ test("choosing a thing draws what it is wired to, and the inspector says each in
   // Following a link chooses the other end.
   await inspector.getByRole("button", { name: /mongo-data/ }).click()
   await expect(inspector).toContainText("1.1 GB")
+  // The box chosen is lit, though the search that found the first one still
+  // holds its words.
+  const chosen = node(page, "volume:mongo-data").locator("[data-selected]")
+  await expect(chosen).toHaveCount(1)
+  await expect(chosen).not.toHaveClass(/opacity-35/)
   await page.keyboard.press("Escape")
   await expect(page.locator(".react-flow__edge-relation")).toHaveCount(0)
 })

@@ -121,30 +121,39 @@ try {
   await inspector.getByRole("button", { name: /events.*serves/ }).click()
   await page.waitForTimeout(1800)
   await shot(page, "map-database-1600")
+  // Emptying the search lets the chosen box go too.
   await search.fill("")
-  await page.keyboard.press("Escape")
   await page.getByRole("button", { name: "Fit" }).click()
   await page.waitForTimeout(900)
 
   await caption(page, "Zoom in on a branch", "scroll over it")
-  await wheelAt(page, (await centre(page, "branch:jobs")).box, -5)
+  const hub = (await centre(page, "branch:jobs")).box
+  await wheelAt(page, { x: hub.x - 90, y: hub.y + hub.height / 2 }, -3)
   await page.waitForTimeout(700)
   await shot(page, "map-jobs-1600")
   await caption(page, "Drag a branch and its shelves come with it", "drag the branch's head")
-  const jobs = await centre(page, "branch:jobs")
-  await glide(
-    page,
-    { x: jobs.box.x + 30, y: jobs.box.y + 20 },
-    { x: jobs.box.x - 50, y: jobs.box.y - 90 },
-  )
-  await page.waitForTimeout(700)
+  const jobs = (await centre(page, "branch:jobs")).box
+  const grip = { x: jobs.x + jobs.width / 2, y: jobs.y + jobs.height / 2 }
+  await glide(page, grip, { x: grip.x + 60, y: grip.y + 120 })
+  await page.waitForTimeout(500)
+  await glide(page, { x: grip.x + 60, y: grip.y + 120 }, grip)
+  await page.waitForTimeout(500)
   await caption(page, "Pull a box off its shelf and it stays where you put it", "drag a box out")
-  const backup = await centre(page, "backup:2")
-  await glide(
-    page,
-    { x: backup.box.x + 30, y: backup.box.y + 20 },
-    { x: backup.box.x + 260, y: backup.box.y + 150 },
-  )
+  // A box wholly on the canvas: a drag that starts past its edge would be
+  // the page's, not the map's.
+  const canvas = await page.locator("[data-slot=server-map]").boundingBox()
+  let pulled = null
+  for (const id of ["backup:3", "backup:1", "backup:2"]) {
+    const box = await node(page, id).boundingBox()
+    if (box && canvas && box.x > canvas.x + 8 && box.y > canvas.y + 8) {
+      pulled = box
+      break
+    }
+  }
+  if (pulled) {
+    const from = { x: pulled.x + pulled.width / 2, y: pulled.y + pulled.height / 2 }
+    await glide(page, from, { x: from.x + 170, y: from.y + 110 })
+  }
   await page.waitForTimeout(1200)
   await shot(page, "map-arranged-1600")
   await caption(page, "Fold what you do not need", "the chevron on a branch")
