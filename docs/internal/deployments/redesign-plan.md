@@ -126,7 +126,7 @@ screens below live in `frontend/src/components/deploy/` and are covered by
 | Route | Screen |
 | --- | --- |
 | `/deploy` | Projects: in-progress runs, search, state chips, a grid of project cards (or rows) with the workload mark, the address, the branch and commit subject, the Compose service count and one status word (until 2026-09-24; see "Life and colour"). `?view=archived` lists archived projects with Restore and Delete permanently. |
-| `/deploy/notifications` | The fleet-level notification channels (Discord, Slack, Telegram, e-mail, signed webhook) with test delivery, pause, history and removal. |
+| `/deploy/notifications` | The fleet-level notification channels (Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover, e-mail, signed webhook) with test delivery, pause, history and removal. |
 | `/deploy/new` | One page: unfinished setups to resume, a source strip (Git repository, Docker — "Docker image" until 2026-10-06 — Template, Database; Compose until 2026-10-05) and a configure form (four steps beside a rail of the plan since 2026-10-05) (name, type, build & output settings, environment variables, database, public address, an Advanced disclosure) that ends in Deploy or Save only. `?draft=` resumes a draft and `?mode=advanced` opens Advanced. |
 | `/deploy/[id]` | The project shell (one compact header: the address, status word, the one command, a verbs menu, a facts row; its pages are the sidebar's third level, not a tab strip) and the Overview: the production block with the site preview and its facts, findings that need attention, recent deployments, live usage (until 2026-09-24; see "Life and colour"). |
 | `/deploy/[id]/deployments` | Success and weekly frequency over releases per day, median release and recovery time over release time per day beside it, why releases failed under both, and counted underlined status filters above the run rows — status, duration, title, commit subject, branch · sha · trigger · time — with Roll back, Compare with live, Pin, Retry and Cancel behind each row, and older pages on request. Filter and environment changes preserve the results' height for the page visit so the controls and shell scroll position stay steady. |
@@ -203,8 +203,10 @@ tokens; see `docs/internal/frontend/design-system.md` §11):
   only — bound to the recorded website address, one host, one megabyte, remembered for an hour
   (`project-mark.tsx`, `handlers_deploy_favicon.go`).
 - **Notifications:** the projects on the left, this server in the middle and a mark per channel on
-  the right, with dashed rings an administrator presses to add a kind not yet set up, drawn on the
-  page's own ground rather than in a frame; the cards under it are the list.
+  the right, with dashed rings an administrator presses to add a kind not yet set up — the first
+  few in the picker's order, until the column holds five, since ten rings stood taller than the
+  rest of the picture — drawn on the page's own ground rather than in a frame; the cards under it
+  are the list.
 - **Projects:** cards land one after another, a card whose run is in progress carries a light
   around its frame and a seven-dot release path beside its state; the in-progress rows carry the
   same dots. **New project:** "Start with something ready" is a bento of the five other ways in.

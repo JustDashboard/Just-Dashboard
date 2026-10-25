@@ -114,8 +114,8 @@ The project identity line and Settings → General show read-only production Git
 including repository access failures. Branch deployments are automatic after the first deployment;
 additional webhooks remain separate integrations. Run labels use a per-project sequence starting at 1,
 while permanent run URLs retain their global identifiers. `/deploy/notifications`
-(`components/deploy/notifications-page.tsx`) manages Discord, Slack, Telegram, e-mail and signed
-webhook channels with event selection, pause/resume, test delivery and delivery history; the Automatic
+(`components/deploy/notifications-page.tsx`) manages Discord, Slack, Microsoft Teams, Mattermost,
+Telegram, ntfy, Gotify, Pushover, e-mail and signed webhook channels with event selection, pause/resume, test delivery and delivery history; the Automatic
 deployment section on General carries the GitHub commit-status switch. Settings → Runtime exposes memory,
 CPU and process limits, the restart policy, a Shutdown section (stop signal, grace and drain
 periods — `settings/shutdown.ts`) and the health-check editor; Settings → Storage names each

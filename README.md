@@ -98,8 +98,8 @@ free.
 - Immutable releases, one-click rollback and health-gated cutover
 - Build logs, runtime, console, request logs and traffic alerts per project
 - Request insights that count real visitors apart from bots, with their devices and pages
-- Notifications to Discord, Slack, Telegram, e-mail, webhooks and GitHub
-- Read runs and their logs, deploy and roll back from an AI client over MCP, with a key you allow
+- Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,
+  e-mail, webhooks and GitHub
 
 </td>
 </tr>

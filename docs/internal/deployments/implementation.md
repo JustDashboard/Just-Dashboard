@@ -1141,7 +1141,8 @@ only renderer/executor/validation authority for their feature.
   request once a minute and closes the preview only on a decoded closed or merged state, recording a
   moved head as out of date. All of it in [preview isolation](preview-isolation.md#previews-from-the-dashboard).
   Outbound notifications are delivered by engine run observers for every terminal outcome and for run
-  start, through Discord, Slack, Telegram, e-mail or a signed webhook; a failed or cancelled run reaches
+  start, through Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover, e-mail or a
+  signed webhook; a failed or cancelled run reaches
   the same channels as a successful one. Credentials are sealed and never listed, deliveries record only
   a status class and are deduplicated per run and event, and a delivery failure never changes a run's
   outcome. GitHub commit statuses ride the same hook. The channel list carries each channel's newest

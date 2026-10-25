@@ -53,6 +53,11 @@ telegram.svg, webhook.svg, bitbucket.svg, codeberg.svg, forgejo.svg, quay.svg
 and harbor.svg keep their names; aws.svg is its aws-light variant, drawn for a
 dark ground, and google-cloud.svg its google-cloud-platform.svg; azure.svg had
 its #0072c6 lifted to #52a9ff, the same hue at the L 0.72 rung.
+The push and chat services a channel can post to besides those come from the
+same collection: pushover.svg and microsoft-teams.svg keep their names, and
+mattermost.svg had its navy #22315b lifted to #8fa4d6, the same hue at the
+L 0.72 rung, so its ring reads on a dark ground. ntfy.svg and gotify.svg were
+already here for the webhooks that point at them.
 
 So do the sites a request arrives from and the services a variable's name says
 hold it: google.svg, bing.svg, duckduckgo.svg, reddit.svg, linkedin.svg,

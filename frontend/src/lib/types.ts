@@ -4697,7 +4697,17 @@ export type DeploymentPublishedPort = {
 
 export type DeploymentRestartPolicy = "unless-stopped" | "always" | "on-failure" | "no"
 
-export type NotificationChannelKind = "webhook" | "discord" | "slack" | "telegram" | "email"
+export type NotificationChannelKind =
+  | "webhook"
+  | "discord"
+  | "slack"
+  | "telegram"
+  | "email"
+  | "ntfy"
+  | "gotify"
+  | "pushover"
+  | "mattermost"
+  | "teams"
 
 export type NotificationEvent = "run.started" | "run.succeeded" | "run.failed" | "run.cancelled"
 
@@ -4748,6 +4758,14 @@ export type NotificationChannelConfig = {
   smtpSecurity?: "starttls" | "tls" | "none"
   from?: string
   to?: string[]
+  /** An ntfy or Gotify server's base URL; ntfy's defaults to https://ntfy.sh. */
+  serverUrl?: string
+  /** The ntfy topic. */
+  topic?: string
+  /** An ntfy access token, a Gotify application token or a Pushover application token. */
+  token?: string
+  /** The Pushover user or group key. */
+  userKey?: string
 }
 
 export type NotificationDelivery = {

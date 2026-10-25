@@ -118,7 +118,8 @@ taking a frame:
   mark paints the ground under its tint so the line never shows through it. And two that are
   unframed because each is its page's opening rather than a block on it: where an outcome goes on
   Notifications — the projects on the left, this server in the middle, a mark per channel on the
-  right, dashed rings for the kinds not yet added — and the GitHub App on Credentials — the
+  right, dashed rings for the first kinds not yet added, until the column holds five — and the
+  GitHub App on Credentials — the
   accounts that installed it, the App and this server, with its setup path under it — stand on the
   page's own ground, as does the map a project's Runtime opens on (its domains,
   the containers answering them, and the volumes, folders and databases those keep, in three lanes
@@ -1687,7 +1688,8 @@ connected is GitHub's own tile, and a GitHub CLI that is not signed in the termi
 GitHub's mark in its corner, `ClientMark`'s shape.
 
 **Where an outcome goes, and who came asking, are products.** A notification channel is its service
-(`channelProduct`): Discord, Slack and Telegram as themselves, a signed webhook as the receiver its
+(`channelProduct`): Discord, Slack, Teams, Mattermost, Telegram, ntfy, Gotify and Pushover as
+themselves, a signed webhook as the receiver its
 URL's host names (`webhookProduct`: n8n, ntfy, Gotify, Home Assistant, Healthchecks, Uptime Kuma)
 and the webhook's own mark otherwise, e-mail as an envelope or as the mail service its server's host
 names with an envelope in the corner; a paused channel is drawn greyed. A request's client is
@@ -1726,7 +1728,9 @@ Fastify, Remix, Symfony and Koa, filled white — with Azure's, Django's, .NET's
 lifted to the L 0.72 rung the way MySQL's navy was. Rust's and pnpm's originals, dark marks drawn
 for the file manager's paper page, stay, while the tile draws light copies (`rust-light.svg`,
 `pnpm-light.svg`), and two marks already keyed, Valkey's and FreshRSS's, were lifted after the
-contact sheet showed them failing the ground.
+contact sheet showed them failing the ground. The notification kinds added in 0.8.2 brought three
+more from the same set — Pushover's, Teams' and Mattermost's, the last with its navy lifted to the
+L 0.72 rung — and draw ntfy and Gotify with the files the webhook receivers already had.
 
 The Databases section brought sixteen more, from the same three collections under the same rules:
 dashboard-icons' etcd, CouchDB, Cassandra, OpenSearch, FerretDB and Kafka (its white variant);

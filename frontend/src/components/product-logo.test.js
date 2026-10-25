@@ -219,9 +219,19 @@ test("buildMethodProduct draws what each build runs on", () => {
 })
 
 test("channelProduct: every channel but e-mail is a product", () => {
-  for (const kind of ["discord", "slack", "telegram", "webhook"]) {
+  for (const kind of [
+    "discord",
+    "slack",
+    "telegram",
+    "webhook",
+    "ntfy",
+    "gotify",
+    "pushover",
+    "mattermost",
+  ]) {
     expect(seen(channelProduct(kind))).toBe(kind)
   }
+  expect(seen(channelProduct("teams"))).toBe("microsoft-teams")
   expect(channelProduct("email")).toBeUndefined()
 })
 

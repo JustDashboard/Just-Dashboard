@@ -201,10 +201,12 @@ const LOGOS: Record<string, string> = {
   lua: "lua.svg",
   mailgun: "mailgun.svg",
   mariadb: "mariadb.svg",
+  mattermost: "mattermost.svg",
   meilisearch: "meilisearch.svg",
   memcached: "memcached.svg",
   memos: "memos.webp",
   metabase: "metabase.svg",
+  "microsoft-teams": "microsoft-teams.svg",
   "minecraft-bedrock": "minecraft.webp",
   "minecraft-java": "minecraft.webp",
   minio: "minio.svg",
@@ -254,6 +256,7 @@ const LOGOS: Record<string, string> = {
   postman: "postman.svg",
   powershell: "powershell.svg",
   prometheus: "prometheus.svg",
+  pushover: "pushover.svg",
   python: "python.svg",
   qdrant: "qdrant.svg",
   qemu: "qemu.svg",
@@ -953,10 +956,12 @@ export function buildMethodProduct(
  * A notification channel as the service it posts to. A signed webhook is
  * drawn with the webhook's own mark — the protocol's, which misattributes
  * nothing — unless `webhookProduct` can say whose it is; e-mail is a protocol
- * with no mark and keeps its glyph.
+ * with no mark and keeps its glyph. Teams is Microsoft's, and its file is
+ * named so.
  */
 export function channelProduct(kind: NotificationChannelKind): string | undefined {
-  return kind === "email" ? undefined : kind
+  if (kind === "email") return undefined
+  return kind === "teams" ? "microsoft-teams" : kind
 }
 
 /** The services whose own host a webhook URL can point at. */
