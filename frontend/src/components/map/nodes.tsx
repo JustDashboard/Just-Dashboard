@@ -2,7 +2,14 @@
 
 import { createContext, memo, useContext } from "react"
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react"
-import { ArrowUpRight, ChevronDown, ChevronRight, Plus } from "@/components/icons"
+import {
+  ArrowUpRight,
+  ChevronDown,
+  ChevronRight,
+  Plus,
+  RotateCounterClockwise,
+} from "@/components/icons"
+import { rowReveal } from "@/components/icon-action"
 import { WireHost, WirePlaceholder } from "@/components/deploy/wire"
 import { Meter, utilisationTone } from "@/components/meter"
 import { ProductGlyph, platformProduct } from "@/components/product-logo"
@@ -27,6 +34,8 @@ export type MapActions = {
   add: (kind: KindDef) => void
   open: (href: string) => void
   can: (kind: KindDef) => boolean
+  /** Put a thing pulled off its shelf back in its slot. */
+  returnToShelf: (id: string) => void
 }
 
 export const MapActionsContext = createContext<MapActions | null>(null)
@@ -235,6 +244,13 @@ export type ShelfNodeData = {
   /** Drawn: on the shelf now, so "Show fewer" knows there is something to fold. */
   drawn: number
   dimmed?: boolean
+  /** The reader pointing at it from the inspector. */
+  hovered?: boolean
+  /**
+   * One of its things is being dragged: `away` while it is off the shelf,
+   * `over` while letting go would put it back.
+   */
+  home?: "away" | "over"
 }
 
 const HEAD_BUTTON =
@@ -256,9 +272,14 @@ export const ShelfNode = memo(function ShelfNode({ data }: NodeProps<Node<ShelfN
   const addable = kind.add && actions.can(kind)
   return (
     <div
+      data-home={data.home}
+      data-hovered={data.hovered || undefined}
       className={cn(
-        "size-full rounded-xl border border-hairline bg-background transition-opacity",
-        data.dimmed && "opacity-40",
+        "size-full rounded-xl border bg-background transition-[opacity,border-color,background-color]",
+        data.home === "away" && "border-dashed border-rule-brand",
+        data.home === "over" && "border-rule-brand bg-wash-brand",
+        !data.home && (data.hovered ? "border-ring" : "border-hairline"),
+        data.dimmed && !data.home && "opacity-40",
       )}
     >
       <Ports />
@@ -296,6 +317,12 @@ export const ShelfNode = memo(function ShelfNode({ data }: NodeProps<Node<ShelfN
         </span>
         <ShelfNote reading={reading} />
         <span className="flex-1" />
+        {/* Where a thing being dragged belongs, said while it is dragged. */}
+        {data.home && (
+          <span className={cn("shrink-0 text-hint text-brand", SECOND_LINE)}>
+            {data.home === "over" ? "Let go to put it back" : "Drop here to put it back"}
+          </span>
+        )}
         {data.expanded && data.drawn > 0 && (
           <button
             type="button"
@@ -375,6 +402,10 @@ export type ItemNodeData = {
   dimmed?: boolean
   /** Wired to the chosen box: drawn lit while the dimmed ones step back. */
   related?: boolean
+  /** The reader pointing at it from the inspector. */
+  hovered?: boolean
+  /** Pulled off its shelf and placed by hand. */
+  away?: boolean
 }
 
 /**
@@ -383,19 +414,26 @@ export type ItemNodeData = {
  * health, a backup's last run, a certificate's days — never a verdict the
  * map reached on its own.
  */
-export const ItemNode = memo(function ItemNode({ data }: NodeProps<Node<ItemNodeData>>) {
+export const ItemNode = memo(function ItemNode({ data, dragging }: NodeProps<Node<ItemNodeData>>) {
+  const { returnToShelf } = useActions()
   const { item } = data
   return (
     <div
       data-selected={data.selected || undefined}
+      data-hovered={data.hovered || undefined}
       data-tone={item.tone}
+      data-away={data.away || undefined}
       className={cn(
-        "flex size-full items-center gap-2.5 rounded-lg border bg-card px-2.5 transition-[opacity,border-color,background-color]",
+        "group relative flex size-full items-center gap-2.5 rounded-lg border bg-card px-2.5 transition-[opacity,border-color,background-color]",
         data.selected
           ? "border-border-strong bg-accent"
-          : data.related
-            ? "border-rule-brand"
-            : "border-hairline hover:border-border-strong",
+          : data.hovered
+            ? "border-ring"
+            : data.related
+              ? "border-rule-brand"
+              : dragging
+                ? "border-rule-brand"
+                : "border-hairline hover:border-border-strong",
         data.dimmed && "opacity-35",
       )}
     >
@@ -431,6 +469,25 @@ export const ItemNode = memo(function ItemNode({ data }: NodeProps<Node<ItemNode
       <span className={cn("flex-1 items-center justify-end", ONLY_FAR)}>
         <StatusDot tone={TONE_DOT[item.tone]} className="size-3" />
       </span>
+      {/* A thing placed by hand keeps the way back to its shelf on itself. */}
+      {data.away && !dragging && (
+        <button
+          type="button"
+          aria-label={`Put ${item.name} back on its shelf`}
+          title="Back on its shelf"
+          className={cn(
+            "nodrag absolute -top-2.5 -right-2.5 flex size-6 items-center justify-center rounded-md border border-hairline bg-popover text-muted-foreground focus-ring hover:text-foreground",
+            rowReveal(),
+            NOT_FAR,
+          )}
+          onClick={(event) => {
+            event.stopPropagation()
+            returnToShelf(item.id)
+          }}
+        >
+          <RotateCounterClockwise className="size-3.5" />
+        </button>
+      )}
     </div>
   )
 })

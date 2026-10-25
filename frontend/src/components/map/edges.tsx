@@ -46,9 +46,15 @@ export const BranchEdge = memo(function BranchEdge({
       path={path}
       className={cn("transition-[stroke,opacity]", data?.dimmed && "opacity-30")}
       style={{
-        stroke: data?.lit ? "var(--color-chart-1)" : "var(--color-border-strong)",
-        strokeWidth: data?.tier === "branch" ? 1.75 : 1.25,
-        strokeDasharray: data?.tier === "away" ? "4 4" : undefined,
+        // A thing off its shelf hangs by a line that has to be seen: it is
+        // the only thing saying which shelf the box is still on.
+        stroke: data?.lit
+          ? "var(--color-chart-1)"
+          : data?.tier === "away"
+            ? "var(--color-muted-foreground)"
+            : "var(--color-border-strong)",
+        strokeWidth: data?.tier === "branch" ? 1.75 : data?.tier === "away" ? 1.5 : 1.25,
+        strokeDasharray: data?.tier === "away" ? "5 5" : undefined,
       }}
     />
   )

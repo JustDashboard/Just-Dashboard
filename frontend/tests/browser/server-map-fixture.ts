@@ -422,21 +422,142 @@ const tunnels = [
   }),
 ]
 
+/** What the inspector lists under a box, as the server sends it. */
+const FACTS: Record<string, [string, string][]> = {
+  "project:1": [
+    ["Address", "shop.example.com"],
+    ["Environment", "production"],
+    ["Framework", "nextjs"],
+    ["Services", "2"],
+    ["Last run", "succeeded"],
+  ],
+  "project:2": [
+    ["Address", "api.example.com"],
+    ["Environment", "production"],
+    ["Framework", "fastapi"],
+    ["Last run", "succeeded"],
+  ],
+  "project:4": [
+    ["Address", "blog.example.com"],
+    ["Environment", "production"],
+    ["Framework", "astro"],
+    ["Last run", "running"],
+  ],
+  "container:c-mongo": [
+    ["Image", "mongo:8.0"],
+    ["Stack", "data"],
+    ["Restarts", "3"],
+  ],
+  "container:c-pg": [
+    ["Image", "postgres:17"],
+    ["Stack", "data"],
+    ["Published", "5432→5432"],
+    ["Up for", "12d"],
+  ],
+  "container:c-api": [
+    ["Image", "python:3.13-slim"],
+    ["Published", "8000→8000"],
+    ["Up for", "3d"],
+  ],
+  "container:c-shop-web": [
+    ["Image", "node:22-alpine"],
+    ["Published", "3000→3000"],
+    ["Up for", "3d"],
+  ],
+  "db:1": [
+    ["Engine", "postgres 17.2"],
+    ["Database", "shop"],
+    ["Runs in", "postgres-main"],
+    ["Environment", "production"],
+    ["Answered in", "3 ms"],
+  ],
+  "db:3": [
+    ["Engine", "mongodb 8.0"],
+    ["Database", "events"],
+    ["Runs in", "mongo-events"],
+    ["Environment", "production"],
+  ],
+  "db:4": [
+    ["Engine", "postgres 17.2"],
+    ["Database", "analytics"],
+    ["Runs in", "postgres-main"],
+    ["Answered in", "4 ms"],
+  ],
+  "volume:mongo-data": [
+    ["Size", "1.1 GB"],
+    ["Driver", "local"],
+    ["Mount point", "/var/lib/docker/volumes/mongo-data/_data"],
+  ],
+  "volume:pg-data": [
+    ["Size", "4.2 GB"],
+    ["Driver", "local"],
+  ],
+  "stack:data": [
+    ["Containers", "3"],
+    ["Running", "2"],
+  ],
+  "domain:shop.example.com": [
+    ["Site", "shop.conf"],
+    ["Serves", "shop"],
+    ["Proxy", "nginx"],
+    ["HTTPS", "yes"],
+  ],
+  "domain:api.example.com": [
+    ["Site", "api.conf"],
+    ["Serves", "api"],
+    ["Proxy", "nginx"],
+    ["HTTPS", "yes"],
+  ],
+  "cert:/etc/letsencrypt/live/flows.example.com": [
+    ["Covers", "flows.example.com"],
+    ["Issuer", "Let's Encrypt"],
+    ["Expires", "3 Nov 2026"],
+  ],
+  "backup:1": [
+    ["Destination", "s3 · atlas-backups"],
+    ["Schedule", "0 3 * * *"],
+    ["Last run", "6h ago, success"],
+    ["Next run", "in 18h"],
+    ["Sources", "2"],
+  ],
+  "backup:2": [
+    ["Destination", "b2 · atlas-volumes"],
+    ["Schedule", "0 */6 * * *"],
+    ["Last run", "4h ago, failed"],
+    ["Next run", "in 2h"],
+    ["Sources", "4"],
+  ],
+  "backup:3": [
+    ["Destination", "local · /srv/backups"],
+    ["Schedule", "weekly"],
+    ["Last run", "1d ago, success"],
+    ["Next run", "in 6d"],
+  ],
+}
+
+function withFacts<T extends { id: string }>(list: T[]) {
+  return list.map((one) =>
+    FACTS[one.id]
+      ? { ...one, facts: FACTS[one.id].map(([label, value]) => ({ label, value })) }
+      : one,
+  )
+}
+
 const link = (from: string, to: string, via: string) => ({ from, to, via })
 
 export const busyMap = {
   host: { hostname: host.hostname },
   checkedAt: at,
   kinds: [
-    kind("projects", projects),
-    kind("containers", containers),
-    kind("stacks", stacks),
-    kind("volumes", volumes),
+    kind("projects", withFacts(projects)),
+    kind("containers", withFacts(containers)),
+    kind("stacks", withFacts(stacks)),
+    kind("volumes", withFacts(volumes)),
     kind("networks", networks),
     kind("images", images),
-    kind("databases", databases),
-    kind("domains", domains),
-    kind("certificates", certificates),
+    kind("databases", withFacts(databases)),
+    kind("domains", withFacts(domains)),
+    kind("certificates", withFacts(certificates)),
     kind("streams", streams),
     kind("services", services, { total: 212 }),
     kind("pm2", pm2),
@@ -445,7 +566,7 @@ export const busyMap = {
     kind("drawings", drawings),
     kind("repositories", repositories),
     kind("computers", computers),
-    kind("backups", backups),
+    kind("backups", withFacts(backups)),
     kind("scheduled", scheduled),
     kind("alerts", alerts),
     kind("channels", channels),

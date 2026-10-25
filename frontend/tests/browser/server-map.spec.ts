@@ -156,23 +156,46 @@ test("a branch dragged takes its shelves with it; with Alt it moves alone", asyn
   expect(after.y).toBeCloseTo(before.y, 0)
 })
 
-test("a box pulled off its shelf stays where it is put, and goes back from the inspector", async ({
+test("a box pulled off its shelf lands on clear ground, hangs from its shelf, and goes back", async ({
   page,
 }) => {
   const mock = await openOn(page, "drawing:1")
-  // Down, off its shelf and over the next one's.
-  await drag(page, "drawing:1", 0, 170)
+  const from = await at(page, "drawing:1")
+  const grip = { x: from.x + from.width / 2, y: from.y + from.height / 2 }
+  await page.mouse.move(grip.x, grip.y)
+  await page.mouse.down()
+  for (let step = 1; step <= 10; step++) await page.mouse.move(grip.x, grip.y + step * 17)
+  // While it is in the hand its shelf says where it belongs.
+  await expect(node(page, "shelf:drawings").locator("[data-home=away]")).toHaveCount(1)
+  await expect(node(page, "shelf:drawings")).toContainText("Drop here to put it back")
+  // Let go over the next shelf down: it slides off it rather than covering
+  // that shelf's things.
+  await page.mouse.up()
   await expect
     .poll(() => Object.keys((mock.saved.layout as { positions?: object } | null)?.positions ?? {}))
     .toContain("drawing:1")
+  await expect(node(page, "shelf:drawings").locator("[data-home]")).toHaveCount(0)
+  const landed = await at(page, "drawing:1")
+  const next = await at(page, "shelf:repositories")
+  const covers =
+    landed.x < next.x + next.width &&
+    next.x < landed.x + landed.width &&
+    landed.y < next.y + next.height &&
+    next.y < landed.y + landed.height
+  expect(covers).toBe(false)
   // It hangs from its shelf by a line of its own.
   await expect(page.locator('.react-flow__edge[data-id="e:shelf:drawings:drawing:1"]')).toHaveCount(
     1,
   )
 
+  // Chosen, the inspector offers the way back; the box carries it too.
   await node(page, "drawing:1").click()
   const inspector = page.getByRole("complementary", { name: "Inspector" })
-  await inspector.getByRole("button", { name: "Back on its shelf" }).click()
+  await expect(inspector.getByRole("button", { name: "Put it back on its shelf" })).toBeVisible()
+  await node(page, "drawing:1").hover()
+  await node(page, "drawing:1")
+    .getByRole("button", { name: "Put Network plan back on its shelf" })
+    .click()
   await expect
     .poll(() => Object.keys((mock.saved.layout as { positions?: object } | null)?.positions ?? {}))
     .not.toContain("drawing:1")
@@ -195,14 +218,22 @@ test("choosing a thing draws what it is wired to, and the inspector says each in
   await expect(inspector).toContainText("mongo-events")
   await expect(inspector).toContainText("exited (1)")
   await expect(
-    inspector.getByRole("button", { name: /events.*serves.*not answering/ }),
+    inspector.getByRole("button", { name: /events.*not answering.*serves/ }),
   ).toBeVisible()
-  await expect(inspector.getByRole("link", { name: "Open" })).toHaveAttribute(
+  await expect(inspector.getByRole("link", { name: "Open container" })).toHaveAttribute(
     "href",
     "/docker/containers/c-mongo",
   )
+  // Its details are the facts its own page leads with.
+  await expect(inspector.getByRole("definition").filter({ hasText: "mongo:8.0" })).toBeVisible()
+  // Pointing at a link rings the box at its other end on the canvas.
+  const row = inspector.getByRole("button", { name: /mongo-data/ })
+  await row.hover()
+  await expect(node(page, "volume:mongo-data").locator("[data-hovered]")).toHaveCount(1)
+  await page.mouse.move(5, 500)
+  await expect(node(page, "volume:mongo-data").locator("[data-hovered]")).toHaveCount(0)
   // Following a link chooses the other end.
-  await inspector.getByRole("button", { name: /mongo-data/ }).click()
+  await row.click()
   await expect(inspector).toContainText("1.1 GB")
   // The box chosen is lit, though the search that found the first one still
   // holds its words.

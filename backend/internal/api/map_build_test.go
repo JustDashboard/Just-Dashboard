@@ -154,6 +154,28 @@ func TestMapSaysWhatWasMeasured(t *testing.T) {
 	if b := itemOf(t, m, "backups", "backup:2"); b.State != "last run failed" || b.Tone != mapDanger {
 		t.Errorf("backup = %+v", b)
 	}
+	// What the inspector lists under a box, and nothing with no value.
+	fact := func(item mapItem, label string) string {
+		for _, f := range item.Facts {
+			if f.Value == "" {
+				t.Errorf("%s has an empty %s", item.ID, f.Label)
+			}
+			if f.Label == label {
+				return f.Value
+			}
+		}
+		return ""
+	}
+	db := itemOf(t, m, "containers", "container:c-db")
+	if fact(db, "Image") != "postgres:17" || fact(db, "Stack") != "data" || fact(db, "Published") != "5432→5432" {
+		t.Errorf("container facts = %+v", db.Facts)
+	}
+	if fact(itemOf(t, m, "databases", "db:4"), "Runs in") != "pg" {
+		t.Errorf("database facts = %+v", itemOf(t, m, "databases", "db:4").Facts)
+	}
+	if fact(itemOf(t, m, "domains", "domain:shop.example.com"), "HTTPS") != "yes" {
+		t.Errorf("domain facts = %+v", itemOf(t, m, "domains", "domain:shop.example.com").Facts)
+	}
 	// The HTTP server and the TLS server both name it; the TLS one is drawn.
 	domains := kindOf(t, m, "domains")
 	if d := itemOf(t, m, "domains", "domain:shop.example.com"); d.State != "https" {

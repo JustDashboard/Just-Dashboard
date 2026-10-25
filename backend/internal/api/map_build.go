@@ -54,6 +54,9 @@ type mapItem struct {
 	State     string  `json:"state"`
 	Detail    string  `json:"detail,omitempty"`
 	Href      string  `json:"href"`
+	// Facts are what the inspector lists under the box: a few label and
+	// value pairs read from the same source as its state.
+	Facts []mapFact `json:"facts,omitempty"`
 	// owner is the account an API key belongs to, for the per-account filter.
 	owner int64
 }
@@ -454,7 +457,8 @@ func buildServerMap(in mapInputs) mapResponse {
 			out = append(out, mapItem{
 				ID: "drawing:" + strconv.FormatInt(d.ID, 10), Name: d.Name, Product: "excalidraw",
 				Tone: mapIdle, State: "edited " + mapAgo(b.now.Sub(d.UpdatedAt)) + " ago",
-				Href: "/excalidraw/" + strconv.FormatInt(d.ID, 10),
+				Href:  "/excalidraw/" + strconv.FormatInt(d.ID, 10),
+				Facts: mapFacts("Edited", d.UpdatedAt.Format("2 Jan 2006, 15:04")),
 			})
 		}
 		return out
@@ -476,6 +480,7 @@ func buildServerMap(in mapInputs) mapResponse {
 			out = append(out, mapItem{
 				ID: "computer:" + c.ID, Name: c.Name, Product: strings.ToLower(c.OS),
 				Tone: mapIdle, State: state, Detail: c.Host, Href: "/remote-desktop/" + url.PathEscape(c.ID),
+				Facts: mapFacts("Address", c.Host, "System", c.OS, "Connects with", strings.ToUpper(c.Protocol)),
 			})
 		}
 		return out
@@ -713,6 +718,20 @@ func mapProject(d deploy.DeploymentSummary) mapItem {
 	default:
 		item.Tone, item.State = mapOK, "ready"
 	}
+	run := ""
+	if d.LastRun != nil {
+		run = strings.ReplaceAll(string(d.LastRun.State), "_", " ")
+	}
+	port := ""
+	if d.HostPort > 0 {
+		port = strconv.Itoa(d.HostPort)
+	}
+	services := ""
+	if d.ServiceCount > 0 {
+		services = strconv.Itoa(d.ServiceCount)
+	}
+	item.Facts = mapFacts("Address", endpointHost(d.Endpoint), "Environment", d.EnvironmentName,
+		"Framework", d.Framework, "Port", port, "Services", services, "Last run", run)
 	return item
 }
 
@@ -766,6 +785,21 @@ func mapContainer(c dockerx.Container) mapItem {
 	default:
 		item.Tone, item.State = mapUnknown, c.State
 	}
+	ports := []string{}
+	for _, p := range c.Ports {
+		if p.PublicPort > 0 {
+			ports = append(ports, fmt.Sprintf("%d→%d", p.PublicPort, p.PrivatePort))
+		}
+	}
+	up, restarts := "", ""
+	if c.State == "running" && c.UptimeSecond > 0 {
+		up = mapAgo(time.Duration(c.UptimeSecond) * time.Second)
+	}
+	if c.Restarts > 0 {
+		restarts = strconv.Itoa(c.Restarts)
+	}
+	item.Facts = mapFacts("Image", c.Image, "Stack", c.ComposeStack, "Published", strings.Join(ports, ", "),
+		"Up for", up, "Restarts", restarts)
 	return item
 }
 
@@ -818,6 +852,7 @@ func mapStacks(list []dockerx.Container) []mapItem {
 			ID: "stack:" + name, Name: name, Product: s.product,
 			Href:  "/docker/stacks/" + url.PathEscape(name),
 			State: fmt.Sprintf("%d of %d running", s.running, s.total),
+			Facts: mapFacts("Containers", strconv.Itoa(s.total), "Running", strconv.Itoa(s.running)),
 		}
 		switch {
 		case s.running == s.total:
@@ -843,6 +878,11 @@ func mapVolume(v dockerx.Volume, mounted bool) mapItem {
 	if v.Size > 0 {
 		item.Detail = alertBytes(v.Size)
 	}
+	size := ""
+	if v.Size > 0 {
+		size = alertBytes(v.Size)
+	}
+	item.Facts = mapFacts("Size", size, "Driver", v.Driver, "Mount point", v.Mountpoint)
 	return item
 }
 
@@ -859,6 +899,8 @@ func mapNetwork(n dockerx.Network) mapItem {
 	} else {
 		item.Tone, item.State = mapIdle, "unused"
 	}
+	item.Facts = mapFacts("Driver", n.Driver, "Subnet", strings.Join(n.Subnets, ", "), "Gateway", n.Gateway,
+		"Containers", strconv.Itoa(n.Containers))
 	return item
 }
 
@@ -875,6 +917,12 @@ func mapImage(img dockerx.Image) mapItem {
 	if img.Containers > 0 {
 		item.Tone, item.State = mapOK, "in use"
 	}
+	created := ""
+	if !img.Created.IsZero() {
+		created = img.Created.Format("2 Jan 2006")
+	}
+	item.Facts = mapFacts("Size", alertBytes(img.Size), "Containers", strconv.FormatInt(img.Containers, 10),
+		"Created", created)
 	return item
 }
 
@@ -904,6 +952,19 @@ func mapDatabase(e fleetEntry) mapItem {
 	default:
 		item.Tone, item.State = mapUnknown, e.State
 	}
+	where := e.Container
+	if where == "" {
+		where = e.Unit
+	}
+	if where == "" && e.Host != "" {
+		where = strings.TrimSuffix(e.Host+":"+e.Port, ":")
+	}
+	latency := ""
+	if e.OK && e.LatencyMs > 0 {
+		latency = strconv.FormatInt(e.LatencyMs, 10) + " ms"
+	}
+	item.Facts = mapFacts("Engine", strings.TrimSpace(item.Product+" "+e.VersionNumber), "Database", e.Database,
+		"Runs in", where, "Environment", e.Environment, "Answered in", latency)
 	return item
 }
 
@@ -933,6 +994,20 @@ func mapDomain(v proxysvc.VHost, name string) mapItem {
 	case len(v.Roots) > 0:
 		item.Detail = v.Roots[0]
 	}
+	serves := ""
+	switch {
+	case v.Owner != nil && v.Owner.Project != "":
+		serves = v.Owner.Project
+	case len(v.Upstreams) > 0:
+		serves = strings.Join(v.Upstreams, ", ")
+	case len(v.Roots) > 0:
+		serves = v.Roots[0]
+	}
+	tls := "no"
+	if v.TLS {
+		tls = "yes"
+	}
+	item.Facts = mapFacts("Site", v.Name, "Serves", serves, "Proxy", string(v.Kind), "HTTPS", tls)
 	return item
 }
 
@@ -958,6 +1033,15 @@ func mapCertificate(c proxysvc.Certificate) mapItem {
 	default:
 		item.Tone, item.State = mapOK, mapPlural(c.DaysLeft, "day left", "days left")
 	}
+	covers := strings.Join(c.Domains, ", ")
+	if len(c.Domains) > 3 {
+		covers = strings.Join(c.Domains[:3], ", ") + fmt.Sprintf(" and %d more", len(c.Domains)-3)
+	}
+	expires := ""
+	if !c.NotAfter.IsZero() {
+		expires = c.NotAfter.Format("2 Jan 2006")
+	}
+	item.Facts = mapFacts("Covers", covers, "Issuer", c.Issuer, "Expires", expires)
 	return item
 }
 
@@ -977,6 +1061,8 @@ func mapStream(s proxysvc.StreamEntry) mapItem {
 	default:
 		item.Tone, item.State = mapIdle, strings.ReplaceAll(s.State, "_", " ")
 	}
+	item.Facts = mapFacts("Listens on", ":"+strconv.Itoa(s.Listen), "Forwards to", s.Upstream,
+		"Protocol", strings.ToUpper(s.Protocol))
 	return item
 }
 
@@ -999,6 +1085,15 @@ func mapUnit(u procs.Unit) mapItem {
 	if item.State == "" {
 		item.State = u.ActiveState
 	}
+	enabled, restarts := "no", ""
+	if u.Enabled {
+		enabled = "yes"
+	}
+	if u.Restarts > 0 {
+		restarts = strconv.Itoa(u.Restarts)
+	}
+	item.Facts = mapFacts("Description", u.Description, "State", strings.TrimSpace(u.ActiveState+" "+u.SubState),
+		"Starts at boot", enabled, "Restarts", restarts)
 	return item
 }
 
@@ -1020,6 +1115,14 @@ func mapPM2(p procs.PM2Process) mapItem {
 	if p.Restarts > 0 {
 		item.Detail = mapPlural(p.Restarts, "restart", "restarts")
 	}
+	memory, restarts := "", ""
+	if p.Memory > 0 {
+		memory = alertBytes(p.Memory)
+	}
+	if p.Restarts > 0 {
+		restarts = strconv.Itoa(p.Restarts)
+	}
+	item.Facts = mapFacts("Status", p.Status, "Memory", memory, "Restarts", restarts)
 	return item
 }
 
@@ -1036,6 +1139,7 @@ func mapDashboard(r selfupdate.Report) mapItem {
 	default:
 		item.Tone, item.State = mapOK, "up to date"
 	}
+	item.Facts = mapFacts("Version", r.Version, "Newest", r.Latest)
 	return item
 }
 
@@ -1058,6 +1162,7 @@ func mapTerminalItem(t mapTerminal) mapItem {
 	if t.Windows > 1 {
 		item.Detail = strings.TrimSpace(item.Detail + " · " + mapPlural(t.Windows, "window", "windows"))
 	}
+	item.Facts = mapFacts("Signed in as", t.User, "Windows", strconv.Itoa(t.Windows), "Running", t.Process)
 	return item
 }
 
@@ -1078,6 +1183,11 @@ func mapRepo(r gitx.Repo) mapItem {
 	default:
 		item.Tone, item.State = mapOK, "clean"
 	}
+	sync := ""
+	if r.Ahead > 0 || r.Behind > 0 {
+		sync = fmt.Sprintf("%d ahead, %d behind", r.Ahead, r.Behind)
+	}
+	item.Facts = mapFacts("Branch", r.Branch, "Folder", r.Path, "Remote", r.Remote, "Upstream", sync)
 	return item
 }
 
@@ -1105,6 +1215,22 @@ func mapBackup(j *backups.Job, now time.Time) mapItem {
 	if j.NextRun != nil && j.Enabled {
 		item.Detail = "next in " + mapAgo(j.NextRun.Sub(now))
 	}
+	destination := string(j.TargetKind)
+	switch {
+	case j.Target.Bucket != "":
+		destination += " · " + j.Target.Bucket
+	case j.Target.Path != "":
+		destination += " · " + j.Target.Path
+	}
+	last, next := "", ""
+	if j.LastRun != nil {
+		last = mapAgo(now.Sub(j.LastRun.StartedAt)) + " ago, " + string(j.LastRun.Status)
+	}
+	if j.NextRun != nil && j.Enabled {
+		next = "in " + mapAgo(j.NextRun.Sub(now))
+	}
+	item.Facts = mapFacts("Destination", destination, "Schedule", j.Schedule, "Last run", last, "Next run", next,
+		"Sources", strconv.Itoa(len(j.Sources)+len(j.DatabaseDumps)))
 	return item
 }
 
@@ -1125,6 +1251,14 @@ func mapTimer(t procs.Timer, now time.Time) mapItem {
 	if t.Activates != "" {
 		item.Detail = t.Activates
 	}
+	next, last := "", ""
+	if t.Next != nil {
+		next = "in " + mapAgo(t.Next.Sub(now))
+	}
+	if t.Last != nil {
+		last = mapAgo(now.Sub(*t.Last)) + " ago"
+	}
+	item.Facts = mapFacts("Runs", t.Activates, "Next", next, "Last", last)
 	return item
 }
 
@@ -1141,6 +1275,7 @@ func mapCron(tab procs.Crontab, job procs.CronJob) mapItem {
 	if job.Disabled {
 		item.Tone, item.State = mapIdle, "commented out"
 	}
+	item.Facts = mapFacts("Schedule", job.Schedule, "File", tab.Source, "Runs as", job.User)
 	return item
 }
 
@@ -1165,7 +1300,8 @@ func alertName(kind string) string {
 func mapAlertItems(a mapAlerts) []mapItem {
 	out := []mapItem{}
 	rule := func(id, kind string, enabled bool, firing int, unjudged, href, scope string) mapItem {
-		item := mapItem{ID: id, Name: alertName(kind), Href: href, Detail: scope}
+		item := mapItem{ID: id, Name: alertName(kind), Href: href, Detail: scope,
+			Facts: mapFacts("Watches", scope, "Firing for", mapPlural(firing, "subject", "subjects"))}
 		switch {
 		case !enabled:
 			item.Tone, item.State = mapIdle, "paused"
@@ -1206,6 +1342,11 @@ func mapChannel(c deploy.NotificationChannel) mapItem {
 	default:
 		item.Tone, item.State = mapOK, "delivered"
 	}
+	last := ""
+	if c.LastDelivery != nil {
+		last = c.LastDelivery.Status
+	}
+	item.Facts = mapFacts("Kind", c.Kind, "Events", strconv.Itoa(len(c.Events)), "Last delivery", last)
 	return item
 }
 
@@ -1225,6 +1366,14 @@ func mapAccount(u *auth.User) mapItem {
 			item.Detail = "no two-factor"
 		}
 	}
+	twoFactor, signedIn := "off", ""
+	if u.TOTPEnabled {
+		twoFactor = "on"
+	}
+	if !u.LastLoginAt.IsZero() {
+		signedIn = u.LastLoginAt.Format("2 Jan 2006")
+	}
+	item.Facts = mapFacts("Role", string(u.Role), "Two-factor", twoFactor, "Last sign-in", signedIn)
 	return item
 }
 
@@ -1244,6 +1393,14 @@ func mapKey(k auth.APIToken, now time.Time) mapItem {
 	} else {
 		item.Detail = "never used"
 	}
+	used, expires := "never", "never"
+	if k.LastUsedAt != nil {
+		used = mapAgo(now.Sub(*k.LastUsedAt)) + " ago"
+	}
+	if k.ExpiresAt != nil {
+		expires = k.ExpiresAt.Format("2 Jan 2006")
+	}
+	item.Facts = mapFacts("Role", string(k.Role), "Reaches", k.Scope, "Last used", used, "Expires", expires)
 	return item
 }
 
@@ -1260,6 +1417,12 @@ func mapSystemUser(u linuxusers.User) mapItem {
 	default:
 		item.Tone, item.State = mapIdle, "no sign-in"
 	}
+	signedIn := ""
+	if u.LastLogin != nil {
+		signedIn = u.LastLogin.Format("2 Jan 2006")
+	}
+	item.Facts = mapFacts("Home", u.Home, "Shell", u.Shell, "SSH keys", strconv.Itoa(u.SSHKeys),
+		"Last sign-in", signedIn)
 	return item
 }
 
@@ -1275,6 +1438,8 @@ func mapFirewall(fw *netsec.FirewallStatus) mapItem {
 		// look at; whether it should be on is the reader's call.
 		item.Tone, item.State = mapWarning, "off"
 	}
+	item.Facts = mapFacts("Engine", string(fw.Backend), "Incoming", fw.Policy.Incoming,
+		"Outgoing", fw.Policy.Outgoing)
 	return item
 }
 
@@ -1291,6 +1456,8 @@ func mapTunnels(v netx.VPNSummary) []mapItem {
 			item.Tone, item.State = mapIdle, mapPlural(v.WireGuard.Peers, "peer", "peers")
 		}
 		item.Detail = mapPlural(v.WireGuard.Interfaces, "tunnel", "tunnels")
+		item.Facts = mapFacts("Tunnels", strconv.Itoa(v.WireGuard.Interfaces),
+			"Peers online", fmt.Sprintf("%d of %d", v.WireGuard.Online, v.WireGuard.Peers))
 		out = append(out, item)
 	}
 	if v.Tailscale.Installed {
@@ -1298,10 +1465,23 @@ func mapTunnels(v netx.VPNSummary) []mapItem {
 		if v.Tailscale.Running {
 			item.Tone, item.State = mapOK, "connected"
 			item.Detail = fmt.Sprintf("%d of %d peers online", v.Tailscale.Online, v.Tailscale.Peers)
+			item.Facts = mapFacts("Peers online", fmt.Sprintf("%d of %d", v.Tailscale.Online, v.Tailscale.Peers))
 		} else {
 			item.Tone, item.State = mapIdle, "stopped"
 		}
 		out = append(out, item)
+	}
+	return out
+}
+
+// mapFacts is a box's details as the inspector lists them: label and value
+// in pairs, leaving out the ones with nothing to say.
+func mapFacts(pairs ...string) []mapFact {
+	out := []mapFact{}
+	for i := 0; i+1 < len(pairs); i += 2 {
+		if strings.TrimSpace(pairs[i+1]) != "" {
+			out = append(out, mapFact{Label: pairs[i], Value: pairs[i+1]})
+		}
 	}
 	return out
 }

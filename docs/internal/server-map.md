@@ -61,19 +61,33 @@ The layout is the same every time, and what the reader moved outranks it, as in 
 - **Dragging carries what branches off.** The server takes the whole map, a branch takes its shelves
   and whatever was pulled off them (`followersOf`), and a shelf carries its grid as its children.
   Holding Alt moves one box alone. The positions of everything moved are saved on drop.
-- **A thing pulled off its shelf stays where it is put**, hanging from its shelf by a dashed line; dropped
-  back on its shelf, or sent back from the inspector (*Back on its shelf*), it returns to its slot. A
-  thing on its shelf has no saved position — its place is its slot — so a server that gains a
-  container puts it on the shelf without moving anything the reader arranged.
+- **A thing pulled off its shelf stays where it is put**, hanging from its shelf by a dashed line in the
+  muted ink, so which shelf it still belongs to is seen. While it is in the hand its shelf turns into
+  the drop target — a dashed brand edge and *Drop here to put it back*, *Let go to put it back* once
+  letting go would — and let go over anything else it slides to the nearest clear ground
+  (`freeSpot`, unit-tested: searched ring by ring outward, nearest first), so it is never left
+  covering another shelf's things. It goes back by being dropped on its shelf, by the ↺ on its own
+  corner, or from the inspector (*Put it back on its shelf*). A thing on its shelf has no saved
+  position — its place is its slot — so a server that gains a container puts it on the shelf without
+  moving anything the reader arranged.
 - **Tidy up** forgets every position (with *Undo* in its toast); **Forget this layout** in Options
   throws away the whole arrangement, folds included, behind a confirmation.
 
 ## Reading it
 
 - **Choosing a box** lights it and what it is wired to, draws those links in the brand's blue with how
-  each is known written on them, and steps the rest back; the inspector says the same in words, each
-  row a way to the other end. A shelf chosen lights what is on it; the server is what the inspector
-  shows with nothing chosen. Links run over the shelves' ground and under the boxes (`zIndex` 1 between
+  each is known written on them, and steps the rest back. A shelf chosen lights what is on it; the
+  server is what the inspector shows with nothing chosen.
+- **The inspector** has one shape for all three: a head naming the kind; the thing itself — its mark,
+  its name, its state with the kind, and its actions directly under the name (*Open* as the command
+  face, then show it on the map with its links, put it back on its shelf, copy its name); then
+  sections, each an eyebrow over a hairline. A thing's *Details* are the facts the server sends with it
+  (`facts`: a container's image, stack, published ports and uptime; a database's engine, where it runs
+  and how fast it answered; a backup's destination, schedule and runs …) and *Wired to* names each
+  link as a `Tag`; a shelf lists its things; the server shows CPU and memory live from the shell's
+  metrics stream, four readings, and every kind on it by branch. Every row is a way to its box, and
+  pointing at a row rings that box on the canvas (the `signal` ring a search hit takes), so the list
+  and the picture are read together. The keys are written along its foot. Links run over the shelves' ground and under the boxes (`zIndex` 1 between
   the shelves' 0 and the boxes' 2), and two boxes stacked in one column are joined round the column's
   left rather than through it.
 - **Search** (`/`) lights what it finds by name, by what a box says of itself, by product or by kind;
@@ -162,10 +176,10 @@ folds, opened shelves, the view, and the two switches (minimap; drawing the chos
 ## Tests
 
 - `lib/server-map.test.js`: the registry, the layout (sides, no overlaps, determinism, caps, folds,
-  hand-placed boxes, branches carrying shelves), dragging's followers, folding defaults, the document
-  decoder, links, search and the census.
+  hand-placed boxes, branches carrying shelves), dragging's followers, where a box let go lands,
+  folding defaults, the document decoder, links, search and the census.
 - `api/map_build_test.go`: the joins, the measured states (exit codes, project states), unread and
-  absent sources, worst-first capping and the per-role filter; `map_sources_test.go`: one read while
+  absent sources, worst-first capping, a box's facts and the per-role filter; `map_sources_test.go`: one read while
   fresh, the budget, the last answer through a failure; `handlers_map_test.go`: the arrangement per
   account, refused to a key, and the map on a server with nothing running;
   `store/schema_server_map_test.go`: the table on fresh and upgraded installs.
@@ -173,6 +187,7 @@ folds, opened shelves, the view, and the two switches (minimap; drawing the chos
   volume and a container that exited 3 drawn as down.
 - `tests/browser/server-map.spec.ts` (fixture `server-map-fixture.ts`): the sides, "+N more", folding
   remembered across a reload, a branch carrying its shelves and Alt moving it alone, pulling a box off
-  its shelf and back, links and the inspector, revealing a thing behind "+N more", Add, a reading role
+  its shelf (its shelf the drop target, landing clear of the next shelf, the line it hangs by, back by
+  its own ↺), links and the inspector (its details, a row ringing its box), revealing a thing behind "+N more", Add, a reading role
   offered only its own API key, a fresh server, and the far distance's held names; `/map` is one of
   `design-system.spec.ts`'s surfaces.

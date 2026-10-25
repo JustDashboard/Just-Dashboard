@@ -7,6 +7,7 @@ import {
   census,
   decodeDocument,
   followersOf,
+  freeSpot,
   foldedByDefault,
   isArranged,
   isFolded,
@@ -324,5 +325,33 @@ describe("reading the map", () => {
 
   test("the census counts what is drawn and what is down", () => {
     expect(census(map, visibleKinds(map, everyone))).toEqual({ things: 4, down: 1 })
+  })
+})
+
+describe("letting go of a box", () => {
+  const box = { x: 100, y: 100, width: 220, height: 60 }
+
+  test("a drop on clear ground stays where it was let go", () => {
+    expect(freeSpot(box, [{ x: 600, y: 600, width: 100, height: 100 }])).toEqual({ x: 100, y: 100 })
+  })
+
+  test("a drop over another shelf slides to the nearest clear ground", () => {
+    const shelf = { x: 50, y: 80, width: 400, height: 120 }
+    const spot = freeSpot(box, [shelf])
+    const landed = { ...box, ...spot }
+    // Clear of the shelf, gap included…
+    const clear =
+      landed.x >= shelf.x + shelf.width + 14 ||
+      landed.x + landed.width + 14 <= shelf.x ||
+      landed.y >= shelf.y + shelf.height + 14 ||
+      landed.y + landed.height + 14 <= shelf.y
+    expect(clear).toBe(true)
+    // …and by the shortest way: up out of the shelf, not across the map.
+    expect(Math.hypot(spot.x - box.x, spot.y - box.y)).toBeLessThan(200)
+  })
+
+  test("with nowhere clear in reach it stays put", () => {
+    const wall = { x: -5000, y: -5000, width: 10000, height: 10000 }
+    expect(freeSpot(box, [wall], { reach: 64 })).toEqual({ x: 100, y: 100 })
   })
 })

@@ -9583,6 +9583,8 @@ export type MapItem = {
   detail?: string
   /** The page that manages it. */
   href: string
+  /** What the inspector lists under it: a few label and value pairs. */
+  facts?: MapFact[]
 }
 
 /** Two things wired together, and how the server knows: a label, a route, a mount. */

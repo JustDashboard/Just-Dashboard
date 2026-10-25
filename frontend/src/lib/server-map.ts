@@ -915,3 +915,50 @@ export function census(map: ServerMap | undefined, kinds: readonly KindDef[]) {
 export function kindOfItem(map: ServerMap | undefined, id: string) {
   return map ? itemIndex(map).get(id)?.kind : undefined
 }
+
+// ---------------------------------------------------------------------------
+// Where a box dropped by hand may land.
+// ---------------------------------------------------------------------------
+
+export type Rect = { x: number; y: number; width: number; height: number }
+
+function overlaps(a: Rect, b: Rect, gap: number) {
+  return (
+    a.x < b.x + b.width + gap &&
+    b.x < a.x + a.width + gap &&
+    a.y < b.y + b.height + gap &&
+    b.y < a.y + a.height + gap
+  )
+}
+
+/**
+ * The nearest place to where a box was dropped that covers nothing else on
+ * the map. A thing pulled off its shelf and let go over another shelf was
+ * drawn on top of that shelf's things, looking dropped into a shelf it is not
+ * on; it slides instead to the closest clear ground, searched ring by ring
+ * outwards from the drop, nearest first. Where nothing is clear within reach
+ * it stays where it was let go.
+ */
+export function freeSpot(
+  want: Rect,
+  others: readonly Rect[],
+  { gap = 14, step = 16, reach = 1600 } = {},
+): Point {
+  const clear = (x: number, y: number) =>
+    !others.some((other) => overlaps({ ...want, x, y }, other, gap))
+  if (clear(want.x, want.y)) return { x: want.x, y: want.y }
+  for (let r = step; r <= reach; r += step) {
+    const ring: Point[] = []
+    for (let d = -r; d <= r; d += step) {
+      ring.push({ x: d, y: -r }, { x: d, y: r })
+      if (d !== -r && d !== r) ring.push({ x: -r, y: d }, { x: r, y: d })
+    }
+    ring.sort((a, b) => Math.hypot(a.x, a.y) - Math.hypot(b.x, b.y))
+    for (const offset of ring) {
+      if (clear(want.x + offset.x, want.y + offset.y)) {
+        return { x: want.x + offset.x, y: want.y + offset.y }
+      }
+    }
+  }
+  return { x: want.x, y: want.y }
+}

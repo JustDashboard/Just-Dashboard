@@ -57,6 +57,7 @@ import {
   branchId,
   census,
   followersOf,
+  freeSpot,
   isArranged,
   isFolded,
   kindOfItem,
@@ -70,6 +71,7 @@ import {
   type LaidNode,
   type MapDocument,
   type Point,
+  type Rect,
 } from "@/lib/server-map"
 import { notify } from "@/lib/toast"
 import type { Board } from "@/lib/boards"
@@ -149,6 +151,11 @@ export function MapCanvas({
   const searchRef = useRef<HTMLInputElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  // A box the reader points at from the inspector, ringed on the canvas.
+  const [hovered, setHovered] = useState<string | null>(null)
+  // The shelf a thing being dragged belongs to, and whether letting go now
+  // would put it back.
+  const [home, setHome] = useState<{ shelf: string; over: boolean } | null>(null)
   const [query, setQuery] = useState("")
   const wide = useMediaQuery("(min-width: 1024px)")
   const [inspectorOpen, setInspectorOpen] = useState(true)
@@ -265,10 +272,12 @@ export function MapCanvas({
           dimmed: lit ? !lit.has(node.id) : false,
           selected: node.id === selected,
           related: related ? related.has(node.id) && node.id !== selected : false,
+          hovered: node.id === hovered,
+          home: home?.shelf === node.id ? (home.over ? "over" : "away") : undefined,
         })
         return data === node.data ? node : { ...node, data }
       }),
-    [nodes, lit, selected, related],
+    [nodes, lit, selected, related, hovered, home],
   )
 
   const edges = useMemo(() => {
@@ -341,7 +350,8 @@ export function MapCanvas({
         frame(id, drawn)
         return
       }
-      const def = kinds.find((k) => k.key === kindOfItem(map, id))
+      const isShelf = id.startsWith("shelf:")
+      const def = kinds.find((k) => k.key === (isShelf ? id.slice(6) : kindOfItem(map, id)))
       if (!def) return
       framing.current = id
       update((d) => {
@@ -349,6 +359,7 @@ export function MapCanvas({
         const branch = branchId(def.branch)
         const shelf = shelfId(def.key)
         if (isFolded(next, branch, byDefault)) next = toggleFold(next, branch, byDefault)
+        if (isShelf) return next
         if (isFolded(next, shelf, byDefault)) next = toggleFold(next, shelf, byDefault)
         if (!next.expanded.includes(shelf)) next = { ...next, expanded: [...next.expanded, shelf] }
         return next
@@ -415,6 +426,12 @@ export function MapCanvas({
       add: (kind) => void add(kind),
       open: (href) => router.push(href),
       can: canAdd,
+      returnToShelf: (id) =>
+        update((d) => {
+          const positions = { ...d.positions }
+          delete positions[id]
+          return { ...d, positions }
+        }),
     }),
     [update, byDefault, add, router, canAdd],
   )
@@ -427,6 +444,8 @@ export function MapCanvas({
         for (const n of flow.getNodes()) if (ids.has(n.id)) followers.set(n.id, n.position)
       }
       drag.current = { id: node.id, start: node.position, followers }
+      const laidNode = laid.nodes.find((n) => n.id === node.id)
+      if (laidNode?.type === "item") setHome({ shelf: shelfId(laidNode.kind.key), over: true })
     },
     [laid, flow],
   )
@@ -434,6 +453,12 @@ export function MapCanvas({
   const onNodeDrag = useCallback(
     (_: MouseEvent | TouchEvent, node: Node) => {
       const held = drag.current
+      if (home && held?.id === node.id) {
+        // Whether letting go here would put the thing back on its shelf,
+        // said by the shelf as it changes, not on every frame.
+        const over = isOverShelf(flow.getNodes(), node, home.shelf)
+        if (over !== home.over) setHome({ shelf: home.shelf, over })
+      }
       if (!held || held.id !== node.id || held.followers.size === 0) return
       const dx = node.position.x - held.start.x
       const dy = node.position.y - held.start.y
@@ -444,13 +469,14 @@ export function MapCanvas({
         }),
       )
     },
-    [setNodes],
+    [setNodes, home, flow],
   )
 
   const onNodeDragStop = useCallback(
     (_: MouseEvent | TouchEvent, node: Node, dragged: Node[]) => {
       const held = drag.current
       drag.current = null
+      setHome(null)
       const current = flow.getNodes()
       const byId = new Map(current.map((n) => [n.id, n]))
       const set: Record<string, Point> = {}
@@ -471,8 +497,16 @@ export function MapCanvas({
             y: absolute.y + SIZE.item.height / 2,
           }
           const onShelf = shelf && inside(centre, shelf)
-          if (onShelf) unset.add(moved.id)
-          else set[moved.id] = absolute
+          if (onShelf) {
+            unset.add(moved.id)
+            continue
+          }
+          // Off its shelf, it lands on clear ground: let go over another
+          // shelf, it slides to the nearest place that covers nothing.
+          set[moved.id] = freeSpot(
+            { ...absolute, width: SIZE.item.width, height: SIZE.item.height },
+            obstacles(current, moved.id),
+          )
           continue
         }
         set[moved.id] = moved.position
@@ -495,6 +529,17 @@ export function MapCanvas({
         pending.current = null
       } else if (unset.size > 0) {
         setNodes(base)
+      }
+      // A box that slid off the shelf it was let go over is drawn where it
+      // landed now, not after the save comes round.
+      const slid = Object.entries(set).filter(([id]) => byId.get(id)?.parentId === undefined)
+      if (slid.length > 0) {
+        setNodes((list) =>
+          list.map((n) => {
+            const at = set[n.id]
+            return at && !n.parentId ? { ...n, position: at } : n
+          }),
+        )
       }
     },
     [flow, laid.nodes, update, setNodes, base],
@@ -833,7 +878,8 @@ export function MapCanvas({
             <ZoomButtons
               onFit={() => void flow.fitView({ padding: fitPadding(doc.minimap), duration: 300 })}
             />
-            {selected && (
+            {/* Links are a thing's own; a shelf chosen lights its things instead. */}
+            {selected && !selected.startsWith("shelf:") && (
               <div className="pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-2">
                 <span className="pointer-events-auto flex items-center gap-2 rounded-md border border-hairline bg-popover px-2.5 py-1 text-hint text-muted-foreground shadow-sm">
                   <Linked className="size-3.5" />
@@ -860,14 +906,10 @@ export function MapCanvas({
               kinds={kinds}
               selected={selected}
               onChoose={reveal}
+              onHover={setHovered}
+              onFrame={(id) => frame(id, flow.getNodes())}
               onClose={() => setInspectorOpen(false)}
-              onReturn={(id) =>
-                update((d) => {
-                  const positions = { ...d.positions }
-                  delete positions[id]
-                  return { ...d, positions }
-                })
-              }
+              onReturn={actions.returnToShelf}
               placed={(id) => doc.positions[id] !== undefined}
               onAdd={(kind) => void add(kind)}
               canAdd={canAdd}
@@ -892,10 +934,24 @@ const flagged = new WeakMap<object, Map<string, Record<string, unknown>>>()
 
 function flaggedData(
   base: Record<string, unknown>,
-  flags: { dimmed: boolean; selected: boolean; related: boolean },
+  flags: {
+    dimmed: boolean
+    selected: boolean
+    related: boolean
+    hovered: boolean
+    home?: "away" | "over"
+  },
 ) {
-  if (!flags.dimmed && !flags.selected && !flags.related) return base
-  const key = `${flags.dimmed ? 1 : 0}${flags.selected ? 1 : 0}${flags.related ? 1 : 0}`
+  if (!flags.dimmed && !flags.selected && !flags.related && !flags.hovered && !flags.home) {
+    return base
+  }
+  const key = [
+    flags.dimmed ? 1 : 0,
+    flags.selected ? 1 : 0,
+    flags.related ? 1 : 0,
+    flags.hovered ? 1 : 0,
+    flags.home ?? "",
+  ].join("")
   let variants = flagged.get(base)
   if (!variants) {
     variants = new Map()
@@ -942,6 +998,29 @@ function minimapColor(node: Node) {
   if (node.type === "server") return "var(--color-chart-1)"
   if (node.type === "shelf") return "color-mix(in oklab, var(--color-muted) 60%, transparent)"
   return "color-mix(in oklab, var(--color-muted-foreground) 55%, var(--color-muted))"
+}
+
+/** Whether a dragged thing's middle is over its own shelf. */
+function isOverShelf(nodes: Node[], dragged: Node, shelf: string) {
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const home = byId.get(shelf)
+  if (!home) return false
+  const parent = dragged.parentId ? byId.get(dragged.parentId) : undefined
+  const centre = {
+    x: (parent?.position.x ?? 0) + dragged.position.x + SIZE.item.width / 2,
+    y: (parent?.position.y ?? 0) + dragged.position.y + SIZE.item.height / 2,
+  }
+  return inside(centre, home)
+}
+
+/**
+ * Everything a box let go of must not cover: the server, the branches, the
+ * shelves (which carry their own things) and the other things placed by hand.
+ */
+function obstacles(nodes: Node[], except: string): Rect[] {
+  return nodes
+    .filter((n) => n.id !== except && !n.parentId)
+    .map((n) => ({ x: n.position.x, y: n.position.y, width: n.width ?? 0, height: n.height ?? 0 }))
 }
 
 function inside(point: Point, node: Node) {
@@ -1063,7 +1142,7 @@ function toFlowNodes(
         return {
           ...common,
           parentId: node.parentId,
-          data: { item: node.item, kind: node.kind.key },
+          data: { item: node.item, kind: node.kind.key, away: !node.parentId },
           // A box placed by hand sits over whatever it was put on, the next
           // shelf's boxes included.
           zIndex: node.parentId ? 2 : 3,

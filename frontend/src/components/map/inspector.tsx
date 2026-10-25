@@ -1,35 +1,57 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowUpRight, Cross, Plus, RotateCounterClockwise } from "@/components/icons"
-import { IconAction } from "@/components/icon-action"
+import {
+  ArrowUpRight,
+  ChevronRight,
+  Copy,
+  Cross,
+  Crosshair,
+  Plus,
+  RotateCounterClockwise,
+} from "@/components/icons"
+import { IconAction, rowReveal } from "@/components/icon-action"
+import { KEYCAP } from "@/components/command-search/keycaps"
 import { WireHost } from "@/components/deploy/wire"
+import { Meter, utilisationTone } from "@/components/meter"
+import { ProductGlyph, platformProduct } from "@/components/product-logo"
 import { Status, StatusDot } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { useMetrics } from "@/hooks/use-metrics"
-import { duration, plural } from "@/lib/format"
+import { copyText } from "@/lib/clipboard"
+import { duration, percent } from "@/lib/format"
 import { BRANCHES, itemIndex, kindOf, relatedTo, shelfId, type KindDef } from "@/lib/server-map"
 import type { MapItem, ServerMap } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { VIA_LABEL } from "@/components/map/edges"
 import { ItemMark, KIND_GLYPH, TONE_DOT } from "@/components/map/marks"
 
+type Point = (id: string | null) => void
+
 /**
- * What the chosen box says about itself, in words: the canvas draws a link
- * as a line, the inspector says what it is and opens the other end. With
- * nothing chosen it is the server's own account of itself — what it runs and
- * how much of each.
+ * What the chosen box says about itself. The canvas draws a link as a line;
+ * the inspector names it and opens the other end.
  *
- * It is the ER diagram's inspector in shape (a column of the workbench, a
- * hairline from the canvas, the lower part of the frame on a narrow window),
- * and every row in it is a way somewhere: a link opens the other end on the
- * map, a thing's verb opens its page.
+ * Every view has one shape, so the panel reads the same whatever is chosen:
+ * a head naming what kind of thing this is; the thing itself — its mark, its
+ * name, its state — with what can be done to it right under the name, where
+ * the eye already is; then its sections, each a heading over a hairline. A
+ * row in any of them is a way somewhere, and pointing at it rings its box on
+ * the canvas, so the list and the picture are read together. With nothing
+ * chosen it is the server's own account: how hard it is working now, and
+ * what is on it, branch by branch.
+ *
+ * It is the ER diagram's inspector in place (a column of the workbench, a
+ * hairline from the canvas, the lower part of the frame on a narrow window).
  */
 export function MapInspector({
   map,
   kinds,
   selected,
   onChoose,
+  onHover,
+  onFrame,
   onClose,
   onReturn,
   placed,
@@ -40,7 +62,12 @@ export function MapInspector({
   map: ServerMap
   kinds: KindDef[]
   selected: string | null
+  /** Choose a thing or a shelf, bringing it into view. */
   onChoose: (id: string) => void
+  /** Point at a box from a row: ring it on the canvas. */
+  onHover: Point
+  /** Bring the chosen box into view with what it is wired to. */
+  onFrame: (id: string) => void
   onClose: () => void
   onReturn: (id: string) => void
   placed: (id: string) => boolean
@@ -50,52 +77,192 @@ export function MapInspector({
 }) {
   const found = selected ? itemIndex(map).get(selected) : undefined
   const shelf = selected?.startsWith("shelf:") ? kindOf(selected.slice(6)) : undefined
+  const head = found ? kindOf(found.kind) : shelf
+  const HeadGlyph = head ? KIND_GLYPH[head.key] : undefined
   return (
     <aside
       aria-label="Inspector"
       className="flex min-h-0 min-w-0 flex-col border-hairline max-lg:border-t lg:border-l"
     >
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-hairline px-3">
-        <span className="eyebrow">
-          {found ? kindOf(found.kind)?.label : shelf ? "Shelf" : "This server"}
-        </span>
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline pr-2 pl-4">
+        {HeadGlyph && <HeadGlyph aria-hidden className="size-3.5 text-muted-foreground" />}
+        <span className="eyebrow">{found ? head?.label : shelf ? "Shelf" : "This server"}</span>
         <span className="flex-1" />
         <IconAction label="Close the inspector (I)" className="size-7" onClick={onClose}>
           <Cross />
         </IconAction>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+
+      {/* Keyed by what is shown, so each choice arrives rather than morphs. */}
+      <div key={selected ?? "server"} className="min-h-0 flex-1 animate-rise overflow-y-auto">
         {found ? (
-          <ItemInspector
+          <ItemView
             map={map}
             item={found.item}
             kind={found.kind}
             onChoose={onChoose}
+            onHover={onHover}
+            onFrame={onFrame}
             placed={placed(found.item.id)}
             onReturn={() => onReturn(found.item.id)}
           />
         ) : shelf ? (
-          <ShelfInspector
+          <ShelfView
             map={map}
             kind={shelf}
             onChoose={onChoose}
+            onHover={onHover}
             onAdd={onAdd}
             canAdd={canAdd(shelf)}
             folded={folded(shelfId(shelf.key))}
           />
         ) : (
-          <ServerInspector map={map} kinds={kinds} />
+          <ServerView map={map} kinds={kinds} onChoose={onChoose} onHover={onHover} />
         )}
+      </div>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-hairline px-4 py-2.5 text-hint text-muted-foreground max-lg:hidden">
+        <Key cap="/">Find</Key>
+        <Key cap="F">Fit</Key>
+        <Key cap="I">Panel</Key>
+        <Key cap="Esc">Let go</Key>
+        <Key cap="Alt">Drag one box</Key>
       </div>
     </aside>
   )
 }
 
-function ItemInspector({
+function Key({ cap, children }: { cap: string; children: React.ReactNode }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <kbd className={KEYCAP}>{cap}</kbd>
+      {children}
+    </span>
+  )
+}
+
+/** The thing itself: its mark, its name, its state, and what can be done to it. */
+function Identity({
+  mark,
+  title,
+  line,
+  actions,
+}: {
+  mark: React.ReactNode
+  title: React.ReactNode
+  line: React.ReactNode
+  actions?: React.ReactNode
+}) {
+  return (
+    <div className="space-y-4 p-4">
+      <div className="flex min-w-0 items-start gap-3">
+        {mark}
+        <div className="min-w-0 flex-1 pt-0.5">
+          <h2 className="text-title leading-snug font-semibold break-words">{title}</h2>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-hint text-muted-foreground">
+            {line}
+          </div>
+        </div>
+      </div>
+      {actions && <div className="flex items-center gap-1.5">{actions}</div>}
+    </div>
+  )
+}
+
+function Section({
+  title,
+  count,
+  children,
+}: {
+  title: string
+  count?: number
+  children: React.ReactNode
+}) {
+  return (
+    <section className="border-t border-hairline px-4 py-4">
+      <h3 className="mb-2.5 flex items-center gap-2">
+        <span className="eyebrow">{title}</span>
+        {count !== undefined && (
+          <span className="numeric text-hint text-muted-foreground">{count}</span>
+        )}
+      </h3>
+      {children}
+    </section>
+  )
+}
+
+/** Label and value, the facts a box's own page leads with. */
+function Facts({ facts }: { facts: { label: string; value: string }[] }) {
+  return (
+    <dl className="grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)] gap-x-3 gap-y-2 text-body">
+      {facts.map((fact) => (
+        <div key={fact.label} className="contents">
+          <dt className="truncate text-muted-foreground">{fact.label}</dt>
+          <dd className="min-w-0 break-words">{fact.value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+/**
+ * A row that is a way to another box: pressing it chooses that box,
+ * pointing at it rings the box on the canvas.
+ */
+function BoxRow({
+  id,
+  mark,
+  title,
+  line,
+  trailing,
+  onChoose,
+  onHover,
+}: {
+  id: string
+  mark: React.ReactNode
+  title: React.ReactNode
+  line?: React.ReactNode
+  trailing?: React.ReactNode
+  onChoose: (id: string) => void
+  onHover: Point
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        className="group/row flex w-full min-w-0 items-center gap-3 rounded-lg px-2 py-1.5 text-left focus-ring transition-colors hover:bg-row-hover"
+        onClick={() => onChoose(id)}
+        onMouseEnter={() => onHover(id)}
+        onMouseLeave={() => onHover(null)}
+        onFocus={() => onHover(id)}
+        onBlur={() => onHover(null)}
+      >
+        {mark}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-body font-medium">{title}</span>
+          {line && (
+            <span className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
+              {line}
+            </span>
+          )}
+        </span>
+        {trailing}
+        <ChevronRight
+          aria-hidden
+          className={cn("size-3.5 shrink-0 text-muted-foreground", rowReveal("row"))}
+        />
+      </button>
+    </li>
+  )
+}
+
+function ItemView({
   map,
   item,
   kind,
   onChoose,
+  onHover,
+  onFrame,
   placed,
   onReturn,
 }: {
@@ -103,67 +270,106 @@ function ItemInspector({
   item: MapItem
   kind: string
   onChoose: (id: string) => void
+  onHover: Point
+  onFrame: (id: string) => void
   placed: boolean
   onReturn: () => void
 }) {
+  const def = kindOf(kind)
   const related = relatedTo(map, item.id)
+  const facts = item.facts?.length
+    ? item.facts
+    : item.detail
+      ? [{ label: "About", value: item.detail }]
+      : []
   return (
-    <div className="animate-rise space-y-5 p-3">
-      <div className="flex min-w-0 items-start gap-3">
-        <ItemMark item={item} kind={kind} className="size-10" />
-        <div className="min-w-0 flex-1 space-y-1">
-          <div className="text-title font-semibold break-words">{item.name}</div>
-          <Status tone={TONE_DOT[item.tone]} label={item.state} />
-        </div>
-      </div>
-      {item.detail && <p className="text-body break-words text-muted-foreground">{item.detail}</p>}
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" asChild>
-          <Link href={item.href}>
-            Open
-            <ArrowUpRight />
-          </Link>
-        </Button>
-        {placed && (
-          <Button size="sm" variant="outline" onClick={onReturn}>
-            <RotateCounterClockwise />
-            Back on its shelf
-          </Button>
-        )}
-      </div>
+    <>
+      <Identity
+        mark={<ItemMark item={item} kind={kind} className="size-11" />}
+        title={item.name}
+        line={
+          <>
+            <Status tone={TONE_DOT[item.tone]} label={item.state} />
+            {def && (
+              <>
+                <span aria-hidden>·</span>
+                <span>{def.noun[0].toUpperCase() + def.noun.slice(1)}</span>
+              </>
+            )}
+          </>
+        }
+        actions={
+          <>
+            <Button size="sm" asChild className="min-w-0 flex-1">
+              <Link href={item.href}>
+                <span className="truncate">Open {def?.noun ?? "it"}</span>
+                <ArrowUpRight />
+              </Link>
+            </Button>
+            <IconAction
+              label="Show it on the map with what it is wired to"
+              variant="outline"
+              size="icon-sm"
+              onClick={() => onFrame(item.id)}
+            >
+              <Crosshair />
+            </IconAction>
+            {placed && (
+              <IconAction
+                label="Put it back on its shelf"
+                variant="outline"
+                size="icon-sm"
+                onClick={onReturn}
+              >
+                <RotateCounterClockwise />
+              </IconAction>
+            )}
+            <IconAction
+              label="Copy the name"
+              variant="outline"
+              size="icon-sm"
+              onClick={() => void copyText(item.name, "Name copied")}
+            >
+              <Copy />
+            </IconAction>
+          </>
+        }
+      />
 
-      <section className="space-y-2">
-        <h3 className="eyebrow">Wired to</h3>
+      {facts.length > 0 && (
+        <Section title="Details">
+          <Facts facts={facts} />
+        </Section>
+      )}
+
+      <Section title="Wired to" count={related.length}>
         {related.length === 0 ? (
           <p className="text-hint text-muted-foreground">
             The server knows of nothing on the map this is wired to.
           </p>
         ) : (
-          <ul className="-mx-1.5 space-y-0.5">
+          <ul className="-mx-2 space-y-0.5">
             {related.map((one) => (
-              <li key={one.item.id}>
-                <button
-                  type="button"
-                  className="flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left focus-ring transition-colors hover:bg-row-hover"
-                  onClick={() => onChoose(one.item.id)}
-                >
-                  <ItemMark item={one.item} kind={one.kind} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-body font-medium">{one.item.name}</span>
-                    <span className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
-                      <StatusDot tone={TONE_DOT[one.item.tone]} />
-                      <span className="truncate">
-                        {linkSentence(one.via, one.direction)} · {one.item.state}
-                      </span>
-                    </span>
-                  </span>
-                </button>
-              </li>
+              <BoxRow
+                key={one.item.id}
+                id={one.item.id}
+                mark={<ItemMark item={one.item} kind={one.kind} />}
+                title={one.item.name}
+                line={
+                  <>
+                    <StatusDot tone={TONE_DOT[one.item.tone]} />
+                    <span className="truncate">{one.item.state}</span>
+                  </>
+                }
+                trailing={<Tag className="shrink-0">{linkSentence(one.via, one.direction)}</Tag>}
+                onChoose={onChoose}
+                onHover={onHover}
+              />
             ))}
           </ul>
         )}
-      </section>
-    </div>
+      </Section>
+    </>
   )
 }
 
@@ -196,10 +402,13 @@ function linkSentence(via: string, direction: "to" | "from") {
   return forward
 }
 
-function ShelfInspector({
+const SHELF_ROWS = 60
+
+function ShelfView({
   map,
   kind,
   onChoose,
+  onHover,
   onAdd,
   canAdd,
   folded,
@@ -207,6 +416,7 @@ function ShelfInspector({
   map: ServerMap
   kind: KindDef
   onChoose: (id: string) => void
+  onHover: Point
   onAdd: (kind: KindDef) => void
   canAdd: boolean
   folded: boolean
@@ -217,140 +427,265 @@ function ShelfInspector({
   const total = reading ? Math.max(reading.total, items.length) : 0
   const down = items.filter((item) => item.tone === "danger").length
   return (
-    <div className="animate-rise space-y-4 p-3">
-      <div className="flex items-center gap-3">
-        <span className="flex size-10 items-center justify-center rounded-lg border border-hairline bg-background text-muted-foreground [&>svg]:size-5">
-          {Glyph && <Glyph aria-hidden />}
-        </span>
-        <div className="min-w-0">
-          <div className="text-title font-semibold">{kind.label}</div>
-          <div className="text-hint text-muted-foreground">
-            {kind.tool
-              ? kind.tool.detail
-              : reading?.state === "unread"
-                ? "Not read"
-                : plural(total, kind.noun, `${kind.noun}s`)}
-            {down > 0 && <span className="text-destructive"> · {down} down</span>}
-            {folded && " · folded"}
-          </div>
-        </div>
-      </div>
+    <>
+      <Identity
+        mark={
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-hairline bg-background text-muted-foreground [&>svg]:size-5">
+            {Glyph && <Glyph aria-hidden />}
+          </span>
+        }
+        title={kind.label}
+        line={
+          kind.tool ? (
+            <span>{kind.tool.detail}</span>
+          ) : reading?.state === "unread" ? (
+            <Status tone="warning" label="Not read" />
+          ) : (
+            <>
+              <span>
+                <span className="numeric text-foreground">{total.toLocaleString("en-US")}</span>{" "}
+                {total === 1 ? kind.noun : `${kind.noun}s`}
+              </span>
+              {down > 0 && (
+                <>
+                  <span aria-hidden>·</span>
+                  <Status tone="danger" label={`${down} down`} />
+                </>
+              )}
+              {folded && (
+                <>
+                  <span aria-hidden>·</span>
+                  <span>folded</span>
+                </>
+              )}
+            </>
+          )
+        }
+        actions={
+          <>
+            <Button size="sm" asChild className="min-w-0 flex-1">
+              <Link href={kind.href}>
+                <span className="truncate">Open {kind.label}</span>
+                <ArrowUpRight />
+              </Link>
+            </Button>
+            {kind.add && canAdd && (
+              <Button size="sm" variant="outline" onClick={() => onAdd(kind)}>
+                <Plus />
+                {kind.add.label}
+              </Button>
+            )}
+          </>
+        }
+      />
+
       {reading?.reason && (
         <p
           className={cn(
-            "text-hint",
+            "border-t border-hairline px-4 py-3 text-hint",
             reading.state === "unread" ? "text-warning" : "text-muted-foreground",
           )}
         >
           {reading.reason}
         </p>
       )}
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" asChild>
-          <Link href={kind.href}>
-            Open {kind.label}
-            <ArrowUpRight />
-          </Link>
-        </Button>
-        {kind.add && canAdd && (
-          <Button size="sm" variant="outline" onClick={() => onAdd(kind)}>
-            <Plus />
-            {kind.add.label}
-          </Button>
-        )}
-      </div>
+
       {items.length > 0 && (
-        <ul className="-mx-1.5 space-y-0.5">
-          {items.slice(0, 60).map((item) => (
-            <li key={item.id}>
-              <button
-                type="button"
-                className="flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left focus-ring transition-colors hover:bg-row-hover"
-                onClick={() => onChoose(item.id)}
-              >
-                <StatusDot tone={TONE_DOT[item.tone]} />
-                <span className="min-w-0 flex-1 truncate text-body">{item.name}</span>
-                <span className="shrink-0 text-hint text-muted-foreground">{item.state}</span>
-              </button>
-            </li>
-          ))}
-          {items.length > 60 && (
-            <li className="px-1.5 py-1 text-hint text-muted-foreground">
-              and {items.length - 60} more on its page
-            </li>
+        <Section title="On this shelf" count={total}>
+          <ul className="-mx-2 space-y-0.5">
+            {items.slice(0, SHELF_ROWS).map((item) => (
+              <BoxRow
+                key={item.id}
+                id={item.id}
+                mark={<ItemMark item={item} kind={kind.key} />}
+                title={item.name}
+                line={
+                  <>
+                    <StatusDot tone={TONE_DOT[item.tone]} />
+                    <span
+                      className={cn(
+                        "truncate",
+                        item.tone === "danger" && "text-destructive",
+                        item.tone === "warning" && "text-warning",
+                      )}
+                    >
+                      {item.state}
+                    </span>
+                  </>
+                }
+                onChoose={onChoose}
+                onHover={onHover}
+              />
+            ))}
+          </ul>
+          {total > SHELF_ROWS && (
+            <Link
+              href={kind.href}
+              className="mt-2 inline-flex items-center gap-1 text-hint text-muted-foreground focus-ring hover:text-foreground"
+            >
+              {(total - SHELF_ROWS).toLocaleString("en-US")} more on its page
+              <ArrowUpRight className="size-3" />
+            </Link>
           )}
-        </ul>
+        </Section>
       )}
-    </div>
+    </>
   )
 }
 
-function ServerInspector({ map, kinds }: { map: ServerMap; kinds: KindDef[] }) {
-  const { host, snapshot } = useMetrics()
+function ServerView({
+  map,
+  kinds,
+  onChoose,
+  onHover,
+}: {
+  map: ServerMap
+  kinds: KindDef[]
+  onChoose: (id: string) => void
+  onHover: Point
+}) {
+  const { host, snapshot, connection } = useMetrics()
+  const platform = platformProduct(host?.platform)
   const readings = new Map(map.kinds.map((k) => [k.key, k]))
+  const live = connection === "open"
   return (
-    <div className="animate-rise space-y-5 p-3">
-      <div className="flex items-center gap-3">
-        <WireHost size="md" />
-        <div className="min-w-0">
-          <div className="truncate text-title font-semibold">
-            {host?.hostname ?? map.host.hostname}
-          </div>
-          <div className="truncate text-hint text-muted-foreground">
-            {host ? `${host.platform} ${host.platformVersion} · ${host.kernelVersion}` : "—"}
-          </div>
+    <>
+      <Identity
+        mark={<WireHost size="md" />}
+        title={host?.hostname ?? map.host.hostname}
+        line={
+          host ? (
+            <>
+              {platform && <ProductGlyph id={platform} className="size-3" />}
+              <span>
+                {host.platform} {host.platformVersion}
+              </span>
+              <span aria-hidden>·</span>
+              <span className="truncate">{host.kernelVersion}</span>
+            </>
+          ) : (
+            <span>Reading the host…</span>
+          )
+        }
+      />
+
+      <Section title="Now">
+        <div className="space-y-3">
+          <Reading label="CPU" value={snapshot?.cpu.totalPercent} live={live} />
+          <Reading label="Memory" value={snapshot?.memory.usedPercent} live={live} />
         </div>
-      </div>
-      {snapshot && (
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-hint">
-          <Fact label="Up">{duration(snapshot.uptimeSeconds)}</Fact>
-          <Fact label="Load">{snapshot.cpu.loadAvg1.toFixed(2)}</Fact>
-          <Fact label="Cores">{snapshot.cpu.cores}</Fact>
-          <Fact label="Processes">{snapshot.procs.total}</Fact>
+        <dl className="mt-4 grid grid-cols-4 overflow-hidden rounded-lg border border-hairline">
+          <Cell label="Up">{snapshot ? duration(snapshot.uptimeSeconds) : "—"}</Cell>
+          <Cell label="Load">{snapshot ? snapshot.cpu.loadAvg1.toFixed(2) : "—"}</Cell>
+          <Cell label="Cores">{snapshot?.cpu.cores ?? host?.cpuCores ?? "—"}</Cell>
+          <Cell label="Tasks">{snapshot?.procs.total ?? host?.processes ?? "—"}</Cell>
         </dl>
-      )}
-      <p className="text-hint text-muted-foreground">
-        Choose a box to see what it is wired to. Drag a branch to move it with everything on it, or
-        hold Alt to move one box alone.
-      </p>
-      {BRANCHES.map((branch) => {
-        const here = kinds.filter((kind) => kind.branch === branch.key && !kind.tool)
-        if (here.length === 0) return null
-        return (
-          <section key={branch.key} className="space-y-1.5">
-            <h3 className="eyebrow">{branch.label}</h3>
-            <ul className="space-y-1">
-              {here.map((kind) => {
-                const reading = readings.get(kind.key)
-                const total = reading ? Math.max(reading.total, reading.items.length) : 0
-                const down = reading?.items.filter((item) => item.tone === "danger").length ?? 0
-                return (
-                  <li key={kind.key} className="flex items-center gap-2 text-body">
-                    <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                      {kind.label}
-                    </span>
-                    {down > 0 && (
-                      <span className="numeric text-hint text-destructive">{down} down</span>
-                    )}
-                    <span className="numeric">
-                      {reading?.state === "unread" ? "—" : total.toLocaleString("en-US")}
-                    </span>
-                  </li>
-                )
-              })}
-            </ul>
-          </section>
-        )
-      })}
+      </Section>
+
+      <Section title="On this server">
+        <div className="space-y-4">
+          {BRANCHES.map((branch) => {
+            const here = kinds.filter((kind) => kind.branch === branch.key && !kind.tool)
+            if (here.length === 0) return null
+            const things = here.reduce((sum, kind) => {
+              const reading = readings.get(kind.key)
+              return sum + (reading ? Math.max(reading.total, reading.items.length) : 0)
+            }, 0)
+            return (
+              <div key={branch.key}>
+                {/* A branch heads its kinds in weight rather than with a glyph:
+                    the first kind's glyph beside it was the same mark twice. */}
+                <div className="mb-1 flex items-baseline justify-between px-0.5">
+                  <span className="text-xs font-semibold text-foreground">{branch.label}</span>
+                  <span className="numeric text-hint text-muted-foreground">
+                    {things.toLocaleString("en-US")}
+                  </span>
+                </div>
+                <ul className="-mx-2">
+                  {here.map((kind) => (
+                    <KindRow
+                      key={kind.key}
+                      kind={kind}
+                      reading={readings.get(kind.key)}
+                      onChoose={onChoose}
+                      onHover={onHover}
+                    />
+                  ))}
+                </ul>
+              </div>
+            )
+          })}
+        </div>
+      </Section>
+    </>
+  )
+}
+
+/** One kind on the server: how many, how many down, and its shelf a press away. */
+function KindRow({
+  kind,
+  reading,
+  onChoose,
+  onHover,
+}: {
+  kind: KindDef
+  reading?: ServerMap["kinds"][number]
+  onChoose: (id: string) => void
+  onHover: Point
+}) {
+  const total = reading ? Math.max(reading.total, reading.items.length) : 0
+  const down = reading?.items.filter((item) => item.tone === "danger").length ?? 0
+  const Glyph = KIND_GLYPH[kind.key]
+  const id = shelfId(kind.key)
+  return (
+    <li>
+      <button
+        type="button"
+        className="group/row flex w-full items-center gap-2.5 rounded-md px-2 py-1 text-left text-body focus-ring transition-colors hover:bg-row-hover"
+        onClick={() => onChoose(id)}
+        onMouseEnter={() => onHover(id)}
+        onMouseLeave={() => onHover(null)}
+        onFocus={() => onHover(id)}
+        onBlur={() => onHover(null)}
+      >
+        {Glyph && <Glyph aria-hidden className="size-3.5 text-muted-foreground" />}
+        <span className="min-w-0 flex-1 truncate">{kind.label}</span>
+        {down > 0 && (
+          <span className="flex items-center gap-1 text-hint text-destructive">
+            <StatusDot tone="danger" />
+            <span className="numeric">{down}</span>
+          </span>
+        )}
+        <span className="numeric w-9 text-right text-muted-foreground">
+          {reading?.state === "unread" ? "—" : total.toLocaleString("en-US")}
+        </span>
+      </button>
+    </li>
+  )
+}
+
+function Reading({ label, value, live }: { label: string; value?: number; live: boolean }) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between text-hint">
+        <span className="flex items-center gap-1.5 text-muted-foreground">
+          {live && <StatusDot tone="running" live />}
+          {label}
+        </span>
+        <span className="numeric text-body text-foreground">
+          {value === undefined ? "—" : percent(value, 0)}
+        </span>
+      </div>
+      <Meter value={value ?? 0} tone={utilisationTone(value ?? 0)} size="thin" />
     </div>
   )
 }
 
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+function Cell({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="min-w-0">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="numeric truncate text-foreground">{children}</dd>
+    <div className="min-w-0 border-l border-hairline px-2.5 py-2 first:border-l-0">
+      <dt className="eyebrow truncate">{label}</dt>
+      <dd className="numeric mt-0.5 truncate text-body">{children}</dd>
     </div>
   )
 }
