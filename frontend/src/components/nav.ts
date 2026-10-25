@@ -43,6 +43,7 @@ import {
   SignIn,
   Terminal,
   TerminalWindow,
+  ServerMap,
   Topology,
   UserSettings,
   Users,
@@ -128,6 +129,10 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
     label: "Server",
     items: [
       { title: "Overview", href: "/", icon: Home },
+      // Everything on the server as one canvas, the server in the middle.
+      // Beside the Overview rather than in a section: it is about every
+      // section at once, and like the Overview it cannot be hidden.
+      { title: "Map", href: "/map", icon: ServerMap },
       {
         title: "Monitoring",
         icon: Monitoring,

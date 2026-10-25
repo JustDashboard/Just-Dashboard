@@ -88,9 +88,10 @@ exactly one purpose or to the base, so every card turns on something no other ca
 is Deployments and Proxy & TLS, Run databases is Databases and Backups, Work on the server is the six
 Workspace tools, Manage containers is Docker, Secure the server is Security and Route the network is
 Network. Until this was a partition, Manage containers brought nothing the other purposes had not,
-and Route the network and Secure the server brought the same two rows. Overview, Monitoring,
-Settings and the account cannot be hidden: a rail without them has no way to say how the machine is,
-or back to the switch. Packages, System users and the audit log can be, but every answer keeps them
+and Route the network and Secure the server brought the same two rows. Overview, the server map,
+Monitoring, Settings and the account cannot be hidden: a rail without them has no way to say how the
+machine is, or back to the switch — and the map is about every section at once, so no answer is
+without it. Packages, System users and the audit log can be, but every answer keeps them
 (`BASE_SECTIONS`): they are how the machine itself is changed and checked, whatever it is for.
 
 What a hidden section loses is exactly three things, each read through `useHiddenSections()`:
@@ -154,7 +155,7 @@ purpose is chosen when every section of it the role is offered is shown (`purpos
 chosen one takes its sections out and pressing any other brings them back whole (`pressPurpose`).
 Purposes share no section, so a press never moves another card. Beside it, *Sidebar* is the rail itself (`SidebarEditor`), walked
 from the same registry in its groups and order with a switch on every row the role may hide;
-Overview, Monitoring and Settings say *Always* instead, and Server configuration heads the three
+Overview, Map, Monitoring and Settings say *Always* instead, and Server configuration heads the three
 sections it holds. A list of sections beside a separate picture of the rail was the same list twice.
 Both edit one draft, and an edit raises the settings pages' floating Save (`SaveBarProvider`,
 design system §7) rather than a disabled button sitting under the page. Accounts that predate the

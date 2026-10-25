@@ -244,6 +244,14 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   resolving a name the caller chose is traffic the caller directs, and the reverse proxy's own DNS check,
   which it reuses, is kept at that capability. For anyone else the lookup never runs and the field is
   absent, never `false`.
+- **The server map.** `GET /map` is one read open to every account that summarises many list routes,
+  so it answers each account with what those routes would: the shells only for `terminal`; the
+  computers, the dashboard's accounts, the Linux accounts, the alert rules and the VPN only for
+  `system.admin` — neither read for nor sent to anybody else — and the API keys the account's own
+  unless it holds `system.admin`, as `GET /tokens` decides (`filterServerMap`). It sends no value
+  those routes keep back (environment, DSNs, channel URLs). `GET`/`PUT`/`DELETE /map/layout` are the
+  account's own arrangement behind `RequireSession`, open to every role and audited
+  (`map.layout.save`, `map.layout.reset`). See [the server map](../server-map.md#who-sees-what).
 
 #### Redis: one route, any command
 
