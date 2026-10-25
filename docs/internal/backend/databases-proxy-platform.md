@@ -1907,7 +1907,8 @@ the page.
 ### Alerts: told when a server or its backups go wrong
 
 A database's **Alerts** page (`/databases/{id}/alerts`, in the rail under Operate) holds rules that
-tell the deployments' notification channels — webhook, Discord, Slack, Telegram and e-mail, through
+tell the deployments' notification channels — webhook, Discord, Slack, Teams, Mattermost, Telegram,
+ntfy, Gotify, Pushover and e-mail, through
 `deploy.AutomationStore.DeliverNotification`, so a channel is configured once on
 `/deploy/notifications` and nowhere else — when something is wrong with a database, and when it is
 over. There is no second delivery system and no second poll: the server kinds are judged on the

@@ -2024,6 +2024,8 @@ func (s *AutomationStore) deliverProvider(ctx context.Context, client *http.Clie
 	message := renderNotification(envelope)
 	var target string
 	var body []byte
+	// A credential the provider takes as a header rather than in the URL.
+	headers := map[string]string{}
 	switch kind {
 	case NotificationKindDiscord:
 		target, body = cfg.WebhookURL, discordPayload(message, envelope.SentAt)
@@ -2032,6 +2034,27 @@ func (s *AutomationStore) deliverProvider(ctx context.Context, client *http.Clie
 	case NotificationKindTelegram:
 		target = "https://api.telegram.org/bot" + cfg.BotToken + "/sendMessage"
 		body = telegramPayload(cfg.ChatID, message)
+	case NotificationKindMattermost:
+		target, body = cfg.WebhookURL, mattermostPayload(message)
+	case NotificationKindTeams:
+		target, body = cfg.WebhookURL, teamsPayload(message)
+	case NotificationKindNtfy:
+		if cfg.ServerURL != "" {
+			target = cfg.ServerURL + "/"
+		}
+		body = ntfyPayload(cfg.Topic, message)
+		if cfg.Token != "" {
+			headers["Authorization"] = "Bearer " + cfg.Token
+		}
+	case NotificationKindGotify:
+		if cfg.ServerURL != "" {
+			target = cfg.ServerURL + "/message"
+		}
+		body = gotifyPayload(message)
+		headers["X-Gotify-Key"] = cfg.Token
+	case NotificationKindPushover:
+		target = "https://api.pushover.net/1/messages.json"
+		body = pushoverPayload(cfg, message, envelope.SentAt)
 	default:
 		return "unsupported", invalidNotification("unknown channel kind %q", kind)
 	}
@@ -2044,6 +2067,9 @@ func (s *AutomationStore) deliverProvider(ctx context.Context, client *http.Clie
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "just-dashboard-notifications")
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
 	return postNotification(client, req)
 }
 

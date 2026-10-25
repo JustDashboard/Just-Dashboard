@@ -322,10 +322,12 @@ to the contribution terms above, including the additional licence grant to the p
   webhook channel, an nginx image deployment with resource limits, a busybox image that exits before it
   listens, and a restart. It needs Docker and Go and touches only the containers it creates; run it after
   changes to the engine, run observers, notifications, runtime limits or health-gate diagnostics.
-- Notification channels (Discord, Slack, Telegram, e-mail, signed webhook) and GitHub commit statuses are
-  covered by component tests with fake providers; a real provider or GitHub post is verified manually
-  through **Send test** and a deployment of a GitHub-sourced project, and the pull request must say which
-  providers were exercised.
+- Notification channels (Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,
+  e-mail, signed webhook) and GitHub commit statuses are covered by component tests with fake providers.
+  `TestLivePushServersReceiveARunFailure` (`JD_DEPLOY_LIVE=1`, Docker) runs real ntfy, Gotify and
+  Mattermost servers on loopback and reads the delivered message back from each; the hosted providers
+  and a GitHub post are verified manually through **Send test** and a deployment of a GitHub-sourced
+  project, and the pull request must say which providers were exercised.
 - Changes to deployment variables, feature links, backup gates or managed-resource lifecycle also run
   `go test -race ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store -count=1`;
   the browser gate covers the project overview, build transcript and focused settings, including

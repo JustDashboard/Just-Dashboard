@@ -29,11 +29,33 @@ rows are `webhook` channels whose URL is their display target.
 | `slack` | Incoming webhook URL | `https://hooks.slack.com/services/…` | `text` plus mrkdwn blocks |
 | `telegram` | Bot token + chat id | token `^\d{5,}:[A-Za-z0-9_-]{30,}$`, chat `-?\d+` or `@name` | `sendMessage` with HTML parse mode, previews disabled |
 | `email` | SMTP host/port/security, username/password, from, up to 20 recipients | hostname or IP, port 1–65535, `starttls`/`tls`/`none`; a username requires TLS; RFC 5322 addresses | Plain-text mail, RFC 2047 subject, 15-second dial and command deadline |
+| `teams` | Workflows webhook URL (its `sig` query parameter authorizes the post) | `https`, host under `.logic.azure.com` or `.powerplatform.com`, `/workflows/` in the path, a `sig` parameter; an Office 365 connector (`*.webhook.office.com`, retired by Microsoft in May 2026) is refused with that reason | `{"type":"message"}` with one Adaptive Card 1.4: title coloured `attention`/`good`, summary, a FactSet of the fields, an `Action.OpenUrl` to the run |
+| `mattermost` | Incoming webhook URL | `…/hooks/<20–64 letters or digits>` (under a subpath too), `https`, or plain `http` on a loopback address; no user info | One Slack-style attachment: outcome colour bar, title linked to the run, summary and fields with Markdown backslash-escaped |
+| `ntfy` | Server URL (default `https://ntfy.sh`), topic, optional access token | topic `^[-_A-Za-z0-9]{1,64}$`, token `^tk_[A-Za-z0-9]{29}$`; the server rule below | JSON publish to the server root: title, plain-text fields, priority 4 for bad news and 3 otherwise, `click` and one `view` action to the run, message kept under 4000 bytes; token as `Authorization: Bearer` |
+| `gotify` | Server URL, application token | token `^[A-Za-z0-9._-]{10,64}$`; the server rule below, with a token always | `POST <server>/message` with `X-Gotify-Key`; priority 8 for bad news and 5 otherwise; the run link in the text and as the `client::notification` click |
+| `pushover` | Application token, user or group key | both `^[A-Za-z0-9]{30}$`, as Pushover documents them | `POST https://api.pushover.net/1/messages.json` as JSON; title ≤ 250 and message ≤ 1024 characters, `url`/`url_title` to the run, priority 1 (sounds through quiet hours) for bad news and 0 otherwise |
 
-Webhook URLs for Discord and Slack are credentials: the `url` column stores a masked form (host and
-every path segment except the last) and the sealed configuration holds the real one. List and
-update responses never include a credential. Editing a channel with a blank credential field keeps
-the stored value; a channel's kind cannot change after creation.
+Webhook URLs for Discord, Slack and Mattermost are credentials: the `url` column stores a masked form
+(host and every path segment except the last) and the sealed configuration holds the real one. A Teams
+URL's credential is its query, and its target is only `https://<host>/workflows/••••`. An ntfy
+channel's target is `<server>/••••`: on a public server whoever knows the topic reads every message, so
+the topic is held like a token. A Gotify channel shows its server, and a Pushover channel
+`Pushover user` and the user key's first three characters. List and update responses never include a
+credential. Editing a channel with a blank credential field keeps the stored value — for ntfy, Gotify
+and Pushover every field is kept that way, the server URL included — and a channel's kind cannot change
+after creation. A kept token cannot be cleared by blanking it; a channel that should stop sending one is
+made again.
+
+"Bad news" is a message rendered red: a failed run or an alert firing (`notificationMessage.urgent`).
+The push services raise its priority so a phone makes noise for it and for nothing else.
+
+The ntfy and Gotify server URL (`notificationServer`) is an `http` or `https` address with a host and
+nothing else — no user info, query or fragment, since it is shown as the target — returned without a
+trailing slash. Whenever a token goes with it (always for Gotify, when one is set for ntfy) it must be
+`https`, unless its host is a loopback address (`localhost`, `127.0.0.0/8`, `::1`), parsed rather than
+matched by prefix: the backend shares the host's network, so a server published on `127.0.0.1` is
+reached without crossing a network. This is the rule SMTP sign-in is held to. Mattermost's webhook URL
+takes the same loopback exception.
 
 Two more events reach a channel without being selected on it: `traffic.firing` and `traffic.recovered`, sent by a traffic alert rule to the channels the rule names (see [`request-observability.md`](request-observability.md)); a webhook receives the envelope with an `alert` block, the providers a rendered sentence with the reading and the limit. Its `url` opens the project's Logs page on the requests around the moment the rule changed state (`?view=requests&moment=`), not on whatever the last hour holds when it is read.
 
@@ -149,12 +171,20 @@ is excluded from the policy decision key, so toggling it cannot invalidate cache
 
 ## Verification
 
-- `notifications_test.go`: validation matrix, legacy event alias, rendering for every outcome,
+- `notifications_test.go`: validation matrix (every kind, including the cleartext-token and
+  loopback rules, `127.example.test` not being loopback, and Teams' retired connector), every push
+  setting kept on edit, legacy event alias, rendering for every outcome,
   a TLS grade alert's firing and recovery titles, a database alert's title, fields and e-mail link,
   a host alert's title, subject and server fields (the server named once) and e-mail link,
   dispatcher delivery of a failed run with deduplication, disabled channel and start-only
-  selection, Discord/Slack/Telegram payload shapes through a rewriting transport, e-mail through a
-  captured mailer, credential masking in listings, and the notify step's new contract.
+  selection, Discord/Slack/Telegram and ntfy/Gotify/Pushover/Mattermost/Teams payload shapes and
+  credential headers through a rewriting transport, push priorities only for bad news, Pushover's and
+  ntfy's length limits, e-mail through a captured mailer, credential masking in listings, and the
+  notify step's new contract.
+- `notifications_live_test.go` (`JD_DEPLOY_LIVE=1`, Docker): real ntfy (anonymous publishing
+  denied, so the channel without a token is refused with `4xx`), Gotify and Mattermost servers on
+  loopback each receive a failed run through `DeliverNotification`'s default client, read back from
+  the server's own API — the title, the reason, the priority and the run link.
 - `run_observer_test.go`: observers hear about failed, successful and queued-cancelled runs; a slow
   observer changes nothing about the run.
 - `automation_readings_test.go`: each channel carries its newest attempt and last fourteen outcomes
@@ -163,7 +193,10 @@ is excluded from the policy decision key, so toggling it cannot invalidate cache
 - `github_status_test.go`: pending/failure/success posting with deduplication, policy opt-out,
   restart and foreign-remote suppression, remote parsing, and the decision key staying stable.
 - Browser (`deploy-projects.spec.ts`, `deploy-notifications.spec.ts`, `deploy-settings-a.spec.ts`):
-  a Discord channel's creation, pause/resume, test delivery, delivery history and removal; each
+  a Discord channel's creation, pause/resume, test delivery, delivery history and removal; the
+  picker's ten kinds, an ntfy channel's generated topic and its refusal to send a token over plain
+  http, a Teams URL named as a retired connector, and a Pushover edit keeping its keys until
+  *Replace delivery settings*; each
   channel saying how its last message went on one line with its verbs on the card's middle, the
   recent messages and the last day's counts over them, and a channel's sheet reading every attempt; an e-mail edit that
   waits for its host, sender and recipients, and a Discord edit that keeps its webhook hidden until
@@ -172,8 +205,10 @@ is excluded from the policy decision key, so toggling it cannot invalidate cache
 - `notifications_reliability_test.go`: eight concurrent observers deliver exactly once; a failed
   delivery schedules a retry, a repeated observer call cannot jump the backoff, the sweeper re-sends
   when due and stops after the third attempt; Slack escaping and Discord length caps.
-- Not verified here: a real Discord, Slack, Telegram or SMTP endpoint, and a real GitHub status
-  post. Both depend on external credentials; the test endpoint exercises the same code path.
+- Not verified here: a real Discord, Slack, Teams, Telegram, Pushover or SMTP endpoint, and a real
+  GitHub status post. They depend on external accounts; the test endpoint exercises the same code
+  path. The Teams card follows the Workflows template's documented shape, which an operator's own
+  flow can change.
 
 ## Delivery reservation and retries
 

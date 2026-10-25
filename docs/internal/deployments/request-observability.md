@@ -279,7 +279,7 @@ changes nothing. The state, the reading and when it entered the state are writte
 can say "firing since 03:12, 4.2%" without waiting a minute.
 
 Delivery is the notification channels' own: the two events are rendered by `renderTrafficAlert` into
-the same provider payloads a run's outcome takes (Discord, Slack, Telegram, e-mail; a webhook gets the
+the same provider payloads a run's outcome takes (every chat, push and e-mail kind; a webhook gets the
 envelope with an `alert` block verbatim). The rule's channels, or every enabled channel when it names
 none. "Send test" delivers the rule as if it had just fired, at twice its limit, with `[test]` in the
 title so nobody wakes up for it. The message's link opens the Logs page on the requests around the

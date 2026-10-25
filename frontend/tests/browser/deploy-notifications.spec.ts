@@ -259,3 +259,124 @@ test("each channel says how its last message went, and its sheet reads every att
   await expect(sheet.getByText(/attempt 2 · server error/)).toBeVisible()
   await expect(sheet.getByText("Test message", { exact: true })).toBeVisible()
 })
+
+/**
+ * The push services ask for a server and a secret rather than one webhook
+ * URL, and each field is read against the server's own rule before the press.
+ */
+test("an ntfy channel takes a generated topic and will not send a token over plain http", async ({
+  page,
+}) => {
+  await mockProject(page)
+  const writes: Record<string, unknown>[] = []
+  await page.route("**/api/v1/deploy/notifications", async (route) => {
+    if (route.request().method() === "GET") return json(route, [])
+    if (route.request().method() !== "POST") return route.fallback()
+    const input = route.request().postDataJSON() as Record<string, unknown>
+    writes.push(input)
+    await json(route, {
+      channel: { id: 95, ...input, config: undefined, url: "", target: "https://ntfy.lan/••••" },
+      secret: "",
+    })
+  })
+
+  await page.goto("/deploy/notifications")
+  await page.getByRole("button", { name: "Add channel", exact: true }).click()
+  const kinds = page.getByRole("group", { name: "Deliver to" }).getByRole("button")
+  await expect(kinds).toHaveCount(10)
+  await page
+    .getByRole("group", { name: "Deliver to" })
+    .getByRole("button", { name: /^ntfy/ })
+    .click()
+
+  const dialog = page.getByRole("dialog")
+  // The public server is written out, so it is seen to be the public one, and
+  // the topic says what it guards there.
+  await expect(page.locator("#notification-server")).toHaveValue("https://ntfy.sh")
+  await expect(dialog.getByText(/anyone who knows the topic reads every message/)).toBeVisible()
+  const save = dialog.getByRole("button", { name: "Add channel", exact: true })
+  await expect(save).toBeDisabled()
+  await page.getByRole("button", { name: "Generate a topic" }).click()
+  await expect(page.locator("#notification-topic")).toHaveValue(/^jd-[a-z0-9]{20}$/)
+  await expect(save).toBeEnabled()
+
+  await page.locator("#notification-server").fill("http://ntfy.lan")
+  await page.locator("#notification-token").fill(`tk_${"a".repeat(29)}`)
+  await expect(
+    dialog.getByText("A token is not sent over plain http", { exact: false }),
+  ).toBeVisible()
+  await expect(save).toBeDisabled()
+  await page.locator("#notification-server").fill("https://ntfy.lan")
+  await expect(save).toBeEnabled()
+  await save.click()
+  await expect(page.getByText("Notification channel created")).toBeVisible()
+
+  const body = writes.at(-1) as { kind: string; config: Record<string, unknown> }
+  expect(body.kind).toBe("ntfy")
+  expect(body.config.serverUrl).toBe("https://ntfy.lan")
+  expect(body.config.topic).toMatch(/^jd-[a-z0-9]{20}$/)
+  expect(body.config.token).toBe(`tk_${"a".repeat(29)}`)
+  expect(body.config.webhookUrl).toBeUndefined()
+})
+
+test("a Teams channel names a retired connector, and a Pushover edit keeps its keys until replaced", async ({
+  page,
+}) => {
+  await mockProject(page)
+  const channel = {
+    id: 96,
+    name: "Phone",
+    kind: "pushover",
+    url: "",
+    target: "Pushover user uQi••••",
+    events: [],
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await page.route("**/api/v1/deploy/notifications", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    await json(route, [channel])
+  })
+  const writes: Record<string, unknown>[] = []
+  await page.route("**/api/v1/deploy/notifications/96", async (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    writes.push(route.request().postDataJSON() as Record<string, unknown>)
+    await json(route, channel)
+  })
+
+  await page.goto("/deploy/notifications")
+  await page.getByRole("button", { name: "Add channel", exact: true }).click()
+  await page
+    .getByRole("group", { name: "Deliver to" })
+    .getByRole("button", { name: /^Microsoft Teams/ })
+    .click()
+  const dialog = page.getByRole("dialog")
+  const webhook = page.getByLabel("Teams Workflows webhook URL")
+  await webhook.fill("https://contoso.webhook.office.com/webhookb2/abc/IncomingWebhook/def/ghi")
+  await expect(dialog.getByText(/stopped delivering to in May 2026/)).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Add channel", exact: true })).toBeDisabled()
+  await webhook.fill(
+    "https://prod-12.westus.logic.azure.com:443/workflows/8a1f/triggers/manual/paths/invoke?api-version=2016-06-01&sig=abc",
+  )
+  await expect(dialog.getByText("Microsoft Teams webhook", { exact: true })).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Add channel", exact: true })).toBeEnabled()
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+
+  await page.getByRole("button", { name: "Actions for Phone" }).click()
+  await page.getByRole("menuitem", { name: "Edit channel" }).click()
+  // Both keys are kept when blank, so the stored reading stands in for them
+  // and nothing takes input until it is replaced.
+  await expect(dialog.getByText("Pushover user uQi••••")).toBeVisible()
+  await expect(page.getByLabel("User or group key")).toHaveCount(0)
+  await page.getByRole("button", { name: "Replace delivery settings" }).click()
+  await expect(page.getByLabel("User or group key")).toBeVisible()
+  await expect(dialog.getByText(/sounds through quiet hours/)).toBeVisible()
+  await page.getByLabel("Name", { exact: true }).fill("Phone renamed")
+  await dialog.getByRole("button", { name: "Save channel" }).click()
+  await expect(page.getByText("Notification channel saved")).toBeVisible()
+  const body = writes.at(-1) as { name: string; config: Record<string, unknown> }
+  expect(body.name).toBe("Phone renamed")
+  expect(body.config.token).toBeUndefined()
+  expect(body.config.userKey).toBeUndefined()
+})
