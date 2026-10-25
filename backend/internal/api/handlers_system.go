@@ -22,6 +22,8 @@ func (s *Server) mountSystemRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/metrics/events", s.handle(s.handleMetricsEvents))
 		r.Method(http.MethodGet, "/disk-usage", s.handle(s.handleDiskBreakdown))
 		r.Method(http.MethodGet, "/stream", s.handle(s.handleSystemStream))
+		// The host's alert rules; see mountHostAlertRoutes.
+		r.Route("/alerts", s.mountHostAlertRoutes)
 	})
 }
 

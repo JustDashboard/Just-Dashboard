@@ -2308,7 +2308,11 @@ The passes, in order. Each one is a diff you can review on its own.
    of them: a 12px inset and a 56px floor, the title over a hint-sized reason, and the verb a small
    outline button at the far end (under the words, never the tile, where the card is narrow), the
    amber edge rather than a filled button carrying that no certificate is a problem. The alerts
-   page's all-clear and firing cards take the same size.
+   page's all-clear and firing cards take the same size. The host's Alerts page under Metrics
+   (`/metrics/alerts`, 2026-10-25) is the same page over the machine's own readings — CPU, memory
+   and filesystems as their glyphs, containers as Docker, backups as an archive — and draws its
+   channels, all-clear, subject cards and history from the parts the two share
+   (`components/alerts/alert-parts.tsx`) rather than a second copy of them.
 
    Docker networks took the same exit on 2026-10-08, at the operator's request, because it was the
    still page of the section: a column of grey cards, each a name, a subnet and a count, with the

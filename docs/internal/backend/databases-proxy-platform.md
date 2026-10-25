@@ -1916,8 +1916,12 @@ and the backup kinds on the same pass from `backup_jobs` and `backup_runs`.
 
 - **Six kinds, stated per engine.** `alertKinds` (`dbx/alert_capabilities.go`, a list flag) is what a
   database of an engine can be watched for, and the create route refuses a rule for one database
-  whose engine lacks the kind. A server can be `down` (it did not answer the recorder; a SQL pool
-  whose snapshot was refused is pinged to tell a refusal from a server that went away), fill its
+  whose engine lacks the kind. The host's own `backup_failed` rule
+  ([Host alerts](observability-security.md#host-alerts-told-when-the-machine-itself-goes-wrong))
+  follows every backup job, files and volumes included, and leaves to these rules any job an enabled
+  one of them already follows, so a failed dump is told once. A server can be `down` (it did not
+  answer the recorder; a SQL pool whose snapshot was refused is pinged to tell a refusal from a
+  server that went away), fill its
   `disk`, run near its `connections` limit (the snapshot's sessions against `max_connections` less
   the superuser reserve, Redis `connected_clients` against `maxclients` — now recorded with the
   counters — and MongoDB `current` against `current + available`), and fall behind in
@@ -5626,8 +5630,10 @@ containers/volumes/networks.
   rule's state except mutes), `DELETE /proxy/alerts/rules/{id}`, `PUT /proxy/alerts/mutes {ruleId, subject,
   muted}`. The ordinary watched-check schedule still records a handshake and certificate; only an
   enabled grade rule runs the full grader. The operator chooses the minimum expected grade. The
-  rules are read and edited on their own page, `/proxy/alerts` (`components/proxy/alerts-page.tsx`),
-  and the overview's identity bar links there with the firing count from the same `GET /proxy/alerts`.
+  rules are read and edited on their own page, `/proxy/alerts` (`components/proxy/alerts-page.tsx`,
+  with the parts that do not know its kinds in `components/alerts/alert-parts.tsx`, which the host's
+  Alerts page shares), and the overview's identity bar links there with the firing count from the same
+  `GET /proxy/alerts`.
   `TestProxyAlertsRequireAdminAndTellEachTransitionOnce` covers the API gate, audit, firing, unreadable
   source, and recovery; `TestProxyAlertReadingsForRenewalAndServedCertificates` covers the two additional
   readings; `TestProxyAlertsCheckCurrentPinnedWatchEndpoints` and

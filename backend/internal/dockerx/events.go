@@ -353,6 +353,26 @@ func (e *EventLog) Status() (running bool, since time.Time, buffered int) {
 	return e.running, e.since, count
 }
 
+// Covers reports whether the buffer still holds everything the daemon said
+// from t until now: the stream has been followed since before t and the ring
+// has not overwritten anything that old. Only then is an event missing from
+// the buffer evidence that it did not happen. A reconnect after the daemon
+// restarted is not seen here; the containers it stopped are stopped again by
+// the restart itself.
+func (e *EventLog) Covers(t time.Time) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if !e.running || e.since.IsZero() || e.since.After(t) {
+		return false
+	}
+	if !e.filled {
+		return true
+	}
+	// The slot about to be written is the oldest one kept.
+	oldest := e.buffer[e.next].Time
+	return !oldest.After(t)
+}
+
 // Subscribe returns a channel of events as they arrive, and a function to stop.
 func (e *EventLog) Subscribe() (<-chan Event, func()) {
 	ch := make(chan Event, 64)

@@ -86,6 +86,95 @@ carries its project's id, so the Overview's activity row draws the project's own
 storage: a sample whose `uptime_seconds` dropped means the machine went down, which also catches
 restarts nobody initiated here. Works with `JD_METRICS_RETENTION=0`; only reboot markers go quiet.
 
+## Host alerts: told when the machine itself goes wrong
+
+The host's **Alerts** page (`/metrics/alerts`, under Monitoring beside Metrics, for administrators;
+Metrics' identity line links there with the firing count) holds rules that tell the deployments'
+notification channels — through `deploy.AutomationStore.DeliverNotification`, so a channel is set up
+once on `/deploy/notifications` — when the machine is in trouble, and when that is over. It is the
+proxy alerts' shape ([Proxy alerts](databases-proxy-platform.md#proxy)): rules, subjects, mutes and a
+bounded history, a picture of what is watched wired to the channels, and a test per channel and per
+rule. Source: `api/host_alerts.go` (rules, the pass, `stepHostAlert`, history), `api/host_alert_readings.go`
+(each kind's source and judge), `api/handlers_host_alerts.go` (routes); tables `host_alert_rules`,
+`host_alert_state`, `host_alert_events` in `store/schema_host_alerts.go`; the page is
+`components/metrics/alerts-page.tsx` over `lib/host-alerts.ts`, with the parts it shares with the
+proxy's page in `components/alerts/alert-parts.tsx`.
+
+- **Five kinds, a closed vocabulary** (`hostAlertSpecs`). `cpu_high` and `memory_high` take a line
+  (default 90%, 10–100) and a window (CPU 10 min, memory 5 — the OOM killer does not wait ten; 1–1440):
+  the **mean of the recorded samples** in `metric_samples` over the window, with its peak, so a spike
+  inside a quiet window is a high peak and not an alert (Netdata's stock CPU alarm averages ten minutes
+  the same way). A window the record does not cover yet — fewer than two samples, a newest sample older
+  than three intervals (at least two minutes), or a first sample later than the window's start plus
+  two intervals — is not judged. A firing message ends with the container that used the most over the
+  window from `metric_container_samples` ("1.8 cores on average", Docker counting a core as 100%, or
+  bytes for memory). `disk_filling` (default 90%, 10–99) reads the recorder's newest
+  `metric_mount_samples` batch and fires a mount on its space **or** its inodes, since a filesystem out
+  of inodes reports free space and refuses to create a file; a mount missing from the newest batch has
+  been unmounted and leaves. `container_down` (minutes 2, 1–1440) and `backup_failed` are below.
+- **One pass a minute** (`hostAlerts.Start` from `Server.Start`, clock, observer and deliverer fields
+  for tests); each source is read once a pass and only when an enabled rule needs it. CPU, memory and
+  disk are queries of what the recorder already keeps; with `JD_METRICS_RETENTION=0` those rules are
+  unjudged and say so.
+- **A container is down** when it is running with a health check reporting unhealthy, Docker restarted
+  it by its restart policy three times in ten minutes (a loop, counted from `RestartCount` across passes;
+  a deploy's or an operator's restart is not counted by Docker at all), it is `restarting`, or it
+  **stopped without being asked to**. The listing is `ListContainers(all)`, which inspects running
+  containers for health and restart count as the Docker page's listing does; a stopped container is
+  inspected once per stop (`dockerx.LastExit`, cached by id and the exit code its status prints) for its
+  start, finish, exit code and OOM verdict. A stop counts only when it finished after the rule began
+  watching on its current terms (`watch_from`), so containers stopped long ago, or while the rule was
+  paused, never page. Then `judgeExit`: `dead` and an OOM kill are down; a `kill` or `stop` Docker
+  recorded for the container between its start and its finish (`judgeStop`, from the event log — docker
+  stop's SIGTERM, compose, a deploy's cutover and this dashboard all send one; a crash or the kernel gets
+  only a `die`) is on purpose; exit 0 finished rather than failed; 130 and 143 were signals asking it to
+  stop; 137 is down only when the event log was listening and still holds the ten minutes before the
+  stop (`EventLog.Covers`) and saw no kill — otherwise it is read as a stop that outlasted its grace
+  period, because a false page is worse than a late one; any other code is a crash. A deploy's release
+  task and a `compose run` container are one-shot by design and never subjects, a `paused` container
+  (a backup freezing its volumes) is fine, and a removed container leaves.
+- **Every backup job** — files, volumes and database dumps alike — is a `backup_failed` subject
+  (`job:<id>`), judged by its newest finished run in the database alerts' own words (`judgeBackupJob`
+  over `readAlertBackupJobs`, the reader both share): it stays failed until a run succeeds. A job an
+  enabled database `backup_failed` rule already follows (one for every database, or one for a database
+  the job dumps) is **left to that rule** (`databaseBackupRules`), so one failed run is told once and
+  keeps the database page's link; a job leaving the host rule that way is told it is over if it was
+  firing.
+- **Hold and state** (`stepHostAlert`, one pure function). A subject is told once when it has been over
+  the line for its kind's passes and minutes — one pass for CPU, memory (their window is the hold) and
+  backups, two for disks, two and the rule's minutes for containers — and once when it comes back,
+  never in between; one that comes back before it was told ends without a word. A reading that could
+  not be taken, or a percentage between the line and five points under it, keeps the subject where it
+  was. A subject the reading no longer finds is cleared, told it is over if it had fired. State rows
+  exist only while a subject fires, holds or is muted; a rule's `revision` moves on every edit and a
+  pass writes a subject only while the revision it read still holds. New terms, a pause or a resume
+  start the rule over (mutes are kept, `watch_from` moves on); new channels alone do not. The newest 500
+  events are kept, a test marked as one.
+- **Messages.** `host.alert.firing` / `host.alert.recovered` with `NotificationEnvelope.Host`, rendered
+  by `renderHostAlert` ([notifications](../deployments/notifications.md)); a rule with no channels tells
+  every enabled one, a paused channel gets nothing, a muted subject is followed but not told.
+- **Routes**, all `system.admin` and audited: `GET /system/alerts` (rules with why the last pass could
+  not judge each, `unjudged`; firing, holding and muted subjects; the last 100 events; `metrics`, whether
+  history is recorded), `POST /system/alerts/rules` (`host.alerts.rule.create`),
+  `POST /system/alerts/rules/{id}/test` (the rule's message, `[test]`, to its channels;
+  `host.alerts.rule.test`; 409 when no enabled channel is told), `POST /system/alerts/test {channelId}`
+  (`host.alerts.test`), `POST /system/alerts/evaluate` (a pass now; holds still apply;
+  `host.alerts.evaluate`); behind `destructive`, because each stops somebody being told:
+  `PUT /system/alerts/rules/{id}` (`.rule.update`, can pause), `DELETE /system/alerts/rules/{id}`
+  (`.rule.delete`), `PUT /system/alerts/mutes {ruleId, subject, muted}` (`host.alerts.mute`/`unmute`).
+- **Tests.** `host_alerts_test.go`: validation and defaults, the state machine's holds and transitions,
+  each kind's reading with made-up readings (the window's mean, coverage and band; space and inodes per
+  mount; a crash told from a stop, a loop, a one-shot and a stop before the rule; every job but those a
+  database rule follows), the restart window, and the store queries.
+  `handlers_host_alerts_test.go`: the admin gate on every route, audit, firing once after the hold,
+  unknown and unjudged passes, a muted recovery, both tests, a pause clearing state, an edit during a
+  pass, and the server's own observer on staged backup jobs and a CPU rule with no samples.
+  `events_test.go` covers `Covers`, `notifications_test.go` the message, `schema_host_alerts_test.go` the
+  tables on fresh and upgraded installs, `lib/host-alerts.test.js` the page's words and form ranges, and
+  `tests/browser/host-alerts.spec.ts` the page. Not verified here: a real container crashing under a
+  live daemon end to end and a real channel's delivery (the readings and the delivery path are the ones
+  the tests drive).
+
 ## netsec: exposure and login history
 
 The Security overview's Intrusion reading describes fail2ban only: its current bans and jails,

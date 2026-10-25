@@ -133,6 +133,9 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         icon: Monitoring,
         children: [
           { title: "Metrics", href: "/metrics", icon: LineChart },
+          // Beside the readings it watches. An administrator's, as the
+          // proxy's Alerts are: its rules decide who is told about what.
+          { title: "Alerts", href: "/metrics/alerts", icon: Bell, capability: "system.admin" },
           {
             title: "Processes",
             href: "/processes",

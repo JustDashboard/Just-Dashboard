@@ -42,6 +42,9 @@ const (
 	// And the database events, to the channels a database alert rule names.
 	NotificationEventDatabaseFiring    = "database.alert.firing"
 	NotificationEventDatabaseRecovered = "database.alert.recovered"
+	// And the host events, to the channels a host alert rule names.
+	NotificationEventHostFiring    = "host.alert.firing"
+	NotificationEventHostRecovered = "host.alert.recovered"
 )
 
 // NotificationEvents is the closed vocabulary a channel may select from.
@@ -317,6 +320,31 @@ type NotificationEnvelope struct {
 	// Database carries a database alert's subject and reading; it is set on
 	// the two database events and on nothing else.
 	Database *DatabaseAlertEnvelope `json:"database,omitempty"`
+	// Host carries a host alert's subject and reading; it is set on the two
+	// host events and on nothing else.
+	Host *HostAlertEnvelope `json:"host,omitempty"`
+}
+
+// HostAlertEnvelope is what a host alert says when the machine itself is in
+// trouble — its CPU or memory held high, a filesystem filling, a container
+// gone down, a backup job failed — and when that is over. Server is the
+// machine's name, because one channel often hears from several of them;
+// Label names the subject in words and Detail is the reading against the
+// rule's line.
+type HostAlertEnvelope struct {
+	RuleID int64  `json:"ruleId"`
+	Kind   string `json:"kind"`
+	// Subject is what the rule follows: "cpu", "memory", a mountpoint, a
+	// container's name, or "job:<id>".
+	Subject   string  `json:"subject"`
+	Label     string  `json:"label"`
+	Server    string  `json:"server,omitempty"`
+	Detail    string  `json:"detail"`
+	Threshold float64 `json:"threshold,omitempty"`
+	// Since is when the subject entered the state being announced.
+	Since time.Time `json:"since"`
+	// Test marks a message sent from "Send test", so nobody acts on it.
+	Test bool `json:"test,omitempty"`
 }
 
 // DatabaseAlertEnvelope is what a database alert says when a server stops
@@ -410,6 +438,8 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 		return renderProxyAlert(envelope)
 	case NotificationEventDatabaseFiring, NotificationEventDatabaseRecovered:
 		return renderDatabaseAlert(envelope)
+	case NotificationEventHostFiring, NotificationEventHostRecovered:
+		return renderHostAlert(envelope)
 	case NotificationEventTest:
 		message.Emoji, message.Color = "🔔", 0x5865f2
 		message.Title = "Test notification from Just Dashboard"
@@ -604,6 +634,56 @@ func renderDatabaseAlert(envelope NotificationEnvelope) notificationMessage {
 		subject = "Backup job"
 	}
 	message.Fields = [][2]string{{subject, label}}
+	if !alert.Since.IsZero() {
+		message.Fields = append(message.Fields, [2]string{"Since", alert.Since.UTC().Format("2006-01-02 15:04 UTC")})
+	}
+	return message
+}
+
+// hostAlertWhat is each host alert kind as the noun phrase a title leads
+// with, and the word its subject goes by in the fields. The kinds are the api
+// package's; an unknown one still renders.
+var hostAlertWhat = map[string][2]string{
+	"cpu_high":       {"CPU high", "Server"},
+	"memory_high":    {"Memory high", "Server"},
+	"disk_filling":   {"Disk filling up", "Filesystem"},
+	"container_down": {"Container down", "Container"},
+	"backup_failed":  {"Backup failed", "Backup job"},
+}
+
+// renderHostAlert is the sentence a host alert sends: what, which subject on
+// which server, and the reading against the line.
+func renderHostAlert(envelope NotificationEnvelope) notificationMessage {
+	message := notificationMessage{URL: envelope.URL, LinkLabel: "Open it in Just Dashboard"}
+	alert := envelope.Host
+	if alert == nil {
+		alert = &HostAlertEnvelope{}
+	}
+	words, ok := hostAlertWhat[alert.Kind]
+	if !ok {
+		words = [2]string{"Host alert", "Subject"}
+	}
+	label := alert.Label
+	if label == "" {
+		label = alert.Subject
+	}
+	prefix := ""
+	if alert.Test {
+		prefix = "[test] "
+	}
+	if envelope.Event == NotificationEventHostFiring {
+		message.Emoji, message.Color = "🚨", 0xef4444
+		message.Title = fmt.Sprintf("%s%s — %s", prefix, words[0], label)
+	} else {
+		message.Emoji, message.Color = "✅", 0x22c55e
+		message.Title = fmt.Sprintf("%sResolved: %s — %s", prefix, words[0], label)
+	}
+	message.Summary = alert.Detail
+	message.Fields = [][2]string{{words[1], label}}
+	// The machine is named once: a CPU rule's subject already is the server.
+	if alert.Server != "" && alert.Server != label {
+		message.Fields = append(message.Fields, [2]string{"Server", alert.Server})
+	}
 	if !alert.Since.IsZero() {
 		message.Fields = append(message.Fields, [2]string{"Since", alert.Since.UTC().Format("2006-01-02 15:04 UTC")})
 	}

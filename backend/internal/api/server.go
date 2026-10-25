@@ -293,6 +293,9 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	s.modules.deploySchedule.Start(ctx)
 	s.modules.trafficAlerts.Start(ctx)
+	// The host's own alerts read the recorder's history and Docker, both
+	// started above, and tell the same channels.
+	s.modules.hostAlerts.Start(ctx)
 	if err := s.startDeployEngine(ctx); err != nil {
 		return err
 	}
