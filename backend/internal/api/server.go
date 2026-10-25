@@ -64,6 +64,10 @@ type Server struct {
 	// The icons deployed websites declare, read once an hour per project.
 	favicons faviconCache
 
+	// mapSources holds the server map's last answer from every source it
+	// reads (map_sources.go), so an open map costs the server little.
+	mapSources mapSources
+
 	// The GitHub accounts' own pictures, read once an hour per account.
 	avatars avatarCache
 

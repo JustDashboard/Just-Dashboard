@@ -128,6 +128,7 @@ func (s *Server) Routes() http.Handler {
 			s.mountDeployRoutes(r)
 			s.mountJobRoutes(r)
 			s.mountRemoteDesktopRoutes(r)
+			s.mountMapRoutes(r)
 		})
 
 		if !s.Cfg.AgentMode {
