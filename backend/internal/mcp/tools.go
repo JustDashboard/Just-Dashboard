@@ -35,12 +35,33 @@ const (
 	ListMax = 1000
 )
 
-// Instructions is what a client is told the server is for, once, before any
-// tool is chosen.
-const Instructions = `Just Dashboard's databases. Start with list_connections: every other tool names a database by the connection it returns. ` +
-	`Read the structure with list_tables and describe_schema before writing SQL, and write it for that connection's engine. ` +
-	`run_query and sample_rows only read. run_write is offered only for a database this key may change, and runs one statement at a time; ` +
-	`a destructive statement still needs the key owner's role to allow it. Protected databases are never reachable here. Every call is recorded in the dashboard's audit log.`
+// What a client is told the server is for, once, before any tool is chosen:
+// the part for what this key reaches, and the audit sentence every key hears.
+const (
+	databaseInstructions = `Just Dashboard's databases. Start with list_connections: every other database tool names a database by the connection it returns. ` +
+		`Read the structure with list_tables and describe_schema before writing SQL, and write it for that connection's engine. ` +
+		`run_query and sample_rows only read. run_write is offered only for a database this key may change, and runs one statement at a time; ` +
+		`a destructive statement still needs the key owner's role to allow it. Protected databases are never reachable here.`
+	deployInstructions = `Just Dashboard's deployments. Start with list_deployments: every other deployment tool names a deployment by the name it returns, ` +
+		`and acts on its production environment. list_runs and read_run_log say what a run did and why it failed; list_releases names what a rollback can go back to. ` +
+		`deploy and rollback are offered only when this key may deploy, queue a run as the dashboard's own buttons do and are held to the key owner's role; ` +
+		`a rollback also needs a role that may take destructive actions. Follow a queued run with read_run_log.`
+	auditInstructions = `Every call is recorded in the dashboard's audit log.`
+)
+
+// Instructions is what this key's client is told: the databases' part unless
+// the key reaches only the deployments, and the deployments' part when it
+// reaches them.
+func Instructions(o Offer) string {
+	parts := []string{}
+	if o.databases() {
+		parts = append(parts, databaseInstructions)
+	}
+	if o.Deployments {
+		parts = append(parts, deployInstructions)
+	}
+	return strings.Join(append(parts, auditInstructions), " ")
+}
 
 // Tool is one entry of tools/list.
 type Tool struct {
@@ -89,7 +110,10 @@ func reading(title string) Annotations {
 	return Annotations{Title: title, ReadOnlyHint: true, IdempotentHint: true}
 }
 
-var catalogue = []Tool{
+// catalogue is every tool in the fixed order tools/list gives them.
+var catalogue = append(append([]Tool{}, databaseTools...), deployTools...)
+
+var databaseTools = []Tool{
 	{
 		Name:  ToolListConnections,
 		Title: "List databases",
@@ -163,13 +187,39 @@ var catalogue = []Tool{
 	},
 }
 
-// Tools is what tools/list answers for a key: run_query only for one whose
-// owner may run statements at all, run_write only for one that may change
-// some database. The order is fixed, so a client's cache of it holds.
-func Tools(query, write bool) []Tool {
+// Offer is which tools a key is offered, as its grants and its owner's role
+// decide. Each tool still asks again when it is called.
+type Offer struct {
+	// Databases is a key that reaches some database. A key that reaches none
+	// and no deployments either is still offered the database tools, which
+	// answer that it reaches nothing.
+	Databases bool
+	// Query is an owner whose role may run SQL at all, and Write a key that
+	// may also change some database.
+	Query, Write bool
+	// Deployments is a key that may read the deployments, Deploy one that may
+	// also queue a deploy, and Rollback one whose owner may also roll back.
+	Deployments, Deploy, Rollback bool
+}
+
+func (o Offer) databases() bool { return o.Databases || !o.Deployments }
+
+// Tools is what tools/list answers for a key: the database tools for one that
+// reaches a database, run_query only for one whose owner may run statements at
+// all, run_write only for one that may change some database, and the
+// deployment tools as its deployment grant and role allow. The order is fixed,
+// so a client's cache of it holds.
+func Tools(o Offer) []Tool {
+	offered := map[string]bool{
+		ToolRunQuery: o.Query, ToolRunWrite: o.Write,
+		ToolDeploy: o.Deploy, ToolRollback: o.Rollback,
+	}
 	out := make([]Tool, 0, len(catalogue))
 	for _, t := range catalogue {
-		if (t.Name == ToolRunQuery && !query) || (t.Name == ToolRunWrite && !write) {
+		if (IsDeployTool(t.Name) && !o.Deployments) || (!IsDeployTool(t.Name) && !o.databases()) {
+			continue
+		}
+		if allowed, gated := offered[t.Name]; gated && !allowed {
 			continue
 		}
 		out = append(out, t)
@@ -196,6 +246,12 @@ type Arguments struct {
 	SQL        string   `json:"sql"`
 	Limit      int      `json:"limit"`
 	MaxRows    int      `json:"maxRows"`
+	Deployment string   `json:"deployment"`
+	Run        int64    `json:"run"`
+	Release    int64    `json:"release"`
+	Lines      int      `json:"lines"`
+	Ref        string   `json:"ref"`
+	Revision   string   `json:"revision"`
 }
 
 // DecodeArguments reads a call's arguments for one tool, refusing a name the
@@ -231,6 +287,9 @@ func DecodeArguments(tool string, raw json.RawMessage) (Arguments, error) {
 		}
 	}
 	args.Connection = strings.TrimSpace(args.Connection)
+	args.Deployment = strings.TrimSpace(args.Deployment)
+	args.Ref = strings.TrimSpace(args.Ref)
+	args.Revision = strings.TrimSpace(args.Revision)
 	return args, nil
 }
 

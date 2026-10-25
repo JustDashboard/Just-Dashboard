@@ -1149,6 +1149,13 @@ only renderer/executor/validation authority for their feature.
   attempt and last fourteen outcomes, and each delivery the project and run it announced, so the
   page reads whether messages arrive without a request per channel. See
   [notifications](notifications.md).
+- An AI client reaches the deployments over the MCP endpoint when its key was given them
+  (`api_tokens.deploy_access`: none, `read`, `deploy`): it lists deployments, runs and releases,
+  reads a run's transcript tail (`OrchestrationStore.RunTranscriptTail`, the stored and already
+  masked `step.log` chunks, or a pre-engine run's bounded `deploy_runs.log`), and with `deploy`
+  queues a deploy or a rollback of a production environment through the same enqueue functions and
+  capability checks as the run and rollback routes. Previews, approvals, cancels, retries and
+  settings are not offered. See [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters
   managed environment labels at the daemon before inspecting matching containers once each — running
   or stopped, since the set is one environment's (`ListContainersWithLastRun`; the plain labelled

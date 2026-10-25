@@ -30,7 +30,8 @@ export function Segments<T extends string>({
   /** The group's accessible name: "Python version", "Health check 1 kind". */
   label: string
   value: T
-  options: { value: T; label: React.ReactNode; mono?: boolean }[]
+  /** An option can be shown and refused, as a choice the reader's role does not have. */
+  options: { value: T; label: React.ReactNode; mono?: boolean; disabled?: boolean }[]
   onChange: (value: T) => void
   disabled?: boolean
   /** Share the whole width between the segments, for a field's own line. */
@@ -56,6 +57,7 @@ export function Segments<T extends string>({
         <ToggleGroupItem
           key={option.value}
           value={option.value}
+          disabled={option.disabled}
           className={cn(
             "min-w-0 text-xs data-[state=off]:text-muted-foreground",
             fill && "flex-1",

@@ -1,4 +1,4 @@
-import type { ApiToken, ApiTokenConnection } from "@/lib/types"
+import type { ApiToken, ApiTokenConnection, ApiTokenDeployments } from "@/lib/types"
 
 /** The endpoint an AI client is pointed at. Only an MCP key opens it. */
 export const MCP_PATH = "/api/v1/mcp"
@@ -71,18 +71,38 @@ export function grantsWithin(grants: Grants, canChange: boolean): Grants {
 }
 
 /**
+ * The deployment grant an owner can still hand out: one who may no longer
+ * deploy keeps the deployments, to read. The server refuses the rest.
+ */
+export function deploymentsWithin(
+  access: ApiTokenDeployments | undefined,
+  canDeploy: boolean,
+): ApiTokenDeployments {
+  if (access === "deploy" && !canDeploy) return "read"
+  return access ?? ""
+}
+
+/** What a key may do with the deployments, as a list row says it. */
+const DEPLOYMENT_WORDS: Record<ApiTokenDeployments, string> = {
+  "": "",
+  read: "reads deployments",
+  deploy: "deploys",
+}
+
+/**
  * What a key reaches, in the words a list row has room for: "reads shop,
- * changes notes". A database since forgotten has taken its grant with it, so
- * an id with no name is one the list has not caught up with yet.
+ * changes notes, deploys". A database since forgotten has taken its grant with
+ * it, so an id with no name is one the list has not caught up with yet.
  */
 export function grantSummary(
-  token: Pick<ApiToken, "connections">,
+  token: Pick<ApiToken, "connections" | "deployments">,
   nameOf: (id: number) => string | undefined,
 ): string {
   const named = (token.connections ?? [])
     .map((c) => ({ ...c, name: nameOf(c.connectionId) }))
     .filter((c): c is ApiTokenConnection & { name: string } => c.name !== undefined)
-  if (named.length === 0) return "no databases"
+  const deployments = DEPLOYMENT_WORDS[token.deployments ?? ""]
+  if (named.length === 0) return deployments || "no databases"
   const byAccess = (access: ApiTokenConnection["access"]) =>
     named
       .filter((c) => c.access === access)
@@ -93,6 +113,7 @@ export function grantSummary(
   return [
     reads.length > 0 && `reads ${listWords(reads)}`,
     changes.length > 0 && `changes ${listWords(changes)}`,
+    deployments,
   ]
     .filter(Boolean)
     .join(", ")

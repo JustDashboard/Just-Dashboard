@@ -13,8 +13,8 @@ const tokenPrefix = "vpsd_"
 
 // ScopeMCP is the scope of a key made for an AI client. Unlike a capability
 // scope it narrows where the key goes, not what its role may do there: it
-// opens the MCP endpoint and nothing else, and reaches only the databases
-// granted to it.
+// opens the MCP endpoint and nothing else, and reaches only the databases and
+// the deployments granted to it.
 const ScopeMCP = "mcp"
 
 var ErrTokenInvalid = errors.New("api token invalid, revoked or expired")
@@ -35,6 +35,9 @@ type APIToken struct {
 	// Connections are the databases an MCP key reaches, as ListAPITokens
 	// reads them. Every other key has none.
 	Connections []TokenConnection `json:"connections,omitempty"`
+	// Deployments is what an MCP key may do with the deployments: nothing,
+	// read them, or also deploy and roll them back. Every other key has none.
+	Deployments DeployAccess `json:"deployments,omitempty"`
 }
 
 // CreateAPIToken mints a scripting credential. The role may narrow the owner's
@@ -107,7 +110,7 @@ func roleAtMost(want, have Role) bool {
 	return rank[want] <= rank[have]
 }
 
-const apiTokenColumns = `id, user_id, name, prefix, role, scope, created_at, expires_at, last_used_at, revoked`
+const apiTokenColumns = `id, user_id, name, prefix, role, scope, created_at, expires_at, last_used_at, revoked, deploy_access`
 
 func (s *Service) apiTokenByID(ctx context.Context, id int64) (*APIToken, error) {
 	row := s.st.DB.QueryRowContext(ctx, `SELECT `+apiTokenColumns+` FROM api_tokens WHERE id = ?`, id)
@@ -117,14 +120,15 @@ func (s *Service) apiTokenByID(ctx context.Context, id int64) (*APIToken, error)
 func scanAPIToken(row interface{ Scan(...any) error }) (*APIToken, error) {
 	var (
 		t                      APIToken
-		role                   string
+		role, deployments      string
 		created, expires, used int64
 		revoked                int
 	)
-	if err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &role, &t.Scope, &created, &expires, &used, &revoked); err != nil {
+	if err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &role, &t.Scope, &created, &expires, &used, &revoked, &deployments); err != nil {
 		return nil, err
 	}
 	t.Role = Role(role)
+	t.Deployments = DeployAccess(deployments)
 	t.CreatedAt = time.Unix(created, 0).UTC()
 	t.Revoked = revoked == 1
 	if expires > 0 {

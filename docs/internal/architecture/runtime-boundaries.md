@@ -170,10 +170,11 @@ optional, separately confirmed revoke after the tool has switched credentials. T
 valid until revoked or expired; creating a replacement does not impersonate another owner.
 An MCP key's replacement is made on `POST /tokens/mcp` at the old key's role with the databases the
 old key reaches that are neither protected nor forgotten since, each narrowed to `read` where that
-role may not change a database. `PUT /tokens/{id}/connections`
+role may not change a database, and the old key's deployment grant, narrowed to `read` where that
+role may not deploy. `PUT /tokens/{id}/connections`
 (session only, the owner's own active MCP key, `404` for another account's, `409 not_mcp_key` for any
 other key) replaces what a key reaches without a new secret; it is audited as
-`dashboard.token.connections` with the databases by name. Forgetting a connection removes its grants
+`dashboard.token.connections` with the databases by name and the deployment grant. Forgetting a connection removes its grants
 with it (`ON DELETE CASCADE`).
 `DELETE /tokens/{id}` revokes and retains the record. The session-only
 `DELETE /tokens/{id}/record` additionally requires `system.admin` and `s.destructive`; it deletes
