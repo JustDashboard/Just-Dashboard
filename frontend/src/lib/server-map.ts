@@ -820,7 +820,14 @@ function hasParent(node: LaidNode) {
 // Reading the map: what a box is wired to, and what a search finds.
 // ---------------------------------------------------------------------------
 
-export type Related = { item: MapItem; kind: string; via: string; direction: "to" | "from" }
+export type Related = {
+  item: MapItem
+  kind: string
+  via: string
+  /** The other ways the server knows the pair is joined. */
+  also: string[]
+  direction: "to" | "from"
+}
 
 /**
  * What one thing is wired to, both ways: a project's domains and its
@@ -842,6 +849,7 @@ export function relatedTo(map: ServerMap | undefined, id: string): Related[] {
       item: found.item,
       kind: found.kind,
       via: link.via,
+      also: link.also ?? [],
       direction: link.from === id ? "to" : "from",
     })
   }

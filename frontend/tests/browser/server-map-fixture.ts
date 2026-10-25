@@ -251,6 +251,7 @@ const services = [
   unit("systemd-journald", "ok", "running", "Journal Service"),
   unit("unattended-upgrades", "ok", "running", "Unattended Upgrades Shutdown"),
   unit("containerd", "ok", "running", "containerd container runtime"),
+  unit("certbot", "idle", "inactive", "Certbot"),
 ]
 
 const pm2 = [
@@ -543,7 +544,8 @@ function withFacts<T extends { id: string }>(list: T[]) {
   )
 }
 
-const link = (from: string, to: string, via: string) => ({ from, to, via })
+const link = (from: string, to: string, via: string, also?: string[]) =>
+  also ? { from, to, via, also } : { from, to, via }
 
 export const busyMap = {
   host: { hostname: host.hostname },
@@ -606,7 +608,7 @@ export const busyMap = {
     link("project:4", "container:c-blog", "release"),
     link("project:5", "container:c-grafana", "release"),
     link("project:6", "container:c-docs", "release"),
-    link("project:1", "db:1", "binding"),
+    link("project:1", "db:1", "binding", ["reference", "env"]),
     link("project:1", "db:2", "binding"),
     link("project:2", "db:1", "binding"),
     link("project:2", "db:3", "binding"),
@@ -637,6 +639,29 @@ export const busyMap = {
     link("db:1", "backup:1", "backup"),
     link("db:4", "backup:1", "backup"),
     link("container:c-minio", "backup:2", "backup"),
+    // Known otherwise than by a binding: n8n's DATABASE_URL names the
+    // analytics server, the blog's variables refer to the shop database.
+    link("project:3", "db:4", "env", ["session"]),
+    link("project:4", "db:1", "reference"),
+    link("project:1", "repo:/srv/shop", "source"),
+    link("project:2", "repo:/srv/api", "source"),
+    link("stream:postgres", "container:c-pg", "route"),
+    link("stack:data", "volume:pg-data", "member"),
+    link("volume:pg-data", "backup:2", "backup"),
+    link("repo:/srv/infra", "backup:3", "backup"),
+    link("pm2:d1:0", "repo:/srv/infra", "workdir"),
+    link("pm2:d1:0", "sysuser:deploy", "user"),
+    link("pm2:d1:1", "sysuser:deploy", "user"),
+    link("cron:/etc/cron.d/reports:3", "sysuser:deploy", "user"),
+    link("timer:certbot.timer", "unit:certbot.service", "starts"),
+    link("alert:host:1", "channel:1", "notifies"),
+    link("alert:host:1", "channel:2", "notifies"),
+    link("alert:proxy:1", "channel:1", "notifies"),
+    link("key:1", "account:1", "owner"),
+    link("key:2", "account:1", "owner"),
+    link("key:3", "account:2", "owner"),
+    link("key:2", "db:1", "access"),
+    link("key:2", "db:4", "access"),
   ],
 }
 

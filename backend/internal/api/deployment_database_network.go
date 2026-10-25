@@ -256,17 +256,8 @@ func (o *deploymentDatabaseNetworks) attachDatabase(ctx context.Context, network
 
 func (o *deploymentDatabaseNetworks) ResolveVariable(ctx context.Context, environmentID int64, revision int, target string) (string, error) {
 	var id int64
-	format, database := "", ""
-	// 5.pooled, 5.pooled.jdbc: the same reference, through the connection's
-	// pooler. The rest of it is read as it always was.
-	pooled := false
-	if match := pooledReferenceRE.FindStringSubmatch(target); match != nil {
-		target, pooled = match[1]+match[2], true
-	}
-	if match := databaseReferenceShapeRE.FindStringSubmatch(target); match != nil {
-		target, format, database = match[1], match[2], match[3]
-	}
-	for _, candidate := range []string{target, strings.TrimSuffix(target, ".url")} {
+	candidates, format, database, pooled := databaseReferenceTarget(target)
+	for _, candidate := range candidates {
 		if parsed, err := strconv.ParseInt(candidate, 10, 64); err == nil && parsed > 0 {
 			id = parsed
 			break
@@ -314,6 +305,23 @@ func (o *deploymentDatabaseNetworks) ResolveVariable(ctx context.Context, enviro
 		return deploy.ConnectionStringForFormat(dsn, format, database)
 	}
 	return dsn, nil
+}
+
+// databaseReferenceTarget reads the target of a ${{database.…}} reference:
+// what the connection may be named by — its id, or its name with or without
+// ".url" — in the order to try them, and what is asked of it. The deployment
+// runtime resolves a reference through it, and the server map draws the line
+// from a deployment to the database its variables refer to by the same reading.
+func databaseReferenceTarget(target string) (candidates []string, format, database string, pooled bool) {
+	// 5.pooled, 5.pooled.jdbc: the same reference, through the connection's
+	// pooler. The rest of it is read as it always was.
+	if match := pooledReferenceRE.FindStringSubmatch(target); match != nil {
+		target, pooled = match[1]+match[2], true
+	}
+	if match := databaseReferenceShapeRE.FindStringSubmatch(target); match != nil {
+		target, format, database = match[1], match[2], match[3]
+	}
+	return []string{target, strings.TrimSuffix(target, ".url")}, format, database, pooled
 }
 
 // databaseReferenceShapeRE reads a database reference that asks for a

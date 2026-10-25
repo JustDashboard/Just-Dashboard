@@ -64,9 +64,16 @@ type mapItem struct {
 type mapLink struct {
 	From string `json:"from"`
 	To   string `json:"to"`
-	// Via is how the server knows: route, release, member, binding, mount,
-	// network, certificate, backup, image, serves.
+	// Via is how the server knows the two are joined, the surest way where it
+	// knows several (mapViaOrder): binding, reference, dependency, release,
+	// route, serves, pooler, source, workdir, member, self, mount,
+	// certificate, backup, starts, access, owner, notifies, user, image,
+	// network, env, session.
 	Via string `json:"via"`
+	// Also is every other way it knows the same two are joined — a deployment
+	// bound to a database whose variables refer to it too — so a pair is one
+	// line however many ways it is known.
+	Also []string `json:"also,omitempty"`
 }
 
 type mapFact struct {
@@ -144,6 +151,37 @@ type mapStreams struct {
 	Paused  []proxysvc.StreamEntry
 }
 
+// mapRelations is what the store declares between the deployments and the
+// rest: the typed references among a deployment's current variables, the
+// dependencies its plan names, and the container each connection's pooler
+// runs in.
+type mapRelations struct {
+	refs    []mapProjectRef
+	poolers map[int64]string
+}
+
+// mapProjectRef is one thing a deployment's configuration names. Kind is
+// database (target an id or a name, as a reference writes it), domain (a
+// hostname), storage (a volume's name) or backup (a job's id); via is
+// reference for a variable's ${{…}} and dependency for the plan's own list.
+type mapProjectRef struct {
+	projectID int64
+	kind      string
+	target    string
+	via       string
+}
+
+// mapUse is a database a deployment or a container uses, as the databases
+// topology found it: named in its running environment (env), or connected
+// to the engine now (session). ProjectID is set where the container is a
+// release of a deployment, the container's name otherwise.
+type mapUse struct {
+	connID    int64
+	projectID int64
+	container string
+	via       string
+}
+
 // mapInputs is every source's last answer, as readMapSource left it.
 type mapInputs struct {
 	now        time.Time
@@ -177,6 +215,16 @@ type mapInputs struct {
 	firewall     mapRead[*netsec.FirewallStatus]
 	vpn          mapRead[netx.VPNSummary]
 	dashboard    mapRead[selfupdate.Report]
+
+	// What only joins things: the store's declarations between deployments
+	// and the rest, the databases topology's reading of who uses each
+	// database, and who holds each listening port.
+	relations mapRead[mapRelations]
+	uses      mapRead[[]mapUse]
+	listeners mapRead[[]proxysvc.Listener]
+	// dataDir is the dashboard's data directory: the container mounting it
+	// is the dashboard's own, and so is the compose project it is in.
+	dataDir string
 
 	// absent names the kinds whose module this server does not run.
 	absent map[string]bool
@@ -269,6 +317,9 @@ func buildServerMap(in mapInputs) mapResponse {
 			if env, err := strconv.ParseInt(c.Labels["io.just-dashboard.environment-id"], 10, 64); err == nil {
 				if project, ok := envProject[env]; ok {
 					b.link("project:"+strconv.FormatInt(project, 10), id, "release")
+					if c.ComposeStack != "" {
+						b.link("project:"+strconv.FormatInt(project, 10), "stack:"+c.ComposeStack, "release")
+					}
 				}
 			}
 			if c.ComposeStack != "" {
@@ -582,6 +633,7 @@ func buildServerMap(in mapInputs) mapResponse {
 	})
 	kindFrom(b, "tunnels", in.vpn, absent("vpn"), mapTunnels)
 
+	mapJoins(b, in)
 	for i := range b.kinds {
 		b.kinds[i].Items, b.kinds[i].Total = capItems(b.kinds[i].Key, b.kinds[i].Items)
 		if b.kinds[i].Key == "terminals" && in.terminalHome != "" {
@@ -591,7 +643,7 @@ func buildServerMap(in mapInputs) mapResponse {
 	return mapResponse{
 		Host:      mapHost{Hostname: in.hostname},
 		Kinds:     b.kinds,
-		Links:     linksBetween(b.links, b.kinds),
+		Links:     linksBetween(mergeLinks(b.links), b.kinds),
 		CheckedAt: in.now.UTC(),
 	}
 }
@@ -1099,7 +1151,7 @@ func mapUnit(u procs.Unit) mapItem {
 
 func mapPM2(p procs.PM2Process) mapItem {
 	item := mapItem{
-		ID: fmt.Sprintf("pm2:%s:%d", p.DaemonID, p.ID), Name: p.Name, Product: "pm2",
+		ID: mapPM2ID(p), Name: p.Name, Product: "pm2",
 		Href: "/processes/pm2?app=" + url.QueryEscape(fmt.Sprintf("%s:%d", p.DaemonID, p.ID)),
 	}
 	switch p.Status {
@@ -1268,7 +1320,7 @@ func mapCron(tab procs.Crontab, job procs.CronJob) mapItem {
 		command = command[:57] + "…"
 	}
 	item := mapItem{
-		ID:   fmt.Sprintf("cron:%s:%d", tab.Source, job.Line),
+		ID:   mapCronID(tab, job),
 		Name: command, Product: "cron", Href: "/processes/scheduled",
 		Tone: mapOK, State: job.Schedule, Detail: tab.Source,
 	}

@@ -361,7 +361,20 @@ function ItemView({
                     <span className="truncate">{one.item.state}</span>
                   </>
                 }
-                trailing={<Tag className="shrink-0">{linkSentence(one.via, one.direction)}</Tag>}
+                trailing={
+                  <Tag
+                    className="shrink-0"
+                    title={
+                      one.also.length > 0
+                        ? [one.via, ...one.also]
+                            .map((via) => linkSentence(via, one.direction))
+                            .join(" · ")
+                        : undefined
+                    }
+                  >
+                    {linkSentence(one.via, one.direction)}
+                  </Tag>
+                }
                 onChoose={onChoose}
                 onHover={onHover}
               />
@@ -373,7 +386,11 @@ function ItemView({
   )
 }
 
-/** How a link reads from the chosen end: "routes to" one way, "routed from" the other. */
+/**
+ * How a link reads from the chosen box to the row: a domain "routes to" its
+ * project, a project is "routed from" its domain, a database is "bound to it"
+ * (the deployment in the row).
+ */
 function linkSentence(via: string, direction: "to" | "from") {
   const forward = VIA_LABEL[via] ?? via
   if (direction === "to") return forward
@@ -395,9 +412,35 @@ function linkSentence(via: string, direction: "to" | "from") {
     case "backup":
       return "backs it up"
     case "image":
-      return "a container of it"
+      return "run by"
     case "serves":
       return "served by"
+    case "reference":
+      return "referred to by"
+    case "env":
+      return "in its env"
+    case "session":
+      return "connected from"
+    case "dependency":
+      return "needed by"
+    case "source":
+      return "source of"
+    case "workdir":
+      return "folder of"
+    case "starts":
+      return "started by"
+    case "user":
+      return "runs it"
+    case "notifies":
+      return "notified by"
+    case "owner":
+      return "owns it"
+    case "access":
+      return "reached by"
+    case "pooler":
+      return "pooled by"
+    case "self":
+      return "runs it"
   }
   return forward
 }

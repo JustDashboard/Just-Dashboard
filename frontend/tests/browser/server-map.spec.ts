@@ -244,6 +244,40 @@ test("choosing a thing draws what it is wired to, and the inspector says each in
   await expect(page.locator(".react-flow__edge-relation")).toHaveCount(0)
 })
 
+test("a deployment is wired to the database its env names and the checkout it is built from", async ({
+  page,
+}) => {
+  await openOn(page, "project:3")
+  await node(page, "project:3").click()
+  const inspector = page.getByRole("complementary", { name: "Inspector" })
+  // No binding: the server saw its environment name the database.
+  await expect(
+    inspector.getByRole("button", { name: /analytics.*answers.*names in env/ }),
+  ).toBeVisible()
+  await expect(page.locator(".react-flow__edge-relation")).toHaveCount(3)
+  await expect(page.locator(".react-flow__edgelabel-renderer")).toContainText("names in env")
+
+  // A pair known several ways is one line, named by the surest of them.
+  await page.keyboard.press("Escape")
+  const search = page.getByRole("textbox", { name: "Find anything on the server" })
+  await search.fill("nightly-databases")
+  await search.press("Enter")
+  await expect(inspector).toContainText("nightly-databases")
+  await inspector.getByRole("button", { name: /^shop.*answers/ }).click()
+  const bound = inspector.getByRole("button", { name: /^shop.*ready.*bound to it/ })
+  await expect(bound).toBeVisible()
+  await expect(bound.locator("[data-slot=tag]")).toHaveAttribute(
+    "title",
+    "bound to it · referred to by · in its env",
+  )
+  await expect(inspector.getByRole("button", { name: /^blog.*referred to by/ })).toBeVisible()
+  await expect(inspector.getByRole("button", { name: /claude-code.*reached by/ })).toBeVisible()
+  await bound.click()
+  await expect(
+    inspector.getByRole("button", { name: /^shop.*3 changes.*built from/ }),
+  ).toBeVisible()
+})
+
 test("a thing behind “+N more” is brought onto its shelf when it is chosen", async ({ page }) => {
   await open(page)
   await expect(node(page, "container:c-vault")).toHaveCount(0)

@@ -39,6 +39,40 @@ func SitesForUpstreamPort(vhosts []VHost, port int, bound string) []VHost {
 	return out
 }
 
+// StreamsForUpstreamPort is the streams forwarding to port on this machine
+// through a socket bound to bound, by the same reading of an address as
+// SitesForUpstreamPort: any server of a pool counts, and a range forwarded
+// port for port reaches each port of the range on its one address.
+func StreamsForUpstreamPort(streams []StreamEntry, port int, bound string) []StreamEntry {
+	own := ownAddresses()
+	out := []StreamEntry{}
+	for _, s := range streams {
+		targets := []string{s.Upstream}
+		for _, server := range s.Servers {
+			targets = append(targets, server.Address)
+		}
+		reaches := false
+		for _, target := range targets {
+			if s.SamePort {
+				last := s.ListenEnd
+				if last == 0 {
+					last = s.Listen
+				}
+				reaches = port >= s.Listen && port <= last && answersFor(target, bound, own)
+			} else {
+				reaches = upstreamReaches(target, port, bound, own)
+			}
+			if reaches {
+				break
+			}
+		}
+		if reaches {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // upstreamReaches reads one proxy_pass or reverse_proxy value, which for
 // Caddy may name several targets.
 func upstreamReaches(upstream string, port int, bound string, own map[string]bool) bool {

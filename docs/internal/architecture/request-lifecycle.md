@@ -249,7 +249,11 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   computers, the dashboard's accounts, the Linux accounts, the alert rules and the VPN only for
   `system.admin` — neither read for nor sent to anybody else — and the API keys the account's own
   unless it holds `system.admin`, as `GET /tokens` decides (`filterServerMap`). It sends no value
-  those routes keep back (environment, DSNs, channel URLs). `GET`/`PUT`/`DELETE /map/layout` are the
+  those routes keep back (environment, DSNs, channel URLs). Its lines come from reads open to every
+  role — the databases topology, the ports list's socket owners, the deployments' configuration — and
+  a line goes only between two things the account is shown; a deployment's sealed variables are opened
+  server-side only to read a typed `${{database.…}}` or `${{domain.…}}` reference's target, and no
+  value of one is sent. `GET`/`PUT`/`DELETE /map/layout` are the
   account's own arrangement behind `RequireSession`, open to every role and audited
   (`map.layout.save`, `map.layout.reset`). See [the server map](../server-map.md#who-sees-what).
 
