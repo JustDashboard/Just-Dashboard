@@ -54,6 +54,11 @@ type DeploymentSummary struct {
 	// removed, so the fleet can name the host without seeing a credential.
 	SourceRepository string `json:"sourceRepository,omitempty"`
 	SourceRemote     string `json:"sourceRemote,omitempty"`
+	// SourcePath is the checkout on this server a local source is read from.
+	// It is for the server map's line to the repository the deployment is
+	// built from, and is not part of the list's answer: the deployment's own
+	// page names its source.
+	SourcePath string `json:"-"`
 	// Recipe and Framework say what the desired build plan builds: the
 	// automatic recipe, and the framework detection recognised in the source.
 	Recipe    string `json:"recipe,omitempty"`
@@ -248,6 +253,7 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 			}
 			summary.SourceRepository = identity.Repository
 			summary.SourceRemote = displayRemote(identity.Remote)
+			summary.SourcePath = identity.LocalPath
 		}
 		var build BuildPlanConfig
 		if json.Unmarshal([]byte(buildJSON), &build) == nil {

@@ -6,8 +6,9 @@ the page that answers "what is on this machine, and what is wired to what" witho
 section in turn, and every box on it is a way to the page that manages that thing.
 
 The backend is `api/handlers_map.go` (the routes, the reads, the per-account filter),
-`api/map_sources.go` (the held answers) and `api/map_build.go` (the pure join); the store holds
-`map_layouts`. The frontend is `app/(dashboard)/map/`, `components/map/` and `lib/server-map.ts`.
+`api/map_sources.go` (the held answers), `api/map_build.go` (the pure join: the shelves and the lines a
+shelf draws as it is read) and `api/map_links.go` (the lines between kinds, and one line per pair); the
+store holds `map_layouts`. The frontend is `app/(dashboard)/map/`, `components/map/` and `lib/server-map.ts`.
 
 ## What the map is not
 
@@ -21,7 +22,9 @@ The backend is `api/handlers_map.go` (the routes, the reads, the per-account fil
   list (0.7.5's rule). A source that could not be read says so, with its reason, and is never drawn
   as an empty shelf (security invariants: an unavailable reading is neither healthy nor a problem).
 - **Not a guess.** A line joins two things only where the server knows they are joined: a label, a
-  route the proxy holds, a binding, a mount. No relation is inferred from a name.
+  route the proxy holds and the socket's owner behind it, a binding, a variable's typed reference, an
+  address the databases topology found in a running container's environment, a mount, a folder a
+  backup takes. No relation is inferred from a name.
 
 ## The shape
 
@@ -84,7 +87,10 @@ The layout is the same every time, and what the reader moved outranks it, as in 
   sections, each an eyebrow over a hairline. A thing's *Details* are the facts the server sends with it
   (`facts`: a container's image, stack, published ports and uptime; a database's engine, where it runs
   and how fast it answered; a backup's destination, schedule and runs …) and *Wired to* names each
-  link as a `Tag`; a shelf lists its things; the server shows CPU and memory live from the shell's
+  link as a `Tag`, read from the chosen box to the row (a project *refers to* its database, a database
+  is *referred to by* the project); a pair the server knows several ways is one line, named by the
+  surest (`mapViaOrder`: declared before seen), with the others in the tag's title; a shelf lists its
+  things; the server shows CPU and memory live from the shell's
   metrics stream, four readings, and every kind on it by branch. Every row is a way to its box, and
   pointing at a row rings that box on the canvas (the `signal` ring a search hit takes), so the list
   and the picture are read together. The keys are written along its foot. Links run over the shelves' ground and under the boxes (`zIndex` 1 between
@@ -115,8 +121,8 @@ The layout is the same every time, and what the reader moved outranks it, as in 
   | Spec | Sources | Holds | Waits |
   | --- | --- | --- | --- |
   | fast | containers, projects | 10 s | 2.5 s |
-  | steady | images, volumes, networks, databases (the fleet's own dial, shared through its cache), bindings, sites, backups, PM2, channels, drawings, API keys, alert rules, accounts, computers | 30 s | 2.5 s |
-  | slow | certificates, streams, timers, systemd units, the system's cron files, VPN, firewall | 2 min | 1.2 s |
+  | steady | images, volumes, networks, databases (the fleet's own dial, shared through its cache), bindings, the deployments' references, dependencies and poolers (`relations`), the listening sockets and their owners (`listeners`, as `GET /proxy/ports` reads them), sites, backups, PM2, channels, drawings, API keys, alert rules, accounts, computers | 30 s | 2.5 s |
+  | slow | the databases topology (`uses`: every running container inspected for the addresses it names, every engine asked for its sessions), certificates, streams, timers, systemd units, the system's cron files, VPN, firewall | 2 min | 1.2 s |
   | rare | repositories (a walk of the Git roots), Linux accounts, this dashboard's version | 5 min | 1.2 s |
   | holding | open shells (in memory) | 3 s | 1 s |
 
@@ -136,19 +142,35 @@ The layout is the same every time, and what the reader moved outranks it, as in 
 
 ## Links
 
+Each line is read from the source that knows it. Where one pair is known several ways it is drawn once
+(`mergeLinks`), as the surest way in its direction, the rest in `also`.
+
 | `via` | From → to | Known by |
 | --- | --- | --- |
-| `route` | domain → project | the site's owner (`markDeploymentRoutes`) |
-| `route` | domain → container | the site's upstream on loopback, matched to the container publishing that port |
-| `certificate` | domain → certificate | the certificate's `UsedBy` naming the site |
-| `release` | project → container | the container's `io.just-dashboard.environment-id` label |
 | `binding` | project → database | `deploy_database_bindings` |
-| `serves` | container → database | the fleet's placement of the connection's server |
-| `member` | stack → container | the Compose project label |
+| `reference` | project → database, domain | a `${{database.…}}` or `${{domain.…}}` among the environment's current variables, its target read as the runtime reads it (`databaseReferenceTarget`) |
+| `dependency` | project → database, volume, domain, backup job | the environment's planned dependencies (`deploy_dependencies`, `release_id = 0`); a bind path draws nothing |
+| `release` | project → container, stack | the container's `io.just-dashboard.environment-id` label, and its Compose project |
+| `route` | domain → project | the site's owner (`markDeploymentRoutes`) |
+| `route` | domain, stream → container, service, PM2 app, this dashboard | the port the site's or stream's upstream names on this machine (`SitesForUpstreamPort`, `StreamsForUpstreamPort`) and who holds it (`AttributeOwners`, as the ports page reads it); a container publishing a loopback port the site forwards to |
+| `serves` | container, service → database | the fleet's placement of the connection's server: its container, or the systemd unit a native server runs under |
+| `pooler` | container → database | `db_poolers` |
+| `source` | project → repository | the checkout a local source is read from (the deepest repository holding it), or every checkout whose remote is the one a Git source is fetched from (`remoteKey`: `git@host:a/b.git` and `https://host/a/b` are one) |
+| `workdir` | PM2 app → repository | the repository holding the app's working folder |
+| `member` | stack → container, volume, network | the Compose project label |
+| `self` | this dashboard → stack | the Compose project of the container mounting the dashboard's data directory (`SelfProject`) |
 | `mount` | container → volume | the container's mounts |
+| `certificate` | domain → certificate | the certificate's `UsedBy` naming the site |
+| `backup` | database, container, volume, repository → backup job | the job's dumps, the containers it pauses, and its source folders holding the volume's mount point or the checkout (or held by it), less an absolute exclude |
+| `starts` | timer → service | the unit the timer activates |
+| `access` | API key → database | the databases an MCP key reaches |
+| `owner` | API key → account | the key's account |
+| `notifies` | alert rule → channel | the channels the rule names, or every enabled one where it names none |
+| `user` | terminal, PM2 app, cron job → Linux account | the account the shell, the app or the job runs as |
+| `image` | container, project → image | the container's image id; the live release's image references |
 | `network` | container → network | the container's user networks (not `bridge`, `host`, `none`) |
-| `image` | container → image | the container's image id |
-| `backup` | database or container → backup job | the job's dumps and the containers it pauses |
+| `env` | project, container → database | the databases topology: a running container's environment holding one of the server's addresses (the `db-N.jd.internal` alias, the container's name or service, a published address) — a `DATABASE_URL` written by hand, which no binding records |
+| `session` | project, container → database | the databases topology: the engine reporting a session from the container's address |
 
 Lines to a thing that is not on the map, or not this role's to see, are dropped (`linksBetween`).
 
@@ -179,15 +201,22 @@ folds, opened shelves, the view, and the two switches (minimap; drawing the chos
   hand-placed boxes, branches carrying shelves), dragging's followers, where a box let go lands,
   folding defaults, the document decoder, links, search and the census.
 - `api/map_build_test.go`: the joins, the measured states (exit codes, project states), unread and
-  absent sources, worst-first capping, a box's facts and the per-role filter; `map_sources_test.go`: one read while
-  fresh, the budget, the last answer through a failure; `handlers_map_test.go`: the arrangement per
-  account, refused to a key, and the map on a server with nothing running;
+  absent sources, worst-first capping, a box's facts and the per-role filter; `map_links_test.go`: every
+  line between kinds in the table above, what must not be joined (a rule's disabled channel, an
+  excluded folder, another remote, a shallower checkout, a revoked key, a socket nothing forwards to),
+  one line per pair, the remote and folder readings, and the store read of references, dependencies and
+  poolers; `map_sources_test.go`: one read while fresh, the budget, the last answer through a failure;
+  `handlers_map_test.go`: the arrangement per account, refused to a key, and the map on a server with
+  nothing running; `proxysvc/ports_routes_test.go`: the sites and streams forwarding to a port;
   `store/schema_server_map_test.go`: the table on fresh and upgraded installs.
 - `api/map_live_test.go` (`JD_DEPLOY_LIVE=1`): a real daemon's running container wired to its
-  volume and a container that exited 3 drawn as down.
+  volume and a container that exited 3 drawn as down; an application whose `DATABASE_URL` names a
+  Postgres container joined to that database by `env`, and the database to its container by `serves`.
 - `tests/browser/server-map.spec.ts` (fixture `server-map-fixture.ts`): the sides, "+N more", folding
   remembered across a reload, a branch carrying its shelves and Alt moving it alone, pulling a box off
   its shelf (its shelf the drop target, landing clear of the next shelf, the line it hangs by, back by
-  its own ↺), links and the inspector (its details, a row ringing its box), revealing a thing behind "+N more", Add, a reading role
+  its own ↺), links and the inspector (its details, a row ringing its box), a deployment wired to the
+  database its environment names and the checkout it is built from, a pair known several ways drawn
+  once, revealing a thing behind "+N more", Add, a reading role
   offered only its own API key, a fresh server, and the far distance's held names; `/map` is one of
   `design-system.spec.ts`'s surfaces.

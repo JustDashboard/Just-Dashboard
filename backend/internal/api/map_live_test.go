@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -92,5 +93,87 @@ func TestLiveServerMapReadsTheRealDaemon(t *testing.T) {
 			t.Errorf("%s is unread without a reason", k.Key)
 		}
 		t.Logf("%-12s %-7s %3d %s", k.Key, k.State, k.Total, k.Reason)
+	}
+}
+
+// The line the map exists to draw, read from a real daemon and a real
+// engine: an application whose environment names a database's container —
+// a deployment's DATABASE_URL written by hand rather than bound — is joined
+// to that database, and the database to the container serving it.
+func TestLiveServerMapJoinsAnAppToTheDatabaseItsEnvNames(t *testing.T) {
+	if os.Getenv("JD_DEPLOY_LIVE") != "1" {
+		t.Skip("set JD_DEPLOY_LIVE=1 for the Docker map test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	docker := func(args ...string) string {
+		t.Helper()
+		raw, err := hostexec.Command(ctx, "docker", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("docker %v: %v: %s", args, err, raw)
+		}
+		return strings.TrimSpace(string(raw))
+	}
+	cleanup := func() {
+		_ = hostexec.Command(context.Background(), "docker", "rm", "-f", "jd-map-live-pg", "jd-map-live-app").Run()
+		_ = hostexec.Command(context.Background(), "docker", "network", "rm", "jd-map-live-net").Run()
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	docker("network", "create", "jd-map-live-net")
+	docker("run", "-d", "--name", "jd-map-live-pg", "--network", "jd-map-live-net", "-p", "127.0.0.1::5432",
+		"-e", "POSTGRES_PASSWORD=jd-map-live", "postgres:17-alpine")
+	app := docker("run", "-d", "--name", "jd-map-live-app", "--network", "jd-map-live-net",
+		"-e", "DATABASE_URL=postgres://app:secret@jd-map-live-pg:5432/postgres", "alpine", "sleep", "600")
+	published := docker("port", "jd-map-live-pg", "5432/tcp")
+	if i := strings.Index(published, "\n"); i > 0 {
+		published = published[:i]
+	}
+	for {
+		if err := hostexec.Command(ctx, "docker", "exec", "jd-map-live-pg", "pg_isready", "-U", "postgres").Run(); err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatal("postgres never became ready")
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	s := testServer(t)
+	s.modules.docker = dockerx.New("unix:///var/run/docker.sock")
+	sealed, err := s.Sealer.Seal("postgres://postgres:jd-map-live@" + published + "/postgres?sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.Store.DB.Exec(`INSERT INTO db_connections(name, driver, dsn_enc, created_at) VALUES('map-live', 'postgres', ?, 1)`, sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, _ := res.LastInsertId()
+	db := "db:" + strconv.FormatInt(conn, 10)
+
+	admin := &httpx.Principal{User: &auth.User{ID: 1, Username: "live"}, Role: auth.RoleAdmin, Kind: "session"}
+	deadline := time.Now().Add(2 * time.Minute)
+	var m mapResponse
+	for {
+		in := s.readServerMap(admin)
+		m = filterServerMap(buildServerMap(in), admin)
+		if in.uses.Have && in.databases.Have && hasLink(m, "container:"+app, db, "env") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the app was never joined to the database its env names: uses %+v (%v), links %v",
+				in.uses.Value, in.uses.Err, m.Links)
+		}
+		time.Sleep(time.Second)
+	}
+	pg := ""
+	for _, item := range kindOf(t, m, "containers").Items {
+		if item.Name == "jd-map-live-pg" {
+			pg = item.ID
+		}
+	}
+	if !hasLink(m, pg, db, "serves") {
+		t.Errorf("no line from the database to the container serving it: %v", m.Links)
 	}
 }

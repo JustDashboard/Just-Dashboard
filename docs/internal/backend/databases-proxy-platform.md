@@ -685,7 +685,8 @@ tag floats only within that line's patch releases; Timescale is pinned to one re
   gateway, so by address alone the dashboard was drawn as *This server* reading every database it
   watched. On other engines the asking pool's own connections are left out as before. A binding's word
   (`connected`, `stale`, `broken`) outranks an observation's. Both are on the read surface; the
-  detected-but-unconnected half is filled only for `system.admin`.
+  detected-but-unconnected half is filled only for `system.admin`. The server map draws its `env` and
+  `session` lines from the same join (`mapUses`), held for two minutes.
   Fleet, topology and consumer reads reuse one Docker list and one inspection per container within
   their request, including the fleet's administrator-only discovery. Each request starts fresh; the
   snapshot is never used for access-changing actions.
@@ -3422,7 +3423,9 @@ containers/volumes/networks.
   `ports_routes.go`): `routes` are the enabled sites whose upstream reaches the TCP socket
   (`SitesForUpstreamPort`, shared with the container routes view: `localhost`, a loopback, `0.0.0.0` or one
   of the host's own addresses at that exact port — `:30000` is not `:3000` — and only the loopback spellings
-  for a loopback socket; a container or other host name never matches), `stream` the nginx stream on an
+  for a loopback socket; a container or other host name never matches; `StreamsForUpstreamPort` reads a
+  stream's upstream and pool the same way, a range forwarded port for port included, for the server
+  map's line from a stream to what holds its port), `stream` the nginx stream on an
   nginx-held socket when nginx includes the stream directory, and `servedSites` the enabled nginx sites
   listening on an nginx-held port. `GET /ports/free?protocol=&address=&from=&count=` (system.admin: it binds
   each candidate for a moment on the address named) finds up to 20 ports with `portalloc.Select`, searching

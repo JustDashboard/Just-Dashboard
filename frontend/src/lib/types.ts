@@ -9588,7 +9588,14 @@ export type MapItem = {
 }
 
 /** Two things wired together, and how the server knows: a label, a route, a mount. */
-export type MapLink = { from: string; to: string; via: string }
+export type MapLink = {
+  from: string
+  to: string
+  /** How the server knows the two are joined, the surest way where it knows several. */
+  via: string
+  /** The other ways it knows the same pair is joined; one line is drawn for all of them. */
+  also?: string[]
+}
 
 export type MapFact = { label: string; value: string; tone?: MapTone }
 

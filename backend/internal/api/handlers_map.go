@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -130,6 +132,23 @@ func (s *Server) readServerMap(p *httpx.Principal) mapInputs {
 	run(func() {
 		in.bindings = readMapSource(c, spec("bindings", mapSteady), s.topologyBindings)
 	})
+	run(func() {
+		in.relations = readMapSource(c, spec("relations", mapSteady), s.mapRelations)
+	})
+	// The databases page's own reading of who uses each database: every
+	// running container's environment searched for its addresses, and the
+	// engine's session list. It inspects each container and dials each
+	// server, so it is held the longest the lines can wait.
+	run(func() {
+		in.uses = readMapSource(c, spec("uses", mapSlow), s.mapUses)
+	})
+	// Who holds each port — the unit, the PM2 app, the container, this
+	// dashboard — as the ports page reads it, for the lines from a site or a
+	// stream to what it forwards to.
+	run(func() {
+		in.listeners = readMapSource(c, spec("listeners", mapSteady), s.mapListeners)
+	})
+	in.dataDir = s.Cfg.DataDir
 	if m.proxy == nil {
 		in.absent["proxy"] = true
 	} else {
@@ -326,6 +345,159 @@ func (s *Server) mapDatabases(ctx context.Context) ([]fleetEntry, error) {
 	}
 	wg.Wait()
 	return out, nil
+}
+
+// mapRelations is what the deployments and the databases declare of each
+// other in the store: the typed references among a deployment's current
+// variables, the dependencies its plan names, and each connection's pooler.
+func (s *Server) mapRelations(ctx context.Context) (mapRelations, error) {
+	out := mapRelations{poolers: map[int64]string{}}
+	rows, err := s.Store.DB.QueryContext(ctx, `
+	  SELECT e.project_id, v.value_enc
+	    FROM deploy_variable_revisions v
+	    JOIN deploy_environments e ON e.id = v.environment_id
+	    JOIN deploy_projects p ON p.id = e.project_id
+	   WHERE v.active = 1 AND v.value_mode IN ('reference', '')
+	     AND e.archived_at = 0 AND p.archived_at = 0
+	   ORDER BY e.project_id, v.key`)
+	if err != nil {
+		return out, err
+	}
+	for rows.Next() {
+		var project int64
+		var sealed string
+		if err := rows.Scan(&project, &sealed); err != nil {
+			rows.Close()
+			return out, err
+		}
+		// Only the reference itself is kept: a variable written before modes
+		// were recorded may be a literal, and its value is dropped here.
+		value, err := s.Sealer.Open(sealed)
+		if err != nil {
+			continue
+		}
+		ref, err := deploy.ParseVariableReference(strings.TrimSpace(value))
+		if err != nil || (ref.Kind != "database" && ref.Kind != "domain") {
+			continue
+		}
+		out.refs = append(out.refs, mapProjectRef{projectID: project, kind: ref.Kind, target: ref.Target, via: "reference"})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	rows, err = s.Store.DB.QueryContext(ctx, `
+	  SELECT e.project_id, d.kind, d.resource_kind, d.resource_id
+	    FROM deploy_dependencies d
+	    JOIN deploy_environments e ON e.id = d.environment_id
+	    JOIN deploy_projects p ON p.id = e.project_id
+	   WHERE d.release_id = 0 AND e.archived_at = 0 AND p.archived_at = 0
+	   ORDER BY d.id`)
+	if err != nil {
+		return out, err
+	}
+	for rows.Next() {
+		var project int64
+		var kind, resourceKind, resource string
+		if err := rows.Scan(&project, &kind, &resourceKind, &resource); err != nil {
+			rows.Close()
+			return out, err
+		}
+		if kind == "storage" && resourceKind != "docker_volume" {
+			// A bind path is a folder, which the map draws no box for.
+			continue
+		}
+		out.refs = append(out.refs, mapProjectRef{projectID: project, kind: kind, target: resource, via: "dependency"})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	rows, err = s.Store.DB.QueryContext(ctx, `SELECT connection_id, container_name FROM db_poolers`)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var conn int64
+		var container string
+		if err := rows.Scan(&conn, &container); err != nil {
+			return out, err
+		}
+		out.poolers[conn] = container
+	}
+	return out, rows.Err()
+}
+
+// mapUses is the databases topology (`GET /databases/topology`) cut to the
+// lines the map draws: a deployment or a container whose environment names a
+// database, or that the engine reports connected to it. Its bindings are the
+// bindings source's, and a stack or network shared with the server is the
+// map's own member and network lines.
+func (s *Server) mapUses(ctx context.Context) ([]mapUse, error) {
+	if s.modules.docker != nil {
+		ctx = s.modules.docker.WithReadSnapshot(ctx)
+	}
+	conns, err := s.existingConnections(ctx)
+	if err != nil {
+		return nil, err
+	}
+	topo, err := s.topology(ctx, conns)
+	if err != nil {
+		return nil, err
+	}
+	nodes := map[string]topoNode{}
+	for _, n := range topo.Nodes {
+		nodes[n.ID] = n
+	}
+	out := []mapUse{}
+	for _, e := range topo.Edges {
+		conn, err := strconv.ParseInt(strings.TrimPrefix(e.From, "db:"), 10, 64)
+		if err != nil {
+			continue
+		}
+		n := nodes[e.To]
+		for _, via := range e.Via {
+			if via != "env" && via != "session" {
+				continue
+			}
+			use := mapUse{connID: conn, via: via}
+			switch n.Kind {
+			case "deployment":
+				use.projectID = n.ProjectID
+			case "container":
+				use.container = n.Name
+			default:
+				continue
+			}
+			out = append(out, use)
+		}
+	}
+	return out, nil
+}
+
+// mapListeners is every listening socket with who it answers for, read as
+// the ports page reads it.
+func (s *Server) mapListeners(ctx context.Context) ([]proxysvc.Listener, error) {
+	owners := make(chan proxysvc.OwnerInput, 1)
+	go func() {
+		if s.modules.docker == nil {
+			owners <- proxysvc.OwnerInput{SelfPID: int32(os.Getpid()), DataDir: s.Cfg.DataDir}
+			return
+		}
+		// Socket units only where systemd is managed here: they name the
+		// service a socket-activated port starts.
+		owners <- s.ownerInput(ctx, s.modules.systemd != nil)
+	}()
+	listeners, err := proxysvc.ListListeners(ctx)
+	in := <-owners
+	if err != nil {
+		return nil, err
+	}
+	if s.modules.pm2 != nil {
+		in.PM2 = s.pm2Apps(ctx, listeners)
+	}
+	return proxysvc.AttributeOwners(listeners, in), nil
 }
 
 func (s *Server) mapBoards(ctx context.Context) ([]mapBoard, error) {
