@@ -60,6 +60,7 @@ import { expired, expiringSoon, usableKeys } from "@/components/account/access"
 import { KeyMap } from "@/components/account/key-map"
 import {
   clientConfig,
+  deploymentsWithin,
   grantList,
   grantsOf,
   grantsWithin,
@@ -109,19 +110,21 @@ export function scopeWords(token: ApiToken) {
 
 /**
  * What an MCP key's replacement reaches: the databases the key reaches that a
- * key can still be given. One protected since, or forgotten, is refused every
- * call already, and the server would refuse the whole list for it.
+ * key can still be given, and the deployments as the key had them. A database
+ * protected since, or forgotten, is refused every call already, and the server
+ * would refuse the whole list for it.
  */
 async function replacementGrants(token: ApiToken | undefined, role: Role) {
   const saved = await get<DbConnection[]>("/databases/")
   const open = new Set(saved.filter((conn) => !conn.readOnly).map((conn) => conn.id))
-  const grants = grantList(grantsWithin(grantsOf(token), role !== "readonly")).filter((grant) =>
-    open.has(grant.connectionId),
+  const connections = grantList(grantsWithin(grantsOf(token), role !== "readonly")).filter(
+    (grant) => open.has(grant.connectionId),
   )
-  if (grants.length === 0) {
+  const deployments = deploymentsWithin(token?.deployments, role !== "readonly")
+  if (connections.length === 0 && deployments === "") {
     throw new Error("None of the databases this key reaches can be given to a key any more.")
   }
-  return grants
+  return { connections, deployments }
 }
 
 /** The one line a key's state comes down to. */
@@ -651,7 +654,7 @@ function KeyDialog({
               name: name.trim(),
               role,
               ttlDays: Number(ttl),
-              connections: await replacementGrants(replacement, role),
+              ...(await replacementGrants(replacement, role)),
             })
           : await post<{ secret: string }>("/tokens/", {
               name: name.trim(),
@@ -789,8 +792,8 @@ function KeyDialog({
             </Field>
             {scope === "mcp" ? (
               <Notice title="Opens the MCP endpoint only">
-                The replacement reaches the same databases as the key it replaces, and opens nothing
-                else on this dashboard.
+                The replacement reaches the same databases and deployments as the key it replaces,
+                and opens nothing else on this dashboard.
               </Notice>
             ) : scope ? (
               <Notice title="Reads database metrics only">

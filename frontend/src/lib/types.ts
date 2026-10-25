@@ -5227,7 +5227,12 @@ export type ApiToken = {
   revoked: boolean
   /** The databases an MCP key reaches. Every other key has none. */
   connections?: ApiTokenConnection[]
+  /** What an MCP key may do with the deployments; absent is nothing. */
+  deployments?: ApiTokenDeployments
 }
+
+/** An MCP key's deployment grant: nothing, read them, or also deploy and roll back. */
+export type ApiTokenDeployments = "" | "read" | "deploy"
 
 /** One database an MCP key reaches, to read only or to change as well. */
 export type ApiTokenConnection = {

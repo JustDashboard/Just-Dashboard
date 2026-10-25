@@ -99,6 +99,7 @@ free.
 - Build logs, runtime, console, request logs and traffic alerts per project
 - Request insights that count real visitors apart from bots, with their devices and pages
 - Notifications to Discord, Slack, Telegram, e-mail, webhooks and GitHub
+- Read runs and their logs, deploy and roll back from an AI client over MCP, with a key you allow
 
 </td>
 </tr>
@@ -133,7 +134,8 @@ free.
 - Point-in-time recovery for PostgreSQL: the write-ahead log archived with WAL-G, recovered to any second
 - Alerts when a database goes down, fills its disk, runs low on connections, lags or misses a backup
 - An MCP server for AI clients such as Claude Code, Cursor and VS Code: keys that reach only the
-  databases you choose, read-only unless you allow changes, never a protected one, every call audited
+  databases you choose, read-only unless you allow changes, never a protected one, and the
+  deployments only if you allow it, every call audited
 
 </td>
 </tr>
