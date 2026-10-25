@@ -361,6 +361,12 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
             icon: SettingsSliders,
             capability: "system.admin",
           },
+          {
+            title: "just-dashboard.com",
+            href: "/dashboard/link",
+            icon: CloudUpload,
+            capability: "system.admin",
+          },
         ],
       },
     ],

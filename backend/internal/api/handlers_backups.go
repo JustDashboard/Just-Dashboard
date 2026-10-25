@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -440,29 +441,46 @@ func (s *Server) handleBackupRunNow(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
-	job, err := s.modules.backupStore.Get(r.Context(), id)
+	job, err := s.startBackupRun(r.Context(), httpx.MustPrincipal(r).Username(), id)
 	if err != nil {
-		return mapBackupError(err)
+		return err
 	}
-	if err := s.modules.backupStore.ValidatePaths(job); err != nil {
-		return mapBackupError(err)
-	}
-	if s.modules.backupRunner.IsRunning(id) {
-		return httpx.Err(http.StatusConflict, "already_running", backups.ErrAlreadyRunning.Error())
-	}
-	// A backup can take hours, so it runs detached from the request rather
-	// than holding a connection open for the whole transfer. The run row that
-	// Execute creates is the progress record the UI polls.
-	go func() {
-		ctx, cancel := detachedContext(12 * 60 * 60)
-		defer cancel()
-		if _, err := s.modules.backupRunner.Execute(ctx, id, "manual"); err != nil {
-			s.Log.Error("manual backup failed", "job", job.Name, "err", err)
-		}
-	}()
 	httpx.SetAudit(r, "backup.run", job.Name, nil)
 	httpx.JSON(w, http.StatusAccepted, map[string]any{"started": true, "job": job.Name})
 	return nil
+}
+
+// startBackupRun starts a job's run now and returns once it has begun, for the
+// Run now button and for a linked site's backup.run alike. A backup can take
+// hours, so it runs detached from the caller rather than holding a connection
+// open for the whole transfer. The run row that Execute creates is the progress
+// record the UI polls.
+//
+// The run is recorded as manual, or as coming from the linked account when the
+// actor is one, so the job's history says which.
+func (s *Server) startBackupRun(ctx context.Context, actor string, id int64) (*backups.Job, error) {
+	job, err := s.modules.backupStore.Get(ctx, id)
+	if err != nil {
+		return nil, mapBackupError(err)
+	}
+	if err := s.modules.backupStore.ValidatePaths(job); err != nil {
+		return nil, mapBackupError(err)
+	}
+	if s.modules.backupRunner.IsRunning(id) {
+		return nil, httpx.Err(http.StatusConflict, "already_running", backups.ErrAlreadyRunning.Error())
+	}
+	trigger, failure := "manual", "manual backup failed"
+	if strings.HasPrefix(actor, "account:") {
+		trigger, failure = "account_link", "backup started by a linked account failed"
+	}
+	go func() {
+		ctx, cancel := detachedContext(12 * 60 * 60)
+		defer cancel()
+		if _, err := s.modules.backupRunner.Execute(ctx, id, trigger); err != nil {
+			s.Log.Error(failure, "job", job.Name, "err", err)
+		}
+	}()
+	return job, nil
 }
 
 func (s *Server) handleBackupRuns(w http.ResponseWriter, r *http.Request) error {

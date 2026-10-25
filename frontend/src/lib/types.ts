@@ -6822,6 +6822,59 @@ export type DashboardConfigReport = {
 }
 
 /**
+ * What a linked site may be shown and ask for. Mirrors internal/accountlink: the scope is
+ * chosen here, enforced here, and the site only draws the controls the reported scope allows.
+ */
+export type AccountLinkScope = "observe" | "operate" | "maintain"
+
+/**
+ * This server's link to a just-dashboard.com account. Mirrors the `/dashboard/link` routes;
+ * optional fields are omitted by the backend when absent, never `null`.
+ */
+export type AccountLinkStatus = {
+  /** JD_ACCOUNT_LINK. When false the page explains the switch and offers no action. */
+  enabled: boolean
+  /** JD_ACCOUNT_URL, e.g. "https://just-dashboard.com". */
+  siteUrl: string
+  state: "unlinked" | "pending" | "linked"
+  /** This server's key fingerprint, "21fe:31df:a154:a261". Absent until the identity exists. */
+  fingerprint?: string
+  /** Present only while state is "pending". */
+  request?: {
+    userCode: string
+    approveUrl: string
+    expiresAt: string
+    scope: AccountLinkScope
+  }
+  /** Present only while state is "linked". */
+  link?: {
+    serverId: string
+    /** The site account's label, an e-mail address. */
+    owner: string
+    scope: AccountLinkScope
+    linkedAt: string
+    /** Dashboard username, or "cli". */
+    linkedBy: string
+    lastHeartbeatAt?: string
+    /** The last failed exchange with the site; cleared by the next success. */
+    lastError?: string
+    lastCommand?: {
+      id: string
+      kind: string
+      status: "succeeded" | "failed" | "refused"
+      issuedBy: string
+      at: string
+    }
+    siteKeys: { kid: string; fingerprint: string; notAfter?: string }[]
+    updatePolicy?: { auto: "off" | "patch" | "all"; window: { start: string; end: string } }
+    /** The exact JSON body of the last heartbeat sent, so the page shows what is shared. */
+    lastSnapshot?: Record<string, unknown>
+  }
+  /** Why the most recent link request ended without a link, so the page can say so. */
+  lastOutcome?: { result: "denied" | "expired" | "failed"; at: string; message?: string }
+}
+
+/**
  * Removing the dashboard from the server. Mirrors internal/uninstall.
  *
  * The phases are in the order they run: the first two in the backend while it

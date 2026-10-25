@@ -97,6 +97,12 @@ services:
       JD_UPDATE_REPO: ${JD_UPDATE_REPO:-JustDashboard/Just-Dashboard}
       JD_UPDATE_BRANCH: ${JD_UPDATE_BRANCH:-main}
       JD_UPDATE_DIR: ${JD_UPDATE_DIR:-}
+      # Linking this server to a just-dashboard.com account. Nothing is sent
+      # until an administrator links it (Settings, install.sh, or
+      # scripts/manage.sh link); false switches the feature off outright. The
+      # URL is an origin: https, or http for localhost while developing the site.
+      JD_ACCOUNT_LINK: ${JD_ACCOUNT_LINK:-true}
+      JD_ACCOUNT_URL: ${JD_ACCOUNT_URL:-https://just-dashboard.com}
       JD_LOG_LEVEL: ${JD_LOG_LEVEL:-info}
     volumes:
       # Root-equivalent access. Everything that reaches it is authenticated,

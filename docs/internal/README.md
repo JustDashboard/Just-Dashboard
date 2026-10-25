@@ -24,6 +24,10 @@ strategy, and feature ownership behind those rules.
 
 ## Backend features
 
+- [`backend/account-link.md`](backend/account-link.md) — linking this server to a just-dashboard.com account: the
+  protocol it implements (the site repository's `server-link-protocol.md`), the trust model, the three doors
+  (Settings, `install.sh`, `manage.sh link`), the scope table and what the heartbeat carries, command
+  verification and audit, automatic-update policy, the local API, configuration and failure modes.
 - [`backend/network.md`](backend/network.md) — the network module: the spec restored at boot, the
   client-path guard, devices and namespaces, routing and forwarding, the gateway table and forward
   admission, blocklists, kernel protections, shaping, WireGuard and Tailscale, the resolver and traffic.

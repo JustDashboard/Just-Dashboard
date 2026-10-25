@@ -65,6 +65,12 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/config/certificate", s.handle(s.handleSelfConfigCertificate))
 			// Removing the dashboard from the server; see handlers_uninstall.go.
 			s.mountUninstallRoutes(r)
+			// Linking this server to a just-dashboard.com account. An agent
+			// answers only to its hub, which has no business handing it to a
+			// site account, so the routes do not exist there.
+			if s.modules.accountLink != nil {
+				s.mountAccountLinkRoutes(r)
+			}
 		})
 	})
 }
