@@ -16,6 +16,9 @@ const maxImageEditBytes = 64 << 20
 // ImageSnapshot returns one immutable reading: the revision always names the
 // bytes the browser decodes, even when a native writer changes the open file.
 func (s *Service) ImageSnapshot(path string) ([]byte, string, error) {
+	if s.run != nil {
+		return hosted3(s, func(s *Service) ([]byte, string, error) { return s.ImageSnapshot(path) })
+	}
 	full, err := s.Resolve(path)
 	if err != nil {
 		return nil, "", err

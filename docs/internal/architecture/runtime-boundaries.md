@@ -95,6 +95,10 @@ systemd through `jobs.RunDetached`, and a restarted backend adopts them; see
 - `CommandOnHostAsUser` enters the host namespace before using `setpriv` to select the trusted account's
   UID/GID and groups, clear capabilities and set no-new-privileges. PM2 uses this path with a minimal
   environment; a user-owned executable is never run as the dashboard's root identity.
+- `InHostMounts(fn)` runs Go code, not a command, in the host's mount namespace: on a goroutine locked
+  to a thread that unshares its filesystem attributes and `setns`es into `/proc/1/ns/mnt`, a thread Go
+  then discards rather than reuses. Only `fn` moves; a goroutine it starts is back in the container.
+  Where there is no other namespace (a plain install) or it cannot be entered, `fn` runs in place.
 - Argv is passed through unchanged and **never** through a shell. Keep it that way ([invariant 6](../security/invariants.md#invariants-that-must-not-regress)).
 
 Local interactive rebase uses Git's editor protocol: `gitx` sets the editor to the current server
@@ -109,6 +113,16 @@ filesystem entry point goes through it, including the ones that do not look like
 backup restore destinations, database dump paths, bind-mount sources, build contexts. `ResolveEntry`
 applies the same containment but returns the entry rather than its target: use it for delete, move, stat
 and chmod, which act *on* a symlink.
+
+The Files page's handlers (and `GET /system/disk-usage`) use `modules.hostFiles`, the same `Service`
+made with `OnHost(InHostMounts)`: every exported operation, `Resolve` included, runs whole in the host's
+mount namespace, so the page sees `/tmp`, `/usr` and `/var/lib` as the terminal does and a path is never
+resolved in one tree and opened in another. Every other caller keeps `modules.files`, in the container's
+view, because it resolves a path and then opens it itself. The roots and the checks are identical in
+both; only the tree they are evaluated against differs. Resolving through `/host` was the alternative
+and was rejected: every path the kernel hands back — symlink targets, walk results, error text — would
+need translating, and absolute symlinks would have to be re-rooted by hand, at every one of the
+package's syscalls.
 
 Logs are read under their own roots: `logsx.Service.Allow` holds a path, after resolving symlinks, to
 `JD_LOG_ROOTS`. Every log file the dashboard opens passes it, including the paths no request typed — a

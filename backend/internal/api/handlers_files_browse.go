@@ -55,7 +55,7 @@ func (s *Server) fileBookmarks(ctx context.Context) []fileBookmark {
 }
 
 func (s *Server) handleFilePlaces(w http.ResponseWriter, r *http.Request) error {
-	svc := s.modules.files
+	svc := s.modules.hostFiles
 	httpx.JSON(w, http.StatusOK, filePlacesResponse{
 		Home:          svc.Home(),
 		Roots:         svc.Roots(),
@@ -83,7 +83,7 @@ func (s *Server) handleFileBookmarks(w http.ResponseWriter, r *http.Request) err
 		// Resolved before it is stored, so a bookmark can never be a way to
 		// keep a path the roots would refuse — and so the stored form is the
 		// canonical one the listing will report.
-		full, err := s.modules.files.Resolve(b.Path)
+		full, err := s.modules.hostFiles.Resolve(b.Path)
 		if err != nil {
 			return mapFileError(err)
 		}
@@ -191,7 +191,7 @@ func (s *Server) handleFileColour(w http.ResponseWriter, r *http.Request) error 
 	}
 	// The entry, not what it points at: a link to a folder is labelled as the
 	// link, which is the row the operator coloured.
-	full, err := s.modules.files.ResolveEntry(req.Path)
+	full, err := s.modules.hostFiles.ResolveEntry(req.Path)
 	if err != nil {
 		return mapFileError(err)
 	}
@@ -249,7 +249,7 @@ func (s *Server) rewriteFileColours(ctx context.Context, root string, to func(st
 }
 
 func (s *Server) handleFileComplete(w http.ResponseWriter, r *http.Request) error {
-	entries := s.modules.files.Complete(r.URL.Query().Get("prefix"),
+	entries := s.modules.hostFiles.Complete(r.URL.Query().Get("prefix"),
 		atoiDefault(r.URL.Query().Get("limit"), 0))
 	httpx.JSON(w, http.StatusOK, entries)
 	return nil
@@ -265,7 +265,7 @@ func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) error {
 	// backstop for a filesystem that blocks on a read.
 	ctx, cancel := timeoutCtx(r, 15*time.Second)
 	defer cancel()
-	result, err := s.modules.files.Find(ctx, files.FindOptions{
+	result, err := s.modules.hostFiles.Find(ctx, files.FindOptions{
 		Root:     q.Get("path"),
 		Query:    q.Get("q"),
 		Limit:    atoiDefault(q.Get("limit"), 0),
@@ -281,7 +281,7 @@ func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) handleFilePreview(w http.ResponseWriter, r *http.Request) error {
-	preview, err := s.modules.files.Preview(r.URL.Query().Get("path"))
+	preview, err := s.modules.hostFiles.Preview(r.URL.Query().Get("path"))
 	if err != nil {
 		return mapFileError(err)
 	}
@@ -292,7 +292,7 @@ func (s *Server) handleFilePreview(w http.ResponseWriter, r *http.Request) error
 func (s *Server) handleFileUsage(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 45*time.Second)
 	defer cancel()
-	usage, err := s.modules.files.Usage(ctx, r.URL.Query().Get("path"),
+	usage, err := s.modules.hostFiles.Usage(ctx, r.URL.Query().Get("path"),
 		time.Duration(atoiDefault(r.URL.Query().Get("budgetMs"), 0))*time.Millisecond)
 	if err != nil {
 		return mapFileError(err)
@@ -304,7 +304,7 @@ func (s *Server) handleFileUsage(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) handleFileChecksum(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 5*time.Minute)
 	defer cancel()
-	sum, err := s.modules.files.Checksum(ctx, r.URL.Query().Get("path"), r.URL.Query().Get("algo"))
+	sum, err := s.modules.hostFiles.Checksum(ctx, r.URL.Query().Get("path"), r.URL.Query().Get("algo"))
 	if err != nil {
 		return mapFileError(err)
 	}
@@ -346,7 +346,7 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) error {
 		if r.Header.Get("Range") != "" {
 			return httpx.BadRequest("an image revision requires the complete file")
 		}
-		content, revision, err := s.modules.files.ImageSnapshot(path)
+		content, revision, err := s.modules.hostFiles.ImageSnapshot(path)
 		if err != nil {
 			return mapFileError(err)
 		}
@@ -358,7 +358,7 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) error {
 		http.ServeContent(w, r, filepath.Base(path), time.Time{}, bytes.NewReader(content))
 		return nil
 	}
-	f, st, err := s.modules.files.Open(path)
+	f, st, err := s.modules.hostFiles.Open(path)
 	if err != nil {
 		return mapFileError(err)
 	}

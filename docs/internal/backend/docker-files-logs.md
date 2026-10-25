@@ -320,6 +320,15 @@ it creates or changes no containers.
 
 ## Files
 
+**The Files page sees the server, not this container.** Its handlers use `modules.hostFiles`, whose
+every operation runs in the host's mount namespace through `hostexec.InHostMounts` (see
+[runtime boundaries](../architecture/runtime-boundaries.md#reaching-the-host-and-containing-paths)),
+so a path outside the directories `docker-compose.yml` mirrors — `/tmp/claude-1000`, `/var/lib/apt`,
+`/usr/sbin` — opens what the terminal shows instead of answering "not found" from the image's own
+tree. When the namespace cannot be entered the page falls back to the container's view and the backend
+logs one warning. `mounts_test.go` checks the namespace under `--privileged --pid=host`; outside that it
+skips.
+
 Owner and group names are memoised only within a listing or completion request. The next request
 performs NSS lookups again, so account renames and reused IDs are not hidden until backend restart.
 User and group IDs have separate maps, and numeric IDs remain the filesystem identity.

@@ -48,6 +48,9 @@ var (
 // beginning "../". An archive this server writes must never carry the path
 // traversal its own extractor exists to refuse.
 func (s *Service) ResolveArchive(base string, paths []string) (string, []string, error) {
+	if s.run != nil {
+		return hosted3(s, func(s *Service) (string, []string, error) { return s.ResolveArchive(base, paths) })
+	}
 	baseDir, err := s.Resolve(base)
 	if err != nil {
 		return "", nil, err
@@ -72,6 +75,9 @@ func (s *Service) ResolveArchive(base string, paths []string) (string, []string,
 // download costs no temporary space. Callers resolve through ResolveArchive
 // first; nothing here checks a path.
 func (s *Service) Compress(w io.Writer, baseDir string, members []string, format ArchiveFormat) error {
+	if s.run != nil {
+		return hosted1(s, func(s *Service) error { return s.Compress(w, baseDir, members, format) })
+	}
 	switch format {
 	case FormatZip:
 		return writeZip(w, baseDir, members)
@@ -166,6 +172,9 @@ func writeZip(w io.Writer, baseDir string, paths []string) error {
 // "../../etc/cron.d/evil" is the classic path-traversal write primitive, and
 // refusing it is not optional.
 func (s *Service) Extract(ctx context.Context, archivePath, dest string) ([]string, error) {
+	if s.run != nil {
+		return hosted2(s, func(s *Service) ([]string, error) { return s.Extract(ctx, archivePath, dest) })
+	}
 	// Serialising extraction keeps two requests from each reserving the same
 	// free space and then consuming it together.
 	s.extractMu.Lock()

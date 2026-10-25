@@ -105,9 +105,10 @@ services:
       - /:/host:rslave
       # The dashboard addresses the server by its real paths, so the
       # directories it manages have to appear here under those same paths.
-      # Without this the file manager, git discovery and compose-stack
-      # scanning quietly operate on this container's own empty filesystem
-      # while appearing to browse the server. Narrow this list if you have
+      # Without this git discovery, compose-stack scanning and the other
+      # path-taking features quietly operate on this container's own empty
+      # filesystem while appearing to browse the server. (The Files page
+      # runs in the host's mount namespace and sees every path regardless.) Narrow this list if you have
       # narrowed JD_FILE_ROOTS and friends to match.
       - /home:/home
       - /opt:/opt
