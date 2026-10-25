@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   clientConfig,
+  deploymentsWithin,
   grantList,
   grantsOf,
   grantsWithin,
@@ -84,5 +85,26 @@ describe("grantSummary", () => {
     expect(grantSummary({ connections: [{ connectionId: 99, access: "read" }] }, nameOf)).toBe(
       "no databases",
     )
+  })
+})
+
+describe("deployments", () => {
+  const nameOf = (id) => ({ 1: "shop" })[id]
+
+  test("are said after the databases, or alone", () => {
+    expect(
+      grantSummary(
+        { connections: [{ connectionId: 1, access: "read" }], deployments: "deploy" },
+        nameOf,
+      ),
+    ).toBe("reads shop, deploys")
+    expect(grantSummary({ connections: [], deployments: "read" }, nameOf)).toBe("reads deployments")
+    expect(grantSummary({ connections: [], deployments: "" }, nameOf)).toBe("no databases")
+  })
+
+  test("narrow to reading for an owner who can no longer deploy", () => {
+    expect(deploymentsWithin("deploy", false)).toBe("read")
+    expect(deploymentsWithin("deploy", true)).toBe("deploy")
+    expect(deploymentsWithin(undefined, true)).toBe("")
   })
 })

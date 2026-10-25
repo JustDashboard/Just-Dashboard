@@ -17,8 +17,9 @@ import (
 )
 
 // MCP keys are made and re-pointed beside every other key, under /tokens and
-// a human's session: the databases a key reaches are part of the key. They
-// are listed, revoked and deleted by the routes every key already has.
+// a human's session: the databases and the deployments a key reaches are part
+// of the key. They are listed, revoked and deleted by the routes every key
+// already has.
 
 type mcpTokenRequest struct {
 	Name string `json:"name"`
@@ -27,10 +28,15 @@ type mcpTokenRequest struct {
 	Role        auth.Role              `json:"role"`
 	TTLDays     int                    `json:"ttlDays"`
 	Connections []auth.TokenConnection `json:"connections"`
+	// Deployments is what the key may do with the deployments: "" nothing,
+	// "read", or "deploy".
+	Deployments auth.DeployAccess `json:"deployments"`
 }
 
 type mcpConnectionsRequest struct {
 	Connections []auth.TokenConnection `json:"connections"`
+	// Deployments left out keeps the key's deployment grant as it is.
+	Deployments *auth.DeployAccess `json:"deployments"`
 }
 
 func (s *Server) handleCreateMCPToken(w http.ResponseWriter, r *http.Request) error {
@@ -46,13 +52,13 @@ func (s *Server) handleCreateMCPToken(w http.ResponseWriter, r *http.Request) er
 	if req.TTLDays > 0 {
 		ttl = time.Duration(req.TTLDays) * 24 * time.Hour
 	}
-	tok, secret, err := s.Auth.CreateMCPToken(r.Context(), httpx.MustPrincipal(r).User, req.Name, req.Role, ttl, req.Connections)
+	tok, secret, err := s.Auth.CreateMCPToken(r.Context(), httpx.MustPrincipal(r).User, req.Name, req.Role, ttl, req.Connections, req.Deployments)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
 	httpx.SetAudit(r, "dashboard.token.create", tok.Name, map[string]any{
 		"role": tok.Role, "ttlDays": req.TTLDays, "scope": tok.Scope,
-		"connections": mcpGrantedNames(conns, tok.Connections),
+		"connections": mcpGrantedNames(conns, tok.Connections), "deployments": tok.Deployments,
 	})
 	// The secret is returned exactly once; only its hash is retained.
 	httpx.JSON(w, http.StatusCreated, map[string]any{"token": tok, "secret": secret})
@@ -72,19 +78,19 @@ func (s *Server) handleSetMCPTokenConnections(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return err
 	}
-	tok, err := s.Auth.SetTokenConnections(r.Context(), httpx.MustPrincipal(r).User, id, req.Connections)
+	tok, err := s.Auth.SetTokenConnections(r.Context(), httpx.MustPrincipal(r).User, id, req.Connections, req.Deployments)
 	switch {
 	case errors.Is(err, auth.ErrNotFound):
 		return httpx.ErrNotFound
 	case errors.Is(err, auth.ErrNotMCPToken):
-		return httpx.Err(http.StatusConflict, "not_mcp_key", "this key opens the API, not the MCP endpoint, and reaches no databases of its own")
+		return httpx.Err(http.StatusConflict, "not_mcp_key", "this key opens the API, not the MCP endpoint, and reaches no databases or deployments of its own")
 	case errors.Is(err, auth.ErrTokenInactive):
 		return httpx.Err(http.StatusConflict, "token_inactive", "this key was revoked or has expired; make a new one")
 	case err != nil:
 		return httpx.BadRequest("%v", err)
 	}
 	httpx.SetAudit(r, "dashboard.token.connections", tok.Name, map[string]any{
-		"connections": mcpGrantedNames(conns, tok.Connections),
+		"connections": mcpGrantedNames(conns, tok.Connections), "deployments": tok.Deployments,
 	})
 	httpx.JSON(w, http.StatusOK, tok)
 	return nil

@@ -79,7 +79,7 @@ func TestTheLegacyHandshakeSettlesOnAVersionWeSpeak(t *testing.T) {
 			t.Errorf("initialize asking for %s settled on %+v %v", c.asked, call, err)
 			continue
 		}
-		result := call.Initialize(Instructions)
+		result := call.Initialize(Instructions(Offer{Databases: true}))
 		if result["protocolVersion"] != c.want || req.Client.Name != "cursor" {
 			t.Errorf("initialize answered %+v", result)
 		}
@@ -166,7 +166,7 @@ func TestAModernAnswerSaysItIsCompleteAndMayNotBeShared(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	discover := call.Discover(Instructions)
+	discover := call.Discover(Instructions(Offer{Databases: true}))
 	if discover["resultType"] != "complete" || discover["cacheScope"] != "private" || discover["ttlMs"] == nil ||
 		!reflect.DeepEqual(discover["supportedVersions"], Supported()) {
 		t.Fatalf("server/discover = %+v", discover)
@@ -177,7 +177,7 @@ func TestAModernAnswerSaysItIsCompleteAndMayNotBeShared(t *testing.T) {
 	}
 
 	legacy := &Call{Request: &Request{Method: "tools/list"}, Version: "2025-11-25"}
-	listed := legacy.Cached(map[string]any{"tools": Tools(true, true)}, 60_000)
+	listed := legacy.Cached(map[string]any{"tools": Tools(Offer{Databases: true, Query: true, Write: true})}, 60_000)
 	for _, key := range []string{"resultType", "ttlMs", "cacheScope", "_meta"} {
 		if _, ok := listed[key]; ok {
 			t.Errorf("a legacy list carries %s", key)

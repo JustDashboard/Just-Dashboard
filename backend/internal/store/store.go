@@ -80,6 +80,9 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   -- 'metrics.read' opens only the routes that name it; 'mcp' opens the MCP
   -- endpoint and reaches only the databases api_token_connections grants it.
   scope        TEXT NOT NULL DEFAULT '',
+  -- What an MCP key may do with the deployments: '' nothing, 'read' read
+  -- them and their runs, 'deploy' also queue deploys and rollbacks.
+  deploy_access TEXT NOT NULL DEFAULT '',
   created_at   INTEGER NOT NULL,
   expires_at   INTEGER NOT NULL DEFAULT 0,
   last_used_at INTEGER NOT NULL DEFAULT 0,
@@ -1788,6 +1791,9 @@ var addedColumns = []struct{ table, column, spec string }{
 	// An API key can be narrowed to one capability, such as reading the
 	// exported database metrics. Every key that existed before is unscoped.
 	{"api_tokens", "scope", "TEXT NOT NULL DEFAULT ''"},
+	// An MCP key can be given the deployments as well as databases. Every
+	// key made before reaches none of them.
+	{"api_tokens", "deploy_access", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on

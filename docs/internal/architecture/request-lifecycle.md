@@ -33,7 +33,8 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   `403 key_scope`, and a `WWW-Authenticate: Bearer` challenge naming no authorization server. Inside
   the endpoint the principal carries the key's role (narrowed to its owner's) with no capability
   scope, and every tool call
-  is held to the databases `api_token_connections` grants the key, read again on each call; see
+  is held to the databases `api_token_connections` grants the key, read again on each call, and to
+  its deployment grant (`api_tokens.deploy_access`), read with the key; see
   [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
 - **`httpx.AuditMutations`** records every state-changing request. WebSocket routes are GET and
   long-lived, so they call `s.recordAudit(...)` at open time — the event is "a terminal was opened".

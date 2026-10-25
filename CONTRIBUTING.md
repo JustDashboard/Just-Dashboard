@@ -563,7 +563,7 @@ Each area of the section has its own browser spec over one mocked server
 catalogue above, and `database-fleet-fixture.ts` for a machine with and without
 Docker): `database-shell.spec.ts`, `database-control-center.spec.ts`,
 `database-fleet-backups.spec.ts`, `database-mcp-server.spec.ts` (the MCP server dialog: its keys and
-the databases each reaches), `database-home.spec.ts`, `database-data.spec.ts`,
+the databases and deployments each reaches), `database-home.spec.ts`, `database-data.spec.ts`,
 `database-query.spec.ts`, `database-query-bodies.spec.ts` (stored programs and script separators in
 the editor), `database-explain.spec.ts` (the Plan tree's measured, estimated and printed plans),
 `database-assistant.spec.ts` (the editor's assistant, its answers streamed by the mock),

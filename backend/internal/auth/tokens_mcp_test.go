@@ -29,7 +29,7 @@ func TestAnMCPKeyCarriesItsOwnersRoleAndItsDatabases(t *testing.T) {
 	tok, secret, err := svc.CreateMCPToken(t.Context(), owner, " claude-desktop ", "", 30*24*time.Hour, []TokenConnection{
 		{ConnectionID: ids[1], Access: AccessWrite},
 		{ConnectionID: ids[0], Access: AccessRead},
-	})
+	}, DeployNone)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,21 +76,24 @@ func TestAnMCPKeysGrantsAreChecked(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name   string
-		owner  *User
-		grants []TokenConnection
+		name        string
+		owner       *User
+		grants      []TokenConnection
+		deployments DeployAccess
 	}{
-		{"no database", admin, nil},
-		{"twice", admin, []TokenConnection{{ids[0], AccessRead}, {ids[0], AccessWrite}}},
-		{"an access nobody spells", admin, []TokenConnection{{ids[0], "admin"}}},
-		{"no id", admin, []TokenConnection{{0, AccessRead}}},
-		{"changes through a read-only account", viewer, []TokenConnection{{ids[0], AccessWrite}}},
+		{"no database and no deployments", admin, nil, DeployNone},
+		{"twice", admin, []TokenConnection{{ids[0], AccessRead}, {ids[0], AccessWrite}}, DeployNone},
+		{"an access nobody spells", admin, []TokenConnection{{ids[0], "admin"}}, DeployNone},
+		{"no id", admin, []TokenConnection{{0, AccessRead}}, DeployNone},
+		{"changes through a read-only account", viewer, []TokenConnection{{ids[0], AccessWrite}}, DeployNone},
+		{"a deployment grant nobody spells", admin, []TokenConnection{{ids[0], AccessRead}}, "admin"},
+		{"deploys through a read-only account", viewer, nil, DeployRun},
 	} {
-		if _, _, err := svc.CreateMCPToken(t.Context(), tc.owner, "key", "", 0, tc.grants); err == nil {
+		if _, _, err := svc.CreateMCPToken(t.Context(), tc.owner, "key", "", 0, tc.grants, tc.deployments); err == nil {
 			t.Errorf("%s: created", tc.name)
 		}
 	}
-	if _, _, err := svc.CreateMCPToken(t.Context(), viewer, "key", "", 0, []TokenConnection{{ids[0], AccessRead}}); err != nil {
+	if _, _, err := svc.CreateMCPToken(t.Context(), viewer, "key", "", 0, []TokenConnection{{ids[0], AccessRead}}, DeployNone); err != nil {
 		t.Errorf("a read-only account cannot make a key that reads: %v", err)
 	}
 	var keys int
@@ -102,12 +105,12 @@ func TestAnMCPKeysGrantsAreChecked(t *testing.T) {
 func TestAnMCPKeyIsRepointedOnlyByItsOwnerWhileItWorks(t *testing.T) {
 	svc, owner := newTestService(t, false)
 	ids := connectionsFor(t, svc, "shop", "analytics")
-	tok, secret, err := svc.CreateMCPToken(t.Context(), owner, "cursor", "", 0, []TokenConnection{{ids[0], AccessRead}})
+	tok, secret, err := svc.CreateMCPToken(t.Context(), owner, "cursor", "", 0, []TokenConnection{{ids[0], AccessRead}}, DeployNone)
 	if err != nil {
 		t.Fatal(err)
 	}
 	next := []TokenConnection{{ids[1], AccessWrite}}
-	updated, err := svc.SetTokenConnections(t.Context(), owner, tok.ID, next)
+	updated, err := svc.SetTokenConnections(t.Context(), owner, tok.ID, next, nil)
 	if err != nil || !reflect.DeepEqual(updated.Connections, next) {
 		t.Fatalf("repointed = %+v %v", updated, err)
 	}
@@ -119,20 +122,20 @@ func TestAnMCPKeyIsRepointedOnlyByItsOwnerWhileItWorks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.SetTokenConnections(t.Context(), other, tok.ID, next); !errors.Is(err, ErrNotFound) {
+	if _, err := svc.SetTokenConnections(t.Context(), other, tok.ID, next, nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("another account repointed the key: %v", err)
 	}
 	plain, _, err := svc.CreateAPIToken(t.Context(), owner, "github-actions", RoleLimited, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.SetTokenConnections(t.Context(), owner, plain.ID, next); !errors.Is(err, ErrNotMCPToken) {
+	if _, err := svc.SetTokenConnections(t.Context(), owner, plain.ID, next, nil); !errors.Is(err, ErrNotMCPToken) {
 		t.Errorf("a key for the whole API was given databases: %v", err)
 	}
 	if err := svc.RevokeAPIToken(t.Context(), tok.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.SetTokenConnections(t.Context(), owner, tok.ID, next); !errors.Is(err, ErrTokenInactive) {
+	if _, err := svc.SetTokenConnections(t.Context(), owner, tok.ID, next, nil); !errors.Is(err, ErrTokenInactive) {
 		t.Errorf("a revoked key was repointed: %v", err)
 	}
 	if granted, _ := svc.TokenConnections(t.Context(), tok.ID); !reflect.DeepEqual(granted, next) {
@@ -147,7 +150,7 @@ func TestAnMCPKeysGrantsGoWithTheKeyAndTheConnection(t *testing.T) {
 	ids := connectionsFor(t, svc, "shop", "analytics")
 	tok, _, err := svc.CreateMCPToken(t.Context(), owner, "claude", "", 0, []TokenConnection{
 		{ids[0], AccessRead}, {ids[1], AccessRead},
-	})
+	}, DeployNone)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,5 +169,56 @@ func TestAnMCPKeysGrantsGoWithTheKeyAndTheConnection(t *testing.T) {
 	var left int
 	if err := svc.st.DB.QueryRow(`SELECT COUNT(*) FROM api_token_connections`).Scan(&left); err != nil || left != 0 {
 		t.Fatalf("%d grants outlived their key (%v)", left, err)
+	}
+}
+
+// The deployments are a grant of their own: a key made without it reaches
+// none, a key may reach the deployments and no database, and re-pointing the
+// databases keeps the grant unless it is named.
+func TestAnMCPKeysDeploymentGrantIsItsOwn(t *testing.T) {
+	svc, owner := newTestService(t, false)
+	ids := connectionsFor(t, svc, "shop")
+	plain, _, err := svc.CreateMCPToken(t.Context(), owner, "claude", "", 0, []TokenConnection{{ids[0], AccessRead}}, DeployNone)
+	if err != nil || plain.Deployments != DeployNone {
+		t.Fatalf("a key made without the deployments = %+v %v", plain, err)
+	}
+	deployer, secret, err := svc.CreateMCPToken(t.Context(), owner, "cursor", "", 0, nil, DeployRun)
+	if err != nil || deployer.Deployments != DeployRun || len(deployer.Connections) != 0 {
+		t.Fatalf("a key for the deployments alone = %+v %v", deployer, err)
+	}
+	if resolved, _, _, err := svc.ResolveAPIToken(t.Context(), secret); err != nil || resolved.Deployments != DeployRun {
+		t.Fatalf("resolved = %+v %v", resolved, err)
+	}
+	kept, err := svc.SetTokenConnections(t.Context(), owner, deployer.ID, []TokenConnection{{ids[0], AccessWrite}}, nil)
+	if err != nil || kept.Deployments != DeployRun {
+		t.Fatalf("re-pointing the databases changed the deployments: %+v %v", kept, err)
+	}
+	read := DeployRead
+	if narrowed, err := svc.SetTokenConnections(t.Context(), owner, deployer.ID, nil, &read); err != nil || narrowed.Deployments != DeployRead {
+		t.Fatalf("narrowed = %+v %v", narrowed, err)
+	}
+	none := DeployNone
+	if _, err := svc.SetTokenConnections(t.Context(), owner, deployer.ID, nil, &none); err == nil {
+		t.Error("a key was left reaching nothing")
+	}
+	listed, err := svc.ListAPITokens(t.Context(), owner.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range listed {
+		if k.ID == deployer.ID && k.Deployments != DeployRead {
+			t.Errorf("the list gives the key %q", k.Deployments)
+		}
+	}
+
+	// An owner demoted since may not give a key the right to deploy, though
+	// the key itself was made at a role that could.
+	if _, err := svc.st.DB.Exec(`UPDATE users SET role = ? WHERE id = ?`, string(RoleReadOnly), owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	owner.Role = RoleReadOnly
+	run := DeployRun
+	if _, err := svc.SetTokenConnections(t.Context(), owner, deployer.ID, nil, &run); err == nil {
+		t.Error("a read-only owner gave a key the right to deploy")
 	}
 }

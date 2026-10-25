@@ -78,7 +78,12 @@ A change that weakens any of these has to say so explicitly.
    exactly as the SQL editor judges it for that role — a destructive one
    still needs `destructive` and spends the same budget — and the key's grants narrow it further:
    only the connections `api_token_connections` names, each `read` or `write`, re-read on every call,
-   and never a protected connection, which is refused for every tool, reads included. A walk of
+   and never a protected connection, which is refused for every tool, reads included. The
+   deployments are a separate grant, `api_tokens.deploy_access` (`''`, `read` or `deploy`, none for
+   every key made before it): a deploy or a rollback goes through the same enqueue functions the
+   deployment routes call and asks the key's role, narrowed to its owner's now, for the capability
+   the route asks — `service.control` to deploy, `destructive` and the destructive budget to roll
+   back. A walk of
    every route with an MCP key (`TestAnMCPKeyOpensNoOtherRoute`) holds the first half; the grants
    are re-checked by the handler rather than trusted from the key.
 

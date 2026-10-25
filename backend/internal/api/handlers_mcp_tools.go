@@ -53,7 +53,11 @@ func (s *Server) callMCPTool(r *http.Request, p *httpx.Principal, req *mcp.Reque
 	if c.failed {
 		httpx.AuditFailed(r)
 	}
-	httpx.SetAudit(r, "database.mcp."+req.Name, c.target, c.detail)
+	area := "database"
+	if mcp.IsDeployTool(req.Name) {
+		area = "deploy"
+	}
+	httpx.SetAudit(r, area+".mcp."+req.Name, c.target, c.detail)
 	return result
 }
 
@@ -89,6 +93,18 @@ func (c *mcpCall) run(tool string, raw []byte) map[string]any {
 		return c.runQuery(args)
 	case mcp.ToolRunWrite:
 		return c.runWrite(args)
+	case mcp.ToolListDeployments:
+		return c.listDeployments()
+	case mcp.ToolListRuns:
+		return c.listRuns(args)
+	case mcp.ToolReadRunLog:
+		return c.readRunLog(args)
+	case mcp.ToolListReleases:
+		return c.listReleases(args)
+	case mcp.ToolDeploy:
+		return c.deploy(args)
+	case mcp.ToolRollback:
+		return c.rollback(args)
 	}
 	return c.refuse("unknown", "Unknown tool: "+tool)
 }
