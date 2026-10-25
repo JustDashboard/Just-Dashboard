@@ -2,6 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test"
 import { DATABASE_SURFACES, mockDatabases } from "./database-fixture"
 import { mockProject } from "./deploy-fixture"
 import { overview as remoteDesktopOverview } from "./remote-desktop-fixture"
+import { busyMap } from "./server-map-fixture"
 
 /**
  * The design system's rules, checked in a browser rather than in a document.
@@ -81,6 +82,8 @@ async function mockShell(page: Page) {
     }
     if (path === "/deploy/github-app/") return json(route, { configured: false, installations: [] })
     if (path === "/remote-desktop/") return json(route, remoteDesktopOverview())
+    if (path === "/map/") return json(route, busyMap)
+    if (path === "/map/layout") return json(route, { layout: null })
     if (path === "/security/boundary")
       return json(route, { checks: [], allowlist: [], sshPorts: [] })
     if (path.startsWith("/audit")) {
@@ -126,6 +129,7 @@ const SURFACES = [
   "/remote-desktop",
   "/remote-desktop/new",
   "/metrics/alerts",
+  "/map",
 ] as const
 
 /**

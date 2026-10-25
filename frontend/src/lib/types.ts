@@ -9501,3 +9501,69 @@ export type NetworkConfirmationView = {
   owned: boolean
   change: NetworkChangeStatus | null
 }
+
+// ---------------------------------------------------------------------------
+// The server map: one summary of everything the dashboard manages.
+//
+// These mirror api/handlers_map.go. Each kind is read from the source its own
+// page reads, summarised to what a box on the map draws — a name, a state, one
+// fact and the page that manages it — so one request draws the whole server.
+// ---------------------------------------------------------------------------
+
+/** A thing's state as the map colours it: measured, never guessed. */
+export type MapTone = "ok" | "warning" | "danger" | "idle" | "unknown"
+
+export type MapItem = {
+  /** Stable across readings: `container:<id>`, `project:12`, `domain:shop.example.com`. */
+  id: string
+  name: string
+  /** The product its logo is drawn from, where one is known. */
+  product?: string
+  /** A deployment's project, whose website's icon draws it. */
+  projectId?: number
+  /** An icon the dashboard serves for it — a project's website's favicon. */
+  icon?: string
+  tone: MapTone
+  /** The state in a word or two: "running", "exited (137)", "answers", "failed". */
+  state: string
+  /** One more fact: an image, a size, when it last ran. */
+  detail?: string
+  /** The page that manages it. */
+  href: string
+}
+
+/** Two things wired together, and how the server knows: a label, a route, a mount. */
+export type MapLink = { from: string; to: string; via: string }
+
+export type MapFact = { label: string; value: string; tone?: MapTone }
+
+export type MapKindReading = {
+  key: string
+  /** How many exist; `items` may hold fewer where the list was capped. */
+  total: number
+  items: MapItem[]
+  /**
+   * read: the list arrived. unread: its source failed, and `reason` says why —
+   * never drawn as empty. limited: this role is shown part of it. absent: this
+   * server does not run the module (no PM2, no Docker), so there is no shelf.
+   */
+  state: "read" | "unread" | "limited" | "absent"
+  reason?: string
+  /** A kind summarised rather than listed — packages, services — says it in facts. */
+  facts?: MapFact[]
+}
+
+export type ServerMap = {
+  host: {
+    hostname: string
+    platform?: string
+    platformVersion?: string
+    kernel?: string
+    uptimeSeconds?: number
+  }
+  kinds: MapKindReading[]
+  links: MapLink[]
+  checkedAt: string
+}
+
+export type MapLayoutResponse = { layout: unknown; updatedAt?: string }
