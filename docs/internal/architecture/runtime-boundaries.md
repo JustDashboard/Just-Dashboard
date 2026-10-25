@@ -253,7 +253,8 @@ blueprint installs, port and queue leases, removals, drafts, schedules, Git watc
 and previews; proxy
 watching (`watched_endpoints`, filled from the older one-port-per-name `watched_domains`, holding TLS watches and TCP network probes by `kind`, with each check in `watched_checks`); compose deployment history (`docker_stack_deployments` — the file, the
 running digests and the git commit captured before every state-changing action, with environment values
-hashed rather than stored); the general `settings` key/value table; mount, container, interface
+hashed rather than stored); the server map's arrangement, one JSON document per account
+(`map_layouts`, which goes with its account); the general `settings` key/value table; mount, container, interface
 (`metric_interface_samples`) and host metric samples; and the network module's sealed WireGuard client
 configurations (`network_vpn_clients`), saved diagnostic runs (`network_diagnostic_runs`) and private
 packet capture metadata/artifacts (`network_packet_captures`), optional source/check identities

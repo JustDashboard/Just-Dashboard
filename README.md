@@ -80,6 +80,9 @@ free.
 - A live overview of the machine: CPU, memory, load, network, storage and disk I/O
 - Shortcuts to every section, with the open shells, the drawings edited last, the databases and
   every backup job one press away
+- A map of the whole server: the server in the middle and everything it runs branching off it —
+  projects, containers, databases, domains, backups, shells, accounts — wired together where the
+  server knows they are, arranged however you like and remembered
 - Metrics with seven days of history the backend records itself, and CSV export
 - Alerts when the CPU or memory stays high, a disk fills, a container goes down or a backup fails
 - Notable moments, top processes and the day's activity at a glance
