@@ -42,6 +42,10 @@ func (s *Server) mountVHostRoutes(r chi.Router) {
 			// takes whatever it pointed at out of nginx's configuration.
 			r.Method(http.MethodPost, "/vhosts/{name}/enabled", s.handle(s.handleVHostToggle))
 			r.Method(http.MethodDelete, "/vhosts/{name}/link", s.handle(s.handleVHostUnlink))
+			// Removing a deployment's route takes its domain offline. Only
+			// a route whose project is gone or archived: a live one is the
+			// deployment's to change, and it would write the route again.
+			r.Method(http.MethodDelete, "/vhosts/{name}/deployment-route", s.handle(s.handleDeploymentRouteRetire))
 		})
 	})
 	r.Route("/access-lists", s.mountAccessListRoutes)
@@ -148,6 +152,43 @@ func (s *Server) markDeploymentRoutes(ctx context.Context, hosts []proxysvc.VHos
 		}
 	}
 	return rows.Err()
+}
+
+// handleDeploymentRouteRetire removes a route its deployment no longer writes.
+func (s *Server) handleDeploymentRouteRetire(w http.ResponseWriter, r *http.Request) error {
+	name := httpx.URLParam(r, "name")
+	m := deploymentRouteRe.FindStringSubmatch(name)
+	if m == nil {
+		return httpx.BadRequest("%s is not a route a deployment writes", name)
+	}
+	id, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil || deploy.RouteNameFor(id) != name {
+		return httpx.BadRequest("%s is not a route a deployment writes", name)
+	}
+	hosts := []proxysvc.VHost{{Name: name}}
+	if err := s.markDeploymentRoutes(r.Context(), hosts); err != nil {
+		return httpx.Internal(err)
+	}
+	if owner := hosts[0].Owner; owner != nil && !owner.Archived {
+		return httpx.Err(http.StatusConflict, "deployment_active",
+			owner.Project+" still deploys this route and would write it again. Remove the domain from the deployment instead.")
+	}
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	out, err := s.modules.proxy.RetireDeploymentRoute(ctx, name)
+	if err != nil {
+		if errors.Is(err, proxysvc.ErrRouteRecovery) {
+			return httpx.Err(http.StatusConflict, "route_unmanaged", "The route was changed outside Just Dashboard or could not be put back, so it was left as it is.")
+		}
+		return mapProxyError(err)
+	}
+	detail := map[string]any{"certificates": out.Certificates}
+	if out.CertificateError != "" {
+		detail["certificateError"] = out.CertificateError
+	}
+	httpx.SetAudit(r, "proxy.deployment_route.remove", name, detail)
+	httpx.JSON(w, http.StatusOK, out)
+	return nil
 }
 
 // handleProxyPending says which changes on disk the running nginx has not

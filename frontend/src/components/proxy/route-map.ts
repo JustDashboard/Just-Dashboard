@@ -13,6 +13,7 @@ import {
   unitProduct,
 } from "@/components/product-logo"
 import { certPathProduct } from "@/components/proxy/marks"
+import { activeOwner } from "@/components/proxy/site-details"
 import { listenerProduct } from "@/components/proxy/ports"
 import { isParked } from "@/components/proxy/site-order"
 import { isDown, upstreamRank, upstreamsOf } from "@/components/proxy/upstream-health"
@@ -153,6 +154,26 @@ export function backendOf(
   return { name: address, address }
 }
 
+/**
+ * A backend as the deployment that writes the route, where the sockets did
+ * not name it. A deployment's container publishes no port and is dialled by
+ * its address on the deployment's network — `10.0.0.3:3000` — which no
+ * listener holds, so the route drew a bare address under a generic glyph
+ * while the deployment's own card drew its website's icon.
+ */
+function ownedBackend<T extends Pick<MapApp, "name" | "address" | "projectId">>(
+  vhost: VHost,
+  backend: T,
+): T {
+  const owner = activeOwner(vhost)
+  if (!owner || backend.projectId) return backend
+  return {
+    ...backend,
+    projectId: owner.projectId,
+    name: backend.name === backend.address ? owner.project : backend.name,
+  }
+}
+
 /** The address the upstream check names a target by: host:port, or a socket's path. */
 function checkedAddress(upstream: string): string {
   const path = socketPath(upstream)
@@ -180,7 +201,7 @@ export function siteBackend(
     const address = checkedAddress(upstream)
     const targets = upstreamsOf(upstreams, vhost.path)
     const owner = (targets.find((t) => sameAddress(t, address)) ?? targets[0])?.owner
-    return { kind: "app", ...backendOf(upstream, listeners, owner) }
+    return { kind: "app", ...ownedBackend(vhost, backendOf(upstream, listeners, owner)) }
   }
   const root = vhost.roots?.[0]
   if (root) return { kind: "files", name: root, address: root }
@@ -253,7 +274,7 @@ export function routeMap({
       const address = checkedAddress(upstream)
       const mine = targets.filter((t) => sameAddress(t, address))
       const judged = mine[0] ?? (vhost.upstreams.length === 1 ? targets[0] : undefined)
-      const backend = backendOf(upstream, listeners, judged?.owner)
+      const backend = ownedBackend(vhost, backendOf(upstream, listeners, judged?.owner))
       add(`app:${backend.address}`, {
         kind: "app",
         ...backend,

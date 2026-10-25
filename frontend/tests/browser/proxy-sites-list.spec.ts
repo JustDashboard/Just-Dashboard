@@ -1160,6 +1160,62 @@ test("a reader sees who manages a route and reaches its deployment, and nothing 
   await expect(menu.getByRole("menuitem", { name: /anyway|Enable|Disable|Delete/ })).toHaveCount(0)
 })
 
+test("a Docker Caddy route its project left behind can be removed, and a live one cannot", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const ingress = {
+    kind: "caddy",
+    path: "",
+    enabled: true,
+    formEditable: false,
+    listen: ["80", "443"],
+    tls: true,
+    modified: "",
+    size: 0,
+  }
+  // Its project was deleted, so no environment names it.
+  const orphan = {
+    ...ingress,
+    name: "just-dashboard-env-211.conf",
+    serverNames: ["lampino.example.com"],
+    upstreams: ["http://10.0.0.4:3000"],
+  }
+  const live = {
+    ...ingress,
+    name: "just-dashboard-env-175.conf",
+    serverNames: ["shop.example.com"],
+    upstreams: ["http://10.0.0.3:3000"],
+    owner: { projectId: 3, environmentId: 175, project: "shop", environment: "production" },
+  }
+  const sites: unknown[] = [orphan, live]
+  await page.route("**/api/v1/proxy/vhosts", (route) => json(route, sites))
+  let removed: string | undefined
+  await page.route("**/api/v1/proxy/vhosts/*/deployment-route", (route) => {
+    removed = `${route.request().method()} ${new URL(route.request().url()).pathname}`
+    sites.splice(0, 1)
+    return json(route, { name: orphan.name, certificates: ["lampino.example.com"] })
+  })
+  await page.goto("/proxy/sites")
+
+  await expect(
+    (await openMenu(page, live.name)).getByRole("menuitem", { name: "Remove route" }),
+  ).toHaveCount(0)
+  await page.keyboard.press("Escape")
+
+  await (await openMenu(page, orphan.name)).getByRole("menuitem", { name: "Remove route" }).click()
+  const confirm = page.getByRole("dialog", { name: `Remove ${orphan.name}` })
+  await expect(confirm).toContainText("The deployment that wrote this route is gone.")
+  await expect(confirm).toContainText("lampino.example.com stops answering")
+  await confirm.getByRole("button", { name: "Remove route" }).click()
+  await expect
+    .poll(() => removed)
+    .toBe(`DELETE /api/v1/proxy/vhosts/${orphan.name}/deployment-route`)
+  await expect(page.getByText(`${orphan.name} removed`)).toBeVisible()
+  await expect(page.getByText(/completed/)).toHaveCount(0)
+  await expect(card(page, orphan.name)).toHaveCount(0)
+})
+
 test("a broken site link remains removable from its inventory", async ({ page }) => {
   await mockProxy(page, { included: true })
   await serveSites(page, layouts)

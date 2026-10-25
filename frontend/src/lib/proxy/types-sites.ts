@@ -169,6 +169,16 @@ export type SiteDeleteResult = {
 }
 
 /**
+ * DELETE /proxy/vhosts/{name}/deployment-route: a route its deployment no
+ * longer writes is gone, and with it the certificates Caddy kept only for it.
+ */
+export type RetiredRoute = {
+  name: string
+  certificates: string[]
+  certificateError?: string
+}
+
+/**
  * GET /proxy/pending: what on disk the running nginx has not loaded. nginx
  * replaces its workers on every load and keeps them through a reload it
  * refuses, so `lastReload` is its oldest worker's start and `generation`
