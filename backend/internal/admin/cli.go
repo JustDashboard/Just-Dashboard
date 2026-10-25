@@ -25,9 +25,19 @@ const Usage = `Local dashboard account tools:
   --admin reset-password USER
   --admin revoke-sessions USER
 
+Link this server to a just-dashboard.com account:
+  --admin link [--scope observe|operate|maintain] [--wait 15m]
+  --admin unlink
+  --admin link-status
+
 Run through scripts/manage.sh on the host. Password commands read one line
 from stdin; never supply passwords in command arguments. The password set here
 is the one used to sign in. Existing two-factor enrollment is kept.
+
+link prints a code to enter on just-dashboard.com, waits for you to approve it
+there, and exits 0 once linked, 2 if it was declined or not approved in time.
+The scope (default observe) is what the site may see and do; widen it later in
+Settings. Linking needs JD_MASTER_KEY and is refused when JD_ACCOUNT_LINK=false.
 `
 
 func Run(ctx context.Context, dataDir string, args []string, in io.Reader, out, errOut io.Writer) error {
@@ -55,6 +65,9 @@ func run(ctx context.Context, dataDir string, args []string, in io.Reader, out, 
 		return err
 	}
 	defer st.Close()
+	if isLinkCommand(args[0]) {
+		return runLink(ctx, st, args, out, errOut)
+	}
 	// These operations never decrypt secrets or evaluate login policy.
 	svc := auth.NewService(st, nil, time.Hour, time.Hour, false)
 	if args[0] == "users" {
@@ -145,6 +158,15 @@ func run(ctx context.Context, dataDir string, args []string, in io.Reader, out, 
 
 func validateArgs(args []string) error {
 	switch args[0] {
+	case "link":
+		if _, err := parseLinkFlags(args[1:]); err != nil {
+			return err
+		}
+		return nil
+	case "unlink", "link-status":
+		if len(args) == 1 {
+			return nil
+		}
 	case "users":
 		if len(args) == 1 {
 			return nil

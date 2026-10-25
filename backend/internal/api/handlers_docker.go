@@ -547,28 +547,40 @@ func (s *Server) handleContainerStatStream(w http.ResponseWriter, r *http.Reques
 func (s *Server) containerLifecycle(action dockerx.LifecycleAction) httpx.Handler {
 	return func(w http.ResponseWriter, r *http.Request) error {
 		id := httpx.URLParam(r, "id")
-		detail, err := s.modules.docker.Inspect(r.Context(), id)
-		if err != nil {
-			return s.dockerErr(err)
-		}
-		// No typed phrase on stop, restart or kill. They are the three most
-		// pressed buttons in a Docker panel and every one of them is undone by
-		// pressing start, so a typing exercise in front of them bought nothing
-		// and cost the phrase its meaning everywhere else. The dialog still
-		// names the container, which is what stops the mis-clicked row.
 		var timeout *int
 		if v := r.URL.Query().Get("timeout"); v != "" {
 			t := atoiDefault(v, 10)
 			timeout = &t
 		}
-		if err := s.modules.docker.Lifecycle(r.Context(), id, action, timeout); err != nil {
-			return s.dockerErr(err)
+		detail, err := s.runContainerAction(r.Context(), id, action, timeout)
+		if err != nil {
+			return err
 		}
 		httpx.SetAudit(r, "docker.container."+string(action), detail.Name,
 			map[string]any{"id": id, "image": detail.Image})
 		httpx.NoContent(w)
 		return nil
 	}
+}
+
+// runContainerAction is what a container's start, stop, restart and the rest
+// do, for the buttons in the browser and for a linked site's commands alike.
+// It records nothing: each caller writes the audit entry in its own terms.
+//
+// No typed phrase on stop, restart or kill. They are the three most pressed
+// buttons in a Docker panel and every one of them is undone by pressing start,
+// so a typing exercise in front of them bought nothing and cost the phrase its
+// meaning everywhere else. The dialog still names the container, which is what
+// stops the mis-clicked row.
+func (s *Server) runContainerAction(ctx context.Context, id string, action dockerx.LifecycleAction, timeout *int) (*dockerx.ContainerDetail, error) {
+	detail, err := s.modules.docker.Inspect(ctx, id)
+	if err != nil {
+		return nil, s.dockerErr(err)
+	}
+	if err := s.modules.docker.Lifecycle(ctx, id, action, timeout); err != nil {
+		return nil, s.dockerErr(err)
+	}
+	return detail, nil
 }
 
 func (s *Server) handleContainerRemove(w http.ResponseWriter, r *http.Request) error {
@@ -928,7 +940,11 @@ func (s *Server) handleStackConfig(w http.ResponseWriter, r *http.Request) error
 }
 
 func (s *Server) findStack(r *http.Request, name string) (*dockerx.ComposeStack, error) {
-	stacks, err := s.modules.docker.ListStacks(r.Context(), s.Cfg.ComposeRoots)
+	return s.findStackIn(r.Context(), name)
+}
+
+func (s *Server) findStackIn(ctx context.Context, name string) (*dockerx.ComposeStack, error) {
+	stacks, err := s.modules.docker.ListStacks(ctx, s.Cfg.ComposeRoots)
 	if err != nil {
 		return nil, s.dockerErr(err)
 	}
@@ -946,28 +962,10 @@ func (s *Server) stackAction(action dockerx.ComposeAction) httpx.Handler {
 			return err
 		}
 		name := httpx.URLParam(r, "name")
-		stack, err := s.findStack(r, name)
+		stack, res, err := s.runStackAction(r.Context(), httpx.MustPrincipal(r).Username(), name, action,
+			r.URL.Query().Get("service"), func() error { return httpx.RequireTypedConfirmation(w, r, name) })
 		if err != nil {
 			return err
-		}
-		if !stack.Managed {
-			return httpx.BadRequest("stack %q has no compose file on disk that this dashboard can reach", name)
-		}
-		// One answer to "which of these interrupts a running service", shared
-		// with the streaming runner so the socket cannot become a way around
-		// the confirmation the POST demands.
-		if composeNeedsPhrase(action) {
-			if err := httpx.RequireTypedConfirmation(w, r, name); err != nil {
-				return err
-			}
-		}
-		// Written down before it is replaced, for the same reason the
-		// streaming runner does it: after the deploy the previous state is
-		// gone and there is nothing left to roll back to.
-		s.recordStackDeployment(r, stack, string(action))
-		res, err := s.modules.docker.RunCompose(r.Context(), stack.WorkingDir, action, r.URL.Query().Get("service"))
-		if err != nil {
-			return httpx.Wrap(http.StatusBadGateway, "compose_failed", err)
 		}
 		httpx.SetAudit(r, "docker.stack."+string(action), name,
 			map[string]any{"exitCode": res.ExitCode, "dir": stack.WorkingDir})
@@ -978,6 +976,47 @@ func (s *Server) stackAction(action dockerx.ComposeAction) httpx.Handler {
 		httpx.JSON(w, status, res)
 		return nil
 	}
+}
+
+// runStackAction runs one compose action on a stack by name, for the stack
+// page and for a linked site's stack.restart alike. It finds the stack, refuses
+// one with no compose file on disk that this dashboard can reach, asks confirm
+// for the actions that need a typed phrase, writes the stack's previous state
+// down before it is replaced, and runs the action. It audits nothing; each
+// caller does that in its own terms.
+//
+// confirm is the caller's way of getting the typed phrase. A caller that has
+// none (the site, which can only ever restart) passes nil, and an action that
+// needs the phrase is then refused rather than run unconfirmed.
+func (s *Server) runStackAction(ctx context.Context, actor, name string, action dockerx.ComposeAction, service string, confirm func() error) (*dockerx.ComposeStack, *dockerx.ComposeResult, error) {
+	stack, err := s.findStackIn(ctx, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !stack.Managed {
+		return nil, nil, httpx.BadRequest("stack %q has no compose file on disk that this dashboard can reach", name)
+	}
+	// One answer to "which of these interrupts a running service", shared
+	// with the streaming runner so the socket cannot become a way around
+	// the confirmation the POST demands.
+	if composeNeedsPhrase(action) {
+		if confirm == nil {
+			return nil, nil, httpx.Err(http.StatusForbidden, "confirmation_required",
+				"this action needs the stack's name typed in confirmation")
+		}
+		if err := confirm(); err != nil {
+			return nil, nil, err
+		}
+	}
+	// Written down before it is replaced, for the same reason the
+	// streaming runner does it: after the deploy the previous state is
+	// gone and there is nothing left to roll back to.
+	s.recordStackDeploymentAs(ctx, actor, stack, string(action))
+	res, err := s.modules.docker.RunCompose(ctx, stack.WorkingDir, action, service)
+	if err != nil {
+		return nil, nil, httpx.Wrap(http.StatusBadGateway, "compose_failed", err)
+	}
+	return stack, res, nil
 }
 
 func (s *Server) handlePruneAll(w http.ResponseWriter, r *http.Request) error {

@@ -16,6 +16,15 @@ Accounts (dashboard accounts, not Linux users)
   reset-password USER                Set a new password and clear lockout
   revoke-sessions USER                Sign out every browser session for USER
 
+Linking to just-dashboard.com (optional)
+  link [SCOPE]                       Link this server to your just-dashboard.com account.
+                                     Prints a code to enter there, then waits for you to
+                                     approve it. SCOPE is observe (default), operate or
+                                     maintain; widen it later in Settings. Exits 0 once
+                                     linked, 2 if it was declined or not approved in time
+  unlink                             Unlink it
+  link-status                        Say whether it is linked
+
 Stack
   status                             Show containers and their health
   logs [backend|frontend|proxy]       Follow logs (default: backend; Ctrl+C exits)
@@ -28,6 +37,10 @@ never belong in command arguments. The password you set is the one you sign
 in with; it is not asked for again. Resetting preserves two-factor and disabled
 state, and revokes browser sessions and API tokens. Account changes are
 audited as local root.
+
+Linking is optional and refused when JD_ACCOUNT_LINK=false. The code link prints
+is only a pointer to the request; the key it is signed with never leaves the
+dashboard. See README.md, "Linking to just-dashboard.com".
 
 Examples:
   sudo ./scripts/create-user.sh alice limited
@@ -60,7 +73,11 @@ case "$command" in
 			[ "$#" -eq 1 ] || die "reset-password accepts one username. See --help."
 		fi
 		;;
-	users|status|restart) [ "$#" -eq 0 ] || die "$command does not accept arguments. See --help." ;;
+	users|status|restart|unlink|link-status) [ "$#" -eq 0 ] || die "$command does not accept arguments. See --help." ;;
+	link)
+		[ "$#" -le 1 ] || die "link accepts one scope. See --help."
+		case "${1:-observe}" in observe|operate|maintain) ;; *) die "Scope must be observe, operate or maintain." ;; esac
+		;;
 	revoke-sessions) [ "$#" -eq 1 ] && [ -n "$1" ] || die "revoke-sessions needs one username. See --help." ;;
 	logs)
 		[ "$#" -le 1 ] || die "logs accepts one service. See --help."
@@ -89,8 +106,12 @@ case "$command" in
 		# Compose restart keeps the old container environment after an .env edit.
 		exec "${compose[@]}" up -d --force-recreate
 		;;
-	users|revoke-sessions)
+	users|revoke-sessions|unlink|link-status)
 		exec "${compose[@]}" run --rm --no-deps -T backend --admin "$command" "$@"
+		;;
+	link)
+		# exec keeps the command's own exit status: 2 means declined or not approved in time.
+		exec "${compose[@]}" run --rm --no-deps -T backend --admin link --scope "${1:-observe}"
 		;;
 	create-user|reset-password)
 		if [ "$password_stdin" -eq 1 ]; then

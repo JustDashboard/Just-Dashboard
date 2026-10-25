@@ -4,7 +4,13 @@
 configure the dashboard, build/start, and verify startup. Its existing private-access, migration,
 secret-preservation and port-selection decisions remain authoritative. Substeps and explicit `[ok]`
 or `[!]` labels keep status readable without color. Color requires a capable terminal and is disabled
-by `NO_COLOR` or `TERM=dumb`. `--help` prints usage without provisioning the host.
+by `NO_COLOR` or `TERM=dumb`. `--help` prints usage without provisioning the host. It takes `--link`, `--no-link` and `--link-scope`, which
+answer the optional question about linking the server to a just-dashboard.com account
+([account link](../backend/account-link.md#terminal-installer-managesh)): asked after the two-factor question on a
+new install (default No) and skipped when `JD_ACCOUNT_LINK=false` in the environment or in the kept `.env`; on
+a re-run that keeps `.env`, only `--link` links. The link itself is the last step of stage 4, after the health
+check, runs with input from `/dev/null`, and never fails the install: a decline, a timeout or an unreachable
+site becomes a warning and a `Not linked. Later: ...` line in the summary.
 
 When the checkout has no `.env` and `/var/lib/just-dashboard/install.env` exists — the copy an uninstall
 that kept its data left beside that data — the installer offers to restore it (default yes) and then
@@ -63,6 +69,17 @@ who had just reset their own password from a root shell was signed in and immedi
 third one. Resetting a password does not provide a way around enrolled two-factor or enable a
 disabled account; a reset also clears a change an account still owed.
 
+## Linking commands
+
+`link [observe|operate|maintain]`, `unlink` and `link-status` run `--admin link --scope S`, `--admin unlink`
+and `--admin link-status` the same way. Unlike the account commands they read `JD_MASTER_KEY`,
+`JD_ACCOUNT_LINK` and `JD_ACCOUNT_URL` from the Compose environment, because the identity they sign with is
+sealed and they must refuse when linking is switched off; `link-status` needs no key. `link` prints an approval
+address and a code, waits (`--wait`, 15 minutes by default) and exits 0 when linked, 2 when declined or not
+approved in time, 1 for any other failure; `manage.sh` keeps that status. They run in the same image against
+the same store as the running dashboard, which picks up a link or unlink within seconds. Audit: `account.link`
+and `account.unlink`, actor `cli`, username `root`, method `CLI`. Agent mode refuses all `--admin` commands.
+
 ## Stack commands
 
 `status` runs Compose `ps --all`. `logs [backend|frontend|proxy]` follows the selected service with
@@ -80,6 +97,9 @@ The Python fixtures check command arguments, stdin preservation, root and input 
 with spaces, Compose fallback, restoring a kept uninstall's `.env`, asking for the key of a store left
 without one, and the installer's successful/failing
 completion flows without changing
-host packages or the installed stack. Go tests use temporary stores to verify password strength,
+host packages or the installed stack. The linking cases prove what the installer asked by what its answers did
+(bash prints no prompt for piped input): the question is skipped under `--link`, `--no-link`, a kept `.env` and
+`JD_ACCOUNT_LINK=false`, the link command runs after the health check with the scope given, and a decline, an
+error or silence from it leaves the install finished. Go tests use temporary stores to verify password strength,
 account creation, TOTP preservation, token/session revocation, transactional rollback, audit records,
 and secret-free output.

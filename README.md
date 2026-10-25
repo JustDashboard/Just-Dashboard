@@ -205,6 +205,7 @@ free.
 - Search and replace API keys, with explicit revocation and inactive-record cleanup
 - A first-run question that keeps the sections you don't use out of your sidebar
 - One-click self-update, with the release notes compiled in
+- Optionally linked to your just-dashboard.com account, at a scope you choose, to see this server from the site
 
 </td>
 <td width="50%" valign="top">
@@ -366,6 +367,12 @@ rest in four labelled stages:
 Use `./install.sh --help` to preview the steps, or `sudo NO_COLOR=1 ./install.sh` for plain output.
 Everything it asked is editable afterwards under **Settings → Configuration**.
 
+One of its questions is optional and defaults to **No**: whether to [link this server to your
+just-dashboard.com account](#linking-to-just-dashboardcom). For unattended runs, `--link` and
+`--no-link` answer it and `--link-scope observe|operate|maintain` names what the site may do
+(default `observe`). The install finishes whether or not the link is approved, and
+`JD_ACCOUNT_LINK=false` removes the question altogether.
+
 **First sign-in:** every new account is asked once what it will use the server for — shipping apps,
 running databases, containers, the network, security, or working on the box — and its sidebar,
 Overview and search's empty list keep only those sections. Hiding a section is about the sidebar,
@@ -396,6 +403,9 @@ while the backend is stopped.
 | `sudo ./scripts/create-user.sh alice limited` | Create an account (`readonly`, `limited` or `admin`) |
 | `sudo ./scripts/manage.sh users` | List accounts, roles and two-factor status |
 | `sudo ./scripts/manage.sh revoke-sessions alice` | Sign out every browser session for an account |
+| `sudo ./scripts/manage.sh link [observe\|operate\|maintain]` | Link this server to your just-dashboard.com account (prints a code to approve there) |
+| `sudo ./scripts/manage.sh unlink` | Unlink it |
+| `sudo ./scripts/manage.sh link-status` | Say whether it is linked |
 | `sudo ./scripts/manage.sh status` | Show the containers and their health |
 | `sudo ./scripts/manage.sh logs [backend\|frontend\|proxy]` | Follow logs (Ctrl+C exits) |
 | `sudo ./scripts/manage.sh restart` | Recreate the stack to apply `.env` edits |
@@ -422,6 +432,36 @@ disconnects the web terminal; it recreates containers with current settings, whi
 
 </details>
 
+## Linking to just-dashboard.com
+
+Optional, and off until you do it. A linked server shows up on your [just-dashboard.com](https://just-dashboard.com)
+account with its health, version and the way to reach it, so you can find your dashboards in one
+place. Link it from **Settings → just-dashboard.com**, from the question in `install.sh`, or over SSH
+with `sudo ./scripts/manage.sh link`; all three run the same code. The server asks the site for a short
+code, you enter it on the site while signed in, and the server learns it was approved. Nothing secret is
+typed or printed: the code only points at the request, and completing the link needs the key this
+server keeps sealed in its own store.
+
+You choose the **scope** when you link, and can change it any time in Settings:
+
+| Scope | The site sees | The site can also |
+| --- | --- | --- |
+| `observe` (default) | Version and update state, OS, kernel, architecture, uptime, the address you reach the dashboard at (tailnet name or SSH tunnel port), CPU, memory, disk, load and network readings, container and backup counts, alerts firing | Ask for a fresh reading |
+| `operate` | All of that, plus the names of containers, stacks, backup jobs and the last-deployed project | Start, stop or restart a container, restart a compose stack, run a backup job |
+| `maintain` | Same as `operate` | Also install a dashboard update, set an automatic-update policy (evaluated here, in your server's time zone), restart the dashboard |
+
+Never sent, at any scope: `.env`, the allowlist, accounts, API keys, file paths beyond mount points,
+logs, connection strings, deployment variables or backup credentials. The Settings page shows the exact
+body of the last report.
+
+Everything is outbound over HTTPS: the dashboard is not made reachable and the site never connects to it.
+A command from the site runs only if its signature verifies against the site key pinned when you linked,
+it has not expired or been seen before, and it fits the scope you chose here; every one, run or refused,
+is written to the audit log as the site account. Unlink from Settings, with
+`sudo ./scripts/manage.sh unlink`, or by removing the server on the site. `JD_ACCOUNT_LINK=false` switches
+the feature off entirely: no page controls, no installer question, no command, and a link that exists
+goes quiet. `JD_ACCOUNT_URL` names the site, an origin only (`http://` just for `localhost`).
+
 ## Security first
 
 **This dashboard is root-equivalent.** Anyone who reaches it with a valid session has root on the
@@ -435,6 +475,9 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Destructive actions are confirmed and audited; deleting a project, database, stack or Git checkout,
   and uninstalling with a wipe, asks for a typed phrase checked on the server.
 - Every state-changing request lands in the audit log.
+- Linking to a just-dashboard.com account is optional and outbound only. A command from the site runs
+  only if its signature verifies against the key pinned at link time and its kind is within the scope
+  you chose; linking is a browser-session action for an administrator, or root at the terminal.
 
 ### Roles
 
@@ -506,6 +549,8 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_ACME_CA_ROOT` | system roots | A PEM bundle to trust when that authority signs with its own roots — its issuing roots, and the root behind its directory's TLS listener if that is private too. With it set, the public-DNS check before an order is skipped, because a private authority validates however it was set up to. |
 | `JD_UPDATE_REPO` | `JustDashboard/Just-Dashboard` | The repository releases are read from. Change it to follow a fork. |
 | `JD_UPDATE_BRANCH` | `main` | The branch whose changelog decides what "newest" means, and which an in-app update fast-forwards to. |
+| `JD_ACCOUNT_LINK` | `true` | Whether this server may be linked to a just-dashboard.com account. Linking is always something an administrator does; `false` removes the Settings page's controls, the installer's question and the terminal command, and silences a link that already exists, so nothing is ever sent. |
+| `JD_ACCOUNT_URL` | `https://just-dashboard.com` | The site this install may link to: an origin only, with no path, query or credentials. `https://` everywhere; `http://` only for `localhost`, `127.0.0.1` or `[::1]`, to develop the site beside the dashboard. Anything else refuses to start. |
 | `JD_UPDATE_DIR` | discovered | The directory you cloned into. Normally empty: the dashboard asks Docker where its own stack was deployed from. Set it only if the Updates page says that failed. |
 | `JD_AGENT_MODE` | `false` | Run as an agent managed by a hub: no login, mutual TLS only. Not useful on its own yet. |
 | `JD_DEV` | `false` | Development only. Drops `Secure` from the session cookie so the UI works over plain HTTP. Never set it on a real host. |

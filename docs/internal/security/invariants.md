@@ -161,6 +161,13 @@ A change that weakens any of these has to say so explicitly.
 11. Requested diagnostics claim only what an owner returned. Unavailable measurements carry a
     reason — never as a healthy result, and never as a problem. A finding that cannot name an action or a
     deep link says which external action is required instead.
+12. Linking to a just-dashboard.com account adds no inbound path and no second authority. A command from the
+    site runs only if its signature verifies against the site key pinned at link time, it has not expired or
+    been seen before, and its kind is within the scope chosen on this server, and each is written to the audit
+    log whatever its outcome; the kinds are a closed set that call the services the pages call. Linking,
+    changing the scope and unlinking are session-only in the browser (an API key is refused) and root-only at
+    the terminal, the heartbeat is a fixed field set that names nothing on the machine below `operate`, and
+    the installer never handles a link credential. See [account link](../backend/account-link.md).
 
 ## Invariant 2: what two-factor still guarantees
 
