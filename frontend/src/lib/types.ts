@@ -3698,6 +3698,39 @@ export type DeploymentGitWatch = {
   intervalSeconds: number
   reason?: string
   policy?: DeploymentGitPolicy
+  commitStatus?: DeploymentCommitStatus
+}
+
+/** The last thing written back to the Git host: a commit status or a preview comment. */
+export type DeploymentForgeReport = {
+  provider: string
+  repository?: string
+  revision?: string
+  /** pending/success/failure/error for a status; building/ready/failed/removed/cancelled for a comment. */
+  state: string
+  runId?: number
+  ok: boolean
+  /** Why the host did not take it, in words the operator can act on. */
+  message?: string
+  at: string
+}
+
+/** Where an environment's releases are reported, as whom, and how the last one went. */
+export type DeploymentCommitStatus = {
+  /** github, gitlab or gitea (Gitea and Forgejo share one API); absent when nothing is reported. */
+  provider?: "github" | "gitlab" | "gitea" | "git"
+  /** What to call the host: github, gitlab, gitea, forgejo or codeberg. */
+  product?: string
+  host?: string
+  repository?: string
+  /** The status's name on the host, `just-dashboard/<environment>`. */
+  context?: string
+  /** The saved token a GitLab or Gitea status is written with. */
+  credential?: string
+  ready: boolean
+  reason?: string
+  lastStatus?: DeploymentForgeReport
+  lastComment?: DeploymentForgeReport
 }
 
 /** One page of a project's run history, newest first. */
@@ -5198,6 +5231,11 @@ export type DeploymentCredential = {
   usedBy: number
   /** The projects behind `usedBy`, ascending; `usedBy` counts environments, so it can be larger. */
   usedByProjectIds?: number[]
+  /**
+   * The projects whose commit statuses and preview comments a provider token
+   * writes. Nothing deploys through it, so this does not count as `usedBy`.
+   */
+  reportsForProjectIds?: number[]
 }
 
 /**

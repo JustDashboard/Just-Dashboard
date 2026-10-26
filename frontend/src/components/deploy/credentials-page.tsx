@@ -130,7 +130,7 @@ const KIND_OPTIONS: {
     kind: "provider_token",
     title: "Provider token",
     short: "Calls the provider's API",
-    hint: "Calls the provider's API — commit statuses, deploy keys, releases.",
+    hint: "Calls a GitLab, Gitea or Forgejo API for the host it names — commit statuses and preview comments.",
   },
 ]
 
@@ -180,7 +180,8 @@ const TARGET_HINT: Record<DeploymentCredentialKind, string> = {
   git_bearer: "The Git host this token signs in to.",
   git_ssh: "The Git host this key signs in to.",
   registry: "Required. The registry host, with its port if it has one.",
-  provider_token: "The provider's API host, if this token is scoped to one.",
+  provider_token:
+    "The Git host it writes to, as the repository's address names it, with its port if it has one.",
   github_app: "github.com",
 }
 
@@ -188,7 +189,7 @@ const TARGET_PLACEHOLDER: Record<DeploymentCredentialKind, string> = {
   git_bearer: "github.com",
   git_ssh: "github.com",
   registry: "ghcr.io",
-  provider_token: "api.github.com",
+  provider_token: "gitlab.example.com",
   github_app: "github.com",
 }
 
@@ -204,7 +205,8 @@ const SECRET_HINT: Record<DeploymentCredentialKind, string> = {
   git_bearer: "A personal access token that can read the repositories it will clone.",
   git_ssh: "A private key in PEM form; the public half goes in the provider's deploy keys.",
   registry: "The password, or an access token, that goes with the username.",
-  provider_token: "A token allowed to call the provider's API.",
+  provider_token:
+    "GitLab: the api scope, Developer or above. Gitea and Forgejo: write:repository, and write:issue with read:user for preview comments.",
   github_app: "",
 }
 
@@ -249,8 +251,14 @@ function bareHost(value: string) {
   return host.replace(/:(?!\d+$).*$/, "")
 }
 
-function usageLabel(projects: number) {
-  return projects > 0 ? `used by ${plural(projects, "project")}` : "not in use"
+function usageLabel(projects: number, reports: number) {
+  if (projects > 0) return `used by ${plural(projects, "project")}`
+  return reports > 0 ? `writes statuses for ${plural(reports, "project")}` : "not in use"
+}
+
+/** Projects whose commit statuses a provider token writes; none deploy through it. */
+function reportsFor(credential: Pick<DeploymentCredential, "reportsForProjectIds">) {
+  return credential.reportsForProjectIds?.length ?? 0
 }
 
 function lastUsedLabel(lastUsedAt: string | undefined) {
@@ -363,7 +371,14 @@ export function CredentialsPage() {
     (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
     60000,
     [],
-    { enabled: Boolean(list?.some((credential) => credential.usedByProjectIds?.length)) },
+    {
+      enabled: Boolean(
+        list?.some(
+          (credential) =>
+            credential.usedByProjectIds?.length || credential.reportsForProjectIds?.length,
+        ),
+      ),
+    },
   )
   const projects = new Map(
     (fleet.data?.deployments ?? []).map((deployment) => [deployment.id, deployment]),
@@ -488,6 +503,11 @@ export function CredentialsPage() {
             It signs in for {plural(projects, "project")}. The server refuses to remove it while
             their sources point at it — move them to another credential first.
           </p>
+        ) : reportsFor(credential) > 0 ? (
+          <p>
+            It writes commit statuses for {plural(reportsFor(credential), "project")}. They stop
+            until another token for {credential.target} is saved; how they deploy does not change.
+          </p>
         ) : (
           <p>Nothing deploys through it; removing it cannot change a running project.</p>
         ),
@@ -545,7 +565,10 @@ export function CredentialsPage() {
       key={credential.id}
       credential={credential}
       installation={installationOf(credential)}
-      projects={(credential.usedByProjectIds ?? []).flatMap((id) => projects.get(id) ?? [])}
+      projects={(credential.usedBy > 0
+        ? (credential.usedByProjectIds ?? [])
+        : (credential.reportsForProjectIds ?? [])
+      ).flatMap((id) => projects.get(id) ?? [])}
       verbs={verbsFor(credential)}
       onEdit={credential.kind !== "github_app" ? () => edit(credential) : undefined}
       probing={probing === credential.id}
@@ -555,8 +578,16 @@ export function CredentialsPage() {
 
   // What a project's source reads through first; the rest under it.
   const groups = [
-    { key: "in-use", label: "In use", rows: (list ?? []).filter((c) => c.usedBy > 0) },
-    { key: "idle", label: "Not in use", rows: (list ?? []).filter((c) => c.usedBy === 0) },
+    {
+      key: "in-use",
+      label: "In use",
+      rows: (list ?? []).filter((c) => c.usedBy > 0 || reportsFor(c) > 0),
+    },
+    {
+      key: "idle",
+      label: "Not in use",
+      rows: (list ?? []).filter((c) => c.usedBy === 0 && reportsFor(c) === 0),
+    },
   ].filter((group) => group.rows.length > 0)
   const hosts = new Set((list ?? []).map((credential) => credential.target).filter(Boolean))
   const editing = draft?.id ? list?.find((credential) => credential.id === draft.id) : undefined
@@ -738,7 +769,7 @@ function CredentialCard({
   const shown = projects.slice(0, 3)
   const usage = (
     <>
-      {usageLabel(projectsUsing(credential))}
+      {usageLabel(projectsUsing(credential), reportsFor(credential))}
       {" · "}
       <span className={cn(!credential.lastUsedAt && "text-warning")}>
         {lastUsedLabel(credential.lastUsedAt)}
@@ -747,7 +778,9 @@ function CredentialCard({
   )
   const readers = shown.length > 0 && (
     <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-      <span className={cn(wide && "sr-only")}>reads the source of</span>
+      <span className={cn(wide && "sr-only")}>
+        {credential.usedBy > 0 ? "reads the source of" : "writes statuses for"}
+      </span>
       {shown.map((project) => (
         <span
           key={project.id}

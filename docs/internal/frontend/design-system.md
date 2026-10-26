@@ -697,7 +697,8 @@ every page, panel and chart title in the product and left it under a switch, one
 flow screen of six options was six titles and six captions, and the caption is what made the row two
 lines tall in the first place. "Report each release on the commit" plus "Posts a pending, success or
 failure status to GitHub through the dashboard's own credential" is one fact written twice; "Report
-each release as a GitHub commit status" is the fact. Where the hint carried a *consequence* the title
+each release as a commit status" is the fact (Settings, which knows the host, names it: "…as a GitLab
+commit status"). Where the hint carried a *consequence* the title
 has to carry it too — "Required — a failing readiness check blocks activation", not "Readiness check
 required" — and where it carried something that belongs to the whole section rather than to one
 switch (which branch is watched, that nothing fires before the first deployment) it moves to the

@@ -1,7 +1,8 @@
 # Deployment notifications and commit statuses
 
 Every run announces its outcome to the audience outside the transcript. Two mechanisms share one
-engine hook: notification channels (chat, e-mail, signed webhooks) and GitHub commit statuses.
+engine hook: notification channels (chat, e-mail, signed webhooks) and commit statuses (with preview
+comments) on the Git host the source lives on — GitHub, GitLab, Gitea or Forgejo.
 
 ## Run observers
 
@@ -105,7 +106,7 @@ The signed webhook body keeps its six historical fields (`event`, `runId`, `proj
 `terminalReason`, `durationSeconds` and `url`. Provider kinds render the same facts; a failure whose
 terminal code is a named cause (a build, runtime, release-task or source cause rather than a code
 that only says where, such as `build_failed`) adds a Cause field with its title before the reason,
-which is the cause's sentence. A GitHub commit status, with room for a few words, carries the title. `url` points
+which is the cause's sentence. A commit status, with room for a few words, carries the title. `url` points
 at the run page under the dashboard's own endpoint, read from the self-configuration report and
 cached for five minutes.
 
@@ -141,33 +142,100 @@ below need `system.admin`.
 
 All mutations require `system.admin` and are audited as `deploy.notification.*`.
 
-## GitHub commit statuses
+## Commit statuses
 
-`deploy.CommitStatusPublisher` is a second observer. For a run whose environment source is a
-`github.com` remote (HTTPS, SSH or `git@` forms; GitHub Enterprise hosts and other providers are
-ignored) it posts `pending` on start and `success`, `failure` or `error` on the terminal state to
-`repos/{owner}/{name}/statuses/{sha}` with context `just-dashboard/<environment slug>` and a link to
-the run. The status is posted as the dashboard's [GitHub App](github-app.md) when one is connected
-and installed on the repository, and through the dashboard's own `gh` credential otherwise (or when
-the App is not installed there). Restarts and preview removals deploy no new commit and post
-nothing. A missing `gh`, an expired token or a repository the token cannot write are logged
-warnings; a run's outcome is never changed by a status that could not be posted.
+`deploy.CommitStatusPublisher` is a second observer. For a run whose environment source is a Git
+remote on a host it can report to, it posts `pending` on start and `success`, `failure` or `error` on
+the terminal state for the exact commit the run deployed, named `just-dashboard/<environment slug>` and
+linked to the run. Restarts, stops, starts and preview removals deploy no new commit and post nothing.
+A status that cannot be posted never changes a run's outcome; since the host's answer is otherwise
+only a log line, the publisher keeps the newest outcome per environment (see
+[What Settings shows](#what-settings-shows)).
+
+### GitHub
+
+A `github.com` remote (HTTPS, SSH or `git@` forms; GitHub Enterprise hosts are not GitHub here) is
+posted to `repos/{owner}/{name}/statuses/{sha}` as the dashboard's [GitHub App](github-app.md) when one
+is connected and installed on the repository, and through the dashboard's own `gh` credential otherwise
+(or when the App is not installed there). A missing `gh`, an expired token or a repository the token
+cannot write are recorded outcomes.
+
+### GitLab, Gitea and Forgejo
+
+`deploy.ForgeClient` speaks the REST APIs of GitLab and of Gitea, which Forgejo (Codeberg among them)
+shares. Nothing about the host is configured beyond a token:
+
+- **Which software.** `gitlab.com`, `codeberg.org` and `gitea.com` are known. Any other host is asked:
+  `GET <prefix>/api/v1/version` answers anyone on Gitea and Forgejo (Forgejo's version reads
+  `11.0.16+gitea-1.22.0`, which is how the page tells the two apart), and `GET <prefix>/api/v4/version`
+  answers a GitLab token — or, without one, refuses with an `X-Gitlab-Meta` header that still identifies
+  GitLab. Gitea repositories are always `owner/name`, so anything before those two path segments is
+  the instance's subpath; a GitLab project nests groups, so each split of the path into "where GitLab
+  is" and "the project" is tried in turn. An answer is kept for an hour, a host that answered as
+  neither for two minutes. A redirect is never followed.
+- **Which token.** The source's own credential when it is an HTTPS token (`git_bearer` or
+  `provider_token`) for that host; otherwise the newest `provider_token` whose target names the host
+  (with its port when it has one). An SSH-cloned or public source therefore reports once a provider
+  token for its host is saved. `PlanningStore.ForgeToken` implements the rule, and a successful post
+  stamps the credential's `lastUsedAt`.
+- **Transport.** A token goes only to the remote's own host, over HTTPS — or plain HTTP to a loopback
+  address, the rule every other credentialed call follows. An `ssh://` or `git@` remote is reported to
+  the host's HTTPS side. The API is called with `Authorization: Bearer` on GitLab and
+  `Authorization: token` on Gitea.
+- **Calls.** GitLab: `POST /api/v4/projects/<url-encoded path>/statuses/<sha>` with `state` `running`,
+  `success`, `failed` or `canceled` (GitHub's `pending`/`success`/`failure`/`error`), `name` and
+  `target_url`. GitLab shows the statuses as an external pipeline on the commit and its merge requests; a
+  second deployment of the same commit adds a status rather than being refused, and the pipeline
+  settles on the newest. Gitea and Forgejo: `POST /api/v1/repos/<owner>/<name>/statuses/<sha>` with
+  GitHub's states and `context`. Descriptions are cut to 140 characters.
+- **Scopes.** GitLab: `api`, at least the Developer role. Gitea and Forgejo: `write:repository`, plus
+  `write:issue` and `read:user` for preview comments. A refusal is recorded in the host's terms — a 403
+  names the scope that host needs and appends the host's own message (GitLab's `error_description`,
+  Gitea's `message`).
 
 ## Pull request comments
 
-`deploy.PullRequestCommenter` is a third observer, and it speaks only as the GitHub App. For a run
-whose environment is a preview created by a GitHub trigger it keeps one comment on the pull request —
-found again by a `<!-- just-dashboard:preview:<environment id> -->` marker and edited in place — that
-reads Building, then Ready with the preview's address, Failed with the terminal reason, or Removed
-once the preview is torn down, with the commit and a link to the run. Production runs, previews from
-other providers and a repository the App is not installed on produce no comment; a comment that
-cannot be posted is a logged warning. `github_comments_test.go` covers the state sequence, the
-per-run deduplication and the refusals.
+`deploy.PullRequestCommenter` is a third observer. For a run whose environment is a preview created by
+a GitHub, GitLab or Gitea trigger it keeps one comment on the pull or merge request — found again by a
+`<!-- just-dashboard:preview:<environment id> -->` marker at the start of its body and edited in place —
+that reads Building, then Ready with the preview's address, Failed with the terminal reason, or Removed
+once the preview is torn down, with the commit and a link to the run. Production runs produce no
+comment.
+
+On GitHub the comment speaks only as the GitHub App; a repository the App is not installed on gets
+none. On GitLab (merge request notes, paged through `X-Next-Page`) and Gitea/Forgejo (issue comments)
+it is written with the token the statuses use, and only a comment that token's own account wrote is
+edited: the account is read once an hour from `/api/v4/user` or `/api/v1/user`, so a marker quoted by
+somebody else, or in a GitLab system note, is never overwritten even with an administrator's token. A
+comment is written only when the trigger's repository is the one the preview builds and the host
+answers as the trigger's provider.
 
 The per-environment policy row gained an additive `commit_statuses` column (default on), exposed as
 `commitStatuses` on `GET …/git-watch` and `PUT …/git-policy` and as **Report each release as a
-GitHub commit status** in Settings → General's Automatic deployment section (and on `/deploy/new`). It
-is excluded from the policy decision key, so toggling it cannot invalidate cached polling decisions.
+<host> commit status** in Settings → General's Automatic deployment section (**Report each release as a
+commit status** on `/deploy/new`, before the host is known). It is excluded from the policy decision
+key, so toggling it cannot invalidate cached polling decisions. It governs statuses; preview comments
+follow the trigger.
+
+## What Settings shows
+
+`deploy_forge_reports` (additive; one row per environment and kind, `status` or `comment`, removed with
+its environment) keeps the newest outcome: provider, repository, commit, state, run, whether the host
+took it and, when it did not, why. A preview comment's row belongs to the environment whose trigger
+opened the preview, which is the one Settings shows.
+
+`GET …/git-watch` carries `commitStatus` from `CommitStatusPublisher.Describe`: `provider` (`github`,
+`gitlab` or `gitea`), `product` (adds `forgejo` and `codeberg`, for the name and logo), `host`,
+`repository`, `context`, the `credential` a GitLab or Gitea status is written with, `ready` and a
+`reason` when it is not, and `lastStatus`/`lastComment`. The switch is named for the host, and the line
+under it says one of: where the last status went and with which token; that a provider token for the
+host is missing, linking to Credentials; or, in the warning tone, that the host refused the last status
+or preview comment, with the token and the host's reason.
+
+On Credentials a provider token lists `reportsForProjectIds` — the projects whose statuses it writes by
+the rule above — and is filed under **In use** with "writes statuses for N projects". Nothing deploys
+through it, so it is not `usedBy`, and removing it is not refused: the confirmation says the statuses
+stop until another token for the host is saved.
 
 ## Verification
 
@@ -187,11 +255,27 @@ is excluded from the policy decision key, so toggling it cannot invalidate cache
   the server's own API — the title, the reason, the priority and the run link.
 - `run_observer_test.go`: observers hear about failed, successful and queued-cancelled runs; a slow
   observer changes nothing about the run.
+- `forge_reports_test.go`: every remote shape, Gitea under a subpath and GitLab with nested groups found
+  by asking the host (and GitLab without a token), unsupported hosts remembered, no token over plain
+  HTTP to another machine, each host's paths, states, names and auth header, one comment kept per
+  preview and another author's marker left alone, a refusal in the host's terms, the token precedence,
+  the publisher and the reading with no token and then with one, the policy switch, a GitLab merge
+  request comment and a trigger for another repository refused, and which projects a provider token
+  writes for.
+- `forge_reports_live_test.go` (`JD_DEPLOY_LIVE=1`, Docker; `JD_FORGE_LIVE_GITLAB=1` adds GitLab, about
+  five minutes to start): real Gitea 1.24, Forgejo 11 and GitLab 18.4 servers, each with a pull or merge
+  request; the statuses and the single edited comment are read back from the server's own API, a token
+  with too few scopes is refused with 403, and each host is named by asking it.
+- `deploy-settings-a.spec.ts`: the switch named for GitLab and Forgejo, the missing-token line and its
+  link, a refusal with the token's name; `deploy-credentials.spec.ts`: a status-writing provider token
+  under In use, and its removal dialog.
 - `automation_readings_test.go`: each channel carries its newest attempt and last fourteen outcomes
   oldest first, an e-mail channel its mail server, and each delivery the project and run it
   announced (none for a test message).
 - `github_status_test.go`: pending/failure/success posting with deduplication, policy opt-out,
   restart and foreign-remote suppression, remote parsing, and the decision key staying stable.
+- `github_comments_test.go`: a GitHub preview's comment through Building, Ready and Removed, the
+  per-run deduplication, and a Gitea preview never reaching the GitHub poster.
 - Browser (`deploy-projects.spec.ts`, `deploy-notifications.spec.ts`, `deploy-settings-a.spec.ts`):
   a Discord channel's creation, pause/resume, test delivery, delivery history and removal; the
   picker's ten kinds, an ntfy channel's generated topic and its refusal to send a token over plain
