@@ -23,6 +23,7 @@ import {
   Lifebuoy,
   Rocket,
   LineChart,
+  Linked,
   ListOrdered,
   LockClosed,
   Logs,
@@ -175,6 +176,9 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
             icon: Key,
             capability: "system.admin",
           },
+          // Read masked by anyone who may read a project's variables; written
+          // by an administrator, which the page itself says.
+          { title: "Shared variables", href: "/deploy/variables", icon: Linked },
           { title: "Notifications", href: "/deploy/notifications", icon: Bell },
         ],
       },

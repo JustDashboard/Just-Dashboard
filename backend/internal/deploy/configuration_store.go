@@ -384,7 +384,7 @@ func (s *PlanningStore) RevealVariable(ctx context.Context, projectID, environme
 			continue
 		}
 		result := &VariableReveal{Name: name, Value: value.value}
-		if reference, parseErr := ParseVariableReference(value.value); parseErr == nil && value.valueMode != "literal" {
+		if reference, ok := parseStoredReference(value.value, value.valueMode); ok {
 			result.Reference = &reference
 		}
 		return result, nil
@@ -403,7 +403,7 @@ func (s *PlanningStore) LiteralVariableValues(ctx context.Context, projectID, en
 	}
 	literal := map[string]string{}
 	for _, value := range values {
-		if _, parseErr := ParseVariableReference(value.value); parseErr == nil && value.valueMode != "literal" {
+		if _, ok := parseStoredReference(value.value, value.valueMode); ok {
 			continue
 		}
 		literal[value.name] = value.value
@@ -423,6 +423,12 @@ func (s *PlanningStore) PutVariable(
 	value, err := validateVariableWrite(request)
 	if err != nil {
 		return nil, err
+	}
+	if request.Reference != "" {
+		reference, _ := ParseVariableReference(request.Reference)
+		if err := s.checkSharedReference(ctx, projectID, name, request.Sensitivity, reference); err != nil {
+			return nil, err
+		}
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -964,7 +970,7 @@ func variableViews(values []storedVariableValue) []DeploymentVariable {
 			CreatedAt: value.createdAt, EnvironmentID: value.environmentID,
 			DesiredRevision: value.desiredRevision,
 		}
-		if reference, err := ParseVariableReference(value.value); err == nil && value.valueMode != "literal" {
+		if reference, ok := parseStoredReference(value.value, value.valueMode); ok {
 			view.Reference = &reference
 		}
 		result = append(result, view)
@@ -1032,7 +1038,8 @@ func ResolveVariableGraphWithModes(values map[string]string, modes map[string]st
 		state[name] = 1
 		stack = append(stack, name)
 		resolvedValue, leafSecret := value, false
-		if reference, err := ParseVariableReference(value); err == nil && modes[name] != "literal" {
+		if reference, ok := parseStoredReference(value, modes[name]); ok {
+			var err error
 			if reference.Kind == "variable" {
 				resolvedValue, leafSecret, err = visit(reference.Target)
 				if err != nil {

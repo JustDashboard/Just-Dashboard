@@ -65,10 +65,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useConfirm } from "@/components/confirm-dialog"
 import {
-  Code,
   Copy,
   Database,
   Eye,
@@ -76,7 +74,6 @@ import {
   FileText,
   Key,
   Linked,
-  LockClosed,
   Pencil,
   Plus,
   RefreshClockwise,
@@ -93,6 +90,8 @@ import {
   REFUSAL_WORD,
 } from "@/components/deploy/settings/dotenv"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { ValueType, VariableMark } from "@/components/deploy/settings/variable-type"
+import { SharedReferencePicker, SharedVariables } from "@/components/deploy/shared-variables"
 import { SettingSection, SettingsPage } from "@/components/deploy/settings/setting-card"
 import {
   ConfigurationState,
@@ -809,6 +808,18 @@ function VariablesBody({
         {reference && (links.data?.length ?? 0) > 0 && (
           <ReferencePicker links={links.data ?? []} value={value} onChange={setValue} />
         )}
+        {reference && (
+          <SharedReferencePicker
+            projectId={projectId}
+            value={value}
+            onChange={(next, shared) => {
+              setValue(next)
+              // The server refuses a variable that reads a secret without
+              // being one, so choosing a secret says so in the Type too.
+              if (shared === "secret") setSensitivity("secret")
+            }}
+          />
+        )}
       </div>
       {/* No count under the title: the three switches under it are the count. */}
       <FormSection title="Who can read it">
@@ -1029,6 +1040,17 @@ function VariablesBody({
         </div>
       </SettingSection>
 
+      {/* The project's own shared values, read by any of its environments
+          through a variable above — never by name on their own. */}
+      <SharedVariables
+        scope={{ kind: "project", projectId }}
+        frame={({ actions, body }) => (
+          <SettingSection id="project-variables" title="Project variables" actions={actions}>
+            {body}
+          </SettingSection>
+        )}
+      />
+
       <SidePanel
         open={editorOpen && canEdit}
         onOpenChange={(open) => (open ? setEditorOpen(true) : closeEditor())}
@@ -1219,28 +1241,6 @@ function VariableName({ name, hue }: { name: string; hue?: string }) {
 }
 
 /**
- * The tile a variable is drawn on: the service its name says holds it, the
- * engine a reference points at, or — for a name that says nothing — a lock
- * for a secret and brackets for a setting. Never a guess: `DATABASE_URL`
- * without a reference is no product.
- */
-function VariableMark({
-  variable,
-  product,
-}: {
-  variable: Pick<DeploymentVariable, "sensitivity">
-  product?: string
-}) {
-  return (
-    <ProductLogo
-      size="sm"
-      id={product}
-      fallback={variable.sensitivity === "secret" ? LockClosed : Code}
-    />
-  )
-}
-
-/**
  * What the variable holds, and who set it when. Narrow, the person is their
  * face alone — the name was what the line lost to its ellipsis on most rows.
  */
@@ -1283,6 +1283,27 @@ function ValueLine({
         ) : (
           <>database #{reference.target} · reference</>
         )
+      ) : reference && (reference.kind === "server" || reference.kind === "project") ? (
+        <>
+          <Linked className="inline-block size-3 align-[-1px]" />{" "}
+          {compact ? (
+            <span className="font-mono text-foreground/90">
+              {reference.kind}.{reference.target}
+            </span>
+          ) : (
+            <Link
+              href={
+                reference.kind === "server"
+                  ? "/deploy/variables"
+                  : `/deploy/${projectId}/settings/variables#project-variables`
+              }
+              className="rounded-sm font-mono text-foreground/90 focus-ring hover:underline"
+            >
+              {reference.kind}.{reference.target}
+            </Link>
+          )}
+          <span className={cn(!wide && "sr-only")}> · shared</span>
+        </>
       ) : reference ? (
         <>
           <Key className="inline-block size-3 align-[-1px]" />{" "}
@@ -1393,37 +1414,6 @@ function VariableSubject({
         )}
       </div>
     </div>
-  )
-}
-
-/**
- * Secret or setting, as the two faces of one control. It was two filter chips
- * — a control for narrowing a list, pressed into service as a choice — beside
- * a field three times their height.
- */
-function ValueType({
-  value,
-  onChange,
-}: {
-  value: Sensitivity
-  onChange: (value: Sensitivity) => void
-}) {
-  return (
-    <ToggleGroup
-      type="single"
-      variant="outline"
-      aria-label="Value type"
-      value={value}
-      onValueChange={(next) => next && onChange(next as Sensitivity)}
-      className="w-full sm:w-auto"
-    >
-      <ToggleGroupItem value="secret" className="h-11 flex-1 gap-1.5 text-body sm:h-9 sm:flex-none">
-        <LockClosed className={cn("size-3.5", value === "secret" && "text-brand")} /> Secret
-      </ToggleGroupItem>
-      <ToggleGroupItem value="plain" className="h-11 flex-1 gap-1.5 text-body sm:h-9 sm:flex-none">
-        <Code className={cn("size-3.5", value === "plain" && "text-brand")} /> Config
-      </ToggleGroupItem>
-    </ToggleGroup>
   )
 }
 

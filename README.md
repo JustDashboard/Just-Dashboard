@@ -99,6 +99,7 @@ free.
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
 - Push to deploy, plus pull-request previews only your tailnet can reach
 - Immutable releases, one-click rollback and health-gated cutover
+- Variables per environment, plus shared ones defined once for the server or a project
 - Build logs, runtime, console, request logs and traffic alerts per project
 - Request insights that count real visitors apart from bots, with their devices and pages
 - Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,

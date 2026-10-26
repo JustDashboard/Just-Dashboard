@@ -41,6 +41,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		// is: chi prefers the literal segment, so the fleet's counts never
 		// read as a project called "pull-requests".
 		r.Method(http.MethodGet, "/pull-requests", s.handle(s.handleDeploymentPullRequestSummary))
+		// Masked like an environment's variable list, and read by whoever
+		// may read that; a value leaves only through the audited reveal.
+		r.Method(http.MethodGet, "/shared-variables", s.handle(s.handleSharedVariables))
+		r.Method(http.MethodGet, "/{id}/shared-variables", s.handle(s.handleSharedVariables))
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleDeployGet))
 		r.Method(http.MethodGet, "/{id}/pull-requests", s.handle(s.handleDeploymentPullRequests))
 		r.Method(http.MethodGet, "/{id}/pull-requests/{number}/checks", s.handle(s.handleDeploymentPullRequestChecks))
@@ -114,6 +118,12 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/import", s.handle(s.handleDeploymentDotenvImport))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/{name}/generate", s.handle(s.handleDeploymentVariableGenerate))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/{name}/rotate", s.handle(s.handleDeploymentVariableRotate))
+				// A shared variable is written and revealed on the terms an
+				// environment's own variable is: an administrator, in a session.
+				r.Method(http.MethodPut, "/shared-variables/{name}", s.handle(s.handleSharedVariablePut))
+				r.Method(http.MethodGet, "/shared-variables/{name}/reveal", s.handle(s.handleSharedVariableReveal))
+				r.Method(http.MethodPut, "/{id}/shared-variables/{name}", s.handle(s.handleSharedVariablePut))
+				r.Method(http.MethodGet, "/{id}/shared-variables/{name}/reveal", s.handle(s.handleSharedVariableReveal))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfigurationSave))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/source", s.handle(s.handleDeploymentSourceUpdate))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/detect", s.handle(s.handleDeploymentDetect))
@@ -165,6 +175,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// saved DNS-provider credential: destructive, but never a typed
 			// phrase, since the secret is pasted again in a minute.
 			r.Method(http.MethodDelete, "/credentials/{id}", s.handle(s.handleDeploymentCredentialDelete))
+			// Removing a shared variable is a saved credential's case: refused
+			// while anything reads it, and typed again in a minute otherwise.
+			r.With(httpx.RequireSession).Method(http.MethodDelete, "/shared-variables/{name}", s.handle(s.handleSharedVariableDelete))
+			r.With(httpx.RequireSession).Method(http.MethodDelete, "/{id}/shared-variables/{name}", s.handle(s.handleSharedVariableDelete))
 			// Closing a preview removes its container, volumes and address:
 			// destructive, with an ordinary confirmation, since the pull
 			// request can be tested again in a minute.

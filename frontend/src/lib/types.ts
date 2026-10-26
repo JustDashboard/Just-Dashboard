@@ -4942,6 +4942,39 @@ export type DeploymentVariable = {
 }
 
 /**
+ * A value defined once and read by any environment whose own variable
+ * references it: the server's as `${{server.NAME}}` by every project, a
+ * project's as `${{project.NAME}}` by that project's environments. The list
+ * never carries the value; `usedBy` names every variable that reads it.
+ */
+export type DeploymentSharedVariable = {
+  scope: "server" | "project"
+  projectId?: number
+  name: string
+  sensitivity: "plain" | "secret"
+  masked: string
+  valueDigest: string
+  /** The literal a variable holds to read this one. */
+  reference: string
+  updatedBy: string
+  createdAt: string
+  updatedAt: string
+  usedBy: DeploymentSharedVariableUse[]
+}
+
+export type DeploymentSharedVariableUse = {
+  projectId: number
+  projectName: string
+  environmentId: number
+  environmentName: string
+  environmentKind: string
+  /** The environment's own variable that holds the reference. */
+  variable: string
+  /** Its live release started before the value last changed, so it runs the earlier one until it deploys again. */
+  waiting: boolean
+}
+
+/**
  * POST …/variables/import?dryRun=1: what importing the same body would do to
  * each name, in the order written, compared by digest on the server. One
  * refused name refuses the whole import; `reason` says which line to fix.

@@ -934,6 +934,30 @@ only renderer/executor/validation authority for their feature.
   failed to parse must never fall through to the import. Both paths share `parseDotenvEntries`, and
   `components/deploy/settings/dotenv.ts` is that parser written again line for line, so the sheet
   can draw a preview while the server's is in flight, and the server's verdicts replace it.
+- Shared variables (`deploy/shared_variables.go`, table `deploy_shared_variables`) are values defined
+  once and read by reference: the server's as `${{server.NAME}}` from any project, a project's as
+  `${{project.NAME}}` from that project's environments only (a preview environment is one of them).
+  Nothing is injected by name — an environment reads a shared value only through a variable of its own,
+  with that variable's scopes, so a shared name never shadows or fills in one of the environment's. A
+  shared name starts with a letter (it is a reference target); a shared value is sealed like a
+  variable's, has no revisions, and is always a literal, so reference-shaped text in one is never followed
+  and shared values cannot chain or cycle across scopes. The reference is what a variable revision holds,
+  so a release freezes the reference and a run opens the value when it reads its variables, exactly as a
+  credential reference does: a change reaches a release through its next deploy, and a rollback to an
+  older release reads today's value. A run whose shared variable is gone fails closed rather than handing
+  the workload the reference's own text. Saving a variable that references one checks that it exists in that scope and refuses a plain
+  variable reading a secret one; a new project's wizard refuses `${{project.…}}` (the project does not
+  exist yet) and checks `${{server.…}}` before commit. Only values saved in `reference` mode are read as
+  shared references: a value saved before modes were recorded keeps the shape inference of the kinds that
+  existed then, so a legacy `${{server.X}}` stays the literal text it always was (`parseStoredReference`).
+  Routes: `GET /deploy/shared-variables` and `GET /deploy/{id}/shared-variables` list them masked with
+  every active variable that reads each (`usedBy`, with `waiting` where the environment's live release
+  started before the value last changed) for anyone who may read an environment's variables; `PUT …/{name}`
+  (create or change; an omitted value keeps the sealed one) and `GET …/{name}/reveal` are an
+  administrator's in a session, like a variable's; `DELETE …/{name}` is `s.destructive` in a session and
+  answers `409 shared_variable_in_use` naming each reader while any active environment's variable reads it.
+  Audited as `deploy.shared_variable.{create,update,reveal,delete}` with the scope and never the value. A
+  project's shared variables go with the project when it is purged.
 - Domains, persistent storage, backup jobs and database entries remain resources of Proxy, Docker,
   Backups and Databases. Deployments store typed ownership links and use read-only owner observations for
   domain conflicts, DNS, existing certificate pairs, ports, public binds, firewall policy and dependency
