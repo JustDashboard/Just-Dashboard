@@ -1145,7 +1145,9 @@ only renderer/executor/validation authority for their feature.
   signed webhook; a failed or cancelled run reaches
   the same channels as a successful one. Credentials are sealed and never listed, deliveries record only
   a status class and are deduplicated per run and event, and a delivery failure never changes a run's
-  outcome. GitHub commit statuses ride the same hook. The channel list carries each channel's newest
+  outcome. Commit statuses and preview comments — on GitHub, GitLab, Gitea and Forgejo, the last two
+  written with a saved token for the host — ride the same hook, and the newest outcome of each is kept
+  for Settings. The channel list carries each channel's newest
   attempt and last fourteen outcomes, and each delivery the project and run it announced, so the
   page reads whether messages arrive without a request per channel. See
   [notifications](notifications.md).
@@ -1433,7 +1435,9 @@ only renderer/executor/validation authority for their feature.
 - `deploy_credentials` rows are managed under `/deploy/credentials` (`system.admin`, session, every mutation
   audited): `GET` lists `{id, name, kind, target, username?, createdAt, updatedAt, lastUsedAt?, usedBy,
   usedByProjectIds?}` without the secret — `usedByProjectIds` names, sorted, the projects behind
-  `usedBy`, read from the same join so the two can never describe different sets, and since `usedBy`
+  `usedBy`, read from the same join so the two can never describe different sets (a provider token's
+  `reportsForProjectIds`, the projects whose GitLab or Gitea statuses it writes, is computed apart and is
+  not `usedBy`; see [notifications](notifications.md#what-settings-shows)), and since `usedBy`
   counts environments a project with two on one credential is one id and two in the count; an
   archived project drops out of both. `POST`/`PUT` seal the secret with the same `auth.Sealer` the
   variables use and validate

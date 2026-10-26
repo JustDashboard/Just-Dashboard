@@ -323,7 +323,11 @@ to the contribution terms above, including the additional licence grant to the p
   listens, and a restart. It needs Docker and Go and touches only the containers it creates; run it after
   changes to the engine, run observers, notifications, runtime limits or health-gate diagnostics.
 - Notification channels (Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,
-  e-mail, signed webhook) and GitHub commit statuses are covered by component tests with fake providers.
+  e-mail, signed webhook) and commit statuses are covered by component tests with fake providers.
+  Commit statuses and preview comments on GitLab, Gitea and Forgejo also run against the real servers:
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveForgesReceiveStatusesAndOneCommentPerPreview -count=1 -v`
+  starts Gitea and Forgejo; add `JD_FORGE_LIVE_GITLAB=1` (and `-timeout 25m`) for GitLab, which takes
+  about five minutes to start.
   `TestLivePushServersReceiveARunFailure` (`JD_DEPLOY_LIVE=1`, Docker) runs real ntfy, Gotify and
   Mattermost servers on loopback and reads the delivered message back from each; the hosted providers
   and a GitHub post are verified manually through **Send test** and a deployment of a GitHub-sourced

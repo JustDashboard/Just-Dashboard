@@ -124,19 +124,22 @@ type moduleSet struct {
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
-	jobs            *jobs.Manager
-	diagnostics     *netdiag.Service
-	captures        *netcapture.Service
-	captureNative   captureNativeOwner
-	flowAccounting  *netflows.Service
-	backupStore     *backups.Store
-	backupRunner    *backups.Runner
-	backupSched     *backups.Scheduler
-	deployStore     *deploy.Store
-	deployer        *deploy.Deployer
-	deployRuns      *deploy.OrchestrationStore
-	deployEngine    *deploy.Engine
-	deployPlanning  *deploy.PlanningStore
+	jobs           *jobs.Manager
+	diagnostics    *netdiag.Service
+	captures       *netcapture.Service
+	captureNative  captureNativeOwner
+	flowAccounting *netflows.Service
+	backupStore    *backups.Store
+	backupRunner   *backups.Runner
+	backupSched    *backups.Scheduler
+	deployStore    *deploy.Store
+	deployer       *deploy.Deployer
+	deployRuns     *deploy.OrchestrationStore
+	deployEngine   *deploy.Engine
+	deployPlanning *deploy.PlanningStore
+	// commitStatuses reports runs to GitHub, GitLab and Gitea/Forgejo, and
+	// says in Settings where they go and whether the host took them.
+	commitStatuses  *deploy.CommitStatusPublisher
 	deploySources   *deploy.HostSourceAnalyzer
 	deployPreflight *deploy.HostPreflightObserver
 	// deployChecker answers the advisory check and Detect again with the
@@ -384,10 +387,13 @@ func (s *Server) initModules() {
 	// path's success step: a failed deployment is the one somebody most
 	// needs to hear about.
 	notifications := deploy.NewNotificationDispatcher(s.modules.deployAutomation, s.modules.deployRuns, s.dashboardEndpoint, s.Log)
+	forges := deploy.NewForgeClient(s.modules.deployPlanning)
+	s.modules.commitStatuses = deploy.NewCommitStatusPublisher(s.modules.deployRuns, githubStatusPoster{app: s.modules.githubApp, github: s.modules.github}, s.dashboardEndpoint, s.Log).
+		WithForges(forges)
 	s.modules.deployEngine.WithObservers(
 		notifications,
-		deploy.NewCommitStatusPublisher(s.modules.deployRuns, githubStatusPoster{app: s.modules.githubApp, github: s.modules.github}, s.dashboardEndpoint, s.Log),
-		deploy.NewPullRequestCommenter(s.modules.deployRuns, s.modules.githubApp, s.dashboardEndpoint, s.Log),
+		s.modules.commitStatuses,
+		deploy.NewPullRequestCommenter(s.modules.deployRuns, s.modules.githubApp, s.dashboardEndpoint, s.Log).WithForges(forges),
 	)
 	s.modules.deploySchedule = deploy.NewAutomationScheduler(s.modules.deployAutomation, s.dispatchDeploymentSchedule).
 		WithSweep(notifications.RetryFailedDeliveries)

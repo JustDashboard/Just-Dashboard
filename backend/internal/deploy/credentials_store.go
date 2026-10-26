@@ -73,6 +73,11 @@ type CredentialSummary struct {
 	// who a credential serves instead of only counting them. UsedBy counts
 	// environments; a project with two on the same credential appears once.
 	UsedByProjectIDs []int64 `json:"usedByProjectIds,omitempty"`
+	// ReportsForProjectIDs names the projects whose commit statuses and
+	// preview comments a provider token writes: sources on the host it names
+	// that have no HTTPS token of their own. It is not UsedBy — nothing
+	// deploys through it, so removing it is not refused.
+	ReportsForProjectIDs []int64 `json:"reportsForProjectIds,omitempty"`
 }
 
 // CredentialCreateRequest is POST /deploy/credentials's body.
@@ -253,7 +258,13 @@ func (s *PlanningStore) ListCredentials(ctx context.Context) ([]CredentialSummar
 		}
 		out = append(out, *summary)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.attachForgeReporting(ctx, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func applyCredentialConfig(summary *CredentialSummary, raw string) {
@@ -277,7 +288,103 @@ func (s *PlanningStore) GetCredential(ctx context.Context, id int64) (*Credentia
 	if err != nil {
 		return nil, err
 	}
+	if summary.Kind == CredentialProviderToken {
+		all, err := s.ListCredentials(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, listed := range all {
+			if listed.ID == id {
+				summary.ReportsForProjectIDs = listed.ReportsForProjectIDs
+			}
+		}
+	}
 	return summary, nil
+}
+
+// attachForgeReporting fills ReportsForProjectIDs the way ForgeToken
+// chooses: a source's own HTTPS token for its host comes first, and
+// otherwise the newest provider token naming the host writes for it.
+func (s *PlanningStore) attachForgeReporting(ctx context.Context, summaries []CredentialSummary) error {
+	type token struct {
+		index   int
+		updated time.Time
+		id      int64
+	}
+	byTarget := map[string][]token{}
+	for i, summary := range summaries {
+		if summary.Kind == CredentialProviderToken && summary.Target != "" {
+			target := strings.ToLower(summary.Target)
+			byTarget[target] = append(byTarget[target], token{i, summary.UpdatedAt, summary.ID})
+		}
+	}
+	if len(byTarget) == 0 {
+		return nil
+	}
+	for target := range byTarget {
+		slices.SortFunc(byTarget[target], func(a, b token) int {
+			if !a.updated.Equal(b.updated) {
+				return b.updated.Compare(a.updated)
+			}
+			return int(b.id - a.id)
+		})
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT p.id, src.identity_json, COALESCE(c.kind, ''), COALESCE(c.config_json, '{}')
+		  FROM deploy_environments e
+		  JOIN deploy_projects p ON p.id = e.project_id AND p.archived_at = 0
+		  JOIN deploy_sources src ON src.environment_id = e.id AND src.revision = e.desired_revision
+		  LEFT JOIN deploy_credentials c ON c.id = src.credential_id
+		 WHERE e.archived_at = 0 AND src.kind = 'git'`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	reports := map[int]map[int64]bool{}
+	for rows.Next() {
+		var projectID int64
+		var identity, ownKind, ownConfig string
+		if err := rows.Scan(&projectID, &identity, &ownKind, &ownConfig); err != nil {
+			return err
+		}
+		var source SourceIdentity
+		if json.Unmarshal([]byte(identity), &source) != nil {
+			continue
+		}
+		remote, ok := parseForgeRemote(source.Remote)
+		if !ok || GitHubRepository(source) != "" {
+			continue
+		}
+		if ownKind == CredentialGitBearer || ownKind == CredentialProviderToken {
+			var own credentialConfig
+			_ = json.Unmarshal([]byte(ownConfig), &own)
+			if own.Target == "" || strings.EqualFold(own.Target, remote.host) || strings.EqualFold(own.Target, remote.hostname) {
+				continue
+			}
+		}
+		candidates := byTarget[remote.host]
+		if len(candidates) == 0 {
+			candidates = byTarget[remote.hostname]
+		}
+		if len(candidates) == 0 {
+			continue
+		}
+		index := candidates[0].index
+		if reports[index] == nil {
+			reports[index] = map[int64]bool{}
+		}
+		reports[index][projectID] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for index, projects := range reports {
+		for id := range projects {
+			summaries[index].ReportsForProjectIDs = append(summaries[index].ReportsForProjectIDs, id)
+		}
+		slices.Sort(summaries[index].ReportsForProjectIDs)
+	}
+	return nil
 }
 
 func (s *PlanningStore) CreateCredential(ctx context.Context, request CredentialCreateRequest) (*CredentialSummary, error) {

@@ -2,13 +2,14 @@ package deploy
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 // CommitStatusPoster is the GitHub half the publisher needs. ghx implements it;
@@ -30,12 +31,17 @@ var githubRemoteRE = regexp.MustCompile(`(?i)^(?:https?://|git@|ssh://git@)?(?:w
 
 // CommitStatusPublisher reports run outcomes back to the commit they deployed.
 // It is a RunObserver: it never blocks or fails a run, and it posts only for
-// sources whose remote is GitHub and whose environment policy asks for it.
+// sources on GitHub, GitLab, Gitea or Forgejo whose environment policy asks
+// for it.
 type CommitStatusPublisher struct {
 	runs    *OrchestrationStore
 	poster  CommitStatusPoster
 	baseURL func() string
 	log     *slog.Logger
+
+	// forges writes to GitLab and Gitea/Forgejo hosts; nil leaves a run on
+	// one of them unreported, as before the client existed.
+	forges *ForgeClient
 
 	mu     sync.Mutex
 	posted map[string]bool
@@ -43,6 +49,12 @@ type CommitStatusPublisher struct {
 
 func NewCommitStatusPublisher(runs *OrchestrationStore, poster CommitStatusPoster, baseURL func() string, log *slog.Logger) *CommitStatusPublisher {
 	return &CommitStatusPublisher{runs: runs, poster: poster, baseURL: baseURL, log: log, posted: map[string]bool{}}
+}
+
+// WithForges lets the publisher report to GitLab and Gitea/Forgejo hosts.
+func (p *CommitStatusPublisher) WithForges(forges *ForgeClient) *CommitStatusPublisher {
+	p.forges = forges
+	return p
 }
 
 func (p *CommitStatusPublisher) RunStarted(ctx context.Context, run EngineRun) {
@@ -78,7 +90,7 @@ func failureDescription(run EngineRun) string {
 }
 
 func (p *CommitStatusPublisher) publish(ctx context.Context, run EngineRun, state, description string) {
-	if p == nil || p.poster == nil || p.runs == nil {
+	if p == nil || p.runs == nil {
 		return
 	}
 	if run.Operation == OperationRestart || run.Operation == OperationPreviewRemove ||
@@ -109,19 +121,42 @@ func (p *CommitStatusPublisher) publish(ctx context.Context, run EngineRun, stat
 			status.TargetURL = fmt.Sprintf("%s/deploy/%d/runs/%d", base, run.ProjectID, run.ID)
 		}
 	}
-	if err := p.poster.PostCommitStatus(ctx, target.repository, target.revision, status); err != nil && p.log != nil {
-		p.log.Warn("commit status was not posted", "run", run.ID, "repository", target.repository, "err", err)
+	report := ForgeReport{Provider: target.provider, Repository: target.repository, Revision: target.revision, State: state, RunID: run.ID, At: time.Now()}
+	var err error
+	switch {
+	case target.provider == ForgeGitHub:
+		err = p.poster.PostCommitStatus(ctx, target.repository, target.revision, status)
+	case target.endpointErr != nil:
+		err = target.endpointErr
+	default:
+		err = p.forges.PostStatus(ctx, target.endpoint, target.revision, status)
+		if err == nil {
+			p.forges.markUsed(ctx, target.endpoint)
+		}
 	}
+	report.OK = err == nil
+	if err != nil {
+		report.Message = err.Error()
+		if p.log != nil {
+			p.log.Warn("commit status was not posted", "run", run.ID, "provider", target.provider, "repository", target.repository, "err", err)
+		}
+	}
+	p.runs.recordForgeReport(ctx, run.EnvironmentID, forgeReportStatus, report)
 }
 
 type commitStatusTarget struct {
+	provider   string
 	repository string
 	revision   string
 	context    string
+	// endpoint is set for GitLab and Gitea; endpointErr is why a run on one
+	// of those hosts cannot be reported, recorded rather than posted.
+	endpoint    ForgeEndpoint
+	endpointErr error
 }
 
-// target resolves the GitHub repository and exact commit a run deploys, or
-// reports that this run has nothing to tell GitHub about.
+// target resolves the repository and exact commit a run deploys, or reports
+// that this run has nothing to tell a Git host about.
 func (p *CommitStatusPublisher) target(ctx context.Context, run EngineRun) (commitStatusTarget, bool) {
 	if run.EnvironmentID == 0 {
 		return commitStatusTarget{}, false
@@ -130,33 +165,88 @@ func (p *CommitStatusPublisher) target(ctx context.Context, run EngineRun) (comm
 	if err != nil || !policy.CommitStatuses {
 		return commitStatusTarget{}, false
 	}
-	var identity string
-	var environment string
-	err = p.runs.db.QueryRowContext(ctx, `
-		SELECT e.slug,
-		       COALESCE((SELECT src.identity_json FROM deploy_sources src
-		                  WHERE src.environment_id = e.id AND src.revision = ? ORDER BY src.id DESC LIMIT 1), '{}')
-		  FROM deploy_environments e WHERE e.id = ?`, run.PlanRevision, run.EnvironmentID).
-		Scan(&environment, &identity)
-	if err != nil {
+	source, credentialID, environment, err := p.runs.environmentSource(ctx, run.EnvironmentID, run.PlanRevision)
+	if err != nil || source.Kind != SourceGit {
 		return commitStatusTarget{}, false
 	}
-	var source SourceIdentity
-	if json.Unmarshal([]byte(identity), &source) != nil || source.Kind != SourceGit {
-		return commitStatusTarget{}, false
-	}
-	repository := githubRepository(source)
 	revision := strings.ToLower(strings.TrimSpace(run.SourceRevision))
 	if revision == "" {
 		revision = strings.ToLower(strings.TrimSpace(source.Revision))
 	}
-	if repository == "" || !gitObjectIDRE.MatchString(revision) {
+	if !gitObjectIDRE.MatchString(revision) {
 		return commitStatusTarget{}, false
 	}
-	return commitStatusTarget{
-		repository: repository, revision: revision,
-		context: "just-dashboard/" + sanitizeStatusContext(environment),
-	}, true
+	target := commitStatusTarget{revision: revision, context: "just-dashboard/" + sanitizeStatusContext(environment)}
+	if repository := githubRepository(source); repository != "" {
+		if p.poster == nil {
+			return commitStatusTarget{}, false
+		}
+		target.provider, target.repository = ForgeGitHub, repository
+		return target, true
+	}
+	if p.forges == nil {
+		return commitStatusTarget{}, false
+	}
+	endpoint, err := p.forges.Resolve(ctx, source, credentialID)
+	if errors.Is(err, ErrForgeUnsupported) {
+		return commitStatusTarget{}, false
+	}
+	target.provider, target.repository, target.endpoint, target.endpointErr = endpoint.Provider, endpoint.Repository, endpoint, err
+	if errors.Is(err, ErrForgeNoToken) {
+		target.endpointErr = fmt.Errorf("%w %s: save a provider token for it under Deployments → Credentials", ErrForgeNoToken, endpoint.Host)
+	}
+	if target.provider == "" {
+		// Resolve failed before it could name the host's software (a token
+		// that may not travel over http); the reading names the remote.
+		target.provider = "git"
+	}
+	return target, true
+}
+
+// Describe is the reading Settings shows for an environment: where its
+// statuses go, whether anything can be written, and the last outcomes.
+func (p *CommitStatusPublisher) Describe(ctx context.Context, projectID, environmentID int64) (*CommitStatusReading, error) {
+	if p == nil || p.runs == nil {
+		return &CommitStatusReading{}, nil
+	}
+	if _, err := p.runs.EnvironmentExecutionTarget(ctx, projectID, environmentID); err != nil {
+		return nil, err
+	}
+	source, credentialID, environment, err := p.runs.environmentSource(ctx, environmentID, 0)
+	if err != nil {
+		return nil, err
+	}
+	reading := &CommitStatusReading{Context: "just-dashboard/" + sanitizeStatusContext(environment)}
+	if reports, err := p.runs.forgeReports(ctx, environmentID); err == nil {
+		reading.LastStatus, reading.LastComment = reports[forgeReportStatus], reports[forgeReportComment]
+	}
+	if source.Kind != SourceGit {
+		reading.Reason = "Only a Git source has commits to report on."
+		return reading, nil
+	}
+	if repository := githubRepository(source); repository != "" {
+		reading.Provider, reading.Product, reading.Host, reading.Repository = ForgeGitHub, "github", "github.com", repository
+		reading.Ready = p.poster != nil
+		return reading, nil
+	}
+	if p.forges == nil {
+		reading.Reason = "Commit statuses are written to GitHub, GitLab, Gitea and Forgejo."
+		return reading, nil
+	}
+	endpoint, err := p.forges.Resolve(ctx, source, credentialID)
+	reading.Provider, reading.Product, reading.Host = endpoint.Provider, endpoint.Product, endpoint.Host
+	reading.Repository, reading.Credential = endpoint.Repository, endpoint.Credential
+	switch {
+	case err == nil:
+		reading.Ready = true
+	case errors.Is(err, ErrForgeUnsupported):
+		reading.Reason = "This source's host is not GitHub, GitLab, Gitea or Forgejo, or did not answer as one."
+	case errors.Is(err, ErrForgeNoToken):
+		reading.Reason = "Save a provider token for " + endpoint.Host + " under Deployments → Credentials to report here."
+	default:
+		reading.Reason = err.Error()
+	}
+	return reading, nil
 }
 
 // GitHubRepository is the owner/name behind a source identity, accepting
