@@ -328,6 +328,11 @@ to the contribution terms above, including the additional licence grant to the p
   Mattermost servers on loopback and reads the delivered message back from each; the hosted providers
   and a GitHub post are verified manually through **Send test** and a deployment of a GitHub-sourced
   project, and the pull request must say which providers were exercised.
+- Log drains run against real services with
+  `JD_DEPLOY_LIVE=1 go test ./internal/logdrain -run TestLiveDrainsDeliverToLokiTheCollectorAndVector -count=1 -v`:
+  Loki (push API and OTLP, read back with LogQL), an OpenTelemetry Collector and Vector, each in a
+  container on loopback. The package's concurrency is worth `-race` (it needs cgo; the `golang` image
+  has it).
 - Changes to deployment variables, feature links, backup gates or managed-resource lifecycle also run
   `go test -race ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store -count=1`;
   the browser gate covers the project overview, build transcript and focused settings, including

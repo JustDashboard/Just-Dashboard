@@ -52,6 +52,9 @@ The ingress is the right layer for the first because it is the one place every r
 through regardless of what the application chose to write about itself — and it works for every
 framework without asking the operator to add request logging to their app.
 
+Both the container output and the request record can also be copied to a log service as they
+happen; see [log drains](log-drains.md).
+
 ## Requests
 
 ### Recording

@@ -103,6 +103,7 @@ free.
 - Request insights that count real visitors apart from bots, with their devices and pages
 - Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,
   e-mail, webhooks and GitHub
+- Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint
 
 </td>
 </tr>

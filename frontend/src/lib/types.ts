@@ -3699,6 +3699,35 @@ export type DeploymentGitWatch = {
   policy?: DeploymentGitPolicy
 }
 
+/** Where deployments' output and requests are copied to: an OTLP collector, a Loki, or a JSON-lines endpoint. */
+export type LogDrainKind = "otlp" | "loki" | "http"
+export type LogDrainStream = "output" | "requests"
+
+export type LogDrain = {
+  id: number
+  name: string
+  kind: LogDrainKind
+  endpoint: string
+  enabled: boolean
+  streams: LogDrainStream[]
+  /** Empty sends every project, including ones created later. */
+  projects: number[]
+  /** The headers the drain sends, by name; their values are sealed and never read back. */
+  headerNames: string[]
+  createdAt: string
+  updatedAt: string
+  status: {
+    shipped: number
+    dropped: number
+    batches: number
+    lastSuccessAt?: string
+    lastError?: string
+    lastErrorAt?: string
+    /** Waiting in memory for the next delivery. */
+    queued: number
+  }
+}
+
 /** One page of a project's run history, newest first. */
 export type DeploymentRunsPage = {
   runs: DeploymentEngineRun[]

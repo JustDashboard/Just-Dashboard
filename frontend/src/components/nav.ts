@@ -176,6 +176,7 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
             capability: "system.admin",
           },
           { title: "Notifications", href: "/deploy/notifications", icon: Bell },
+          { title: "Log drains", href: "/deploy/drains", icon: Logs },
         ],
       },
       {
