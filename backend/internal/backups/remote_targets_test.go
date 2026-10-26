@@ -149,7 +149,6 @@ func TestPrepareRemoteTargetCarriesWhatAnEditDoesNotRepeat(t *testing.T) {
 type testSFTPServer struct {
 	addr     string
 	host     ssh.Signer
-	extra    ssh.Signer
 	root     string
 	password string
 	mu       sync.Mutex
@@ -169,7 +168,9 @@ func testHostSigner(t *testing.T) ssh.Signer {
 	return signer
 }
 
-func newTestSFTPServer(t *testing.T, host ssh.Signer, clientKey ssh.PublicKey) *testSFTPServer {
+// newTestSFTPServer serves host's key and any extra ones, as OpenSSH servers
+// hold one of each kind; every key is set before the listener starts.
+func newTestSFTPServer(t *testing.T, host ssh.Signer, clientKey ssh.PublicKey, extra ...ssh.Signer) *testSFTPServer {
 	t.Helper()
 	server := &testSFTPServer{host: host, root: t.TempDir(), password: "correct horse"}
 	config := &ssh.ServerConfig{
@@ -187,6 +188,9 @@ func newTestSFTPServer(t *testing.T, host ssh.Signer, clientKey ssh.PublicKey) *
 		},
 	}
 	config.AddHostKey(host)
+	for _, key := range extra {
+		config.AddHostKey(key)
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -206,12 +210,6 @@ func newTestSFTPServer(t *testing.T, host ssh.Signer, clientKey ssh.PublicKey) *
 }
 
 func (s *testSFTPServer) serve(raw net.Conn, config *ssh.ServerConfig) {
-	if s.extra != nil {
-		// A second host key, as OpenSSH servers hold one of each kind.
-		withExtra := *config
-		withExtra.AddHostKey(s.extra)
-		config = &withExtra
-	}
 	conn, channels, requests, err := ssh.NewServerConn(raw, config)
 	if err != nil {
 		_ = raw.Close()
@@ -413,8 +411,7 @@ func TestSFTPPinsTheStrongestKeyAndAsksForThePinnedKind(t *testing.T) {
 	}
 	rsaSigner, _ := ssh.NewSignerFromKey(rsaKey)
 	ed := testHostSigner(t)
-	server := newTestSFTPServer(t, rsaSigner, nil)
-	server.extra = ed
+	server := newTestSFTPServer(t, rsaSigner, nil, ed)
 	job := server.job(t)
 	secrets := &TargetSecrets{Password: "correct horse"}
 	pins := &recordedPins{}
