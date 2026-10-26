@@ -1347,6 +1347,9 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	if err := configuration.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
+	if err := refuseUnrunnableChecks(configuration.Checks); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
