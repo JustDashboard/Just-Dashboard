@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import {
+  commandWords,
   countdown,
   fieldLabel,
   heartbeatStale,
@@ -74,12 +75,23 @@ test("each scope names what it shares and what it lets the site do", () => {
 test("names are shared from operate up, and nothing else is added there", () => {
   const observe = sharedItems("observe")
   expect(observe).toHaveLength(7)
+  expect(observe.map((item) => item.label)).toContain(
+    "Access path (tailnet address or SSH tunnel port)",
+  )
   expect(sharedItems("operate")).toEqual([
     ...observe,
-    "Container, stack, backup-job and last-deployed project names",
+    { key: "names", label: "Container, stack, backup-job and last-deployed project names" },
   ])
   expect(sharedItems("maintain")).toEqual(sharedItems("operate"))
+  // Every entry has a key of its own, which is what the page draws its mark from.
+  expect(new Set(sharedItems("operate").map((item) => item.key)).size).toBe(8)
   expect(NEVER_SENT).toContain("API keys")
+})
+
+test("a command is said in words, and an unknown kind as it was sent", () => {
+  expect(commandWords("container.restart")).toBe("Restart a container")
+  expect(commandWords("dashboard.update.install")).toBe("Install a dashboard update")
+  expect(commandWords("something.new")).toBe("something.new")
 })
 
 test("the site is named by its host", () => {

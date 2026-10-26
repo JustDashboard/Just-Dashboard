@@ -1,13 +1,13 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 
 /**
- * Settings → just-dashboard.com against a mocked API: not linked, waiting for approval, linked,
+ * Settings → Connect against a mocked API: not linked, waiting for approval, linked,
  * and linking switched off, plus the three things done to a link — change its scope, sync it,
  * unlink it. The mock is a small state machine rather than canned answers, because the page's
  * whole job is following the link from one state to the next.
  *
- * Reading register, no frame anywhere (design-system §15), so the structural checks other specs
- * make of their pages are made here too.
+ * Reading register, no frame anywhere and no stat tile (design-system §15, pass 2 dropped as
+ * `/git` drops it), so the structural checks other specs make of their pages are made here too.
  */
 
 const now = Date.now()
@@ -185,6 +185,13 @@ function framedPanels(page: Page) {
   )
 }
 
+function statTiles(page: Page) {
+  return page.locator("[data-slot=stat-tile]").count()
+}
+
+const picture = (page: Page) =>
+  page.getByRole("list", { name: "How this server connects to just-dashboard.com" })
+
 function scrollsSideways(page: Page) {
   return page.evaluate(
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -200,9 +207,7 @@ test("not linked: three scopes that name what they share, observe chosen, and a 
   await mock(page, unlinked)
   await page.goto("/dashboard/link")
 
-  await expect(page.getByRole("heading", { name: "just-dashboard.com", level: 1 })).toHaveClass(
-    /sr-only/,
-  )
+  await expect(page.getByRole("heading", { name: "Connect", level: 1 })).toHaveClass(/sr-only/)
   await expect(page.locator("[data-slot=page]")).toHaveAttribute("data-register", "reading")
   await expect(page.getByText("Not linked", { exact: true }).first()).toBeVisible()
   await expect(page.getByText("21fe:31df:a154:a261")).toBeVisible()
@@ -213,24 +218,30 @@ test("not linked: three scopes that name what they share, observe chosen, and a 
   await expect(scopeCard(page, "Operate")).toHaveAttribute("aria-pressed", "false")
   await expect(scopeCard(page, "Maintain")).toHaveAttribute("aria-pressed", "false")
 
-  // Each card says exactly what it shares and unlocks.
-  await expect(scopes.getByText("Access path (tailnet address or SSH tunnel port)")).toBeVisible()
+  // Each card says what it lets the site do; what it shares is the one list under them.
   await expect(scopes.getByText("Refresh the snapshot.")).toBeVisible()
-  await expect(
-    scopes.getByText(/Everything in Observe, plus container, stack/).first(),
-  ).toBeVisible()
   await expect(scopes.getByText(/restart a stack and run a backup job/)).toBeVisible()
   await expect(
     scopes.getByText(/install a dashboard update, set the automatic-update policy/),
   ).toBeVisible()
 
+  // The link drawn before it exists: the four kinds of data, the server and the site, unlinked.
+  for (const kind of ["System", "Readings", "Containers", "Backups"]) {
+    await expect(picture(page).getByText(kind, { exact: true })).toBeVisible()
+  }
+  await expect(picture(page).getByText("Not linked", { exact: true })).toBeVisible()
+  await expect(picture(page).getByText("Counts only")).toHaveCount(2)
+
   // What would leave, for the scope in question, and what never does.
   const sends = page.locator("section", { hasText: "What this server will send" })
   await expect(sends.getByText("At Observe")).toBeVisible()
+  await expect(sends.getByText("Access path (tailnet address or SSH tunnel port)")).toBeVisible()
   await expect(sends.getByText("Alerts firing")).toBeVisible()
   await expect(sends.getByText(/project names/)).toHaveCount(0)
   await scopeCard(page, "Operate").click()
   await expect(sends.getByText("At Operate")).toBeVisible()
+  // The picture follows the card picked.
+  await expect(picture(page).getByText("Counts and names")).toHaveCount(2)
   await expect(
     sends.getByText("Container, stack, backup-job and last-deployed project names"),
   ).toBeVisible()
@@ -240,6 +251,7 @@ test("not linked: three scopes that name what they share, observe chosen, and a 
   await expect(page.getByRole("button", { name: "Copy command" })).toBeVisible()
 
   expect(await framedPanels(page)).toEqual([])
+  expect(await statTiles(page)).toBe(0)
   expect(await scrollsSideways(page)).toBe(false)
 })
 
@@ -250,7 +262,7 @@ test("linking asks for the chosen scope, shows the code to approve, and follows 
   await page.goto("/dashboard/link")
 
   await scopeCard(page, "Operate").click()
-  await page.getByRole("button", { name: "Link", exact: true }).click()
+  await page.getByRole("button", { name: "Link this server", exact: true }).click()
 
   // A request is waiting: the code large and copyable, the way to approve it, the clock.
   await expect(page.getByText("ABCD-1234", { exact: true })).toBeVisible()
@@ -265,8 +277,9 @@ test("linking asks for the chosen scope, shows the code to approve, and follows 
   await expect(page.getByRole("button", { name: "Copy code" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible()
   await expect(page.getByText("Waiting for approval").first()).toBeVisible()
+  await expect(page.getByRole("meter", { name: "Time left to approve" })).toBeVisible()
   // The form is gone while the request stands; the fingerprint to check is on the page.
-  await expect(page.getByRole("button", { name: "Link", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Link this server", exact: true })).toHaveCount(0)
   await expect(page.getByText(/shows this server's fingerprint/)).toContainText(
     "21fe:31df:a154:a261",
   )
@@ -274,6 +287,7 @@ test("linking asks for the chosen scope, shows the code to approve, and follows 
     "At Operate",
   )
   expect(await framedPanels(page)).toEqual([])
+  expect(await statTiles(page)).toBe(0)
 
   // Approving in the other tab: the page asks every five seconds and flips to linked.
   world.link = linked("operate")
@@ -303,7 +317,7 @@ test("a refused start says what failed beside the button", async ({ page }) => {
     error: { code: "site_unreachable", message: "just-dashboard.com did not answer within 15s" },
   }
   await page.goto("/dashboard/link")
-  await page.getByRole("button", { name: "Link", exact: true }).click()
+  await page.getByRole("button", { name: "Link this server", exact: true }).click()
 
   // Next.js keeps its own route announcer in an alert; this is the one holding the refusal.
   const alert = page.getByRole("alert").filter({ hasText: "Could not start linking" })
@@ -311,7 +325,7 @@ test("a refused start says what failed beside the button", async ({ page }) => {
   await expect(alert).toContainText("just-dashboard.com did not answer within 15s")
   // Nothing was started, so the form stays and can be tried again.
   await expect(scopeCard(page, "Observe")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Link", exact: true })).toBeEnabled()
+  await expect(page.getByRole("button", { name: "Link this server", exact: true })).toBeEnabled()
 })
 
 test("the outcome of the last request is said once", async ({ page }) => {
@@ -347,8 +361,9 @@ test("linking switched off explains the switch and offers nothing", async ({ pag
 
   await expect(page.getByText("Linking is turned off")).toBeVisible()
   await expect(page.getByText("JD_ACCOUNT_LINK=false")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Link", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Link this server", exact: true })).toHaveCount(0)
   await expect(page.locator("[data-slot=choice-card]")).toHaveCount(0)
+  await expect(picture(page)).toHaveCount(0)
   await expect(page.getByText("sudo ./scripts/manage.sh link")).toHaveCount(0)
   await expect(page.locator("[data-slot=page] button, [data-slot=page] a")).toHaveCount(0)
 })
@@ -363,13 +378,23 @@ test("linked: the link's state, what is shared as it was sent, the policy and th
   await expect(page.getByText("alice@example.com").first()).toBeVisible()
   await expect(page.getByText("Operate scope")).toBeVisible()
 
-  // Three readings of the link.
-  const tiles = page.locator("[data-slot=stat-tile]")
-  await expect(tiles).toHaveCount(3)
-  await expect(tiles.nth(0)).toContainText("by operator")
-  await expect(tiles.nth(1)).toContainText("just now")
-  await expect(tiles.nth(2)).toContainText("container.restart")
-  await expect(tiles.nth(2)).toContainText("succeeded")
+  // When and by whom is the identity line's; the picture carries what the heartbeat last said.
+  await expect(page.getByText(/linked 3d .*by operator/)).toBeVisible()
+  await expect(picture(page).getByText("Ubuntu 24.04")).toBeVisible()
+  await expect(picture(page).getByText("12 running")).toBeVisible()
+  await expect(picture(page).getByText("atlas", { exact: true })).toBeVisible()
+  await expect(picture(page).getByText("alice@example.com")).toBeVisible()
+  await expect(picture(page).getByText("Heartbeat just now")).toBeVisible()
+
+  // The heartbeat and the last command are rows with their state at the far end, not tiles.
+  expect(await statTiles(page)).toBe(0)
+  const activity = page.locator("section", { hasText: "Activity" }).first()
+  const heartbeat = activity.locator("[data-slot=row]", { hasText: "Heartbeat" })
+  await expect(heartbeat).toContainText("Last sent just now")
+  await expect(heartbeat).toContainText("Sending")
+  const command = activity.locator("[data-slot=row]", { hasText: "Restart a container" })
+  await expect(command).toContainText("alice@example.com")
+  await expect(command).toContainText("Succeeded")
 
   // The scope in force is the chosen card.
   await expect(scopeCard(page, "Operate")).toHaveAttribute("aria-pressed", "true")
@@ -422,8 +447,15 @@ test("linked: a failed exchange is a warning on the link, not a dead page", asyn
   await expect(page.getByText("Linked, not reaching the site")).toBeVisible()
   await expect(page.getByText("The last exchange with just-dashboard.com failed")).toBeVisible()
   await expect(page.getByText("just-dashboard.com answered 503")).toBeVisible()
-  await expect(page.locator("[data-slot=stat-tile]").nth(1)).toContainText(/10m (\d+s )?ago/)
-  await expect(page.locator("[data-slot=stat-tile]").nth(2)).toContainText("refused")
+  const activity = page.locator("section", { hasText: "Activity" }).first()
+  await expect(activity.locator("[data-slot=row]", { hasText: "Heartbeat" })).toContainText(
+    /Last sent 10m (\d+s )?ago/,
+  )
+  await expect(activity.getByText("Not reaching the site")).toBeVisible()
+  await expect(
+    activity.locator("[data-slot=row]", { hasText: "Install a dashboard update" }),
+  ).toContainText("Refused")
+  await expect(picture(page).getByText("Not reaching the site")).toBeVisible()
 })
 
 test("linked: a scope change is a choice and then a command, and can be dropped", async ({
@@ -514,9 +546,8 @@ test("the page does not scroll sideways, in any state, on a phone or a wide scre
       world.link = state
       await page.goto("/dashboard/link")
       await expect(page.locator("[data-slot=page]")).toHaveClass(/animate-rise/)
-      await expect(
-        page.locator("[data-slot=choice-card], [data-slot=stat-tile]").first(),
-      ).toBeVisible()
+      await expect(picture(page)).toBeVisible()
+      await expect(page.locator("[data-slot=choice-card], [data-slot=well]").first()).toBeVisible()
       expect(await scrollsSideways(page), `${name} at ${width}`).toBe(false)
       await page.screenshot({
         path: `test-results/account-link-${name}-${width}.png`,
@@ -531,5 +562,5 @@ test("Settings lists the page beside Configuration, for an administrator", async
   await page.goto("/dashboard/link")
   const settings = page.locator("[data-slot=sidebar]")
   await expect(settings.locator("a[href='/dashboard/configuration']")).toBeVisible()
-  await expect(settings.locator("a[href='/dashboard/link']")).toContainText("just-dashboard.com")
+  await expect(settings.locator("a[href='/dashboard/link']")).toHaveText("Connect")
 })

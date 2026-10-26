@@ -2680,6 +2680,19 @@ The passes, in order. Each one is a diff you can review on its own.
    Databases' cards say whether the gating job dumps each one. Logs is the one deployment page that
    keeps its row: four readings of the ingress's last hour that no row or chip says. Its fifth,
    Container, went — the Events tab already counts the hour's disruptions.
+
+   Settings → Connect (`/dashboard/link`, named after the site's domain until 0.8.2) took the exit
+   on 2026-10-26, at the operator's request, because it read as a form with no life: three grey
+   tiles over three cards each holding two paragraphs. When the link was made and by whom is the
+   identity line's; the heartbeat and the last command are an Activity block of two rows, each with
+   its `Status`, the command in words and drawn as what it acted on. What took the tiles' place is
+   the deploy overview's wiring turned to face out (`account-link/connect-picture.tsx`): what the
+   heartbeat reads — the distribution's logo, Readings, Docker, Backups — wired into this server
+   and out to the site's J and the account, every line pulsing while heartbeats go out, amber and
+   still when the link stopped reaching the site, dashed while nothing is linked. The scope cards
+   lost their *Shares* paragraphs for a mark and one line, because what a scope shares is the list
+   under them, which follows the card picked; that list and the snapshot's groups are drawn with
+   their marks, a kind no product names taking its lane hue as the Schedule band's kinds do.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed

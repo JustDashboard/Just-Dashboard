@@ -14,19 +14,21 @@ export function Policy({
   policy,
   scope,
   site,
+  className,
 }: {
   policy: NonNullable<AccountLinkStatus["link"]>["updatePolicy"]
   scope: AccountLinkScope
   site: string
+  className?: string
 }) {
   const words = policyWords(policy)
   return (
-    <Section title="Automatic updates">
+    <Section title="Automatic updates" className={className}>
       <ReadingList>
         <Reading label="Installs">{words.auto}</Reading>
         {words.window && <Reading label="When">{words.window}</Reading>}
       </ReadingList>
-      <p className="text-hint text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         Set from {site}.{" "}
         {scope === "maintain"
           ? "This server applies it itself."

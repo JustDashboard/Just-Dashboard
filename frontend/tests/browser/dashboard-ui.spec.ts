@@ -375,7 +375,7 @@ test("the configuration page edits in place and says where it lives", async ({ p
   await expect(transcript.getByText("earlier output trimmed")).toHaveCount(0)
 
   // The one pointer to linking the server to an account; the page itself is account-link.spec.ts.
-  await expect(page.getByRole("link", { name: "Settings → just-dashboard.com" })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "Settings → Connect" })).toHaveAttribute(
     "href",
     "/dashboard/link",
   )
