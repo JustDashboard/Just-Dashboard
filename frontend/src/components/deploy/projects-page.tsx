@@ -625,7 +625,10 @@ function InProgressPanel({
   )
 }
 
-/** The ways into the fleet, the same five `/deploy/new` opens on, one click nearer. */
+/**
+ * The ways into the fleet, one click nearer: the four sources `/deploy/new`
+ * opens on, and Compose, which opens its Docker tab where stacks are offered.
+ */
 const SOURCES: {
   key: string
   title: string
@@ -678,9 +681,9 @@ const SOURCES: {
 
 /**
  * No projects yet. The empty state says what goes here, drawn as the places a
- * project comes from, and under it the five ways in as the cards `/deploy/new`
- * opens on — lit, because each is a choice (§16), and each lands on its own
- * tab through `?source=`.
+ * project comes from, and under it the five ways in as cards — lit, because
+ * each is a choice (§16), and each lands on its tab of `/deploy/new` through
+ * `?source=`.
  */
 function FleetEmpty({ admin }: { admin: boolean }) {
   return (
