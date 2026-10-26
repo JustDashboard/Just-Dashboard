@@ -59,7 +59,7 @@ func (spec *SiteSpec) realIPCloudflare() bool {
 	return spec.RealIP != nil && spec.RealIP.Source == "cloudflare"
 }
 
-func (spec *SiteSpec) edgeVar() string { return NginxIdent(spec.Name) + "_edge" }
+func (spec *SiteSpec) edgeVar() string { return spec.varIdent() + "_edge" }
 
 func validateRealIP(spec *SiteSpec) error {
 	r := spec.RealIP

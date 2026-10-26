@@ -135,6 +135,7 @@ func compareReleaseSnapshots(from, to *ReleaseWithArtifacts) ReleaseDetailCompar
 	field("request body limit", fromSnapshot.Plan.requestBodyLimitLabel(), toSnapshot.Plan.requestBodyLimitLabel())
 	field("allowed addresses", allowFromLabel(fromSnapshot.Plan.AllowFrom), allowFromLabel(toSnapshot.Plan.AllowFrom))
 	field("response headers", responseHeadersLabel(fromSnapshot.Plan.ResponseHeaders), responseHeadersLabel(toSnapshot.Plan.ResponseHeaders))
+	field("sign-in", signInLabel(fromSnapshot.Plan.ForwardAuth), signInLabel(toSnapshot.Plan.ForwardAuth))
 	field("restart policy", fromSnapshot.Plan.EffectiveRestartPolicy(), toSnapshot.Plan.EffectiveRestartPolicy())
 	field("host network", boolLabel(fromSnapshot.Plan.HostNetwork), boolLabel(toSnapshot.Plan.HostNetwork))
 	field("privileged", boolLabel(fromSnapshot.Plan.Privileged), boolLabel(toSnapshot.Plan.Privileged))
@@ -246,6 +247,19 @@ func allowFromLabel(entries []string) string {
 		return "everyone"
 	}
 	return strings.Join(entries, ", ")
+}
+
+// signInLabel names the auth server and both of its addresses, none of them
+// a secret: every visitor is sent to the sign-in page.
+func signInLabel(gate *RouteForwardAuth) string {
+	if gate == nil {
+		return "none"
+	}
+	label := gate.Provider + " · " + gate.Verify + " · " + gate.SignIn
+	if gate.PreviewsOnly {
+		label += " · previews only"
+	}
+	return label
 }
 
 // responseHeadersLabel compares headers by name and value; neither is a

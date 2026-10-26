@@ -190,6 +190,10 @@ type SiteSpec struct {
 	// PagesDir is where the site's pages are served from. The service sets
 	// it from its own nginx directory; it is never taken from a request.
 	PagesDir string `json:"-"`
+	// shortVars names the site's variables and limit zones from
+	// NginxVarIdent. RenderNginx sets it on its own copy when a variable
+	// would be too long for nginx under the whole NginxIdent.
+	shortVars bool
 	// Custom is appended verbatim inside the server block. It is the escape
 	// hatch, and it is the one field not validated beyond refusing an
 	// unbalanced brace — a form that cannot express everything needs
@@ -255,10 +259,26 @@ type SiteMaintenance struct {
 // order they are written.
 var errorPageCodes = []int{404, 502, 503, 504}
 
-// maintVar and maintIPVar name the site's maintenance map and geo.
-func (spec *SiteSpec) maintVar() string { return NginxIdent(spec.Name) + "_maint" }
+// varIdent is the ident the site's variables and limit zones are named
+// from. A zone shares it because its key is a variable named after it, and
+// nginx refuses a reload that finds a live zone counting by another key.
+func (spec *SiteSpec) varIdent() string {
+	if spec.shortVars {
+		return NginxVarIdent(spec.Name)
+	}
+	return NginxIdent(spec.Name)
+}
 
-func (spec *SiteSpec) maintIPVar() string { return NginxIdent(spec.Name) + "_maint_ip" }
+// ownsVar says whether v is the site's variable with that suffix, named from
+// either ident: a file is read before anything knows which one wrote it.
+func (spec *SiteSpec) ownsVar(v, suffix string) bool {
+	return v == "$"+NginxIdent(spec.Name)+suffix || v == "$"+NginxVarIdent(spec.Name)+suffix
+}
+
+// maintVar and maintIPVar name the site's maintenance map and geo.
+func (spec *SiteSpec) maintVar() string { return spec.varIdent() + "_maint" }
+
+func (spec *SiteSpec) maintIPVar() string { return spec.varIdent() + "_maint_ip" }
 
 // hasErrorPage says whether the site serves its own page for code.
 func (spec *SiteSpec) hasErrorPage(code int) bool {
@@ -283,7 +303,7 @@ func (spec *SiteSpec) timedLog() bool {
 // logFormatName and connectionVar name the http-level objects the site owns.
 func (spec *SiteSpec) logFormatName() string { return NginxIdent(spec.Name) + "_timed" }
 
-func (spec *SiteSpec) connectionVar() string { return NginxIdent(spec.Name) + "_connection" }
+func (spec *SiteSpec) connectionVar() string { return spec.varIdent() + "_connection" }
 
 // usesWebSockets says whether any location the renderer writes forwards
 // upgrades, which is when the site's connection map is needed.

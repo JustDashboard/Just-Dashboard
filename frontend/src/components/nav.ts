@@ -21,6 +21,7 @@ import {
   Key,
   Layers,
   Lifebuoy,
+  Link,
   Rocket,
   LineChart,
   ListOrdered,
@@ -367,10 +368,12 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
             icon: SettingsSliders,
             capability: "system.admin",
           },
+          // "Connect", not the site's domain: the domain said where the link goes but not
+          // what the page does, and it wore Version's cloud beside it.
           {
-            title: "just-dashboard.com",
+            title: "Connect",
             href: "/dashboard/link",
-            icon: CloudUpload,
+            icon: Link,
             capability: "system.admin",
           },
         ],

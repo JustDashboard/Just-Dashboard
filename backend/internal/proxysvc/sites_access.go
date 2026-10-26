@@ -85,9 +85,9 @@ var (
 	hotlinkMapRe = regexp.MustCompile(`^\$uri\s+\$jd_\w+_hotlink_type\s*\{$`)
 )
 
-func (spec *SiteSpec) botVar() string         { return NginxIdent(spec.Name) + "_bot" }
-func (spec *SiteSpec) hotlinkTypeVar() string { return NginxIdent(spec.Name) + "_hotlink_type" }
-func (spec *SiteSpec) hotlinkVar() string     { return NginxIdent(spec.Name) + "_hotlink" }
+func (spec *SiteSpec) botVar() string         { return spec.varIdent() + "_bot" }
+func (spec *SiteSpec) hotlinkTypeVar() string { return spec.varIdent() + "_hotlink_type" }
+func (spec *SiteSpec) hotlinkVar() string     { return spec.varIdent() + "_hotlink" }
 
 // accessListPath is the file the site's access list is in.
 func (spec *SiteSpec) accessListPath() string {

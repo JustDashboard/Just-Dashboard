@@ -257,6 +257,14 @@ to the contribution terms above, including the additional licence grant to the p
   table) also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBuildFailureIsNamedFromBuildKit -count=1 -v`,
   which builds an npm project whose lockfile no longer matches package.json and checks the cause is
   named from buildx's own output; it creates no image.
+  Changes to a failed run's diagnosis (what is sent, how it is masked, how the answer is read:
+  `deploy/run_diagnosis.go`) also run it against a real model behind an OpenAI-compatible server on
+  this machine — never a hosted key — for example Ollama on loopback:
+  `JD_DEPLOY_LIVE=1 JD_TEST_ASSISTANT_URL=http://127.0.0.1:11434/v1 JD_TEST_ASSISTANT_MODEL=qwen2.5:3b go test ./internal/deploy -run TestLiveFailedBuildIsDiagnosedByARealModel -count=1 -v`.
+  It builds a Node project whose build script needs a package it never declared, sends the digest the
+  route would send and fails unless the answer quotes a line the build printed; `JD_TEST_DIAGNOSIS_OUT`
+  writes the answer as the run page reads it. A small model on a busy processor is slow: give it a few
+  minutes, and fewer threads than the host has cores.
   Sixty-four fixtures: the locked Node starters (installed by Bun, pnpm and Yarn 1), a Next.js static
   export and a standalone server, SvelteKit on adapter-auto, Express serving a Vite client, a Hono
   dev-only starter on Bun, React Router in SPA mode with a prerendered home, FastAPI, Flask, Django,
@@ -291,12 +299,21 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_TEST_S3_ENDPOINT` and its keys: `go test ./internal/backups -run TestLiveEncryptedArchiveRoundTripsThroughObjectStorage -count=1 -v`;
   a native dump restored from an encrypted archive takes `JD_TEST_POSTGRES_DSN` and
   `JD_TEST_MYSQL_ADMIN_DSN`: `go test ./internal/api -run TestLiveEncryptedArchiveRestoresANativeDump -count=1 -v`.
+  SFTP and rclone destinations against an OpenSSH server (atmoz/sftp) and a WebDAV server run by rclone,
+  through the same lifecycle plus a refused host-key change:
+  `JD_DEPLOY_LIVE=1 go test ./internal/backups -run TestLiveSFTPAndRcloneBackupsUploadPruneAndRestore -count=1 -v`
+  (the rclone half needs `rclone` on PATH, as the backend image ships it).
 - The public-certificate journey against a real ACME authority (an isolated Caddy and a Pebble that
   validates nothing, on one Docker network):
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory -count=1 -v`.
   Changes to how a deployment route renders its redirects, response headers or allowed addresses also
   run `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules -count=1 -v`,
-  which asks a real Caddy what it answers for each.
+  which asks a real Caddy what it answers for each. Changes to a route's sign-in, how Caddy reaches the
+  auth server, or the maintenance pass that repairs that network also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyGatesRouteBehindForwardAuth -count=1 -v`,
+  which signs in at a real Authelia (`authelia/authelia:4.39`, pulled on first run) in front of
+  `traefik/whoami`, and `go test ./internal/proxysvc -run TestLiveDeploymentRouteSignsInOnNginx`, which
+  needs only the host's nginx.
   This uses locked application fixtures and checks served build values, private install credentials,
   SvelteKit adapters, HTML/Containerfile defaults and Go command/version behavior, plus the catalogue's
   own starters: Astro, Nuxt, React Router, FastAPI (unpinned requirements, server auto-installed), a
@@ -323,7 +340,11 @@ to the contribution terms above, including the additional licence grant to the p
   listens, and a restart. It needs Docker and Go and touches only the containers it creates; run it after
   changes to the engine, run observers, notifications, runtime limits or health-gate diagnostics.
 - Notification channels (Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,
-  e-mail, signed webhook) and GitHub commit statuses are covered by component tests with fake providers.
+  e-mail, signed webhook) and commit statuses are covered by component tests with fake providers.
+  Commit statuses and preview comments on GitLab, Gitea and Forgejo also run against the real servers:
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveForgesReceiveStatusesAndOneCommentPerPreview -count=1 -v`
+  starts Gitea and Forgejo; add `JD_FORGE_LIVE_GITLAB=1` (and `-timeout 25m`) for GitLab, which takes
+  about five minutes to start.
   `TestLivePushServersReceiveARunFailure` (`JD_DEPLOY_LIVE=1`, Docker) runs real ntfy, Gotify and
   Mattermost servers on loopback and reads the delivered message back from each; the hosted providers
   and a GitHub post are verified manually through **Send test** and a deployment of a GitHub-sourced

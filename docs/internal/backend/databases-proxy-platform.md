@@ -1118,6 +1118,13 @@ the page.
   system prompt cached and the conversation under automatic caching, and the server-side refusal
   fallback (`fallbacks: "default"`) for Opus and Sonnet. The OpenAI-compatible request carries the
   model, the messages, the stream and the usage option, and nothing a server might not know.
+- **The same provider answers two other questions**, each one request sent only when somebody
+  presses for it: a drawing's *Describe a diagram* (`POST /boards/diagram`, the prompt alone, audited
+  as `board.diagram`) and a failed deployment's *Ask why it failed*
+  (`POST /deploy/{id}/runs/{run}/diagnosis`, the run's record masked on the server first, audited as
+  `deploy.run.diagnose`; [the deployment contract](../deployments/implementation.md) says what is sent).
+  Both share the install's budget of model calls and its four answers at once, and the settings sheet
+  names all three under *Used by*.
 - **Engines** come from the capability table: `assistant` is every engine with a dialect, and
   `assistantPolicy` is PostgreSQL and its forks but CockroachDB. The editor offers the assistant to a
   role with `service.control` on those engines; a failed statement and a plan offer a question of
@@ -2696,7 +2703,8 @@ say, the window, the base backup a recovery starts from, retention — is `dbx/p
 - **The destinations are a backup job's**: a directory on this server (default
   `JD_BACKUP_DIR/wal`), S3 or Backblaze B2, each archive a folder of its own (`<container>-<UTC
   stamp>`). `fromJob` takes an existing backup job's destination and sealed keys, so a bucket's keys
-  are not typed twice. Keys are sealed with `JD_MASTER_KEY` like a job's and never returned.
+  are not typed twice; a job whose destination is SFTP or rclone is refused, since WAL-G writes only
+  to a directory or an object store. Keys are sealed with `JD_MASTER_KEY` like a job's and never returned.
 - **Encrypted with WAL-G's own OpenPGP**, to a key made for the archive. The server is given only the
   public half, which is all encrypting needs: a server, or a superuser reading `walg.json` through
   `pg_read_file`, cannot read its own archive back. The private half is sealed in the store and written
@@ -3699,6 +3707,23 @@ containers/volumes/networks.
     `log_format` of one name fails the reload, and a `map` variable defined twice is decided by the
     last file read. `ParseSiteSpec` steps over these statements (and whatever is inside their blocks)
     rather than reading a map entry or a geo range as a server directive.
+  - **A variable name is at most 46 characters** (`maxNginxVarLen`). nginx's default
+    `variables_hash_bucket_size 64` takes no longer one on a 64-bit build, and one longer name fails
+    `nginx -t` for the whole configuration ("could not build variables_hash"), so every site stops
+    reloading. `NginxIdent` plus a suffix passed that for a site name with a dot from 21 characters (26 with
+    only WebSockets on), and for every deployment route from environment 10 on (`just-dashboard-env-10.conf` + `_connection` is 47).
+    `RenderNginx` therefore renders once under `NginxIdent` and, only when one of the dashboard's own
+    `$jd_…` variables comes out too long, renders again with every variable and limit zone named from
+    `NginxVarIdent`: the start of the ident and an FNV-32a hash of the whole name, short enough for the
+    longest suffix (`_asset_immutable`). A file that already loads keeps every name it has, so nothing
+    reads as edited by hand after an upgrade. All of a site's variables move together because the
+    readers find a partner by swapping the suffix (`_maint` → `_maint_ip`, a zone's `_req` →
+    `_limit_exempt`); the limit zones move with them because a zone's key is a variable named after it,
+    and nginx refuses a reload that finds a live zone counting by another key. Upstream, cache-zone and
+    `log_format` names are not hashed by length and keep `NginxIdent`. The forward-auth reader takes its
+    variables under either ident. `TestEveryVariableFitsNginxsDefaultHash` renders every variable the
+    form can name for the longest site name, and `TestLiveNginxTakesTheVariablesOfLongNames` passes
+    them and environment 10's route through the real `nginx -t`.
   - **WebSockets use the standard upgrade map**, per site: `map $http_upgrade $jd_<id>_connection
     { default upgrade; '' close; }`, with `Connection $jd_<id>_connection` in each upgrading location.
     It replaces passing the client's `$http_connection` through, whose comment wrongly said a map had
@@ -4058,6 +4083,12 @@ containers/volumes/networks.
   401s would redirect), and with a custom `Remote-User`/`Remote-Email` request header. The provider
   round-trips through the `# Single sign-on through <provider>.` comment. Session cookies the auth
   server sets on the check response are not relayed, so the sign-in portal must set its own.
+  The provider, check-address and sign-in-page rules are exported (`ValidForwardAuthProvider`,
+  `ValidateForwardAuthCheck`, `ValidateForwardAuthSignIn`) because a deployment route's sign-in
+  (`DeploymentRoute.ForwardAuth`) is held to the same ones; on nginx that route is this site
+  feature on every path, and on the Docker Caddy ingress it is the equivalent `forward_auth`
+  ([Caddy ingress](../deployments/caddy-ingress.md#sign-in)). The form's four presets live in
+  `frontend/src/lib/sso-providers.ts`, shared with the deployment Domains settings.
 
   **HSTS and TLS versions** (`sites_tls.go`, form "Encryption"). `HSTSMaxAge` (0 = 15552000, else
   300..63072000), `HSTSOwnNameOnly` (drops `includeSubDomains`) and `HSTSPreload` (refused below a year
@@ -5118,7 +5149,9 @@ containers/volumes/networks.
     duplicates; route upstreams go through `validStreamUpstream`. `StreamModule.Preread` reads
     `--with-stream_ssl_preread_module`, and `ApplyStream` refuses routes with `ErrNoStreamPreread` (409
     `stream_preread_missing`). The parser reads the map, the route blocks and `ssl_preread` back and names
-    any other shape. A site already on the port (443) is refused by the port check like any other holder.
+    any other shape. The stream module's variables hash has the same 46-character limit, so a stream
+    whose `<ident>_sni` would pass it names the variable from `NginxVarIdent`; the parser takes either
+    spelling. A site already on the port (443) is refused by the port check like any other holder.
     The upstream Test dials the pool only, not the routes' backends. Audited as `routes` in `proxy.stream.apply`.
   - **Listen options** (`stream_listen.go`). `ListenEnd` makes `listen <first>-<last>` (at most 100 ports;
     `streamBinds`, `freePort`, the session list and `configClaims` via `listenBinds` all cover every port of a

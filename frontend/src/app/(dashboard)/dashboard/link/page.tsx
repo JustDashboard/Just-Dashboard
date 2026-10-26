@@ -1,17 +1,19 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { External, Slash } from "@/components/icons"
 import { scopeName, siteHost } from "@/lib/account-link"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { AccountLinkStatus } from "@/lib/types"
+import type { AccountLinkScope, AccountLinkStatus } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import { useAccountLink } from "@/hooks/use-account-link"
+import { ConnectPicture } from "@/components/account-link/connect-picture"
 import { LinkPanel } from "@/components/account-link/link-panel"
 import { Policy } from "@/components/account-link/policy"
 import { SharedFields } from "@/components/account-link/shared-fields"
-import { Keys, LinkActions, StatusPanel } from "@/components/account-link/status-panel"
+import { Activity, Keys, LinkActions, ScopeSection } from "@/components/account-link/status-panel"
 import { LogoGlyph } from "@/components/logo"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext, PageState } from "@/components/page"
@@ -21,14 +23,23 @@ import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 
 /**
- * Linking this server to a just-dashboard.com account: choose what the site may see and do,
- * approve the request there, and from then on read what is shared and change or end the link.
+ * Settings → Connect: linking this server to a just-dashboard.com account — choose what the site
+ * may see and do, approve the request there, and from then on read what is shared and change or
+ * end the link. It was named after the site's domain in the sidebar, which said where the link
+ * goes but not what the page does; the domain is still the identity line's name.
  *
  * It reports and then offers one decision, so it takes the passes of design-system §15 with the
- * host Overview as its reference, like Configuration beside it: an identity line first, whose far
- * end is the link's state and the two things done to a link that exists; then, once linked, three
- * readings of the link; no frame anywhere. The decision is the scope, a choice between three
- * things, so those are the lit cards.
+ * deploy overview as its reference: an identity line first, whose far end is the link's state and
+ * the two things done to a link that exists; then the link drawn as what it is
+ * (`connect-picture.tsx`) — what this server reads, wired through it to the site and the account
+ * — whose lines pulse while heartbeats go out; then one section at a time under hairlines, the
+ * deploy settings pages' rhythm, so each part is read on its own. The decision is the scope, a
+ * choice between three things, so those are the lit cards.
+ *
+ * §15 pass 2 is dropped here, the way `/git` drops it. The link had three tiles — linked,
+ * last heartbeat, last command — and the operator asked for them to go. When it was linked and by
+ * whom is the identity line's; the heartbeat is the picture's site line and the Activity row with
+ * its `Status`; the last command is the Activity row beside it, drawn as what it acted on.
  *
  * Three states share the page — not linked, waiting for approval, linked — and a fourth, linking
  * switched off, which explains the switch and offers nothing. The backend decides all four; the
@@ -38,6 +49,8 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 export default function AccountLinkPage() {
   const account = useAccountLink()
   const { status } = account
+  // Least access first: the person who only presses Link has chosen the scope that cannot act.
+  const [choice, setChoice] = useState<AccountLinkScope>("observe")
 
   // Approval happens in another tab, so arriving at "linked" is news the page has to announce.
   const state = status?.state
@@ -51,15 +64,16 @@ export default function AccountLinkPage() {
   }, [state, owner])
 
   if (!status) {
-    return <PageState eyebrow="Settings" title="just-dashboard.com" error={account.error} />
+    return <PageState eyebrow="Settings" title="Connect" error={account.error} />
   }
 
   const site = siteHost(status.siteUrl)
   const link = status.state === "linked" ? status.link : undefined
+  const scope = link?.scope ?? status.request?.scope ?? choice
 
   return (
     <Page className="animate-rise">
-      <PageContext eyebrow="Settings" title="just-dashboard.com" />
+      <PageContext eyebrow="Settings" title="Connect" />
 
       <HostIdentity
         logo={
@@ -109,30 +123,50 @@ export default function AccountLinkPage() {
           <code className="font-mono">.env</code>, so it never contacts {site}. Remove it, or set it
           to <code className="font-mono">true</code>, and restart the dashboard to link this server.
         </Notice>
-      ) : link ? (
-        <>
-          <StatusPanel link={link} site={site} onChangeScope={account.changeScope} />
-          <SharedFields
-            scope={link.scope}
-            snapshot={link.lastSnapshot}
-            sentAt={link.lastHeartbeatAt}
-          />
-          <div className="grid min-w-0 gap-x-12 gap-y-8 xl:grid-cols-2">
-            <Policy policy={link.updatePolicy} scope={link.scope} site={site} />
-            <Keys fingerprint={status.fingerprint} siteKeys={link.siteKeys} />
-          </div>
-        </>
       ) : (
         <>
           {status.state === "unlinked" && status.lastOutcome && (
             <Outcome outcome={status.lastOutcome} />
           )}
-          <LinkPanel status={status} onBegin={account.begin} onCancel={account.cancel} />
+          <ConnectPicture status={status} scope={scope} />
+          <div className="flex min-w-0 flex-col divide-y divide-hairline">
+            {link ? (
+              <>
+                <Activity link={link} site={site} className={BLOCK} />
+                <ScopeSection scope={link.scope} onChange={account.changeScope} className={BLOCK} />
+                <SharedFields
+                  scope={link.scope}
+                  snapshot={link.lastSnapshot}
+                  sentAt={link.lastHeartbeatAt}
+                  className={BLOCK}
+                />
+                <div className={cn("grid min-w-0 gap-x-16 gap-y-12 xl:grid-cols-2", BLOCK)}>
+                  <Policy policy={link.updatePolicy} scope={link.scope} site={site} />
+                  <Keys fingerprint={status.fingerprint} siteKeys={link.siteKeys} />
+                </div>
+              </>
+            ) : (
+              <>
+                <LinkPanel
+                  status={status}
+                  scope={choice}
+                  onScope={setChoice}
+                  onBegin={account.begin}
+                  onCancel={account.cancel}
+                  className={BLOCK}
+                />
+                <SharedFields scope={scope} className={BLOCK} />
+              </>
+            )}
+          </div>
         </>
       )}
     </Page>
   )
 }
+
+/** Each section stands alone under a hairline, with room enough round it to be read as one. */
+const BLOCK = "py-12 first:pt-6 last:pb-4"
 
 function Facts({ status }: { status: AccountLinkStatus }) {
   if (!status.enabled) return <span>Turned off by JD_ACCOUNT_LINK</span>

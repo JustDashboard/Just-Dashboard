@@ -148,8 +148,8 @@ func containsFold(list []string, name string) bool {
 	return slices.ContainsFunc(list, func(s string) bool { return strings.EqualFold(s, name) })
 }
 
-func (spec *SiteSpec) corsVar() string      { return NginxIdent(spec.Name) + "_cors" }
-func (spec *SiteSpec) preflightVar() string { return NginxIdent(spec.Name) + "_preflight" }
+func (spec *SiteSpec) corsVar() string      { return spec.varIdent() + "_cors" }
+func (spec *SiteSpec) preflightVar() string { return spec.varIdent() + "_preflight" }
 
 // anyOrigin says whether the site allows every origin, which needs no
 // map: the answer is * whoever asks.

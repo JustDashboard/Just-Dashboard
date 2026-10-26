@@ -173,7 +173,8 @@ job/run IDs plus randomness. Artifact creation and publication refuse collisions
 an existing archive.
 
 `internal/backups` stores job definitions and run history in SQLite. A job has source paths, exclusion
-globs, a local/S3/Backblaze-B2 destination, a five-field cron schedule (validated by `Job.Validate`, so no
+globs, a destination (a directory here, S3, Backblaze B2, an SFTP server or an rclone remote — see
+[SFTP and rclone destinations](#sftp-and-rclone-destinations)), a five-field cron schedule (validated by `Job.Validate`, so no
 caller can store an expression that never fires), an enabled flag, a retention count, a retention age in
 days (`retention_days`, additive), and the containers to pause for the archive step (`pause_containers`,
 additive; names are trimmed and refused when option-shaped). `POST /backups/{id}/enabled` pauses or
@@ -183,14 +184,15 @@ definition or touching sealed keys. The list and single-job reads carry the figu
 detector and its response field were removed in 0.7.5. Displayable target configuration is separate
 from access keys; credentials are sealed by
 `auth.Sealer` and never returned by the API. A job may also encrypt its archives (see
-[Archive encryption](#archive-encryption)). The target-test route checks local writability or object-store
-bucket access before the operator depends on a schedule.
+[Archive encryption](#archive-encryption)). The target-test route checks local writability, object-store
+bucket access, an SFTP sign-in and a probe file, or an rclone remote's write access before the operator
+depends on a schedule.
 
 `Scheduler` rebuilds its in-memory robfig/cron entries from enabled jobs at start and after edits. Manual
 and scheduled runs share `Runner.Execute`; a per-job running set prevents overlap. Execution records a run,
 streams a gzip-compressed tar archive to a `0600` staging file, fails on unreadable or changing files,
 applies exclusions to both full paths and basenames, then moves locally or uploads through the
-AWS S3 multipart client. A source may contain the staging directory only when an exclusion covers it —
+AWS S3 multipart client, SFTP or rclone. A source may contain the staging directory only when an exclusion covers it —
 the dashboard's own data directory is the one source where that is legitimate, and the suggested job
 excludes `staging`, `deployment-workspaces` and `install.env` (the copy of the key a kept uninstall leaves
 beside the data, which must not travel in an archive of that data). Database dumps are taken first, while the engines can
@@ -269,11 +271,50 @@ job counts as protection. Owners that cannot answer are named in `unavailable` r
 empty, and unprotected resources sort first. Backup-before-deploy behavior and restore-evidence
 limits are covered in [`../deployments/implementation.md`](../deployments/implementation.md).
 
+## SFTP and rclone destinations
+
+Both are reached only during a transfer: `remote_targets.go` holds the transports and
+`objectstore.go` the dispatch (`uploadArtifact`, `downloadArtifact`, `deleteArtifact`, `TestTarget`) that
+the runner, retention and restore share with S3. An archive lands at `<path>/<name>` on the server or in
+the remote; the run's manifest records the destination as it was, so a restore reads the archive where it
+was written even after the job is edited.
+
+**SFTP.** `target` holds `host`, `port` (22 when omitted), `username` and `path` (under the account's home
+unless absolute); the sealed secrets hold a `password`, a `privateKey` (OpenSSH or PEM) with its
+`passphrase`, or both, and a new job needs one of them. Sign-in uses `golang.org/x/crypto/ssh` and
+`github.com/pkg/sftp`; an upload is written as `<name>.partial`, size-checked and renamed, so an
+interrupted one never looks like a backup. The server's host key is pinned on first contact — by the
+target test, or by the first run when nobody tested — and only after the server accepted the
+credentials, so a server that cannot be signed in to pins nothing. The pin (`hostKey`, an authorized-keys
+line, and `hostKeyFingerprint`, SHA256) lives in `target`; the client asks for the strongest key kind
+(Ed25519, then ECDSA, then RSA) when nothing is pinned and for the pinned kind afterwards, the way OpenSSH
+uses known_hosts. A server presenting another key is refused before any credential is sent, and the run
+log names both fingerprints. An edit of the same host and port keeps the pin; another server is pinned
+afresh; `forgetHostKey: true` on `PUT /backups/{id}` drops it for a reinstalled server. The test response
+carries `hostKeyFingerprint` and, the first time, `hostKeyPinned`, audited as `backup.target.pin`, so the
+page can show the fingerprint to compare with the server's own. The run that pins writes the key into its
+own manifest, and a restore or prune of an archive whose server the job no longer names, never pinned, is
+refused rather than trusted.
+
+**rclone.** The secret is one remote's section as `rclone config show <name>` prints it (OAuth tokens
+included); `ParseRcloneRemote` keeps its options and the page names the service from `remoteType`, read
+from its `type`. Because rclone can reach this server's own disk, the configuration is vetted: only
+storage backends are accepted (`local` and the wrappers that take a bare path — `alias`, `crypt`, `union`,
+`combine`, `chunker`, `hasher`, `compress`, `cache` — are refused), and so are options that name a file
+here or run a program (any key containing `file`, `command` or `socket`, and `ssh`) and `env_auth`, which
+would sign in with the dashboard's own environment. Every command runs the image's own rclone (the
+`rclone` stage of `backend/Dockerfile`, a pinned release checked against its published SHA-256 sums) with
+a private `0600` configuration written for that command alone, a private cache directory, `HOME` and
+`TMPDIR` in the same temporary directory, and no environment from the dashboard, so no `RCLONE_*`
+variable reaches it. `copyto` uploads and restores, `deletefile` prunes, and the test runs `mkdir`,
+`rcat` and `deletefile` on a probe.
+
 ## Archive encryption
 
 A job's `encrypt` setting (additive column, default 0, so a job that predates it keeps writing what
 it always wrote) seals each new archive before it is written to the destination. A new job takes
-`true` when its destination is S3 or B2 and `false` for a directory on this server, unless the request
+`true` when its destination leaves the server (S3, B2, SFTP or rclone) and `false` for a directory on
+this server, unless the request
 says otherwise; `PUT /backups/{id}` without the field keeps the stored value, so an older caller cannot
 turn encryption off by omission. Archives already taken keep the form they were written in, whichever
 way the setting is changed later.
@@ -383,7 +424,8 @@ The current host-execution implementation and its relationship to the documented
 
 A backup job's destination can also be given to a PostgreSQL server's point-in-time recovery
 (`fromJob` on `POST /databases/{id}/pitr`): its kind, configuration and sealed keys are copied into the
-archive's own record, and a directory gets a `wal` folder beside the job's archives. The archive is not
+archive's own record, and a directory gets a `wal` folder beside the job's archives. WAL-G writes only
+to a directory or an object store, so a job whose destination is SFTP or rclone is refused there. The archive is not
 a run of the job and is not pruned by its retention; see
 [Databases → Point-in-time recovery](databases-proxy-platform.md#point-in-time-recovery).
 

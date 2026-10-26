@@ -2,9 +2,9 @@ import { bytes, duration, percent } from "@/lib/format"
 import type { AccountLinkScope, AccountLinkStatus } from "@/lib/types"
 
 /**
- * The pure half of the just-dashboard.com page: what each scope shares and lets the site do, the
- * heartbeat the dashboard last sent read as rows a person can check, and the countdown on a link
- * request. The wording of the scopes is the contract's scope table
+ * The pure half of the Connect page: what each scope shares and lets the site do, the heartbeat
+ * the dashboard last sent read as rows a person can check, the picture's four kinds of data, and
+ * the countdown on a link request. The wording of the scopes is the contract's scope table
  * (docs/server-link-protocol.md); the CLI help names the same things, so a change goes to both.
  */
 
@@ -14,43 +14,59 @@ export function scopeName(scope: AccountLinkScope): string {
   return scope[0].toUpperCase() + scope.slice(1)
 }
 
+/** One thing the heartbeat carries; `key` is what the page draws it as. */
+export type SharedItem = { key: string; label: string }
+
 /** What the heartbeat carries at `observe`, and so at every scope. */
-const OBSERVED = [
-  "version and update state",
-  "OS, kernel and architecture",
-  "uptime",
-  "access path (tailnet address or SSH tunnel port)",
-  "CPU, memory, disk, load and network",
-  "container and backup counts",
-  "alerts firing",
+const OBSERVED: SharedItem[] = [
+  { key: "version", label: "version and update state" },
+  { key: "os", label: "OS, kernel and architecture" },
+  { key: "uptime", label: "uptime" },
+  { key: "access", label: "access path (tailnet address or SSH tunnel port)" },
+  { key: "metrics", label: "CPU, memory, disk, load and network" },
+  { key: "counts", label: "container and backup counts" },
+  { key: "alerts", label: "alerts firing" },
 ]
 
 /** The names `operate` adds. Names only: never an image, a variable or a path. */
-const NAMED = "container, stack, backup-job and last-deployed project names"
+const NAMED: SharedItem = {
+  key: "names",
+  label: "container, stack, backup-job and last-deployed project names",
+}
 
 /**
  * Never in the heartbeat at any scope (plan §3.6 and §4.4). Said next to what is shared because
  * the list of what leaves a root-equivalent machine is only half of a trust decision.
  */
-export const NEVER_SENT =
-  ".env contents, API keys, accounts, the network allowlist, logs, file contents, connection strings, deploy variables and backup credentials"
+export const NEVER_SENT: readonly string[] = [
+  ".env contents",
+  "API keys",
+  "Accounts",
+  "The network allowlist",
+  "Logs",
+  "File contents",
+  "Connection strings",
+  "Deploy variables",
+  "Backup credentials",
+]
 
 const upper = (text: string) => text[0].toUpperCase() + text.slice(1)
+const capital = (item: SharedItem) => ({ ...item, label: upper(item.label) })
 
 /** Everything the heartbeat carries at this scope, one thing to an entry. */
-export function sharedItems(scope: AccountLinkScope): string[] {
-  return scope === "observe" ? OBSERVED.map(upper) : [...OBSERVED.map(upper), upper(NAMED)]
+export function sharedItems(scope: AccountLinkScope): SharedItem[] {
+  return (scope === "observe" ? OBSERVED : [...OBSERVED, NAMED]).map(capital)
 }
 
 /** The scope card's sentence for what it shares. */
 export function scopeShares(scope: AccountLinkScope): string {
   switch (scope) {
     case "observe":
-      return OBSERVED.map(upper).join(" · ")
+      return OBSERVED.map((item) => upper(item.label)).join(" · ")
     case "operate":
-      return `Everything in Observe, plus ${NAMED}.`
+      return `Everything in Observe, plus ${NAMED.label}.`
     case "maintain":
-      return `The same as Operate: everything in Observe, plus ${NAMED}.`
+      return `The same as Operate: everything in Observe, plus ${NAMED.label}.`
   }
 }
 
@@ -64,6 +80,23 @@ export function scopeAllows(scope: AccountLinkScope): string {
     case "maintain":
       return "Also install a dashboard update, set the automatic-update policy and restart the dashboard."
   }
+}
+
+const COMMAND_WORDS: Record<string, string> = {
+  "snapshot.now": "Refresh the snapshot",
+  "container.start": "Start a container",
+  "container.stop": "Stop a container",
+  "container.restart": "Restart a container",
+  "stack.restart": "Restart a stack",
+  "backup.run": "Run a backup job",
+  "dashboard.update.install": "Install a dashboard update",
+  "dashboard.update.policy": "Set the automatic-update policy",
+  "dashboard.restart": "Restart the dashboard",
+}
+
+/** A command's kind in words; a kind this page does not know is shown as it was sent. */
+export function commandWords(kind: string): string {
+  return COMMAND_WORDS[kind] ?? kind
 }
 
 /** "just-dashboard.com", or "localhost:3000" in development; the raw text if it is not a URL. */
@@ -90,6 +123,9 @@ export function countdown(expiresAt: string, now: number): { label: string; expi
   const clock = `${pad(Math.floor((left % 3600) / 60))}:${pad(left % 60)}`
   return { label: hours > 0 ? `${hours}:${clock}` : clock, expired: false }
 }
+
+/** How long a link request stands before the site drops it. */
+export const REQUEST_LIFETIME = 15 * 60_000
 
 /** Ten missed heartbeats (they go out every 30 s) is a link that is not working. */
 const STALE_AFTER = 300_000

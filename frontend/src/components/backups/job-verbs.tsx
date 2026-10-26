@@ -65,9 +65,26 @@ export function useJobVerbs({
 
   const testTarget = async (job: BackupJob) => {
     try {
-      const res = await post<{ ok: boolean; error?: string }>(`/backups/${job.id}/test`)
-      if (res.ok) notify.success(`${job.name}: destination is reachable and writable`)
+      const res = await post<{
+        ok: boolean
+        error?: string
+        hostKeyFingerprint?: string
+        hostKeyPinned?: boolean
+      }>(`/backups/${job.id}/test`)
+      // A server reached for the first time is pinned to the key it showed;
+      // saying the fingerprint is what lets that be compared with the
+      // server's own before the first archive goes to it.
+      const pinned = res.hostKeyPinned
+        ? `Pinned the server's host key ${res.hostKeyFingerprint}`
+        : undefined
+      if (res.ok)
+        notify.success(`${job.name}: destination is reachable and writable`, {
+          description: pinned,
+          // Long enough to compare the fingerprint with the server's own.
+          duration: pinned ? 20000 : undefined,
+        })
       else notify.error(`${job.name}: destination unreachable`, res.error)
+      if (res.hostKeyPinned) refresh()
     } catch (err) {
       notify.error("Could not test the destination", err)
     }

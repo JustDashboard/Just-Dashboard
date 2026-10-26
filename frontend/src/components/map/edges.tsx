@@ -101,7 +101,7 @@ export const RelationEdge = memo(function RelationEdge({
       {data?.label && (
         <EdgeLabelRenderer>
           <span
-            className="nopan pointer-events-none absolute rounded-sm border border-hairline bg-popover px-1.5 py-0.5 text-micro text-muted-foreground group-data-[zoom=far]/map:hidden"
+            className="nopan pointer-events-none absolute"
             style={{
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
               // Above every box, chosen ones included: a label under a box
@@ -109,7 +109,10 @@ export const RelationEdge = memo(function RelationEdge({
               zIndex: 1001,
             }}
           >
-            {data.label}
+            {/* Held to the screen as the names are, from its middle on the line. */}
+            <span className="block [transform:scale(max(1,calc(var(--map-unzoom,1)*0.8)))] rounded-sm border border-hairline bg-popover px-1.5 py-0.5 text-micro whitespace-nowrap text-muted-foreground">
+              {data.label}
+            </span>
           </span>
         </EdgeLabelRenderer>
       )}

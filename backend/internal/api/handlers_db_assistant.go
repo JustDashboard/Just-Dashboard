@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/assistant"
@@ -39,6 +40,9 @@ type assistantState struct {
 	// slots bounds how many answers stream at once.
 	slots   chan struct{}
 	options assistant.Options
+	// diagnosing holds the runs whose failure is being asked about, so a
+	// second press waits for the first answer instead of paying for another.
+	diagnosing sync.Map
 }
 
 func newAssistantState() *assistantState {

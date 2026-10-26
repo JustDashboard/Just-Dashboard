@@ -95,8 +95,10 @@ func TestPullRequestCommenterKeepsOneCommentCurrent(t *testing.T) {
 }
 
 // Production runs, previews of other providers and a poster that fails never
-// change a run and never reach GitHub with the wrong pull request.
-func TestPullRequestCommenterOnlySpeaksForGitHubPreviews(t *testing.T) {
+// change a run and never reach GitHub with the wrong pull request. A Gitea or
+// GitLab preview is written to its own host (forge_reports_test.go), never to
+// GitHub.
+func TestPullRequestCommenterSendsOnlyGitHubPreviewsToGitHub(t *testing.T) {
 	f, preview := previewFixture(t)
 	poster := &recordingCommentPoster{err: errors.New("app not installed")}
 	commenter := NewPullRequestCommenter(NewOrchestrationStore(f.store), poster, nil, nil)

@@ -773,7 +773,7 @@ export default function DashboardConfigurationPage() {
             href="/dashboard/link"
             className="rounded-sm text-foreground underline-offset-4 focus-ring hover:underline"
           >
-            Settings → just-dashboard.com
+            Settings → Connect
           </Link>
           .
         </p>

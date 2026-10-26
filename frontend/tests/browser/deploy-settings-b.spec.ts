@@ -252,6 +252,143 @@ test.describe("Redirects, access and headers", () => {
   })
 })
 
+test.describe("Sign-in", () => {
+  test("requiring sign-in saves the auth server beside the runtime, and a refusal lands on its field", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    const puts: Record<string, unknown>[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
+        puts.push(request.postDataJSON())
+      }
+    })
+    let refuse = true
+    await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+      if (route.request().method() !== "PUT" || !refuse) return route.fallback()
+      refuse = false
+      await route.fulfill({
+        status: 422,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: {
+            code: "invalid_plan",
+            message: "the check address takes no query",
+            field: "runtime.forwardAuth.verify",
+          },
+        }),
+      })
+    })
+    await page.goto("/deploy/7/settings/domains")
+    const access = page.getByRole("form", { name: "Access and headers" })
+    await expect(access.getByText("Everyone · every domain above")).toBeVisible()
+
+    // On, it starts at Authelia's usual address, and a preset address
+    // follows the provider while a typed one would stay.
+    await access.getByRole("switch", { name: "Require sign-in" }).click()
+    const check = access.getByRole("textbox", { name: "Check address" })
+    await expect(check).toHaveValue("http://127.0.0.1:9091/api/authz/auth-request")
+    await access.getByRole("radio", { name: "oauth2-proxy" }).click()
+    await expect(check).toHaveValue("http://127.0.0.1:4180/oauth2/auth")
+    await access.getByRole("radio", { name: "Authelia" }).click()
+    await check.fill("http://127.0.0.1:9091/api/authz/auth-request?x=1")
+    await access.getByRole("textbox", { name: "Sign-in page" }).fill("https://auth.example.test/")
+    await expect(access.getByText("Signed in through Authelia · every domain above")).toBeVisible()
+    await expect(
+      access.getByText(/The application is sent Remote-User and Remote-Email/),
+    ).toBeVisible()
+
+    await saveSettings(page)
+    await expect(
+      access.getByText("the check address takes no query", { exact: true }),
+    ).toBeVisible()
+    await check.fill("http://127.0.0.1:9091/api/authz/auth-request")
+    await saveSettings(page)
+    await expectSaved(page)
+    const saved = puts.at(-1)!.runtime as Record<string, unknown>
+    expect(saved.forwardAuth).toEqual({
+      provider: "authelia",
+      verify: "http://127.0.0.1:9091/api/authz/auth-request",
+      signIn: "https://auth.example.test/",
+    })
+    // The form writes its fields and keeps the rest of the runtime.
+    expect(saved.internalPort).toBe(3000)
+    expect(saved.command).toEqual(["bun", "start"])
+
+    // For previews only, this environment's route stays open.
+    await access.getByRole("radio", { name: "Previews only" }).click()
+    await expect(
+      access.getByText("Everyone here · previews sign in through Authelia"),
+    ).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
+    expect((puts.at(-1)!.runtime as Record<string, unknown>).forwardAuth).toMatchObject({
+      previewsOnly: true,
+    })
+
+    // Off, the field leaves the plan altogether.
+    await access.getByRole("switch", { name: "Require sign-in" }).click()
+    await saveSettings(page)
+    await expectSaved(page)
+    expect(puts.at(-1)!.runtime as Record<string, unknown>).not.toHaveProperty("forwardAuth")
+  })
+
+  test("a password on a domain is named before a sign-in is saved beside it", async ({ page }) => {
+    const mock = await mockProject(page)
+    mock.configuration().domains[0].protection = {
+      username: "team",
+      hash: "$2a$10$" + "a".repeat(53),
+    }
+    await page.goto("/deploy/7/settings/domains")
+    const access = page.getByRole("form", { name: "Access and headers" })
+    await access.getByRole("switch", { name: "Require sign-in" }).click()
+    await expect(
+      access.getByText(
+        "Signing in replaces the password on api.example.test. Remove it under the domain first.",
+      ),
+    ).toBeVisible()
+    await access.getByRole("radio", { name: "Previews only" }).click()
+    await expect(access.getByText(/Signing in replaces the password/)).toHaveCount(0)
+  })
+
+  test("sign-in, for the pull request @shots", async ({ page }) => {
+    test.skip(!process.env.JD_SHOTS, "JD_SHOTS names the directory the pictures go in")
+    // The whole page, so the form is seen under the domains it applies to.
+    const shot = (name: string) =>
+      page.screenshot({
+        path: `${process.env.JD_SHOTS}/${name}`,
+        fullPage: true,
+        animations: "disabled",
+      })
+    const mock = await mockProject(page)
+    Object.assign(mock.configuration().runtime, {
+      allowFrom: ["10.0.0.0/8"],
+      forwardAuth: {
+        provider: "authelia",
+        verify: "http://127.0.0.1:9091/api/authz/auth-request",
+        signIn: "https://auth.example.test/",
+      },
+    })
+    const access = page.getByRole("form", { name: "Access and headers" })
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto("/deploy/7/settings/domains")
+      await expect(access.getByText("Only 1 address, signed in through Authelia")).toBeVisible()
+      await access.evaluate((element) => element.scrollIntoView({ block: "start" }))
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+      ).toBe(false)
+      await shot(`deploy-sign-in-${width}.png`)
+    }
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await access.getByRole("radio", { name: "Previews only" }).click()
+    await expect(
+      access.getByText("Only 1 address here · previews sign in through Authelia"),
+    ).toBeVisible()
+    await shot("deploy-sign-in-previews-1280.png")
+  })
+})
+
 test.describe("Storage", () => {
   test("mounts render, a new one saves, and evidence reflects operations", async ({ page }) => {
     await mockProject(page)

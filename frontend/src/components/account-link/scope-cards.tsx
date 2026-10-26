@@ -1,13 +1,25 @@
 "use client"
 
-import { scopeAllows, scopeName, scopeShares, SCOPES } from "@/lib/account-link"
+import { Eye } from "@/components/icons"
+import { scopeAllows, scopeName, SCOPES } from "@/lib/account-link"
 import type { AccountLinkScope } from "@/lib/types"
+import { LargeMarkTile, type Mark } from "@/components/account-link/marks"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 
 /**
- * The three scopes as the choice they are. Each card says what the heartbeat carries and what the
- * site may then ask this server to do, in the contract's words, because "Operate" alone tells
- * nobody that it adds the names of their containers and projects to what leaves the machine.
+ * Each scope drawn as what it lets the site touch: Observe only reads, Operate reaches Docker,
+ * Maintain reaches this dashboard itself.
+ */
+const MARK: Record<AccountLinkScope, Mark> = {
+  observe: { glyph: Eye, hue: "var(--tag-blue)" },
+  operate: { product: "docker" },
+  maintain: { brand: true },
+}
+
+/**
+ * The three scopes as the choice they are: a mark, a name and what the site may then ask this
+ * server to do, in the contract's words. What each one shares is the list under the cards, which
+ * follows the card picked — said once there rather than in three paragraphs here.
  */
 export function ScopeCards({
   value,
@@ -25,18 +37,8 @@ export function ScopeCards({
           key={scope}
           verb={`Choose the ${scopeName(scope)} scope`}
           title={scopeName(scope)}
-          description={
-            <span className="mt-1 flex flex-col gap-2.5">
-              <span className="block">
-                <span className="eyebrow block">Shares</span>
-                {scopeShares(scope)}
-              </span>
-              <span className="block">
-                <span className="eyebrow block">Lets the site</span>
-                {scopeAllows(scope)}
-              </span>
-            </span>
-          }
+          description={scopeAllows(scope)}
+          logo={<LargeMarkTile mark={MARK[scope]} />}
           index={index}
           selected={value === scope}
           disabled={disabled}

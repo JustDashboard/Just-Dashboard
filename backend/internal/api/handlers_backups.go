@@ -86,6 +86,9 @@ type jobRequest struct {
 	// Encrypt is omitted by a caller that predates it: a new job then takes
 	// the default for its destination and an edited one keeps its setting.
 	Encrypt *bool `json:"encrypt,omitempty"`
+	// ForgetHostKey drops an SFTP destination's pinned host key, for a
+	// server that was reinstalled; it is pinned again when next reached.
+	ForgetHostKey bool `json:"forgetHostKey,omitempty"`
 }
 
 func (req *jobRequest) toJob() *backups.Job {
@@ -99,7 +102,7 @@ func (req *jobRequest) toJob() *backups.Job {
 		TargetKind: req.TargetKind, Target: req.Target,
 		Schedule: req.Schedule, Retention: req.Retention, RetentionDays: req.RetentionDays, Enabled: req.Enabled,
 		Recovery: req.Recovery, SQLitePaths: req.SQLitePaths, DatabaseDumps: req.DatabaseDumps,
-		PauseContainers: req.PauseContainers, Encrypt: req.encrypt(),
+		PauseContainers: req.PauseContainers, Encrypt: req.encrypt(), ForgetHostKey: req.ForgetHostKey,
 	}
 }
 
@@ -428,11 +431,22 @@ func (s *Server) handleBackupTestTarget(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		return httpx.Internal(err)
 	}
-	if err := backups.TestTarget(r.Context(), job, secrets); err != nil {
-		httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
-		return nil
+	pinned := job.Target.HostKeyFingerprint
+	err = backups.TestTarget(r.Context(), job, secrets, s.modules.backupStore.Pinner(id))
+	result := map[string]any{"ok": err == nil}
+	if err != nil {
+		result["error"] = err.Error()
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	// An SFTP server's key is said with every answer, and once as newly
+	// pinned, so the operator can compare it with the server's own.
+	if job.Target.HostKeyFingerprint != "" {
+		result["hostKeyFingerprint"] = job.Target.HostKeyFingerprint
+		if pinned == "" {
+			result["hostKeyPinned"] = true
+			httpx.SetAudit(r, "backup.target.pin", job.Name, map[string]any{"fingerprint": job.Target.HostKeyFingerprint})
+		}
+	}
+	httpx.JSON(w, http.StatusOK, result)
 	return nil
 }
 

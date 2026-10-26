@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useRef, useState } from "react"
 import { Clock, External } from "@/components/icons"
 import { ApiError, get, put } from "@/lib/api"
@@ -15,6 +16,7 @@ import type {
   DeployProject,
   DeploymentDraftSource,
   DeploymentEnvironmentConfiguration,
+  DeploymentCommitStatus,
   DeploymentGitPolicy,
   DeploymentGitWatch,
   DeploymentSummary,
@@ -1005,7 +1007,6 @@ function AutomaticDeployment({
       projectId={projectId}
       environmentId={environmentId}
       canEdit={canEdit}
-      github={product === "github"}
       product={product}
       repository={
         configuration.source?.repository ??
@@ -1026,7 +1027,6 @@ function AutomaticDeploymentForm({
   projectId,
   environmentId,
   canEdit,
-  github,
   product,
   repository,
   projectName,
@@ -1037,7 +1037,6 @@ function AutomaticDeploymentForm({
   projectId: number
   environmentId: number
   canEdit: boolean
-  github: boolean
   product: string
   repository?: string
   projectName: string
@@ -1196,17 +1195,9 @@ function AutomaticDeploymentForm({
               </Field>
             </FieldRow>
           </OptionRow>
-          <OptionRow
-            title={
-              // In the run of the words rather than beside them, so a title
-              // that wraps on a phone keeps its mark at the start of its first
-              // line instead of centred against both.
-              <span>
-                <ProductGlyph id="github" className="mr-1.5 inline-block align-[-2px]" />
-                Report each release as a GitHub commit status
-              </span>
-            }
-            hint={github ? undefined : "This source is not on GitHub.com — nothing is reported."}
+          <CommitStatusOption
+            reading={watch.commitStatus}
+            product={product}
             checked={commitStatuses}
             onCheckedChange={(next) => patch({ commitStatuses: next })}
             disabled={!canEdit}
@@ -1225,6 +1216,112 @@ function AutomaticDeploymentForm({
         )}
       </SettingSection>
     </SettingForm>
+  )
+}
+
+const FORGE_NAMES: Record<string, string> = {
+  github: "GitHub",
+  gitlab: "GitLab",
+  gitea: "Gitea",
+  forgejo: "Forgejo",
+  codeberg: "Codeberg",
+}
+
+const STATUS_WORDS: Record<string, string> = {
+  pending: "in progress",
+  success: "succeeded",
+  failure: "failed",
+  error: "cancelled",
+}
+
+/**
+ * The commit-status switch, named for the host the source lives on. Under it
+ * one line: where the last status went when all is well, and in full when
+ * something needs doing — no token for the host, or the host refused the
+ * last status or preview comment — because that is the line somebody opened
+ * Settings to read.
+ */
+function CommitStatusOption({
+  reading,
+  product,
+  checked,
+  onCheckedChange,
+  disabled,
+}: {
+  reading?: DeploymentCommitStatus
+  product: string
+  checked: boolean
+  onCheckedChange: (next: boolean) => void
+  disabled: boolean
+}) {
+  const forge = reading?.product ?? reading?.provider ?? product
+  const name = FORGE_NAMES[forge]
+  const supported = reading ? Boolean(reading.provider) : forge === "github"
+  const credentials = (
+    <Link
+      href="/deploy/credentials"
+      className="rounded-sm underline underline-offset-2 focus-ring hover:text-foreground"
+    >
+      Credentials
+    </Link>
+  )
+  const last = reading?.lastStatus
+  const comment = reading?.lastComment
+  // Which saved token to fix, when the host refused one.
+  const from = reading?.credential ? ` from ${reading.credential}` : ""
+  let hint: React.ReactNode
+  let warning = false
+  if (!reading) {
+    hint = supported ? undefined : "This source is not on GitHub.com — nothing is reported."
+  } else if (!reading.provider) {
+    hint = reading.reason ?? "Nothing is reported for this source."
+  } else if (!reading.ready) {
+    warning = true
+    hint = reading.reason?.includes("Deployments → Credentials") ? (
+      <>
+        Save a provider token for <span className="font-mono">{reading.host}</span> under{" "}
+        {credentials} to report here.
+      </>
+    ) : (
+      reading.reason
+    )
+  } else if (last && !last.ok) {
+    warning = true
+    hint = `${name ?? reading.host} refused the last status${from}: ${last.message}`
+  } else if (comment && !comment.ok) {
+    warning = true
+    hint = `${name ?? reading.host} refused the last preview comment${from}: ${comment.message}`
+  } else if (last) {
+    hint = (
+      <>
+        Reported {relativeTime(last.at)}: {STATUS_WORDS[last.state] ?? last.state} on{" "}
+        <ShortSha sha={last.revision} className="align-[1px]" />
+        {reading.credential && <> with {reading.credential}</>}
+      </>
+    )
+  } else if (reading.credential) {
+    hint = (
+      <>
+        Written as <span className="font-mono">{reading.context}</span> with {reading.credential}.
+      </>
+    )
+  }
+  return (
+    <OptionRow
+      title={
+        // In the run of the words rather than beside them, so a title that
+        // wraps on a phone keeps its mark at the start of its first line
+        // instead of centred against both.
+        <span>
+          {name && <ProductGlyph id={forge} className="mr-1.5 inline-block align-[-2px]" />}
+          Report each release as {name ? `a ${name}` : "a"} commit status
+        </span>
+      }
+      hint={warning ? <span className="text-warning">{hint}</span> : hint}
+      checked={checked}
+      onCheckedChange={onCheckedChange}
+      disabled={disabled}
+    />
   )
 }
 

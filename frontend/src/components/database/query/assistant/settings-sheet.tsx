@@ -56,7 +56,7 @@ function draftOf(settings: AssistantSettings | undefined): AssistantSetup {
 }
 
 /**
- * Who answers the editor's assistant, for the whole install: Claude with the
+ * Who answers the assistant, for the whole install: Claude with the
  * operator's Anthropic key, or any server that speaks OpenAI's chat
  * completions, which is how a model running on this machine is reached.
  *
@@ -84,7 +84,7 @@ export function AssistantSettingsSheet({
       open={open}
       onOpenChange={(next) => !next && onClose()}
       title={settings?.configured ? "Assistant settings" : "Set up the assistant"}
-      description="Choose the model provider the SQL editor's assistant asks"
+      description="Choose the model provider the dashboard's assistant asks"
       width="md"
       footer={
         <>
@@ -189,7 +189,10 @@ function SettingsForm({
       }}
     >
       <FormFacts>
-        <FormFact label="Used by">every SQL database&rsquo;s editor on this server</FormFact>
+        <FormFact label="Used by">
+          every SQL database&rsquo;s editor, a drawing&rsquo;s Describe a diagram, and a failed
+          deployment&rsquo;s Ask why it failed
+        </FormFact>
       </FormFacts>
 
       <div className="space-y-1.5">
@@ -310,9 +313,10 @@ function SettingsForm({
 
       <Notice title="What the provider is sent">
         The question, and the structure of the database it is about: table and column names, types,
-        keys and references. Rows are sent only with a question someone attaches a result to.
-        Nothing the assistant writes is run, and every question is in the audit log with what it
-        cost.
+        keys and references. Rows are sent only with a question someone attaches a result to. Asked
+        why a deployment failed, it is sent that run&rsquo;s failed step, settings, variable names
+        and the end of its transcript, with secret values masked. Nothing the assistant writes is
+        run or applied, and every question is in the audit log with what it cost.
       </Notice>
 
       {refusal && !["key", "baseUrl", "model"].includes(refusal.field ?? "") && (
