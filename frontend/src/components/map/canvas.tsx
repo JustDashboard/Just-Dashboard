@@ -53,7 +53,6 @@ import { post } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
 import {
   BRANCHES,
-  SIZE,
   branchId,
   census,
   followersOf,
@@ -86,14 +85,28 @@ import type { MemoryStatus } from "@/components/map/memory"
 const ZOOM = { min: 0.12, max: 2 }
 
 /**
- * The zoom a box's words stop being read at. Below `mid` a box drops its
- * second line, below `far` it is its mark and its dot; the switch is one
- * attribute on the canvas that CSS reads, so zooming re-renders no box.
+ * The zoom a box's words stop being read at. Below `near` a thing drops its
+ * second line, below `mid` its mark too, and is its name and its dot; the
+ * switch is one attribute on the canvas that CSS reads, so zooming
+ * re-renders no box.
  */
 function zoomBucket(zoom: number): "near" | "mid" | "far" {
-  if (zoom < 0.5) return "far"
-  if (zoom < 0.8) return "mid"
+  if (zoom < 0.35) return "far"
+  if (zoom < 0.75) return "mid"
   return "near"
+}
+
+/**
+ * How much a name in a box is grown so it reads on the screen at 11px however
+ * far out the map is, from the `size` it is set in — a thing's 14px name, a
+ * shelf's 10px eyebrow (`NAME` and `SHELF` in nodes.tsx) — up to the `most`
+ * a line of its box holds; past that it shrinks with the rest. Grown in steps
+ * of a twelfth of a doubling, so a zoom lays the names out again a few times
+ * rather than on every frame, each step too small to see.
+ */
+function heldScale(zoom: number, size: number, most: number) {
+  const wanted = Math.min(most, Math.max(1, 11 / size / Math.max(zoom, 0.01)))
+  return Math.round(2 ** (Math.round(Math.log2(wanted) * 12) / 12) * 1000) / 1000
 }
 
 type Drag = {
@@ -160,13 +173,27 @@ export function MapCanvas({
   const wide = useMediaQuery("(min-width: 1024px)")
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const zoom = useStore((s) => zoomBucket(s.transform[2]))
-  // The far zoom holds names to the screen by scaling them against the zoom;
-  // the factor is written straight onto the canvas as the view moves, so the
-  // labels follow every frame of a zoom without React drawing anything.
+  // Zoomed out, names are held to the screen by growing them against the
+  // zoom; the factors are written straight onto the canvas as the view moves,
+  // so they follow a zoom without React drawing anything. The names with
+  // open ground round them are scaled on every frame (`--map-unzoom`, no
+  // layout); the names in boxes are cut short inside them, so they are laid
+  // out again, and only when their step changes (`--map-name`, `--map-label`).
   const store = useStoreApi()
   useEffect(() => {
-    const apply = (z: number) =>
-      canvasRef.current?.style.setProperty("--map-unzoom", String(1 / Math.max(z, 0.05)))
+    const written = new Map<string, string>()
+    const write = (canvas: HTMLElement, name: string, value: string) => {
+      if (written.get(name) === value) return
+      written.set(name, value)
+      canvas.style.setProperty(name, value)
+    }
+    const apply = (z: number) => {
+      const canvas = canvasRef.current
+      if (!canvas) return
+      canvas.style.setProperty("--map-unzoom", String(1 / Math.max(z, 0.05)))
+      write(canvas, "--map-name", String(heldScale(z, 14, 4)))
+      write(canvas, "--map-label", String(heldScale(z, 10, 5)))
+    }
     apply(store.getState().transform[2])
     return store.subscribe((state) => apply(state.transform[2]))
   }, [store])
@@ -215,7 +242,9 @@ export function MapCanvas({
     restored.current = true
     window.setTimeout(() => {
       if (doc.viewport) void flow.setViewport(doc.viewport)
-      else void flow.fitView({ padding: fitPadding(doc.minimap), maxZoom: 0.9, minZoom: 0.3 })
+      // The first view takes in the whole server down to the zoom its names
+      // stop being held at (`heldScale`); a bigger one opens on its middle.
+      else void flow.fitView({ padding: fitPadding(doc.minimap), maxZoom: 0.9, minZoom: 0.2 })
     }, 0)
   }, [doc.viewport, doc.minimap, flow])
 
@@ -493,8 +522,8 @@ export function MapCanvas({
               }
             : moved.position
           const centre = {
-            x: absolute.x + SIZE.item.width / 2,
-            y: absolute.y + SIZE.item.height / 2,
+            x: absolute.x + laidNode.width / 2,
+            y: absolute.y + laidNode.height / 2,
           }
           const onShelf = shelf && inside(centre, shelf)
           if (onShelf) {
@@ -504,7 +533,7 @@ export function MapCanvas({
           // Off its shelf, it lands on clear ground: let go over another
           // shelf, it slides to the nearest place that covers nothing.
           set[moved.id] = freeSpot(
-            { ...absolute, width: SIZE.item.width, height: SIZE.item.height },
+            { ...absolute, width: laidNode.width, height: laidNode.height },
             obstacles(current, moved.id),
           )
           continue
@@ -1007,8 +1036,8 @@ function isOverShelf(nodes: Node[], dragged: Node, shelf: string) {
   if (!home) return false
   const parent = dragged.parentId ? byId.get(dragged.parentId) : undefined
   const centre = {
-    x: (parent?.position.x ?? 0) + dragged.position.x + SIZE.item.width / 2,
-    y: (parent?.position.y ?? 0) + dragged.position.y + SIZE.item.height / 2,
+    x: (parent?.position.x ?? 0) + dragged.position.x + (dragged.measured?.width ?? 0) / 2,
+    y: (parent?.position.y ?? 0) + dragged.position.y + (dragged.measured?.height ?? 0) / 2,
   }
   return inside(centre, home)
 }
@@ -1142,7 +1171,12 @@ function toFlowNodes(
         return {
           ...common,
           parentId: node.parentId,
-          data: { item: node.item, kind: node.kind.key, away: !node.parentId },
+          data: {
+            item: node.item,
+            kind: node.kind.key,
+            card: node.kind.face === "card",
+            away: !node.parentId,
+          },
           // A box placed by hand sits over whatever it was put on, the next
           // shelf's boxes included.
           zIndex: node.parentId ? 2 : 3,

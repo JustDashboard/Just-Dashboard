@@ -70,19 +70,46 @@ function Ports() {
  * `data-zoom` on the canvas, and these read it, so zooming re-renders no box):
  *
  *   near — every word;
- *   mid  — names, without the line under them;
- *   far  — the overview: a thing is its mark and its dot, and the names of
- *          the server, the branches and the shelves are held at a size that
- *          reads on the screen, scaled against the zoom (`--map-unzoom`, kept
- *          on the canvas by the canvas itself), so the whole server is a map
- *          you can find your way round rather than three hundred specks.
+ *   mid  — a thing is its mark, its name and its dot, and a shelf's offer
+ *          to add the first one or a tool is its words alone;
+ *   far  — a thing is its name and its dot, the name given the box's width.
+ *
+ * Past near no name is left to shrink with the map. The server's and the
+ * branches' names read at four fifths of their size, a shelf's and a thing's
+ * at 11px, so the eye goes heart, branch, shelf, thing however far out it is.
+ * The names in a box grow by their font size (`--map-name`, `--map-label`,
+ * written by the canvas in small steps), so they are laid out and cut short
+ * inside their box rather than spilling over its buttons or its neighbour;
+ * the server's and the branches' names have open ground round them and are
+ * scaled instead (`--map-unzoom`, every frame, no layout), so they are always
+ * read whole.
  */
 const SECOND_LINE = "group-data-[zoom=mid]/map:hidden group-data-[zoom=far]/map:hidden"
 const NOT_FAR = "group-data-[zoom=far]/map:hidden"
-const ONLY_FAR = "hidden group-data-[zoom=far]/map:flex"
-/** A name held to the screen at the far zoom, growing from its left edge. */
+const ONLY_NEAR = SECOND_LINE
+const NOT_NEAR = "group-data-[zoom=near]/map:hidden"
+/** The words in a box held to the screen, from the ladder step they are set in. */
+const NAME = {
+  hint: "[font-size:calc(var(--text-hint)*var(--map-name,1))]",
+  sm: "[font-size:calc(var(--text-sm)*var(--map-name,1))]",
+  title: "[font-size:calc(var(--text-title)*var(--map-name,1))]",
+}
+/** A shelf's head held to the screen: its eyebrow, its count, its glyph and the room between. */
+const SHELF = {
+  label: "[font-size:calc(var(--text-micro)*var(--map-label,1))]",
+  count: "[font-size:calc(var(--text-hint)*var(--map-label,1))]",
+  glyph: "size-[min(2.75rem,calc(1rem*var(--map-label,1)))]",
+  gap: "gap-[calc(0.5rem*var(--map-label,1))]",
+}
+/**
+ * A name with open ground round it, held to the screen by scaling from its
+ * left edge. Its box grows with it, so it lets the pointer through to what it
+ * comes to lie over — a branch's fold, the box beneath it.
+ */
 const HELD =
-  "origin-left group-data-[zoom=far]/map:[transform:scale(max(1,calc(var(--map-unzoom,1)*0.8)))]"
+  "pointer-events-none origin-left [transform:scale(max(1,calc(var(--map-unzoom,1)*0.8)))]"
+/** A state's dot drawn on its own, a little larger the further out. */
+const HELD_DOT = "[transform:scale(min(2.5,max(1,calc(var(--map-unzoom,1)*0.5))))]"
 
 export type ServerNodeData = { things: number; down: number; hostname?: string }
 
@@ -99,17 +126,17 @@ export const ServerNode = memo(function ServerNode({ data }: NodeProps<Node<Serv
   const cpu = snapshot?.cpu.totalPercent
   const memory = snapshot?.memory.usedPercent
   return (
-    <div className="flex size-full flex-col justify-between rounded-xl border border-rule-brand bg-card p-4">
+    <div className="flex size-full flex-col justify-between rounded-xl border border-rule-brand bg-card p-4 group-data-[zoom=far]/map:justify-center">
       <Ports />
       <div className="flex min-w-0 items-center gap-3">
         <WireHost size="md" />
         <div className={cn("min-w-0", HELD)}>
-          <div className="truncate text-title font-semibold">
+          <div className="truncate text-base font-semibold">
             {host?.hostname ?? data.hostname ?? "This server"}
           </div>
           <div
             className={cn(
-              "flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground",
+              "flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground",
               SECOND_LINE,
             )}
           >
@@ -131,7 +158,7 @@ export const ServerNode = memo(function ServerNode({ data }: NodeProps<Node<Serv
         <Reading label="CPU" value={cpu} live={connection === "open"} />
         <Reading label="Memory" value={memory} live={connection === "open"} />
       </div>
-      <div className={cn("flex items-center gap-1.5 text-hint text-muted-foreground", SECOND_LINE)}>
+      <div className={cn("flex items-center gap-1.5 text-xs text-muted-foreground", SECOND_LINE)}>
         <span className="numeric text-foreground">{data.things.toLocaleString("en-US")}</span>
         {data.things === 1 ? "thing" : "things"} on the map
         {data.down > 0 && (
@@ -149,7 +176,7 @@ export const ServerNode = memo(function ServerNode({ data }: NodeProps<Node<Serv
 function Reading({ label, value, live }: { label: string; value?: number; live: boolean }) {
   return (
     <div className="min-w-0 space-y-1">
-      <div className="flex items-baseline justify-between gap-2 text-hint">
+      <div className="flex items-baseline justify-between gap-2 text-xs">
         <span className="flex items-center gap-1.5 text-muted-foreground">
           {live && <StatusDot tone="running" live />}
           {label}
@@ -191,16 +218,14 @@ export const BranchNode = memo(function BranchNode({ data }: NodeProps<Node<Bran
       <span
         className={cn(
           "flex size-10 shrink-0 items-center justify-center rounded-lg border border-hairline bg-control text-foreground [&>svg]:size-5",
-          NOT_FAR,
+          ONLY_NEAR,
         )}
       >
         <Glyph aria-hidden />
       </span>
       <div className={cn("min-w-0 flex-1", HELD)}>
-        <div className="truncate text-title font-semibold">{data.branch.label}</div>
-        <div
-          className={cn("flex items-center gap-1.5 text-hint text-muted-foreground", SECOND_LINE)}
-        >
+        <div className="truncate text-base font-semibold">{data.branch.label}</div>
+        <div className={cn("flex items-center gap-1.5 text-xs text-muted-foreground", SECOND_LINE)}>
           <span className="numeric">{data.things.toLocaleString("en-US")}</span>
           {data.down > 0 && (
             <>
@@ -253,6 +278,15 @@ export type ShelfNodeData = {
   home?: "away" | "over"
 }
 
+/**
+ * A shelf head's add and open: drawn near, gone far out where they would be
+ * specks, and at mid shown while the head is pointed at or focused — so the
+ * name held to the screen has the head's width to be read in, and gives a
+ * little of it back when a way in is wanted.
+ */
+const HEAD_ACTION =
+  "group-data-[zoom=far]/map:hidden group-data-[zoom=mid]/map:hidden group-hover/head:group-data-[zoom=mid]/map:flex group-focus-within/head:group-data-[zoom=mid]/map:flex"
+
 const HEAD_BUTTON =
   "nodrag flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-ring"
 
@@ -283,7 +317,7 @@ export const ShelfNode = memo(function ShelfNode({ data }: NodeProps<Node<ShelfN
       )}
     >
       <Ports />
-      <div className="flex h-12 items-center gap-2 pr-2 pl-3">
+      <div className="group/head flex h-14 items-center gap-2 pr-2 pl-3">
         <button
           type="button"
           aria-label={data.folded ? `Unfold ${kind.label}` : `Fold ${kind.label}`}
@@ -300,16 +334,18 @@ export const ShelfNode = memo(function ShelfNode({ data }: NodeProps<Node<ShelfN
             <ChevronDown className="size-3.5" />
           )}
         </button>
-        <span className={cn("flex min-w-0 items-center gap-2", HELD)}>
-          {Glyph && <Glyph aria-hidden className="size-4 shrink-0 text-muted-foreground" />}
-          <span className="eyebrow truncate">{kind.label}</span>
+        <span className={cn("flex min-w-0 items-center", SHELF.gap)}>
+          {Glyph && (
+            <Glyph aria-hidden className={cn("shrink-0 text-muted-foreground", SHELF.glyph)} />
+          )}
+          <span className={cn("eyebrow truncate", SHELF.label)}>{kind.label}</span>
           {!kind.tool && reading?.state !== "unread" && (
-            <span className="numeric text-hint text-muted-foreground">
+            <span className={cn("numeric text-muted-foreground", SHELF.count)}>
               {total.toLocaleString("en-US")}
             </span>
           )}
           {down > 0 && (
-            <span className="flex items-center gap-1 text-hint text-destructive">
+            <span className={cn("flex shrink-0 items-center gap-1 text-destructive", SHELF.count)}>
               <StatusDot tone="danger" />
               <span className="numeric">{down} down</span>
             </span>
@@ -343,7 +379,7 @@ export const ShelfNode = memo(function ShelfNode({ data }: NodeProps<Node<ShelfN
             type="button"
             aria-label={kind.add.label}
             title={kind.add.label}
-            className={cn(HEAD_BUTTON, NOT_FAR)}
+            className={cn(HEAD_BUTTON, HEAD_ACTION)}
             onClick={(event) => {
               event.stopPropagation()
               actions.add(kind)
@@ -356,7 +392,7 @@ export const ShelfNode = memo(function ShelfNode({ data }: NodeProps<Node<ShelfN
           type="button"
           aria-label={`Open ${kind.label}`}
           title={`Open ${kind.label}`}
-          className={cn(HEAD_BUTTON, NOT_FAR)}
+          className={cn(HEAD_BUTTON, HEAD_ACTION)}
           onClick={(event) => {
             event.stopPropagation()
             actions.open(kind.href)
@@ -398,6 +434,8 @@ function ShelfNote({ reading }: { reading?: MapKindReading }) {
 export type ItemNodeData = {
   item: MapItem
   kind: string
+  /** Drawn as a card (`KindDef.face`): its state and its fact on lines of their own. */
+  card?: boolean
   selected?: boolean
   dimmed?: boolean
   /** Wired to the chosen box: drawn lit while the dimmed ones step back. */
@@ -412,19 +450,24 @@ export type ItemNodeData = {
  * One thing: its mark, its name, and its state in a word with the dot that
  * colours it. The state is what was measured — a container's state and
  * health, a backup's last run, a certificate's days — never a verdict the
- * map reached on its own.
+ * map reached on its own. A card is the same box made room in: the name a
+ * step up, and the fact that says which one it is (a project's address, a
+ * database's engine, where a domain goes) under the state rather than cut
+ * short beside it.
  */
 export const ItemNode = memo(function ItemNode({ data, dragging }: NodeProps<Node<ItemNodeData>>) {
   const { returnToShelf } = useActions()
-  const { item } = data
+  const { item, card } = data
   return (
     <div
       data-selected={data.selected || undefined}
       data-hovered={data.hovered || undefined}
       data-tone={item.tone}
       data-away={data.away || undefined}
+      data-face={card ? "card" : undefined}
       className={cn(
-        "group relative flex size-full items-center gap-2.5 rounded-lg border bg-card px-2.5 transition-[opacity,border-color,background-color]",
+        "group relative flex size-full items-center gap-3 rounded-lg border bg-card px-3 transition-[opacity,border-color,background-color]",
+        card && "rounded-xl px-3.5",
         data.selected
           ? "border-border-strong bg-accent"
           : data.hovered
@@ -438,12 +481,17 @@ export const ItemNode = memo(function ItemNode({ data, dragging }: NodeProps<Nod
       )}
     >
       <Ports />
-      <ItemMark item={item} kind={data.kind} />
-      <div className={cn("min-w-0 flex-1", NOT_FAR)}>
-        <div className="truncate text-body leading-tight font-medium">{item.name}</div>
+      <ItemMark item={item} kind={data.kind} size="md" className={NOT_FAR} />
+      <div className="min-w-0 flex-1">
+        <div
+          data-slot="map-name"
+          className={cn("truncate leading-tight font-medium", card ? NAME.title : NAME.sm)}
+        >
+          {item.name}
+        </div>
         <div
           className={cn(
-            "mt-0.5 flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground",
+            "mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground",
             SECOND_LINE,
           )}
         >
@@ -457,17 +505,22 @@ export const ItemNode = memo(function ItemNode({ data, dragging }: NodeProps<Nod
           >
             {item.state}
           </span>
-          {item.detail && (
+          {item.detail && !card && (
             <>
               <span aria-hidden>·</span>
               <span className="truncate">{item.detail}</span>
             </>
           )}
         </div>
+        {item.detail && card && (
+          <div className={cn("mt-0.5 truncate text-xs text-muted-foreground", SECOND_LINE)}>
+            {item.detail}
+          </div>
+        )}
       </div>
-      {/* From afar the state is the dot alone, drawn where the words were. */}
-      <span className={cn("flex-1 items-center justify-end", ONLY_FAR)}>
-        <StatusDot tone={TONE_DOT[item.tone]} className="size-3" />
+      {/* Past near the state is the dot alone, at the end of the name. */}
+      <span className={cn("flex shrink-0", NOT_NEAR)}>
+        <StatusDot tone={TONE_DOT[item.tone]} className={cn("size-3", HELD_DOT)} />
       </span>
       {/* A thing placed by hand keeps the way back to its shelf on itself. */}
       {data.away && !dragging && (
@@ -501,7 +554,7 @@ export const MoreNode = memo(function MoreNode({ data }: NodeProps<Node<SlotNode
     <button
       type="button"
       className={cn(
-        "nodrag flex size-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-body text-muted-foreground focus-ring transition-colors hover:bg-row-hover hover:text-foreground",
+        "nodrag flex size-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-sm text-muted-foreground focus-ring transition-colors hover:bg-row-hover hover:text-foreground",
         data.dimmed && "opacity-35",
       )}
       onClick={(event) => {
@@ -529,26 +582,28 @@ export const AddNode = memo(function AddNode({ data }: NodeProps<Node<SlotNodeDa
   const Glyph = KIND_GLYPH[kind.key]
   if (!kind.add || !actions.can(kind)) {
     return (
-      <div className="flex size-full items-center rounded-lg px-3 text-hint text-muted-foreground">
+      <div className="flex size-full items-center rounded-lg px-3 text-muted-foreground">
         <Ports />
-        <span className={NOT_FAR}>No {kind.label.toLowerCase()} yet</span>
+        <span className={cn("truncate", NAME.hint)}>No {kind.label.toLowerCase()} yet</span>
       </div>
     )
   }
   return (
     <button
       type="button"
-      className="nodrag group/add flex size-full items-center gap-2.5 rounded-lg border border-dashed border-border px-2.5 text-left focus-ring transition-colors hover:bg-row-hover"
+      className="nodrag group/add flex size-full items-center gap-3 rounded-lg border border-dashed border-border px-3 text-left focus-ring transition-colors hover:bg-row-hover"
       onClick={(event) => {
         event.stopPropagation()
         actions.add(kind)
       }}
     >
       <Ports />
-      <WirePlaceholder size="sm" fallback={Glyph} />
-      <span className={cn("min-w-0", NOT_FAR)}>
-        <span className="block truncate text-body font-medium">{kind.add.label}</span>
-        <span className={cn("block truncate text-hint text-muted-foreground", SECOND_LINE)}>
+      <WirePlaceholder size="md" fallback={Glyph} className={ONLY_NEAR} />
+      <span className="min-w-0">
+        <span className={cn("block truncate leading-tight font-medium", NAME.sm)}>
+          {kind.add.label}
+        </span>
+        <span className={cn("mt-1 block truncate text-xs text-muted-foreground", SECOND_LINE)}>
           No {kind.noun} yet
         </span>
       </span>
@@ -564,19 +619,26 @@ export const ToolNode = memo(function ToolNode({ data }: NodeProps<Node<SlotNode
   return (
     <button
       type="button"
-      className="nodrag flex size-full items-center gap-2.5 rounded-lg border border-hairline bg-card px-2.5 text-left focus-ring transition-colors hover:border-border-strong"
+      className="nodrag flex size-full items-center gap-3 rounded-lg border border-hairline bg-card px-3 text-left focus-ring transition-colors hover:border-border-strong"
       onClick={(event) => {
         event.stopPropagation()
         open(kind.href)
       }}
     >
       <Ports />
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-hairline bg-background text-muted-foreground [&>svg]:size-4">
+      <span
+        className={cn(
+          "flex size-10 shrink-0 items-center justify-center rounded-lg border border-hairline bg-background text-muted-foreground [&>svg]:size-5",
+          ONLY_NEAR,
+        )}
+      >
         {Glyph && <Glyph aria-hidden />}
       </span>
-      <span className={cn("min-w-0", NOT_FAR)}>
-        <span className="block truncate text-body font-medium">{kind.tool?.label}</span>
-        <span className={cn("block truncate text-hint text-muted-foreground", SECOND_LINE)}>
+      <span className="min-w-0">
+        <span className={cn("block truncate leading-tight font-medium", NAME.sm)}>
+          {kind.tool?.label}
+        </span>
+        <span className={cn("mt-1 block truncate text-xs text-muted-foreground", SECOND_LINE)}>
           {kind.tool?.detail}
         </span>
       </span>

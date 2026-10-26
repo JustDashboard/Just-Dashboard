@@ -11,6 +11,7 @@ import {
   foldedByDefault,
   isArranged,
   isFolded,
+  itemSize,
   kindOf,
   layoutMap,
   relatedTo,
@@ -171,7 +172,29 @@ describe("the layout", () => {
     const second = box(laid, "project:2")
     expect(first.parentId).toBe("shelf:projects")
     expect(first.position).toEqual({ x: SIZE.shelfPad, y: SIZE.shelfHead })
-    expect(second.position.x).toBe(SIZE.shelfPad + SIZE.item.width + SIZE.gap)
+    expect(second.position.x).toBe(SIZE.shelfPad + SIZE.card.width + SIZE.gap)
+  })
+
+  test("projects, databases and domains are cards, three as wide as four of anything else", () => {
+    const laid = layoutMap({ map, kinds, doc: DEFAULT_DOCUMENT })
+    const project = box(laid, "project:1")
+    expect({ width: project.width, height: project.height }).toEqual(SIZE.card)
+    expect(itemSize(kindOf("databases"))).toEqual(SIZE.card)
+    expect(itemSize(kindOf("domains"))).toEqual(SIZE.card)
+    expect(itemSize(kindOf("certificates"))).toEqual(SIZE.item)
+    const container = laid.nodes.find((n) => n.type === "item" && n.kind.key === "containers")
+    expect({ width: container.width, height: container.height }).toEqual(SIZE.item)
+    // A shelf of cards and a shelf of four in a row end at one edge.
+    expect(3 * SIZE.card.width + 2 * SIZE.gap).toBe(4 * SIZE.item.width + 3 * SIZE.gap)
+    expect(Number.isInteger(SIZE.card.width)).toBe(true)
+    // What stands in a card shelf's grid — "+N more", the first one's add — is a card too.
+    const fresh = serverMap([reading("projects", [])])
+    const empty = layoutMap({
+      map: fresh,
+      kinds: visibleKinds(fresh, everyone),
+      doc: DEFAULT_DOCUMENT,
+    })
+    expect(box(empty, "add:projects").width).toBe(SIZE.card.width)
   })
 
   test("a thing placed by hand leaves its shelf and keeps its place", () => {
