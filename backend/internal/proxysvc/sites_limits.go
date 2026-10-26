@@ -77,11 +77,11 @@ func (spec *SiteSpec) limitedLocations() bool {
 // straight in: nginx refuses a reload that finds a live zone counting by a
 // different key than before, so turning exemptions on or counting by path
 // would otherwise fail every reload until nginx was restarted.
-func (spec *SiteSpec) limitExemptVar() string { return NginxIdent(spec.Name) + "_limit_exempt" }
+func (spec *SiteSpec) limitExemptVar() string { return spec.varIdent() + "_limit_exempt" }
 
-func (spec *SiteSpec) reqZone() string { return NginxIdent(spec.Name) + "_req" }
+func (spec *SiteSpec) reqZone() string { return spec.varIdent() + "_req" }
 
-func (spec *SiteSpec) connZone() string { return NginxIdent(spec.Name) + "_conn" }
+func (spec *SiteSpec) connZone() string { return spec.varIdent() + "_conn" }
 
 // locationZone is the zone of the i-th extra path's own limit.
 func (spec *SiteSpec) locationZone(i int) string {

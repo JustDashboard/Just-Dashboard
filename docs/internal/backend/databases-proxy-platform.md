@@ -3707,6 +3707,23 @@ containers/volumes/networks.
     `log_format` of one name fails the reload, and a `map` variable defined twice is decided by the
     last file read. `ParseSiteSpec` steps over these statements (and whatever is inside their blocks)
     rather than reading a map entry or a geo range as a server directive.
+  - **A variable name is at most 46 characters** (`maxNginxVarLen`). nginx's default
+    `variables_hash_bucket_size 64` takes no longer one on a 64-bit build, and one longer name fails
+    `nginx -t` for the whole configuration ("could not build variables_hash"), so every site stops
+    reloading. `NginxIdent` plus a suffix passed that for a site name with a dot from 21 characters (26 with
+    only WebSockets on), and for every deployment route from environment 10 on (`just-dashboard-env-10.conf` + `_connection` is 47).
+    `RenderNginx` therefore renders once under `NginxIdent` and, only when one of the dashboard's own
+    `$jd_…` variables comes out too long, renders again with every variable and limit zone named from
+    `NginxVarIdent`: the start of the ident and an FNV-32a hash of the whole name, short enough for the
+    longest suffix (`_asset_immutable`). A file that already loads keeps every name it has, so nothing
+    reads as edited by hand after an upgrade. All of a site's variables move together because the
+    readers find a partner by swapping the suffix (`_maint` → `_maint_ip`, a zone's `_req` →
+    `_limit_exempt`); the limit zones move with them because a zone's key is a variable named after it,
+    and nginx refuses a reload that finds a live zone counting by another key. Upstream, cache-zone and
+    `log_format` names are not hashed by length and keep `NginxIdent`. The forward-auth reader takes its
+    variables under either ident. `TestEveryVariableFitsNginxsDefaultHash` renders every variable the
+    form can name for the longest site name, and `TestLiveNginxTakesTheVariablesOfLongNames` passes
+    them and environment 10's route through the real `nginx -t`.
   - **WebSockets use the standard upgrade map**, per site: `map $http_upgrade $jd_<id>_connection
     { default upgrade; '' close; }`, with `Connection $jd_<id>_connection` in each upgrading location.
     It replaces passing the client's `$http_connection` through, whose comment wrongly said a map had
@@ -5132,7 +5149,9 @@ containers/volumes/networks.
     duplicates; route upstreams go through `validStreamUpstream`. `StreamModule.Preread` reads
     `--with-stream_ssl_preread_module`, and `ApplyStream` refuses routes with `ErrNoStreamPreread` (409
     `stream_preread_missing`). The parser reads the map, the route blocks and `ssl_preread` back and names
-    any other shape. A site already on the port (443) is refused by the port check like any other holder.
+    any other shape. The stream module's variables hash has the same 46-character limit, so a stream
+    whose `<ident>_sni` would pass it names the variable from `NginxVarIdent`; the parser takes either
+    spelling. A site already on the port (443) is refused by the port check like any other holder.
     The upstream Test dials the pool only, not the routes' backends. Audited as `routes` in `proxy.stream.apply`.
   - **Listen options** (`stream_listen.go`). `ListenEnd` makes `listen <first>-<last>` (at most 100 ports;
     `streamBinds`, `freePort`, the session list and `configClaims` via `listenBinds` all cover every port of a

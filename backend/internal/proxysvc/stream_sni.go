@@ -37,9 +37,21 @@ const maxStreamRoutes = 64
 var ErrNoStreamPreread = errors.New("this nginx was built without stream_ssl_preread_module, so a stream cannot route by TLS name")
 
 // streamSNIVar is the variable the stream's map sets: the upstream block for
-// the name the client asked for.
+// the name the client asked for. It is the stream's only variable, so it is
+// named from NginxVarIdent only when the whole ident makes it too long.
 func streamSNIVar(name string) string {
-	return "$" + NginxIdent(name) + "_sni"
+	v := NginxIdent(name) + "_sni"
+	if len(v) > maxNginxVarLen {
+		v = NginxVarIdent(name) + "_sni"
+	}
+	return "$" + v
+}
+
+// isStreamSNIVar says whether v is the stream's map variable, named either
+// way: a file written before long names were shortened says the whole ident,
+// and loads where the operator raised variables_hash_bucket_size.
+func isStreamSNIVar(name, v string) bool {
+	return v == streamSNIVar(name) || v == "$"+NginxIdent(name)+"_sni"
 }
 
 // streamRouteUpstream is the upstream block of a stream's i-th route,
@@ -116,8 +128,7 @@ func renderStreamRoutes(l *lines, spec *StreamSpec) {
 // readSNI takes a proxy_pass through the stream's own map: each route's
 // upstream block holding one plain server, and the default the stream's pool,
 // read as any proxy_pass target is.
-func (p *parsedStream) readSNI(maps map[string]Directive, upstreams map[string]Directive, used map[string]bool) {
-	variable := streamSNIVar(p.spec.Name)
+func (p *parsedStream) readSNI(variable string, maps map[string]Directive, upstreams map[string]Directive, used map[string]bool) {
 	block, ok := maps[variable]
 	if !ok {
 		p.cannot("proxy_pass with a variable")

@@ -974,11 +974,11 @@ func parseStreamFile(fileName, content string) parsedStream {
 				continue
 			}
 			if strings.HasPrefix(d.Args[0], "$") {
-				if d.Args[0] != streamSNIVar(p.spec.Name) {
+				if !isStreamSNIVar(p.spec.Name, d.Args[0]) {
 					p.cannot("proxy_pass with a variable")
 					continue
 				}
-				p.readSNI(nameMaps, upstreams, used)
+				p.readSNI(d.Args[0], nameMaps, upstreams, used)
 				continue
 			}
 			p.readProxyPass(d.Args[0], upstreams, used)
