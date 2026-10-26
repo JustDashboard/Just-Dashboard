@@ -56,6 +56,7 @@ import { ReleasePipeline } from "@/components/deploy/run-pipeline"
 import { RunDetails, initialStep } from "@/components/deploy/run-steps"
 import { RunHeader } from "@/components/deploy/run-header"
 import { RunFailure, RunReady } from "@/components/deploy/run-outcome"
+import { RunDiagnosis } from "@/components/deploy/run-diagnosis"
 import { useRunStream } from "@/components/deploy/run-stream"
 import { useProjectNavScope } from "@/components/deploy/project-shell"
 import { releaseVerbs } from "@/components/deploy/run-verbs"
@@ -427,6 +428,15 @@ export function RunPage() {
       setFocusLine((focus) => ({ seq: cause.lineSeq!, nonce: (focus?.nonce ?? 0) + 1 }))
   }
 
+  // A line the diagnosis quoted, in the build logs: on its own step's
+  // output, scrolled to the line.
+  const showLine = (seq: number) => {
+    const step =
+      rows.find((candidate) => candidate.id.startsWith(`${seq}:`))?.stepId ?? failedStep?.id
+    if (step !== undefined) showOutput(step)
+    setFocusLine((focus) => ({ seq, nonce: (focus?.nonce ?? 0) + 1 }))
+  }
+
   const showFailedStep = () => {
     if (!failedStep) return
     setInspectedStepId(failedStep.id)
@@ -615,6 +625,19 @@ export function RunPage() {
           {run.terminalReason}
         </p>
       ) : null}
+
+      {/* Asked for, never shown unasked: the failure above is the decision,
+          and its own fix stays the command. */}
+      {(run.state === "failed" || run.state === "rolled_back") && (
+        <RunDiagnosis
+          projectId={projectId}
+          runId={runId}
+          canAsk={canRun}
+          canSetUp={can("system.admin")}
+          rows={rows}
+          onShowLine={showLine}
+        />
+      )}
 
       {/* project.data is a separate poll from the run snapshot; reading
           isLiveRelease before it lands would flash "Superseded" for every

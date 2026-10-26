@@ -101,6 +101,7 @@ free.
 - Immutable releases, one-click rollback and health-gated cutover
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
 - Build logs, runtime, console, request logs and traffic alerts per project
+- A failed run named from its own output, and on request explained by your own model, secrets masked
 - Request insights that count real visitors apart from bots, with their devices and pages
 - Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,
   e-mail and webhooks

@@ -257,6 +257,14 @@ to the contribution terms above, including the additional licence grant to the p
   table) also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBuildFailureIsNamedFromBuildKit -count=1 -v`,
   which builds an npm project whose lockfile no longer matches package.json and checks the cause is
   named from buildx's own output; it creates no image.
+  Changes to a failed run's diagnosis (what is sent, how it is masked, how the answer is read:
+  `deploy/run_diagnosis.go`) also run it against a real model behind an OpenAI-compatible server on
+  this machine — never a hosted key — for example Ollama on loopback:
+  `JD_DEPLOY_LIVE=1 JD_TEST_ASSISTANT_URL=http://127.0.0.1:11434/v1 JD_TEST_ASSISTANT_MODEL=qwen2.5:3b go test ./internal/deploy -run TestLiveFailedBuildIsDiagnosedByARealModel -count=1 -v`.
+  It builds a Node project whose build script needs a package it never declared, sends the digest the
+  route would send and fails unless the answer quotes a line the build printed; `JD_TEST_DIAGNOSIS_OUT`
+  writes the answer as the run page reads it. A small model on a busy processor is slow: give it a few
+  minutes, and fewer threads than the host has cores.
   Sixty-four fixtures: the locked Node starters (installed by Bun, pnpm and Yarn 1), a Next.js static
   export and a standalone server, SvelteKit on adapter-auto, Express serving a Vite client, a Hono
   dev-only starter on Bun, React Router in SPA mode with a prerendered home, FastAPI, Flask, Django,

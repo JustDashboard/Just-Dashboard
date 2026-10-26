@@ -1118,6 +1118,13 @@ the page.
   system prompt cached and the conversation under automatic caching, and the server-side refusal
   fallback (`fallbacks: "default"`) for Opus and Sonnet. The OpenAI-compatible request carries the
   model, the messages, the stream and the usage option, and nothing a server might not know.
+- **The same provider answers two other questions**, each one request sent only when somebody
+  presses for it: a drawing's *Describe a diagram* (`POST /boards/diagram`, the prompt alone, audited
+  as `board.diagram`) and a failed deployment's *Ask why it failed*
+  (`POST /deploy/{id}/runs/{run}/diagnosis`, the run's record masked on the server first, audited as
+  `deploy.run.diagnose`; [the deployment contract](../deployments/implementation.md) says what is sent).
+  Both share the install's budget of model calls and its four answers at once, and the settings sheet
+  names all three under *Used by*.
 - **Engines** come from the capability table: `assistant` is every engine with a dialect, and
   `assistantPolicy` is PostgreSQL and its forks but CockroachDB. The editor offers the assistant to a
   role with `service.control` on those engines; a failed statement and a plan offer a question of

@@ -859,6 +859,44 @@ only renderer/executor/validation authority for their feature.
   refusal without repeating it. A context deadline that reaches a step while its run is alive is
   `step_timeout`; only a cancelled context is a cancellation. The signature table and fixes are listed
   in [the recipe contract](recipes.md#failure-diagnosis).
+- A run that failed or rolled back can be asked about, on request only, of the provider an
+  administrator set up for the assistant ([the editor's assistant](../backend/databases-proxy-platform.md#the-editors-assistant)):
+  `POST /deploy/{id}/runs/{run}/diagnosis` (`service.control`, the assistant's own capability, and the
+  install's one budget of model calls and four answers at once; `api/handlers_deploy_diagnosis.go`).
+  What is sent is decided in `deploy/run_diagnosis.go` and is what the run's page already shows any
+  signed-in account: the run's outcome, the failed step (the run page's rule: the first failed or
+  blocked step of the latest attempts) with its code, message and the cause its evidence records —
+  a build's or release task's `cause`, a health gate's `diagnostics.cause` and its scalar readings of
+  the container — including the fix it offers; the settings the run used (`ExecutionPlan`: source
+  kind, branch and commit, build method, recipe, framework, versions, package manager, root, commands,
+  output, release tasks without their environment, runtime port, strategy and limits, checks); its
+  variables by name, scope and sensitivity, never a value; every step's state; and the end of the
+  transcript — the failed step's own last 170 non-blank lines and up to 30 written after it, each
+  without terminal escapes and cut at 400 bytes, 24 KiB in all, newest kept. The whole text is masked
+  again on the way out (`DiagnosisMasker`), because the transcript was masked when it was written with
+  the values the run had then: by value, every secret variable of the environment as it is now and as
+  the run had it, every plain one that carries credential material or looks like a key
+  (`tokenShaped`: twenty characters or more, one word, letters and digits, not an address or a
+  digest), what a `credential` or `database` reference points at in the store (the secret, the saved
+  address and its password), every saved deployment credential, the environment's trigger secrets and
+  a carried-over project's `deploy_env` values (`PlanningStore.DiagnosisSecrets`, which contacts
+  nothing; values under four characters are left, since masking them would mask ordinary words); and by
+  shape, a private key, a URL's password, an `Authorization` value, a value assigned to a name that
+  says password, secret, token or key, and the tokens of GitHub, GitLab, Slack, AWS, Anthropic and
+  OpenAI, Stripe, Google, npm, Hugging Face, Docker and JWTs. A variable that cannot be opened stops the
+  request with `409 diagnosis_unmasked` before anything is sent. The model is told the shape to answer in
+  (`DiagnosisSystemPrompt`: CAUSE, EVIDENCE quoted lines, numbered STEPS), and `ReadDiagnosisAnswer`
+  reads it leniently; a quoted line is kept only when it is a line that was sent (matched by its
+  sequence or its text, BuildKit's own step and cache lines left out, at most four, in transcript
+  order), and the rest are counted as `unmatched`. An answer in no shape is kept whole. The answer, the
+  exact masked text that was sent, the provider, model, tokens, who asked and when are kept in
+  `deploy_run_diagnoses` (one row per run, replaced by Ask again, gone with its run), which
+  `GET …/diagnosis` reads for any account that may read the run; a second press without `again` answers
+  the kept one and costs nothing, and a press while one is in flight is `409 diagnosis_running`. Every
+  press is audited as `deploy.run.diagnose` with the provider, model, tokens, lines sent, values masked
+  and outcome (`answered`, `kept`, `failed`, `unusable`, `unmasked`), never what was sent or answered.
+  Nothing the answer says is applied. The live check against a real model is
+  `TestLiveFailedBuildIsDiagnosedByARealModel` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
 - Deploy and force-build resolve the current desired revision (force-build disables cache); redeploy and
   rollback clone only available immutable artifacts and traverse the same checks/cutover path; restart
   stops and starts the existing live runtime without creating a release, then verifies the plan's
@@ -1847,7 +1885,14 @@ commit for a remote Git source whose drift names no source change, a plain deplo
 moved to another branch or repository is never asked for the old commit), Retry moves to the menu as
 "Retry with the settings it used", and one line under the failure says what changed. A run that failed
 with `source_revision_unavailable` offers Deploy the branch head the same way, since its commit cannot
-be fetched again. Under that the run is two parts with no strip between them. The build console paints
+be fetched again. Under a run that failed or rolled back, *Ask why it failed* (`run-diagnosis.tsx`)
+asks the assistant's provider about it — never unasked, and quieter than the failure, whose own fix
+stays the command. Before the press one line says which model, where the question goes and what of the
+run, with secret values masked; an administrator whose assistant is off sets it up there in the
+assistant's settings sheet. The answer is the likely cause, the transcript lines it quoted (each a line
+the run wrote, opening the build logs at it), what to try, who asked and when, and *What was sent* folded
+under it with the exact text; *Ask again* replaces it. An account without `service.control` sees an answer
+somebody asked for, and nothing else. Under that the run is two parts with no strip between them. The build console paints
 its lines through the painter the dashboard's own transcripts use (`components/transcript-line.tsx`),
 numbers them, strips terminal escapes, groups each step's lines under a sticky rule, filters by stage
 and errors (with a count), shows the time since the run began, wraps, follows, copies and downloads

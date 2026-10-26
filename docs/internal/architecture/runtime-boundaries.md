@@ -250,7 +250,8 @@ Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,
 runtimes, steps, logs, dependencies, checks, triggers, delivery records, variable and plan snapshots,
 blueprint installs, port and queue leases, removals, drafts, schedules, Git watch cursors, notifications,
-and previews; proxy
+and previews, and the last answer the assistant gave about a failed run with the masked text it was sent
+(`deploy_run_diagnoses`, which goes with its run); proxy
 watching (`watched_endpoints`, filled from the older one-port-per-name `watched_domains`, holding TLS watches and TCP network probes by `kind`, with each check in `watched_checks`); compose deployment history (`docker_stack_deployments` — the file, the
 running digests and the git commit captured before every state-changing action, with environment values
 hashed rather than stored); the server map's arrangement, one JSON document per account

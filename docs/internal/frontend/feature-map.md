@@ -115,7 +115,11 @@ documented in [the backend contract](../backend/network-native-managers.md).
 The project identity line and Settings → General show read-only production Git monitoring status,
 including repository access failures. Branch deployments are automatic after the first deployment;
 additional webhooks remain separate integrations. Run labels use a per-project sequence starting at 1,
-while permanent run URLs retain their global identifiers. `/deploy/notifications`
+while permanent run URLs retain their global identifiers. A run that failed or rolled back offers *Ask
+why it failed* under its failure (`components/deploy/run-diagnosis.tsx`): the assistant's provider is
+asked only on the press, its answer — cause, quoted lines that open the build logs at themselves, steps,
+and the exact masked text that was sent — is kept with the run, and an administrator sets the assistant
+up from there (`deploy-run-diagnosis.spec.ts`). `/deploy/notifications`
 (`components/deploy/notifications-page.tsx`) manages Discord, Slack, Microsoft Teams, Mattermost,
 Telegram, ntfy, Gotify, Pushover, e-mail and signed webhook channels with event selection, pause/resume, test delivery and delivery history; the Automatic
 deployment section on General carries the GitHub commit-status switch. Settings → Runtime exposes memory,

@@ -3171,6 +3171,33 @@ export type DeploymentSettingsChange = {
   after?: string
 }
 
+/**
+ * `GET`/`POST /deploy/{id}/runs/{run}/diagnosis`: the last answer the
+ * assistant's provider gave about a failed run, kept with it.
+ */
+export type DeploymentRunDiagnosis = {
+  runId: number
+  provider: "anthropic" | "openai"
+  model: string
+  modelLabel: string
+  answer: {
+    cause?: string
+    /** Transcript lines the answer quoted, as the transcript has them. */
+    evidence: { seq: number; text: string }[]
+    steps: string[]
+    /** Lines it quoted that the run never printed, which are left out. */
+    unmatched?: number
+    /** The whole answer, for one that kept to no shape. */
+    text: string
+  }
+  /** Exactly what went to the provider, already masked. */
+  sent: string
+  sentLines: number
+  masked: number
+  createdBy: string
+  createdAt: string
+}
+
 export type DeploymentRunSnapshot = {
   run: DeploymentEngineRun
   steps: DeploymentStep[]
