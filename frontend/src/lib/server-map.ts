@@ -68,6 +68,15 @@ export type KindDef = {
   /** Columns in the shelf's grid. */
   cols?: number
   /**
+   * How one of them is drawn. A `card` is for what a server is for — its
+   * projects, its databases and the names it answers to: a taller, wider box
+   * whose name has room to be read whole from further out, with its state and
+   * its one fact (the address, the engine, where a name goes) each on a line
+   * of its own rather than cut short beside each other. Three cards span what
+   * four rows do, so a branch's shelves keep one straight edge.
+   */
+  face?: "card"
+  /**
    * A tool rather than an inventory: the shelf is one box that opens the
    * page, with nothing to read. Files is a tool — every file on the disk is
    * not a box.
@@ -85,6 +94,7 @@ export const KINDS: readonly KindDef[] = [
     href: "/deploy",
     section: "deploy",
     add: { label: "New project", capability: "system.admin", href: "/deploy/new" },
+    face: "card",
   },
   {
     key: "databases",
@@ -94,6 +104,7 @@ export const KINDS: readonly KindDef[] = [
     href: "/databases",
     section: "databases",
     add: { label: "Add a database", capability: "system.admin", href: "/databases/new" },
+    face: "card",
   },
   {
     key: "stacks",
@@ -145,6 +156,7 @@ export const KINDS: readonly KindDef[] = [
     href: "/proxy/sites",
     section: "proxy",
     add: { label: "Add a site", capability: "system.admin", href: "/proxy/sites?new=1" },
+    face: "card",
   },
   {
     key: "certificates",
@@ -480,20 +492,36 @@ export function toggleFold(
 // Where every box goes.
 // ---------------------------------------------------------------------------
 
+const ITEM = { width: 270, height: 76 }
+const GAP = 12
+
 export const SIZE = {
-  server: { width: 340, height: 148 },
-  branch: { width: 216, height: 76 },
-  item: { width: 220, height: 60 },
-  shelfHead: 48,
+  server: { width: 380, height: 164 },
+  /** Wide enough that "Protection", held at mid's furthest, clears the fold. */
+  branch: { width: 256, height: 84 },
+  item: ITEM,
+  /** Three of them as wide as four things in a row, gaps and all. */
+  card: { width: (4 * ITEM.width + GAP) / 3, height: 96 },
+  shelfHead: 56,
   shelfPad: 12,
-  gap: 10,
+  gap: GAP,
   /** Server → branch, and branch → shelf: room for the line to bend. */
-  reach: 128,
-  shelfReach: 104,
-  shelfGap: 28,
-  branchGap: 64,
-  minShelfWidth: 280,
+  reach: 136,
+  shelfReach: 112,
+  shelfGap: 32,
+  branchGap: 72,
+  /**
+   * Room in a shelf's head for its name held at 11px (`heldScale`) — the
+   * longest, "Notifications", "Repositories" — at the zoom an empty server
+   * first opens at, with the fold beside it.
+   */
+  minShelfWidth: 460,
 } as const
+
+/** The size of one of a kind's boxes on its shelf, or wherever it was put. */
+export function itemSize(kind: KindDef) {
+  return kind.face === "card" ? SIZE.card : SIZE.item
+}
 
 /** How many of a shelf's things are drawn before "+N more" — two rows of its grid. */
 export function shelfCap(kind: KindDef) {
@@ -610,20 +638,21 @@ function planShelf(
   const cells = onShelf.length + slots.length
   const cols = Math.max(1, Math.min(kind.cols ?? 3, Math.max(cells, 1)))
   const rows = Math.ceil(cells / cols)
-  const gridWidth = cols * SIZE.item.width + (cols - 1) * SIZE.gap
+  const box = itemSize(kind)
+  const gridWidth = cols * box.width + (cols - 1) * SIZE.gap
   const width = Math.max(SIZE.minShelfWidth, gridWidth + SIZE.shelfPad * 2)
-  const gridHeight = rows > 0 ? rows * SIZE.item.height + (rows - 1) * SIZE.gap : 0
+  const gridHeight = rows > 0 ? rows * box.height + (rows - 1) * SIZE.gap : 0
   const height = folded ? SIZE.shelfHead : SIZE.shelfHead + gridHeight + SIZE.shelfPad
   return { kind, reading, folded, expanded, cols, onShelf, away, more, slots, width, height }
 }
 
 /** A cell of a shelf's grid, relative to the shelf. */
-function cell(index: number, cols: number): Point {
+function cell(index: number, cols: number, box: { width: number; height: number }): Point {
   const col = index % cols
   const row = Math.floor(index / cols)
   return {
-    x: SIZE.shelfPad + col * (SIZE.item.width + SIZE.gap),
-    y: SIZE.shelfHead + row * (SIZE.item.height + SIZE.gap),
+    x: SIZE.shelfPad + col * (box.width + SIZE.gap),
+    y: SIZE.shelfHead + row * (box.height + SIZE.gap),
   }
 }
 
@@ -732,6 +761,7 @@ export function layoutMap({
           away: shelf.away.map((item) => item.id),
         })
         edges.push({ id: `e:${id}:${sid}`, source: id, target: sid, side, tier: "shelf" })
+        const box = itemSize(shelf.kind)
         if (!shelf.folded) {
           shelf.onShelf.forEach((item, index) => {
             nodes.push({
@@ -740,8 +770,8 @@ export function layoutMap({
               item,
               kind: shelf.kind,
               side,
-              position: cell(index, shelf.cols),
-              ...SIZE.item,
+              position: cell(index, shelf.cols, box),
+              ...box,
               parentId: sid,
             })
           })
@@ -756,8 +786,8 @@ export function layoutMap({
                     : toolId(shelf.kind.key),
               type: slot,
               kind: shelf.kind,
-              position: cell(index, shelf.cols),
-              ...SIZE.item,
+              position: cell(index, shelf.cols, box),
+              ...box,
               parentId: sid,
               count: slot === "more" ? shelf.more : undefined,
             })
@@ -773,7 +803,7 @@ export function layoutMap({
             kind: shelf.kind,
             side,
             position: doc.positions[item.id],
-            ...SIZE.item,
+            ...box,
           })
           edges.push({
             id: `e:${sid}:${item.id}`,

@@ -133,10 +133,13 @@ export function itemProduct(item: MapItem, kind: string) {
 export function ItemMark({
   item,
   kind,
+  size = "sm",
   className,
 }: {
   item: MapItem
   kind: string
+  /** The tile's size, `ProductLogo`'s: `sm` in a list, `md` on the map's boxes. */
+  size?: "sm" | "md"
   className?: string
 }) {
   const [failed, setFailed] = useState(false)
@@ -145,7 +148,8 @@ export function ItemMark({
       <span
         aria-hidden="true"
         className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-lg border border-hairline bg-background",
+          "flex shrink-0 items-center justify-center rounded-lg border border-hairline bg-background",
+          size === "sm" ? "size-8" : "size-10",
           className,
         )}
       >
@@ -154,7 +158,7 @@ export function ItemMark({
         <img
           src={item.icon}
           alt=""
-          className="size-4.5 object-contain"
+          className={cn("object-contain", size === "sm" ? "size-4.5" : "size-6")}
           onError={() => setFailed(true)}
         />
       </span>
@@ -163,7 +167,7 @@ export function ItemMark({
   return (
     <ProductLogo
       id={itemProduct(item, kind)}
-      size="sm"
+      size={size}
       fallback={KIND_GLYPH[kind] ?? Box}
       className={className}
     />

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Locator, type Page } from "@playwright/test"
 import { DEFAULT_DOCUMENT, layoutMap, visibleKinds } from "../../src/lib/server-map"
 import { busyMap, freshMap, mockServerMap } from "./server-map-fixture"
 
@@ -34,6 +34,15 @@ async function openOn(page: Page, id: string, zoom = 0.9) {
   // The canvas at 1600×1000, between the rail and the inspector.
   const viewport = { x: 500 - x * zoom, y: 460 - y * zoom, zoom }
   return open(page, { layout: { version: 1, viewport } })
+}
+
+/** How large a piece of the map's text is on the screen: its size times the zoom. */
+async function onScreen(locator: Locator) {
+  return locator.evaluate((el) => {
+    const viewport = el.closest(".react-flow__viewport")
+    const zoom = viewport ? new DOMMatrix(getComputedStyle(viewport).transform).a : 1
+    return parseFloat(getComputedStyle(el).fontSize) * zoom
+  })
 }
 
 /** Where a box is on the screen now. */
@@ -367,7 +376,7 @@ test("a fresh server offers the first of each, and a source still being read say
   await expect(node(page, "shelf:tunnels")).toHaveCount(0)
 })
 
-test("from afar a thing is its mark and its dot, and the names that find it stay readable", async ({
+test("from afar a thing is its name and its dot, and every name stays readable", async ({
   page,
 }) => {
   await open(page)
@@ -376,7 +385,50 @@ test("from afar a thing is its mark and its dot, and the names that find it stay
   await expect(canvas).toHaveAttribute("data-zoom", "far")
   const label = node(page, "branch:deployed").getByText("Deployed")
   const box = await label.boundingBox()
-  // Held to the screen: a 15px title at a third of its size would be 5px.
+  // Held to the screen: a 16px name at a fifth of its size would be 3px.
   expect(box!.height).toBeGreaterThan(10)
-  await expect(node(page, "container:c-api").getByText("api-1")).toBeHidden()
+  // A thing keeps its name, grown to read at 11px, and gives up its second
+  // line and its mark for the room.
+  const api = node(page, "container:c-api")
+  await expect(api.locator("[data-slot=map-name]")).toHaveText("api-1")
+  expect(await onScreen(api.locator("[data-slot=map-name]"))).toBeGreaterThan(10.5)
+  await expect(api.getByText("running", { exact: true })).toBeHidden()
+  await expect(api.locator("img, svg").first()).toBeHidden()
+  // A shelf's name reads at least as large as the things on it.
+  const shelf = node(page, "shelf:containers").getByText("Containers", { exact: true })
+  expect(await onScreen(shelf)).toBeGreaterThan(10.5)
+})
+
+test("a little way out a thing is its mark, its name and its dot", async ({ page }) => {
+  await openOn(page, "container:c-api", 0.5)
+  await expect(page.locator("[data-slot=server-map]")).toHaveAttribute("data-zoom", "mid")
+  const api = node(page, "container:c-api")
+  const name = api.locator("[data-slot=map-name]")
+  await expect(name).toBeVisible()
+  // 14px at half size would be 7px; it is held at 11.
+  expect(await onScreen(name)).toBeGreaterThan(10.5)
+  await expect(api.locator("img, svg").first()).toBeVisible()
+  await expect(api.getByText("running", { exact: true })).toBeHidden()
+  // A shelf's name has its head's width; its ways in show when it is pointed at.
+  const head = node(page, "shelf:containers")
+  const openShelf = head.getByRole("button", { name: "Open Containers" })
+  await expect(openShelf).toBeHidden()
+  await head.getByText("Containers", { exact: true }).hover()
+  await expect(openShelf).toBeVisible()
+})
+
+test("a database is a card, its engine on a line of its own under its state", async ({ page }) => {
+  await openOn(page, "db:1")
+  const shop = node(page, "db:1")
+  await expect(shop.locator("[data-face=card]")).toBeVisible()
+  const name = await shop.getByText("shop", { exact: true }).boundingBox()
+  const state = await shop.getByText("answers", { exact: true }).boundingBox()
+  const fact = await shop.getByText("postgres 17.2", { exact: true }).boundingBox()
+  expect(state!.y).toBeGreaterThan(name!.y)
+  expect(fact!.y).toBeGreaterThan(state!.y + state!.height - 1)
+  // Three cards span what four of anything else do, so the branch keeps one edge.
+  const card = await shop.boundingBox()
+  const row = await node(page, "container:c-api").boundingBox()
+  expect(3 * card!.width).toBeGreaterThan(4 * row!.width)
+  await expect(node(page, "container:c-api").locator("[data-face=card]")).toHaveCount(0)
 })

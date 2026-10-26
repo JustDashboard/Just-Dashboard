@@ -51,6 +51,14 @@ added yet with the verb (*Add a database*); one it may not fill says *No databas
 (Files, Packages) is one box that opens its page: every file on the disk is not a box, and asking the
 package manager on every read is the costliest thing the map could do.
 
+Every thing is one box: its mark on a 40px tile, its name, and its state in a word with its dot
+(`SIZE.item`, 270 × 76). What a server is for — its projects, its databases and the names it answers
+to — is a *card* (`face: "card"` in `KINDS`, `SIZE.card`, 364 × 96): the same box with room, its name
+a step up and the fact that says which one it is (a project's address, a database's engine, where a
+domain goes) on a line of its own under the state rather than cut short beside it. Three cards span
+what four of anything else do, gaps and all, so a branch's shelves still end at one edge; what stands
+in a card shelf's grid ("+N more", the first one's *Add*) is a card too.
+
 A kind the role cannot open is not drawn (its `capability` in `KINDS`, and the backend does not send
 it); a module the server does not run (no PM2, no Docker) is `absent` and has no shelf. Shelves in a
 section the account keeps out of its sidebar start folded (`foldedByDefault`), and opening one is
@@ -99,11 +107,28 @@ The layout is the same every time, and what the reader moved outranks it, as in 
 - **Search** (`/`) lights what it finds by name, by what a box says of itself, by product or by kind;
   Enter chooses the first and frames it with its links — unfolding its branch and shelf and opening
   the shelf where it sat behind "+N more".
-- **Three distances.** `data-zoom` on the canvas is `near`, `mid` (names without their second line)
-  or `far`: the overview, where a thing is its mark and its dot and the names of the server, the branches
-  and the shelves are held to a size that reads on screen by scaling against the zoom
-  (`--map-unzoom`, written onto the canvas from React Flow's store on every frame without a render).
-  The buttons on a head (fold, add, open) are not drawn far out, where they would be specks.
+- **Three distances, and no name left to shrink.** `data-zoom` on the canvas is `near` (every word,
+  from 0.75), `mid` (a thing is its mark, its name and its dot, from 0.35) or `far` (its name and its
+  dot, the name given the box's width). Past near every name is held so it still reads — a thing's and
+  a shelf's at 11px on the screen, the server's and the branches' at four fifths of their size — so
+  the eye goes heart, branch, shelf, thing at any distance, and the first view takes in the whole
+  server down to a zoom of 0.2.
+  - *Names in boxes grow by their font size* (`--map-name`, `--map-label`, from `heldScale`), so they
+    are laid out and cut short inside their box rather than spilling over its buttons or the next
+    box. They grow up to what a line of the box holds (a thing's name four times, so down to about
+    0.2) and shrink with the map past that. The canvas writes them in steps of a twelfth of a
+    doubling, and only when the step changes, so a zoom lays the names out a few times rather than on
+    every frame: measured on a headless VM, zooming a map of about a thousand things with every shelf
+    opened showed no difference between the names held and the names fixed (a median frame of
+    16.7 ms).
+  - *Names with open ground round them are scaled* — the server's, the branches', a link's label —
+    against `--map-unzoom`, written every frame and costing no layout, so a long hostname is read
+    whole; they let the pointer through to the fold they come to lie over.
+  - *Room is given to the names.* A shelf is at least 460 wide, so the longest shelf name, held, fits
+    beside its fold at the zoom an empty server first opens at. A head's fold, add and open are not
+    drawn far out, where they would be specks, and at mid its add and open show while it is pointed at
+    or focused. From mid on, a shelf's offer to add the first one and a tool are their words alone,
+    without the ring or the glyph.
 - **Keys**: `/` search, `f` fit, `i` the inspector, Enter opens the chosen thing's page, Escape lets
   it go. They are heard inside the map and while the focus is on the page's body (a press in the
   inspector that redraws it leaves it there), never from the sidebar or a menu.
@@ -198,7 +223,7 @@ folds, opened shelves, the view, and the two switches (minimap; drawing the chos
 ## Tests
 
 - `lib/server-map.test.js`: the registry, the layout (sides, no overlaps, determinism, caps, folds,
-  hand-placed boxes, branches carrying shelves), dragging's followers, where a box let go lands,
+  hand-placed boxes, branches carrying shelves, the cards and the four rows they span), dragging's followers, where a box let go lands,
   folding defaults, the document decoder, links, search and the census.
 - `api/map_build_test.go`: the joins, the measured states (exit codes, project states), unread and
   absent sources, worst-first capping, a box's facts and the per-role filter; `map_links_test.go`: every
@@ -218,5 +243,6 @@ folds, opened shelves, the view, and the two switches (minimap; drawing the chos
   its own ↺), links and the inspector (its details, a row ringing its box), a deployment wired to the
   database its environment names and the checkout it is built from, a pair known several ways drawn
   once, revealing a thing behind "+N more", Add, a reading role
-  offered only its own API key, a fresh server, and the far distance's held names; `/map` is one of
+  offered only its own API key, a fresh server, the names held at 11px from mid and far (a thing's
+  and a shelf's), and a database drawn as a card with its engine on its own line; `/map` is one of
   `design-system.spec.ts`'s surfaces.
