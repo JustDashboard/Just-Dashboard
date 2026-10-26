@@ -360,13 +360,25 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		lines = append(lines, "    defer")
 		headerDirective = "  header {\n" + strings.Join(lines, "\n") + "\n  }\n"
 	}
-	handling := authDirective + bodyDirective + "  " + directive + "\n"
-	if len(route.AllowFrom) > 0 {
+	gateDirective := ""
+	if route.ForwardAuth != nil {
+		var err error
+		if gateDirective, err = renderCaddyForwardAuth(*route.ForwardAuth); err != nil {
+			return "", err
+		}
+	}
+	handling := authDirective + gateDirective + bodyDirective + "  " + directive + "\n"
+	if len(route.AllowFrom) > 0 || route.ForwardAuth != nil {
 		// Caddy orders a site's directives itself and puts basic_auth before
-		// respond, which would ask a refused address for the password first.
-		// A route block runs in the order written, so the fence comes first.
-		fence := "  @outside not remote_ip " + strings.Join(route.AllowFrom, " ") + "\n" +
-			"  respond @outside \"Forbidden\" 403\n"
+		// respond, which would ask a refused address for the password first,
+		// and a header it removes after forward_auth has set it. A route
+		// block runs in the order written, so the fence comes first and the
+		// sign-in check before the application.
+		fence := ""
+		if len(route.AllowFrom) > 0 {
+			fence = "  @outside not remote_ip " + strings.Join(route.AllowFrom, " ") + "\n" +
+				"  respond @outside \"Forbidden\" 403\n"
+		}
 		handling = "  route {\n" + indentCaddy(fence+handling) + "  }\n"
 	}
 	out := "# Managed by Just Dashboard\n" + strings.Join(names, ", ") + " {\n" + tlsDirective + logDirective + headerDirective + handling + "}\n"
@@ -387,6 +399,62 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 			"  redir " + scheme + strings.ToLower(redirect.To) + "{uri} " + strconv.Itoa(redirect.HostRedirectCode()) + "\n}\n"
 	}
 	return out, nil
+}
+
+// renderCaddyForwardAuth asks the auth server what nginx's auth_request asks
+// it on a Proxy site, so one check address answers on either proxy: the
+// address the visitor asked for as X-Original-URL, the server's 2xx letting
+// the request through with the user copied into Remote-User and
+// Remote-Email, its 401 sending the visitor to sign in with rd= set, and
+// anything else — Caddy's own 502 when the server does not answer included —
+// refusing it. Host is the auth server's own, as nginx's proxy_pass sends.
+//
+// The two headers are removed from what the visitor sent before the check.
+// Caddy 2.11's forward_auth drops them itself when the server sends none;
+// removing them first holds whichever Caddy the operator's ingress runs.
+func renderCaddyForwardAuth(gate SiteForwardAuth) (string, error) {
+	verify, err := url.Parse(gate.Verify)
+	if err != nil {
+		return "", err
+	}
+	if verify.Hostname() == "localhost" || (net.ParseIP(verify.Hostname()) != nil && net.ParseIP(verify.Hostname()).IsLoopback()) {
+		// Caddy's loopback is its own container's. Activation swaps in the
+		// address of the container publishing the port.
+		return "", errors.New("Caddy reaches an auth server on this host through the container that publishes it")
+	}
+	path := verify.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	from := forwardAuthResponseHeaders[gate.Provider]
+	copies := make([]string, 0, len(forwardAuthHeaders))
+	for index, to := range forwardAuthHeaders {
+		if strings.EqualFold(from[index], to) {
+			copies = append(copies, to)
+		} else {
+			copies = append(copies, from[index]+">"+to)
+		}
+	}
+	separator := "?"
+	if strings.Contains(gate.SignIn, "?") {
+		separator = "&"
+	}
+	var out strings.Builder
+	for _, header := range forwardAuthHeaders {
+		out.WriteString("  request_header -" + header + "\n")
+	}
+	out.WriteString("  forward_auth " + strconv.Quote(verify.Scheme+"://"+verify.Host) + " {\n")
+	out.WriteString("    uri " + strconv.Quote(path) + "\n")
+	out.WriteString("    header_up Host {upstream_hostport}\n")
+	out.WriteString("    header_up X-Original-URL {scheme}://{hostport}{uri}\n")
+	out.WriteString("    header_up X-Original-Method {method}\n")
+	out.WriteString("    copy_headers " + strings.Join(copies, " ") + "\n")
+	out.WriteString("    @signin status 401\n")
+	out.WriteString("    handle_response @signin {\n")
+	out.WriteString("      redir " + strconv.Quote(gate.SignIn+separator+"rd={scheme}://{hostport}{uri}") + " 302\n")
+	out.WriteString("    }\n")
+	out.WriteString("  }\n")
+	return out.String(), nil
 }
 
 // indentCaddy moves every line of a block one level in.
@@ -520,6 +588,78 @@ func (c *dockerCaddy) target(ctx context.Context, upstream string) (dockerCaddyT
 	return dockerCaddyTarget{}, errors.New("Caddy ingress requires a running Docker candidate with a matching loopback publication")
 }
 
+// dockerCaddyAuthTargetPrefix carries the auth server a route signs in
+// through, when Caddy reaches it the way it reaches the application, so the
+// maintenance pass repairs that network too.
+const dockerCaddyAuthTargetPrefix = "# Just Dashboard auth target: "
+
+func (target dockerCaddyTarget) authMetadata() string {
+	raw, _ := json.Marshal(target)
+	return dockerCaddyAuthTargetPrefix + string(raw) + "\n"
+}
+
+// routeContent is the route as the ingress holds it, metadata included, and
+// the targets Caddy has to share a network with: the application, and the
+// auth server when the route signs in through one published on loopback.
+// Activation writes it and verification compares against it, so the two
+// cannot disagree about what a route with a sign-in looks like.
+func (c *dockerCaddy) routeContent(ctx context.Context, route DeploymentRoute) (string, []dockerCaddyTarget, error) {
+	target, err := c.target(ctx, route.Upstream)
+	if err != nil {
+		return "", nil, err
+	}
+	rendered, auth, err := c.resolveForwardAuth(ctx, route)
+	if err != nil {
+		return "", nil, err
+	}
+	content, err := renderDockerCaddyRoute(rendered, target.upstream())
+	if err != nil {
+		return "", nil, err
+	}
+	content += target.metadata()
+	targets := []dockerCaddyTarget{target}
+	if auth != nil {
+		content += auth.authMetadata()
+		targets = append(targets, *auth)
+	}
+	return content, targets, nil
+}
+
+// resolveForwardAuth points a route's sign-in check at the container that
+// publishes it on this host's loopback, the way the application's upstream
+// is found: Caddy's own loopback is its container's, where nothing answers.
+// A check address anywhere else — a name or address Caddy can reach — is
+// asked as it is.
+func (c *dockerCaddy) resolveForwardAuth(ctx context.Context, route DeploymentRoute) (DeploymentRoute, *dockerCaddyTarget, error) {
+	gate := route.ForwardAuth
+	if gate == nil {
+		return route, nil, nil
+	}
+	verify, err := url.Parse(gate.Verify)
+	if err != nil {
+		return route, nil, err
+	}
+	host := verify.Hostname()
+	if host == "localhost" {
+		host = "127.0.0.1"
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		return route, nil, nil
+	}
+	if verify.Scheme != "http" || verify.Port() == "" {
+		return route, nil, fmt.Errorf("Caddy reaches an auth server on this host through the container that publishes its port; %s has to be http:// with a port", gate.Verify)
+	}
+	origin := "http://" + net.JoinHostPort(host, verify.Port())
+	target, err := c.target(ctx, origin)
+	if err != nil {
+		return route, nil, fmt.Errorf("no running container publishes the auth server at %s for Caddy to reach: %w", origin, err)
+	}
+	resolved := *gate
+	resolved.Verify = target.upstream() + verify.EscapedPath()
+	route.ForwardAuth = &resolved
+	return route, &target, nil
+}
+
 func (c *dockerCaddy) connectTarget(ctx context.Context, target dockerCaddyTarget) (bool, error) {
 	raw, err := hostexec.Command(ctx, "docker", "inspect", c.ID).Output()
 	if err != nil {
@@ -603,11 +743,7 @@ func (s *Service) applyDockerCaddyRoute(ctx context.Context, c *dockerCaddy, rou
 			return result, fmt.Errorf("%s is already served by an existing Caddy site", domain)
 		}
 	}
-	target, err := c.target(ctx, route.Upstream)
-	if err != nil {
-		return result, err
-	}
-	content, err := renderDockerCaddyRoute(route, target.upstream())
+	content, targets, err := c.routeContent(ctx, route)
 	if err != nil {
 		return result, err
 	}
@@ -646,9 +782,10 @@ func (s *Service) applyDockerCaddyRoute(ctx context.Context, c *dockerCaddy, rou
 			return result, err
 		}
 	}
-	content += target.metadata()
-	if _, err := c.connectTarget(ctx, target); err != nil {
-		return result, err
+	for _, target := range targets {
+		if _, err := c.connectTarget(ctx, target); err != nil {
+			return result, err
+		}
 	}
 	if route.TLS {
 		if err := c.installACMERoots(ctx, acmeDirectory()); err != nil {

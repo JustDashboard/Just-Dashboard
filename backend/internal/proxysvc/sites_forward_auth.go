@@ -1,6 +1,7 @@
 package proxysvc
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -51,6 +52,17 @@ var forwardAuthSources = map[string][2]string{
 	"custom":       {"remote_user", "remote_email"},
 }
 
+// forwardAuthResponseHeaders are the same headers by name, which is how
+// Caddy's copy_headers reads them.
+var forwardAuthResponseHeaders = map[string][2]string{
+	"authelia":     {"Remote-User", "Remote-Email"},
+	"authentik":    {"X-Authentik-Username", "X-Authentik-Email"},
+	"oauth2-proxy": {"X-Auth-Request-User", "X-Auth-Request-Email"},
+	"custom":       {"Remote-User", "Remote-Email"},
+}
+
+var errForwardAuthProvider = errors.New("single sign-on is through Authelia, Authentik, oauth2-proxy or a custom server")
+
 // forwardAuthHeaders are the request headers the application is told the
 // user in. Set in every forwarding location, they replace whatever the
 // visitor sent, and are left out where no check ran.
@@ -86,6 +98,40 @@ func validForwardAuthURL(raw, what string) (*url.URL, error) {
 	return u, nil
 }
 
+// ValidForwardAuthProvider says whether single sign-on can be through this
+// provider.
+func ValidForwardAuthProvider(provider string) bool {
+	_, ok := forwardAuthSources[provider]
+	return ok
+}
+
+// ValidateForwardAuthCheck checks the address an auth server is asked at:
+// written unquoted into either proxy's file, so held to a closed set of
+// characters, and without a query, which nginx would pass on unchanged and
+// Caddy would drop.
+func ValidateForwardAuthCheck(raw string) error {
+	verify, err := validForwardAuthURL(raw, "check address")
+	if err != nil {
+		return err
+	}
+	if verify.RawQuery != "" || strings.Contains(raw, "?") {
+		return fmt.Errorf("the check address takes no query")
+	}
+	return nil
+}
+
+// ValidateForwardAuthSignIn checks the page a visitor without a session is
+// sent to. The proxy adds rd= itself.
+func ValidateForwardAuthSignIn(raw string) error {
+	if _, err := validForwardAuthURL(raw, "sign-in address"); err != nil {
+		return err
+	}
+	if strings.Contains(raw, "rd=") {
+		return fmt.Errorf("the sign-in address is given rd= itself — leave it off")
+	}
+	return nil
+}
+
 func validateForwardAuth(spec *SiteSpec) error {
 	f := spec.ForwardAuth
 	for _, loc := range spec.Locations {
@@ -104,25 +150,18 @@ func validateForwardAuth(spec *SiteSpec) error {
 	if f == nil {
 		return nil
 	}
-	if _, ok := forwardAuthSources[f.Provider]; !ok {
-		return fmt.Errorf("single sign-on is through Authelia, Authentik, oauth2-proxy or a custom server")
+	if !ValidForwardAuthProvider(f.Provider) {
+		return errForwardAuthProvider
 	}
 	if spec.Kind == "redirect" {
 		// `return` is answered before the access phase auth_request is in.
 		return fmt.Errorf("a redirect is answered before anyone could be asked to sign in")
 	}
-	verify, err := validForwardAuthURL(f.Verify, "check address")
-	if err != nil {
+	if err := ValidateForwardAuthCheck(f.Verify); err != nil {
 		return err
 	}
-	if verify.RawQuery != "" || strings.Contains(f.Verify, "?") {
-		return fmt.Errorf("the check address takes no query")
-	}
-	if _, err := validForwardAuthURL(f.SignIn, "sign-in address"); err != nil {
+	if err := ValidateForwardAuthSignIn(f.SignIn); err != nil {
 		return err
-	}
-	if strings.Contains(f.SignIn, "rd=") {
-		return fmt.Errorf("the sign-in address is given rd= itself — leave it off")
 	}
 	// The visitor's browser would send its password to the auth server as
 	// well, which reads an Authorization header as its own credentials; and

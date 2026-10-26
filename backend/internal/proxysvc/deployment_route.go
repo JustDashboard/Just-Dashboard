@@ -49,6 +49,13 @@ type DeploymentRoute struct {
 	// route answers; everyone else is refused with 403 before the password,
 	// if there is one, is asked for.
 	AllowFrom []string `json:"allowFrom,omitempty"`
+	// ForwardAuth has every request the route serves checked with an auth
+	// server first, the way a Proxy site's single sign-on is: a visitor
+	// without a session is sent to sign in, and one the server refuses, or
+	// that it cannot answer for, is refused. It replaces the password, so a
+	// route has one or the other. PathsOnly is not a route's to set: a
+	// deployment has no paths of its own.
+	ForwardAuth *SiteForwardAuth `json:"forwardAuth,omitempty"`
 }
 
 // Hostnames is every name the route answers, served and redirecting, which
@@ -120,7 +127,33 @@ func validateDeploymentRules(route DeploymentRoute) error {
 			return fmt.Errorf("%s is written %s", entry, normalized)
 		}
 	}
+	if route.ForwardAuth != nil {
+		if err := ValidateDeploymentForwardAuth(*route.ForwardAuth); err != nil {
+			return err
+		}
+		// The browser would send the password to the auth server too, which
+		// reads an Authorization header as its own credentials.
+		if len(route.BasicAuth) > 0 {
+			return errors.New("signing in replaces the route's password — remove the password first")
+		}
+	}
 	return nil
+}
+
+// ValidateDeploymentForwardAuth checks a deployment route's sign-in by the
+// rules a Proxy site's single sign-on is held to, less what a route does not
+// have: paths of its own to sign in on.
+func ValidateDeploymentForwardAuth(f SiteForwardAuth) error {
+	if !ValidForwardAuthProvider(f.Provider) {
+		return errForwardAuthProvider
+	}
+	if f.PathsOnly {
+		return errors.New("a deployment route signs in on every path")
+	}
+	if err := ValidateForwardAuthCheck(f.Verify); err != nil {
+		return err
+	}
+	return ValidateForwardAuthSignIn(f.SignIn)
 }
 
 // DefaultDeploymentMaxBodyMB is the request-body ceiling an nginx
@@ -347,11 +380,7 @@ func (s *Service) VerifyDeploymentRoute(ctx context.Context, route DeploymentRou
 	} else if edge != nil {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		target, err := edge.target(ctx, route.Upstream)
-		if err != nil {
-			return err
-		}
-		want, err := renderDockerCaddyRoute(route, target.upstream())
+		want, _, err := edge.routeContent(ctx, route)
 		if err != nil {
 			return err
 		}
@@ -359,7 +388,7 @@ func (s *Service) VerifyDeploymentRoute(ctx context.Context, route DeploymentRou
 		if err != nil {
 			return err
 		}
-		if !snapshot.Existed || snapshot.Content != want+target.metadata() {
+		if !snapshot.Existed || snapshot.Content != want {
 			return ErrRouteRecovery
 		}
 		return edge.configurationSynced(ctx)
@@ -531,6 +560,14 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 	}
 	if authFile != "" {
 		spec.BasicAuthFile, spec.BasicAuthRealm = authFile, "Protected deployment"
+	}
+	if route.ForwardAuth != nil {
+		// The site's own single sign-on, every path checked: the redirecting
+		// names are servers of their own and answer before it, and the ACME
+		// challenge is left open by the renderer, so a certificate covering
+		// the route can still be issued and renewed.
+		gate := *route.ForwardAuth
+		spec.ForwardAuth = &gate
 	}
 	return spec
 }

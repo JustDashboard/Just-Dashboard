@@ -71,6 +71,32 @@ address for the password first, so a route with an allow list wraps its handling
 which runs in the order written. A route with none of these renders byte for byte what it did before
 they existed, so no live route reads as changed after an upgrade.
 
+## Sign-in
+
+A route that signs in (`DeploymentRoute.ForwardAuth`) asks the auth server what nginx's `auth_request`
+asks it on a Proxy site, so one check address answers on either proxy: `forward_auth` to the check
+address's origin with `uri` its path, `header_up X-Original-URL {scheme}://{hostport}{uri}` and
+`X-Original-Method`, and `Host` set to the auth server's own as nginx's `proxy_pass` sends it. A 2xx
+copies the provider's user headers into `Remote-User` and `Remote-Email` (`copy_headers
+X-Auth-Request-User>Remote-User …` for oauth2-proxy, Authentik's `X-Authentik-*` likewise); a 401 is
+answered by a `handle_response` with `redir "<signIn>?rd={scheme}://{hostport}{uri}" 302`; anything
+else, Caddy's own 502 when the server does not answer included, is refused. The two headers are removed
+from the visitor's request first (`request_header -Remote-User`): Caddy 2.11's `forward_auth` drops
+them itself when the server sends none, and removing them first holds on whichever Caddy the operator's
+ingress runs. The handling is a `route` block, so the fence, the check and the application run in the
+order written; the redirecting names' blocks carry none of it.
+
+Caddy's loopback is its own container's, so a check address on `127.0.0.1` (or `localhost`) is found
+the way the application is: the container publishing that port on loopback, joined over its network and
+asked at its address there (`resolveForwardAuth`; it has to be `http://` with a port). The renderer
+refuses a loopback check address outright, so an unresolved one can never be written. The route records
+that container as a second metadata line, `# Just Dashboard auth target: {…}`, and the lifecycle worker
+repairs it as it does the application's: a Caddy recreated without the auth server's network, or an auth
+container with a new address, is joined and rewritten within a pass, since without it every visitor is
+refused. A check address anywhere else — a name or address Caddy can reach — is asked as written.
+Activation and verification build the content through one function (`routeContent`), so what is
+verified is what was written.
+
 ## Certificates and application networking
 
 Caddy owns issuance and renewal on its existing public listener. A deterministic, temporary site
@@ -119,8 +145,18 @@ not order a public production certificate.
 `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules -count=1 -v`
 checks what a real Caddy answers for a route's rules: the redirecting name's 308 keeps the path and
 query, an address off the list gets 403, an allowed one gets the application with the route's header in
-place of the application's own, and the inventory lists both names under the route. The deployment C5 live gate and deployment/API/Proxy race
-tests remain required. The browser regression covers automatic Caddy HTTPS without a Certbot warning.
+place of the application's own, and the inventory lists both names under the route.
+`JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyGatesRouteBehindForwardAuth -count=1 -v`
+puts a route that signs in in front of `traefik/whoami`, with a real Authelia 4.39 (one file user, SQLite)
+published on loopback on a network of its own and a private certificate authority for the names. It
+checks that the written route names Authelia's container address and its target rather than
+loopback; that a visitor without a session gets 302 to the sign-in page with `rd=` set; that after
+signing in at Authelia the application is told `Remote-User: alice` and `Remote-Email` even though the
+request claimed another user; that the redirecting name answers 308 without asking; that a Caddy
+disconnected from Authelia's network refuses everyone until one maintenance pass rejoins it; and that
+with Authelia stopped the route refuses rather than passes. `TestLiveDeploymentRouteSignsInOnNginx`
+checks the nginx spelling against the host's real nginx without Docker. The deployment C5 live gate and
+deployment/API/Proxy race tests remain required. The browser regression covers automatic Caddy HTTPS without a Certbot warning.
 
 References: [Caddy commands](https://caddyserver.com/docs/command-line),
 [Caddyfile imports](https://caddyserver.com/docs/caddyfile/directives/import), and

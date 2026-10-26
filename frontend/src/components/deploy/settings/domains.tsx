@@ -27,9 +27,12 @@ import { useAuth } from "@/hooks/use-auth"
 import type {
   DeploymentDomainRoute,
   DeploymentEnvironmentConfiguration,
+  DeploymentForwardAuth,
   DeploymentHostnameSuggestion,
   DeploymentRedirectCode,
+  ForwardAuthProvider,
 } from "@/lib/types"
+import { SSO_PROVIDERS, chooseSsoProvider, ssoPreset } from "@/lib/sso-providers"
 import { Field, FieldCheck, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo, issuerProduct } from "@/components/product-logo"
@@ -66,6 +69,7 @@ import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/
 import { OwnershipSelect } from "@/components/deploy/settings/mounts"
 import { useProject } from "@/components/deploy/project-context"
 import { HeaderListField, ListField } from "@/components/proxy/site-form"
+import { routeAccessState, signInConflicts } from "@/components/deploy/settings/route-access"
 
 /**
  * Domains — the hostnames this environment answers on.
@@ -126,7 +130,8 @@ export function DomainsSettings({
               nothing to act on; one already saved stays editable. */}
           {(configuration.domains.length > 0 ||
             Boolean(configuration.runtime.allowFrom?.length) ||
-            Boolean(configuration.runtime.responseHeaders?.length)) && (
+            Boolean(configuration.runtime.responseHeaders?.length) ||
+            Boolean(configuration.runtime.forwardAuth)) && (
             <RouteRulesForm configuration={configuration} save={state.save} />
           )}
         </>
@@ -960,23 +965,49 @@ function servedNames(domains: DomainValue[]) {
 type RouteRules = {
   allowFrom: string[]
   responseHeaders: { name: string; value: string }[]
+  forwardAuth?: DeploymentForwardAuth
 }
 
-/** Which of the form's fields a refusal names. */
-function refusedRule(field: string | undefined): keyof RouteRules | undefined {
-  if (field?.startsWith("runtime.allowFrom")) return "allowFrom"
-  if (field?.startsWith("runtime.responseHeaders")) return "responseHeaders"
+type SignInField = "provider" | "verify" | "signIn"
+
+/** Which of the form's fields a refusal names, and which sign-in field. */
+function refusedRule(
+  field: string | undefined,
+): { rule: keyof RouteRules; part?: SignInField } | undefined {
+  if (field?.startsWith("runtime.allowFrom")) return { rule: "allowFrom" }
+  if (field?.startsWith("runtime.responseHeaders")) return { rule: "responseHeaders" }
+  if (field?.startsWith("runtime.forwardAuth")) {
+    const part = field.slice("runtime.forwardAuth.".length) as SignInField
+    return {
+      rule: "forwardAuth",
+      part: ["provider", "verify", "signIn"].includes(part) ? part : undefined,
+    }
+  }
   return undefined
+}
+
+/** The sign-in as the plan keeps it, trimmed, or nothing when it is off. */
+function savedSignIn(gate: DeploymentForwardAuth | undefined): DeploymentForwardAuth | undefined {
+  if (!gate) return undefined
+  return {
+    provider: gate.provider,
+    verify: gate.verify.trim(),
+    signIn: gate.signIn.trim(),
+    ...(gate.previewsOnly ? { previewsOnly: true } : {}),
+  }
 }
 
 /**
  * Who reaches the domains above, and what every answer carries: the route's
- * allowed addresses and response headers. They are the route's rather than a
- * hostname's — the proxy serves every name from one site — so they are one
- * form under the list instead of a control repeated on every row.
+ * allowed addresses, its sign-in and its response headers. They are the
+ * route's rather than a hostname's — the proxy serves every name from one
+ * site — so they are one form under the list instead of a control repeated
+ * on every row. They are listed in the order a request meets them: the
+ * address list refuses first, then the sign-in, then the headers are set on
+ * whatever is answered.
  *
  * They live in the plan's runtime, beside the upload limit, and this form
- * writes only those two fields of it, so a Runtime save never undoes them
+ * writes only those three fields of it, so a Runtime save never undoes them
  * and this save never undoes a Runtime edit.
  */
 function RouteRulesForm({
@@ -992,11 +1023,17 @@ function RouteRulesForm({
   const saved: RouteRules = {
     allowFrom: configuration.runtime.allowFrom ?? [],
     responseHeaders: configuration.runtime.responseHeaders ?? [],
+    forwardAuth: configuration.runtime.forwardAuth,
   }
   const draft = useSettingDraft(`deploy.${project.projectId}.settings.route-rules`, saved)
   const rules = draft.value
   const [saving, setSaving] = useState(false)
-  const [refusal, setRefusal] = useState<{ field: keyof RouteRules; message: string }>()
+  const [refusal, setRefusal] = useState<{
+    rule: keyof RouteRules
+    part?: SignInField
+    message: string
+  }>()
+  const preview = Boolean(configuration.runtime.previewIsolation)
 
   const onSave = async () => {
     setSaving(true)
@@ -1007,13 +1044,14 @@ function RouteRulesForm({
           ...latest.runtime,
           allowFrom: rules.allowFrom.length > 0 ? rules.allowFrom : undefined,
           responseHeaders: rules.responseHeaders.length > 0 ? rules.responseHeaders : undefined,
+          forwardAuth: savedSignIn(rules.forwardAuth),
         }),
       })
       return true
     } catch (error) {
-      const field = error instanceof ApiError ? refusedRule(error.field) : undefined
-      if (error instanceof ApiError && field) {
-        setRefusal({ field, message: error.message })
+      const refused = error instanceof ApiError ? refusedRule(error.field) : undefined
+      if (error instanceof ApiError && refused) {
+        setRefusal({ ...refused, message: error.message })
       } else {
         notify.error("Could not save access and headers", error)
       }
@@ -1023,7 +1061,6 @@ function RouteRulesForm({
     }
   }
 
-  const fenced = rules.allowFrom.length > 0
   return (
     <SettingForm
       name="Access and headers"
@@ -1039,11 +1076,7 @@ function RouteRulesForm({
     >
       <SettingSection
         title="Access and headers"
-        state={
-          fenced
-            ? `Only ${plural(rules.allowFrom.length, "address", "addresses")} · every domain above`
-            : "Everyone · every domain above"
-        }
+        state={routeAccessState(rules.allowFrom, rules.forwardAuth, preview)}
         status={settingStatus({ dirty: draft.dirty, refused: Boolean(refusal) })}
       >
         <ListField
@@ -1052,8 +1085,15 @@ function RouteRulesForm({
           placeholder="203.0.113.7 or 10.0.0.0/8"
           values={rules.allowFrom}
           onChange={(allowFrom) => draft.set({ ...rules, allowFrom })}
-          hint="Anyone else is refused with 403, before the password is asked for. Empty lets everyone in."
-          error={refusal?.field === "allowFrom" ? refusal.message : undefined}
+          hint="Anyone else is refused with 403, before the password or the sign-in is asked for. Empty lets everyone in."
+          error={refusal?.rule === "allowFrom" ? refusal.message : undefined}
+          disabled={!canAdmin}
+        />
+        <RouteSignIn
+          gate={rules.forwardAuth}
+          onChange={(forwardAuth) => draft.set({ ...rules, forwardAuth })}
+          conflicts={signInConflicts(configuration.domains, rules.forwardAuth, preview)}
+          refusal={refusal?.rule === "forwardAuth" ? refusal : undefined}
           disabled={!canAdmin}
         />
         <HeaderListField
@@ -1062,10 +1102,140 @@ function RouteRulesForm({
           values={rules.responseHeaders}
           onChange={(responseHeaders) => draft.set({ ...rules, responseHeaders })}
           hint="Set on every answer, replacing a header of the same name the application sends."
-          error={refusal?.field === "responseHeaders" ? refusal.message : undefined}
+          error={refusal?.rule === "responseHeaders" ? refusal.message : undefined}
           disabled={!canAdmin}
         />
       </SettingSection>
     </SettingForm>
+  )
+}
+
+/**
+ * Require sign-in: the route asks an auth server about every request, the
+ * way a Proxy site's single sign-on does, with the same four servers and
+ * the same two addresses. What a deployment adds is who it is for — this
+ * environment and its previews, or its previews alone — since a preview's
+ * plan is a copy of this one.
+ */
+function RouteSignIn({
+  gate,
+  onChange,
+  conflicts,
+  refusal,
+  disabled,
+}: {
+  gate: DeploymentForwardAuth | undefined
+  onChange: (gate: DeploymentForwardAuth | undefined) => void
+  conflicts: string[]
+  refusal?: { part?: SignInField; message: string }
+  disabled: boolean
+}) {
+  const preset = ssoPreset(gate?.provider)
+  const update = (patch: Partial<DeploymentForwardAuth>) => gate && onChange({ ...gate, ...patch })
+  return (
+    <OptionList>
+      <OptionRow
+        title="Require sign-in"
+        hint="Every request is checked with Authelia, Authentik, oauth2-proxy or another server first. A visitor without a session is sent to sign in and brought back; if the server refuses or does not answer, so does the site."
+        checked={Boolean(gate)}
+        disabled={disabled}
+        onCheckedChange={(on) =>
+          onChange(
+            on ? { provider: "authelia", verify: SSO_PROVIDERS[0].verify, signIn: "" } : undefined,
+          )
+        }
+      >
+        {gate && (
+          <div className="flex flex-col gap-3">
+            <ToggleGroup
+              type="single"
+              aria-label="Auth server"
+              value={gate.provider}
+              onValueChange={(value) =>
+                value && update(chooseSsoProvider(gate, value as ForwardAuthProvider))
+              }
+              variant="outline"
+              size="sm"
+              className="w-full flex-wrap"
+              disabled={disabled}
+            >
+              {SSO_PROVIDERS.map((provider) => (
+                <ToggleGroupItem
+                  key={provider.value}
+                  value={provider.value}
+                  className="flex-1 text-hint"
+                >
+                  {provider.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            <Field
+              label="Check address"
+              htmlFor="route-sso-verify"
+              hint="Where the proxy asks about each request, with the visitor's headers and the address they asked for. On Caddy, an address on 127.0.0.1 is reached through the container that publishes it."
+              error={refusal?.part === "verify" ? refusal.message : undefined}
+            >
+              <Input
+                id="route-sso-verify"
+                value={gate.verify}
+                onChange={(event) => update({ verify: event.target.value.trim() })}
+                placeholder={preset.verify || "http://127.0.0.1:8080/verify"}
+                className="font-mono text-hint"
+                disabled={disabled}
+              />
+            </Field>
+            <Field
+              label="Sign-in page"
+              htmlFor="route-sso-signin"
+              hint="A visitor without a session is sent here, with rd= set to the address they asked for."
+              error={refusal?.part === "signIn" ? refusal.message : undefined}
+            >
+              <Input
+                id="route-sso-signin"
+                value={gate.signIn}
+                onChange={(event) => update({ signIn: event.target.value.trim() })}
+                placeholder={preset.signIn}
+                className="font-mono text-hint"
+                disabled={disabled}
+              />
+            </Field>
+            <ToggleGroup
+              type="single"
+              aria-label="Who signs in"
+              value={gate.previewsOnly ? "previews" : "everywhere"}
+              onValueChange={(value) =>
+                value && update({ previewsOnly: value === "previews" || undefined })
+              }
+              variant="outline"
+              size="sm"
+              className="w-full"
+              disabled={disabled}
+            >
+              <ToggleGroupItem value="everywhere" className="flex-1 text-hint">
+                Here and on previews
+              </ToggleGroupItem>
+              <ToggleGroupItem value="previews" className="flex-1 text-hint">
+                Previews only
+              </ToggleGroupItem>
+            </ToggleGroup>
+            <FormNote>
+              The application is sent Remote-User and Remote-Email, taken from the server&apos;s{" "}
+              {preset.sends}, and never the visitor&apos;s own. Names that redirect answer before
+              anyone is asked to sign in.
+            </FormNote>
+            {conflicts.map((conflict) => (
+              <FormNote key={conflict} tone="warning">
+                {conflict}
+              </FormNote>
+            ))}
+            {refusal && (!refusal.part || refusal.part === "provider") && (
+              <FormNote role="alert" tone="danger">
+                {refusal.message}
+              </FormNote>
+            )}
+          </div>
+        )}
+      </OptionRow>
+    </OptionList>
   )
 }

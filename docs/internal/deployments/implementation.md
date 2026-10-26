@@ -1392,8 +1392,34 @@ only renderer/executor/validation authority for their feature.
   which keeps the ACME path and which the site parser reads back; Caddy writes it a site block of its own
   with `redir`. The release comparison lists the redirect on the domain's line and the two runtime fields
   as their own. The Domains settings offer **Redirect to another domain** in each row's menu and an
-  **Access and headers** form under the list, which writes only those two runtime fields; the Runtime form
-  neither holds nor writes them.
+  **Access and headers** form under the list, which writes only those two runtime fields and the sign-in
+  below; the Runtime form neither holds nor writes them.
+- Route sign-in. `runtime.forwardAuth` (`provider` authelia, authentik, oauth2-proxy or custom;
+  `verify`, the auth server's check address; `signIn`, the page a visitor without a session is sent to;
+  `previewsOnly`) has the public route ask an auth server about every request before the application
+  sees it, the way a Proxy site's single sign-on does, and it is held to the same rules
+  (`proxysvc.ValidForwardAuthProvider`, `ValidateForwardAuthCheck`, `ValidateForwardAuthSignIn`; fields
+  `runtime.forwardAuth.provider|verify|signIn`). A 2xx lets the request through with the user handed on
+  as `Remote-User` and `Remote-Email`, replacing whatever the visitor sent; a 401 sends the visitor to
+  `signIn` with `rd=` set to the address they asked for; anything else, the server not answering
+  included, refuses the request. It is the route's, like the address list: the allow list refuses first
+  (403), then the sign-in, and redirecting names answer before either, since they serve nothing.
+  `validateRouteSignIn` refuses, on a route the sign-in gates, a domain password (the browser would send
+  it to the auth server as its own credentials; field `runtime.forwardAuth`) and a served name without
+  HTTPS (the session cookie would cross networks in clear, and Authelia refuses to answer for one). A
+  preview's plan is a copy of production's runtime, so previews sign in too; `previewsOnly` keeps this
+  environment's own route open and gates only the previews (`RuntimePlanConfig.SignInGate`: the gate is
+  on a plan marked `previewIsolation`, which a preview's always is). A preview's tailnet address is not
+  a public route and is not gated. Activation (`publicRoute`) hands the proxy the release snapshot's gate
+  as `DeploymentRoute.ForwardAuth`, so a rollback restores the sign-in its release had. nginx renders it as
+  the site feature on every path; Caddy as `forward_auth` asking the same check address with the same
+  headers ([Caddy ingress](caddy-ingress.md#sign-in)), so one address answers on either proxy. The field
+  is kept only when set, so a plan without it keeps its digest; the release comparison lists it as
+  **sign-in**. A `public_route` smoke check meets the sign-in redirect like any visitor, so on a gated
+  route give it an expected status of 302 or accept any answer. The **Access and headers** form's
+  **Require sign-in** offers the Proxy page's four presets (`lib/sso-providers.ts`), **Here and on
+  previews** or **Previews only**, and names a password or plain-HTTP name the server would refuse before
+  the save (`settings/route-access.ts`).
 - The [GitHub App](github-app.md): one App per dashboard through the manifest flow, installation tokens
   for private clones through a `github_app` credential per installation, triggers on `delivery: "app"`
   fed by the App's single webhook (`POST /api/v1/hooks/github-app`, routed by repository through the
