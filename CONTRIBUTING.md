@@ -255,8 +255,10 @@ to the contribution terms above, including the additional licence grant to the p
   which resolves (without pulling) every catalogue image and requires it for amd64 and arm64.
   Changes to build-failure diagnosis (the BuildKit reader in `dockerx`, the collector or the signature
   table) also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBuildFailureIsNamedFromBuildKit -count=1 -v`,
-  which builds an npm project whose lockfile no longer matches package.json and checks the cause is
-  named from buildx's own output; it creates no image.
+  which builds an npm project whose lockfile matches package.json but leaves out a package a locked
+  dependency needs (detection compares only package.json with the lock, so the recipe still runs
+  `npm ci` rather than `npm install`) and checks the cause is named from buildx's own output; it
+  creates no image.
   Changes to a failed run's diagnosis (what is sent, how it is masked, how the answer is read:
   `deploy/run_diagnosis.go`) also run it against a real model behind an OpenAI-compatible server on
   this machine — never a hosted key — for example Ollama on loopback:
