@@ -341,6 +341,14 @@ func (s *PlanningStore) resolveExternalVariableReference(
 		return "", false, fmt.Errorf("%w: domain reference target was not found", ErrInvalidVariable)
 	case "service":
 		return s.resolveServiceVariableReference(ctx, environmentID, planRevision, reference.Target)
+	case SharedScopeServer:
+		return s.sharedVariableValue(ctx, 0, reference.Target)
+	case SharedScopeProject:
+		projectID, err := s.environmentProject(ctx, environmentID)
+		if err != nil {
+			return "", false, err
+		}
+		return s.sharedVariableValue(ctx, projectID, reference.Target)
 	default:
 		return "", false, fmt.Errorf("%w: unsupported external reference kind", ErrInvalidVariable)
 	}
@@ -968,6 +976,10 @@ func (s *PlanningStore) Commit(
 				return nil, fmt.Errorf("%w: warning %s is not acknowledged", ErrPreflightBlocked, finding.Code)
 			}
 		}
+	}
+
+	if err := s.checkDraftSharedReferences(ctx, draft); err != nil {
+		return nil, err
 	}
 
 	secret := auth.RandomToken(24)

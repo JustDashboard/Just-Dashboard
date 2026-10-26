@@ -293,6 +293,10 @@ to the contribution terms above, including the additional licence grant to the p
   Each sweep uses unique volume names. Startup/readiness is separate from first-use account setup;
   the [template matrix](docs/audits/2026-09-22-deploy-new/template-matrix.md) records which templates
   generate credentials, require setup, have no application login, or remain unavailable.
+- Changes to shared variables or to how a run opens its variables also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSharedVariableReachesTheContainer -count=1 -v`,
+  which starts a real container with the values a run opens for references to a server, a secret and a
+  project variable, reads them back from inside it, and checks the next run reads a changed value.
 - Object-storage backups against a real S3 API (MinIO in a container: target test, upload, retention,
   restore): `JD_DEPLOY_LIVE=1 go test ./internal/backups -run TestLiveObjectStorageBackupUploadsPrunesAndRestores -count=1 -v`.
   Encrypted archives in a bucket take an S3-compatible service you started yourself, named by

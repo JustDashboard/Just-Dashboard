@@ -118,6 +118,7 @@ const SURFACES = [
   "/deploy?view=archived",
   "/deploy/notifications",
   "/deploy/credentials",
+  "/deploy/variables",
   "/deploy/drains",
   "/deploy/new",
   "/account",

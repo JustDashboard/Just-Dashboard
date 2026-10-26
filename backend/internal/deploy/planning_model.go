@@ -1822,6 +1822,10 @@ func ParseVariableReference(value string) (VariableReference, error) {
 		if ValidateEnvKey(target) != nil {
 			return VariableReference{}, fmt.Errorf("%w: variable reference target is invalid", ErrInvalidVariable)
 		}
+	case SharedScopeServer, SharedScopeProject:
+		if !sharedVariableNameRE.MatchString(target) {
+			return VariableReference{}, fmt.Errorf("%w: shared variable reference target is invalid", ErrInvalidVariable)
+		}
 	case "credential", "domain", "service", "database":
 		// A reference target is a name or an id. It is never a path, and a
 		// parent segment in one is only ever an attempt to make it into one.

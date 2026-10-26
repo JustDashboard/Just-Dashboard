@@ -2753,7 +2753,10 @@ export async function mockProject(
       const requestBody = request.postDataJSON() as {
         sensitivity: "plain" | "secret"
         scopes: DeploymentVariable["scopes"]
+        reference?: string
       }
+      // A typed reference reads back parsed, as the server answers it.
+      const typed = /^\$\{\{([A-Za-z][\w-]*)\.(.+)\}\}$/.exec(requestBody.reference ?? "")
       configurationRevision += 1
       configurationPending = true
       scopedVariables = [
@@ -2765,6 +2768,7 @@ export async function mockProject(
           scopes: requestBody.scopes,
           masked: requestBody.sensitivity === "secret" ? "••••••••" : "configured",
           valueDigest: `sha256:${"3".repeat(64)}`,
+          ...(typed ? { reference: { kind: typed[1], target: typed[2] } } : {}),
           pending: true,
           createdBy: "operator",
           createdAt: now,
@@ -2834,6 +2838,9 @@ export async function mockProject(
     } else if (path === "/deploy/drafts" && method === "POST") {
       body = draft
     } else if (path === "/deploy/drafts/browser-draft") body = draft
+    // Shared variables are empty here; deploy-shared-variables.spec.ts
+    // routes its own over these.
+    else if (/^\/deploy\/(\d+\/)?shared-variables$/.test(path) && method === "GET") body = []
     else {
       body = showcase && method === "GET" ? showcaseRead(path, url) : undefined
       if (body === undefined) {
