@@ -100,10 +100,14 @@ free.
 - Push to deploy, plus pull-request previews only your tailnet can reach
 - Immutable releases, one-click rollback and health-gated cutover
 - Variables per environment, plus shared ones defined once for the server or a project
+- Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
 - Build logs, runtime, console, request logs and traffic alerts per project
+- A failed run named from its own output, and on request explained by your own model, secrets masked
 - Request insights that count real visitors apart from bots, with their devices and pages
 - Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,
-  e-mail, webhooks and GitHub
+  e-mail and webhooks
+- Commit statuses and preview comments on GitHub, GitLab, Gitea and Forgejo
+- Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint
 
 </td>
 </tr>
@@ -188,7 +192,8 @@ free.
 
 - A verdict on the host: exposure, SSH, logins and who is attacking
 - fail2ban, CrowdSec and Suricata where they run
-- Scheduled backups to disk, S3 or Backblaze B2, encrypted on the way out, and native database dumps
+- Scheduled backups to disk, S3, Backblaze B2, an SFTP server or Google Drive, OneDrive, Dropbox, WebDAV
+  and the other services rclone speaks, encrypted on the way out, and native database dumps
 - A coverage map of everything that is *not* backed up yet
 - Single-file and in-place restore
 
@@ -437,7 +442,7 @@ disconnects the web terminal; it recreates containers with current settings, whi
 
 Optional, and off until you do it. A linked server shows up on your [just-dashboard.com](https://just-dashboard.com)
 account with its health, version and the way to reach it, so you can find your dashboards in one
-place. Link it from **Settings → just-dashboard.com**, from the question in `install.sh`, or over SSH
+place. Link it from **Settings → Connect**, from the question in `install.sh`, or over SSH
 with `sudo ./scripts/manage.sh link`; all three run the same code. The server asks the site for a short
 code, you enter it on the site while signed in, and the server learns it was approved. Nothing secret is
 typed or printed: the code only points at the request, and completing the link needs the key this

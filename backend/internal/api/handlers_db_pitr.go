@@ -280,7 +280,9 @@ func (s *Server) pitrDestination(ctx context.Context, req pitrSetupRequest) (bac
 			target.Path = strings.TrimRight(target.Path, "/") + "/wal"
 		}
 	}
-	if !kind.Valid() {
+	if !kind.Valid() || kind == backups.TargetSFTP || kind == backups.TargetRclone {
+		// WAL-G writes its archive to a directory or an object store; a
+		// backup job's SFTP or rclone destination is not one it can use.
 		return "", backups.TargetConfig{}, nil, httpx.BadRequest("the destination is one of local, s3, b2")
 	}
 	switch kind {
@@ -388,7 +390,7 @@ func (s *Server) handleDBPITREnable(w http.ResponseWriter, r *http.Request) erro
 	// Before anything is touched, as a backup job's destination is tested.
 	if err := backups.TestTarget(ctx, &backups.Job{TargetKind: kind, Target: backups.TargetConfig{
 		Bucket: target.Bucket, Region: target.Region, Endpoint: target.Endpoint, Prefix: target.Prefix, Path: target.Path,
-	}}, secrets); err != nil {
+	}}, secrets, nil); err != nil {
 		return httpx.Err(http.StatusBadRequest, "destination_unreachable", fmt.Sprintf("the destination could not be used: %v", err))
 	}
 	detail := map[string]any{

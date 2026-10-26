@@ -124,6 +124,105 @@ test.describe("General settings", () => {
     expect(policy.watchExclude).toEqual(["docs/**"])
   })
 
+  test("names the host commit statuses go to, and says what it refused", async ({ page }) => {
+    await mockProject(page)
+    const now = Date.now()
+    const readings = [
+      {
+        provider: "gitlab",
+        product: "gitlab",
+        host: "gitlab.example.test",
+        repository: "platform/shop",
+        context: "just-dashboard/production",
+        ready: false,
+        reason:
+          "Save a provider token for gitlab.example.test under Deployments → Credentials to report here.",
+      },
+      {
+        provider: "gitlab",
+        product: "gitlab",
+        host: "gitlab.example.test",
+        repository: "platform/shop",
+        context: "just-dashboard/production",
+        credential: "gitlab-ci",
+        ready: true,
+        lastStatus: {
+          provider: "gitlab",
+          state: "success",
+          revision: "9f3c2a1d".padEnd(40, "0"),
+          ok: false,
+          message:
+            "the token may not write here (403): it needs the api scope and at least the Developer role",
+          at: new Date(now - 60_000).toISOString(),
+        },
+      },
+      {
+        provider: "gitea",
+        product: "forgejo",
+        host: "git.example.test",
+        repository: "acme/shop",
+        context: "just-dashboard/production",
+        credential: "forgejo-ci",
+        ready: true,
+        lastStatus: {
+          provider: "gitea",
+          state: "success",
+          revision: "9f3c2a1d".padEnd(40, "0"),
+          ok: true,
+          at: new Date(now - 5 * 60_000).toISOString(),
+        },
+      },
+    ]
+    let reading = readings[0]
+    await page.route("**/api/v1/deploy/7/environments/12/git-watch", (route) =>
+      json(route, {
+        automatic: true,
+        branch: "main",
+        status: "watching",
+        intervalSeconds: 5,
+        policy: {
+          automatic: true,
+          commitStatuses: true,
+          watchInclude: [],
+          watchExclude: [],
+          revision: 1,
+        },
+        commitStatus: reading,
+      }),
+    )
+    await page.goto("/deploy/7/settings/general")
+    const gitCard = page.getByRole("form", { name: "Automatic deployment" })
+
+    // No token for the host: the switch is named for GitLab, and the line
+    // under it says what to save and where.
+    await expect(gitCard.getByRole("switch", { name: /GitLab commit status/ })).toBeVisible()
+    const missing = gitCard.getByText(/Save a provider token for/)
+    await expect(missing).toContainText("gitlab.example.test")
+    await expect(missing.getByRole("link", { name: "Credentials" })).toHaveAttribute(
+      "href",
+      "/deploy/credentials",
+    )
+
+    // The host refused the last status: its reason, in full.
+    reading = readings[1]
+    await page.reload()
+    await expect(
+      gitCard.getByText(
+        "GitLab refused the last status from gitlab-ci: the token may not write here (403)",
+        { exact: false },
+      ),
+    ).toBeVisible()
+
+    // Forgejo took it: one quiet line, the outcome and the token it used.
+    reading = readings[2]
+    await page.reload()
+    await expect(gitCard.getByRole("switch", { name: /Forgejo commit status/ })).toBeVisible()
+    const reported = gitCard.getByText(/^Reported 5m/)
+    await expect(reported).toContainText("succeeded on")
+    await expect(reported).toContainText("9f3c2a1")
+    await expect(reported).toContainText("with forgejo-ci")
+  })
+
   test("says what the last check decided under the picture, not in the head", async ({ page }) => {
     await mockProject(page)
     await page.route("**/api/v1/deploy/7/environments/12/git-watch", (route) =>

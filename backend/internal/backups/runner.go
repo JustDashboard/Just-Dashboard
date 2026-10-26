@@ -215,7 +215,7 @@ func (r *Runner) performWithManifest(ctx context.Context, job *Job, runID int64,
 		fmt.Fprintf(logBuf, "stored at %s\n", dest)
 		return dest, size, manifest, nil
 
-	case TargetS3, TargetB2:
+	case TargetS3, TargetB2, TargetSFTP, TargetRclone:
 		// The staging copy is removed once uploaded; keeping it would double
 		// the disk cost of every backup.
 		defer os.Remove(local)
@@ -223,10 +223,17 @@ func (r *Runner) performWithManifest(ctx context.Context, job *Job, runID int64,
 		if err != nil {
 			return "", 0, manifest, err
 		}
-		key := strings.TrimPrefix(filepath.Join(job.Target.Prefix, name), "/")
-		fmt.Fprintf(logBuf, "uploading to %s/%s\n", job.Target.Bucket, key)
-		if err := uploadObject(ctx, job, secrets, key, local); err != nil {
+		key := remoteKey(job, name)
+		pinnedBefore := job.Target.HostKey
+		fmt.Fprintf(logBuf, "uploading to %s\n", remoteLabel(job, key))
+		if err := uploadArtifact(ctx, job, secrets, r.store.Pinner(job.ID), key, local); err != nil {
 			return "", 0, manifest, err
+		}
+		if pinnedBefore == "" && job.Target.HostKey != "" {
+			// The archive remembers the key it was written under, so its
+			// restore insists on the same server.
+			manifest.Target.HostKey, manifest.Target.HostKeyFingerprint = job.Target.HostKey, job.Target.HostKeyFingerprint
+			fmt.Fprintf(logBuf, "pinned the server's host key %s\n", job.Target.HostKeyFingerprint)
 		}
 		fmt.Fprintf(logBuf, "upload complete\n")
 		return key, size, manifest, nil
@@ -485,7 +492,8 @@ func (r *Runner) prune(ctx context.Context, job *Job) error {
 						return err
 					}
 				}
-				if err := deleteObject(ctx, archivedJob, secrets, old.Artifact); err != nil {
+				target, pin := r.store.transferJob(job, old)
+				if err := deleteArtifact(ctx, target, secrets, pin, old.Artifact); err != nil {
 					r.log.Warn("could not delete remote artifact", "key", old.Artifact, "err", err)
 					return nil
 				}

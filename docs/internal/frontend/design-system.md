@@ -77,9 +77,9 @@ taking a frame:
   preload rows, and its deep scan's findings, suite list with its chip filters, key exchange and
   connection rows; the password files and DNS provider lists),
   the runtime-health bar, and every block of the deployment section — the fleet
-  and its archive, Credentials and Notifications, a project's Overview, Deployments, Logs, Runtime
+  and its archive, Credentials, Notifications and Log drains, a project's Overview, Deployments, Logs, Runtime
   and Console, the run page, the nine settings pages and the create flow — are plain, with every
-  row in them that is *taken* rather than read (a project, a run, a credential, a channel, a
+  row in them that is *taken* rather than read (a project, a run, a credential, a channel, a drain, a
   service, a webhook, a schedule, a variable, a linked database) a lit card — a `ChoiceRow` in a
   `ChoiceList`, or on the fleet's grid a project's own `SpotlightBorder` card with the same lit
   edge (what kept a frame there was, first, a *picture*, on the argument that a picture needs an
@@ -697,7 +697,8 @@ every page, panel and chart title in the product and left it under a switch, one
 flow screen of six options was six titles and six captions, and the caption is what made the row two
 lines tall in the first place. "Report each release on the commit" plus "Posts a pending, success or
 failure status to GitHub through the dashboard's own credential" is one fact written twice; "Report
-each release as a GitHub commit status" is the fact. Where the hint carried a *consequence* the title
+each release as a commit status" is the fact (Settings, which knows the host, names it: "…as a GitLab
+commit status"). Where the hint carried a *consequence* the title
 has to carry it too — "Required — a failing readiness check blocks activation", not "Readiness check
 required" — and where it carried something that belongs to the whole section rather than to one
 switch (which branch is watched, that nothing fires before the first deployment) it moves to the
@@ -2680,6 +2681,19 @@ The passes, in order. Each one is a diff you can review on its own.
    Databases' cards say whether the gating job dumps each one. Logs is the one deployment page that
    keeps its row: four readings of the ingress's last hour that no row or chip says. Its fifth,
    Container, went — the Events tab already counts the hour's disruptions.
+
+   Settings → Connect (`/dashboard/link`, named after the site's domain until 0.8.2) took the exit
+   on 2026-10-26, at the operator's request, because it read as a form with no life: three grey
+   tiles over three cards each holding two paragraphs. When the link was made and by whom is the
+   identity line's; the heartbeat and the last command are an Activity block of two rows, each with
+   its `Status`, the command in words and drawn as what it acted on. What took the tiles' place is
+   the deploy overview's wiring turned to face out (`account-link/connect-picture.tsx`): what the
+   heartbeat reads — the distribution's logo, Readings, Docker, Backups — wired into this server
+   and out to the site's J and the account, every line pulsing while heartbeats go out, amber and
+   still when the link stopped reaching the site, dashed while nothing is linked. The scope cards
+   lost their *Shares* paragraphs for a mark and one line, because what a scope shares is the list
+   under them, which follows the card picked; that list and the snapshot's groups are drawn with
+   their marks, a kind no product names taking its lane hue as the Schedule band's kinds do.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed
@@ -3281,7 +3295,7 @@ the reader through it.
 | Databases — the control center, the map, a database's home, Search, Compare, Generate, Performance, Advisor, Access, Backups, Alerts, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
 | `/databases/[id]/import` — bring a database over from another server | **Flow** | A sequence with an outcome: which server it is on now, how it should come over, and — for a replication — when to cut over, ending in a database here. The spine is taken from the import the server keeps, so a reload, or the next day, finds it where it was. |
 | A database's Data, Query, Schema, Diagram and Logs | Reading, as a workbench | The reader works rather than scrolls, so the page is one frame held to the window (`<Page fill>` through `SectionFrame`, which takes the fact from the engine registry). A workbench is a layout of this register (§2), not a third one: same grounds, same type ladder, no flow panel. |
-| The server map (`/map`) | Reading, as a workbench | The reader arrives to find out what is on the server and what is wired to what. One frame held to the window (`<Page fill>`) around a canvas and its inspector, the way a database's Diagram is; the boxes are the product's own vocabulary on that canvas — a `ProductLogo` tile, the name, a `Status` dot and word, shelves headed in the eyebrow voice, the dashed ring of a thing not added yet — with no dot grid behind them, and the links are the brand's blue only for the chosen box. *Add* is the surface's one command face. |
+| The server map (`/map`) | Reading, as a workbench | The reader arrives to find out what is on the server and what is wired to what. One frame held to the window (`<Page fill>`) around a canvas and its inspector, the way a database's Diagram is; the boxes are the product's own vocabulary on that canvas — a `ProductLogo` tile, the name, a `Status` dot and word, shelves headed in the eyebrow voice, the dashed ring of a thing not added yet — with projects, databases and domains drawn as cards (the same box with room, its fact on a line of its own) and every name held to a size that reads however far out the canvas is, with no dot grid behind them, and the links are the brand's blue only for the chosen box. *Add* is the surface's one command face. |
 | `/databases/new` — add a database | **Flow** | A question with an outcome: which database, started here or connected, ending in the one command that does it. The section's other flow page is Import. |
 | Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with a picker on it — the generators on a database's Generate page — gets the edge on that picker and changes in no other way. |
 | `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. Each of its four screens is the run page's rail and inspector before the run: the plan read down a rail beside the one focused surface holding the step's fields. |

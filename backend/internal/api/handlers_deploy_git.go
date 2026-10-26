@@ -20,6 +20,13 @@ func (s *Server) handleDeploymentGitWatch(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return mapDeployError(err)
 	}
+	// The reading is an addition to the watch: a host that cannot be asked
+	// leaves it out rather than failing the section it sits in.
+	if s.modules.commitStatuses != nil {
+		if reading, err := s.modules.commitStatuses.Describe(r.Context(), projectID, environmentID); err == nil {
+			status.CommitStatus = reading
+		}
+	}
 	httpx.JSON(w, http.StatusOK, status)
 	return nil
 }

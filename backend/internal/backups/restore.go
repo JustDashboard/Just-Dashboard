@@ -352,11 +352,11 @@ func (r *Runner) localArtifact(ctx context.Context, runID int64) (*Run, ArchiveF
 	if run.Status != StatusSuccess || run.Artifact == "" {
 		return failed(fmt.Errorf("run %d has no successful artifact", runID))
 	}
-	job, err := r.store.Get(ctx, run.JobID)
+	current, err := r.store.Get(ctx, run.JobID)
 	if err != nil {
 		return failed(err)
 	}
-	job = archiveJob(job, run)
+	job, pin := r.store.transferJob(current, run)
 	path := run.Artifact
 	if job.TargetKind == TargetLocal {
 		path, err = r.store.paths.Resolve(path)
@@ -376,7 +376,7 @@ func (r *Runner) localArtifact(ctx context.Context, runID int64) (*Run, ArchiveF
 			return failed(err)
 		}
 		path = filepath.Join(stage, "archive")
-		if err := downloadObject(ctx, job, secrets, run.Artifact, path); err != nil {
+		if err := downloadArtifact(ctx, job, secrets, pin, run.Artifact, path); err != nil {
 			return failed(err)
 		}
 	}

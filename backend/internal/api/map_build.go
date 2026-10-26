@@ -1269,6 +1269,10 @@ func mapBackup(j *backups.Job, now time.Time) mapItem {
 	}
 	destination := string(j.TargetKind)
 	switch {
+	case j.TargetKind == backups.TargetSFTP:
+		destination += " · " + j.Target.Username + "@" + j.Target.Host + ":" + j.Target.Path
+	case j.TargetKind == backups.TargetRclone:
+		destination += " · " + j.Target.RemoteType + ":" + j.Target.Path
 	case j.Target.Bucket != "":
 		destination += " · " + j.Target.Bucket
 	case j.Target.Path != "":

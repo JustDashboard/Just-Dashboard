@@ -301,7 +301,7 @@ persisted there. A kept `.env` is read as Compose reads it: `JD_ACCOUNT_LINK=fal
 switch linking off. In stage 4, after the health check, `$COMPOSE run ... --admin link --scope S --wait 15m` runs
 with its input from `/dev/null`, its output relayed, and **its failure never fails the install**: a decline,
 a timeout or an unreachable site gives a warning and `Not linked. Later: sudo ./scripts/manage.sh link, or
-Settings → just-dashboard.com` as the summary's line; success gives the command's own `Linked to <owner> as
+Settings → Connect` as the summary's line; success gives the command's own `Linked to <owner> as
 "<name>" (<scope>).` line, and a re-run with `--link` on a server that is already linked says `This server is
 already linked to <owner>.` rather than that it is not linked. `scripts/manage.sh link [scope]`, `unlink` and `link-status` forward to the
 commands and keep their exit status.

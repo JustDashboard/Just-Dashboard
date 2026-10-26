@@ -56,6 +56,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/runs/{run}/metrics", s.handle(s.handleDeploymentRunMetrics))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/stream", s.handle(s.handleDeploymentRunStream))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/settings-drift", s.handle(s.handleDeploymentRunSettingsDrift))
+		r.Method(http.MethodGet, "/{id}/runs/{run}/diagnosis", s.handle(s.handleDeploymentRunDiagnosis))
 		r.Method(http.MethodGet, "/{id}/requests", s.handle(s.handleDeploymentRequests))
 		r.Method(http.MethodGet, "/{id}/requests/stream", s.handle(s.handleDeploymentRequestStream))
 		r.Method(http.MethodGet, "/{id}/requests/export", s.handle(s.handleDeploymentRequestExport))
@@ -84,6 +85,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/notifications", s.handle(s.handleDeploymentNotifications))
 		r.Method(http.MethodGet, "/notifications/options", s.handle(s.handleDeploymentNotificationOptions))
 		r.Method(http.MethodGet, "/notifications/{channel}/deliveries", s.handle(s.handleDeploymentNotificationDeliveries))
+		s.mountLogDrainReads(r)
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
@@ -91,6 +93,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/{id}/environments/{env}/runs", s.handle(s.handleDeploymentRunCreate))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/cancel", s.handle(s.handleDeploymentRunCancel))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/retry", s.handle(s.handleDeploymentRunRetry))
+			// Asking about a failure takes what asking the SQL editor's
+			// assistant takes: it spends the install's model budget.
+			r.Method(http.MethodPost, "/{id}/runs/{run}/diagnosis", s.handle(s.handleDeploymentRunDiagnose))
 			// Merging and commenting speak on GitHub as the dashboard's own
 			// account, which is why an API token may not: the same rule as
 			// the Git page's write routes, with the session requirement the
@@ -156,6 +161,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/notifications/{channel}/test", s.handle(s.handleDeploymentNotificationTest))
 				r.Method(http.MethodPut, "/notifications/{channel}/enabled", s.handle(s.handleDeploymentNotificationEnabled))
 				r.Method(http.MethodDelete, "/notifications/{channel}", s.handle(s.handleDeploymentNotificationDelete))
+				s.mountLogDrainWrites(r)
 			})
 			r.Method(http.MethodPost, "/", s.handle(s.handleDeployCreate))
 			r.Method(http.MethodPut, "/{id}", s.handle(s.handleDeployUpdate))

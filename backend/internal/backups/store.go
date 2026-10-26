@@ -12,6 +12,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"golang.org/x/crypto/ssh"
 )
 
 var ErrNotFound = errors.New("backup job not found")
@@ -218,11 +219,14 @@ func (s *Store) Create(ctx context.Context, j *Job, secrets *TargetSecrets) (*Jo
 	if err := s.ValidatePaths(j); err != nil {
 		return nil, err
 	}
+	if err := prepareRemoteTarget(j, secrets, nil); err != nil {
+		return nil, err
+	}
 	if err := s.ensureArchiveKey(ctx, j); err != nil {
 		return nil, err
 	}
 	sealed := ""
-	if secrets != nil && (secrets.AccessKeyID != "" || secrets.SecretAccessKey != "") {
+	if !secrets.Empty() {
 		v, err := s.sealer.Seal(encodeJSON(secrets))
 		if err != nil {
 			return nil, err
@@ -252,6 +256,13 @@ func (s *Store) Update(ctx context.Context, id int64, j *Job, secrets *TargetSec
 	if err := s.ValidatePaths(j); err != nil {
 		return nil, err
 	}
+	current, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := prepareRemoteTarget(j, secrets, current); err != nil {
+		return nil, err
+	}
 	if err := s.ensureArchiveKey(ctx, j); err != nil {
 		return nil, err
 	}
@@ -260,7 +271,7 @@ func (s *Store) Update(ctx context.Context, id int64, j *Job, secrets *TargetSec
 		enabled = 1
 	}
 	sealed := ""
-	replaceSecrets := secrets != nil && (secrets.AccessKeyID != "" || secrets.SecretAccessKey != "")
+	replaceSecrets := !secrets.Empty()
 	if replaceSecrets {
 		var err error
 		sealed, err = s.sealer.Seal(encodeJSON(secrets))
@@ -477,4 +488,72 @@ func (s *Store) SuccessfulRuns(ctx context.Context, jobID int64) ([]*Run, error)
 func (s *Store) DeleteRun(ctx context.Context, runID int64) error {
 	_, err := s.st.DB.ExecContext(ctx, `DELETE FROM backup_runs WHERE id = ?`, runID)
 	return err
+}
+
+// prepareRemoteTarget settles what an SFTP or rclone destination takes from
+// its credentials and from the job it replaces (current is nil on create):
+// credentials a new destination cannot work without, the host key pinned
+// for the same server, and the service an rclone remote names.
+func prepareRemoteTarget(j *Job, secrets *TargetSecrets, current *Job) error {
+	sameKind := current != nil && current.TargetKind == j.TargetKind && current.HasCredentials
+	switch j.TargetKind {
+	case TargetSFTP:
+		if secrets.Empty() && !sameKind {
+			return errors.New("an SFTP destination needs a password or a private key")
+		}
+		if !secrets.Empty() {
+			if _, err := sftpAuth(secrets); err != nil {
+				return err
+			}
+		}
+		switch {
+		case j.ForgetHostKey:
+			j.Target.HostKey, j.Target.HostKeyFingerprint = "", ""
+		case j.Target.HostKey == "" && current != nil && current.TargetKind == TargetSFTP && sameSFTPServer(current.Target, j.Target):
+			// The same server keeps the key it was pinned to; another
+			// server is pinned again the first time it is reached.
+			j.Target.HostKey = current.Target.HostKey
+		}
+		j.Target.HostKeyFingerprint = ""
+		if j.Target.HostKey != "" {
+			key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(j.Target.HostKey))
+			if err != nil {
+				return errors.New("the pinned host key is not an SSH public key line")
+			}
+			j.Target.HostKey = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
+			j.Target.HostKeyFingerprint = FingerprintHostKey(key)
+		}
+	case TargetRclone:
+		if secrets.Empty() || strings.TrimSpace(secrets.RcloneConfig) == "" {
+			if !sameKind {
+				return errors.New("an rclone destination needs the remote's configuration")
+			}
+			j.Target.RemoteType = current.Target.RemoteType
+			return nil
+		}
+		remote, err := ParseRcloneRemote(secrets.RcloneConfig)
+		if err != nil {
+			return err
+		}
+		j.Target.RemoteType = remote.Type
+	}
+	return nil
+}
+
+// PinHostKey records the key an SFTP destination presented the first time
+// it was reached. A key already pinned is never replaced here; only an
+// edit of the destination forgets one.
+func (s *Store) PinHostKey(ctx context.Context, jobID int64, key ssh.PublicKey) error {
+	_, err := s.st.DB.ExecContext(ctx, `
+		UPDATE backup_jobs SET target_cfg = json_set(target_cfg, '$.hostKey', ?, '$.hostKeyFingerprint', ?)
+		 WHERE id = ? AND target_kind = 'sftp' AND COALESCE(json_extract(target_cfg, '$.hostKey'), '') = ''`,
+		strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key))), FingerprintHostKey(key), jobID)
+	return err
+}
+
+// Pinner is PinHostKey for one job, as a transfer needs it.
+func (s *Store) Pinner(jobID int64) HostKeyPinner {
+	return func(ctx context.Context, key ssh.PublicKey) error {
+		return s.PinHostKey(ctx, jobID, key)
+	}
 }

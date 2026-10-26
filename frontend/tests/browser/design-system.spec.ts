@@ -119,6 +119,7 @@ const SURFACES = [
   "/deploy/notifications",
   "/deploy/credentials",
   "/deploy/variables",
+  "/deploy/drains",
   "/deploy/new",
   "/account",
   "/account/security",

@@ -350,6 +350,9 @@ func TestReleaseComparisonNamesEveryChangedFieldAndHidesVariableValues(t *testin
 		"plan": map[string]any{
 			"strategy": "stop_first", "internalPort": 8080, "command": []string{"serve", "--port", "8080"},
 			"mounts": []map[string]any{{"source": "app-data", "target": "/data", "ownership": "managed"}},
+			"forwardAuth": map[string]any{
+				"provider": "authelia", "verify": "http://127.0.0.1:9091/api/authz/auth-request", "signIn": "https://auth.example.test/",
+			},
 		},
 		"variables": []map[string]any{
 			{"name": "TOKEN", "sensitivity": "secret", "scopes": "runtime", "valueDigest": fakeContentDigest("rotated")},
@@ -394,7 +397,7 @@ func TestReleaseComparisonNamesEveryChangedFieldAndHidesVariableValues(t *testin
 	for _, field := range comparison.Detail.Fields {
 		changed[field.Field] = field.Changed
 	}
-	for _, field := range []string{"source revision", "image", "command", "internal port", "strategy", "persistent storage"} {
+	for _, field := range []string{"source revision", "image", "command", "internal port", "strategy", "persistent storage", "sign-in"} {
 		if !changed[field] {
 			t.Fatalf("%q reported unchanged: %#v", field, comparison.Detail.Fields)
 		}

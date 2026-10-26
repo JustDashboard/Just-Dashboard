@@ -84,7 +84,7 @@ func TestLiveObjectStorageBackupUploadsPrunesAndRestores(t *testing.T) {
 		Name: "objects", Sources: []string{source}, Enabled: true, Schedule: "0 3 * * *", Retention: 1,
 		TargetKind: TargetS3, Target: TargetConfig{Bucket: "jd-backups", Prefix: "nightly", Endpoint: endpoint, Region: "us-east-1"},
 	}
-	if err := TestTarget(ctx, job, secrets); err == nil {
+	if err := TestTarget(ctx, job, secrets, nil); err == nil {
 		t.Fatal("a bucket that does not exist passed the target test")
 	}
 	client, err := s3Client(ctx, job, secrets)
@@ -94,7 +94,7 @@ func TestLiveObjectStorageBackupUploadsPrunesAndRestores(t *testing.T) {
 	if _, err := client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &job.Target.Bucket}); err != nil {
 		t.Fatal(err)
 	}
-	if err := TestTarget(ctx, job, secrets); err != nil {
+	if err := TestTarget(ctx, job, secrets, nil); err != nil {
 		t.Fatalf("target test after creating the bucket: %v", err)
 	}
 	created, err := backups.Create(ctx, job, secrets)

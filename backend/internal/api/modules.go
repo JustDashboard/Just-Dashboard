@@ -28,6 +28,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/logdrain"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netcapture"
@@ -97,6 +98,10 @@ type moduleSet struct {
 	// and live tail on a project's Logs page and a site's page is answered
 	// from it.
 	requests *accesslog.Store
+	// logDrains holds where deployments' output and requests are copied to;
+	// logDrainManager ships them, started with the server.
+	logDrains       *logdrain.Store
+	logDrainManager *logdrain.Manager
 	// trafficAlerts watches the request record for the rules operators set,
 	// and tells the notification channels when one crosses its line;
 	// dbAlerts does the same for the databases' readings and their backups,
@@ -124,19 +129,22 @@ type moduleSet struct {
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
-	jobs            *jobs.Manager
-	diagnostics     *netdiag.Service
-	captures        *netcapture.Service
-	captureNative   captureNativeOwner
-	flowAccounting  *netflows.Service
-	backupStore     *backups.Store
-	backupRunner    *backups.Runner
-	backupSched     *backups.Scheduler
-	deployStore     *deploy.Store
-	deployer        *deploy.Deployer
-	deployRuns      *deploy.OrchestrationStore
-	deployEngine    *deploy.Engine
-	deployPlanning  *deploy.PlanningStore
+	jobs           *jobs.Manager
+	diagnostics    *netdiag.Service
+	captures       *netcapture.Service
+	captureNative  captureNativeOwner
+	flowAccounting *netflows.Service
+	backupStore    *backups.Store
+	backupRunner   *backups.Runner
+	backupSched    *backups.Scheduler
+	deployStore    *deploy.Store
+	deployer       *deploy.Deployer
+	deployRuns     *deploy.OrchestrationStore
+	deployEngine   *deploy.Engine
+	deployPlanning *deploy.PlanningStore
+	// commitStatuses reports runs to GitHub, GitLab and Gitea/Forgejo, and
+	// says in Settings where they go and whether the host took them.
+	commitStatuses  *deploy.CommitStatusPublisher
 	deploySources   *deploy.HostSourceAnalyzer
 	deployPreflight *deploy.HostPreflightObserver
 	// deployChecker answers the advisory check and Detect again with the
@@ -256,6 +264,7 @@ func (s *Server) initModules() {
 		s.Cfg.Site, s.Cfg.TLSMode, s.Cfg.DataDir, s.restartProxy, s.Log)
 	s.modules.proxy = proxysvc.NewWithDockerIngress(s.Cfg.NginxDir, s.Cfg.CaddyFile)
 	s.modules.requests = accesslog.NewStore(s.openRequestRecord)
+	s.modules.logDrains = logdrain.NewStore(s.Store, s.Sealer)
 	s.modules.dbs = dbx.NewManager()
 	s.modules.linuxUsers = linuxusers.New()
 	s.modules.netsec = netsec.New()
@@ -384,10 +393,13 @@ func (s *Server) initModules() {
 	// path's success step: a failed deployment is the one somebody most
 	// needs to hear about.
 	notifications := deploy.NewNotificationDispatcher(s.modules.deployAutomation, s.modules.deployRuns, s.dashboardEndpoint, s.Log)
+	forges := deploy.NewForgeClient(s.modules.deployPlanning)
+	s.modules.commitStatuses = deploy.NewCommitStatusPublisher(s.modules.deployRuns, githubStatusPoster{app: s.modules.githubApp, github: s.modules.github}, s.dashboardEndpoint, s.Log).
+		WithForges(forges)
 	s.modules.deployEngine.WithObservers(
 		notifications,
-		deploy.NewCommitStatusPublisher(s.modules.deployRuns, githubStatusPoster{app: s.modules.githubApp, github: s.modules.github}, s.dashboardEndpoint, s.Log),
-		deploy.NewPullRequestCommenter(s.modules.deployRuns, s.modules.githubApp, s.dashboardEndpoint, s.Log),
+		s.modules.commitStatuses,
+		deploy.NewPullRequestCommenter(s.modules.deployRuns, s.modules.githubApp, s.dashboardEndpoint, s.Log).WithForges(forges),
 	)
 	s.modules.deploySchedule = deploy.NewAutomationScheduler(s.modules.deployAutomation, s.dispatchDeploymentSchedule).
 		WithSweep(notifications.RetryFailedDeliveries)

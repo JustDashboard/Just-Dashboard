@@ -22,7 +22,7 @@ type Store struct {
 // whether a pre-rename data directory should be adopted.
 const DatabaseFile = "vpsd.db"
 
-const schema = serverMapSchema + sharedVariableSchema + accountLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
+const schema = runDiagnosisSchema + serverMapSchema + sharedVariableSchema + accountLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -1041,6 +1041,32 @@ CREATE TABLE IF NOT EXISTS deploy_git_watches (
   checked_at     INTEGER NOT NULL DEFAULT 0
 );
 
+-- Log drains: where deployments' output and requests are copied to. The
+-- headers (a drain's credentials) are sealed in config_enc; the status row
+-- is what the drain has shipped and how its last delivery went.
+CREATE TABLE IF NOT EXISTS deploy_log_drains (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL UNIQUE,
+  kind          TEXT NOT NULL,
+  endpoint      TEXT NOT NULL,
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  streams_json  TEXT NOT NULL DEFAULT '["output","requests"]',
+  projects_json TEXT NOT NULL DEFAULT '[]',
+  config_enc    TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS deploy_log_drain_status (
+  drain_id        INTEGER PRIMARY KEY REFERENCES deploy_log_drains(id) ON DELETE CASCADE,
+  shipped         INTEGER NOT NULL DEFAULT 0,
+  dropped         INTEGER NOT NULL DEFAULT 0,
+  batches         INTEGER NOT NULL DEFAULT 0,
+  last_success_at INTEGER NOT NULL DEFAULT 0,
+  last_error      TEXT NOT NULL DEFAULT '',
+  last_error_at   INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS deploy_git_policies (
   environment_id  INTEGER PRIMARY KEY REFERENCES deploy_environments(id) ON DELETE CASCADE,
   automatic       INTEGER NOT NULL DEFAULT 1,
@@ -1049,6 +1075,23 @@ CREATE TABLE IF NOT EXISTS deploy_git_policies (
   commit_statuses INTEGER NOT NULL DEFAULT 1,
   revision        INTEGER NOT NULL DEFAULT 1,
   updated_at      INTEGER NOT NULL DEFAULT 0
+);
+
+-- The last thing written back to the Git host for an environment: one row
+-- for its commit status and one for its preview comment, so Settings can say
+-- whether the host accepted it instead of leaving a refusal in the log.
+CREATE TABLE IF NOT EXISTS deploy_forge_reports (
+  environment_id INTEGER NOT NULL REFERENCES deploy_environments(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL,
+  provider       TEXT NOT NULL DEFAULT '',
+  repository     TEXT NOT NULL DEFAULT '',
+  revision       TEXT NOT NULL DEFAULT '',
+  state          TEXT NOT NULL DEFAULT '',
+  run_id         INTEGER NOT NULL DEFAULT 0,
+  ok             INTEGER NOT NULL DEFAULT 0,
+  message        TEXT NOT NULL DEFAULT '',
+  reported_at    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (environment_id, kind)
 );
 
 CREATE TABLE IF NOT EXISTS deploy_database_networks (

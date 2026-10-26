@@ -43,15 +43,25 @@ func (s *Service) MaintainDockerIngress(ctx context.Context, record func(string,
 }
 
 func parseDockerCaddyTarget(content string) (dockerCaddyTarget, bool) {
+	return parseDockerCaddyTargetLine(content, dockerCaddyTargetPrefix)
+}
+
+// parseDockerCaddyAuthTarget reads the auth server a route signs in through,
+// for a route that has one Caddy reaches over a container network.
+func parseDockerCaddyAuthTarget(content string) (dockerCaddyTarget, bool) {
+	return parseDockerCaddyTargetLine(content, dockerCaddyAuthTargetPrefix)
+}
+
+func parseDockerCaddyTargetLine(content, prefix string) (dockerCaddyTarget, bool) {
 	if !strings.HasPrefix(content, "# Managed by Just Dashboard\n") {
 		return dockerCaddyTarget{}, false
 	}
 	for _, line := range strings.Split(content, "\n") {
-		if !strings.HasPrefix(line, dockerCaddyTargetPrefix) {
+		if !strings.HasPrefix(line, prefix) {
 			continue
 		}
 		var target dockerCaddyTarget
-		if json.Unmarshal([]byte(strings.TrimPrefix(line, dockerCaddyTargetPrefix)), &target) != nil {
+		if json.Unmarshal([]byte(strings.TrimPrefix(line, prefix)), &target) != nil {
 			return target, false
 		}
 		port, err := strconv.Atoi(target.Port)
@@ -101,28 +111,23 @@ func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, b
 		if !ok {
 			continue
 		}
-		next := target
-		found := false
-		connected := false
-		for _, container := range containers {
-			if container.ID == c.ID {
-				_, connected = container.NetworkSettings.Networks[target.Network]
-			}
-			if container.ID != target.ContainerID {
-				continue
-			}
-			if network, ok := container.NetworkSettings.Networks[target.Network]; ok && network.IPAddress != "" {
-				next.Address = network.IPAddress
-				found = true
-			}
+		next, found, connected := c.locateTarget(target, containers)
+		// The auth server a route signs in through is repaired the same way:
+		// a Caddy recreated without its network would refuse every visitor.
+		// One that is gone is left for the next activation to report.
+		auth, gated := parseDockerCaddyAuthTarget(snapshot.Content)
+		nextAuth, authFound, authConnected := auth, false, false
+		if gated {
+			nextAuth, authFound, authConnected = c.locateTarget(auth, containers)
 		}
+		authRepair := authFound && (!authConnected || nextAuth != auth)
 		// A route written before request recording existed serves its site
 		// unrecorded until something rewrites it, and nothing would until the
 		// next deploy. This pass is the something: the block is added here,
 		// through the same write, reload and restore a repair takes, so an
 		// upgrade turns recording on for every managed route within a tick.
 		unrecorded := !hasAccessLog(snapshot.Content)
-		if !found || (connected && next == target && !unrecorded) {
+		if !found || (connected && next == target && !unrecorded && !authRepair) {
 			continue
 		}
 		if err := c.configurationSynced(ctx); err != nil {
@@ -132,10 +137,18 @@ func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, b
 		if !connected || next != target {
 			_, repairErr = c.connectTarget(ctx, next)
 		}
+		if repairErr == nil && authRepair {
+			_, repairErr = c.connectTarget(ctx, nextAuth)
+		}
 		content, rewrite := snapshot.Content, false
 		if repairErr == nil && next != target {
 			content = strings.Replace(content, "reverse_proxy "+strconv.Quote(target.upstream()), "reverse_proxy "+strconv.Quote(next.upstream()), 1)
 			content = strings.Replace(content, target.metadata(), next.metadata(), 1)
+			rewrite = true
+		}
+		if repairErr == nil && authRepair && nextAuth != auth {
+			content = strings.Replace(content, "forward_auth "+strconv.Quote(auth.upstream()), "forward_auth "+strconv.Quote(nextAuth.upstream()), 1)
+			content = strings.Replace(content, auth.authMetadata(), nextAuth.authMetadata(), 1)
 			rewrite = true
 		}
 		if repairErr == nil && unrecorded {
@@ -164,6 +177,27 @@ func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, b
 		}
 	}
 	return nil
+}
+
+// locateTarget finds a persisted target's container where it is now: its
+// address on the target's network, and whether Caddy is still on that
+// network. Container identity, not the published port, decides, so a port
+// reused by another container never redirects the route.
+func (c *dockerCaddy) locateTarget(target dockerCaddyTarget, containers []ingressContainer) (next dockerCaddyTarget, found, connected bool) {
+	next = target
+	for _, container := range containers {
+		if container.ID == c.ID {
+			_, connected = container.NetworkSettings.Networks[target.Network]
+		}
+		if container.ID != target.ContainerID {
+			continue
+		}
+		if network, ok := container.NetworkSettings.Networks[target.Network]; ok && network.IPAddress != "" {
+			next.Address = network.IPAddress
+			found = true
+		}
+	}
+	return next, found, connected
 }
 
 // hasAccessLog reports whether a managed route already records its requests.

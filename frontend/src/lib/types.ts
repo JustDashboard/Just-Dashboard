@@ -12,6 +12,7 @@ import type {
   TCPPoint,
   UploadProfile,
 } from "@/lib/network-traffic"
+import type { ForwardAuthProvider } from "./proxy/types-siteform"
 
 export type Capability =
   | "read"
@@ -2771,13 +2772,23 @@ export type BackupJob = {
   name: string
   sources: string[]
   excludes: string[]
-  targetKind: "local" | "s3" | "b2"
+  targetKind: "local" | "s3" | "b2" | "sftp" | "rclone"
   target: {
     bucket?: string
     region?: string
     endpoint?: string
     prefix?: string
+    /** The directory here, on the SFTP server, or inside the rclone remote. */
     path?: string
+    /** SFTP: the server and account. */
+    host?: string
+    port?: number
+    username?: string
+    /** SFTP: the host key pinned the first time the server was reached. */
+    hostKey?: string
+    hostKeyFingerprint?: string
+    /** rclone: the remote's backend, read from its sealed configuration (drive, onedrive…). */
+    remoteType?: string
   }
   schedule: string
   retention: number
@@ -3168,6 +3179,33 @@ export type DeploymentSettingsChange = {
   change: "changed" | "added" | "removed" | "scope"
   before?: string
   after?: string
+}
+
+/**
+ * `GET`/`POST /deploy/{id}/runs/{run}/diagnosis`: the last answer the
+ * assistant's provider gave about a failed run, kept with it.
+ */
+export type DeploymentRunDiagnosis = {
+  runId: number
+  provider: "anthropic" | "openai"
+  model: string
+  modelLabel: string
+  answer: {
+    cause?: string
+    /** Transcript lines the answer quoted, as the transcript has them. */
+    evidence: { seq: number; text: string }[]
+    steps: string[]
+    /** Lines it quoted that the run never printed, which are left out. */
+    unmatched?: number
+    /** The whole answer, for one that kept to no shape. */
+    text: string
+  }
+  /** Exactly what went to the provider, already masked. */
+  sent: string
+  sentLines: number
+  masked: number
+  createdBy: string
+  createdAt: string
 }
 
 export type DeploymentRunSnapshot = {
@@ -3697,6 +3735,68 @@ export type DeploymentGitWatch = {
   intervalSeconds: number
   reason?: string
   policy?: DeploymentGitPolicy
+  commitStatus?: DeploymentCommitStatus
+}
+
+/** The last thing written back to the Git host: a commit status or a preview comment. */
+export type DeploymentForgeReport = {
+  provider: string
+  repository?: string
+  revision?: string
+  /** pending/success/failure/error for a status; building/ready/failed/removed/cancelled for a comment. */
+  state: string
+  runId?: number
+  ok: boolean
+  /** Why the host did not take it, in words the operator can act on. */
+  message?: string
+  at: string
+}
+
+/** Where an environment's releases are reported, as whom, and how the last one went. */
+export type DeploymentCommitStatus = {
+  /** github, gitlab or gitea (Gitea and Forgejo share one API); absent when nothing is reported. */
+  provider?: "github" | "gitlab" | "gitea" | "git"
+  /** What to call the host: github, gitlab, gitea, forgejo or codeberg. */
+  product?: string
+  host?: string
+  repository?: string
+  /** The status's name on the host, `just-dashboard/<environment>`. */
+  context?: string
+  /** The saved token a GitLab or Gitea status is written with. */
+  credential?: string
+  ready: boolean
+  reason?: string
+  lastStatus?: DeploymentForgeReport
+  lastComment?: DeploymentForgeReport
+}
+
+/** Where deployments' output and requests are copied to: an OTLP collector, a Loki, or a JSON-lines endpoint. */
+export type LogDrainKind = "otlp" | "loki" | "http"
+export type LogDrainStream = "output" | "requests"
+
+export type LogDrain = {
+  id: number
+  name: string
+  kind: LogDrainKind
+  endpoint: string
+  enabled: boolean
+  streams: LogDrainStream[]
+  /** Empty sends every project, including ones created later. */
+  projects: number[]
+  /** The headers the drain sends, by name; their values are sealed and never read back. */
+  headerNames: string[]
+  createdAt: string
+  updatedAt: string
+  status: {
+    shipped: number
+    dropped: number
+    batches: number
+    lastSuccessAt?: string
+    lastError?: string
+    lastErrorAt?: string
+    /** Waiting in memory for the next delivery. */
+    queued: number
+  }
 }
 
 /** One page of a project's run history, newest first. */
@@ -4867,6 +4967,8 @@ export type DeploymentConfiguration = {
     allowFrom?: string[]
     /** Set on every answer the public route gives, replacing the application's own. */
     responseHeaders?: { name: string; value: string }[]
+    /** An auth server asked about every request before the public route answers it. */
+    forwardAuth?: DeploymentForwardAuth
     mounts?: {
       source: string
       target: string
@@ -4925,6 +5027,20 @@ export type DeploymentPlannedDomain = {
 }
 
 export type DeploymentRedirectCode = 301 | 302 | 307 | 308
+
+/**
+ * Sign-in in front of a deployment's public route: a Proxy site's single
+ * sign-on on every path, which previews inherit with the rest of the plan.
+ */
+export type DeploymentForwardAuth = {
+  provider: ForwardAuthProvider
+  /** The auth server's check endpoint, asked with nginx's auth_request convention. */
+  verify: string
+  /** Where a visitor without a session is sent, with rd= set to the address they asked for. */
+  signIn: string
+  /** Leaves this environment's route open and gates only the previews made from it. */
+  previewsOnly?: boolean
+}
 
 export type DeploymentVariable = {
   name: string
@@ -5214,6 +5330,11 @@ export type DeploymentCredential = {
   usedBy: number
   /** The projects behind `usedBy`, ascending; `usedBy` counts environments, so it can be larger. */
   usedByProjectIds?: number[]
+  /**
+   * The projects whose commit statuses and preview comments a provider token
+   * writes. Nothing deploys through it, so this does not count as `usedBy`.
+   */
+  reportsForProjectIds?: number[]
 }
 
 /**

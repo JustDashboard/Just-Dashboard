@@ -582,12 +582,7 @@ func (e *NormalizedStepExecutor) activate(
 			evidence.Recovery = &recovery
 			return StepResult{State: StepUnavailable, ErrorCode: "proxy_unavailable", ErrorMessage: "a managed domain requires an available HTTP proxy", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
-		routeValue := deploymentRoute(release.Release.EnvironmentID, snapshot.Domains, runtime.Host, runtime.Port)
-		routeValue.MaxBodyMB = snapshot.Plan.MaxRequestBodyMB
-		routeValue.AllowFrom = snapshot.Plan.AllowFrom
-		for _, header := range snapshot.Plan.ResponseHeaders {
-			routeValue.ResponseHeaders = append(routeValue.ResponseHeaders, proxysvc.HeaderValue{Name: header.Name, Value: header.Value})
-		}
+		routeValue := publicRoute(release.Release.EnvironmentID, snapshot, runtime.Host, runtime.Port)
 		if routeValue.TLS {
 			resolver, ok := e.proxy.(interface {
 				ResolveDeploymentCertificate(context.Context, []string) (string, string, error)
@@ -684,6 +679,21 @@ func publicRouteActivationEvidence(result proxysvc.DeploymentRouteResult) routeA
 		PriorDigest: result.Snapshot.ContentDigest, Applied: result.Applied,
 		Recovered: result.Recovered, Verified: result.Verified,
 	}
+}
+
+// publicRoute is the route a release's snapshot asks the proxy for: its
+// names, and the rules its plan sets on them.
+func publicRoute(environmentID int64, snapshot runtimeReleaseSnapshot, host string, port int) proxysvc.DeploymentRoute {
+	route := deploymentRoute(environmentID, snapshot.Domains, host, port)
+	route.MaxBodyMB = snapshot.Plan.MaxRequestBodyMB
+	route.AllowFrom = snapshot.Plan.AllowFrom
+	for _, header := range snapshot.Plan.ResponseHeaders {
+		route.ResponseHeaders = append(route.ResponseHeaders, proxysvc.HeaderValue{Name: header.Name, Value: header.Value})
+	}
+	if gate := snapshot.Plan.SignInGate(); gate != nil {
+		route.ForwardAuth = &proxysvc.SiteForwardAuth{Provider: gate.Provider, Verify: gate.Verify, SignIn: gate.SignIn}
+	}
+	return route
 }
 
 func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, port int) proxysvc.DeploymentRoute {

@@ -631,12 +631,42 @@ type RuntimePlanConfig struct {
 	// ResponseHeaders are set on every answer the public route gives,
 	// replacing any header of the same name the application sent.
 	ResponseHeaders []RouteHeader `json:"responseHeaders,omitempty"`
+	// ForwardAuth has the public route ask an auth server about every
+	// request first, so only people who sign in reach the application.
+	ForwardAuth *RouteForwardAuth `json:"forwardAuth,omitempty"`
 }
 
 // RouteHeader is one response header the public route sets.
 type RouteHeader struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
+}
+
+// RouteForwardAuth is the sign-in in front of the public route: Authelia,
+// Authentik, oauth2-proxy or another server answering nginx's auth_request
+// convention, asked at Verify, with SignIn the page a visitor without a
+// session is sent to. The application is told who signed in as Remote-User
+// and Remote-Email.
+//
+// A preview's plan is a copy of this one, so its previews sign in too.
+// PreviewsOnly keeps this environment's own route open and gates only the
+// previews made from it: Vercel's default, where production is public and
+// the work in progress is not.
+type RouteForwardAuth struct {
+	Provider     string `json:"provider"`
+	Verify       string `json:"verify"`
+	SignIn       string `json:"signIn"`
+	PreviewsOnly bool   `json:"previewsOnly,omitempty"`
+}
+
+// SignInGate is the sign-in on this plan's own route, or nil: a gate for
+// previews only is on a preview's plan, which is the copy marked
+// PreviewIsolation, and on no other.
+func (r RuntimePlanConfig) SignInGate() *RouteForwardAuth {
+	if r.ForwardAuth == nil || (r.ForwardAuth.PreviewsOnly && !r.PreviewIsolation) {
+		return nil
+	}
+	return r.ForwardAuth
 }
 
 // PublishedPort is a container port published on the host next to the routed
@@ -1642,7 +1672,46 @@ func (c PlanConfiguration) Validate() error {
 	if err := validateDomainRedirects(c.Domains); err != nil {
 		return err
 	}
-	return validateRouteRules(c.Runtime)
+	if err := validateRouteRules(c.Runtime); err != nil {
+		return err
+	}
+	return validateRouteSignIn(c)
+}
+
+// validateRouteSignIn checks the sign-in in front of the public route: an
+// auth server and a sign-in page either proxy can write, and, on a route it
+// gates, nothing that would undo it. A password is refused because the
+// browser would send it to the auth server as well, which reads an
+// Authorization header as its own credentials; a name served over plain
+// HTTP because its session cookie would cross every network in clear, which
+// is also why Authelia refuses to answer for one. A plan whose sign-in is
+// for its previews alone gates nothing here, unless it is a preview's.
+func validateRouteSignIn(c PlanConfiguration) error {
+	gate := c.Runtime.ForwardAuth
+	if gate == nil {
+		return nil
+	}
+	if !proxysvc.ValidForwardAuthProvider(gate.Provider) {
+		return invalidField("runtime.forwardAuth.provider", "sign-in is through Authelia, Authentik, oauth2-proxy or another server")
+	}
+	if err := proxysvc.ValidateForwardAuthCheck(gate.Verify); err != nil {
+		return invalidField("runtime.forwardAuth.verify", "%v", err)
+	}
+	if err := proxysvc.ValidateForwardAuthSignIn(gate.SignIn); err != nil {
+		return invalidField("runtime.forwardAuth.signIn", "%v", err)
+	}
+	if c.Runtime.SignInGate() == nil {
+		return nil
+	}
+	for _, domain := range c.Domains {
+		if domain.Protection != nil {
+			return invalidField("runtime.forwardAuth", "%s asks for a password, which signing in replaces; remove the password first", domain.Hostname)
+		}
+		if !domain.HTTPS && !domain.Redirects() {
+			return invalidField("runtime.forwardAuth", "%s is served over plain HTTP; signing in needs HTTPS, so the session cookie is never sent in clear", domain.Hostname)
+		}
+	}
+	return nil
 }
 
 // validateDomainRedirects checks that every redirect lands on a domain that
@@ -2413,6 +2482,14 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 	}
 	if len(c.Runtime.ResponseHeaders) == 0 {
 		c.Runtime.ResponseHeaders = nil
+	}
+	if gate := c.Runtime.ForwardAuth; gate != nil {
+		// A copy, so canonicalising never writes through to the caller's plan.
+		trimmed := RouteForwardAuth{
+			Provider: strings.TrimSpace(gate.Provider), Verify: strings.TrimSpace(gate.Verify),
+			SignIn: strings.TrimSpace(gate.SignIn), PreviewsOnly: gate.PreviewsOnly,
+		}
+		c.Runtime.ForwardAuth = &trimmed
 	}
 	sort.Slice(c.Domains, func(i, j int) bool { return c.Domains[i].Hostname < c.Domains[j].Hostname })
 	return c

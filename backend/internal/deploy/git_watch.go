@@ -174,6 +174,9 @@ type GitWatchStatus struct {
 	IntervalSeconds int                 `json:"intervalSeconds"`
 	Reason          string              `json:"reason,omitempty"`
 	Policy          GitDeploymentPolicy `json:"policy"`
+	// CommitStatus says where releases are reported and how the host took
+	// the last one; the route fills it, the watch itself does not.
+	CommitStatus *CommitStatusReading `json:"commitStatus,omitempty"`
 }
 
 type gitWatchCursor struct {

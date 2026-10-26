@@ -21,6 +21,7 @@ import {
   Key,
   Layers,
   Lifebuoy,
+  Link,
   Rocket,
   LineChart,
   Linked,
@@ -180,6 +181,7 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
           // by an administrator, which the page itself says.
           { title: "Shared variables", href: "/deploy/variables", icon: Linked },
           { title: "Notifications", href: "/deploy/notifications", icon: Bell },
+          { title: "Log drains", href: "/deploy/drains", icon: Logs },
         ],
       },
       {
@@ -370,10 +372,12 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
             icon: SettingsSliders,
             capability: "system.admin",
           },
+          // "Connect", not the site's domain: the domain said where the link goes but not
+          // what the page does, and it wore Version's cloud beside it.
           {
-            title: "just-dashboard.com",
+            title: "Connect",
             href: "/dashboard/link",
-            icon: CloudUpload,
+            icon: Link,
             capability: "system.admin",
           },
         ],

@@ -53,6 +53,7 @@ repository the App granted could not be told apart from one abandoned two years 
   a repository no trigger watches, and the App's own lifecycle events, are accepted and ignored.
 - **Commit statuses and pull request comments.** See [notifications](notifications.md): statuses go
   through the App wherever it is installed, and each preview keeps one comment on its pull request.
+  GitLab, Gitea and Forgejo sources report through a saved token instead, under the same observers.
 - **Pull request reads.** `pulls.go` reads a repository's pull requests through the installation
   that grants it: `Client.ListPullRequests` (paged, `open`/`closed`/`all` validated before the path is
   built), `GetPullRequest` (404 → `ErrPullRequestNotFound`), `ListCheckRuns` (403 → `ErrPermission`,
