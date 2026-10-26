@@ -301,7 +301,7 @@ JD_FRONTEND_PORT=42002
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(self.link_calls(), [])
                 self.assertIn("Setup complete", result.stdout)
-                self.assertIn("Not linked. Later: sudo ./scripts/manage.sh link, or Settings → just-dashboard.com", result.stdout)
+                self.assertIn("Not linked. Later: sudo ./scripts/manage.sh link, or Settings → Connect", result.stdout)
                 self.assertNotIn("Linking to just-dashboard.com", result.stdout)
                 for line in ("manage.sh link [scope]", "manage.sh unlink", "manage.sh link-status"):
                     self.assertIn(line, result.stdout)
@@ -402,7 +402,7 @@ JD_FRONTEND_PORT=42002
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.link_calls(), [])
         self.assertIn("Linking this server to a just-dashboard.com account is optional", result.stdout)
-        self.assertIn("sudo ./scripts/manage.sh link, or Settings → just-dashboard.com", result.stdout)
+        self.assertIn("sudo ./scripts/manage.sh link, or Settings → Connect", result.stdout)
         # It does not claim the install is unlinked: it may well be linked.
         self.assertNotIn("Not linked", result.stdout)
 

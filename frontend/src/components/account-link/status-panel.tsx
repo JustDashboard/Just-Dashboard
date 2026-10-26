@@ -1,88 +1,127 @@
 "use client"
 
 import { useState } from "react"
-import { RefreshClockwise, Warning } from "@/components/icons"
-import { heartbeatStale, scopeName } from "@/lib/account-link"
+import { Archive, Heart, RefreshClockwise, Warning } from "@/components/icons"
+import { commandWords, heartbeatStale, scopeName } from "@/lib/account-link"
 import { errorMessage } from "@/lib/api"
 import { calendarDate, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { AccountLinkScope, AccountLinkStatus } from "@/lib/types"
 import { useNow } from "@/hooks/use-now"
+import { MarkTile, type Mark } from "@/components/account-link/marks"
 import { Reading, ReadingList } from "@/components/account-link/reading"
 import { ScopeCards } from "@/components/account-link/scope-cards"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Section } from "@/components/page"
+import { Row, RowList } from "@/components/row-list"
 import { Notice } from "@/components/state"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 
 type Link = NonNullable<AccountLinkStatus["link"]>
 
+/** On the section's own edge, under its title: the rows open nothing, so they take no bleed. */
+const ROW = "px-0 py-3.5"
+
+const COMMAND_STATUS = {
+  succeeded: { tone: "running", label: "Succeeded" },
+  failed: { tone: "danger", label: "Failed" },
+  refused: { tone: "warning", label: "Refused" },
+} as const
+
+/** A command drawn as what it acts on: Docker for a container or a stack, this dashboard itself. */
+function commandMark(kind: string): Mark {
+  if (kind.startsWith("dashboard.")) return { brand: true }
+  if (kind.startsWith("container.")) return { product: "docker" }
+  if (kind.startsWith("stack.")) return { product: "docker-compose" }
+  if (kind.startsWith("backup.")) return { glyph: Archive, hue: "var(--tag-violet)" }
+  return { glyph: RefreshClockwise, hue: "var(--tag-blue)" }
+}
+
 /**
- * How the link is doing — when it was made, when the site last heard from this server, what it
- * last asked for — then the one setting that can change, the scope.
- *
- * Each figure is a reading of the link rather than of the machine, and the two that can go wrong
- * say so through their tone: a heartbeat that has gone quiet, a command the server refused.
+ * What the link has been doing: the heartbeat this server sends, and the last thing the site
+ * asked it to do. They were two of three figures in a row of tiles, with the third — when the link
+ * was made — already the identity line's; as rows they carry the state as a `Status` at their far
+ * end, which is where every other page in the product says whether a thing is working.
  */
-export function StatusPanel({
+export function Activity({
   link,
   site,
-  onChangeScope,
+  className,
 }: {
   link: Link
   site: string
-  onChangeScope: (scope: AccountLinkScope) => Promise<void>
+  className?: string
 }) {
   const now = useNow(10_000)
-  const silent = Boolean(link.lastError) || heartbeatStale(link.lastHeartbeatAt, now)
+  const stale = heartbeatStale(link.lastHeartbeatAt, now)
   const command = link.lastCommand
+  const sender = command?.issuedBy.replace(/^account:/, "")
 
   return (
-    <>
-      <StatGrid columns={3}>
-        <StatTile
-          label="Linked"
-          value={relativeTime(link.linkedAt)}
-          hint={link.linkedBy === "cli" ? "from the terminal" : `by ${link.linkedBy}`}
-        />
-        <StatTile
-          label="Last heartbeat"
-          value={link.lastHeartbeatAt ? relativeTime(link.lastHeartbeatAt) : "Not yet"}
-          tone={silent ? "warning" : "default"}
-          hint={link.lastHeartbeatAt ? timestamp(link.lastHeartbeatAt) : "Sent every 30 seconds"}
-        />
-        <StatTile
-          label="Last command"
-          value={command?.kind ?? "None"}
-          tone={
-            command?.status === "failed"
-              ? "danger"
-              : command?.status === "refused"
-                ? "warning"
-                : "default"
-          }
-          hint={command && `${command.status} · ${command.issuedBy} · ${relativeTime(command.at)}`}
-        />
-      </StatGrid>
-
+    <Section title="Activity" className={className}>
       {link.lastError && (
         <Notice tone="warning" icon={Warning} title={`The last exchange with ${site} failed`}>
           {link.lastError}
         </Notice>
       )}
-
-      <ScopeSection scope={link.scope} onChange={onChangeScope} />
-    </>
+      <RowList>
+        <Row
+          className={ROW}
+          leading={<MarkTile mark={{ glyph: Heart, hue: "var(--tag-green)" }} />}
+          title="Heartbeat"
+          subtitle={
+            link.lastHeartbeatAt
+              ? `Last sent ${relativeTime(link.lastHeartbeatAt)} · ${timestamp(link.lastHeartbeatAt)}`
+              : "Sent every 30 seconds"
+          }
+          trailing={
+            link.lastError ? (
+              <Status tone="warning" label="Not reaching the site" />
+            ) : stale ? (
+              <Status tone="warning" label="Gone quiet" />
+            ) : link.lastHeartbeatAt ? (
+              <Status tone="running" label="Sending" live />
+            ) : (
+              <Status tone="stopped" label="Not yet" />
+            )
+          }
+        />
+        {command ? (
+          <Row
+            className={ROW}
+            leading={<MarkTile mark={commandMark(command.kind)} />}
+            title={commandWords(command.kind)}
+            subtitle={`Last command · ${sender} · ${relativeTime(command.at)}`}
+            trailing={
+              <Status
+                tone={COMMAND_STATUS[command.status].tone}
+                label={COMMAND_STATUS[command.status].label}
+              />
+            }
+          />
+        ) : (
+          <Row
+            className={ROW}
+            leading={<MarkTile mark={{ glyph: RefreshClockwise, hue: "var(--tag-blue)" }} />}
+            title="No commands yet"
+            subtitle={`What ${site} asks this server to do shows up here`}
+          />
+        )}
+      </RowList>
+    </Section>
   )
 }
 
-function ScopeSection({
+/** The scope in force, as the same cards that chose it, and the command that changes it. */
+export function ScopeSection({
   scope,
   onChange,
+  className,
 }: {
   scope: AccountLinkScope
   onChange: (scope: AccountLinkScope) => Promise<void>
+  className?: string
 }) {
   // Null follows the server, so a scope changed from the terminal or the site shows up here.
   const [pick, setPick] = useState<AccountLinkScope | null>(null)
@@ -105,7 +144,8 @@ function ScopeSection({
   return (
     <Section
       title="Scope"
-      actions={<span className="text-hint text-muted-foreground">now {scopeName(scope)}</span>}
+      className={className}
+      actions={<span className="text-xs text-muted-foreground">Now {scopeName(scope)}</span>}
     >
       <ScopeCards value={draft} onChange={setPick} disabled={busy} />
       {draft !== scope && (
@@ -126,12 +166,14 @@ function ScopeSection({
 export function Keys({
   fingerprint,
   siteKeys,
+  className,
 }: {
   fingerprint?: string
   siteKeys: Link["siteKeys"]
+  className?: string
 }) {
   return (
-    <Section title="Keys">
+    <Section title="Keys" className={className}>
       <ReadingList>
         {fingerprint && (
           <Reading label="This server" mono>

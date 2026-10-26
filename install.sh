@@ -152,7 +152,7 @@ esac
 # summary ends on, set only when linking was on the table.
 LINK=0
 LINK_SUMMARY=""
-LINK_LATER="Not linked. Later: sudo ./scripts/manage.sh link, or Settings → just-dashboard.com"
+LINK_LATER="Not linked. Later: sudo ./scripts/manage.sh link, or Settings → Connect"
 
 say ""
 say "${BLUE}${BOLD}Just Dashboard${RESET}${version:+  $version}"
@@ -739,7 +739,7 @@ if [ "$KEEP_ENV" -eq 1 ]; then
 	elif [ -z "$LINK_FLAG" ]; then
 		say ""
 		say "  ${DIM}Linking this server to a just-dashboard.com account is optional:${RESET}"
-		say "  ${DIM}sudo ./scripts/manage.sh link, or Settings → just-dashboard.com.${RESET}"
+		say "  ${DIM}sudo ./scripts/manage.sh link, or Settings → Connect.${RESET}"
 	fi
 fi
 

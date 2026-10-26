@@ -436,7 +436,7 @@ disconnects the web terminal; it recreates containers with current settings, whi
 
 Optional, and off until you do it. A linked server shows up on your [just-dashboard.com](https://just-dashboard.com)
 account with its health, version and the way to reach it, so you can find your dashboards in one
-place. Link it from **Settings → just-dashboard.com**, from the question in `install.sh`, or over SSH
+place. Link it from **Settings → Connect**, from the question in `install.sh`, or over SSH
 with `sudo ./scripts/manage.sh link`; all three run the same code. The server asks the site for a short
 code, you enter it on the site while signed in, and the server learns it was approved. Nothing secret is
 typed or printed: the code only points at the request, and completing the link needs the key this
