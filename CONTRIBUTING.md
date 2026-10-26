@@ -291,6 +291,10 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_TEST_S3_ENDPOINT` and its keys: `go test ./internal/backups -run TestLiveEncryptedArchiveRoundTripsThroughObjectStorage -count=1 -v`;
   a native dump restored from an encrypted archive takes `JD_TEST_POSTGRES_DSN` and
   `JD_TEST_MYSQL_ADMIN_DSN`: `go test ./internal/api -run TestLiveEncryptedArchiveRestoresANativeDump -count=1 -v`.
+  SFTP and rclone destinations against an OpenSSH server (atmoz/sftp) and a WebDAV server run by rclone,
+  through the same lifecycle plus a refused host-key change:
+  `JD_DEPLOY_LIVE=1 go test ./internal/backups -run TestLiveSFTPAndRcloneBackupsUploadPruneAndRestore -count=1 -v`
+  (the rclone half needs `rclone` on PATH, as the backend image ships it).
 - The public-certificate journey against a real ACME authority (an isolated Caddy and a Pebble that
   validates nothing, on one Docker network):
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory -count=1 -v`.

@@ -97,6 +97,8 @@ const BACKUP_TARGET_NAMES: Record<BackupJob["targetKind"], string> = {
   local: "This server",
   s3: "S3 bucket",
   b2: "Backblaze B2",
+  sftp: "SFTP server",
+  rclone: "rclone remote",
 }
 
 // Only explicit metadata enters the index. API payloads can contain credentials,

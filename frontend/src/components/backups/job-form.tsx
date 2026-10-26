@@ -27,7 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { SearchInput } from "@/components/page"
-import { RESOURCE_KIND_LABEL, lines } from "@/components/backups/shared"
+import { RESOURCE_KIND_LABEL, lines, rcloneService } from "@/components/backups/shared"
 import { encrypts } from "@/components/backups/encryption"
 import {
   backupInputs,
@@ -133,6 +133,23 @@ export function JobDialog({
   const [prefix, setPrefix] = useMemoryState(`${draft}.prefix`, openedJob?.target.prefix ?? "")
   const [accessKey, setAccessKey] = useMemoryState(`${draft}.accessKey`, "")
   const [secretKey, setSecretKey] = useMemoryState(`${draft}.secretKey`, "")
+  const opened = openedJob?.target
+  const [sftpHost, setSftpHost] = useMemoryState(`${draft}.sftpHost`, opened?.host ?? "")
+  const [sftpPort, setSftpPort] = useMemoryState(`${draft}.sftpPort`, String(opened?.port ?? 22))
+  const [sftpUser, setSftpUser] = useMemoryState(`${draft}.sftpUser`, opened?.username ?? "")
+  const [sftpPath, setSftpPath] = useMemoryState(
+    `${draft}.sftpPath`,
+    openedJob?.targetKind === "sftp" ? (opened?.path ?? "") : "backups",
+  )
+  const [sftpPassword, setSftpPassword] = useMemoryState(`${draft}.sftpPassword`, "")
+  const [sftpKey, setSftpKey] = useMemoryState(`${draft}.sftpKey`, "")
+  const [sftpPassphrase, setSftpPassphrase] = useMemoryState(`${draft}.sftpPassphrase`, "")
+  const [forgetHostKey, setForgetHostKey] = useMemoryState(`${draft}.forgetHostKey`, false)
+  const [rclonePath, setRclonePath] = useMemoryState(
+    `${draft}.rclonePath`,
+    openedJob?.targetKind === "rclone" ? (opened?.path ?? "") : "",
+  )
+  const [rcloneConfig, setRcloneConfig] = useMemoryState(`${draft}.rcloneConfig`, "")
   // Unset follows the destination until the operator turns it either way.
   const [encryptChoice, setEncrypt] = useMemoryState<boolean | null>(
     `${draft}.encrypt`,
@@ -215,10 +232,24 @@ export function JobDialog({
   const valid = scheduleValid(expression)
 
   const sourceList = lines(sources)
+  // Credentials the destination cannot work without: a new SFTP or rclone
+  // destination has none saved to fall back on.
+  const keepsCredentials =
+    Boolean(openedJob?.hasCredentials) && openedJob?.targetKind === targetKind
+  const targetReady =
+    targetKind === "sftp"
+      ? sftpHost.trim() !== "" &&
+        sftpUser.trim() !== "" &&
+        sftpPath.trim() !== "" &&
+        (keepsCredentials || sftpPassword !== "" || sftpKey.trim() !== "")
+      : targetKind === "rclone"
+        ? keepsCredentials || rcloneConfig.trim() !== ""
+        : true
   const canSave =
     name.trim().length > 0 &&
     (sourceList.length > 0 || databaseDumps.length > 0) &&
     valid &&
+    targetReady &&
     !busy &&
     (!job || (openedJob?.revision ?? 0) > 0)
 
@@ -235,7 +266,20 @@ export function JobDialog({
     sources: sourceList,
     excludes: lines(excludes),
     targetKind,
-    target: targetKind === "local" ? { path } : { bucket, region, endpoint, prefix },
+    target:
+      targetKind === "local"
+        ? { path }
+        : targetKind === "sftp"
+          ? {
+              host: sftpHost.trim(),
+              port: Number(sftpPort) || 22,
+              username: sftpUser.trim(),
+              path: sftpPath.trim(),
+            }
+          : targetKind === "rclone"
+            ? { path: rclonePath.trim() }
+            : { bucket, region, endpoint, prefix },
+    forgetHostKey: targetKind === "sftp" && forgetHostKey ? true : undefined,
     schedule: expression,
     retention: Math.max(0, Number(retention) || 0),
     retentionDays: Math.max(0, Number(retentionDays) || 0),
@@ -258,7 +302,17 @@ export function JobDialog({
     expectedRecoveryOutput: expectedOutput.trim() || undefined,
     // Omitted when blank so editing a schedule does not wipe stored keys.
     secrets:
-      accessKey || secretKey ? { accessKeyId: accessKey, secretAccessKey: secretKey } : undefined,
+      targetKind === "sftp"
+        ? sftpPassword || sftpKey.trim()
+          ? { password: sftpPassword, privateKey: sftpKey.trim(), passphrase: sftpPassphrase }
+          : undefined
+        : targetKind === "rclone"
+          ? rcloneConfig.trim()
+            ? { rcloneConfig: rcloneConfig.trim() }
+            : undefined
+          : accessKey || secretKey
+            ? { accessKeyId: accessKey, secretAccessKey: secretKey }
+            : undefined,
   }
   const submit = async (expectedRevision = openedJob?.revision) => {
     if (!canSave) return
@@ -428,10 +482,74 @@ export function JobDialog({
                 <SelectItem value="local">A directory on this server</SelectItem>
                 <SelectItem value="s3">Amazon S3 or any S3-compatible bucket</SelectItem>
                 <SelectItem value="b2">Backblaze B2</SelectItem>
+                <SelectItem value="sftp">An SFTP server</SelectItem>
+                <SelectItem value="rclone">
+                  Google Drive, OneDrive, Dropbox, WebDAV and more, through rclone
+                </SelectItem>
               </SelectContent>
             </Select>
           </Field>
-          {targetKind === "local" ? (
+          {targetKind === "sftp" ? (
+            <SftpFields
+              job={openedJob}
+              keepsCredentials={keepsCredentials}
+              host={sftpHost}
+              setHost={setSftpHost}
+              port={sftpPort}
+              setPort={setSftpPort}
+              user={sftpUser}
+              setUser={setSftpUser}
+              path={sftpPath}
+              setPath={setSftpPath}
+              password={sftpPassword}
+              setPassword={setSftpPassword}
+              privateKey={sftpKey}
+              setPrivateKey={setSftpKey}
+              passphrase={sftpPassphrase}
+              setPassphrase={setSftpPassphrase}
+              forgetHostKey={forgetHostKey}
+              setForgetHostKey={setForgetHostKey}
+            />
+          ) : targetKind === "rclone" ? (
+            <>
+              <Field
+                label="Remote configuration"
+                htmlFor="job-rclone-config"
+                hint={
+                  keepsCredentials
+                    ? `Saved for ${rcloneService(openedJob?.target.remoteType)}. Paste a new configuration to replace it.`
+                    : "Set the remote up with rclone config on any computer, then paste what rclone config show <name> prints, token included. Sealed with the dashboard's master key and never shown again."
+                }
+              >
+                <Textarea
+                  id="job-rclone-config"
+                  value={rcloneConfig}
+                  onChange={(e) => setRcloneConfig(e.target.value)}
+                  rows={6}
+                  spellCheck={false}
+                  className="font-mono text-xs"
+                  placeholder={
+                    keepsCredentials
+                      ? "unchanged"
+                      : '[gdrive]\ntype = drive\nscope = drive\ntoken = {"access_token":"…"}'
+                  }
+                />
+              </Field>
+              <Field
+                label="Folder"
+                htmlFor="job-rclone-path"
+                hint="Inside the remote. For object storage, the bucket comes first."
+              >
+                <Input
+                  id="job-rclone-path"
+                  value={rclonePath}
+                  onChange={(e) => setRclonePath(e.target.value)}
+                  placeholder="backups/this-server"
+                  className="font-mono text-body"
+                />
+              </Field>
+            </>
+          ) : targetKind === "local" ? (
             <Field
               label="Directory"
               htmlFor="job-path"
@@ -909,5 +1027,147 @@ function ResourcePicker({
         </Group>
       )}
     </div>
+  )
+}
+
+/**
+ * An SFTP server: where it is, who signs in, and the host key the dashboard
+ * pinned the first time it reached it. A password, a key, or both; a key may
+ * carry its passphrase.
+ */
+function SftpFields(props: {
+  job?: BackupJob
+  keepsCredentials: boolean
+  host: string
+  setHost: (value: string) => void
+  port: string
+  setPort: (value: string) => void
+  user: string
+  setUser: (value: string) => void
+  path: string
+  setPath: (value: string) => void
+  password: string
+  setPassword: (value: string) => void
+  privateKey: string
+  setPrivateKey: (value: string) => void
+  passphrase: string
+  setPassphrase: (value: string) => void
+  forgetHostKey: boolean
+  setForgetHostKey: (value: boolean) => void
+}) {
+  const unchanged = props.keepsCredentials ? "unchanged" : ""
+  const saved = props.job?.targetKind === "sftp" ? props.job.target : undefined
+  // The pin belongs to the server it was taken from; another address is
+  // pinned afresh, so its fingerprint stops applying the moment it is typed.
+  const samePlace =
+    saved &&
+    saved.host?.toLowerCase() === props.host.trim().toLowerCase() &&
+    (saved.port ?? 22) === (Number(props.port) || 22)
+  const fingerprint = samePlace ? saved?.hostKeyFingerprint : undefined
+  return (
+    <>
+      <FieldRow>
+        <Field label="Server" htmlFor="job-sftp-host">
+          <Input
+            id="job-sftp-host"
+            value={props.host}
+            onChange={(e) => props.setHost(e.target.value)}
+            placeholder="backup.example.com"
+            spellCheck={false}
+          />
+        </Field>
+        <Field label="Port" htmlFor="job-sftp-port">
+          <Input
+            id="job-sftp-port"
+            value={props.port}
+            onChange={(e) => props.setPort(e.target.value.replace(/[^0-9]/g, ""))}
+            inputMode="numeric"
+            placeholder="22"
+          />
+        </Field>
+      </FieldRow>
+      <FieldRow>
+        <Field label="Account" htmlFor="job-sftp-user">
+          <Input
+            id="job-sftp-user"
+            value={props.user}
+            onChange={(e) => props.setUser(e.target.value)}
+            spellCheck={false}
+          />
+        </Field>
+        <Field
+          label="Directory"
+          htmlFor="job-sftp-path"
+          hint="Under the account's home unless it starts with /."
+        >
+          <Input
+            id="job-sftp-path"
+            value={props.path}
+            onChange={(e) => props.setPath(e.target.value)}
+            className="font-mono text-body"
+          />
+        </Field>
+      </FieldRow>
+      <FieldRow>
+        <Field label="Password" htmlFor="job-sftp-password" hint="A password, a key, or both.">
+          <Input
+            id="job-sftp-password"
+            type="password"
+            value={props.password}
+            onChange={(e) => props.setPassword(e.target.value)}
+            placeholder={unchanged}
+          />
+        </Field>
+        <Field
+          label="Key passphrase"
+          htmlFor="job-sftp-passphrase"
+          hint="Only for a protected key."
+        >
+          <Input
+            id="job-sftp-passphrase"
+            type="password"
+            value={props.passphrase}
+            onChange={(e) => props.setPassphrase(e.target.value)}
+            placeholder={unchanged}
+          />
+        </Field>
+      </FieldRow>
+      <Field
+        label="Private key"
+        htmlFor="job-sftp-key"
+        hint="OpenSSH or PEM. Sealed with the dashboard's master key and never shown again."
+      >
+        <Textarea
+          id="job-sftp-key"
+          value={props.privateKey}
+          onChange={(e) => props.setPrivateKey(e.target.value)}
+          rows={3}
+          spellCheck={false}
+          className="font-mono text-xs"
+          placeholder={unchanged || "-----BEGIN OPENSSH PRIVATE KEY-----"}
+        />
+      </Field>
+      {fingerprint ? (
+        <OptionList>
+          <OptionRow
+            title="Pin the server again"
+            hint={
+              <>
+                Pinned to <span className="font-mono">{fingerprint}</span>; a server presenting
+                another key is refused. Turn this on after reinstalling the server, and its new key
+                is pinned the next time it is reached.
+              </>
+            }
+            checked={props.forgetHostKey}
+            onCheckedChange={props.setForgetHostKey}
+          />
+        </OptionList>
+      ) : (
+        <FormNote>
+          The server&apos;s host key is pinned the first time it is reached. Test the destination
+          after saving and compare the fingerprint it shows with the server&apos;s own.
+        </FormNote>
+      )}
+    </>
   )
 }

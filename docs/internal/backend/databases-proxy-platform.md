@@ -2696,7 +2696,8 @@ say, the window, the base backup a recovery starts from, retention — is `dbx/p
 - **The destinations are a backup job's**: a directory on this server (default
   `JD_BACKUP_DIR/wal`), S3 or Backblaze B2, each archive a folder of its own (`<container>-<UTC
   stamp>`). `fromJob` takes an existing backup job's destination and sealed keys, so a bucket's keys
-  are not typed twice. Keys are sealed with `JD_MASTER_KEY` like a job's and never returned.
+  are not typed twice; a job whose destination is SFTP or rclone is refused, since WAL-G writes only
+  to a directory or an object store. Keys are sealed with `JD_MASTER_KEY` like a job's and never returned.
 - **Encrypted with WAL-G's own OpenPGP**, to a key made for the archive. The server is given only the
   public half, which is all encrypting needs: a server, or a superuser reading `walg.json` through
   `pg_read_file`, cannot read its own archive back. The private half is sealed in the store and written
