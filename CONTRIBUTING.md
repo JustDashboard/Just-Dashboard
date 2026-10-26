@@ -296,7 +296,12 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory -count=1 -v`.
   Changes to how a deployment route renders its redirects, response headers or allowed addresses also
   run `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules -count=1 -v`,
-  which asks a real Caddy what it answers for each.
+  which asks a real Caddy what it answers for each. Changes to a route's sign-in, how Caddy reaches the
+  auth server, or the maintenance pass that repairs that network also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyGatesRouteBehindForwardAuth -count=1 -v`,
+  which signs in at a real Authelia (`authelia/authelia:4.39`, pulled on first run) in front of
+  `traefik/whoami`, and `go test ./internal/proxysvc -run TestLiveDeploymentRouteSignsInOnNginx`, which
+  needs only the host's nginx.
   This uses locked application fixtures and checks served build values, private install credentials,
   SvelteKit adapters, HTML/Containerfile defaults and Go command/version behavior, plus the catalogue's
   own starters: Astro, Nuxt, React Router, FastAPI (unpinned requirements, server auto-installed), a

@@ -12,6 +12,7 @@ import type {
   TCPPoint,
   UploadProfile,
 } from "@/lib/network-traffic"
+import type { ForwardAuthProvider } from "./proxy/types-siteform"
 
 export type Capability =
   | "read"
@@ -4867,6 +4868,8 @@ export type DeploymentConfiguration = {
     allowFrom?: string[]
     /** Set on every answer the public route gives, replacing the application's own. */
     responseHeaders?: { name: string; value: string }[]
+    /** An auth server asked about every request before the public route answers it. */
+    forwardAuth?: DeploymentForwardAuth
     mounts?: {
       source: string
       target: string
@@ -4925,6 +4928,20 @@ export type DeploymentPlannedDomain = {
 }
 
 export type DeploymentRedirectCode = 301 | 302 | 307 | 308
+
+/**
+ * Sign-in in front of a deployment's public route: a Proxy site's single
+ * sign-on on every path, which previews inherit with the rest of the plan.
+ */
+export type DeploymentForwardAuth = {
+  provider: ForwardAuthProvider
+  /** The auth server's check endpoint, asked with nginx's auth_request convention. */
+  verify: string
+  /** Where a visitor without a session is sent, with rd= set to the address they asked for. */
+  signIn: string
+  /** Leaves this environment's route open and gates only the previews made from it. */
+  previewsOnly?: boolean
+}
 
 export type DeploymentVariable = {
   name: string

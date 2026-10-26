@@ -14,6 +14,7 @@ import {
   type Icon,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
+import { SSO_PROVIDERS, chooseSsoProvider, ssoPreset } from "@/lib/sso-providers"
 import { ApiError, get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type {
@@ -3763,43 +3764,6 @@ function AccessSection({
   )
 }
 
-const SSO_PROVIDERS: {
-  value: ForwardAuthProvider
-  label: string
-  verify: string
-  signIn: string
-  sends: string
-}[] = [
-  {
-    value: "authelia",
-    label: "Authelia",
-    verify: "http://127.0.0.1:9091/api/authz/auth-request",
-    signIn: "https://auth.example.com/",
-    sends: "Remote-User and Remote-Email",
-  },
-  {
-    value: "authentik",
-    label: "Authentik",
-    verify: "http://127.0.0.1:9000/outpost.goauthentik.io/auth/nginx",
-    signIn: "https://authentik.example.com/outpost.goauthentik.io/start",
-    sends: "X-authentik-username and X-authentik-email",
-  },
-  {
-    value: "oauth2-proxy",
-    label: "oauth2-proxy",
-    verify: "http://127.0.0.1:4180/oauth2/auth",
-    signIn: "https://auth.example.com/oauth2/start",
-    sends: "X-Auth-Request-User and X-Auth-Request-Email (run it with --set-xauthrequest)",
-  },
-  {
-    value: "custom",
-    label: "Other",
-    verify: "",
-    signIn: "https://auth.example.com/login",
-    sends: "Remote-User and Remote-Email",
-  },
-]
-
 /** Single sign-on through an auth server nginx asks about each request. */
 function SingleSignOn({
   spec,
@@ -3809,16 +3773,10 @@ function SingleSignOn({
   set: <K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => void
 }) {
   const sso = spec.forwardAuth
-  const preset = SSO_PROVIDERS.find((p) => p.value === sso?.provider) ?? SSO_PROVIDERS[0]
+  const preset = ssoPreset(sso?.provider)
   const update = (patch: Partial<SiteForwardAuth>) =>
     set("forwardAuth", { provider: "authelia", verify: "", signIn: "", ...sso, ...patch })
-  // A check address still at another preset's default follows the choice;
-  // one the operator typed stays.
-  const choose = (provider: ForwardAuthProvider) => {
-    const next = SSO_PROVIDERS.find((p) => p.value === provider)
-    const typed = sso?.verify && !SSO_PROVIDERS.some((p) => p.verify === sso.verify)
-    update({ provider, ...(next && !typed ? { verify: next.verify } : {}) })
-  }
+  const choose = (provider: ForwardAuthProvider) => update(chooseSsoProvider(sso, provider))
   const conflicts = [
     (spec.basicAuthFile || spec.accessList !== undefined) && "the password and access list",
     spec.interceptErrors && "replacing the application's own error pages",

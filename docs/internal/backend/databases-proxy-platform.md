@@ -4058,6 +4058,12 @@ containers/volumes/networks.
   401s would redirect), and with a custom `Remote-User`/`Remote-Email` request header. The provider
   round-trips through the `# Single sign-on through <provider>.` comment. Session cookies the auth
   server sets on the check response are not relayed, so the sign-in portal must set its own.
+  The provider, check-address and sign-in-page rules are exported (`ValidForwardAuthProvider`,
+  `ValidateForwardAuthCheck`, `ValidateForwardAuthSignIn`) because a deployment route's sign-in
+  (`DeploymentRoute.ForwardAuth`) is held to the same ones; on nginx that route is this site
+  feature on every path, and on the Docker Caddy ingress it is the equivalent `forward_auth`
+  ([Caddy ingress](../deployments/caddy-ingress.md#sign-in)). The form's four presets live in
+  `frontend/src/lib/sso-providers.ts`, shared with the deployment Domains settings.
 
   **HSTS and TLS versions** (`sites_tls.go`, form "Encryption"). `HSTSMaxAge` (0 = 15552000, else
   300..63072000), `HSTSOwnNameOnly` (drops `includeSubDomains`) and `HSTSPreload` (refused below a year
