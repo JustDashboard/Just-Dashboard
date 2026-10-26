@@ -131,9 +131,11 @@ func TestTheSiteRemovingTheServerClearsTheLinkAndStopsEverything(t *testing.T) {
 func TestFailedExchangesBackOffShowAsAnErrorAndRecover(t *testing.T) {
 	t.Parallel()
 	e := startedEnv(t)
-	e.link(ScopeObserve)
+	// Failing from before the link: a first heartbeat that got through would
+	// put the next one HeartbeatSeconds away, past any wait here.
 	e.site.fail("/heartbeat", 1000)
 	e.site.fail("/commands", 1000)
+	e.link(ScopeObserve)
 	waitFor(t, "an error to show", func() bool {
 		s, _ := e.svc.Status(t.Context())
 		return s.Link != nil && s.Link.LastError != "" && e.site.hitCount("POST /heartbeat") >= 3 && e.site.hitCount("GET /commands") >= 3
