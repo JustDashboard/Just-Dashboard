@@ -554,6 +554,14 @@ func (target dockerCaddyTarget) metadata() string {
 }
 
 func (c *dockerCaddy) target(ctx context.Context, upstream string) (dockerCaddyTarget, error) {
+	return c.findTarget(ctx, upstream, false)
+}
+
+// findTarget is target, and with everywhere it also takes a port published
+// on every interface, which answers on loopback as well. The application's
+// publication is the dashboard's own and always on loopback; an auth server
+// is the operator's, and is as often published as 9091:9091.
+func (c *dockerCaddy) findTarget(ctx context.Context, upstream string, everywhere bool) (dockerCaddyTarget, error) {
 	parsed, err := url.Parse(upstream)
 	if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.Path != "" || net.ParseIP(parsed.Hostname()) == nil || !net.ParseIP(parsed.Hostname()).IsLoopback() || parsed.Port() == "" {
 		return dockerCaddyTarget{}, errors.New("Caddy requires a private deployment upstream")
@@ -562,13 +570,23 @@ func (c *dockerCaddy) target(ctx context.Context, upstream string) (dockerCaddyT
 	if err != nil {
 		return dockerCaddyTarget{}, err
 	}
+	if target, ok := publishedTarget(containers, parsed.Hostname(), parsed.Port(), everywhere); ok {
+		return target, nil
+	}
+	return dockerCaddyTarget{}, errors.New("Caddy ingress requires a running Docker candidate with a matching loopback publication")
+}
+
+// publishedTarget is the container publishing host:port, and its address on
+// the first of its networks by name.
+func publishedTarget(containers []ingressContainer, host, port string, everywhere bool) (dockerCaddyTarget, bool) {
 	for _, candidate := range containers {
 		for target, bindings := range candidate.NetworkSettings.Ports {
 			if !strings.HasSuffix(target, "/tcp") {
 				continue
 			}
 			for _, binding := range bindings {
-				if binding.HostPort != parsed.Port() || binding.HostIP != parsed.Hostname() {
+				wildcard := everywhere && (binding.HostIP == "" || binding.HostIP == "0.0.0.0" || binding.HostIP == "::")
+				if binding.HostPort != port || (binding.HostIP != host && !wildcard) {
 					continue
 				}
 				networks := make([]string, 0, len(candidate.NetworkSettings.Networks))
@@ -579,13 +597,13 @@ func (c *dockerCaddy) target(ctx context.Context, upstream string) (dockerCaddyT
 				for _, network := range networks {
 					address := candidate.NetworkSettings.Networks[network].IPAddress
 					if net.ParseIP(address) != nil {
-						return dockerCaddyTarget{candidate.ID, network, strings.TrimSuffix(target, "/tcp"), address}, nil
+						return dockerCaddyTarget{candidate.ID, network, strings.TrimSuffix(target, "/tcp"), address}, true
 					}
 				}
 			}
 		}
 	}
-	return dockerCaddyTarget{}, errors.New("Caddy ingress requires a running Docker candidate with a matching loopback publication")
+	return dockerCaddyTarget{}, false
 }
 
 // dockerCaddyAuthTargetPrefix carries the auth server a route signs in
@@ -650,7 +668,7 @@ func (c *dockerCaddy) resolveForwardAuth(ctx context.Context, route DeploymentRo
 		return route, nil, fmt.Errorf("Caddy reaches an auth server on this host through the container that publishes its port; %s has to be http:// with a port", gate.Verify)
 	}
 	origin := "http://" + net.JoinHostPort(host, verify.Port())
-	target, err := c.target(ctx, origin)
+	target, err := c.findTarget(ctx, origin, true)
 	if err != nil {
 		return route, nil, fmt.Errorf("no running container publishes the auth server at %s for Caddy to reach: %w", origin, err)
 	}

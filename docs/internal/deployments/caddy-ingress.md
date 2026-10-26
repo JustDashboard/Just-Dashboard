@@ -87,8 +87,11 @@ ingress runs. The handling is a `route` block, so the fence, the check and the a
 order written; the redirecting names' blocks carry none of it.
 
 Caddy's loopback is its own container's, so a check address on `127.0.0.1` (or `localhost`) is found
-the way the application is: the container publishing that port on loopback, joined over its network and
-asked at its address there (`resolveForwardAuth`; it has to be `http://` with a port). The renderer
+the way the application is: the container publishing that port, joined over its network and asked at its
+address there (`resolveForwardAuth`; it has to be `http://` with a port). Unlike the application's
+publication, which the dashboard makes and always binds to loopback, an auth server's is the operator's,
+so a port published on every interface (`9091:9091`) counts too, since it answers on loopback as well
+(`publishedTarget` with `everywhere`). The renderer
 refuses a loopback check address outright, so an unresolved one can never be written. The route records
 that container as a second metadata line, `# Just Dashboard auth target: {…}`, and the lifecycle worker
 repairs it as it does the application's: a Caddy recreated without the auth server's network, or an auth

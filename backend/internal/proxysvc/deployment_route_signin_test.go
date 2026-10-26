@@ -288,3 +288,36 @@ func TestLiveDeploymentRouteSignsInOnNginx(t *testing.T) {
 		t.Fatalf("the redirecting name = %d after %d checks", response.StatusCode, checks.Load()-before)
 	}
 }
+
+// The application's publication is the dashboard's and always on loopback;
+// an auth server's is the operator's, and one published on every interface
+// answers on loopback too. Neither follows a port bound to another address.
+func TestPublishedTargetForAnAuthServer(t *testing.T) {
+	container := func(id, hostIP string) ingressContainer {
+		var c ingressContainer
+		c.ID = id
+		c.NetworkSettings.Ports = map[string][]struct{ HostIP, HostPort string }{"9091/tcp": {{hostIP, "9091"}}}
+		c.NetworkSettings.Networks = map[string]struct{ IPAddress string }{"authelia_default": {"172.19.0.3"}}
+		return c
+	}
+	for _, fixture := range []struct {
+		hostIP     string
+		strict, ok bool
+	}{
+		{"127.0.0.1", true, true},
+		{"0.0.0.0", false, true},
+		{"::", false, true},
+		{"", false, true},
+		{"127.0.0.2", false, false},
+		{"203.0.113.7", false, false},
+	} {
+		containers := []ingressContainer{container("auth", fixture.hostIP)}
+		if _, ok := publishedTarget(containers, "127.0.0.1", "9091", false); ok != fixture.strict {
+			t.Fatalf("%q bound: the application's lookup matched=%v", fixture.hostIP, ok)
+		}
+		target, ok := publishedTarget(containers, "127.0.0.1", "9091", true)
+		if ok != fixture.ok || (ok && target != (dockerCaddyTarget{"auth", "authelia_default", "9091", "172.19.0.3"})) {
+			t.Fatalf("%q bound: the auth server's lookup = %+v %v", fixture.hostIP, target, ok)
+		}
+	}
+}
