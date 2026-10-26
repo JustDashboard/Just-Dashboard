@@ -2772,13 +2772,23 @@ export type BackupJob = {
   name: string
   sources: string[]
   excludes: string[]
-  targetKind: "local" | "s3" | "b2"
+  targetKind: "local" | "s3" | "b2" | "sftp" | "rclone"
   target: {
     bucket?: string
     region?: string
     endpoint?: string
     prefix?: string
+    /** The directory here, on the SFTP server, or inside the rclone remote. */
     path?: string
+    /** SFTP: the server and account. */
+    host?: string
+    port?: number
+    username?: string
+    /** SFTP: the host key pinned the first time the server was reached. */
+    hostKey?: string
+    hostKeyFingerprint?: string
+    /** rclone: the remote's backend, read from its sealed configuration (drive, onedrive…). */
+    remoteType?: string
   }
   schedule: string
   retention: number

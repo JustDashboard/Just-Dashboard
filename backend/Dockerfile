@@ -29,6 +29,26 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/just-da
 # whole dashboard. See internal/ptyhold.
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/jd-terminal-holder ./cmd/terminal-holder
 
+# rclone, for backup jobs whose destination is one of the storage services it
+# speaks. Debian packages a release from 2022; this is the project's own
+# build, pinned and checked against the checksums its release publishes (the
+# same on downloads.rclone.org and on GitHub). Fetched in a stage of its own so
+# unzip does not stay in the image.
+FROM debian:bookworm-slim AS rclone
+ARG TARGETARCH
+ARG RCLONE_VERSION=v1.75.2
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+    && case "${TARGETARCH:-amd64}" in \
+         amd64) sum=349ac8fba6ff65d6247043f1750cdcb518ec5d500ef91463a10d37c0ccdf3702 ;; \
+         arm64) sum=7e1e8d69654941b7b7df84ee74c5f7fb09cce7d5496947fb7bf16b55ff427d10 ;; \
+         *) echo "no pinned rclone for ${TARGETARCH}" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL -o /tmp/rclone.zip \
+       "https://downloads.rclone.org/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-linux-${TARGETARCH:-amd64}.zip" \
+    && echo "${sum}  /tmp/rclone.zip" | sha256sum -c - \
+    && unzip -q /tmp/rclone.zip -d /tmp \
+    && install -m 0755 "/tmp/rclone-${RCLONE_VERSION}-linux-${TARGETARCH:-amd64}/rclone" /usr/local/bin/rclone
+
 FROM debian:bookworm-slim
 
 # The dashboard drives the host through these tools; a scratch image would
@@ -164,6 +184,7 @@ RUN set -eu; \
 
 COPY --from=build /out/just-dashboard /usr/local/bin/just-dashboard
 COPY --from=build /out/jd-terminal-holder /usr/local/bin/jd-terminal-holder
+COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 
 # Runs as root deliberately: managing systemd units, the firewall, host
 # accounts and a PTY all require it. The security boundary is the network

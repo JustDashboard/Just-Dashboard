@@ -12,6 +12,7 @@ import {
   containerProducts,
   hasProductLogo,
 } from "@/components/product-logo"
+import { rcloneService, sftpPlace } from "@/components/backups/shared"
 
 /**
  * What a backup protects and where it goes, drawn as the products they are
@@ -250,8 +251,14 @@ export function destinations(jobs: BackupJob[]): Destination[] {
   for (const job of jobs) {
     const product = destinationProduct(job)
     const offsite = job.targetKind !== "local"
-    const place = offsite ? (job.target.bucket ?? "") : (job.target.path ?? "")
-    const endpoint = (job.target.endpoint ?? "").trim()
+    const place = destinationPlace(job)
+    const endpoint =
+      job.targetKind === "rclone"
+        ? (job.target.remoteType ?? "")
+        : (job.targetKind === "sftp"
+            ? `${job.target.host ?? ""}:${job.target.port ?? 22}`
+            : (job.target.endpoint ?? "")
+          ).trim()
     const key = `${job.targetKind}:${endpoint}:${place}`
     const known = out.get(key)
     if (known) {
@@ -265,11 +272,29 @@ export function destinations(jobs: BackupJob[]): Destination[] {
       product,
       service: !offsite
         ? "This server's disk"
-        : ((product && SERVICE[product]) ?? `S3 · ${endpoint.replace(/^https?:\/\//, "")}`),
+        : job.targetKind === "sftp"
+          ? `SFTP · ${job.target.host ?? ""}`
+          : job.targetKind === "rclone"
+            ? rcloneService(job.target.remoteType)
+            : ((product && SERVICE[product]) ?? `S3 · ${endpoint.replace(/^https?:\/\//, "")}`),
       jobs: [job],
     })
   }
   return [...out.values()]
+}
+
+/** Where in a destination a job writes: the bucket, or the directory. */
+function destinationPlace(job: BackupJob): string {
+  switch (job.targetKind) {
+    case "local":
+      return job.target.path ?? ""
+    case "sftp":
+      return sftpPlace(job)
+    case "rclone":
+      return job.target.path || "/"
+    default:
+      return job.target.bucket ?? ""
+  }
 }
 
 /** A destination's mark: the provider as itself, else a glyph for a disk or a bucket. */

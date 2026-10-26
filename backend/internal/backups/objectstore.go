@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
+	"path/filepath"
+	"strings"
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -45,7 +48,7 @@ func s3Client(ctx context.Context, job *Job, secrets *TargetSecrets) (*s3.Client
 	}), nil
 }
 
-func uploadObject(ctx context.Context, job *Job, secrets *TargetSecrets, key, localPath string) error {
+func s3Upload(ctx context.Context, job *Job, secrets *TargetSecrets, key, localPath string) error {
 	client, err := s3Client(ctx, job, secrets)
 	if err != nil {
 		return err
@@ -75,7 +78,7 @@ func uploadObject(ctx context.Context, job *Job, secrets *TargetSecrets, key, lo
 	return nil
 }
 
-func deleteObject(ctx context.Context, job *Job, secrets *TargetSecrets, key string) error {
+func s3Delete(ctx context.Context, job *Job, secrets *TargetSecrets, key string) error {
 	client, err := s3Client(ctx, job, secrets)
 	if err != nil {
 		return err
@@ -86,8 +89,8 @@ func deleteObject(ctx context.Context, job *Job, secrets *TargetSecrets, key str
 	return err
 }
 
-// downloadObject streams an artifact back for a restore.
-func downloadObject(ctx context.Context, job *Job, secrets *TargetSecrets, key, destPath string) error {
+// s3Download streams an artifact back for a restore.
+func s3Download(ctx context.Context, job *Job, secrets *TargetSecrets, key, destPath string) error {
 	client, err := s3Client(ctx, job, secrets)
 	if err != nil {
 		return err
@@ -111,8 +114,15 @@ func downloadObject(ctx context.Context, job *Job, secrets *TargetSecrets, key, 
 
 // TestTarget verifies a destination is reachable and writable before an
 // operator trusts a schedule to it. A backup configuration that only fails at
-// 3am is worse than one that fails while somebody is looking at it.
-func TestTarget(ctx context.Context, job *Job, secrets *TargetSecrets) error {
+// 3am is worse than one that fails while somebody is looking at it. An SFTP
+// server reached for the first time is pinned through pin.
+func TestTarget(ctx context.Context, job *Job, secrets *TargetSecrets, pin HostKeyPinner) error {
+	switch job.TargetKind {
+	case TargetSFTP:
+		return sftpTest(ctx, job, secrets, pin)
+	case TargetRclone:
+		return rcloneTest(ctx, job, secrets)
+	}
 	if job.TargetKind == TargetLocal {
 		if err := os.MkdirAll(job.Target.Path, 0o700); err != nil {
 			return err
@@ -135,4 +145,82 @@ func TestTarget(ctx context.Context, job *Job, secrets *TargetSecrets) error {
 		return fmt.Errorf("cannot reach bucket %s: %w", job.Target.Bucket, err)
 	}
 	return nil
+}
+
+// remoteKey is where an archive named name lands at a remote destination:
+// under the bucket's prefix, or in the directory on an SFTP server or in an
+// rclone remote.
+func remoteKey(job *Job, name string) string {
+	switch job.TargetKind {
+	case TargetSFTP, TargetRclone:
+		return path.Join(job.Target.Path, name)
+	}
+	return strings.TrimPrefix(filepath.Join(job.Target.Prefix, name), "/")
+}
+
+// remoteLabel is the destination as a run's log names it.
+func remoteLabel(job *Job, key string) string {
+	switch job.TargetKind {
+	case TargetSFTP:
+		return "sftp://" + job.Target.Username + "@" + job.Target.sftpAddress() + "/" + strings.TrimPrefix(key, "/")
+	case TargetRclone:
+		return "rclone " + job.Target.RemoteType + ":" + key
+	}
+	return job.Target.Bucket + "/" + key
+}
+
+func uploadArtifact(ctx context.Context, job *Job, secrets *TargetSecrets, pin HostKeyPinner, key, localPath string) error {
+	switch job.TargetKind {
+	case TargetSFTP:
+		return sftpUpload(ctx, job, secrets, pin, key, localPath)
+	case TargetRclone:
+		return rcloneUpload(ctx, secrets, key, localPath)
+	}
+	return s3Upload(ctx, job, secrets, key, localPath)
+}
+
+func downloadArtifact(ctx context.Context, job *Job, secrets *TargetSecrets, pin HostKeyPinner, key, destPath string) error {
+	switch job.TargetKind {
+	case TargetSFTP:
+		return sftpDownload(ctx, job, secrets, pin, key, destPath)
+	case TargetRclone:
+		return rcloneDownload(ctx, secrets, key, destPath)
+	}
+	return s3Download(ctx, job, secrets, key, destPath)
+}
+
+func deleteArtifact(ctx context.Context, job *Job, secrets *TargetSecrets, pin HostKeyPinner, key string) error {
+	switch job.TargetKind {
+	case TargetSFTP:
+		return sftpDelete(ctx, job, secrets, pin, key)
+	case TargetRclone:
+		return rcloneDelete(ctx, secrets, key)
+	}
+	return s3Delete(ctx, job, secrets, key)
+}
+
+// withPinnedKey gives an archive's own destination the host key pinned for
+// its server since: an archive written by the run that first reached the
+// server recorded no key, and must not be fetched from whoever answers now.
+func withPinnedKey(archived, current *Job) *Job {
+	if archived.TargetKind != TargetSFTP || archived.Target.HostKey != "" || current == nil ||
+		current.TargetKind != TargetSFTP || current.Target.HostKey == "" || !sameSFTPServer(archived.Target, current.Target) {
+		return archived
+	}
+	copy := *archived
+	copy.Target.HostKey, copy.Target.HostKeyFingerprint = current.Target.HostKey, current.Target.HostKeyFingerprint
+	return &copy
+}
+
+// transferJob is the destination an existing archive is read or removed at:
+// the target its run recorded, with the host key since pinned for the same
+// server. Only that server may be pinned on the job's behalf; an archive on
+// a server the job no longer names, never pinned, is not fetched from
+// whoever answers there now.
+func (s *Store) transferJob(current *Job, run *Run) (*Job, HostKeyPinner) {
+	archived := withPinnedKey(archiveJob(current, run), current)
+	if archived.TargetKind == TargetSFTP && current.TargetKind == TargetSFTP && sameSFTPServer(archived.Target, current.Target) {
+		return archived, s.Pinner(current.ID)
+	}
+	return archived, nil
 }
