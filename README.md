@@ -106,6 +106,7 @@ free.
 - Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,
   e-mail and webhooks
 - Commit statuses and preview comments on GitHub, GitLab, Gitea and Forgejo
+- Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint
 
 </td>
 </tr>

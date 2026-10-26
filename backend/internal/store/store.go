@@ -1041,6 +1041,32 @@ CREATE TABLE IF NOT EXISTS deploy_git_watches (
   checked_at     INTEGER NOT NULL DEFAULT 0
 );
 
+-- Log drains: where deployments' output and requests are copied to. The
+-- headers (a drain's credentials) are sealed in config_enc; the status row
+-- is what the drain has shipped and how its last delivery went.
+CREATE TABLE IF NOT EXISTS deploy_log_drains (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL UNIQUE,
+  kind          TEXT NOT NULL,
+  endpoint      TEXT NOT NULL,
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  streams_json  TEXT NOT NULL DEFAULT '["output","requests"]',
+  projects_json TEXT NOT NULL DEFAULT '[]',
+  config_enc    TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS deploy_log_drain_status (
+  drain_id        INTEGER PRIMARY KEY REFERENCES deploy_log_drains(id) ON DELETE CASCADE,
+  shipped         INTEGER NOT NULL DEFAULT 0,
+  dropped         INTEGER NOT NULL DEFAULT 0,
+  batches         INTEGER NOT NULL DEFAULT 0,
+  last_success_at INTEGER NOT NULL DEFAULT 0,
+  last_error      TEXT NOT NULL DEFAULT '',
+  last_error_at   INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS deploy_git_policies (
   environment_id  INTEGER PRIMARY KEY REFERENCES deploy_environments(id) ON DELETE CASCADE,
   automatic       INTEGER NOT NULL DEFAULT 1,

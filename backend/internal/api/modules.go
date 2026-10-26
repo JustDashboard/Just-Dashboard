@@ -28,6 +28,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/logdrain"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netcapture"
@@ -97,6 +98,10 @@ type moduleSet struct {
 	// and live tail on a project's Logs page and a site's page is answered
 	// from it.
 	requests *accesslog.Store
+	// logDrains holds where deployments' output and requests are copied to;
+	// logDrainManager ships them, started with the server.
+	logDrains       *logdrain.Store
+	logDrainManager *logdrain.Manager
 	// trafficAlerts watches the request record for the rules operators set,
 	// and tells the notification channels when one crosses its line;
 	// dbAlerts does the same for the databases' readings and their backups,
@@ -259,6 +264,7 @@ func (s *Server) initModules() {
 		s.Cfg.Site, s.Cfg.TLSMode, s.Cfg.DataDir, s.restartProxy, s.Log)
 	s.modules.proxy = proxysvc.NewWithDockerIngress(s.Cfg.NginxDir, s.Cfg.CaddyFile)
 	s.modules.requests = accesslog.NewStore(s.openRequestRecord)
+	s.modules.logDrains = logdrain.NewStore(s.Store, s.Sealer)
 	s.modules.dbs = dbx.NewManager()
 	s.modules.linuxUsers = linuxusers.New()
 	s.modules.netsec = netsec.New()

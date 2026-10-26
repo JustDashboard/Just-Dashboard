@@ -77,9 +77,9 @@ taking a frame:
   preload rows, and its deep scan's findings, suite list with its chip filters, key exchange and
   connection rows; the password files and DNS provider lists),
   the runtime-health bar, and every block of the deployment section — the fleet
-  and its archive, Credentials and Notifications, a project's Overview, Deployments, Logs, Runtime
+  and its archive, Credentials, Notifications and Log drains, a project's Overview, Deployments, Logs, Runtime
   and Console, the run page, the nine settings pages and the create flow — are plain, with every
-  row in them that is *taken* rather than read (a project, a run, a credential, a channel, a
+  row in them that is *taken* rather than read (a project, a run, a credential, a channel, a drain, a
   service, a webhook, a schedule, a variable, a linked database) a lit card — a `ChoiceRow` in a
   `ChoiceList`, or on the fleet's grid a project's own `SpotlightBorder` card with the same lit
   edge (what kept a frame there was, first, a *picture*, on the argument that a picture needs an
