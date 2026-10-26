@@ -61,10 +61,10 @@ var (
 
 func (spec *SiteSpec) cacheZone() string { return NginxIdent(spec.Name) + "_cache" }
 
-func (spec *SiteSpec) assetExpiresVar() string { return NginxIdent(spec.Name) + "_asset_expires" }
+func (spec *SiteSpec) assetExpiresVar() string { return spec.varIdent() + "_asset_expires" }
 
 func (spec *SiteSpec) assetImmutableVar() string {
-	return NginxIdent(spec.Name) + "_asset_immutable"
+	return spec.varIdent() + "_asset_immutable"
 }
 
 // cachesStatic and cachesProxy say whether the rendered site writes each

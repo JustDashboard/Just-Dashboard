@@ -59,8 +59,8 @@ var forwardAuthHeaders = []string{"Remote-User", "Remote-Email"}
 // A check or sign-in address is a URL written unquoted into the file.
 var forwardAuthURLRe = regexp.MustCompile(`^https?://[A-Za-z0-9._~:/?&=%+-]+$`)
 
-func (spec *SiteSpec) ssoUserVar() string  { return NginxIdent(spec.Name) + "_sso_user" }
-func (spec *SiteSpec) ssoEmailVar() string { return NginxIdent(spec.Name) + "_sso_email" }
+func (spec *SiteSpec) ssoUserVar() string  { return spec.varIdent() + "_sso_user" }
+func (spec *SiteSpec) ssoEmailVar() string { return spec.varIdent() + "_sso_email" }
 
 // ssoEverywhere says whether the server checks every path by default.
 func (spec *SiteSpec) ssoEverywhere() bool {
@@ -303,11 +303,11 @@ func (p *forwardAuthParse) directive(spec *SiteSpec, name, value, location strin
 		return true
 	case "auth_request_set":
 		fields := strings.Fields(value)
-		if len(fields) == 2 && fields[0] == "$"+spec.ssoUserVar() {
+		if len(fields) == 2 && spec.ownsVar(fields[0], "_sso_user") {
 			p.userSource = strings.TrimPrefix(fields[1], "$upstream_http_")
 			return true
 		}
-		return len(fields) == 2 && fields[0] == "$"+spec.ssoEmailVar()
+		return len(fields) == 2 && spec.ownsVar(fields[0], "_sso_email")
 	case "error_page":
 		target, ok := strings.CutPrefix(value, "401 =302 ")
 		if !ok || location != "" {
@@ -323,7 +323,7 @@ func (p *forwardAuthParse) directive(spec *SiteSpec, name, value, location strin
 		header, v, _ := strings.Cut(value, " ")
 		v = strings.TrimSpace(v)
 		return containsFold(forwardAuthHeaders, header) &&
-			(v == "$"+spec.ssoUserVar() || v == "$"+spec.ssoEmailVar())
+			(spec.ownsVar(v, "_sso_user") || spec.ownsVar(v, "_sso_email"))
 	}
 	return false
 }

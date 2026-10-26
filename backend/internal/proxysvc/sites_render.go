@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -35,6 +36,32 @@ func (l *lines) String() string {
 
 // RenderNginx turns a spec into the file that would produce it.
 func RenderNginx(spec *SiteSpec) (string, error) {
+	content, err := renderNginx(spec)
+	if err != nil || spec.shortVars || !hasOverlongVar(content) {
+		return content, err
+	}
+	// Written again with every variable named from the short ident, rather
+	// than only the long ones, so a file that already loads keeps the names
+	// it has and one that would not loads.
+	short := *spec
+	short.shortVars = true
+	return renderNginx(&short)
+}
+
+var ownVarRe = regexp.MustCompile(`\$jd_[a-z0-9_]+`)
+
+// hasOverlongVar says whether the file names one of the dashboard's
+// variables too long for nginx's default variables hash.
+func hasOverlongVar(content string) bool {
+	for _, v := range ownVarRe.FindAllString(content, -1) {
+		if len(v)-1 > maxNginxVarLen {
+			return true
+		}
+	}
+	return false
+}
+
+func renderNginx(spec *SiteSpec) (string, error) {
 	if err := ValidateSpec(spec); err != nil {
 		return "", err
 	}
