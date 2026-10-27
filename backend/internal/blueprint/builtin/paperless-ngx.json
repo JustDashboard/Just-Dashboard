@@ -1,0 +1,324 @@
+{
+  "id": "paperless-ngx",
+  "version": "1.0.0",
+  "name": "Paperless-ngx",
+  "category": "http",
+  "profile": "compose",
+  "description": "A document management system that OCRs and indexes your scans, with PostgreSQL for its index and Valkey for its task queue.",
+  "iconId": "file",
+  "docsUrl": "https://docs.paperless-ngx.com/setup/#docker",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "PAPERLESS_ADMIN_USER",
+    "secretVariable": "PAPERLESS_ADMIN_PASSWORD",
+    "note": "Paperless-ngx creates its superuser on the first start, so https://<domain>/ opens on a login form for the user named here with the password generated here. Reveal it from the Variables tab to sign in."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "GPL-3.0",
+    "upstreamUrl": "https://github.com/paperless-ngx/paperless-ngx",
+    "reviewedAt": "2026-10-27",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Paperless-ngx checks requests against this address; any other is refused as cross-site."
+    },
+    {
+      "name": "admin-user",
+      "kind": "text",
+      "label": "Admin user",
+      "variable": "PAPERLESS_ADMIN_USER",
+      "default": "admin",
+      "required": true,
+      "pattern": "^[a-zA-Z0-9_.@+-]{1,64}$"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "admin-password",
+      "variable": "PAPERLESS_ADMIN_PASSWORD",
+      "label": "Admin password",
+      "length": 24,
+      "description": "Reveal it from the Variables tab to sign in the first time."
+    },
+    {
+      "name": "secret-key",
+      "variable": "PAPERLESS_SECRET_KEY",
+      "label": "Secret key",
+      "length": 64,
+      "description": "Signs sessions; changing it signs everybody out."
+    },
+    {
+      "name": "db-password",
+      "variable": "PAPERLESS_DBPASS",
+      "label": "Database password",
+      "length": 40,
+      "description": "Generated here and given only to the services that sign in to the database."
+    }
+  ],
+  "services": [
+    {
+      "name": "paperless",
+      "role": "app",
+      "purpose": "The web interface, the API, OCR and the task workers, behind the domain",
+      "image": {
+        "reference": "ghcr.io/paperless-ngx/paperless-ngx:2.20.15",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "PAPERLESS_REDIS",
+          "value": "redis://cache:6379"
+        },
+        {
+          "name": "PAPERLESS_DBHOST",
+          "value": "db"
+        },
+        {
+          "name": "PAPERLESS_DBNAME",
+          "value": "paperless"
+        },
+        {
+          "name": "PAPERLESS_DBUSER",
+          "value": "paperless"
+        },
+        {
+          "name": "PAPERLESS_DBPASS",
+          "value": "{{secret.db-password}}"
+        },
+        {
+          "name": "PAPERLESS_SECRET_KEY",
+          "value": "{{secret.secret-key}}"
+        },
+        {
+          "name": "PAPERLESS_URL",
+          "value": "{{variable.PAPERLESS_URL}}"
+        },
+        {
+          "name": "PAPERLESS_ADMIN_USER",
+          "value": "{{variable.PAPERLESS_ADMIN_USER}}"
+        },
+        {
+          "name": "PAPERLESS_ADMIN_PASSWORD",
+          "value": "{{secret.admin-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 8000,
+          "protocol": "tcp",
+          "purpose": "The web interface and API",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "data",
+          "target": "/usr/src/paperless/data",
+          "purpose": "The search index, the classifier and settings",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "media",
+          "target": "/usr/src/paperless/media",
+          "purpose": "Every original document and its archived PDF",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "consume",
+          "target": "/usr/src/paperless/consume",
+          "purpose": "The inbox Paperless imports new documents from",
+          "data": true,
+          "backup": false
+        },
+        {
+          "name": "export",
+          "target": "/usr/src/paperless/export",
+          "purpose": "Where the document exporter writes",
+          "data": true,
+          "backup": false
+        }
+      ],
+      "resources": {
+        "memoryMb": 2048,
+        "minMemoryMb": 1024
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fsS",
+          "--max-time",
+          "2",
+          "-o",
+          "/dev/null",
+          "http://localhost:8000"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 60
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        },
+        {
+          "service": "cache",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "PostgreSQL, holding the index of every document, tag and correspondent",
+      "image": {
+        "reference": "postgres:17.11-alpine",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "POSTGRES_DB",
+          "value": "paperless"
+        },
+        {
+          "name": "POSTGRES_USER",
+          "value": "paperless"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "value": "{{secret.db-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "postgres",
+          "internal": 5432,
+          "protocol": "tcp",
+          "purpose": "SQL connections from Paperless-ngx",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/var/lib/postgresql/data",
+          "purpose": "Every table Paperless-ngx keeps",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "pg_isready",
+          "-h",
+          "127.0.0.1",
+          "-U",
+          "paperless",
+          "-d",
+          "paperless"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 20
+      }
+    },
+    {
+      "name": "cache",
+      "role": "cache",
+      "purpose": "Valkey, the queue Paperless-ngx's OCR and import tasks run from",
+      "image": {
+        "reference": "valkey/valkey:9.0.6-alpine",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "ports": [
+        {
+          "name": "redis",
+          "internal": 6379,
+          "protocol": "tcp",
+          "purpose": "Redis protocol from Paperless-ngx",
+          "exposure": "internal"
+        }
+      ],
+      "resources": {
+        "memoryMb": 256,
+        "minMemoryMb": 64
+      },
+      "healthcheck": {
+        "test": [
+          "valkey-cli",
+          "ping"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 5
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Web interface answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/accounts/login/",
+      "port": "http",
+      "timeoutSeconds": 360
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "PAPERLESS_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "Paperless-ngx migrates its database on start; take a backup first and read the release notes before moving between minor versions."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "docs.example.test"
+      },
+      "digest": "sha256:5c21179852ffe0e6d74c11d9b646503c1a66e212f5eab95887e4760479ceddbe"
+    }
+  ]
+}
