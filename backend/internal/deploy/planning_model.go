@@ -650,6 +650,28 @@ type RuntimePlanConfig struct {
 	// the page as well.
 	ErrorPages      []int `json:"errorPages,omitempty"`
 	InterceptErrors bool  `json:"interceptErrors,omitempty"`
+	// HSTS asks browsers to keep to HTTPS on the route's HTTPS domains:
+	// Strict-Transport-Security on every HTTPS answer. Nil sends none,
+	// which is where a plan starts, because the policy outlives a mistake
+	// for as long as it says. A domain served over plain HTTP is never sent
+	// it, so the control only means something once a served domain is HTTPS.
+	HSTS *RouteHSTS `json:"hsts,omitempty"`
+}
+
+// RouteHSTS is the public route's Strict-Transport-Security policy: MaxAge
+// seconds (zero is six months; at least five minutes, at most two years),
+// the subdomains too with IncludeSubDomains, and Preload to be built into
+// browsers, which needs a year and the subdomains, as the browsers' list
+// does. The bounds are the ones a Proxy site's HSTS control is held to.
+type RouteHSTS struct {
+	MaxAge            int  `json:"maxAge,omitempty"`
+	IncludeSubDomains bool `json:"includeSubDomains,omitempty"`
+	Preload           bool `json:"preload,omitempty"`
+}
+
+// proxy is the policy as the proxy renders and checks it.
+func (h RouteHSTS) proxy() proxysvc.DeploymentHSTS {
+	return proxysvc.DeploymentHSTS{MaxAge: h.MaxAge, IncludeSubDomains: h.IncludeSubDomains, Preload: h.Preload}
 }
 
 // RouteMaintenance is what the public route's maintenance does while it is
@@ -1821,6 +1843,11 @@ func validateRouteRules(runtime RuntimePlanConfig) error {
 	if err := proxysvc.ValidateDeploymentHeaders(headers); err != nil {
 		return invalidField("runtime.responseHeaders", "%v", err)
 	}
+	if h := runtime.HSTS; h != nil {
+		if err := proxysvc.ValidateDeploymentHSTS(h.proxy()); err != nil {
+			return invalidField("runtime.hsts", "%v", err)
+		}
+	}
 	return validateRoutePages(runtime)
 }
 
@@ -2581,6 +2608,11 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 		c.Runtime.ForwardAuth = &trimmed
 	}
 	c.Runtime.Maintenance = canonicalRouteMaintenance(c.Runtime.Maintenance)
+	if h := c.Runtime.HSTS; h != nil {
+		// A copy, so canonicalising never writes through to the caller's plan.
+		policy := *h
+		c.Runtime.HSTS = &policy
+	}
 	// In the order the proxy writes them, and absent when there are none, so
 	// a plan that never chose a page keeps the bytes and the digest it had.
 	if len(c.Runtime.ErrorPages) == 0 {

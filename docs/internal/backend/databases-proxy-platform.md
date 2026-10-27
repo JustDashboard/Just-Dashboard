@@ -4048,7 +4048,8 @@ containers/volumes/networks.
   and Permissions-Policy are kept as parts (keywords unquoted: `self`, `none`, `nonce-…`), so the stored
   scalars never carry `;` or quotes; the renderer adds them. Custom response headers may not name one a
   control writes (X-Frame-Options, CSP, Permissions-Policy, HSTS, `Access-Control-*`, and whatever the
-  security-headers switch or caches send). All response headers go through `renderHeaders`, so the
+  security-headers switch or caches send; a deployment route's refusal of `Strict-Transport-Security`
+  names its own HSTS control under Access and headers instead). All response headers go through `renderHeaders`, so the
   maintenance page's location repeats them. CORS (not on redirects): an http-level
   `map $http_origin $jd_<id>_cors` (exact origins → `$http_origin`, else empty, so no ACAO is sent) or a
   literal `*` (refused with credentials), a `map "$request_method:$http_access_control_request_method"
@@ -4102,6 +4103,14 @@ containers/volumes/networks.
   ([Caddy ingress](../deployments/caddy-ingress.md#sign-in)). The form's four presets live in
   `frontend/src/lib/sso-providers.ts`, shared with the deployment Domains settings.
 
+  **Plain-HTTP names on a TLS site** (`sites_tls.go`). `PlainDomains` are names among `Domains` served
+  over plain HTTP alone — a server of their own on port 80 after the site's own, with no certificate,
+  redirect or HSTS, each marked `# Plain HTTP: <name> is served without TLS.` — and `HostRedirect.Plain`
+  a redirecting name answering on port 80 alone, marked `… over plain HTTP`; a redirecting HTTPS name
+  on a site whose served names are all plain is marked `… over HTTPS`, from which the parser reads the
+  site's TLS, and its certificate and HTTP/2 from that skipped server. `validPlainDomains` refuses a
+  plain name the site does not have, or any on a site without TLS. A deployment route's domains each
+  choose their scheme ([deployments](../deployments/implementation.md)); the form does not offer it.
   **HSTS and TLS versions** (`sites_tls.go`, form "Encryption"). `HSTSMaxAge` (0 = 15552000, else
   300..63072000), `HSTSOwnNameOnly` (drops `includeSubDomains`) and `HSTSPreload` (refused below a year
   or without subdomains; the form asks for the first domain typed) build the one

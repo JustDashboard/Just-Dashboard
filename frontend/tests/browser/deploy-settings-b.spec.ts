@@ -224,6 +224,14 @@ test.describe("Redirects, access and headers", () => {
     await access.getByRole("textbox", { name: "Response headers: value" }).fill("noindex")
     await access.getByRole("button", { name: "Add to response headers" }).click()
     await expect(access.getByText("Only 1 address · every domain above")).toBeVisible()
+    // HSTS is offered because a served domain is HTTPS, starts at six months
+    // with the subdomains, and says which domains it is sent on.
+    await access.getByRole("switch", { name: "HSTS" }).click()
+    await expect(access.getByText("6 months · subdomains", { exact: true })).toBeVisible()
+    await expect(access.getByText(/Sent on api\.example\.test/)).toBeVisible()
+    await access.getByRole("combobox", { name: "Remember for" }).click()
+    await page.getByRole("option", { name: "1 year" }).click()
+    await expect(access.getByText("1 year · subdomains", { exact: true })).toBeVisible()
 
     await saveSettings(page)
     await expectSaved(page)
@@ -238,10 +246,11 @@ test.describe("Redirects, access and headers", () => {
         redirectCode: 307,
       },
     ])
-    // The rules form writes its two fields and keeps the rest of the runtime.
+    // The rules form writes its fields and keeps the rest of the runtime.
     const runtime = puts[2].runtime as Record<string, unknown>
     expect(runtime.allowFrom).toEqual(["203.0.113.7"])
     expect(runtime.responseHeaders).toEqual([{ name: "X-Robots-Tag", value: "noindex" }])
+    expect(runtime.hsts).toEqual({ maxAge: 31536000, includeSubDomains: true })
     expect(runtime.internalPort).toBe((puts[1].runtime as Record<string, unknown>).internalPort)
     expect((puts[2].domains as unknown[]).length).toBe(2)
 
@@ -249,6 +258,61 @@ test.describe("Redirects, access and headers", () => {
     await page.getByRole("button", { name: "Actions for api.example.test" }).click()
     await page.getByRole("menuitem", { name: "Remove" }).click()
     await expect(page.getByText("Redirects to")).toHaveCount(0)
+  })
+
+  test("each domain says its own scheme, and HSTS follows the HTTPS domains", async ({ page }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/hostname**", (route) =>
+      json(route, { hostname: "old.example.test", covered: false, method: "custom" }),
+    )
+    const puts: Record<string, unknown>[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
+        puts.push(request.postDataJSON())
+      }
+    })
+    await page.goto("/deploy/7/settings/domains")
+    const list = page.getByRole("list", { name: "Domains" })
+    await expect(list.getByText("Plain HTTP is redirected to HTTPS", { exact: true })).toBeVisible()
+
+    // A second name added over plain HTTP is served that way, whatever the
+    // first does: its row says so, and no certificate is asked for.
+    await page.getByRole("button", { name: "Add domain", exact: true }).click()
+    const sheet = page.getByRole("dialog", { name: "Add domain" })
+    await sheet.getByRole("textbox", { name: "Hostname" }).fill("old.example.test")
+    await sheet.getByRole("button", { name: "Serve this hostname over HTTPS" }).click()
+    await sheet.getByRole("button", { name: "Add domain", exact: true }).click()
+    await expect(page.getByText("Domains saved", { exact: true })).toBeVisible()
+    expect(puts[0].domains).toEqual([
+      { hostname: "api.example.test", https: true, ownership: "managed" },
+      { hostname: "old.example.test", https: false, ownership: "managed" },
+    ])
+    const rows = list.getByRole("listitem")
+    await expect(
+      rows.nth(0).getByText("Plain HTTP is redirected to HTTPS", { exact: true }),
+    ).toBeVisible()
+    await expect(rows.nth(1).getByText("Plain HTTP, no redirect", { exact: true })).toBeVisible()
+
+    // HSTS names the HTTPS domain it is sent on and the plain one it is not.
+    const access = page.getByRole("form", { name: "Access and headers" })
+    const hsts = access.getByRole("switch", { name: "HSTS" })
+    await expect(hsts).toBeVisible()
+    await expect(
+      access.getByText(/Sent on api\.example\.test; old\.example\.test is served over plain HTTP/),
+    ).toBeVisible()
+
+    // With no served HTTPS domain left and no policy saved, there is
+    // nothing to send the header on, so the control is not offered.
+    await page.getByRole("button", { name: "HTTPS on api.example.test" }).click()
+    await saveSettings(page)
+    await expectSaved(page)
+    await expect.poll(() => puts.length).toBe(2)
+    expect((puts[1].domains as { https: boolean }[]).map((domain) => domain.https)).toEqual([
+      false,
+      false,
+    ])
+    await expect(rows.nth(0).getByText("Plain HTTP, no redirect", { exact: true })).toBeVisible()
+    await expect(hsts).toHaveCount(0)
   })
 })
 

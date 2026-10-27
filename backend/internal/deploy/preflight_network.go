@@ -46,7 +46,44 @@ func networkFindings(draft *Draft, configuration PlanConfiguration) []PreflightF
 			"The proxy answers a larger request with 413 before the application sees it.", "",
 			"proxy", "runtime.maxRequestBodyMb"))
 	}
+	if len(configuration.Domains) > 0 && runtime.HSTS != nil {
+		findings = append(findings, hstsFinding(configuration))
+	}
 	return findings
+}
+
+// hstsFinding says which names the plan's HSTS reaches: the header is sent
+// on an HTTPS answer alone, so a plan whose served domains are all plain
+// sends it to nobody, which the operator should hear before deploying
+// rather than find out from a scanner.
+func hstsFinding(configuration PlanConfiguration) PreflightFinding {
+	policy := configuration.Runtime.HSTS.proxy().Value()
+	var https, plain []string
+	for _, domain := range configuration.Domains {
+		if domain.Redirects() {
+			continue
+		}
+		if domain.HTTPS {
+			https = append(https, strings.ToLower(strings.TrimSpace(domain.Hostname)))
+		} else {
+			plain = append(plain, strings.ToLower(strings.TrimSpace(domain.Hostname)))
+		}
+	}
+	if len(https) == 0 {
+		return finding("hsts", PreflightWarning,
+			"HSTS is on, but no domain is served over HTTPS", policy,
+			"The header is sent only on an HTTPS answer, so no visitor receives the policy.",
+			"Turn HTTPS on for a domain that serves the application, or turn HSTS off.", "proxy", "runtime.hsts")
+	}
+	means := "Every HTTPS answer carries Strict-Transport-Security, and a browser that has seen it refuses plain HTTP for the name for as long as max-age says, so the policy outlives a mistake."
+	if len(plain) > 0 {
+		means += " " + strings.Join(plain, ", ") + " is served over plain HTTP and is not sent it."
+		if len(plain) > 1 {
+			means = strings.Replace(means, " is served over plain HTTP and is not sent it.", " are served over plain HTTP and are not sent it.", 1)
+		}
+	}
+	return finding("hsts", PreflightPass,
+		"Browsers are told to keep to HTTPS on "+strings.Join(https, ", "), policy, means, "", "proxy", "runtime.hsts")
 }
 
 // recipeHostVariables are the host variables each recipe's image sets, which

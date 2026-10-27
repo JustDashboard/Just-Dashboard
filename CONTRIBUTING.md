@@ -354,9 +354,13 @@ to the contribution terms above, including the additional licence grant to the p
   its dns-rfc2136 plugin: `python3-certbot-dns-rfc2136`, or that plugin's wheel and dnspython's unpacked
   into a directory on `PYTHONPATH` (`sudo -n env JD_DEPLOY_LIVE=1 PATH=$PATH PYTHONPATH=<dir> <test binary>`);
   without it both skip. Each waits out the plugin's 60-second propagation delay once, the first twice.
-  Changes to how a deployment route renders its redirects, response headers or allowed addresses also
+  Changes to how a deployment route renders its redirects, response headers, allowed addresses, HSTS
+  or a domain's own scheme also
   run `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules -count=1 -v`,
-  which asks a real Caddy what it answers for each. Changes to a route's sign-in, how Caddy reaches the
+  which asks a real Caddy what it answers for each, a route serving one name over HTTPS and another
+  over plain HTTP with HSTS included, and
+  `go test ./internal/proxysvc -run TestLiveDeploymentRouteMixedTLSOnNginx`, which asks the host's
+  nginx the same. Changes to a route's sign-in, how Caddy reaches the
   auth server, or the maintenance pass that repairs that network also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyGatesRouteBehindForwardAuth -count=1 -v`,
   which signs in at a real Authelia (`authelia/authelia:4.39`, pulled on first run) in front of

@@ -80,6 +80,26 @@ address for the password first, so a deployment's route wraps its handling in a 
 runs in the order written: the fence, the maintenance switch, the password or the sign-in, then the
 application. A route asking for none of the rules carries the switch and nothing else of theirs.
 
+## Per-name schemes and HSTS
+
+Each domain of a plan is served on the scheme it chose. The names with HTTPS on are one site block,
+with the `tls` directive and Caddy's own redirect from plain HTTP; the names with HTTPS off
+(`DeploymentRoute.PlainHostnames`) are a second block with `http://` addresses, served as asked with no
+certificate and no redirect. The handling is the same in both; they are two blocks rather than one
+address list because Caddy refuses a `tls` directive in a block with an `http://` address ("server
+listening on [:80] is HTTP, but attempts to configure TLS connection policies"). A redirecting plain name
+is an `http://` block, and every redirect sends visitors on over the scheme its target is served on
+(`redir http://…` for a plain target). Caddy issues certificates for the HTTPS names alone, as the
+certificate step already asked. The inventory reads TLS from the blocks' addresses, so a route with one
+HTTPS name lists as TLS, and the reconcile pass repairs `reverse_proxy` and `forward_auth` in every
+block. A route with no HTTPS name is the one `http://` block it always was.
+
+`runtime.hsts` is a `Strict-Transport-Security` line in the HTTPS block's deferred `header` block, so
+it replaces an application's own policy; the plain block carries `-Strict-Transport-Security` instead,
+so a plain name is sent none — a browser ignores the header over plain HTTP, and a name promising an
+HTTPS it does not serve would be a lie. Without the control the application's own header passes through
+on either block.
+
 ## Maintenance and error pages
 
 Every deployment route carries its maintenance switch, so maintenance can be turned on at once, from
@@ -208,7 +228,13 @@ not order a public production certificate.
 `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules -count=1 -v`
 checks what a real Caddy answers for a route's rules: the redirecting name's 308 keeps the path and
 query, an address off the list gets 403, an allowed one gets the application with the route's header in
-place of the application's own, and the inventory lists both names under the route.
+place of the application's own, and the inventory lists both names under the route; then, for a route
+serving one name over HTTPS (the test's own certificate) and another over plain HTTP with HSTS, that the
+HTTPS name answers over TLS with the route's policy in place of the application's own and sends its
+plain-HTTP visitors to HTTPS, that the plain name is served as asked with no redirect and no HSTS, that
+each redirecting name answers on its own scheme, and that the inventory lists all four names. The host
+nginx's answers for the same route are `go test ./internal/proxysvc -run TestLiveDeploymentRouteMixedTLSOnNginx`,
+which needs only the host's nginx.
 `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyGatesRouteBehindForwardAuth -count=1 -v`
 puts a route that signs in in front of `traefik/whoami`, with a real Authelia 4.39 (one file user, SQLite)
 published on loopback on a network of its own and a private certificate authority for the names. It

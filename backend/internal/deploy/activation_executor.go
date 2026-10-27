@@ -595,7 +595,7 @@ func (e *NormalizedStepExecutor) activate(
 				evidence.Recovery = &recovery
 				return StepResult{State: StepUnavailable, ErrorCode: "certificate_unavailable", ErrorMessage: "TLS route activation cannot resolve an existing certificate", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 			}
-			certPath, keyPath, resolveErr := resolver.ResolveDeploymentCertificate(ctx, routeValue.Hostnames())
+			certPath, keyPath, resolveErr := resolver.ResolveDeploymentCertificate(ctx, routeValue.TLSHostnames())
 			if resolveErr != nil {
 				recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
 				evidence.Recovery = &recovery
@@ -728,12 +728,23 @@ func publicRoute(environmentID int64, snapshot runtimeReleaseSnapshot, host stri
 		route.Maintenance = proxysvc.DeploymentMaintenance{RetryAfter: m.RetryAfter, BypassFrom: m.BypassFrom}
 	}
 	route.ErrorPages, route.InterceptErrors = snapshot.Plan.ErrorPages, snapshot.Plan.InterceptErrors
+	// Only a TLS route has an HTTPS answer to send the policy on; a plan
+	// whose domains are all plain keeps it for the day one is not.
+	if h := snapshot.Plan.HSTS; h != nil && route.TLS {
+		policy := h.proxy()
+		route.HSTS = &policy
+	}
 	return route
 }
 
 func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, port int) proxysvc.DeploymentRoute {
 	names := make([]string, 0, len(domains))
 	tls := false
+	// Each domain is served on the scheme it chose: the route is TLS as
+	// soon as one is HTTPS, and the others are its plain-HTTP names, with
+	// no certificate to cover them and no redirect away from what they asked
+	// for.
+	var plain []string
 	// A protected domain protects the deployment's whole route: the proxy
 	// serves every domain from one site, so the credentials are its union.
 	var users []proxysvc.BasicAuthUser
@@ -741,6 +752,9 @@ func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, 
 	var redirects []proxysvc.HostRedirect
 	for _, domain := range domains {
 		tls = tls || domain.HTTPS
+		if !domain.HTTPS {
+			plain = append(plain, strings.ToLower(domain.Hostname))
+		}
 		if domain.Redirects() {
 			redirects = append(redirects, proxysvc.HostRedirect{
 				From: strings.ToLower(domain.Hostname), To: strings.ToLower(domain.RedirectTo), Code: domain.RedirectCode,
@@ -753,7 +767,7 @@ func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, 
 			users = append(users, proxysvc.BasicAuthUser{Username: domain.Protection.Username, Hash: domain.Protection.Hash})
 		}
 	}
-	return proxysvc.DeploymentRoute{
+	route := proxysvc.DeploymentRoute{
 		Name: deploymentRouteName(environmentID), Domains: names,
 		Upstream: "http://" + net.JoinHostPort(runtimeCheckHost(host), fmt.Sprintf("%d", port)),
 		TLS:      tls, ForceHTTPS: tls, BasicAuth: users, Redirects: redirects,
@@ -762,6 +776,10 @@ func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, 
 		// makes the two drivers answer the same question.
 		AccessLog: true,
 	}
+	if tls {
+		route.PlainHostnames = plain
+	}
+	return route
 }
 
 // publicRouteURLs are the addresses a public-route check asks, which are

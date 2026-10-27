@@ -146,6 +146,7 @@ func compareRuntimeSnapshots(fromSnapshot, toSnapshot runtimeReleaseSnapshot, fr
 	field("allowed addresses", allowFromLabel(fromSnapshot.Plan.AllowFrom), allowFromLabel(toSnapshot.Plan.AllowFrom))
 	field("response headers", responseHeadersLabel(fromSnapshot.Plan.ResponseHeaders), responseHeadersLabel(toSnapshot.Plan.ResponseHeaders))
 	field("sign-in", signInLabel(fromSnapshot.Plan.ForwardAuth), signInLabel(toSnapshot.Plan.ForwardAuth))
+	field("hsts", hstsLabel(fromSnapshot.Plan.HSTS), hstsLabel(toSnapshot.Plan.HSTS))
 	field("let past maintenance", maintenanceBypassLabel(fromSnapshot.Plan.Maintenance), maintenanceBypassLabel(toSnapshot.Plan.Maintenance))
 	field("maintenance retry after", maintenanceRetryLabel(fromSnapshot.Plan.Maintenance), maintenanceRetryLabel(toSnapshot.Plan.Maintenance))
 	field("error pages", errorPagesLabel(fromSnapshot.Plan), errorPagesLabel(toSnapshot.Plan))
@@ -264,6 +265,14 @@ func allowFromLabel(entries []string) string {
 
 // signInLabel names the auth server and both of its addresses, none of them
 // a secret: every visitor is sent to the sign-in page.
+// hstsLabel is the policy as the header says it, or "off".
+func hstsLabel(h *RouteHSTS) string {
+	if h == nil {
+		return "off"
+	}
+	return h.proxy().Value()
+}
+
 func signInLabel(gate *RouteForwardAuth) string {
 	if gate == nil {
 		return "none"
