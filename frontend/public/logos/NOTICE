@@ -224,3 +224,15 @@ was. The rest of the page's marks are files already here, drawn for the
 project's own extensions: Supabase's, Timescale's, Python's and Perl's. An
 extension with no mark of its own is drawn as its category's glyph, never as
 a mark that is not its own.
+
+The multi-service templates added in 0.8.2 are drawn as the application each
+one runs. wordpress.svg, plausible.svg, matomo.svg, listmonk.svg, wikijs.svg,
+authentik.svg, keycloak.svg, firefly-iii.svg and planka.svg are the
+collection's files, unchanged; miniflux.svg is its miniflux-light variant,
+drawn for a dark ground; paperless-ngx.svg is its file with the leaf's #17541f
+lifted to #79b67c, the same hue at the L 0.72 rung. ghost.webp is the
+collection's ghost-light.png and docmost.webp its docmost.png, resized to 96px
+WebP the way docker-compose.webp was. The templates that pair an application
+already drawn here with its database (nextcloud-mariadb, n8n-postgres,
+gitea-postgres, metabase-postgres, directus-postgres) are keyed to that
+application's file.

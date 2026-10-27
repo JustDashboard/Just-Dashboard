@@ -15,6 +15,7 @@ import { ShellWords } from "@/components/deploy/run-evidence"
 import type { ConfigureFlow, FlowUpdate } from "@/components/deploy/new-project/draft"
 import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
 import { synchronizePrimaryDomain } from "@/components/deploy/new-project/domain-bindings"
+import { composeNamedVolumes } from "@/components/deploy/new-project/plan-reading"
 
 /**
  * Where the port came from, when detection read it: the file and line that
@@ -87,10 +88,13 @@ export function StepRuntime({
       .join(" · ") || "No limits"
 
   const mounts = runtime.mounts ?? []
+  const stackVolumes = composeNamedVolumes(flow)
   const storageFacts =
-    mounts.length === 0
-      ? "Nothing survives a rebuild"
-      : `${mounts.length} ${mounts.length === 1 ? "mount" : "mounts"}`
+    stackVolumes.length > 0
+      ? `${stackVolumes.length} ${stackVolumes.length === 1 ? "volume" : "volumes"} in the Compose stack`
+      : mounts.length === 0
+        ? "Nothing survives a rebuild"
+        : `${mounts.length} ${mounts.length === 1 ? "mount" : "mounts"}`
 
   const accessFacts =
     [

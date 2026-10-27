@@ -2977,6 +2977,7 @@ export type DeploymentFacts = {
   sourceKind?: DeploymentSourceKind
   sourceRef?: string
   sourceRepository?: string
+  sourceTemplate?: string
   buildMethod?: DeploymentBuildMethod
   recipe?: DeploymentRecipe
   framework?: string
@@ -3299,6 +3300,48 @@ export type BlueprintSummary = {
   memoryMb: number
   requiresAcceptance?: boolean
   privileged?: boolean
+  /**
+   * The source kind it deploys as: one reviewed image, or a multi-service
+   * template that runs through the Compose release path — then `image` is
+   * the public service's, `memoryMb` the whole stack's limits added up, and
+   * `services` what the stack runs.
+   */
+  sourceKind?: "blueprint" | "compose"
+  services?: BlueprintServiceSummary[]
+}
+
+export type BlueprintServiceRole = "app" | "worker" | "database" | "cache"
+
+/** One service of a multi-service template as the catalogue lists it. */
+export type BlueprintServiceSummary = {
+  name: string
+  role: BlueprintServiceRole
+  purpose: string
+  image: string
+  memoryMb: number
+  /** The one service routed to the deployment's domain. */
+  public?: boolean
+}
+
+/** One service as the definition declares it, on the detail endpoint. */
+export type BlueprintService = {
+  name: string
+  role: BlueprintServiceRole
+  purpose: string
+  image: { reference: string; tagPolicy: string; command?: string[] }
+  ports?: {
+    name: string
+    internal: number
+    protocol: string
+    purpose: string
+    exposure: "proxy" | "internal"
+    primary?: boolean
+  }[]
+  volumes?: { name: string; target: string; purpose: string; data: boolean; backup: boolean }[]
+  resources: { memoryMb: number; minMemoryMb: number; cpus?: number }
+  dependsOn?: { service: string; condition: "healthy" | "started" | "completed" }[]
+  /** A private service that may reach the internet. */
+  egress?: boolean
 }
 
 export type BlueprintChoice = {
@@ -3367,6 +3410,8 @@ export type BlueprintDetail = Omit<
   | "reviewedAt"
   | "requiresAcceptance"
   | "privileged"
+  | "sourceKind"
+  | "services"
 > & {
   retired?: string
   image: {
@@ -3405,6 +3450,8 @@ export type BlueprintDetail = Omit<
   files?: BlueprintConfigFile[]
   automation?: BlueprintAutomation[]
   update: { detector: string; versionSource?: string; notes?: string; backupFirst?: boolean }
+  /** A multi-service template's services; the top-level image is then empty. */
+  services?: BlueprintService[]
 }
 
 export type GameImportPreview = {
@@ -3690,6 +3737,12 @@ export type DeploymentSummary = {
   sourceRepository?: string
   /** A Git source's remote without userinfo: `https://host/path` or `git@host:path`. */
   sourceRemote?: string
+  /**
+   * The reviewed template (`id@version`) the deployment was made from: a
+   * blueprint source's definition, or the multi-service template a Compose
+   * source was rendered from.
+   */
+  sourceTemplate?: string
   recipe?: DeploymentRecipe
   /** What detection recognised the source as (`nextjs`, `vite`, `django`…), recorded at creation. */
   framework?: string
@@ -4727,6 +4780,8 @@ export type DeploymentDetection = {
     dirty?: boolean
     composeFiles?: string[]
     services?: string[]
+    /** The multi-service template (`id@version`) a Compose source was rendered from. */
+    template?: string
   }
   candidates: DeploymentDetectionCandidate[]
   compose?: {
