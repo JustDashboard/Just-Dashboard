@@ -5392,7 +5392,8 @@ containers/volumes/networks.
   signed) adds `--force-renewal`, unless the configured directory is itself a staging one; with
   `JD_ACME_DIRECTORY` both name `--server`, except Let's Encrypt's production directory, which is
   certbot's default and is left unnamed (certbot swaps a `--dry-run` to staging only when the server
-  is its default spelled exactly). The page offers that
+  is its default spelled exactly); a deployment run's own orders, over HTTP-01 and DNS-01, name it the
+  same way and check for an account under it (`deployments/implementation.md`). The page offers that
   issuance on a test lineage in place of Renew, since certbot renews from the authority the lineage's
   configuration names. Such a job is titled "Replacing the test certificate for …", audited with
   `replacesTestCertificate`, reloads nginx for the enabled sites naming the certificate (see
@@ -5755,7 +5756,12 @@ running and the transcript complete.
 
 - `Manager.Start(spec, run)` returns immediately; the API answers `202`. `StartExclusive(prefix, …)`
   starts nothing while a job of that kind family runs and returns that job instead, checked and started
-  under one lock. `Emitter` gives runners `Status`, `Line`, `Run`/`RunEnv` through
+  under one lock. The `certbot.` family also takes certbot's turn (`proxysvc.HoldCertbot`, wrapped
+  around every runner by `api.startCertbotJob`): a job that finds a deployment run ordering a
+  certificate starts as before and waits in its own console, naming the run, as the run's certificate
+  step waits for a job — one certbot across the dashboard, with certbot's own lock left to arbitrate
+  only against what the dashboard does not run (see the certificate step in
+  [`deployments/implementation.md`](../deployments/implementation.md)). `Emitter` gives runners `Status`, `Line`, `Run`/`RunEnv` through
   `hostexec.CommandOnHost`, and `RunCmd` for a command the caller built on the side it chose. A slow subscriber is skipped rather than allowed to stall
   the command — the buffer is the record, the channel only the tail.
 - **`RunDetached` is for work that must finish even if the dashboard does not** — today every package

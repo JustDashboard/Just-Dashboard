@@ -2,6 +2,10 @@ package proxysvc
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,7 +38,7 @@ func TestLiveCertbotTestRunSavesNothingAndARealIssuanceReplacesAStagingLineage(t
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	dir := t.TempDir()
-	directory, bundle := startPebble(ctx, t, dir)
+	directory, bundle, _ := startPebble(ctx, t, dir)
 
 	config := filepath.Join(dir, "letsencrypt")
 	work := filepath.Join(dir, "work")
@@ -131,10 +135,11 @@ func TestLiveCertbotTestRunSavesNothingAndARealIssuanceReplacesAStagingLineage(t
 }
 
 // startPebble runs a Pebble that validates nothing, so no public port is
-// needed, and answers with its directory and the root its listener's
-// certificate chains to, which certbot has to trust to read it. The
+// needed, and answers with its directory, the root its listener's
+// certificate chains to, which certbot has to trust to read it, and its
+// management address, where the root it signs with is published. The
 // container goes when the test ends.
-func startPebble(ctx context.Context, t *testing.T, dir string) (directory, bundle string) {
+func startPebble(ctx context.Context, t *testing.T, dir string) (directory, bundle, management string) {
 	t.Helper()
 	docker := func(args ...string) string {
 		t.Helper()
@@ -163,7 +168,7 @@ func startPebble(ctx context.Context, t *testing.T, dir string) (directory, bund
 	pebble := docker("run", "-d", "-e", "PEBBLE_VA_ALWAYS_VALID=1", "-e", "PEBBLE_VA_NOSLEEP=1",
 		"-e", "PEBBLE_WFE_NONCEREJECT=0",
 		"-v", pebbleConfig+":/test/config/pebble-config.json:ro",
-		"-p", "127.0.0.1::14000", "ghcr.io/letsencrypt/pebble:latest")
+		"-p", "127.0.0.1::14000", "-p", "127.0.0.1::15000", "ghcr.io/letsencrypt/pebble:latest")
 	t.Cleanup(func() { hostexec.Command(context.Background(), "docker", "rm", "-f", "-v", pebble).Run() })
 
 	bundle = filepath.Join(dir, "minica.pem")
@@ -178,5 +183,57 @@ func startPebble(ctx context.Context, t *testing.T, dir string) (directory, bund
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	return "https://" + docker("port", pebble, "14000/tcp") + "/dir", bundle
+	directory = "https://" + docker("port", pebble, "14000/tcp") + "/dir"
+	management = "https://" + docker("port", pebble, "15000/tcp")
+	// Pebble answers its first requests before it has finished starting;
+	// certbot's should not be the one that finds out.
+	client := pebbleClient(t, bundle)
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(250 * time.Millisecond) {
+		response, err := client.Get(directory)
+		if err == nil {
+			response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Pebble did not come up (%v): %s", err, docker("logs", pebble))
+		}
+	}
+	return directory, bundle, management
+}
+
+// pebbleClient trusts the root behind Pebble's listeners, bundle.
+func pebbleClient(t *testing.T, bundle string) *http.Client {
+	t.Helper()
+	raw, err := os.ReadFile(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener := x509.NewCertPool()
+	if !listener.AppendCertsFromPEM(raw) {
+		t.Fatalf("Pebble's listener root is not PEM: %s", raw)
+	}
+	return &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: listener}}}
+}
+
+// pebbleIssuingRoots is the root Pebble signs certificates with, read from
+// its management listener: a new one every start, so a certificate that
+// chains to it was signed by this run's Pebble.
+func pebbleIssuingRoots(t *testing.T, management, bundle string) *x509.CertPool {
+	t.Helper()
+	response, err := pebbleClient(t, bundle).Get(management + "/roots/0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(raw) {
+		t.Fatalf("Pebble's issuing root is not PEM: %s", raw)
+	}
+	return pool
 }

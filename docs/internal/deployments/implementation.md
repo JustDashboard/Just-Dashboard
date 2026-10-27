@@ -278,11 +278,39 @@ only renderer/executor/validation authority for their feature.
   either proxy: `certificate_automatic` naming the provider, or `certificate_wildcard_unavailable`,
   blocked with the refusal and a deep link to `/proxy/certificates`; a covered one is
   `certificate_available`.
-  HTTP-01 issuance is bounded at five minutes. Both are serialized against route application so two
+  HTTP-01 issuance (`issueDeploymentHTTP`) runs through the same certbot — whose plugins
+  `deploymentChallenge` reads, against probe directories, to choose webroot or standalone — names the
+  same directory (`deploymentHTTPIssueArgs` appends `ACMEDirectory.certbotArgs`), skips the public-DNS
+  check for a private authority as the Caddy path does, and is bounded at five minutes. Both are
+  serialized against route application so two
   runs cannot race one account into a rate limit, and pass `--keep-until-expiring` so a redeploy inside
-  the renewal window asks the authority for nothing. A first order on a host with no ACME account
+  the renewal window asks the authority for nothing. **One certbot at a time** (`proxysvc/certbot_gate.go`):
+  certbot holds a lock on its configuration directory and a second certbot fails on it at once, so
+  every certbot the dashboard runs takes the one turn `HoldCertbot` hands out — the Certificates page's
+  jobs (`startCertbotJob` wraps every `certbot.` job's runner, renewals and the timer's service run
+  included) and a run's HTTP-01 and DNS-01 orders (`holdCertbotFor`). A run that finds the page's job
+  holding it waits, within the step's own five-minute bound (plus the propagation wait over DNS-01),
+  with a transcript line naming the holder — `Waiting for certbot, which is busy with Renewing
+  app.example.com (started by alice from the Certificates page); the certificate step continues when it
+  finishes` — and then re-checks for a covering certificate before ordering, since the job may have
+  issued exactly that; a wait that outlasts the bound fails the step as `certificate_certbot_busy`, in
+  the step's own words (what it waited for and for how long, and to deploy again once that has
+  finished), never certbot's "another instance is already running". The page's job is accepted as it
+  always was, and a job that finds a run ordering waits in its console the same way, naming the run;
+  two of the page's jobs are still kept apart by the job family's `409 certbot_busy`. The turn is taken
+  before the route lock, never inside it, because the job holding the turn reloads nginx under that
+  lock when it is done. What needs no certbot — a covering certificate, the Docker Caddy ingress, a
+  refusal — waits for nobody. certbot's own lock still arbitrates against what the dashboard does not
+  run, the renewal timer first among them. A first order on a host with no ACME account *with that directory*
+  (`acmeAccountExists`, which files accounts by directory as certbot does; any
+  entry under `accounts/` used to count on the HTTP path, so a host registered with Let's Encrypt
+  ordering from a private authority skipped registering and was refused for want of a contact)
   registers without a contact address; an operator who wants expiry mail registers once on the
-  Certificates page and every later order reuses that account. certbot's exit code is not the evidence:
+  Certificates page and every later order reuses that account.
+  `TestLiveDeploymentHTTP01OrdersFromTheConfiguredDirectory` proves the HTTP-01 order against an
+  isolated Pebble: with a Let's Encrypt account already on disk, the run registers with Pebble, the
+  lineage's `server =` is Pebble's directory, the chain verifies against the root that Pebble minted,
+  and the next order finds Pebble's account rather than Let's Encrypt's. certbot's exit code is not the evidence:
   the certificate is read back and must cover the exact names before the step passes. Step evidence
   carries the lineage name, method, outcome and, over DNS, the provider's name — never a key path, key
   material or a credential. `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run
@@ -1899,7 +1927,12 @@ renders `tls { issuer acme { dir … trusted_roots … } }`, the bundle is copie
 `/config/just-dashboard/acme-root.pem` in the container before the route is written, the issued chain
 is verified against those roots when it is read back, and the public-DNS precheck is skipped for a
 private authority (public DNS says nothing about it; Let's Encrypt and its staging twin still require the
-name to resolve here). certbot issuance adds `--server <directory>` for a non-staging override. The
+name to resolve here). Every certbot order the dashboard places — the Certificates page's, a run's
+HTTP-01 and DNS-01 — adds `--server <directory>` for any directory but Let's Encrypt's production one
+(certbot's own default, left unnamed so a `--dry-run` still goes to staging), checks for an account
+under that directory, and skips the public-DNS check for a private authority; `CertbotCommand` hands
+every certbot it runs the bundle as `REQUESTS_CA_BUNDLE`, which is how python-requests, and so certbot,
+trusts a private listener. The
 journey is proven end to end by `TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory`: an isolated
 Caddy on loopback ports and a Pebble that validates nothing (`PEBBLE_VA_ALWAYS_VALID=1`) on one Docker
 network; the certificate is issued, verified against Pebble's freshly minted root, reused on the second

@@ -3,7 +3,9 @@ package deploy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
@@ -109,6 +111,19 @@ func (e *NormalizedStepExecutor) certificateStep(
 			return StepResult{
 				State: StepUnavailable, ErrorCode: "certificate_wildcard_unavailable",
 				ErrorMessage: err.Error(), Evidence: evidence,
+			}
+		}
+		// certbot was somebody else's for longer than this step's bound:
+		// nothing the authority said and nothing to fix on the host, so the
+		// step says what it waited for and how long, in its own words
+		// rather than certbot's "another instance is already running".
+		var busy *proxysvc.CertbotBusyError
+		if errors.As(err, &busy) {
+			return StepResult{
+				State: StepFailed, ErrorCode: "certificate_certbot_busy",
+				ErrorMessage: fmt.Sprintf("the certificate step waited %s for certbot, which was busy with %s, and its time ran out; deploy again once that has finished",
+					busy.Waited.Round(time.Second), busy.Holder),
+				Evidence: evidence,
 			}
 		}
 		return StepResult{

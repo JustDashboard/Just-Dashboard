@@ -345,6 +345,12 @@ to the contribution terms above, including the additional licence grant to the p
 - The public-certificate journey against a real ACME authority (an isolated Caddy and a Pebble that
   validates nothing, on one Docker network):
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory -count=1 -v`.
+  Changes to how a deployment run orders a certificate over HTTP-01 through certbot (the argv, the
+  account check, which certbot runs) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDeploymentHTTP01OrdersFromTheConfiguredDirectory -count=1 -v`,
+  which drives the host's certbot against a Pebble that validates nothing, in directories of the
+  test's own, and requires the order to register with and be signed by that Pebble while an account
+  with Let's Encrypt sits beside it; no port 80 is touched.
   Changes to how a deployment run issues a certificate over DNS-01 (a wildcard plan name, the provider
   choice, the saved credentials it uses) also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDeploymentWildcardIsProvedOverDNS01AndServed -count=1 -v`
