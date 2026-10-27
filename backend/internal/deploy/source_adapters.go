@@ -103,6 +103,9 @@ func (a *HostSourceAnalyzer) Analyze(ctx context.Context, source DraftSourceConf
 			Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID,
 		}, nil
 	case SourceModeBlueprint:
+		if source.Kind == SourceCompose {
+			return a.analyzeComposeTemplate(ctx, source)
+		}
 		plan, err := RenderBlueprintPlan(source, "")
 		if err != nil {
 			return DetectionResult{}, err
@@ -116,6 +119,32 @@ func (a *HostSourceAnalyzer) Analyze(ctx context.Context, source DraftSourceConf
 	default:
 		return DetectionResult{}, ErrUnsupportedSource
 	}
+}
+
+// analyzeComposeTemplate reads a multi-service template the way a pasted
+// Compose file is read — the structural analysis, then Docker Compose itself
+// as the final parser, then each service image's platforms from its registry —
+// and names the reviewed definition it was rendered from. What it analyses is
+// always this dashboard's render of the version the source names, never a
+// document the caller sent.
+func (a *HostSourceAnalyzer) analyzeComposeTemplate(ctx context.Context, source DraftSourceConfig) (DetectionResult, error) {
+	plan, err := RenderBlueprintPlan(source, "")
+	if err != nil {
+		return DetectionResult{}, err
+	}
+	result, err := a.analyzeCompose(ctx, source, plan.ComposeFiles, "")
+	if err != nil {
+		return DetectionResult{}, err
+	}
+	if result.Compose == nil || result.Compose.Digest != plan.Detection.Source.Digest {
+		return DetectionResult{}, fmt.Errorf("%w: the template's Compose analysis changed while it was read", ErrInvalidPlan)
+	}
+	result.Compose.PrimaryService = plan.Detection.Compose.PrimaryService
+	result.Source.Revision = plan.Detection.Source.Revision
+	result.Source.Template = plan.Detection.Source.Template
+	result.Candidates = plan.Detection.Candidates
+	result.SelectedID = plan.Detection.SelectedID
+	return result, nil
 }
 
 // resolveBlueprintImage gives a rendered blueprint the immutable image digest

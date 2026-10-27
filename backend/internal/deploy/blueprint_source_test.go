@@ -179,7 +179,7 @@ func TestBlueprintPlansCarryGeneratedSecretsByNameOnly(t *testing.T) {
 			}
 		}
 		plan, renderErr := RenderBlueprintPlan(DraftSourceConfig{
-			Kind: SourceBlueprint, Mode: SourceModeBlueprint,
+			Kind: BlueprintSourceKind(entry), Mode: SourceModeBlueprint,
 			BlueprintID: entry.ID, BlueprintVersion: entry.Version, BlueprintInputs: inputs,
 		}, "secret-probe")
 		if renderErr != nil {
@@ -327,7 +327,7 @@ func TestEveryTemplateDeploysFromWhatTheNewProjectPageCanFillIn(t *testing.T) {
 				inputs[name] = "operator@example.com"
 			}
 			plan, err := RenderBlueprintPlan(DraftSourceConfig{
-				Kind: SourceBlueprint, Mode: SourceModeBlueprint,
+				Kind: BlueprintSourceKind(definition), Mode: SourceModeBlueprint,
 				BlueprintID: definition.ID, BlueprintVersion: definition.Version,
 				BlueprintInputs: inputs,
 			}, definition.ID)
@@ -339,7 +339,7 @@ func TestEveryTemplateDeploysFromWhatTheNewProjectPageCanFillIn(t *testing.T) {
 			}
 			draft := &Draft{Data: DraftData{
 				Intent: &DraftIntentConfig{Name: definition.ID, Profile: plan.Detection.Candidates[0].Profile},
-				Source: &DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint,
+				Source: &DraftSourceConfig{Kind: BlueprintSourceKind(definition), Mode: SourceModeBlueprint,
 					BlueprintID: definition.ID, BlueprintVersion: definition.Version, BlueprintInputs: inputs},
 				Detection: &plan.Detection, Configuration: &plan.Configuration,
 			}}
