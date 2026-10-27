@@ -410,6 +410,7 @@ export function ProjectRuntime() {
                 : undefined
           }
           stores={mapStores}
+          composeStack={deployment.buildMethod === "compose"}
           storesReason={
             loading || mapStores ? undefined : "The storage and database owners could not be read."
           }

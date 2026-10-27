@@ -56,8 +56,11 @@ func (k Kind) Known() bool {
 
 type Service struct {
 	dockerIngress bool
-	nginxDir      string
-	caddyFile     string
+	// ingressContainer pins deployments to one Caddy container by name;
+	// empty discovers the host's public one.
+	ingressContainer string
+	nginxDir         string
+	caddyFile        string
 
 	// nginx has no way to test a config fragment in isolation, so validation
 	// has to put the candidate where nginx expects it and take it away again.
@@ -83,9 +86,23 @@ func NewWithDockerIngress(nginxDir, caddyFile string) *Service {
 	return s
 }
 
+// NewWithIngressContainer routes deployments through the named Caddy
+// container and nothing else: never host nginx, and never one it starts.
+// Discovery insists on a Caddy publishing 80 and 443 on every address; one
+// bound to a single address, or an acceptance fixture published on loopback,
+// is only ever used by name.
+func NewWithIngressContainer(nginxDir, caddyFile, container string) *Service {
+	s := NewWithDockerIngress(nginxDir, caddyFile)
+	s.ingressContainer = container
+	return s
+}
+
 func (s *Service) dockerCaddy(ctx context.Context) (*dockerCaddy, error) {
 	if !s.dockerIngress {
 		return nil, nil
+	}
+	if s.ingressContainer != "" {
+		return namedDockerCaddy(ctx, s.ingressContainer)
 	}
 	return discoverDockerCaddy(ctx)
 }

@@ -15,7 +15,12 @@ import { StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { TranscriptRow } from "@/components/transcript-line"
 import { Button } from "@/components/ui/button"
-import { formatDuration, stepName, stepSeconds } from "@/components/deploy/vocabulary"
+import {
+  formatDuration,
+  stepName,
+  stepOperation,
+  stepSeconds,
+} from "@/components/deploy/vocabulary"
 import { causeHeadline, causeTitle } from "@/components/deploy/failure-cause"
 import type { ConsoleRow } from "@/components/deploy/build-console"
 import { StepTile } from "@/components/deploy/run-evidence"
@@ -109,7 +114,7 @@ export function RunFailure({
               <p className="numeric text-xs text-muted-foreground">
                 {rolledBack ? "Stopped at " : "Failed at "}
                 <span className="font-medium text-foreground">
-                  {stepName(step.key, run.operation)}
+                  {stepName(step.key, stepOperation(run))}
                 </span>
                 {` · step ${reached} of ${steps.length}`}
                 {seconds !== undefined && ` · after ${formatDuration(seconds)}`}
@@ -155,7 +160,7 @@ export function RunFailure({
         <div className="space-y-3 px-4 pb-4">
           {tail.length > 0 && (
             <ol
-              aria-label={`Last lines from ${step ? stepName(step.key, run.operation) : "the run"}`}
+              aria-label={`Last lines from ${step ? stepName(step.key, stepOperation(run)) : "the run"}`}
               className="overflow-hidden rounded-md border border-hairline bg-surface-sunken py-1.5 font-mono text-xs leading-6"
             >
               {tail.map((row) => (

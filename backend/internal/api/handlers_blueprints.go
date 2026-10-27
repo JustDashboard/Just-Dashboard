@@ -111,7 +111,7 @@ func (s *Server) handleBlueprintRender(w http.ResponseWriter, r *http.Request) e
 		return mapBlueprintError(err)
 	}
 	plan, err := deploy.RenderBlueprintPlan(deploy.DraftSourceConfig{
-		Kind: deploy.SourceBlueprint, Mode: deploy.SourceModeBlueprint,
+		Kind: deploy.BlueprintSourceKind(found), Mode: deploy.SourceModeBlueprint,
 		BlueprintID: found.ID, BlueprintVersion: found.Version, BlueprintInputs: request.Inputs,
 	}, request.Name)
 	if err != nil {

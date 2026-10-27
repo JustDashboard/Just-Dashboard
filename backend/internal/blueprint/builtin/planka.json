@@ -1,0 +1,260 @@
+{
+  "id": "planka",
+  "version": "1.0.0",
+  "name": "Planka",
+  "category": "http",
+  "profile": "compose",
+  "description": "A real-time kanban board for teams, on the PostgreSQL database it requires, on a private network.",
+  "iconId": "kanban",
+  "docsUrl": "https://docs.planka.cloud/docs/installation/docker/production-version/",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "DEFAULT_ADMIN_EMAIL",
+    "secretVariable": "DEFAULT_ADMIN_PASSWORD",
+    "note": "Planka creates its administrator on the first start from the e-mail typed here and the password generated here, so https://<domain>/ opens on a login form for that pair. Reveal the password from the Variables tab."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Fair Use License",
+    "upstreamUrl": "https://github.com/plankanban/planka",
+    "reviewedAt": "2026-10-27",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Planka builds links and its WebSocket address from this."
+    },
+    {
+      "name": "admin-email",
+      "kind": "text",
+      "label": "Admin e-mail",
+      "variable": "DEFAULT_ADMIN_EMAIL",
+      "required": true,
+      "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+      "description": "The administrator's sign-in."
+    }
+  ],
+  "secrets": [
+    {
+      "name": "secret-key",
+      "variable": "PLANKA_SECRET_KEY",
+      "label": "Secret key",
+      "length": 64,
+      "description": "Signs sessions; changing it signs everybody out."
+    },
+    {
+      "name": "admin-password",
+      "variable": "DEFAULT_ADMIN_PASSWORD",
+      "label": "Admin password",
+      "length": 24,
+      "description": "Reveal it from the Variables tab to sign in the first time."
+    },
+    {
+      "name": "db-password",
+      "variable": "PLANKA_DB_PASSWORD",
+      "label": "Database password",
+      "length": 40,
+      "description": "Generated here and given only to the services that sign in to the database."
+    }
+  ],
+  "services": [
+    {
+      "name": "planka",
+      "role": "app",
+      "purpose": "The boards, the API and the real-time socket, behind the domain",
+      "image": {
+        "reference": "ghcr.io/plankanban/planka:2.2.1",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "BASE_URL",
+          "value": "{{variable.BASE_URL}}"
+        },
+        {
+          "name": "DATABASE_URL",
+          "value": "postgresql://planka:{{secret.db-password}}@db:5432/planka"
+        },
+        {
+          "name": "SECRET_KEY",
+          "value": "{{secret.secret-key}}"
+        },
+        {
+          "name": "TRUST_PROXY",
+          "value": "true"
+        },
+        {
+          "name": "DEFAULT_ADMIN_EMAIL",
+          "value": "{{variable.DEFAULT_ADMIN_EMAIL}}"
+        },
+        {
+          "name": "DEFAULT_ADMIN_PASSWORD",
+          "value": "{{secret.admin-password}}"
+        },
+        {
+          "name": "DEFAULT_ADMIN_NAME",
+          "value": "Administrator"
+        },
+        {
+          "name": "DEFAULT_ADMIN_USERNAME",
+          "value": "admin"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 1337,
+          "protocol": "tcp",
+          "purpose": "The boards, API and real-time socket",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "data",
+          "target": "/app/data",
+          "purpose": "Attachments, avatars and backgrounds",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "wget",
+          "-q",
+          "--spider",
+          "http://127.0.0.1:1337/"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 12,
+        "startPeriodSeconds": 40
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "PostgreSQL, holding every board, card and user",
+      "image": {
+        "reference": "postgres:17.11-alpine",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "POSTGRES_DB",
+          "value": "planka"
+        },
+        {
+          "name": "POSTGRES_USER",
+          "value": "planka"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "value": "{{secret.db-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "postgres",
+          "internal": 5432,
+          "protocol": "tcp",
+          "purpose": "SQL connections from Planka",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/var/lib/postgresql/data",
+          "purpose": "Every table Planka keeps",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "pg_isready",
+          "-h",
+          "127.0.0.1",
+          "-U",
+          "planka",
+          "-d",
+          "planka"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 20
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Boards answer",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "port": "http",
+      "timeoutSeconds": 240
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "BASE_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "Planka migrates its database on start; take a backup first. Planka 2 is licensed under its own Fair Use License: free to self-host, not to resell as a service."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "boards.example.test",
+        "admin-email": "admin@example.com"
+      },
+      "digest": "sha256:38fab9a8e1e5bd41aee094dab6b3c6861d118576f254d1cd499a3cffe042483b"
+    }
+  ]
+}

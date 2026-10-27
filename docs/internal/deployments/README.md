@@ -14,6 +14,8 @@
   logs, the request readings, container lifecycle events, and the three container-output fixes.
 - [`log-drains.md`](log-drains.md) — copying deployments' container output and requests to OpenTelemetry
   (OTLP), Loki or a JSON-lines endpoint: formats, severity, sealed headers, delivery, retries and status.
+- [`secret-stores.md`](secret-stores.md) — Vault, OpenBao, Infisical and Doppler connections, the
+  `${{store.NAME/path#KEY}}` reference, when a run reads it, what a rollback reads, previews, routes and audit.
 - [`notifications.md`](notifications.md) — run observers, chat (Discord, Slack, Teams, Mattermost, Telegram), push (ntfy, Gotify, Pushover), e-mail and webhook channels, delivery history, commit statuses and preview comments on GitHub, GitLab, Gitea and Forgejo, and what Settings and Credentials say about them.
 - [`github-app.md`](github-app.md) — the dashboard's GitHub App: manifest flow, installation credentials for clones, App-delivered triggers, statuses and pull request comments.
 - [`gap-closure-plan.md`](../../audits/2026-09-16-deployments/gap-closure-plan.md) — second-pass re-evaluation, defects D1–D7, competitive position and remaining phases.

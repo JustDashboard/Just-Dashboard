@@ -169,6 +169,10 @@ type SourceIdentity struct {
 	// id rather than a registry manifest, and a release takes it from the
 	// daemon instead of pulling it.
 	Local bool `json:"local,omitempty"`
+	// Template is the reviewed multi-service template (`id@version`) a
+	// Compose source's document was rendered from, and empty for every other
+	// source. A blueprint source names its definition in Ref instead.
+	Template string `json:"template,omitempty"`
 }
 
 type DetectionConfidence string
@@ -634,6 +638,29 @@ type RuntimePlanConfig struct {
 	// ForwardAuth has the public route ask an auth server about every
 	// request first, so only people who sign in reach the application.
 	ForwardAuth *RouteForwardAuth `json:"forwardAuth,omitempty"`
+	// Maintenance is who still reaches the application while the public
+	// route is in maintenance, and how long its 503 tells clients to wait.
+	// Whether it is in maintenance is not the plan's: that is a switch on
+	// the live route, turned at once from the Domains settings, so a
+	// rollback or a new release never turns it on or off.
+	Maintenance *RouteMaintenance `json:"maintenance,omitempty"`
+	// ErrorPages are the codes the public route answers with a page of its
+	// own rather than the proxy's stock one: 404, 502, 503 or 504.
+	// InterceptErrors gives the application's own answers with those codes
+	// the page as well.
+	ErrorPages      []int `json:"errorPages,omitempty"`
+	InterceptErrors bool  `json:"interceptErrors,omitempty"`
+}
+
+// RouteMaintenance is what the public route's maintenance does while it is
+// on.
+type RouteMaintenance struct {
+	// RetryAfter is the seconds the 503 tells clients and crawlers to wait;
+	// 0 sends no Retry-After.
+	RetryAfter int `json:"retryAfter,omitempty"`
+	// BypassFrom are the addresses and ranges that reach the application as
+	// usual while it is in maintenance, kept in their canonical spelling.
+	BypassFrom []string `json:"bypassFrom,omitempty"`
 }
 
 // RouteHeader is one response header the public route sets.
@@ -1016,6 +1043,16 @@ func (c DraftSourceConfig) Validate() error {
 		}
 	case SourceModeBlueprint:
 		allowed = sourceFieldSet("blueprintId", "blueprintVersion", "blueprintInputs")
+		if c.Kind == SourceCompose {
+			// A Compose template stores the document rendered from it
+			// (WithTemplateDocuments), which every release then runs.
+			allowed["composeFiles"] = true
+			if len(c.ComposeFiles) > 0 {
+				if _, err := analyzeComposeDocuments(c.ComposeFiles); err != nil {
+					return err
+				}
+			}
+		}
 		if c.BlueprintID == "" || c.BlueprintVersion == "" || len(c.BlueprintID) > 128 ||
 			len(c.BlueprintVersion) > 128 || strings.ContainsAny(c.BlueprintID+c.BlueprintVersion, "\x00\r\n") {
 			return fmt.Errorf("%w: blueprint id and version are required", ErrInvalidSource)
@@ -1102,7 +1139,7 @@ func validModeForKind(kind SourceKind, mode SourceMode) bool {
 		return mode == SourceModeImageReference
 	case SourceCompose:
 		return mode == SourceModeComposePaste || mode == SourceModeComposeUpload ||
-			mode == SourceModeComposeGit || mode == SourceModeComposeLocal
+			mode == SourceModeComposeGit || mode == SourceModeComposeLocal || mode == SourceModeBlueprint
 	case SourceBlueprint:
 		return mode == SourceModeBlueprint
 	case SourceImport:
@@ -1784,6 +1821,51 @@ func validateRouteRules(runtime RuntimePlanConfig) error {
 	if err := proxysvc.ValidateDeploymentHeaders(headers); err != nil {
 		return invalidField("runtime.responseHeaders", "%v", err)
 	}
+	return validateRoutePages(runtime)
+}
+
+// validateRoutePages checks the public route's maintenance and error pages
+// by the rules Proxy holds a site's to.
+func validateRoutePages(runtime RuntimePlanConfig) error {
+	if m := runtime.Maintenance; m != nil {
+		if m.RetryAfter < 0 || m.RetryAfter > proxysvc.MaxRetryAfter {
+			return invalidField("runtime.maintenance.retryAfter", "retry after is between 0 and %d seconds", proxysvc.MaxRetryAfter)
+		}
+		if len(m.BypassFrom) > proxysvc.MaxDeploymentAllow {
+			return invalidField("runtime.maintenance.bypassFrom", "at most %d addresses can be let past maintenance", proxysvc.MaxDeploymentAllow)
+		}
+		seen := map[string]bool{}
+		for index, entry := range m.BypassFrom {
+			field := fmt.Sprintf("runtime.maintenance.bypassFrom[%d]", index)
+			normalized, err := proxysvc.NormalizeAccessEntry(entry)
+			if err != nil {
+				return invalidField(field, "%v", err)
+			}
+			if seen[normalized] {
+				return invalidField(field, "%s is listed twice", normalized)
+			}
+			seen[normalized] = true
+		}
+	}
+	seen := map[int]bool{}
+	for index, code := range runtime.ErrorPages {
+		field := fmt.Sprintf("runtime.errorPages[%d]", index)
+		if !slices.Contains(proxysvc.ErrorPageCodes(), code) {
+			return invalidField(field, "an error page can be set for 404, 502, 503 or 504, not %d", code)
+		}
+		if seen[code] {
+			return invalidField(field, "the %d page is listed twice", code)
+		}
+		seen[code] = true
+	}
+	if runtime.InterceptErrors && len(runtime.ErrorPages) == 0 {
+		return invalidField("runtime.interceptErrors", "choose a page to replace the application's error pages with")
+	}
+	// A preview's plan is a copy of this one, so a sign-in for previews
+	// alone would meet the replaced pages there.
+	if runtime.InterceptErrors && runtime.ForwardAuth != nil {
+		return invalidField("runtime.interceptErrors", "with the application's own error responses replaced, its own 401s would be sent to sign in; turn one of them off")
+	}
 	return nil
 }
 
@@ -1809,6 +1891,9 @@ type VariableReference struct {
 }
 
 func ParseVariableReference(value string) (VariableReference, error) {
+	if reference, isStore, err := parseStoreReference(value); isStore {
+		return reference, err
+	}
 	if !plannedReferenceRE.MatchString(value) {
 		return VariableReference{}, fmt.Errorf("%w: malformed typed reference", ErrInvalidVariable)
 	}
@@ -1987,11 +2072,15 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 	identity := detection.Source
 	for _, value := range []string{
 		identity.Remote, identity.Repository, identity.Ref, identity.Revision,
-		identity.Digest, identity.OS, identity.Architecture, identity.LocalPath,
+		identity.Digest, identity.OS, identity.Architecture, identity.LocalPath, identity.Template,
 	} {
 		if len(value) > 4096 || strings.ContainsAny(value, "\x00\r\n") {
 			return fmt.Errorf("%w: source identity is malformed", ErrInvalidPlan)
 		}
+	}
+	if identity.Template != "" && (source.Mode != SourceModeBlueprint || source.Kind != SourceCompose ||
+		identity.Template != source.BlueprintID+"@"+source.BlueprintVersion) {
+		return fmt.Errorf("%w: template identity does not match the saved source", ErrInvalidPlan)
 	}
 	if identity.Remote != "" {
 		if normalized, _, err := normalizeGitRemote(identity.Remote); err != nil || normalized != identity.Remote {
@@ -2491,8 +2580,33 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 		}
 		c.Runtime.ForwardAuth = &trimmed
 	}
+	c.Runtime.Maintenance = canonicalRouteMaintenance(c.Runtime.Maintenance)
+	// In the order the proxy writes them, and absent when there are none, so
+	// a plan that never chose a page keeps the bytes and the digest it had.
+	if len(c.Runtime.ErrorPages) == 0 {
+		c.Runtime.ErrorPages = nil
+	} else {
+		c.Runtime.ErrorPages = slices.Sorted(slices.Values(c.Runtime.ErrorPages))
+	}
 	sort.Slice(c.Domains, func(i, j int) bool { return c.Domains[i].Hostname < c.Domains[j].Hostname })
 	return c
+}
+
+// canonicalRouteMaintenance is the plan's maintenance spelled the way the
+// proxy writes it, as a copy, or nothing when it asks for nothing: a plan
+// that never set it keeps the bytes and the digest it had.
+func canonicalRouteMaintenance(m *RouteMaintenance) *RouteMaintenance {
+	if m == nil || (m.RetryAfter == 0 && len(m.BypassFrom) == 0) {
+		return nil
+	}
+	out := RouteMaintenance{RetryAfter: m.RetryAfter}
+	for _, entry := range m.BypassFrom {
+		if normalized, err := proxysvc.NormalizeAccessEntry(entry); err == nil {
+			entry = normalized
+		}
+		out.BypassFrom = append(out.BypassFrom, entry)
+	}
+	return &out
 }
 
 func canonicalSourceConfig(source DraftSourceConfig) DraftSourceConfig {

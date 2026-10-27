@@ -92,6 +92,7 @@ import {
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { ValueType, VariableMark } from "@/components/deploy/settings/variable-type"
 import { SharedReferencePicker, SharedVariables } from "@/components/deploy/shared-variables"
+import { StoreReferenceLabel, StoreReferencePicker } from "@/components/deploy/secret-store-picker"
 import { SettingSection, SettingsPage } from "@/components/deploy/settings/setting-card"
 import {
   ConfigurationState,
@@ -820,6 +821,17 @@ function VariablesBody({
             }}
           />
         )}
+        {reference && (
+          <StoreReferencePicker
+            value={value}
+            onChange={(next) => {
+              setValue(next)
+              // A store's value is always a secret, and the server refuses a
+              // variable that reads one without being one.
+              setSensitivity("secret")
+            }}
+          />
+        )}
       </div>
       {/* No count under the title: the three switches under it are the count. */}
       <FormSection title="Who can read it">
@@ -1303,6 +1315,11 @@ function ValueLine({
             </Link>
           )}
           <span className={cn(!wide && "sr-only")}> · shared</span>
+        </>
+      ) : reference?.kind === "store" ? (
+        <>
+          <StoreReferenceLabel target={reference.target} compact={compact} />
+          <span className={cn(!wide && "sr-only")}> · secret store</span>
         </>
       ) : reference ? (
         <>

@@ -54,6 +54,10 @@ type DeploymentSummary struct {
 	// removed, so the fleet can name the host without seeing a credential.
 	SourceRepository string `json:"sourceRepository,omitempty"`
 	SourceRemote     string `json:"sourceRemote,omitempty"`
+	// SourceTemplate is the reviewed template (`id@version`) the deployment
+	// was made from: a blueprint source's own definition, or the
+	// multi-service template a Compose source was rendered from.
+	SourceTemplate string `json:"sourceTemplate,omitempty"`
 	// SourcePath is the checkout on this server a local source is read from.
 	// It is for the server map's line to the repository the deployment is
 	// built from, and is not part of the list's answer: the deployment's own
@@ -140,6 +144,7 @@ type DeploymentFacts struct {
 	SourceKind       SourceKind  `json:"sourceKind,omitempty"`
 	SourceRef        string      `json:"sourceRef,omitempty"`
 	SourceRepository string      `json:"sourceRepository,omitempty"`
+	SourceTemplate   string      `json:"sourceTemplate,omitempty"`
 	BuildMethod      BuildMethod `json:"buildMethod,omitempty"`
 	Recipe           string      `json:"recipe,omitempty"`
 	Framework        string      `json:"framework,omitempty"`
@@ -276,6 +281,10 @@ func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, p
 			summary.SourceRepository = identity.Repository
 			summary.SourceRemote = displayRemote(identity.Remote)
 			summary.SourcePath = identity.LocalPath
+			summary.SourceTemplate = identity.Template
+			if summary.SourceKind == SourceBlueprint {
+				summary.SourceTemplate = identity.Ref
+			}
 		}
 		var build BuildPlanConfig
 		if json.Unmarshal([]byte(buildJSON), &build) == nil {
@@ -848,6 +857,10 @@ func (s *OrchestrationStore) ArchivedDeploymentFacts(ctx context.Context) (map[i
 		var identity SourceIdentity
 		if json.Unmarshal([]byte(identityJSON), &identity) == nil {
 			facts.SourceRef, facts.SourceRepository = identity.Ref, identity.Repository
+			facts.SourceTemplate = identity.Template
+			if facts.SourceKind == SourceBlueprint {
+				facts.SourceTemplate = identity.Ref
+			}
 		}
 		var build BuildPlanConfig
 		if json.Unmarshal([]byte(buildJSON), &build) == nil {

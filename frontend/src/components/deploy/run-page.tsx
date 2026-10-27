@@ -51,6 +51,7 @@ import {
   runLabel,
   runStopped,
   stepName,
+  stepOperation,
   useNow,
 } from "@/components/deploy/vocabulary"
 import { BuildConsole, consoleRows, transcriptSummary } from "@/components/deploy/build-console"
@@ -583,7 +584,9 @@ export function RunPage() {
 
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         Deployment state: {runLabel(run.state, run.operation)}
-        {current ? `. Current step: ${stepName(current.key, run.operation)}, ${current.state}` : ""}
+        {current
+          ? `. Current step: ${stepName(current.key, stepOperation(run))}, ${current.state}`
+          : ""}
       </p>
 
       <RunHeader
@@ -611,7 +614,7 @@ export function RunPage() {
         <p className="text-body text-muted-foreground">Compatibility pipeline</p>
       ) : (
         <div className="flex flex-col gap-3">
-          <ReleasePipeline steps={attempts} operation={run.operation} now={clock} />
+          <ReleasePipeline steps={attempts} operation={stepOperation(run)} now={clock} />
           {/* The path lights the stage at work; before there is one, this
               says why nothing has started. */}
           {active && attempts.length === 0 && (
@@ -703,7 +706,7 @@ export function RunPage() {
             steps={attempts}
             active={active}
             outcome={run.state}
-            operation={run.operation}
+            operation={stepOperation(run)}
             connected={stream.socket === "open"}
             startedAt={run.claimedAt ?? run.requestedAt}
             runNumber={run.runNumber}
@@ -720,7 +723,7 @@ export function RunPage() {
           projectId={projectId}
           deployment={deployment}
           steps={attempts}
-          operation={run.operation}
+          operation={stepOperation(run)}
           now={clock}
           rows={rows}
           lineCounts={transcript.perStep}

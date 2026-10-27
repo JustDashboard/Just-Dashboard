@@ -18,18 +18,23 @@ import {
   Trash,
   Warning,
 } from "@/components/icons"
-import { ApiError, get, refusedIndex } from "@/lib/api"
+import { ApiError, get, put, refusedIndex } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { plural } from "@/lib/format"
+import { plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
+import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentDomainRoute,
   DeploymentEnvironmentConfiguration,
+  DeploymentErrorPage,
   DeploymentForwardAuth,
   DeploymentHostnameSuggestion,
+  DeploymentMaintenanceSwitch,
+  DeploymentPageName,
   DeploymentRedirectCode,
+  Exposure,
   ForwardAuthProvider,
 } from "@/lib/types"
 import { SSO_PROVIDERS, chooseSsoProvider, ssoPreset } from "@/lib/sso-providers"
@@ -69,7 +74,17 @@ import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/
 import { OwnershipSelect } from "@/components/deploy/settings/mounts"
 import { useProject } from "@/components/deploy/project-context"
 import { HeaderListField, ListField } from "@/components/proxy/site-form"
+import { PAGE_LABEL, PageEditor } from "@/components/proxy/page-editor"
 import { routeAccessState, signInConflicts } from "@/components/deploy/settings/route-access"
+import {
+  ERROR_PAGES,
+  errorPagesState,
+  maintenancePolicyState,
+  maintenanceState,
+  maintenanceUnready,
+  retryAfterOf,
+  routeMaintenanceOf,
+} from "@/components/deploy/settings/route-pages"
 
 /**
  * Domains — the hostnames this environment answers on.
@@ -133,6 +148,19 @@ export function DomainsSettings({
             Boolean(configuration.runtime.responseHeaders?.length) ||
             Boolean(configuration.runtime.forwardAuth)) && (
             <RouteRulesForm configuration={configuration} save={state.save} />
+          )}
+          {(configuration.domains.length > 0 ||
+            Boolean(configuration.runtime.maintenance) ||
+            Boolean(configuration.runtime.errorPages?.length)) && (
+            <>
+              <MaintenanceForm projectId={projectId} environmentId={environmentId} />
+              <RoutePagesForm
+                configuration={configuration}
+                save={state.save}
+                projectId={projectId}
+                environmentId={environmentId}
+              />
+            </>
           )}
         </>
       )}
@@ -1237,5 +1265,379 @@ function RouteSignIn({
         )}
       </OptionRow>
     </OptionList>
+  )
+}
+
+/**
+ * Maintenance — the switch. It is not part of the plan: every route a release
+ * writes carries the check, and a file beside the route turns it on, which
+ * both proxies look for on every request. So this save applies at once,
+ * without a deployment and without the route being written again, and
+ * neither a rollback nor the next release turns it on or off. Who is let
+ * past and what the 503 says are the route's, in the form under it.
+ */
+function MaintenanceForm({
+  projectId,
+  environmentId,
+}: {
+  projectId: number
+  environmentId: number
+}) {
+  const { can } = useAuth()
+  // It takes the application away from its visitors, as stopping it does,
+  // and the server asks the same capability.
+  const canSwitch = can("destructive")
+  const path = `/deploy/${projectId}/environments/${environmentId}/maintenance`
+  const live = usePoll(
+    (signal) => get<DeploymentMaintenanceSwitch>(path, undefined, signal),
+    15_000,
+    [path],
+  )
+  const switched = live.data
+  const draft = useSettingDraft(`deploy.${projectId}.settings.maintenance`, {
+    on: switched?.on ?? false,
+  })
+  const [saving, setSaving] = useState(false)
+  const [refusal, setRefusal] = useState<string>()
+  const unready = maintenanceUnready(switched)
+
+  const onSave = async () => {
+    setSaving(true)
+    setRefusal(undefined)
+    try {
+      await put<DeploymentMaintenanceSwitch>(path, { on: draft.value.on })
+      live.refresh()
+      return true
+    } catch (error) {
+      setRefusal(error instanceof Error ? error.message : String(error))
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <SettingForm
+      name="Maintenance"
+      onSave={onSave}
+      dirty={draft.dirty}
+      changes={draft.changes}
+      saving={saving}
+      canEdit={canSwitch}
+      applies="immediately"
+      onDiscard={() => {
+        setRefusal(undefined)
+        draft.discard()
+      }}
+    >
+      <SettingSection
+        id="maintenance"
+        title="Maintenance"
+        state={
+          <span>
+            {maintenanceState(switched)}
+            {switched?.on && switched.since && (
+              <>
+                {" · turned on "}
+                <time dateTime={switched.since} title={timestamp(switched.since)}>
+                  {relativeTime(switched.since)}
+                </time>
+              </>
+            )}
+          </span>
+        }
+        status={
+          draft.dirty || refusal ? (
+            settingStatus({ dirty: draft.dirty, refused: Boolean(refusal) })
+          ) : switched?.on ? (
+            <Status key="on" tone="warning" label="In maintenance" className="animate-rise" />
+          ) : null
+        }
+      >
+        <OptionList>
+          <OptionRow
+            title="Answer with the maintenance page"
+            hint="Every visitor gets the maintenance page with a 503 as soon as this is saved, without a deployment, except the addresses let past below. Certificate renewals keep working."
+            tone={draft.value.on ? "warning" : "default"}
+            checked={draft.value.on}
+            disabled={!canSwitch || (!draft.value.on && !switched?.ready)}
+            onCheckedChange={(on) => draft.set({ on })}
+          />
+        </OptionList>
+        {unready && <FormNote>{unready}</FormNote>}
+        {live.error && !switched && (
+          <FormNote tone="warning">The live route could not be read: {live.error.message}</FormNote>
+        )}
+        {refusal && (
+          <FormNote role="alert" tone="danger">
+            {refusal}
+          </FormNote>
+        )}
+      </SettingSection>
+    </SettingForm>
+  )
+}
+
+type RoutePages = {
+  retryAfter: string
+  bypassFrom: string[]
+  errorPages: DeploymentErrorPage[]
+  interceptErrors: boolean
+}
+
+/** What a page's code is for, under its switch. */
+const ERROR_PAGE_HINT: Record<DeploymentErrorPage, string> = {
+  404: "A path with nothing behind it.",
+  502: "The application is down or starting. The page shipped for it retries every 5 seconds.",
+  503: "The application says it cannot take requests.",
+  504: "The application took longer than the proxy waits to answer.",
+}
+
+/** Which of the form's fields a refusal names. */
+function refusedPage(field: string | undefined): keyof RoutePages | undefined {
+  if (field?.startsWith("runtime.maintenance.retryAfter")) return "retryAfter"
+  if (field?.startsWith("runtime.maintenance.bypassFrom")) return "bypassFrom"
+  if (field?.startsWith("runtime.errorPages")) return "errorPages"
+  if (field?.startsWith("runtime.interceptErrors")) return "interceptErrors"
+  return undefined
+}
+
+/**
+ * The maintenance page and the error pages: who is let past while the switch
+ * above is on, what its 503 tells clients, and which answers get a page of
+ * the route's own rather than the proxy's. They are written into the route,
+ * so they apply with the next deployment, like the rest of the plan. The
+ * pages themselves are files beside the route that either proxy reads on
+ * every answer, so editing one applies at once.
+ */
+function RoutePagesForm({
+  configuration,
+  save,
+  projectId,
+  environmentId,
+}: {
+  configuration: DeploymentEnvironmentConfiguration
+  save: ReturnType<typeof useConfiguration>["save"]
+  projectId: number
+  environmentId: number
+}) {
+  const { can } = useAuth()
+  const canAdmin = can("system.admin")
+  const { runtime } = configuration
+  const saved: RoutePages = {
+    retryAfter: runtime.maintenance?.retryAfter ? String(runtime.maintenance.retryAfter) : "",
+    bypassFrom: runtime.maintenance?.bypassFrom ?? [],
+    errorPages: runtime.errorPages ?? [],
+    interceptErrors: runtime.interceptErrors ?? false,
+  }
+  const draft = useSettingDraft(`deploy.${projectId}.settings.route-pages`, saved)
+  const pages = draft.value
+  const [saving, setSaving] = useState(false)
+  const [finding, setFinding] = useState(false)
+  const [refusal, setRefusal] = useState<{ field: keyof RoutePages; message: string }>()
+  const [editing, setEditing] = useState<DeploymentPageName | null>(null)
+  const retryAfter = retryAfterOf(pages.retryAfter)
+  const signsIn = Boolean(runtime.forwardAuth)
+  const set = (patch: Partial<RoutePages>) => draft.set({ ...pages, ...patch })
+
+  const onSave = async () => {
+    setSaving(true)
+    setRefusal(undefined)
+    try {
+      await save({
+        runtime: (latest) => ({
+          ...latest.runtime,
+          maintenance: routeMaintenanceOf(retryAfter ?? undefined, pages.bypassFrom),
+          errorPages: pages.errorPages.length > 0 ? pages.errorPages : undefined,
+          interceptErrors: pages.errorPages.length > 0 && pages.interceptErrors ? true : undefined,
+        }),
+      })
+      return true
+    } catch (error) {
+      const field = error instanceof ApiError ? refusedPage(error.field) : undefined
+      if (error instanceof ApiError && field) setRefusal({ field, message: error.message })
+      else notify.error("Could not save the pages", error)
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const addMyAddress = async () => {
+    setFinding(true)
+    try {
+      const { client } = await get<Exposure>("/exposure")
+      if (!client) {
+        notify.error("The dashboard could not tell which address you come from")
+        return
+      }
+      if (!pages.bypassFrom.includes(client)) set({ bypassFrom: [...pages.bypassFrom, client] })
+    } catch (error) {
+      notify.error("Could not read your address", error)
+    } finally {
+      setFinding(false)
+    }
+  }
+
+  const editable: DeploymentPageName[] = [
+    "maintenance",
+    ...ERROR_PAGES.filter((code) => saved.errorPages.includes(code)).map(
+      (code) => String(code) as DeploymentPageName,
+    ),
+  ]
+
+  return (
+    <>
+      <SettingForm
+        name="Maintenance page and error pages"
+        onSave={onSave}
+        dirty={draft.dirty}
+        changes={draft.changes}
+        saving={saving}
+        invalid={retryAfter === null}
+        canEdit={canAdmin}
+        onDiscard={() => {
+          setRefusal(undefined)
+          draft.discard()
+        }}
+      >
+        <SettingSection
+          title="Maintenance page"
+          state={maintenancePolicyState(runtime.maintenance)}
+          status={settingStatus({
+            dirty: draft.changed(["retryAfter", "bypassFrom"]),
+            refused: refusal?.field === "retryAfter" || refusal?.field === "bypassFrom",
+          })}
+        >
+          <ListField
+            id="route-maintenance-bypass"
+            label="Let these addresses past"
+            placeholder="203.0.113.7 or 10.0.0.0/8"
+            values={pages.bypassFrom}
+            onChange={(bypassFrom) => set({ bypassFrom })}
+            hint="They reach the application as usual while maintenance is on, so you can check it before visitors come back."
+            error={refusal?.field === "bypassFrom" ? refusal.message : undefined}
+            disabled={!canAdmin}
+          />
+          {canAdmin && (
+            <div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={addMyAddress}
+                pending={finding}
+              >
+                Add my address
+              </Button>
+              <FormNote className="mt-1.5">
+                The address this browser reaches the dashboard from, which is the one the deployment
+                sees only when both are reached the same way.
+              </FormNote>
+            </div>
+          )}
+          <Field
+            label="Retry after"
+            htmlFor="route-maintenance-retry"
+            hint="Seconds the 503 tells clients and crawlers to wait. Empty or 0 sends no Retry-After."
+            error={
+              retryAfter === null
+                ? "Whole seconds, at most 86400 (a day)."
+                : refusal?.field === "retryAfter"
+                  ? refusal.message
+                  : undefined
+            }
+          >
+            <Input
+              id="route-maintenance-retry"
+              value={pages.retryAfter}
+              inputMode="numeric"
+              placeholder="0"
+              onChange={(event) => set({ retryAfter: event.target.value })}
+              className="w-32 font-mono text-xs"
+              disabled={!canAdmin}
+            />
+          </Field>
+        </SettingSection>
+        <SettingSection
+          title="Error pages"
+          state={errorPagesState(runtime.errorPages ?? [], runtime.interceptErrors ?? false)}
+          status={settingStatus({
+            dirty: draft.changed(["errorPages", "interceptErrors"]),
+            refused: refusal?.field === "errorPages" || refusal?.field === "interceptErrors",
+          })}
+        >
+          <OptionList>
+            {ERROR_PAGES.map((code) => (
+              <OptionRow
+                key={code}
+                title={`Own ${PAGE_LABEL[String(code) as DeploymentPageName]} page`}
+                hint={ERROR_PAGE_HINT[code]}
+                checked={pages.errorPages.includes(code)}
+                disabled={!canAdmin}
+                onCheckedChange={(on) =>
+                  set({
+                    errorPages: ERROR_PAGES.filter((c) =>
+                      c === code ? on : pages.errorPages.includes(c),
+                    ),
+                  })
+                }
+              />
+            ))}
+            {pages.errorPages.length > 0 && (
+              <OptionRow
+                title="Replace the application's own error pages"
+                hint={
+                  signsIn
+                    ? "Not with sign-in on: the application's own 401s would be replaced as well."
+                    : "Without it only the errors the proxy produces itself get these pages; with it, the application's answers with those codes do too."
+                }
+                checked={pages.interceptErrors}
+                disabled={!canAdmin || (signsIn && !pages.interceptErrors)}
+                onCheckedChange={(interceptErrors) => set({ interceptErrors })}
+              />
+            )}
+          </OptionList>
+          {refusal && (refusal.field === "errorPages" || refusal.field === "interceptErrors") && (
+            <FormNote role="alert" tone="danger">
+              {refusal.message}
+            </FormNote>
+          )}
+          {canAdmin && (
+            <div className="flex flex-wrap gap-2">
+              {editable.map((name) => (
+                <Button
+                  key={name}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setEditing(name)}
+                >
+                  Edit {PAGE_LABEL[name]}
+                </Button>
+              ))}
+            </div>
+          )}
+          <FormNote>
+            Saved pages are served from the next answer that uses them. Which pages the route
+            answers with, and who is let past, change with the next deployment.
+          </FormNote>
+        </SettingSection>
+      </SettingForm>
+      {canAdmin && (
+        <PageEditor
+          key={editing ?? "none"}
+          open={editing !== null}
+          onOpenChange={(open) => !open && setEditing(null)}
+          site={
+            configuration.domains.find((domain) => !domain.redirectTo)?.hostname ??
+            "this deployment"
+          }
+          page={editing ?? "maintenance"}
+          path={`/deploy/${projectId}/environments/${environmentId}/pages/${editing ?? "maintenance"}`}
+          server="the proxy"
+        />
+      )}
+    </>
   )
 }

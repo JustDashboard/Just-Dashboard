@@ -64,6 +64,8 @@ import {
 import { Insights } from "@/components/deploy/insights"
 import { deployWithCurrentSettings, runPlanIsStale } from "@/components/deploy/failure-cause"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
+import { useReleaseWatch } from "@/components/deploy/release-watch"
+import { watchOpen } from "@/components/deploy/rollback-watch-model"
 import { PromoteDialog } from "@/components/deploy/promote-dialog"
 import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-sheet"
 import { ProjectMark } from "@/components/deploy/project-mark"
@@ -198,6 +200,16 @@ export function ProjectDeployments() {
     undefined,
   )
   const [rollback, setRollback] = useState<{ open: boolean; releaseId?: number }>({ open: false })
+  // The release kept warm for an open window is marked on the row of the run
+  // that made it, so the list says which release Roll back instantly reaches.
+  const releaseWatch = useReleaseWatch(
+    project.projectId,
+    project.environmentId,
+    project.normalized && !project.archived,
+  )
+  const warmReleaseId = watchOpen(releaseWatch.watch)
+    ? releaseWatch.watch?.warmReleaseId
+    : undefined
   const [promote, setPromote] = useState<{ open: boolean; releaseId?: number }>({ open: false })
   const [compare, setCompare] = useState<{
     open: boolean
@@ -602,9 +614,15 @@ export function ProjectDeployments() {
                       <ChoiceList aria-label={group.label}>
                         {group.runs.map((run) => {
                           const release = releaseOf(run)
+                          // One row reads Live: the run whose outcome is live
+                          // now, as the overview's list says it. An instant
+                          // rollback and the deploy that first made its release
+                          // both name that release, and only the newer is live.
                           const isLive =
-                            Boolean(run.releaseId) &&
-                            run.releaseId === standingOf(run).liveReleaseId
+                            run.environmentId === project.environmentId
+                              ? run.id === project.liveRun?.id
+                              : Boolean(run.releaseId) &&
+                                run.releaseId === standingOf(run).liveReleaseId
                           const pending = pendingOf(run, release)
                           const preview =
                             run.environmentId !== project.environmentId &&
@@ -624,6 +642,12 @@ export function ProjectDeployments() {
                                     <TextShimmer className="text-hint">{pending.word}</TextShimmer>
                                   )}
                                   {release?.pinned && <Tag icon={Pin}>Pinned</Tag>}
+                                  {release?.rolledBackAt && (
+                                    <Tag tone="danger" title={release.rollbackReason}>
+                                      Rolled back
+                                    </Tag>
+                                  )}
+                                  {release && release.id === warmReleaseId && <Tag>Warm</Tag>}
                                   {/* Provenance, fixed with the release: the
                                       image was staging's, not built here. */}
                                   {release?.promotion && (

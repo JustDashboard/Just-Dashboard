@@ -62,7 +62,11 @@ fixed host ports, production mounts and Compose preview plans are refused at adm
 Dockerfile instructions run only after approval; an approved Dockerfile is trusted executable code.
 
 Checks target the preview's own endpoint rather than inherited production URLs. A configured domain
-pattern has one `{number}` placeholder. PR close cancels queued/build work, lets an atomic activation
+pattern has one `{number}` placeholder. A preview's name is a plain name, so its certificate step reuses
+any wildcard one label above it: with `pr-{number}.preview.example.com` and `*.preview.example.com`
+issued once — on the Certificates page, or by a deployment whose plan serves that wildcard over DNS-01 —
+no preview orders a certificate of its own. Without one, each preview orders its own over HTTP-01 (or
+Caddy per name), which needs the preview name to resolve here. PR close cancels queued/build work, lets an atomic activation
 settle, and queues resource cleanup; the environment is archived
 only after that succeeds so a failed cleanup can be retried. Removal checks exact owner labels and volume/
 network namespaces, removes preview containers and their anonymous volumes, then preview named volumes

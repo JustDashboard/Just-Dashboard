@@ -12,12 +12,16 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 )
 
-// TestLiveBuildFailureIsNamedFromBuildKit builds the incident's shape with the
-// real recipe and buildx: an npm lockfile that no longer matches package.json.
-// It proves the failed step comes back as a BuildError rather than exec's
-// "exit status 1", and that the transcript the executor persists names the
-// cause, its phase and the packages the lockfile is missing. Opt-in like the
-// rest of the live suite: JD_DEPLOY_LIVE=1.
+// TestLiveBuildFailureIsNamedFromBuildKit builds, with the real recipe and
+// buildx, an npm lockfile that npm ci refuses. One that disagrees with
+// package.json no longer fails: detection sees it and the recipe installs
+// with npm install instead. This one agrees with package.json and lacks only
+// is-number, which the locked is-odd depends on; detection compares
+// package.json with the lock's importers, not the tree under them, so the
+// recipe still runs npm ci. It proves the failed step comes back as a
+// BuildError rather than exec's "exit status 1", and that the transcript the
+// executor persists names the cause, its phase and the packages the lockfile
+// is missing. Opt-in like the rest of the live suite: JD_DEPLOY_LIVE=1.
 func TestLiveBuildFailureIsNamedFromBuildKit(t *testing.T) {
 	if os.Getenv("JD_DEPLOY_LIVE") != "1" {
 		t.Skip("set JD_DEPLOY_LIVE=1 on a Docker/Buildx release host to run the live build diagnosis")
@@ -26,7 +30,7 @@ func TestLiveBuildFailureIsNamedFromBuildKit(t *testing.T) {
 	builder := NewArtifactBuilder(NewDockerArtifactBackend(client))
 	root := t.TempDir()
 	writeBuildFixture(t, root, "package.json", `{"name":"diagnosis-fixture","version":"1.0.0","scripts":{"build":"echo built","start":"node -e 1"},"dependencies":{"is-odd":"3.0.1"}}`)
-	writeBuildFixture(t, root, "package-lock.json", `{"name":"diagnosis-fixture","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"diagnosis-fixture","version":"1.0.0"}}}`)
+	writeBuildFixture(t, root, "package-lock.json", `{"name":"diagnosis-fixture","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"diagnosis-fixture","version":"1.0.0","dependencies":{"is-odd":"3.0.1"}},"node_modules/is-odd":{"version":"3.0.1","resolved":"https://registry.npmjs.org/is-odd/-/is-odd-3.0.1.tgz","integrity":"sha512-CQpnWPrDwmP1+SMHXZhtLtJv90yiyVfluGsX5iNCVkrhQtU3TQHsUWPG9wkdk9Lgd5yNpAg9jQEo90CBaXgWMA==","dependencies":{"is-number":"^6.0.0"}}}}`)
 	tag := fmt.Sprintf("just-dashboard-diagnosis:%d", time.Now().UnixNano())
 	t.Cleanup(func() { _, _ = liveDockerOutput(context.Background(), "image", "rm", "--force", tag) })
 	config := BuildPlanConfig{Method: BuildRecipe, Recipe: "node", PackageManager: "npm", BuildCommand: "npm run build", StartCommand: "npm start"}
@@ -47,7 +51,7 @@ func TestLiveBuildFailureIsNamedFromBuildKit(t *testing.T) {
 	}
 	cause := buildFailureCause(err, collector, causeContext{build: config, prepared: prepared}, nil)
 	if cause == nil || cause.Code != "build_lockfile_out_of_sync" || cause.Phase != phaseInstall ||
-		!strings.Contains(strings.Join(cause.Subjects, ","), "is-odd") || cause.LineSeq == 0 {
+		!strings.Contains(strings.Join(cause.Subjects, ","), "is-number") || cause.LineSeq == 0 {
 		t.Fatalf("cause = %+v", cause)
 	}
 	t.Logf("named: %s", cause.sentence())

@@ -255,8 +255,10 @@ to the contribution terms above, including the additional licence grant to the p
   which resolves (without pulling) every catalogue image and requires it for amd64 and arm64.
   Changes to build-failure diagnosis (the BuildKit reader in `dockerx`, the collector or the signature
   table) also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBuildFailureIsNamedFromBuildKit -count=1 -v`,
-  which builds an npm project whose lockfile no longer matches package.json and checks the cause is
-  named from buildx's own output; it creates no image.
+  which builds an npm project whose lockfile matches package.json but leaves out a package a locked
+  dependency needs (detection compares only package.json with the lock, so the recipe still runs
+  `npm ci` rather than `npm install`) and checks the cause is named from buildx's own output; it
+  creates no image.
   Changes to a failed run's diagnosis (what is sent, how it is masked, how the answer is read:
   `deploy/run_diagnosis.go`) also run it against a real model behind an OpenAI-compatible server on
   this machine — never a hosted key — for example Ollama on loopback:
@@ -293,10 +295,29 @@ to the contribution terms above, including the additional licence grant to the p
   Each sweep uses unique volume names. Startup/readiness is separate from first-use account setup;
   the [template matrix](docs/audits/2026-09-22-deploy-new/template-matrix.md) records which templates
   generate credentials, require setup, have no application login, or remain unavailable.
+- Multi-service (Compose) templates have a sweep of their own. It saves each template's source the way
+  the new-project page does (the server's render of the definition), resolves and pulls every service
+  image through the Compose build step, starts the stack through the runtime owner with generated
+  secrets, and requires the definition's readiness checks to pass, every service's Docker healthcheck
+  to report healthy, and only the public service's port to be published, on loopback
+  (`JD_BLUEPRINT_ONLY=a,b` narrows it; each stack's containers, volumes and networks are removed after
+  it, and so are images it pulled):
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks -count=1 -v -timeout 2h`.
+  A template's schema rules run at build time: every definition is parsed and validated when the
+  catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship.
 - Changes to shared variables or to how a run opens its variables also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSharedVariableReachesTheContainer -count=1 -v`,
   which starts a real container with the values a run opens for references to a server, a secret and a
   project variable, reads them back from inside it, and checks the next run reads a changed value.
+- Changes to secret stores or store references (`internal/secretstore`, `deploy/secret_store_references.go`)
+  also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSecretStoreReferencesReachTheContainer -count=1 -v`
+  (as root, or build the test binary and run it under `sudo`). It starts a real OpenBao dev server and a
+  self-hosted Infisical with its PostgreSQL and Redis on loopback (`openbao/openbao:2.7.2`,
+  `infisical/infisical:v0.167.4`, `postgres:17-alpine`, `redis:7-alpine`, pulled beforehand), reads a
+  secret from each through AppRole and a Universal Auth machine identity into a real container's
+  environment, a pinned version included, then stops OpenBao and checks the next run's first step fails in
+  the store's own words. It removes everything it made. Doppler has no self-hosted server and is covered
+  by an httptest server that follows its documented API (`secretstore_test.go`).
 - Changes to staging environments, promotion or how a release is cloned also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveStagingReleaseIsPromotedAsTheSameImageAndRolledBack -count=1 -v`
   on a Docker and Buildx host (as root, through `go test -c` and `sudo`, like the others). Through the
@@ -318,6 +339,15 @@ to the contribution terms above, including the additional licence grant to the p
 - The public-certificate journey against a real ACME authority (an isolated Caddy and a Pebble that
   validates nothing, on one Docker network):
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory -count=1 -v`.
+  Changes to how a deployment run issues a certificate over DNS-01 (a wildcard plan name, the provider
+  choice, the saved credentials it uses) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDeploymentWildcardIsProvedOverDNS01AndServed -count=1 -v`
+  and `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveCertificateStepProvesAWildcardOverDNS01 -count=1 -v`,
+  as root for Docker. `proxysvc/acmetest` starts a Pebble that really validates DNS-01 against a BIND
+  (`internetsystemsconsortium/bind9:9.20`) taking signed RFC 2136 updates, so the host's certbot needs
+  its dns-rfc2136 plugin: `python3-certbot-dns-rfc2136`, or that plugin's wheel and dnspython's unpacked
+  into a directory on `PYTHONPATH` (`sudo -n env JD_DEPLOY_LIVE=1 PATH=$PATH PYTHONPATH=<dir> <test binary>`);
+  without it both skip. Each waits out the plugin's 60-second propagation delay once, the first twice.
   Changes to how a deployment route renders its redirects, response headers or allowed addresses also
   run `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules -count=1 -v`,
   which asks a real Caddy what it answers for each. Changes to a route's sign-in, how Caddy reaches the
@@ -325,7 +355,11 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyGatesRouteBehindForwardAuth -count=1 -v`,
   which signs in at a real Authelia (`authelia/authelia:4.39`, pulled on first run) in front of
   `traefik/whoami`, and `go test ./internal/proxysvc -run TestLiveDeploymentRouteSignsInOnNginx`, which
-  needs only the host's nginx.
+  needs only the host's nginx. Changes to a route's maintenance switch or error pages also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesMaintenanceAndErrorPages -count=1 -v`
+  and `go test ./internal/proxysvc -run TestLiveDeploymentRouteMaintenanceOnNginx`, which switch a real
+  Caddy's and the host nginx's route by its file and ask each what a visitor, an address let past and a
+  stopped application get.
   This uses locked application fixtures and checks served build values, private install credentials,
   SvelteKit adapters, HTML/Containerfile defaults and Go command/version behavior, plus the catalogue's
   own starters: Astro, Nuxt, React Router, FastAPI (unpinned requirements, server auto-installed), a
@@ -420,6 +454,17 @@ to the contribution terms above, including the additional licence grant to the p
   iteration, never for an acceptance run, and `JD_CUTOVER_EVIDENCE` to retain the measured counts.
   The second kills real containers in the blue/green window and at a live release, and requires that
   exactly one release is running afterwards.
+- Changes to the warm-release window, instant rollback or the rollback watcher (`deploy/rollback_*.go`,
+  `api/handlers_deploy_rollback_watch.go`) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveMetricGatedRollbackSwitchesBackToTheWarmRelease -count=1 -v`.
+  It starts a Caddy ingress of its own published on a loopback port and named to the server
+  (`JD_INGRESS_CONTAINER`, so nothing binds 80 or 443), a webhook receiver, and a real engine and
+  watcher; deploys a healthy release, then one that passes readiness and answers 500 to everything
+  else, restarts the dashboard in the middle of that release's window, drives requests through the
+  ingress, and requires the automatic switch back to the first release's same, paused-then-resumed
+  container, the `release.rolled_back` delivery and its audit; then deploys a healthy third release and
+  requires the warm container removed when its one-minute window passes. It numbers its environment
+  far from any other and removes its containers.
 - Changes to the engine, its reconciler or run persistence also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun -count=1 -v`.
   It builds `internal/deploy/testdata/engine-host`, SIGKILLs that real second process inside every

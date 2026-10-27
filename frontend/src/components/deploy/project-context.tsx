@@ -256,11 +256,14 @@ export function ProjectProvider({
         !archived,
     },
   )
-  // A template's source reference is `id@version`; the definition is read by id.
-  const blueprintId =
-    detail.data?.deployment.sourceKind === "blueprint"
-      ? (detail.data.deployment.sourceRef ?? "").split("@")[0]
-      : ""
+  // A template is named `id@version` — a blueprint source's reference, or the
+  // multi-service template a Compose source was rendered from — and its
+  // definition is read by id.
+  const blueprintId = (
+    detail.data?.deployment.sourceTemplate ??
+    (detail.data?.deployment.sourceKind === "blueprint" ? detail.data.deployment.sourceRef : "") ??
+    ""
+  ).split("@")[0]
   const blueprint = usePoll(
     (signal) => get<BlueprintDetail>(`/deploy/blueprints/${blueprintId}`, undefined, signal),
     0,
