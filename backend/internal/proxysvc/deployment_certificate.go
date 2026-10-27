@@ -24,8 +24,9 @@ import (
 // host already uses, before anything is started.
 //
 // The narrowness is the safety. It only ever issues for the exact hostnames in
-// the run's frozen plan, only over HTTP-01, never for a wildcard — which
-// cannot be issued that way at all — and it verifies afterwards by reading the
+// the run's frozen plan — a wildcard among them is ordered over DNS-01 through
+// credentials the Certificates page already holds (deployment_certificate_dns.go),
+// everything else over HTTP-01 — and it verifies afterwards by reading the
 // certificate back rather than by trusting an exit code.
 
 // CertificateOutcome is what a deployment's certificate step did.
@@ -46,7 +47,9 @@ type DeploymentCertificate struct {
 	CertPath string             `json:"certPath"`
 	KeyPath  string             `json:"keyPath"`
 	Method   string             `json:"method,omitempty"`
-	Domains  []string           `json:"domains"`
+	// DNSProvider names whose saved credentials answered a DNS challenge.
+	DNSProvider string   `json:"dnsProvider,omitempty"`
+	Domains     []string `json:"domains"`
 	// Registered reports whether certbot already had an ACME account. Without
 	// one the order registers a new account, which is the only part of this
 	// that is not repeatable, and is worth saying in the evidence.
@@ -57,18 +60,23 @@ var (
 	// ErrCertbotUnavailable is "this host cannot issue one", which is an
 	// honest unavailable rather than a failure of the deployment's own work.
 	ErrCertbotUnavailable = errors.New("certbot is not installed on this host, so a certificate cannot be issued here")
-	// ErrCertificateWildcard is refused before certbot is asked: Let's Encrypt
-	// will not sign a wildcard against an HTTP challenge, and relaying its
-	// version of that message a minute later tells nobody what to do instead.
-	ErrCertificateWildcard = errors.New("a wildcard certificate can only be issued with a DNS challenge; issue it on the Certificates page and deploy again")
+	// ErrCertificateWildcard is a wildcard this host cannot prove: no saved
+	// DNS credentials answer for its zone, or the Docker Caddy ingress
+	// serves the route. It is refused before certbot is asked, with what to
+	// do instead (wildcardError), rather than relayed from the authority a
+	// minute later.
+	ErrCertificateWildcard = errors.New("a wildcard certificate needs a DNS challenge this host cannot answer")
 )
 
 // EnsureDeploymentCertificate resolves a certificate covering every hostname,
-// issuing one over HTTP-01 if none does.
+// issuing one if none does: over DNS-01 when a name is a wildcard, over
+// HTTP-01 otherwise.
 //
 // Reuse is checked first and is the ordinary answer: a second deployment onto
-// the same wildcard, or a redeploy inside the renewal window, asks the
-// authority for nothing. Issuance is serialized with the route lock for the
+// the same wildcard — a preview under one issued for every preview — or a
+// redeploy inside the renewal window, asks the authority for nothing. A
+// wildcard name is reused too, which it was not while wildcards were refused
+// before the check. Issuance is serialized with the route lock for the
 // same reason a cutover is — two runs ordering certificates for the same host
 // at once is how an account hits a rate limit it did not need to.
 func (s *Service) EnsureDeploymentCertificate(
@@ -80,24 +88,35 @@ func (s *Service) EnsureDeploymentCertificate(
 		return DeploymentCertificate{}, errors.New("a TLS deployment route needs at least one domain")
 	}
 	names := make([]string, 0, len(domains))
+	wildcard := ""
 	for _, domain := range domains {
 		name := strings.ToLower(strings.TrimSpace(domain))
 		if !certDomainRe.MatchString(name) {
 			return DeploymentCertificate{}, fmt.Errorf("%q is not a valid domain name", domain)
 		}
-		if strings.HasPrefix(name, "*.") {
-			return DeploymentCertificate{}, ErrCertificateWildcard
+		if strings.HasPrefix(name, "*.") && wildcard == "" {
+			wildcard = name
 		}
 		names = append(names, name)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Before reuse: the Docker Caddy ingress cannot serve a wildcard route at
+	// all, so a certificate that covers one is no answer there.
+	if wildcard != "" {
+		if err := s.wildcardCaddyRefusal(ctx, wildcard); err != nil {
+			return DeploymentCertificate{}, err
+		}
+	}
 	if certPath, keyPath, err := s.ResolveDeploymentCertificate(ctx, names); err == nil {
 		return DeploymentCertificate{
 			Outcome: CertificateReused, CertPath: certPath, KeyPath: keyPath,
 			Name: certificateNameForPath(certPath), Domains: names,
 		}, nil
+	}
+	if wildcard != "" {
+		return s.issueDeploymentWildcard(ctx, names, wildcard, log)
 	}
 
 	if edge, err := s.provisionIngress(ctx); err != nil {
@@ -170,8 +189,11 @@ func (s *Service) EnsureDeploymentCertificate(
 		}
 	}
 	if err != nil {
-		return DeploymentCertificate{}, fmt.Errorf("certbot could not issue a certificate for %s over the %s challenge: %s",
-			strings.Join(names, ", "), method, lastMeaningfulLine(string(output)))
+		// The method goes back with the failure, as the DNS path's does, for
+		// the audit entry of an order that reached the authority.
+		return DeploymentCertificate{Method: method, Domains: names, Registered: registered},
+			fmt.Errorf("certbot could not issue a certificate for %s over the %s challenge: %s",
+				strings.Join(names, ", "), method, lastMeaningfulLine(string(output)))
 	}
 
 	// Read the certificate back rather than trusting the exit code. certbot

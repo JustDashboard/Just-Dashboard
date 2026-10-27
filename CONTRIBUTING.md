@@ -312,6 +312,15 @@ to the contribution terms above, including the additional licence grant to the p
 - The public-certificate journey against a real ACME authority (an isolated Caddy and a Pebble that
   validates nothing, on one Docker network):
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory -count=1 -v`.
+  Changes to how a deployment run issues a certificate over DNS-01 (a wildcard plan name, the provider
+  choice, the saved credentials it uses) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDeploymentWildcardIsProvedOverDNS01AndServed -count=1 -v`
+  and `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveCertificateStepProvesAWildcardOverDNS01 -count=1 -v`,
+  as root for Docker. `proxysvc/acmetest` starts a Pebble that really validates DNS-01 against a BIND
+  (`internetsystemsconsortium/bind9:9.20`) taking signed RFC 2136 updates, so the host's certbot needs
+  its dns-rfc2136 plugin: `python3-certbot-dns-rfc2136`, or that plugin's wheel and dnspython's unpacked
+  into a directory on `PYTHONPATH` (`sudo -n env JD_DEPLOY_LIVE=1 PATH=$PATH PYTHONPATH=<dir> <test binary>`);
+  without it both skip. Each waits out the plugin's 60-second propagation delay once, the first twice.
   Changes to how a deployment route renders its redirects, response headers or allowed addresses also
   run `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules -count=1 -v`,
   which asks a real Caddy what it answers for each. Changes to a route's sign-in, how Caddy reaches the

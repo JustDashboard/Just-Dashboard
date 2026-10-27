@@ -369,7 +369,7 @@ func (s *Server) initModules() {
 		// and activation still resolves an already-existing pair; what this
 		// join adds is that the run asks for one before it starts anything,
 		// instead of reaching a cutover that has nothing to serve.
-		WithCertificateIssuer(s.modules.proxy).
+		WithCertificateIssuer(auditedCertificateIssuer{issuer: s.modules.proxy, record: s.Audit.Record}).
 		WithNotifications(s.modules.deployAutomation).
 		WithTailnetPublisher(s.modules.tailnet)
 	s.modules.deployExecutor = normalizedExecutor

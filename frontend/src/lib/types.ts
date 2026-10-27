@@ -4119,8 +4119,12 @@ export type DeploymentHostnameSuggestion = {
   /** Whether a certificate on this host already covers it — the only thing activation accepts. */
   covered: boolean
   certificateName?: string
-  /** The HTTP-01 challenge this host could issue one with now, if any. */
-  certificateMethod?: "nginx" | "webroot" | "standalone" | "caddy"
+  /**
+   * The HTTP-01 challenge this host could issue one with now, if any — or, for a
+   * wildcard, `dns-01` through the saved credentials of `certificateDnsProvider`.
+   */
+  certificateMethod?: "nginx" | "webroot" | "standalone" | "caddy" | "dns-01"
+  certificateDnsProvider?: string
   certificateIssue?: string
   method: "wildcard" | "sslip" | "custom" | "none"
   detail: string
