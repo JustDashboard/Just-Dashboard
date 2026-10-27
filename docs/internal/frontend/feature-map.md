@@ -137,7 +137,17 @@ is defined. Checked by `deploy-shared-variables.spec.ts`; the Automatic
 deployment section on General carries the GitHub commit-status switch. `/deploy/drains`
 (`components/deploy/log-drains-page.tsx`, its sentences in `log-drains.ts`) lists the log drains with
 each one's reach and delivery health, and adds or edits one in a side panel: format, endpoint, sealed
-headers, streams and projects. Settings → Runtime exposes memory,
+headers, streams and projects. `/deploy/secret-stores` (`components/deploy/secret-stores-page.tsx`, its
+sentences and the reference grammar in `secret-stores.ts`) lists the Vault, OpenBao, Infisical and Doppler
+connections: each card the product's mark, the name, the host with the mount, namespace and sign-in (or the
+Infisical environment), the newest test or run's read in the store's own words (amber when it failed), and
+who reads it. The side panel takes the store, the name (shown as the reference it is read as, fixed once
+saved), the address, the kind's settings, an optional CA, the sealed credentials and whether previews may read
+it; an edit adds Test with an optional path and key, which shows the version found and never the value. An
+environment variable's editor, with *Reference* on, offers the connected stores with path, key and an
+optional version (`StoreReferencePicker`, `components/deploy/secret-store-picker.tsx`), which makes the
+variable secret; a variable reading one draws the store's mark and name, linked here, and where in it the
+key is (`StoreReferenceLabel`). Checked by `deploy-secret-stores.spec.ts`. Settings → Runtime exposes memory,
 CPU and process limits, the restart policy, a Shutdown section (stop signal, grace and drain
 periods — `settings/shutdown.ts`) and the health-check editor; Settings → Storage names each
 protected volume's backup standing (`settings/volume-backup.ts`). The Runtime page's service cards carry the

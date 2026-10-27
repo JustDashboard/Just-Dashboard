@@ -89,6 +89,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/notifications/options", s.handle(s.handleDeploymentNotificationOptions))
 		r.Method(http.MethodGet, "/notifications/{channel}/deliveries", s.handle(s.handleDeploymentNotificationDeliveries))
 		s.mountLogDrainReads(r)
+		s.mountSecretStoreReads(r)
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
@@ -172,6 +173,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPut, "/notifications/{channel}/enabled", s.handle(s.handleDeploymentNotificationEnabled))
 				r.Method(http.MethodDelete, "/notifications/{channel}", s.handle(s.handleDeploymentNotificationDelete))
 				s.mountLogDrainWrites(r)
+				s.mountSecretStoreWrites(r)
 			})
 			r.Method(http.MethodPost, "/", s.handle(s.handleDeployCreate))
 			r.Method(http.MethodPut, "/{id}", s.handle(s.handleDeployUpdate))
@@ -206,6 +208,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// destructive, with an ordinary confirmation, since the pull
 			// request can be tested again in a minute.
 			r.With(httpx.RequireSession).Method(http.MethodPost, "/{id}/pull-requests/{number}/preview/close", s.handle(s.handleDeploymentPullRequestClose))
+			// Removing a secret store is a saved credential's case: refused
+			// while a variable reads it, and entered again in a minute.
+			s.mountSecretStoreRemoval(r)
 		})
 	})
 }

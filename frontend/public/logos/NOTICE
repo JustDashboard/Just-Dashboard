@@ -236,3 +236,9 @@ WebP the way docker-compose.webp was. The templates that pair an application
 already drawn here with its database (nextcloud-mariadb, n8n-postgres,
 gitea-postgres, metabase-postgres, directus-postgres) are keyed to that
 application's file.
+The Secret stores page draws each connection as the product it reaches. From
+homarr-labs/dashboard-icons, under the Apache License 2.0: vault.svg is the
+collection's hashicorp-vault.svg, renamed after the store kind the page uses;
+infisical.svg and doppler.svg are unchanged. OpenBao has no file here: the
+collection's openbao.svg is a wordmark set in a web font that does not read at
+24px, so the page draws a lock rather than a mark that is not the project's.

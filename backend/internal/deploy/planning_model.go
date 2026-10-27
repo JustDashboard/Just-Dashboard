@@ -1891,6 +1891,9 @@ type VariableReference struct {
 }
 
 func ParseVariableReference(value string) (VariableReference, error) {
+	if reference, isStore, err := parseStoreReference(value); isStore {
+		return reference, err
+	}
 	if !plannedReferenceRE.MatchString(value) {
 		return VariableReference{}, fmt.Errorf("%w: malformed typed reference", ErrInvalidVariable)
 	}

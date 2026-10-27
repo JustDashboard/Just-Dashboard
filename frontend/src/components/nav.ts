@@ -180,6 +180,10 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
           // Read masked by anyone who may read a project's variables; written
           // by an administrator, which the page itself says.
           { title: "Shared variables", href: "/deploy/variables", icon: Linked },
+          // Read by anyone who may read a project's variables — names,
+          // addresses and who reads each, never a credential; written by an
+          // administrator.
+          { title: "Secret stores", href: "/deploy/secret-stores", icon: LockClosed },
           { title: "Notifications", href: "/deploy/notifications", icon: Bell },
           { title: "Log drains", href: "/deploy/drains", icon: Logs },
         ],

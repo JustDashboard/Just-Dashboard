@@ -309,6 +309,15 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSharedVariableReachesTheContainer -count=1 -v`,
   which starts a real container with the values a run opens for references to a server, a secret and a
   project variable, reads them back from inside it, and checks the next run reads a changed value.
+- Changes to secret stores or store references (`internal/secretstore`, `deploy/secret_store_references.go`)
+  also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSecretStoreReferencesReachTheContainer -count=1 -v`
+  (as root, or build the test binary and run it under `sudo`). It starts a real OpenBao dev server and a
+  self-hosted Infisical with its PostgreSQL and Redis on loopback (`openbao/openbao:2.7.2`,
+  `infisical/infisical:v0.167.4`, `postgres:17-alpine`, `redis:7-alpine`, pulled beforehand), reads a
+  secret from each through AppRole and a Universal Auth machine identity into a real container's
+  environment, a pinned version included, then stops OpenBao and checks the next run's first step fails in
+  the store's own words. It removes everything it made. Doppler has no self-hosted server and is covered
+  by an httptest server that follows its documented API (`secretstore_test.go`).
 - Object-storage backups against a real S3 API (MinIO in a container: target test, upload, retention,
   restore): `JD_DEPLOY_LIVE=1 go test ./internal/backups -run TestLiveObjectStorageBackupUploadsPrunesAndRestores -count=1 -v`.
   Encrypted archives in a bucket take an S3-compatible service you started yourself, named by
