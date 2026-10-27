@@ -113,7 +113,17 @@ func compareReleaseSnapshots(from, to *ReleaseWithArtifacts) ReleaseDetailCompar
 		detail.Reason = "One of these releases has no readable runtime snapshot, so only its recorded digests can be compared."
 		return detail
 	}
-	detail.Status = statusAvailable
+	return compareRuntimeSnapshots(fromSnapshot, toSnapshot, from.Release.ExpectedDowntime, to.Release.ExpectedDowntime)
+}
+
+// compareRuntimeSnapshots is the comparison of two frozen runtime snapshots,
+// whichever releases — or, for a promotion's confirmation, which plan not yet
+// released — they came from.
+func compareRuntimeSnapshots(fromSnapshot, toSnapshot runtimeReleaseSnapshot, fromDowntime, toDowntime bool) ReleaseDetailComparison {
+	detail := ReleaseDetailComparison{
+		Status: statusAvailable, Fields: []ReleaseFieldChange{}, Variables: []ReleaseListChange{},
+		Dependencies: []ReleaseListChange{}, Checks: []ReleaseListChange{}, Domains: []ReleaseListChange{},
+	}
 	field := func(name, before, after string) {
 		detail.Fields = append(detail.Fields, ReleaseFieldChange{
 			Field: name, From: before, To: after, Changed: before != after,
@@ -141,7 +151,7 @@ func compareReleaseSnapshots(from, to *ReleaseWithArtifacts) ReleaseDetailCompar
 	field("privileged", boolLabel(fromSnapshot.Plan.Privileged), boolLabel(toSnapshot.Plan.Privileged))
 	field("capabilities", strings.Join(fromSnapshot.Plan.Capabilities, ", "), strings.Join(toSnapshot.Plan.Capabilities, ", "))
 	field("devices", strings.Join(fromSnapshot.Plan.Devices, ", "), strings.Join(toSnapshot.Plan.Devices, ", "))
-	field("expected downtime", boolLabel(from.Release.ExpectedDowntime), boolLabel(to.Release.ExpectedDowntime))
+	field("expected downtime", boolLabel(fromDowntime), boolLabel(toDowntime))
 
 	detail.Variables = diffNamedValues(
 		variableDigestPairs(fromSnapshot.Variables), variableDigestPairs(toSnapshot.Variables))

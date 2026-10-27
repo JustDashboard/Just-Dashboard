@@ -12,19 +12,23 @@ import (
 
 // Resolve references before build credentials are exposed, not only when the
 // runtime joins its network. Saved aliases of the same endpoint share a boundary.
+// A staging environment keeps a database of its own for the same reason a
+// preview does, from the other side: its release tasks run on every staging
+// deploy, and on a shared database they would migrate production's schema
+// from code that was never promoted.
 func (o *deploymentDatabaseNetworks) checkEnvironmentIsolation(ctx context.Context, environmentID int64, conn *dbConnection, dsn string) error {
 	var kind string
 	if err := o.server.Store.DB.QueryRowContext(ctx, `SELECT kind FROM deploy_environments WHERE id=?`, environmentID).Scan(&kind); err != nil {
 		return err
 	}
-	rows, err := o.server.Store.DB.QueryContext(ctx, `SELECT DISTINCT c.id,c.driver,c.dsn_enc FROM db_connections c
+	rows, err := o.server.Store.DB.QueryContext(ctx, `SELECT DISTINCT c.id,c.driver,c.dsn_enc,e.kind FROM db_connections c
 		JOIN (
 		  SELECT environment_id,connection_id FROM deploy_database_bindings
 		  UNION SELECT d.environment_id,linked.id FROM deploy_dependencies d JOIN db_connections linked
 		  ON CAST(d.resource_id AS INTEGER)=linked.id OR d.resource_id=linked.name
 		  WHERE d.release_id=0 AND (d.kind='database' OR d.resource_kind='database_connection')
 		) links ON links.connection_id=c.id JOIN deploy_environments e ON e.id=links.environment_id
-		WHERE e.id<>? AND (e.kind='preview' OR ?='preview')`, environmentID, kind)
+		WHERE e.id<>? AND (e.kind IN ('preview','staging') OR ? IN ('preview','staging'))`, environmentID, kind)
 	if err != nil {
 		return err
 	}
@@ -32,11 +36,12 @@ func (o *deploymentDatabaseNetworks) checkEnvironmentIsolation(ctx context.Conte
 		id     int64
 		driver dbx.Driver
 		sealed string
+		kind   string
 	}
 	var others []connection
 	for rows.Next() {
 		var other connection
-		if err := rows.Scan(&other.id, &other.driver, &other.sealed); err != nil {
+		if err := rows.Scan(&other.id, &other.driver, &other.sealed, &other.kind); err != nil {
 			rows.Close()
 			return err
 		}
@@ -51,9 +56,15 @@ func (o *deploymentDatabaseNetworks) checkEnvironmentIsolation(ctx context.Conte
 	if err != nil {
 		return errors.New("database isolation could not be verified")
 	}
+	refused := func(other connection) error {
+		if kind == string(deploy.EnvironmentPreview) || other.kind == string(deploy.EnvironmentPreview) {
+			return deploy.ErrPreviewIsolation
+		}
+		return deploy.ErrStagingIsolation
+	}
 	for _, other := range others {
 		if other.id == conn.ID {
-			return deploy.ErrPreviewIsolation
+			return refused(other)
 		}
 		if other.driver != conn.Driver {
 			continue
@@ -74,7 +85,7 @@ func (o *deploymentDatabaseNetworks) checkEnvironmentIsolation(ctx context.Conte
 			sameEndpoint = filepath.Clean(info.Database) == filepath.Clean(otherInfo.Database)
 		}
 		if sameEndpoint {
-			return deploy.ErrPreviewIsolation
+			return refused(other)
 		}
 	}
 	return nil

@@ -183,6 +183,24 @@ func (s *OrchestrationStore) Fleet(ctx context.Context, budget QueueBudget) (*Fl
 // opening one workspace costs the same number of statements as opening the
 // fleet page.
 func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, projectID int64) (*FleetReadModel, error) {
+	return s.fleetFor(ctx, budget, projectID, 0)
+}
+
+// projectRunScope narrows a project's runs to what one summary reports. With
+// no environment it is the project as the fleet shows it — production and its
+// previews, as before staging existed — and a staging environment's runs are
+// left out, since staging serves nobody; with one, it is that environment's.
+func projectRunScope(environmentID int64) (string, []any) {
+	if environmentID > 0 {
+		return "environment_id = ?", []any{environmentID}
+	}
+	return "environment_id NOT IN (SELECT id FROM deploy_environments WHERE kind = 'staging')", nil
+}
+
+// fleetFor reads the fleet, one deployment, or — with environmentID set —
+// one of a deployment's environments in the same shape, so the project pages
+// draw staging exactly as they draw production.
+func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, projectID, environmentID int64) (*FleetReadModel, error) {
 	budget = budget.normalized()
 	result := &FleetReadModel{
 		Deployments: []DeploymentSummary{}, ActiveWork: []ActiveWork{},
@@ -191,6 +209,10 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 	projectFilter, projectArgs := "p.archived_at = 0", []any{}
 	if projectID > 0 {
 		projectFilter, projectArgs = "p.id = ?", []any{projectID}
+	}
+	environmentFilter, environmentArgs := "e.slug = 'production'", []any{}
+	if environmentID > 0 {
+		environmentFilter, environmentArgs = "e.id = ?", []any{environmentID}
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT p.id, CASE WHEN p.archived_name != '' THEN p.archived_name ELSE p.name END, p.profile, p.updated_at,
@@ -208,7 +230,7 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		       ), '')
 		  FROM deploy_projects p
 		  JOIN deploy_environments e ON e.project_id = p.id
-		   AND e.slug = 'production' AND e.archived_at = 0
+		   AND `+environmentFilter+` AND e.archived_at = 0
 		  LEFT JOIN deploy_releases l ON l.id = e.live_release_id
   LEFT JOIN deploy_release_runtimes live_runtime ON live_runtime.release_id = e.live_release_id
 		  LEFT JOIN deploy_sources src ON src.environment_id = e.id
@@ -218,7 +240,7 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		  LEFT JOIN deploy_runtime_plans runtime ON runtime.environment_id = e.id
 		   AND runtime.revision = e.desired_revision
 		 WHERE `+projectFilter+`
-		 ORDER BY p.name`, projectArgs...)
+		 ORDER BY p.name`, append(environmentArgs, projectArgs...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -302,11 +324,11 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 	if err != nil {
 		return nil, err
 	}
-	lastRuns, recentRuns, err := s.recentProjectRuns(ctx, projectIDs)
+	lastRuns, recentRuns, err := s.recentProjectRuns(ctx, projectIDs, environmentID)
 	if err != nil {
 		return nil, err
 	}
-	activeRuns, err := s.activeProjectRuns(ctx, projectIDs)
+	activeRuns, err := s.activeProjectRuns(ctx, projectIDs, environmentID)
 	if err != nil {
 		return nil, err
 	}
@@ -631,18 +653,20 @@ func healthFromEvidence(checks []PlannedCheck, latest map[StepKey]json.RawMessag
 func (s *OrchestrationStore) activeProjectRuns(
 	ctx context.Context,
 	projectIDs []int64,
+	environmentID int64,
 ) (map[int64]*EngineRun, error) {
 	result := map[int64]*EngineRun{}
 	if len(projectIDs) == 0 {
 		return result, nil
 	}
 	placeholders, args := inPlaceholders(projectIDs)
+	scope, scopeArgs := projectRunScope(environmentID)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+engineRunColumns+` FROM (
 		  SELECT `+engineRunColumns+`,
 		         ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY requested_at DESC, id DESC) AS rank
-		    FROM deploy_runs WHERE project_id IN `+placeholders+` AND `+activeRunWhere+`
-		) WHERE rank = 1`, args...)
+		    FROM deploy_runs WHERE project_id IN `+placeholders+` AND `+scope+` AND `+activeRunWhere+`
+		) WHERE rank = 1`, append(args, scopeArgs...)...)
 	if err != nil {
 		return nil, fmt.Errorf("read deployment run: %w", err)
 	}
@@ -667,6 +691,7 @@ func (s *OrchestrationStore) activeProjectRuns(
 func (s *OrchestrationStore) recentProjectRuns(
 	ctx context.Context,
 	projectIDs []int64,
+	environmentID int64,
 ) (map[int64]*EngineRun, map[int64][]RecentRun, error) {
 	lastRuns := map[int64]*EngineRun{}
 	recentRuns := map[int64][]RecentRun{}
@@ -674,13 +699,14 @@ func (s *OrchestrationStore) recentProjectRuns(
 		return lastRuns, recentRuns, nil
 	}
 	placeholders, args := inPlaceholders(projectIDs)
+	scope, scopeArgs := projectRunScope(environmentID)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+engineRunColumns+` FROM (
 		  SELECT id AS ranked_id,
 		         ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY requested_at DESC, id DESC) AS rank
-		    FROM deploy_runs WHERE project_id IN `+placeholders+`
+		    FROM deploy_runs WHERE project_id IN `+placeholders+` AND `+scope+`
 		) ranked JOIN deploy_runs ON deploy_runs.id = ranked.ranked_id
-		 WHERE ranked.rank <= ? ORDER BY project_id, ranked.rank`, append(args, recentRunLimit)...)
+		 WHERE ranked.rank <= ? ORDER BY project_id, ranked.rank`, append(append(args, scopeArgs...), recentRunLimit)...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read recent deployment runs: %w", err)
 	}
@@ -854,6 +880,22 @@ func (s *OrchestrationStore) DeploymentBuildMethod(ctx context.Context, projectI
 	return method, err
 }
 
+// EnvironmentDeploymentSummary is DeploymentSummary for one of the deployment's
+// environments; zero is production.
+func (s *OrchestrationStore) EnvironmentDeploymentSummary(ctx context.Context, projectID, environmentID int64, budget QueueBudget) (*DeploymentSummary, error) {
+	if environmentID <= 0 {
+		return s.DeploymentSummary(ctx, projectID, budget)
+	}
+	fleet, err := s.fleetFor(ctx, budget, projectID, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	if len(fleet.Deployments) == 0 {
+		return nil, ErrEnvironmentNotFound
+	}
+	return &fleet.Deployments[0], nil
+}
+
 func (s *OrchestrationStore) DeploymentSummary(ctx context.Context, projectID int64, budget QueueBudget) (*DeploymentSummary, error) {
 	fleet, err := s.fleet(ctx, budget, projectID)
 	if err != nil {
@@ -912,10 +954,11 @@ func (s *OrchestrationStore) ProjectRunsFiltered(
 	}
 	where := []string{"project_id = ?"}
 	args := []any{projectID}
-	if filter.Environment > 0 {
-		where = append(where, "environment_id = ?")
-		args = append(args, filter.Environment)
-	}
+	// Unnarrowed, the list is the project as its summary reads it, so a
+	// staging environment's runs are asked for by naming it.
+	scope, scopeArgs := projectRunScope(filter.Environment)
+	where = append(where, scope)
+	args = append(args, scopeArgs...)
 	if filter.Operation != "" {
 		where = append(where, "operation = ?")
 		args = append(args, filter.Operation)

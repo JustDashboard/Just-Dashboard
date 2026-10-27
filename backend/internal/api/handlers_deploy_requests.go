@@ -551,7 +551,13 @@ func (s *Server) deploymentTarget(r *http.Request) (*deploy.DeploymentSummary, e
 	if err != nil {
 		return nil, err
 	}
-	summary, err := s.modules.deployRuns.DeploymentSummary(r.Context(), id, deploy.QueueBudget{
+	// ?environment= reads a staging environment's route and containers in
+	// place of production's; the summary refuses one of another project.
+	environmentID, err := environmentQuery(r)
+	if err != nil {
+		return nil, err
+	}
+	summary, err := s.modules.deployRuns.EnvironmentDeploymentSummary(r.Context(), id, environmentID, deploy.QueueBudget{
 		Heavy: s.Cfg.DeployHeavySlots,
 		Light: s.Cfg.DeployLightSlots,
 	})

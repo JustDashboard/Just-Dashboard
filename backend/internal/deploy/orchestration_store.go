@@ -266,6 +266,9 @@ func (s *OrchestrationStore) Enqueue(ctx context.Context, req RunRequest) (*Engi
 			return nil, false, err
 		}
 	}
+	if err := validatePromotionAdmissionTx(ctx, tx, req, EnvironmentKind(environmentKind)); err != nil {
+		return nil, false, err
+	}
 	// Provider deliveries and the private branch monitor may observe the same
 	// push. Serialize their enqueue against the latest attempted commit, while
 	// manual rebuilds and a branch moving back to an older commit remain valid.
@@ -493,37 +496,10 @@ func snapshotRunPlanInputsTx(
 		}
 		dependenciesJSON, checksJSON = []byte(dependencies), []byte(checks)
 	} else {
-		dependencies := []json.RawMessage{}
-		checks := []json.RawMessage{}
-		for _, query := range []struct {
-			sql    string
-			target *[]json.RawMessage
-		}{
-			{`SELECT json_object('kind', kind, 'ownership', ownership, 'resourceKind', resource_kind,
-			                    'resourceId', resource_id, 'config', json(config_json))
-			    FROM deploy_dependencies WHERE environment_id = ? AND release_id = 0
-			   ORDER BY kind, resource_kind, resource_id`, &dependencies},
-			{`SELECT json_object('name', name, 'kind', kind, 'phase', phase, 'config', json(config_json),
-			                    'required', json(CASE WHEN required <> 0 THEN 'true' ELSE 'false' END))
-			    FROM deploy_checks WHERE environment_id = ? ORDER BY ordinal, name`, &checks},
-		} {
-			rows, err := tx.QueryContext(ctx, query.sql, environmentID)
-			if err != nil {
-				return err
-			}
-			for rows.Next() {
-				var raw string
-				if err := rows.Scan(&raw); err != nil {
-					rows.Close()
-					return err
-				}
-				*query.target = append(*query.target, json.RawMessage(raw))
-			}
-			if err := rows.Close(); err != nil {
-				return err
-			}
+		dependencies, checks, err := currentPlanInputs(ctx, tx, environmentID)
+		if err != nil {
+			return err
 		}
-		var err error
 		dependenciesJSON, err = json.Marshal(dependencies)
 		if err != nil {
 			return err
@@ -547,6 +523,44 @@ func snapshotRunPlanInputsTx(
 		VALUES(?, ?, ?, ?, ?, ?, ?)`, runID, environmentID, string(dependenciesJSON),
 		string(checksJSON), digest, copyFromRunID, now.Unix())
 	return err
+}
+
+// currentPlanInputs are an environment's dependencies and checks as a run
+// would freeze them now, in the canonical order the snapshot digest is over.
+func currentPlanInputs(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, environmentID int64) ([]json.RawMessage, []json.RawMessage, error) {
+	dependencies := []json.RawMessage{}
+	checks := []json.RawMessage{}
+	for _, query := range []struct {
+		sql    string
+		target *[]json.RawMessage
+	}{
+		{`SELECT json_object('kind', kind, 'ownership', ownership, 'resourceKind', resource_kind,
+		                    'resourceId', resource_id, 'config', json(config_json))
+		    FROM deploy_dependencies WHERE environment_id = ? AND release_id = 0
+		   ORDER BY kind, resource_kind, resource_id`, &dependencies},
+		{`SELECT json_object('name', name, 'kind', kind, 'phase', phase, 'config', json(config_json),
+		                    'required', json(CASE WHEN required <> 0 THEN 'true' ELSE 'false' END))
+		    FROM deploy_checks WHERE environment_id = ? ORDER BY ordinal, name`, &checks},
+	} {
+		rows, err := q.QueryContext(ctx, query.sql, environmentID)
+		if err != nil {
+			return nil, nil, err
+		}
+		for rows.Next() {
+			var raw string
+			if err := rows.Scan(&raw); err != nil {
+				rows.Close()
+				return nil, nil, err
+			}
+			*query.target = append(*query.target, json.RawMessage(raw))
+		}
+		if err := rows.Close(); err != nil {
+			return nil, nil, err
+		}
+	}
+	return dependencies, checks, nil
 }
 
 func normalizeRunRequest(req *RunRequest) error {
