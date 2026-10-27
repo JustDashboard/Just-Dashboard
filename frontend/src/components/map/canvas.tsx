@@ -1174,11 +1174,11 @@ const MapLights = memo(function MapLights({ nodes }: { nodes: Node[] }) {
           aria-hidden
           className="pointer-events-none absolute -z-10"
           style={{
-            left: lights.server.x + lights.server.w / 2 - 900,
-            top: lights.server.y + lights.server.h / 2 - 600,
-            width: 1800,
-            height: 1200,
-            background: "radial-gradient(closest-side, var(--plot-signal), transparent)",
+            left: lights.server.x + lights.server.w / 2 - 700,
+            top: lights.server.y + lights.server.h / 2 - 450,
+            width: 1400,
+            height: 900,
+            background: "radial-gradient(closest-side, var(--map-heart-light), transparent)",
           }}
         />
       )}

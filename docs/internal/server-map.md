@@ -162,9 +162,11 @@ and light steps):
   arrives (§11's *arrived*, `settleLines`: only lines mounted in that moment, not ones panned into view
   later), and while the shell's metrics stream is open each branch's line carries a pulse out from the
   server (§11's *live*); reduced motion ends the first at once and the second runs past the line's end.
-- **The ground** — a light pooled behind the server in the signal blue and behind each branch's column
-  in its hue (`MapLights`, drawn in the canvas's own space under everything, so it pans, zooms and
-  follows a dragged branch). It is never more than a wash: every box keeps its own ground over it.
+- **The ground** — a faint light pooled behind the server in the signal blue (`--map-heart-light`, 8%)
+  and behind each branch's column in its hue (`--hue-light`, 7%) — toned down once at the operator's
+  word, so tune these rather than adding a light (`MapLights`, drawn in the canvas's own space under
+  everything, so it pans, zooms and follows a dragged branch). It is never more than a wash: every box
+  keeps its own ground over it.
 - **The minimap and the inspector** — the minimap draws every box in its branch's hue (a thing down or
   needing a look in its state's colour), and the inspector's *On this server* heads each branch with
   its hue, colours each kind's glyph and names each kind's three commonest products, so the list is the

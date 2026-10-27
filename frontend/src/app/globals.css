@@ -330,6 +330,9 @@
   --branch-jobs: oklch(0.78 0.15 125);
   --branch-people: oklch(0.7 0.16 320);
   --branch-protection: var(--tag-green);
+  /* The light pooled behind the server in the middle of the map: the signal
+     blue, kept faint so it reads as the ground warming rather than a glow. */
+  --map-heart-light: color-mix(in oklab, var(--signal) 8%, transparent);
 
   /* The colour a language is already known by.
    *
@@ -681,7 +684,7 @@
   --hue-plot: color-mix(in oklab, var(--hue) 18%, transparent);
   --hue-rule: color-mix(in oklab, var(--hue) 34%, transparent);
   --hue-wash: color-mix(in oklab, var(--hue) 6%, transparent);
-  --hue-light: color-mix(in oklab, var(--hue) 13%, transparent);
+  --hue-light: color-mix(in oklab, var(--hue) 7%, transparent);
 }
 
 /* A line of the map's tree, on a path one long (`pathLength`): drawn out from
