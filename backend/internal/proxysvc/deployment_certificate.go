@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -124,19 +123,27 @@ func (s *Service) EnsureDeploymentCertificate(
 	} else if edge != nil {
 		return s.ensureDockerCaddyCertificate(ctx, edge, names, log)
 	}
-	availability := s.Availability(ctx)
-	if !availability.Certbot {
-		return DeploymentCertificate{}, ErrCertbotUnavailable
-	}
-	if err := validateDeploymentHTTPDomains(ctx, names, net.DefaultResolver.LookupIPAddr); err != nil {
+	if _, err := deploymentCertbot(ctx); err != nil {
 		return DeploymentCertificate{}, err
+	}
+	directory := acmeDirectory()
+	if err := directory.validate(); err != nil {
+		return DeploymentCertificate{}, err
+	}
+	// As on the Caddy ingress: a private authority validates however it was
+	// set up to, and public DNS says nothing about it. Let's Encrypt and its
+	// staging twin still need the name to resolve here before an order is
+	// worth placing.
+	if !directory.private() {
+		if err := validateDeploymentHTTPDomains(ctx, names, net.DefaultResolver.LookupIPAddr); err != nil {
+			return DeploymentCertificate{}, err
+		}
 	}
 	challenge, err := s.deploymentChallenge(ctx)
 	if err != nil {
 		return DeploymentCertificate{}, err
 	}
-	method := challenge.method
-	if method == "webroot" {
+	if challenge.method == "webroot" {
 		cleanup, err := s.prepareDeploymentWebroot(ctx, names, deploymentACMEWebroot, challenge.listeners, func(ctx context.Context, domains []string) error {
 			return probeDeploymentWebroot(ctx, domains, deploymentACMEWebroot, challenge.listeners)
 		})
@@ -152,35 +159,40 @@ func (s *Service) EnsureDeploymentCertificate(
 			}
 		}()
 	}
+	return s.issueDeploymentHTTP(ctx, names, challenge.method, deploymentACMEWebroot, directory, log)
+}
 
-	registered := certbotAccountExists()
-	args := []string{"certonly", "--" + method, "--non-interactive", "--agree-tos",
-		// A run inside the renewal window is a no-op rather than a failure,
-		// which is what makes this safe to put in every deployment.
-		"--keep-until-expiring", "--no-eff-email"}
-	if method == "webroot" {
-		args = append(args, "--webroot-path", deploymentACMEWebroot)
+// issueDeploymentHTTP orders names over the HTTP challenge method chooses —
+// webroot answered from webroot, or standalone — from directory, through the
+// same certbot the Certificates page and the DNS path run, and reads the
+// certificate back before it says so.
+func (s *Service) issueDeploymentHTTP(
+	ctx context.Context,
+	names []string,
+	method, webroot string,
+	directory ACMEDirectory,
+	log func(stream, text string),
+) (DeploymentCertificate, error) {
+	// The account is the configured directory's, as the DNS path reads it.
+	// Any entry under accounts/ used to count, so a host registered with
+	// Let's Encrypt ordering from another authority was told it had an
+	// account there, skipped registering, and was refused by that authority.
+	registered := acmeAccountExists(letsencryptDir, certbotServer(false))
+	args := deploymentHTTPIssueArgs(method, webroot, registered, names, directory)
+	environment, err := CertbotEnvironment()
+	if err != nil {
+		return DeploymentCertificate{}, err
 	}
-	if !registered {
-		// A first order on this host has to register an ACME account, and the
-		// only thing that needs is an address to send expiry warnings to. This
-		// is deliberately not asked for: Let's Encrypt accepts an account
-		// without one, renewal is certbot's own timer rather than a reply to
-		// that mail, and the dashboard watches the dates itself. An operator
-		// who wants the warnings registers with an address once on the
-		// Certificates page, and every later order reuses that account.
-		args = append(args, "--register-unsafely-without-email")
-	}
-	for _, name := range names {
-		args = append(args, "-d", name)
-	}
-
 	// Bounded well above a normal order: an ACME exchange is two round trips
 	// and a validation, and a host with slow DNS is the case this has to
 	// survive rather than the case it should hang for.
 	issueCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	output, err := hostexec.Command(issueCtx, "certbot", args...).CombinedOutput()
+	cmd, err := CertbotCommand(issueCtx, environment, args...)
+	if err != nil {
+		return DeploymentCertificate{}, err
+	}
+	output, err := cmd.CombinedOutput()
 	if log != nil {
 		for _, line := range strings.Split(strings.TrimRight(string(output), "\n"), "\n") {
 			if strings.TrimSpace(line) != "" {
@@ -213,6 +225,34 @@ func (s *Service) EnsureDeploymentCertificate(
 	}, nil
 }
 
+// deploymentHTTPIssueArgs is the argv of an HTTP-01 order: the DNS path's
+// shape with the challenge plugin in place of the provider's, and the same
+// directory named the same way (ACMEDirectory.certbotArgs).
+func deploymentHTTPIssueArgs(method, webroot string, registered bool, names []string, directory ACMEDirectory) []string {
+	args := []string{"certonly", "--" + method, "--non-interactive", "--agree-tos",
+		// A run inside the renewal window is a no-op rather than a failure,
+		// which is what makes this safe to put in every deployment.
+		"--keep-until-expiring", "--no-eff-email"}
+	if method == "webroot" {
+		args = append(args, "--webroot-path", webroot)
+	}
+	if !registered {
+		// A first order on this host has to register an ACME account, and the
+		// only thing that needs is an address to send expiry warnings to. This
+		// is deliberately not asked for: Let's Encrypt accepts an account
+		// without one, renewal is certbot's own timer rather than a reply to
+		// that mail, and the dashboard watches the dates itself. An operator
+		// who wants the warnings registers with an address once on the
+		// Certificates page, and every later order reuses that account.
+		args = append(args, "--register-unsafely-without-email")
+	}
+	args = append(args, directory.certbotArgs()...)
+	for _, name := range names {
+		args = append(args, "-d", name)
+	}
+	return args
+}
+
 // Existing certificates can serve private names, but a new HTTP-01 order
 // requires public DNS destinations. Check before invoking certbot so saved
 // releases with an old CGNAT-based suggestion fail with a useful remedy.
@@ -238,13 +278,6 @@ func validateDeploymentHTTPDomains(ctx context.Context, names []string,
 	return nil
 }
 
-// certbotAccountExists reports whether this host has already registered with an
-// ACME authority, which decides whether an address has to be offered at all.
-func certbotAccountExists() bool {
-	entries, err := os.ReadDir("/etc/letsencrypt/accounts")
-	return err == nil && len(entries) > 0
-}
-
 // certificateNameForPath is certbot's lineage name: the directory under
 // live/ that holds the pair.
 func certificateNameForPath(path string) string {
@@ -254,18 +287,21 @@ func certificateNameForPath(path string) string {
 // Plugin availability alone cannot decide how to answer HTTP-01: standalone
 // needs an unused port, and the container's certbot cannot run host nginx.
 // Webroot shares challenge files with the host without requiring its plugin.
+// The plugins are those of the certbot the order will run through — the
+// Certificates page's (deploymentCertbot), listed against directories of its
+// own so the listing never fails on the lock a running certbot holds.
 func (s *Service) deploymentChallenge(ctx context.Context) (deploymentHTTPChallenge, error) {
+	rt, err := deploymentCertbot(ctx)
+	if err != nil {
+		return deploymentHTTPChallenge{}, err
+	}
 	listCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	output, err := hostexec.Command(listCtx, "certbot", "plugins", "--non-interactive").CombinedOutput()
-	if err != nil {
-		return deploymentHTTPChallenge{}, fmt.Errorf("%w: certbot could not list its challenge plugins", ErrCertbotUnavailable)
-	}
 	listeners, err := ListListeners(listCtx)
 	if err != nil {
 		return deploymentHTTPChallenge{}, fmt.Errorf("cannot inspect port 80 before certificate issuance: %w", err)
 	}
-	return chooseDeploymentHTTPChallenge(certbotAuthenticators(string(output)), listeners, hostexec.Available("nginx"))
+	return chooseDeploymentHTTPChallenge(rt.authenticators, listeners, hostexec.Available("nginx"))
 }
 
 // DeploymentCertificateMethod reports the same listener-aware choice issuance uses.
