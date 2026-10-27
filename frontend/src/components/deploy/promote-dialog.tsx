@@ -225,6 +225,10 @@ export function PromoteDialog({
             </div>
           )}
         </div>
+      ) : !reading && preview.error ? (
+        <Notice tone="danger" title="This release cannot be promoted">
+          {preview.error.message}
+        </Notice>
       ) : !reading ? (
         <div className="space-y-3" aria-busy="true">
           <Skeleton className="h-12 w-full" />

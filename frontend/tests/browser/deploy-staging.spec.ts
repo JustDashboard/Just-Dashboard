@@ -96,7 +96,13 @@ function json(route: Route, body: unknown, status = 200) {
 /** The staging half of the project, layered over the fixture's production. */
 async function mockStaging(
   page: Page,
-  options: { exists?: boolean; promotionOnly?: boolean; promoted?: boolean; idle?: boolean } = {},
+  options: {
+    exists?: boolean
+    promotionOnly?: boolean
+    promoted?: boolean
+    idle?: boolean
+    refused?: boolean
+  } = {},
 ) {
   let exists = options.exists ?? true
   const requests: { method: string; path: string; body?: unknown }[] = []
@@ -181,6 +187,18 @@ async function mockStaging(
           promotion,
         },
       ])
+    }
+    if (path === "/deploy/7/environments/12/promotion" && options.refused) {
+      return json(
+        route,
+        {
+          error: {
+            code: "promotion_source",
+            message: "only a successful, retained staging release can be promoted",
+          },
+        },
+        409,
+      )
     }
     if (path === "/deploy/7/environments/12/promotion") {
       return json(route, {
@@ -286,4 +304,14 @@ test("a release production took from staging is marked as promoted", async ({ pa
   await page.goto("/deploy/7/deployments")
   await expect(page.getByText("#7 Promote")).toBeVisible()
   await expect(page.getByText("From staging #2").first()).toBeVisible()
+})
+
+test("a staging release production cannot take says why instead of waiting", async ({ page }) => {
+  await mockProject(page)
+  await mockStaging(page, { refused: true })
+  await page.goto("/deploy/7?env=staging")
+  await page.getByRole("button", { name: "Promote", exact: true }).click()
+  const confirm = page.getByRole("dialog", { name: /^Promote/ })
+  await expect(confirm.getByText("only a successful, retained staging release")).toBeVisible()
+  await expect(confirm.getByRole("button", { name: "Promote to production" })).toBeDisabled()
 })
