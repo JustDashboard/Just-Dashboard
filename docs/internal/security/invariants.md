@@ -118,7 +118,7 @@ A change that weakens any of these has to say so explicitly.
    environment that already has one, or whose variables a person pointed at a saved credential, is
    changed (configuration and source) by a person only, though the key may still deploy it and set its
    variables; no saved credential chosen, or a Git credential sent to a different repository; no
-   variable pointed at a saved credential or a database — checked on a draft at commit, where its
+   variable pointed at a saved credential, a database or a secret store — checked on a draft at commit, where its
    variables reach the form they are stored in — nor, for a narrowed key, at a server shared variable.
    A key that can change a deployment's source and deploy it can still run code that reads that
    deployment's own variables at run time, a database reference a person gave it included:

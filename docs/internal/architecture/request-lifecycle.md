@@ -61,7 +61,7 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   `every` (drafts, duplication, server shared variables, fleet-wide reads); `GET /deploy/` lists only
   its deployments. The handlers hold what a deploy key writes: generated values are withheld, and a
   plan or environment change that would reach the host, redirect a saved credential, or point a
-  variable at a credential or database is refused with `session_required` (see
+  variable at a credential, database or secret store is refused with `session_required` (see
   [invariant 4](../security/invariants.md)).
 - **`httpx.AuditMutations`** records every state-changing request, with the API key's id and name
   (`audit_log.key_id`, `key_name`) when the request carried one. WebSocket routes are GET and

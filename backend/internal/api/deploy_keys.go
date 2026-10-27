@@ -441,7 +441,9 @@ func keySourceGuard(next deploy.DraftSourceConfig, previous *deploy.DraftSourceC
 // reference to a saved credential or a database is the value of that
 // credential or connection string in the container, which the key deploys
 // code into, so the key may keep one a person set and never point a variable
-// at one itself. A key narrowed to some deployments may not reach a server
+// at one itself. A secret-store reference is the same: the store's saved
+// connection reads any path it can reach, not only the ones a person gave
+// this deployment. A key narrowed to some deployments may not reach a server
 // shared variable it was not already reading for the same reason: it is the
 // other deployments' value. previous is the reference the variable holds now.
 func keyReferenceGuard(p *httpx.Principal, name, reference, previous string) error {
@@ -455,6 +457,8 @@ func keyReferenceGuard(p *httpx.Principal, name, reference, previous string) err
 	switch {
 	case parsed.Kind == "credential" || parsed.Kind == "database":
 		return refuseForDeployKey(fmt.Sprintf("%s would read a saved %s, and a deploy key cannot point a variable at one", name, parsed.Kind))
+	case parsed.Kind == deploy.StoreReferenceKind:
+		return refuseForDeployKey(fmt.Sprintf("%s would read a secret store through its saved connection, and a deploy key cannot point a variable at one", name))
 	case parsed.Kind == deploy.SharedScopeServer && !p.Token.EveryDeployment():
 		return refuseForDeployKey(fmt.Sprintf("%s would read a server shared variable, and this deploy key reaches only some deployments", name))
 	}

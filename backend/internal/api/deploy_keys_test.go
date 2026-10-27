@@ -681,7 +681,7 @@ func TestADeployKeyCannotRedirectOrReferenceASavedCredential(t *testing.T) {
 			t.Errorf("%s = %d %s", name, w.Code, w.Body.String())
 		}
 	}
-	for _, reference := range []string{"${{credential.github}}", fmt.Sprintf("${{credential.%d}}", saved.ID), "${{database.shop}}"} {
+	for _, reference := range []string{"${{credential.github}}", fmt.Sprintf("${{credential.%d}}", saved.ID), "${{database.shop}}", "${{store.vault-prod/apps/billing#STRIPE_KEY}}"} {
 		w := b.call(b.deploy, http.MethodPut, base+"/variables/LEAK", map[string]any{
 			"revision": 1, "reference": reference, "sensitivity": "secret", "scopes": []string{"runtime"},
 		})
@@ -710,6 +710,7 @@ func TestADeployKeyCannotRedirectOrReferenceASavedCredential(t *testing.T) {
 	for _, variable := range []string{
 		`{"name":"LEAK","sensitivity":"secret","scopes":["runtime"],"reference":"${{credential.github}}"}`,
 		`{"name":"LEAK","sensitivity":"secret","scopes":["runtime"],"valueMode":"reference","value":"${{database.shop}}"}`,
+		`{"name":"LEAK","sensitivity":"secret","scopes":["runtime"],"reference":"${{store.vault-prod/apps/billing#STRIPE_KEY}}"}`,
 	} {
 		created := b.call(b.deploy, http.MethodPost, "/api/v1/deploy/drafts", nil)
 		var draft struct {
@@ -722,7 +723,7 @@ func TestADeployKeyCannotRedirectOrReferenceASavedCredential(t *testing.T) {
 			t.Fatal(err)
 		}
 		w := b.call(b.deploy, http.MethodPost, "/api/v1/deploy/drafts/"+draft.ID+"/commit", map[string]any{"revision": draft.Revision})
-		if keyErrorCode(w) != "session_required" || !strings.Contains(w.Body.String(), "LEAK would read a saved") {
+		if keyErrorCode(w) != "session_required" || !strings.Contains(w.Body.String(), "LEAK would read") {
 			t.Errorf("committing a draft whose variable is %s = %d %s", variable, w.Code, w.Body.String())
 		}
 	}

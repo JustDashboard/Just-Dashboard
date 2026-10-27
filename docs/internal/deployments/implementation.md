@@ -1247,8 +1247,8 @@ only renderer/executor/validation authority for their feature.
   devices, a host path mounted, a release task without `runner: "image"`), and an environment that
   already does, or whose variables read a `credential` reference, is changed by a person only (it may
   still be deployed and have its variables set); a source may not gain a saved credential or send its
-  Git credential to another repository; a variable may not be pointed at a `credential` or `database`
-  reference (on a draft, checked at commit with `Draft.VariableReferences`, which reads a value's mode
+  Git credential to another repository; a variable may not be pointed at a `credential`, `database` or
+  `store` reference (on a draft, checked at commit with `Draft.VariableReferences`, which reads a value's mode
   as the commit stores it), nor, for a key narrowed to some deployments, at a `server` shared
   variable. A key narrowed to chosen deployments
   (`api_token_deployments`) lists and reaches only those. `GET /deploy/{id}/runs/{run}/transcript?after=&limit=`
