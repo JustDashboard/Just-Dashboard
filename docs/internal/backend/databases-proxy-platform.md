@@ -5392,7 +5392,8 @@ containers/volumes/networks.
   signed) adds `--force-renewal`, unless the configured directory is itself a staging one; with
   `JD_ACME_DIRECTORY` both name `--server`, except Let's Encrypt's production directory, which is
   certbot's default and is left unnamed (certbot swaps a `--dry-run` to staging only when the server
-  is its default spelled exactly). The page offers that
+  is its default spelled exactly); a deployment run's own orders, over HTTP-01 and DNS-01, name it the
+  same way and check for an account under it (`deployments/implementation.md`). The page offers that
   issuance on a test lineage in place of Renew, since certbot renews from the authority the lineage's
   configuration names. Such a job is titled "Replacing the test certificate for …", audited with
   `replacesTestCertificate`, reloads nginx for the enabled sites naming the certificate (see
