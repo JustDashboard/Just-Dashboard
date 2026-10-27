@@ -3,7 +3,6 @@ package proxysvc
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -125,37 +124,7 @@ func TestZoneNameserversWalksUpToTheZoneAndNoFurther(t *testing.T) {
 // would, under the first name's lineage, and records its argv.
 func fakeDNSCertbot(t *testing.T, letsencrypt string, plugins ...string) string {
 	t.Helper()
-	bin, stage := t.TempDir(), t.TempDir()
-	log := filepath.Join(bin, "argv.log")
-	var listing strings.Builder
-	for _, p := range plugins {
-		fmt.Fprintf(&listing, "* %s\nDescription: the %s plugin\nInterfaces: Authenticator, Plugin\n\n", p, p)
-	}
-	writeExecutable(t, filepath.Join(bin, "certbot"), fmt.Sprintf(`#!/bin/sh
-echo "$*" >> %q
-case "$1" in
---version) echo "certbot 9.9.9"; exit 0 ;;
-plugins) cat <<'LIST'
-%sLIST
-exit 0 ;;
-certonly)
-  name=""
-  while [ $# -gt 0 ]; do
-    if [ "$1" = "-d" ] && [ -z "$name" ]; then name="${2#\*.}"; fi
-    shift
-  done
-  mkdir -p %q/live/"$name"
-  cp %q/*.pem %q/live/"$name"/
-  echo "Successfully received certificate."
-  exit 0 ;;
-esac
-exit 1
-`, log, listing.String(), letsencrypt, stage, letsencrypt))
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	forgetCertbotRuntime()
-	t.Cleanup(forgetCertbotRuntime)
-	writeDeploymentCertificate(t, stage, []string{"*.preview.example.test", "preview.example.test"})
-	return log
+	return fakeIssuingCertbot(t, letsencrypt, []string{"*.preview.example.test", "preview.example.test"}, plugins...)
 }
 
 // A run that serves a wildcard orders it over DNS-01 through the credentials
