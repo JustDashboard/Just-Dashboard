@@ -78,6 +78,8 @@ const (
 	whyLegacy      = "a legacy project's settings are commands that run on this server; use a draft and its environment instead"
 	whyArchive     = "archiving a deployment is done in the dashboard or with an ordinary key"
 	whyGame        = "operating a game server is not deploying it"
+	whySecretStore = "secret store connections hold credentials of their own and are managed only in the dashboard"
+	whyEnvironment = "adding or removing an environment is done in the dashboard"
 )
 
 // deployKeyRoutes is the decision table: every route a deploy key may make,
@@ -232,6 +234,14 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"PUT /deploy/log-drains/{drain}/enabled":                      keySession(whyChannels),
 	"POST /deploy/log-drains/{drain}/test":                        keySession(whyChannels),
 	"DELETE /deploy/log-drains/{drain}":                           keySession(whyChannels),
+	"POST /deploy/secret-stores":                                  keySession(whySecretStore),
+	"PUT /deploy/secret-stores/{store}":                           keySession(whySecretStore),
+	"POST /deploy/secret-stores/{store}/test":                     keySession(whySecretStore),
+	"DELETE /deploy/secret-stores/{store}":                        keySession(whySecretStore),
+	"POST /deploy/{id}/environments":                              keySession(whyEnvironment),
+	"DELETE /deploy/{id}/environments/{env}":                      keySession(whyEnvironment),
+	"PUT /deploy/{id}/environments/{env}/pages/{page}":            keySession("a route's maintenance and error pages are edited in the dashboard"),
+	"PUT /deploy/{id}/environments/{env}/rollback-policy":         keySession("the terms a release is kept warm and rolled back on are set in the dashboard"),
 	"POST /deploy/blueprints/{id}/render":                         keySession("a template's plan is previewed in the dashboard; a draft from it is a deploy key's to make"),
 	"POST /deploy/import/preview":                                 keySession(whyHost),
 	"POST /deploy/import/adopt":                                   keySession(whyHost),

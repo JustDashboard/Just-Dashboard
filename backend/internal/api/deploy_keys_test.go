@@ -56,6 +56,11 @@ var sessionOnlyBefore = []string{
 	"POST /deploy/{id}/removal-plan",
 	"DELETE /deploy/{id}/shared-variables/{name}", "PUT /deploy/{id}/shared-variables/{name}", "GET /deploy/{id}/shared-variables/{name}/reveal",
 	"POST /deploy/{id}/unarchive",
+	// Session-only from the change that added each, beside the deploy key.
+	"POST /deploy/secret-stores", "PUT /deploy/secret-stores/{store}", "POST /deploy/secret-stores/{store}/test",
+	"DELETE /deploy/secret-stores/{store}",
+	"POST /deploy/{id}/environments", "DELETE /deploy/{id}/environments/{env}",
+	"PUT /deploy/{id}/environments/{env}/pages/{page}", "PUT /deploy/{id}/environments/{env}/rollback-policy",
 }
 
 // keyBench is a server with an administrator, a session, and the three kinds

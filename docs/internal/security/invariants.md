@@ -102,7 +102,8 @@ A change that weakens any of these has to say so explicitly.
    session-only answers `session_required` with the reason. Admission is what lets the key past
    `httpx.RequireSession` (`Principal.DeployRoute`), on that route and no other. What stays a
    session's whatever the key: every reveal (`…/variables/{name}/reveal`, shared variables, the legacy
-   `…/env/reveal`), the saved registry and Git credentials (list, create, update, test and delete),
+   `…/env/reveal`), the saved registry and Git credentials (list, create, update, test and delete), the secret-store
+   connections that hold credentials of their own (create, update, test and delete),
    the pull-request merge and comment that speak as the dashboard's GitHub account, preview approval,
    and the removals that take a typed phrase (`DELETE /deploy/{id}/permanent`, `remove-managed` and its
    plan). Variables are write-only to the key: lists carry names and digests, and

@@ -1238,8 +1238,9 @@ only renderer/executor/validation authority for their feature.
   `api/deploy_keys.go` lists and to no other route; wherever this document gives a drafts,
   configuration, source, Git policy, trigger, variable or shared-variable write the tier
   "`system.admin`, session", a deploy key is admitted too, and every other session-only deployment route
-  (reveals, saved credentials, pull-request merge/comment and previews, schedules, alerts, channels,
-  drains, the typed-phrase removals) stays a session's and answers it `session_required`. Its writes are
+  (reveals, saved credentials, secret-store connections, pull-request merge/comment and previews,
+  schedules, alerts, channels, drains, adding and removing an environment, a route's maintenance and
+  error pages, the warm-release terms, the typed-phrase removals) stays a session's and answers it `session_required`. Its writes are
   held to what a person in a session could not be refused: a generate or rotate answers it without
   `generatedValue`; a plan it commits, or an environment change it makes, may not carry host authority
   (`hostAuthority`: a folder on the server, Docker Compose, privileged, host network, capabilities,
