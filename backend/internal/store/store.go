@@ -22,7 +22,7 @@ type Store struct {
 // whether a pre-rename data directory should be adopted.
 const DatabaseFile = "vpsd.db"
 
-const schema = runDiagnosisSchema + serverMapSchema + sharedVariableSchema + accountLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
+const schema = runDiagnosisSchema + rollbackWatchSchema + serverMapSchema + sharedVariableSchema + accountLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -769,6 +769,8 @@ CREATE TABLE IF NOT EXISTS deploy_releases (
   activated_at           INTEGER NOT NULL DEFAULT 0,
   retired_at             INTEGER NOT NULL DEFAULT 0,
   pinned                 INTEGER NOT NULL DEFAULT 0,
+  rolled_back_at         INTEGER NOT NULL DEFAULT 0,
+  rollback_reason        TEXT NOT NULL DEFAULT '',
   UNIQUE(environment_id, release_number)
 );
 CREATE INDEX IF NOT EXISTS idx_deploy_release_environment
@@ -1837,6 +1839,11 @@ var addedColumns = []struct{ table, column, spec string }{
 	// An MCP key can be given the deployments as well as databases. Every
 	// key made before reaches none of them.
 	{"api_tokens", "deploy_access", "TEXT NOT NULL DEFAULT ''"},
+	// A release taken back by an instant rollback says when and why: the
+	// reading that decided it, or the operator who pressed it. Every release
+	// made before was never rolled back this way.
+	{"deploy_releases", "rolled_back_at", "INTEGER NOT NULL DEFAULT 0"},
+	{"deploy_releases", "rollback_reason", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on

@@ -104,40 +104,79 @@ func selectDockerCaddy(containers []ingressContainer) (*dockerCaddy, error) {
 		if !public("80/tcp", "80") {
 			continue
 		}
-		command := c.Config.Cmd
-		if len(command) < 4 || filepath.Base(command[0]) != "caddy" || command[1] != "run" || !strings.Contains(strings.Join(command[2:], " "), "--config /etc/caddy/Caddyfile") {
+		if !runsCaddyfile(c) {
 			continue
 		}
 		if !public("443/tcp", "443") {
 			return nil, fmt.Errorf("Caddy container %s owns HTTP but does not publish HTTPS on port 443", strings.TrimPrefix(c.Name, "/"))
 		}
-		found := dockerCaddy{ID: c.ID, Name: strings.TrimPrefix(c.Name, "/"), StartedAt: c.State.StartedAt}
-		config, data := false, false
-		storage := map[string]string{}
-		for _, mount := range c.Mounts {
-			if mount.Destination == "/config" || mount.Destination == "/data" {
-				storage[mount.Destination] = mount.Source
-			}
-			if mount.Destination == "/etc/caddy/Caddyfile" && mount.Type == "bind" {
-				found.Source = mount.Source
-			}
-			if mount.Destination == "/config" && mount.RW {
-				config = true
-			}
-			if mount.Destination == "/data" && mount.RW {
-				data = true
-			}
-		}
-		if found.Source == "" || !config || !data {
-			return nil, fmt.Errorf("Caddy container %s needs a persisted Caddyfile, /config and /data before deployments can share it", found.Name)
+		found, err := dockerCaddyFrom(c)
+		if err != nil {
+			return nil, err
 		}
 		if edge != nil {
 			return nil, errors.New("multiple public Caddy containers require an explicit ingress selection")
 		}
-		found.Identity = routeDigest(found.Source + "\x00" + storage["/config"] + "\x00" + storage["/data"])
-		edge = &found
+		edge = found
 	}
 	return edge, nil
+}
+
+func runsCaddyfile(c ingressContainer) bool {
+	command := c.Config.Cmd
+	return len(command) >= 4 && filepath.Base(command[0]) == "caddy" && command[1] == "run" &&
+		strings.Contains(strings.Join(command[2:], " "), "--config /etc/caddy/Caddyfile")
+}
+
+// dockerCaddyFrom is everything discovery asks of an ingress apart from the
+// ports it publishes: a persisted Caddyfile and writable /config and /data.
+func dockerCaddyFrom(c ingressContainer) (*dockerCaddy, error) {
+	found := dockerCaddy{ID: c.ID, Name: strings.TrimPrefix(c.Name, "/"), StartedAt: c.State.StartedAt}
+	config, data := false, false
+	storage := map[string]string{}
+	for _, mount := range c.Mounts {
+		if mount.Destination == "/config" || mount.Destination == "/data" {
+			storage[mount.Destination] = mount.Source
+		}
+		if mount.Destination == "/etc/caddy/Caddyfile" && mount.Type == "bind" {
+			found.Source = mount.Source
+		}
+		if mount.Destination == "/config" && mount.RW {
+			config = true
+		}
+		if mount.Destination == "/data" && mount.RW {
+			data = true
+		}
+	}
+	if found.Source == "" || !config || !data {
+		return nil, fmt.Errorf("Caddy container %s needs a persisted Caddyfile, /config and /data before deployments can share it", found.Name)
+	}
+	found.Identity = routeDigest(found.Source + "\x00" + storage["/config"] + "\x00" + storage["/data"])
+	return &found, nil
+}
+
+// namedDockerCaddy is the ingress an operator named rather than the one
+// discovery would choose. It must still be a running Caddy over its own
+// persisted Caddyfile; only the public ports are not asked of it, which is
+// what makes it nameable at all.
+//
+// It inspects that one container by name rather than every running one: a
+// listing inspected a moment after it was taken fails whole when any other
+// container on the host went away in between.
+func namedDockerCaddy(ctx context.Context, name string) (*dockerCaddy, error) {
+	raw, err := hostexec.Command(ctx, "docker", "inspect", "--type", "container", name).Output()
+	if err != nil {
+		return nil, fmt.Errorf("the ingress container %s is not running", name)
+	}
+	var containers []ingressContainer
+	if json.Unmarshal(raw, &containers) != nil || len(containers) != 1 {
+		return nil, errors.New("could not read Docker ingress ownership")
+	}
+	c := containers[0]
+	if !c.State.Running || !runsCaddyfile(c) {
+		return nil, fmt.Errorf("the ingress container %s is not a running Caddy serving /etc/caddy/Caddyfile", name)
+	}
+	return dockerCaddyFrom(c)
 }
 
 func (c *dockerCaddy) command(ctx context.Context, input string, args ...string) ([]byte, error) {

@@ -206,15 +206,33 @@ const OPERATION_LABELS: Record<string, string> = {
   scheduled_action: "Scheduled",
   import_adopt: "Adopt",
   remove_managed: "Remove resources",
+  instant_rollback: "Instant rollback",
 }
 
 export function operationLabel(operation: string) {
   return OPERATION_LABELS[operation] ?? humanize(operation)
 }
 
+/**
+ * The operation a run's steps are named for. An instant rollback is a
+ * rollback run that resumes the warm release instead of starting a new one
+ * (`deploy/rollback_executor.go`), and its steps say so.
+ */
+export function stepOperation(
+  run: Pick<DeploymentEngineRun, "operation"> & { metadata?: Record<string, unknown> },
+) {
+  return run.operation === "rollback" && run.metadata?.instant === true
+    ? "instant_rollback"
+    : run.operation
+}
+
 /** "#12 Deploy" — the run's name wherever it is listed. */
-export function runTitle(run: Pick<DeploymentEngineRun, "runNumber" | "operation">) {
-  return `#${run.runNumber} ${operationLabel(run.operation)}`
+export function runTitle(
+  run: Pick<DeploymentEngineRun, "runNumber" | "operation"> & {
+    metadata?: Record<string, unknown>
+  },
+) {
+  return `#${run.runNumber} ${operationLabel(stepOperation(run))}`
 }
 
 const TRIGGER_LABELS: Record<string, string> = {
@@ -231,6 +249,7 @@ const TRIGGER_LABELS: Record<string, string> = {
   preview: "preview",
   rollback: "rollback",
   migration: "migration",
+  auto_rollback: "automatically",
 }
 
 /**
@@ -1479,9 +1498,20 @@ const LIVE_RELEASE_STEPS: Record<string, string> = {
   start: "Start live release",
 }
 
+// An instant rollback takes three of the release path's steps against the
+// warm release and the one it replaces rather than a new one.
+const INSTANT_ROLLBACK_STEPS: Record<string, string> = {
+  start_candidate: "Resume warm release",
+  activate: "Switch traffic back",
+  retire_previous: "Remove rolled-back release",
+}
+
 export function stepName(key: string, operation?: string) {
   if (key === "start_candidate" && operation && LIVE_RELEASE_STEPS[operation]) {
     return LIVE_RELEASE_STEPS[operation]
+  }
+  if (operation === "instant_rollback" && INSTANT_ROLLBACK_STEPS[key]) {
+    return INSTANT_ROLLBACK_STEPS[key]
   }
   return STEP_LABELS[key] ?? sentence(key)
 }

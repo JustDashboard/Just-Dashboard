@@ -37,6 +37,8 @@ import type {
   NotificationDelivery,
   ProjectPullRequests,
   ReleaseComparisonResponse,
+  RollbackPolicy,
+  RollbackWatch,
   SourceIdentity,
   TrafficPulse,
   VolumeDetail,
@@ -2182,6 +2184,11 @@ export async function mockProject(
      * draws. `runtime` and `operations` still win when given.
      */
     showcase?: boolean
+    /**
+     * The production environment's warm-release window; null, the default,
+     * is an environment that has never had one.
+     */
+    rollbackWatch?: RollbackWatch | null
   } = {},
 ) {
   const showcase = Boolean(options.showcase)
@@ -2202,6 +2209,15 @@ export async function mockProject(
   let configurationRevision = 3
   let configurationPending = true
   let automationTriggers: Record<string, unknown>[] = showcase ? [...showcaseTriggers] : []
+  let rollbackPolicy: RollbackPolicy = {
+    keepWarm: true,
+    windowSeconds: 600,
+    automatic: true,
+    errorRateMargin: 5,
+    latencyFactor: 2,
+    minRequests: 20,
+  }
+  let rollbackWatch: RollbackWatch | null = options.rollbackWatch ?? null
   let gitPolicy = {
     automatic: true,
     commitStatuses: true,
@@ -2586,6 +2602,27 @@ export async function mockProject(
       body = { run: liveRun(), steps: showcase ? showcaseSteps : steps }
     } else if (path === "/deploy/7/environments/12/configuration" && method === "GET") {
       body = configurationBody()
+    } else if (path === "/deploy/7/environments/12/rollback-watch" && method === "GET") {
+      body = { policy: rollbackPolicy, watch: rollbackWatch, preview: false }
+    } else if (path === "/deploy/7/environments/12/rollback-policy" && method === "PUT") {
+      rollbackPolicy = { ...(request.postDataJSON() as RollbackPolicy), updatedBy: "operator" }
+      actions.push("rollback-policy")
+      body = rollbackPolicy
+    } else if (path === "/deploy/7/environments/12/rollback-watch/rollback" && method === "POST") {
+      actions.push("instant-rollback")
+      if (rollbackWatch) rollbackWatch = { ...rollbackWatch, rollbackRunId: 85 }
+      body = { ...liveRun(), id: 85, runNumber: 85, operation: "rollback", state: "queued" }
+    } else if (path === "/deploy/7/environments/12/rollback-watch/keep" && method === "POST") {
+      actions.push("keep-release")
+      if (rollbackWatch)
+        rollbackWatch = {
+          ...rollbackWatch,
+          state: "closed",
+          endReason: "kept",
+          endMessage: `operator kept release #${rollbackWatch.releaseNumber}.`,
+          endedAt: new Date().toISOString(),
+        }
+      body = rollbackWatch
     } else if (path === "/deploy/7/environments/12/git-watch" && method === "GET") {
       body = {
         automatic: gitPolicy.automatic,

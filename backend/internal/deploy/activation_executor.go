@@ -66,6 +66,9 @@ func (e *NormalizedStepExecutor) CleanupCancelledRun(
 	if e == nil || e.store == nil || e.runtime == nil || operationTargetsLiveRelease(run.Operation) {
 		return mustJSON(map[string]any{"completed": true, "reason": "no candidate runtime cleanup required"}), nil
 	}
+	if request, ok := instantRollbackOf(run); ok {
+		return e.cleanupInstantRollback(ctx, run, request)
+	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 11*time.Minute)
 	defer cancel()
 	release, snapshot, err := e.releaseSnapshotForRun(cleanupCtx, run.ID)
@@ -77,7 +80,7 @@ func (e *NormalizedStepExecutor) CleanupCancelledRun(
 	}
 	execution := StepExecution{Run: run, ClaimToken: claimToken, Output: cancellationCleanupOutput{}}
 	if release.Release.State == "live" {
-		result := e.retirePrevious(cleanupCtx, execution, nil)
+		result := e.retirePredecessor(cleanupCtx, execution, false)
 		completed := result.State == StepPassed || result.State == StepSkipped
 		evidence := mustJSON(map[string]any{
 			"completed": completed, "action": "finish_retirement", "result": result,
@@ -823,6 +826,18 @@ func (e *NormalizedStepExecutor) retirePrevious(
 	execution StepExecution,
 	_ *StoredExecutionPlan,
 ) StepResult {
+	return e.retirePredecessor(ctx, execution, true)
+}
+
+// retirePredecessor stops the release this run replaced, or keeps it warm
+// when the environment's terms allow. A cancellation finishing a committed
+// cutover retires plainly: the operator stopped the run, not asked for a
+// window.
+func (e *NormalizedStepExecutor) retirePredecessor(
+	ctx context.Context,
+	execution StepExecution,
+	allowWarm bool,
+) StepResult {
 	// Once the environment pointer has moved, cancellation must not strand the
 	// predecessor beside the new live runtime. Finish the bounded drain and
 	// retirement independently of the request context.
@@ -845,6 +860,7 @@ func (e *NormalizedStepExecutor) retirePrevious(
 		return normalizedStepFailure(err)
 	}
 	var stop *RuntimeStopEvidence
+	var warmNote map[string]any
 	// A stop-first Compose release reuses one stable project identity. Its old
 	// containers were already replaced by `up`; stopping that identity here
 	// would stop the newly activated release.
@@ -858,6 +874,20 @@ func (e *NormalizedStepExecutor) retirePrevious(
 				return runtimeStepFailure(retireCtx.Err(), "drain_timeout", "the prior release drain did not complete", nil)
 			case <-timer.C:
 			}
+		}
+		if allowWarm && snapshot.Plan.Strategy == StrategyBlueGreen {
+			watch, why := e.keepWarm(retireCtx, execution, release.Release, snapshot, *previous, e.cutoverMoment(retireCtx, execution.Run.ID))
+			if watch != nil {
+				_ = stepLog(execution, "status", warmKeptLine(*watch))
+				return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{
+					"releaseId": predecessorID, "warm": map[string]any{
+						"kept": true, "watchId": watch.ID, "until": watch.ExpiresAt,
+						"runtimeId": previous.RuntimeID, "automatic": watch.Policy.Automatic,
+					},
+				})}
+			}
+			warmNote = map[string]any{"kept": false, "reason": why}
+			_ = stepLog(execution, "status", "Not keeping the previous release warm: "+why)
 		}
 		variables, variablesErr := e.runtimeVariablesForRelease(retireCtx, predecessorID, *previous)
 		if variablesErr != nil {
@@ -874,9 +904,24 @@ func (e *NormalizedStepExecutor) retirePrevious(
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
-	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{
+	evidence := map[string]any{
 		"releaseId": retiredID, "stop": stop, "sharedComposeProject": sharedComposeProject,
-	})}
+	}
+	if warmNote != nil {
+		evidence["warm"] = warmNote
+	}
+	return StepResult{State: StepPassed, Evidence: mustJSON(evidence)}
+}
+
+// warmKeptLine is the transcript's account of a window opening.
+func warmKeptLine(watch RollbackWatch) string {
+	until := watch.ExpiresAt.UTC().Format("15:04:05 UTC")
+	if !watch.Policy.Automatic {
+		return fmt.Sprintf("Kept release #%d warm (paused) until %s, so it can be switched back to instantly",
+			watch.WarmReleaseNum, until)
+	}
+	return fmt.Sprintf("Kept release #%d warm (paused) until %s: if release #%d's 5xx share passes the previous release's by %.1f points or its p95 reaches %.4g× it, over at least %d requests, traffic goes back to it automatically",
+		watch.WarmReleaseNum, until, watch.ReleaseNumber, watch.Policy.ErrorRateMargin, watch.Policy.LatencyFactor, watch.Policy.MinRequests)
 }
 
 func (e *NormalizedStepExecutor) removePreview(ctx context.Context, execution StepExecution) StepResult {
@@ -960,7 +1005,8 @@ func (e *NormalizedStepExecutor) removePreview(ctx context.Context, execution St
 func (e *NormalizedStepExecutor) recordRelease(ctx context.Context, execution StepExecution) StepResult {
 	var release *ReleaseWithArtifacts
 	var err error
-	if operationTargetsLiveRelease(execution.Run.Operation) {
+	_, instant := instantRollbackOf(execution.Run)
+	if operationTargetsLiveRelease(execution.Run.Operation) || instant {
 		targetReleaseID, targetErr := operationTargetReleaseID(execution.Run)
 		if targetErr != nil {
 			return normalizedStepFailure(targetErr)

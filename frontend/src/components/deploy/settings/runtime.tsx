@@ -53,6 +53,7 @@ import {
   type ContainerPeaks,
 } from "@/components/deploy/settings/limit-field"
 import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { RollbackWatchForm } from "@/components/deploy/settings/rollback-watch"
 import { Segments } from "@/components/deploy/settings/segments"
 import {
   DEFAULT_GRACE_SECONDS,
@@ -265,6 +266,11 @@ export function RuntimeSettings({
             configuration={configuration}
             usage={usage}
             save={state.save}
+          />
+          <RollbackWatchForm
+            projectId={projectId}
+            environmentId={environmentId}
+            blueGreen={configuration.runtime.strategy === "blue_green"}
           />
           <HealthChecksForm projectId={projectId} configuration={configuration} save={state.save} />
         </>
