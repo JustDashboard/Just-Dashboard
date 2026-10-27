@@ -156,7 +156,7 @@ test("a store whose last read failed says so in its own words, and Test reaches 
   ).toBeVisible()
   await expect(row.locator(".text-warning")).toHaveCount(1)
   await expect(row.getByText("Read by api-production (production) as DATABASE_URL")).toBeVisible()
-  await expect(row.getByText(/KV secret\/ · AppRole/)).toBeVisible()
+  await expect(row.getByText(/mount secret · AppRole/)).toBeVisible()
   const other = storeRow(page, "infisical")
   await expect(other.getByText(/Tested .*: Signed in; 12 secrets at \/ in prod/)).toBeVisible()
   await expect(other.getByText(/previews too/)).toBeVisible()
