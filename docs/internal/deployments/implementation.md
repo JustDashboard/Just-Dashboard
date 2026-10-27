@@ -282,8 +282,25 @@ only renderer/executor/validation authority for their feature.
   check for a private authority as the Caddy path does, and is bounded at five minutes. Both are
   serialized against route application so two
   runs cannot race one account into a rate limit, and pass `--keep-until-expiring` so a redeploy inside
-  the renewal window asks the authority for nothing. A first order on a host with no ACME account
-  *with that directory* (`acmeAccountExists`, which files accounts by directory as certbot does; any
+  the renewal window asks the authority for nothing. **One certbot at a time** (`proxysvc/certbot_gate.go`):
+  certbot holds a lock on its configuration directory and a second certbot fails on it at once, so
+  every certbot the dashboard runs takes the one turn `HoldCertbot` hands out — the Certificates page's
+  jobs (`startCertbotJob` wraps every `certbot.` job's runner, renewals and the timer's service run
+  included) and a run's HTTP-01 and DNS-01 orders (`holdCertbotFor`). A run that finds the page's job
+  holding it waits, within the step's own five-minute bound (plus the propagation wait over DNS-01),
+  with a transcript line naming the holder — `Waiting for certbot, which is busy with Renewing
+  app.example.com (started by alice from the Certificates page); the certificate step continues when it
+  finishes` — and then re-checks for a covering certificate before ordering, since the job may have
+  issued exactly that; a wait that outlasts the bound fails the step as `certificate_certbot_busy`, in
+  the step's own words (what it waited for and for how long, and to deploy again once that has
+  finished), never certbot's "another instance is already running". The page's job is accepted as it
+  always was, and a job that finds a run ordering waits in its console the same way, naming the run;
+  two of the page's jobs are still kept apart by the job family's `409 certbot_busy`. The turn is taken
+  before the route lock, never inside it, because the job holding the turn reloads nginx under that
+  lock when it is done. What needs no certbot — a covering certificate, the Docker Caddy ingress, a
+  refusal — waits for nobody. certbot's own lock still arbitrates against what the dashboard does not
+  run, the renewal timer first among them. A first order on a host with no ACME account *with that directory*
+  (`acmeAccountExists`, which files accounts by directory as certbot does; any
   entry under `accounts/` used to count on the HTTP path, so a host registered with Let's Encrypt
   ordering from a private authority skipped registering and was refused for want of a contact)
   registers without a contact address; an operator who wants expiry mail registers once on the

@@ -47,6 +47,14 @@ type nsLookup func(context.Context, string) ([]*net.NS, error)
 // for tests, which must not ask the network who hosts example.test.
 var deploymentNSLookup nsLookup = net.DefaultResolver.LookupNS
 
+// UseDeploymentNSLookupForTest answers a run's nameserver lookups from
+// lookup, for a test in another package, and restores the resolver.
+func UseDeploymentNSLookupForTest(lookup func(context.Context, string) ([]*net.NS, error)) (restore func()) {
+	previous := deploymentNSLookup
+	deploymentNSLookup = lookup
+	return func() { deploymentNSLookup = previous }
+}
+
 // zoneNameservers finds the zone a name sits in by asking it and then each
 // parent for NS records, stopping short of the top-level domain, and answers
 // with that zone and its nameservers. Nothing found is "not known", never "no
@@ -242,6 +250,27 @@ func (s *Service) issueDeploymentWildcard(
 	if err := directory.validate(); err != nil {
 		return DeploymentCertificate{}, err
 	}
+	environment, err := CertbotEnvironment()
+	if err != nil {
+		return DeploymentCertificate{}, err
+	}
+	// The HTTP path's bound, plus the propagation wait certbot sleeps
+	// through between writing the record and asking for validation. The
+	// wait for certbot's turn comes out of it too.
+	issueCtx, cancel := context.WithTimeout(ctx, 5*time.Minute+time.Duration(provider.DefaultWait)*time.Second)
+	defer cancel()
+	release, err := holdCertbotFor(issueCtx, names, log)
+	if err != nil {
+		return DeploymentCertificate{}, err
+	}
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Whoever had certbot may have issued the wildcard: the page, or the
+	// run queued before this one.
+	if reused, ok := s.reuseDeploymentCertificate(issueCtx, names); ok {
+		return reused, nil
+	}
 	registered := acmeAccountExists(letsencryptDir, certbotServer(false))
 	args := append([]string{"certonly"}, dnsIssueArgs(provider, provider.DefaultWait)...)
 	args = append(args, "--non-interactive", "--agree-tos", "--keep-until-expiring", "--no-eff-email")
@@ -255,14 +284,6 @@ func (s *Service) issueDeploymentWildcard(
 	for _, name := range names {
 		args = append(args, "-d", name)
 	}
-	environment, err := CertbotEnvironment()
-	if err != nil {
-		return DeploymentCertificate{}, err
-	}
-	// The HTTP path's bound, plus the propagation wait certbot sleeps
-	// through between writing the record and asking for validation.
-	issueCtx, cancel := context.WithTimeout(ctx, 5*time.Minute+time.Duration(provider.DefaultWait)*time.Second)
-	defer cancel()
 	cmd, err := CertbotCommand(issueCtx, environment, args...)
 	if err != nil {
 		return DeploymentCertificate{}, err

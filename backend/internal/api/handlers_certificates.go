@@ -551,9 +551,24 @@ func (s *Server) handleCertAccount(w http.ResponseWriter, r *http.Request) error
 // startCertbotJob starts a certbot job unless another is running. A second
 // certbot fails on the lock the first holds, and the page's console would
 // swap the running job for the one that is about to fail.
+//
+// The job family keeps two of the page's jobs apart; certbot's turn
+// (proxysvc.HoldCertbot) keeps a job and a deployment run's order apart. A
+// job that finds a run ordering starts as it always did and waits for the
+// run inside its own console, saying so, as the run waits for a job.
 func (s *Server) startCertbotJob(w http.ResponseWriter, r *http.Request, spec jobs.Spec, run jobs.Runner) error {
 	spec.StartedBy = httpx.MustPrincipal(r).Username()
-	job, ok := s.modules.jobs.StartExclusive("certbot.", spec, run)
+	holder := spec.Title + " (started by " + spec.StartedBy + " from the Certificates page)"
+	job, ok := s.modules.jobs.StartExclusive("certbot.", spec, func(ctx context.Context, out jobs.Emitter) error {
+		release, err := proxysvc.HoldCertbot(ctx, holder, func(holder string) {
+			out.Status("Waiting for certbot, which is busy with %s; this job continues when it finishes.", holder)
+		})
+		if err != nil {
+			return err
+		}
+		defer release()
+		return run(ctx, out)
+	})
 	if !ok {
 		return httpx.Err(http.StatusConflict, "certbot_busy",
 			fmt.Sprintf("certbot is already running (%s, started by %s). Wait for it to finish.", job.Title, job.StartedBy))

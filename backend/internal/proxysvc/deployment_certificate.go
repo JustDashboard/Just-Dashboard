@@ -98,30 +98,109 @@ func (s *Service) EnsureDeploymentCertificate(
 		}
 		names = append(names, name)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Before reuse: the Docker Caddy ingress cannot serve a wildcard route at
-	// all, so a certificate that covers one is no answer there.
-	if wildcard != "" {
-		if err := s.wildcardCaddyRefusal(ctx, wildcard); err != nil {
-			return DeploymentCertificate{}, err
-		}
-	}
-	if certPath, keyPath, err := s.ResolveDeploymentCertificate(ctx, names); err == nil {
-		return DeploymentCertificate{
-			Outcome: CertificateReused, CertPath: certPath, KeyPath: keyPath,
-			Name: certificateNameForPath(certPath), Domains: names,
-		}, nil
+	// What is on the host already, and an ingress that orders for itself,
+	// need no certbot and wait for nobody's.
+	if result, done, err := s.deploymentCertificateWithoutCertbot(ctx, names, wildcard, log); done || err != nil {
+		return result, err
 	}
 	if wildcard != "" {
 		return s.issueDeploymentWildcard(ctx, names, wildcard, log)
 	}
+	return s.ensureDeploymentHTTPCertificate(ctx, names, log)
+}
 
-	if edge, err := s.provisionIngress(ctx); err != nil {
+// deploymentCertificateWithoutCertbot answers what needs no order, under the
+// route lock: a wildcard the ingress cannot serve, a certificate that already
+// covers every name, or the Docker Caddy ingress, which orders for itself.
+// done reports that it answered.
+func (s *Service) deploymentCertificateWithoutCertbot(
+	ctx context.Context,
+	names []string,
+	wildcard string,
+	log func(stream, text string),
+) (DeploymentCertificate, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Before reuse: the Docker Caddy ingress cannot serve a wildcard route at
+	// all, so a certificate that covers one is no answer there.
+	if wildcard != "" {
+		if err := s.wildcardCaddyRefusal(ctx, wildcard); err != nil {
+			return DeploymentCertificate{}, true, err
+		}
+	}
+	if reused, ok := s.reuseDeploymentCertificate(ctx, names); ok {
+		return reused, true, nil
+	}
+	if wildcard != "" {
+		return DeploymentCertificate{}, false, nil
+	}
+	edge, err := s.provisionIngress(ctx)
+	if err != nil {
+		return DeploymentCertificate{}, true, err
+	}
+	if edge != nil {
+		result, err := s.ensureDockerCaddyCertificate(ctx, edge, names, log)
+		return result, true, err
+	}
+	return DeploymentCertificate{}, false, nil
+}
+
+// reuseDeploymentCertificate is a certificate on this host that already
+// covers every name, which is the ordinary answer. The caller holds s.mu.
+func (s *Service) reuseDeploymentCertificate(ctx context.Context, names []string) (DeploymentCertificate, bool) {
+	certPath, keyPath, err := s.ResolveDeploymentCertificate(ctx, names)
+	if err != nil {
+		return DeploymentCertificate{}, false
+	}
+	return DeploymentCertificate{
+		Outcome: CertificateReused, CertPath: certPath, KeyPath: keyPath,
+		Name: certificateNameForPath(certPath), Domains: names,
+	}, true
+}
+
+// holdCertbotFor takes certbot's turn for a run ordering for names, within
+// ctx — the step's own bound — telling the transcript whom it waits for.
+// The turn comes before the route lock, never inside it: the page's job
+// holding the turn reloads nginx under that lock when it is done.
+func holdCertbotFor(ctx context.Context, names []string, log func(stream, text string)) (func(), error) {
+	return HoldCertbot(ctx, "a deployment run issuing a certificate for "+strings.Join(names, ", "), func(holder string) {
+		if log != nil {
+			log("status", "Waiting for certbot, which is busy with "+holder+"; the certificate step continues when it finishes.")
+		}
+	})
+}
+
+// ensureDeploymentHTTPCertificate orders names over HTTP-01 through certbot,
+// once it has certbot's turn: webroot behind the host's nginx, standalone on
+// a host with nothing on port 80. issueDeploymentHTTP places the order.
+func (s *Service) ensureDeploymentHTTPCertificate(
+	ctx context.Context,
+	names []string,
+	log func(stream, text string),
+) (result DeploymentCertificate, retErr error) {
+	availability := s.Availability(ctx)
+	if !availability.Certbot {
+		return DeploymentCertificate{}, ErrCertbotUnavailable
+	}
+	// Bounded well above a normal order: an ACME exchange is two round trips
+	// and a validation, and a host with slow DNS is the case this has to
+	// survive rather than the case it should hang for. The wait for
+	// certbot's turn comes out of the same bound, so a page job that runs
+	// long fails this step in the step's own time rather than holding the
+	// run for the job's.
+	issueCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	release, err := holdCertbotFor(issueCtx, names, log)
+	if err != nil {
 		return DeploymentCertificate{}, err
-	} else if edge != nil {
-		return s.ensureDockerCaddyCertificate(ctx, edge, names, log)
+	}
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Whoever had certbot may have issued exactly this: the page, for the
+	// same names, or the run queued before this one.
+	if reused, ok := s.reuseDeploymentCertificate(issueCtx, names); ok {
+		return reused, nil
 	}
 	if _, err := deploymentCertbot(ctx); err != nil {
 		return DeploymentCertificate{}, err
@@ -159,7 +238,7 @@ func (s *Service) EnsureDeploymentCertificate(
 			}
 		}()
 	}
-	return s.issueDeploymentHTTP(ctx, names, challenge.method, deploymentACMEWebroot, directory, log)
+	return s.issueDeploymentHTTP(issueCtx, names, challenge.method, deploymentACMEWebroot, directory, log)
 }
 
 // issueDeploymentHTTP orders names over the HTTP challenge method chooses —
