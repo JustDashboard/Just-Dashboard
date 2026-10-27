@@ -317,7 +317,11 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyGatesRouteBehindForwardAuth -count=1 -v`,
   which signs in at a real Authelia (`authelia/authelia:4.39`, pulled on first run) in front of
   `traefik/whoami`, and `go test ./internal/proxysvc -run TestLiveDeploymentRouteSignsInOnNginx`, which
-  needs only the host's nginx.
+  needs only the host's nginx. Changes to a route's maintenance switch or error pages also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesMaintenanceAndErrorPages -count=1 -v`
+  and `go test ./internal/proxysvc -run TestLiveDeploymentRouteMaintenanceOnNginx`, which switch a real
+  Caddy's and the host nginx's route by its file and ask each what a visitor, an address let past and a
+  stopped application get.
   This uses locked application fixtures and checks served build values, private install credentials,
   SvelteKit adapters, HTML/Containerfile defaults and Go command/version behavior, plus the catalogue's
   own starters: Astro, Nuxt, React Router, FastAPI (unpinned requirements, server auto-installed), a

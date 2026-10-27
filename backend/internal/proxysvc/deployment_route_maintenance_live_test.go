@@ -278,6 +278,7 @@ func TestLiveDockerCaddyServesMaintenanceAndErrorPages(t *testing.T) {
 	if state, err := edge.maintenance(ctx, route.Name); err != nil || !state.On {
 		t.Fatalf("the switch after the route was written again = %+v, %v", state, err)
 	}
+	t.Logf("route written again by the next release, letting %s past; the switch is still on", host)
 	if response, body := get("from "+host+", let past", "/"); response.StatusCode != 200 || !strings.HasPrefix(body, "application answer") {
 		t.Fatalf("an address let past = %d %q", response.StatusCode, body)
 	}

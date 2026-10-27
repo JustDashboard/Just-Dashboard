@@ -1489,6 +1489,40 @@ only renderer/executor/validation authority for their feature.
   **Require sign-in** offers the Proxy page's four presets (`lib/sso-providers.ts`), **Here and on
   previews** or **Previews only**, and names a password or plain-HTTP name the server would refuse before
   the save (`settings/route-access.ts`).
+- Maintenance and error pages. Maintenance is a switch beside the live route, not a plan field, so it
+  applies at once and no release turns it on or off. Every route a release writes carries the check
+  (`DeploymentRoute.Maintenance`, rendered on nginx as a Proxy site's maintenance behind
+  `SiteMaintenance.Switch`, on Caddy as a `file` matcher), and the check looks on every request for
+  `maintenance.on` in the route's pages folder: `<nginxDir>/jd-pages/<route>/` on nginx,
+  `/config/just-dashboard/pages/<route without .conf>/` inside the Docker Caddy ingress. Turning it on
+  writes that file and turning it off removes it (`proxysvc.SetDeploymentMaintenance`, under the
+  service lock): nothing is reloaded and the route's bytes never change, so the switch never rewrites a
+  route outside activation, never meets a cutover's snapshot, verify and restore, and survives the next
+  release, a rollback and a cutover in the middle of which it was turned. Turning it on is refused
+  (`ErrMaintenanceUnready`, 409 `no_public_route` or `maintenance_unready`) for an environment with no
+  route and for a route written before the switch existed, which gets the check with its next
+  deployment; turning it off is always allowed. While on, every visitor gets the maintenance page with a 503
+  except the ACME challenge and the plan's `runtime.maintenance.bypassFrom` (addresses and ranges in
+  `NormalizeAccessEntry`'s spelling, at most 64); `runtime.maintenance.retryAfter` (0–86400, 0 sends
+  none) is the `Retry-After`. It is decided before the password and the sign-in and after the address
+  list, on both proxies, so a refused address is still refused and nobody signs in to read the page.
+  `runtime.errorPages` (404, 502, 503, 504) answer those codes with the route's own page, and
+  `runtime.interceptErrors` gives the application's own answers with them the page too (refused with
+  a sign-in, whose 401s it would replace). Those three plan fields are kept only when set, so a plan
+  without them keeps its digest, and change with the next deployment like the rest of the plan; the
+  release comparison lists them as **let past maintenance**, **maintenance retry after** and **error
+  pages**. Activation writes the pages a route serves that it has no file for, from the ones Proxy
+  ships, before the route, and route removal takes the folder, switch included. A page is edited at
+  `GET`/`PUT /deploy/{id}/environments/{env}/pages/{page}` (`maintenance`, `404`, `502`, `503`, `504`;
+  the write is `system.admin` in a session, at most 256 KiB, audited `deploy.page`) and served from the
+  next answer. The switch is `GET`/`PUT /deploy/{id}/environments/{env}/maintenance` `{on}`, the write
+  behind `s.destructive` as stopping a deployment and a Proxy site's maintenance are, audited
+  `deploy.maintenance` with the outcome. Readiness and smoke checks dial the candidate directly and are
+  untouched; a `public_route` check, which goes through the route and would read the maintenance page,
+  is not run while the switch is on and records `maintenance` as its code, so a release can be deployed
+  during a migration window. The Domains settings show the switch as its own **Maintenance** form,
+  which the save bar applies immediately (the destructive capability), and **Maintenance page and error
+  pages** under it for the plan fields and the page editor (`settings/route-pages.ts`).
 - The [GitHub App](github-app.md): one App per dashboard through the manifest flow, installation tokens
   for private clones through a `github_app` credential per installation, triggers on `delivery: "app"`
   fed by the App's single webhook (`POST /api/v1/hooks/github-app`, routed by repository through the

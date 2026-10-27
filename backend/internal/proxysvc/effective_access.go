@@ -240,9 +240,11 @@ var (
 )
 
 // maintenanceSwitchRe is the test a switched maintenance makes for its file,
-// and switchSetRe the variable it sets when the file is there.
+// and switchSetRe the variable it sets when the file is there. Only a file in
+// a pages folder is a switch: the explainer is a reader's, and a test for any
+// other file is not one it should answer whether exists.
 var (
-	maintenanceSwitchRe = regexp.MustCompile(`^\(-f\s+(/\S+/` + regexp.QuoteMeta(maintenanceSwitchFile) + `)\)$`)
+	maintenanceSwitchRe = regexp.MustCompile(`^\(-f\s+(/\S+/jd-pages/[^/\s]+/` + regexp.QuoteMeta(maintenanceSwitchFile) + `)\)$`)
 	switchSetRe         = regexp.MustCompile(`^\$(jd_\w+)_maint$`)
 )
 

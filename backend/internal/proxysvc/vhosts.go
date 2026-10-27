@@ -443,7 +443,7 @@ func (s *Service) fileVHost(name, path, layout string, logs logDefaults) VHost {
 		v.CertPath = v.CertPaths[0]
 	}
 	v.Maintenance = maintOnRe.MatchString(text)
-	if m := maintSwitchLineRe.FindStringSubmatch(text); m != nil {
+	if m := maintSwitchLineRe.FindStringSubmatch(text); m != nil && filepath.Dir(filepath.Dir(m[1])) == s.pagesRoot() {
 		v.Maintenance = switchFileExists(m[1])
 	}
 	v.RateLimited = limitRe.MatchString(text)
