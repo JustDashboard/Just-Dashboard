@@ -3312,7 +3312,7 @@ the reader through it.
 | Databases — the control center, the map, a database's home, Search, Compare, Generate, Performance, Advisor, Access, Backups, Alerts, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
 | `/databases/[id]/import` — bring a database over from another server | **Flow** | A sequence with an outcome: which server it is on now, how it should come over, and — for a replication — when to cut over, ending in a database here. The spine is taken from the import the server keeps, so a reload, or the next day, finds it where it was. |
 | A database's Data, Query, Schema, Diagram and Logs | Reading, as a workbench | The reader works rather than scrolls, so the page is one frame held to the window (`<Page fill>` through `SectionFrame`, which takes the fact from the engine registry). A workbench is a layout of this register (§2), not a third one: same grounds, same type ladder, no flow panel. |
-| The server map (`/map`) | Reading, as a workbench | The reader arrives to find out what is on the server and what is wired to what. One frame held to the window (`<Page fill>`) around a canvas and its inspector, the way a database's Diagram is; the boxes are the product's own vocabulary on that canvas — a `ProductLogo` tile, the name, a `Status` dot and word, shelves headed in the eyebrow voice, the dashed ring of a thing not added yet — with projects, databases and domains drawn as cards (the same box with room, its fact on a line of its own) and every name held to a size that reads however far out the canvas is, with no dot grid behind them, and the links are the brand's blue only for the chosen box. *Add* is the surface's one command face. |
+| The server map (`/map`) | Reading, as a workbench | The reader arrives to find out what is on the server and what is wired to what. One frame held to the window (`<Page fill>`) around a canvas and its inspector, the way a database's Diagram is; the boxes are the product's own vocabulary on that canvas — a `ProductLogo` tile, the name, a `Status` dot and word, shelves headed in the eyebrow voice, the dashed ring of a thing not added yet — with projects, databases and domains drawn as cards (the same box with room, its fact on a line of its own) and every name held to a size that reads however far out the canvas is, with no dot grid behind them. Each of its seven branches has a hue (`--branch-*`) on its lines, shelves and glyphs, with a light pooled under it — the exception below — and the links are the brand's blue only for the chosen box. *Add* is the surface's one command face. |
 | `/databases/new` — add a database | **Flow** | A question with an outcome: which database, started here or connected, ending in the one command that does it. The section's other flow page is Import. |
 | Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with a picker on it — the generators on a database's Generate page — gets the edge on that picker and changes in no other way. |
 | `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. Each of its four screens is the run page's rail and inspector before the run: the plan read down a rail beside the one focused surface holding the step's fields. |
@@ -3449,14 +3449,27 @@ exception. What §16 buys is depth on one surface, a mandatory command face, and
 `--flow-surface`, `--flow-lit`, `--flow-lit-soft` and the `flow-rule` utility are register B's whole
 palette, and a reading page must not grow a use for them.
 
-**One ground is not flat: arrival's.** Sign-in, `/welcome` and the shell's splash between them are the
+**Two grounds are not flat: arrival's, and the server map's canvas.** Sign-in, `/welcome` and the shell's splash between them are the
 only full-bleed screens in the product and the first a new account sees, and they stand on
 `.auth-backdrop` — three washes, the signal from the top edge and the chart ramp's blue and violet from
 the lower corners (never `--brand`, which is near white and washes to grey). The sign-in card's picture
 half is the same lights closer (`.auth-art`), pooled behind the server it draws. The operator asked for
 these screens to have colour and life, and for the line grid that used to sit under the washes to go;
-the exception is the ground of those screens and nothing else — no page in either register takes a
-wash, and nothing on these screens takes a glow, a gradient fill or a pattern.
+the exception is the ground of those screens and the map's canvas and nothing else — no other page in
+either register takes a wash, and nothing on these screens takes a glow, a gradient fill or a pattern.
+
+**The server map is the other.** The operator asked for `/map` to have colour and life — three hundred
+boxes in one grey, read zoomed out as a page of truncated words, was the complaint — and the map is a
+picture of the server rather than a page of readings, so it takes what arrival takes and one thing
+more, all of it on its canvas and nowhere else: a hue per branch (`--branch-*`, five of `LANES`' and
+two more at their rung, no red or amber) on the branch's lines, its tile, its shelves' heads and
+glyphs and the tile of anything that is no product; a light pooled behind the server and each branch
+in the canvas's own space, a wash under every box rather than a glow on any; the tree's lines drawing
+out once on arrival and a pulse along a branch's line while the metrics stream is open (§11's
+*arrived* and *live*, nothing perpetual for its own sake); and every box drawn as the product it is at
+every distance, the far one included. Status keeps its hues, the selection stays `bg-accent`, and no
+box gains a gradient, a shadow or a glow. Nothing else in the product takes the branch hues, and
+`docs/internal/server-map.md` (*Colour*) is where each use is listed.
 
 The update notice above the account card was tried on `.auth-art`'s light at card scale and taken
 back off at the operator's request: in the shell the washes read as the sign-in screen pasted into a

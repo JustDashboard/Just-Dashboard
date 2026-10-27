@@ -52,7 +52,15 @@ added yet with the verb (*Add a database*); one it may not fill says *No databas
 package manager on every read is the costliest thing the map could do.
 
 Every thing is one box: its mark on a 40px tile, its name, and its state in a word with its dot
-(`SIZE.item`, 270 × 76). What a server is for — its projects, its databases and the names it answers
+(`SIZE.item`, 270 × 76). The mark is the thing as itself wherever the dashboard has its logo
+(`ItemMark`, `itemProduct` in `components/map/marks.tsx`): a project as its website's icon, a container,
+image or stack as the product its image is, a unit as its program, a domain as the proxy that answers
+for it and a stream as nginx, a volume or a network as Docker, a certificate as its issuer, a computer
+as its system (a Mac is Apple's), an API key as the service its name says holds it, a firewall whose
+engine is nftables or iptables as netfilter, Packages as the server's distribution, this dashboard as
+its own mark, and a person as their picture (an account's, from the users table's route) or the face
+the rail gives their name. A thing that is no product is its kind's glyph in its branch's hue. A thing
+that is down or needs a look is edged in its state's colour, the colour its dot already is. What a server is for — its projects, its databases and the names it answers
 to — is a *card* (`face: "card"` in `KINDS`, `SIZE.card`, 364 × 96): the same box with room, its name
 a step up and the fact that says which one it is (a project's address, a database's engine, where a
 domain goes) on a line of its own under the state rather than cut short beside it. Three cards span
@@ -87,7 +95,8 @@ The layout is the same every time, and what the reader moved outranks it, as in 
 ## Reading it
 
 - **Choosing a box** lights it and what it is wired to, draws those links in the brand's blue with how
-  each is known written on them, and steps the rest back. A shelf chosen lights what is on it; the
+  each is known written on them, and steps the rest back. The tree's own lines are each in their
+  branch's hue (see *Colour*), lit at full strength on the chosen box's path. A shelf chosen lights what is on it; the
   server is what the inspector shows with nothing chosen.
 - **The inspector** has one shape for all three: a head naming the kind; the thing itself — its mark,
   its name, its state with the kind, and its actions directly under the name (*Open* as the command
@@ -108,8 +117,9 @@ The layout is the same every time, and what the reader moved outranks it, as in 
   Enter chooses the first and frames it with its links — unfolding its branch and shelf and opening
   the shelf where it sat behind "+N more".
 - **Three distances, and no name left to shrink.** `data-zoom` on the canvas is `near` (every word,
-  from 0.75), `mid` (a thing is its mark, its name and its dot, from 0.35) or `far` (its name and its
-  dot, the name given the box's width). Past near every name is held so it still reads — a thing's and
+  from 0.75), `mid` (a thing is its mark, its name and its dot, from 0.35) or `far` (its mark bare,
+  without its tile, grown with its name, then its name and its dot — the logos are what the overview
+  is read by). Past near every name is held so it still reads — a thing's and
   a shelf's at 11px on the screen, the server's and the branches' at four fifths of their size — so
   the eye goes heart, branch, shelf, thing at any distance, and the first view takes in the whole
   server down to a zoom of 0.2.
@@ -132,6 +142,36 @@ The layout is the same every time, and what the reader moved outranks it, as in 
 - **Keys**: `/` search, `f` fit, `i` the inspector, Enter opens the chosen thing's page, Escape lets
   it go. They are heard inside the map and while the focus is on the page's body (a press in the
   inspector that redraws it leaves it there), never from the sidebar or a menu.
+
+## Colour
+
+The operator asked for the map to have colour and life, and it is the one reading page whose ground is
+not flat (design system §16). Each of the seven branches has a hue (`--branch-*` in `globals.css`:
+Deployed blue, Web cyan, Host violet, Workspace pink, Jobs lime, People orchid, Protection green — five
+of `LANES`' hues and two more at their rung, none red or amber). A box, a line or a light names its
+branch with `data-branch`, and what it is drawn in follows from it (`--hue` and its plot, rule, wash
+and light steps):
+
+- **The branch** — its tile and its edge, a dot before its name past near, and the three products it
+  holds most as bare marks after its count. **The server** names the six it runs most (Deployed and
+  Web) the same way.
+- **The shelves** — the head washed in the hue, its glyph in it, the edge a rule of it; a folded shelf
+  shows its four commonest marks after its count. "+N more" and the dashed *Add* take the hue too.
+- **The lines** — the server's line to a branch runs from the brand into the branch's hue, and a
+  branch's lines to its shelves are the hue. They draw themselves out from the server as the map
+  arrives (§11's *arrived*, `settleLines`: only lines mounted in that moment, not ones panned into view
+  later), and while the shell's metrics stream is open each branch's line carries a pulse out from the
+  server (§11's *live*); reduced motion ends the first at once and the second runs past the line's end.
+- **The ground** — a light pooled behind the server in the signal blue and behind each branch's column
+  in its hue (`MapLights`, drawn in the canvas's own space under everything, so it pans, zooms and
+  follows a dragged branch). It is never more than a wash: every box keeps its own ground over it.
+- **The minimap and the inspector** — the minimap draws every box in its branch's hue (a thing down or
+  needing a look in its state's colour), and the inspector's *On this server* heads each branch with
+  its hue, colours each kind's glyph and names each kind's three commonest products, so the list is the
+  canvas's key.
+
+Status colours are untouched: a state is still a dot and a word, and the selection is still the neutral
+`bg-accent`.
 
 ## What keeps it light
 
@@ -226,7 +266,8 @@ folds, opened shelves, the view, and the two switches (minimap; drawing the chos
   hand-placed boxes, branches carrying shelves, the cards and the four rows they span), dragging's followers, where a box let go lands,
   folding defaults, the document decoder, links, search and the census.
 - `api/map_build_test.go`: the joins, the measured states (exit codes, project states), unread and
-  absent sources, worst-first capping, a box's facts and the per-role filter; `map_links_test.go`: every
+  absent sources, worst-first capping, a box's facts, the product a volume, a domain and an account
+  are drawn as, and the per-role filter; `map_links_test.go`: every
   line between kinds in the table above, what must not be joined (a rule's disabled channel, an
   excluded folder, another remote, a shallower checkout, a revoked key, a socket nothing forwards to),
   one line per pair, the remote and folder readings, and the store read of references, dependencies and
@@ -244,5 +285,10 @@ folds, opened shelves, the view, and the two switches (minimap; drawing the chos
   database its environment names and the checkout it is built from, a pair known several ways drawn
   once, revealing a thing behind "+N more", Add, a reading role
   offered only its own API key, a fresh server, the names held at 11px from mid and far (a thing's
-  and a shelf's), and a database drawn as a card with its engine on its own line; `/map` is one of
+  and a shelf's) with a thing's bare mark beside its name far out, a database drawn as a card with
+  its engine on its own line, and the branches' hues, the live pulse on a branch's line only, and the
+  marks a computer, a volume, a key, a domain and an account are drawn with; `/map` is one of
   `design-system.spec.ts`'s surfaces.
+- `components/map/marks.test.js`: which product each kind is read as (a Mac, a netfilter engine and
+  not ufw, a certificate by its issuer, a key by its name), the commonest products a strip names, and
+  the branch a kind's hue is.
