@@ -525,21 +525,29 @@ export function withHeldDomainVariables(
   }
 }
 
-/** Non-HTTP templates must never receive a Caddy route to their database or game port. */
+/**
+ * Non-HTTP templates must never receive a Caddy route to their database or game port.
+ *
+ * A Compose stack publishes whatever its own file does, so it is given no
+ * address of its own — except one rendered from a reviewed template, whose
+ * definition names the one public service and its HTTP check, exactly as a
+ * single-image template does.
+ */
 export function withSuggestedHostname(
   configuration: DeploymentConfiguration,
   profile: WorkloadProfile,
   source: DeploymentDraftSource,
   hostname?: DeploymentHostnameSuggestion,
 ): DeploymentConfiguration {
+  const template = source.kind === "compose" && source.mode === "blueprint"
   const http =
     profile === "web" ||
     profile === "static" ||
     configuration.checks.some((check) => check.kind === "http")
   if (
     !http ||
-    ["worker", "game", "compose", "imported"].includes(profile) ||
-    source.kind === "compose" ||
+    ["worker", "game", "imported"].includes(profile) ||
+    (!template && (profile === "compose" || source.kind === "compose")) ||
     configuration.domains.length ||
     !hostname ||
     hostname.method === "none"
@@ -790,14 +798,14 @@ export async function resumeFlow(draft: DeploymentDraft): Promise<ConfigureFlow>
     detection?.candidates.find((entry) => entry.id === detection?.selectedId) ??
     detection?.candidates[0]
   configuration ??= effectiveConfiguration(intent.profile, source, current, candidate, detection)
+  // A template's plan is the server's render of it, single image or stack.
+  const template = source.mode === "blueprint"
   const profile =
-    draft.data.configuration && source.kind !== "blueprint"
-      ? intent.profile
-      : (candidate?.profile ?? intent.profile)
+    draft.data.configuration && !template ? intent.profile : (candidate?.profile ?? intent.profile)
   const hostname = await fetchHostnameSuggestion(intent.name)
   if (!draft.data.configuration)
     configuration = withSuggestedHostname(configuration, profile, source, hostname)
-  else if (source.kind !== "blueprint")
+  else if (!template)
     configuration = withHeldDomainVariables(
       configuration,
       detectedVariableDeclarations(candidate, profile),

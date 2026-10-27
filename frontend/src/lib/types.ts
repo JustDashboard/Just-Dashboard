@@ -2977,6 +2977,7 @@ export type DeploymentFacts = {
   sourceKind?: DeploymentSourceKind
   sourceRef?: string
   sourceRepository?: string
+  sourceTemplate?: string
   buildMethod?: DeploymentBuildMethod
   recipe?: DeploymentRecipe
   framework?: string
@@ -3299,6 +3300,48 @@ export type BlueprintSummary = {
   memoryMb: number
   requiresAcceptance?: boolean
   privileged?: boolean
+  /**
+   * The source kind it deploys as: one reviewed image, or a multi-service
+   * template that runs through the Compose release path — then `image` is
+   * the public service's, `memoryMb` the whole stack's limits added up, and
+   * `services` what the stack runs.
+   */
+  sourceKind?: "blueprint" | "compose"
+  services?: BlueprintServiceSummary[]
+}
+
+export type BlueprintServiceRole = "app" | "worker" | "database" | "cache"
+
+/** One service of a multi-service template as the catalogue lists it. */
+export type BlueprintServiceSummary = {
+  name: string
+  role: BlueprintServiceRole
+  purpose: string
+  image: string
+  memoryMb: number
+  /** The one service routed to the deployment's domain. */
+  public?: boolean
+}
+
+/** One service as the definition declares it, on the detail endpoint. */
+export type BlueprintService = {
+  name: string
+  role: BlueprintServiceRole
+  purpose: string
+  image: { reference: string; tagPolicy: string; command?: string[] }
+  ports?: {
+    name: string
+    internal: number
+    protocol: string
+    purpose: string
+    exposure: "proxy" | "internal"
+    primary?: boolean
+  }[]
+  volumes?: { name: string; target: string; purpose: string; data: boolean; backup: boolean }[]
+  resources: { memoryMb: number; minMemoryMb: number; cpus?: number }
+  dependsOn?: { service: string; condition: "healthy" | "started" | "completed" }[]
+  /** A private service that may reach the internet. */
+  egress?: boolean
 }
 
 export type BlueprintChoice = {
@@ -3367,6 +3410,8 @@ export type BlueprintDetail = Omit<
   | "reviewedAt"
   | "requiresAcceptance"
   | "privileged"
+  | "sourceKind"
+  | "services"
 > & {
   retired?: string
   image: {
@@ -3405,6 +3450,8 @@ export type BlueprintDetail = Omit<
   files?: BlueprintConfigFile[]
   automation?: BlueprintAutomation[]
   update: { detector: string; versionSource?: string; notes?: string; backupFirst?: boolean }
+  /** A multi-service template's services; the top-level image is then empty. */
+  services?: BlueprintService[]
 }
 
 export type GameImportPreview = {
@@ -3690,6 +3737,12 @@ export type DeploymentSummary = {
   sourceRepository?: string
   /** A Git source's remote without userinfo: `https://host/path` or `git@host:path`. */
   sourceRemote?: string
+  /**
+   * The reviewed template (`id@version`) the deployment was made from: a
+   * blueprint source's definition, or the multi-service template a Compose
+   * source was rendered from.
+   */
+  sourceTemplate?: string
   recipe?: DeploymentRecipe
   /** What detection recognised the source as (`nextjs`, `vite`, `django`…), recorded at creation. */
   framework?: string
@@ -3722,6 +3775,8 @@ export type DeploymentGitPolicy = {
   watchInclude: string[]
   watchExclude: string[]
   commitStatuses?: boolean
+  /** Production refuses every build and takes only releases promoted from staging. */
+  promotionOnly?: boolean
   revision: number
   inherited?: boolean
   conflict?: boolean
@@ -3799,6 +3854,64 @@ export type LogDrain = {
   }
 }
 
+/**
+ * A connection to an external secret manager that deployment variables read
+ * as `${{store.NAME/path#KEY}}`. Vault and OpenBao share the KV version 2
+ * API; Infisical signs in with a Universal Auth machine identity; Doppler
+ * with a service token.
+ */
+export type SecretStoreKind = "vault" | "openbao" | "infisical" | "doppler"
+
+export type SecretStoreSettings = {
+  /** Vault and OpenBao: where the KV version 2 engine is mounted ("secret"). */
+  mount?: string
+  namespace?: string
+  auth?: "token" | "approle"
+  authMount?: string
+  /** Infisical: the project id and environment slug a reference reads in. */
+  project?: string
+  environment?: string
+  /** A PEM certificate authority for a self-hosted store's TLS. */
+  caCert?: string
+}
+
+/** When something was tried against a store and what it answered. */
+export type SecretStoreOutcome = { at: string; ok: boolean; message: string }
+
+/** An environment variable that references a store. */
+export type SecretStoreUse = {
+  projectId: number
+  projectName: string
+  environmentId: number
+  environmentName: string
+  environmentKind: string
+  variable: string
+  /** The reference's target, `name/path#KEY`. */
+  reference: string
+}
+
+export type SecretStore = {
+  id: number
+  name: string
+  kind: SecretStoreKind
+  address: string
+  settings: SecretStoreSettings
+  /** The credentials that are set, by name; their values are sealed and never read back. */
+  credentialNames: string[]
+  /** A pull request preview's variables may read this store. */
+  allowPreviews: boolean
+  createdBy: string
+  updatedBy: string
+  createdAt: string
+  updatedAt: string
+  test?: SecretStoreOutcome
+  lastRead?: SecretStoreOutcome
+  usedBy: SecretStoreUse[]
+}
+
+/** What Test found: the store's own words, and a probe's version. */
+export type SecretStoreTest = { ok: boolean; message: string; version?: string }
+
 /** One page of a project's run history, newest first. */
 export type DeploymentRunsPage = {
   runs: DeploymentEngineRun[]
@@ -3856,6 +3969,67 @@ export type DeploymentInsights = {
   topFailures: { code: string; count: number }[]
 }
 
+/**
+ * Where a promoted release's image came from: the staging release it was
+ * promoted from, and the local image id the container is created from.
+ */
+export type DeploymentPromotion = {
+  environmentId: number
+  environmentName: string
+  releaseId: number
+  releaseNumber: number
+  runId: number
+  imageId: string
+  imageDigest: string
+  sourceRevision?: string
+}
+
+/** One of a deployment's long-lived environments, for the environment switcher. */
+export type DeploymentEnvironment = {
+  id: number
+  name: string
+  slug: string
+  kind: "production" | "staging"
+  desiredRevision: number
+  liveReleaseId?: number
+  /** Production refuses builds and takes only releases promoted from staging. */
+  promotionOnly?: boolean
+  createdAt: string
+}
+
+/** What adding staging copied from production, what it left behind, and why. */
+export type DeploymentStagingCopy = {
+  environment: DeploymentEnvironment
+  copied: string[]
+  skipped: { name: string; kind: string; reason: string }[]
+  adjusted: string[]
+}
+
+/** The Promote confirmation's read: the exact image and how production differs. */
+export type DeploymentPromotionPreview = {
+  source: {
+    environmentId: number
+    environmentName: string
+    release: DeploymentRelease
+    imageId: string
+    imageDigest: string
+    imageSizeBytes: number
+    imagePresent: boolean
+  }
+  target: {
+    environmentId: number
+    environmentName: string
+    liveRelease?: DeploymentRelease
+    desiredRevision: number
+    activeRuns: number
+    promotionOnly: boolean
+    pendingChanges: { kind: string; name: string; change: string }[]
+    releaseTasks: string[]
+  }
+  detail: ReleaseComparison["detail"]
+  blockers: { code: string; message: string }[]
+}
+
 export type DeploymentRelease = {
   id: number
   projectId: number
@@ -3863,7 +4037,7 @@ export type DeploymentRelease = {
   number: number
   runId: number
   predecessorReleaseId?: number
-  state: "candidate" | "live" | "retained"
+  state: "candidate" | "live" | "retained" | "failed" | "retired"
   planRevision: number
   sourceRevision?: string
   imageDigest?: string
@@ -3875,6 +4049,83 @@ export type DeploymentRelease = {
   activatedAt?: string
   retiredAt?: string
   pinned: boolean
+  /** Set on a release an instant rollback took traffic away from. */
+  rolledBackAt?: string
+  rollbackReason?: string
+  /** Set when the image was promoted from staging rather than built here. */
+  promotion?: DeploymentPromotion
+}
+
+/**
+ * An environment's terms for keeping the previous release warm after a
+ * blue/green cutover (`deploy/rollback_watch.go`).
+ */
+export type RollbackPolicy = {
+  keepWarm: boolean
+  windowSeconds: number
+  automatic: boolean
+  /** Percentage points over the previous release's 5xx share. */
+  errorRateMargin: number
+  /** Multiple of the previous release's p95. */
+  latencyFactor: number
+  minRequests: number
+  updatedBy?: string
+  updatedAt?: string
+}
+
+export type RollbackReading = {
+  requests: number
+  failures: number
+  /** A share, 0–1. */
+  errorRate: number
+  p95?: number
+  from: string
+  until: string
+}
+
+export type RollbackVerdictCode =
+  "no_route" | "no_record" | "not_enough_requests" | "within_baseline" | "error_rate" | "latency"
+
+export type RollbackVerdict = {
+  code: RollbackVerdictCode
+  judged: boolean
+  tripped: boolean
+  reason: string
+  latencyJudged: boolean
+}
+
+export type RollbackWatchState = "watching" | "rolling_back" | "rolled_back" | "closing" | "closed"
+
+export type RollbackWatch = {
+  id: number
+  projectId: number
+  environmentId: number
+  runId: number
+  releaseId: number
+  warmReleaseId: number
+  warmRuntimeId: string
+  state: RollbackWatchState
+  policy: RollbackPolicy
+  cutoverAt: string
+  expiresAt: string
+  baseline?: RollbackReading
+  observed?: RollbackReading
+  verdict?: RollbackVerdict
+  checkedAt?: string
+  rollbackRunId?: number
+  attempts: number
+  endReason?: string
+  endMessage?: string
+  endedAt?: string
+  createdAt: string
+  releaseNumber: number
+  warmReleaseNumber: number
+}
+
+export type RollbackWatchResponse = {
+  policy: RollbackPolicy
+  watch: RollbackWatch | null
+  preview: boolean
 }
 
 export type DeploymentTrigger = {
@@ -4119,8 +4370,12 @@ export type DeploymentHostnameSuggestion = {
   /** Whether a certificate on this host already covers it — the only thing activation accepts. */
   covered: boolean
   certificateName?: string
-  /** The HTTP-01 challenge this host could issue one with now, if any. */
-  certificateMethod?: "nginx" | "webroot" | "standalone" | "caddy"
+  /**
+   * The HTTP-01 challenge this host could issue one with now, if any — or, for a
+   * wildcard, `dns-01` through the saved credentials of `certificateDnsProvider`.
+   */
+  certificateMethod?: "nginx" | "webroot" | "standalone" | "caddy" | "dns-01"
+  certificateDnsProvider?: string
   certificateIssue?: string
   method: "wildcard" | "sslip" | "custom" | "none"
   detail: string
@@ -4727,6 +4982,8 @@ export type DeploymentDetection = {
     dirty?: boolean
     composeFiles?: string[]
     services?: string[]
+    /** The multi-service template (`id@version`) a Compose source was rendered from. */
+    template?: string
   }
   candidates: DeploymentDetectionCandidate[]
   compose?: {
@@ -4969,6 +5226,12 @@ export type DeploymentConfiguration = {
     responseHeaders?: { name: string; value: string }[]
     /** An auth server asked about every request before the public route answers it. */
     forwardAuth?: DeploymentForwardAuth
+    /** What the route's maintenance does while it is on; whether it is on is the switch's. */
+    maintenance?: DeploymentRouteMaintenance
+    /** The codes the public route answers with a page of its own. */
+    errorPages?: DeploymentErrorPage[]
+    /** Gives the application's own answers with those codes the page too. */
+    interceptErrors?: boolean
     mounts?: {
       source: string
       target: string
@@ -5040,6 +5303,34 @@ export type DeploymentForwardAuth = {
   signIn: string
   /** Leaves this environment's route open and gates only the previews made from it. */
   previewsOnly?: boolean
+}
+
+/** What a deployment's maintenance does while it is on. */
+export type DeploymentRouteMaintenance = {
+  /** Seconds the 503 tells clients and crawlers to wait; empty sends no Retry-After. */
+  retryAfter?: number
+  /** The addresses and ranges that reach the application as usual while it is on. */
+  bypassFrom?: string[]
+}
+
+export type DeploymentErrorPage = 404 | 502 | 503 | 504
+
+/** A page a deployment's route answers with: its maintenance page or an error page. */
+export type DeploymentPageName = "maintenance" | "404" | "502" | "503" | "504"
+
+/**
+ * GET/PUT /deploy/{id}/environments/{env}/maintenance: the switch beside the
+ * live route, which the route reads on every request.
+ */
+export type DeploymentMaintenanceSwitch = {
+  driver: "nginx" | "caddy"
+  /** The environment has a route on the proxy at all. */
+  route: boolean
+  /** The route carries the check, so the switch acts at once. */
+  ready: boolean
+  on: boolean
+  /** When it was turned on (RFC 3339). */
+  since?: string
 }
 
 export type DeploymentVariable = {
@@ -5441,7 +5732,8 @@ export type DbMetricsExport = {
 }
 
 export type SessionInfo = {
-  authMethod?: "unknown" | "password" | "totp" | "recovery"
+  authMethod?:
+    "unknown" | "password" | "totp" | "recovery" | "passkey" | "passkey+totp" | "passkey+recovery"
   id: string
   userId: number
   twoFactorPassed: boolean
@@ -9795,3 +10087,19 @@ export type ServerMap = {
 }
 
 export type MapLayoutResponse = { layout: unknown; updatedAt?: string }
+
+/**
+ * A passkey of the signed-in account: a WebAuthn credential that stands in
+ * for its password at sign-in. `rpId` is the host name it signs in at.
+ */
+export type Passkey = {
+  id: number
+  name: string
+  rpId: string
+  createdAt: string
+  /** Zero time when it has never signed in. */
+  lastUsedAt: string
+  /** Backed up by a password manager or a phone's keychain rather than held on one device. */
+  synced: boolean
+  transports: string[]
+}

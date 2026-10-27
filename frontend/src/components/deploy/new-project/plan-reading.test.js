@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { checkTarget, planGroups, variablesFact } from "./plan-reading"
+import { checkTarget, composeNamedVolumes, planGroups, variablesFact } from "./plan-reading"
 
 const flow = {
   name: "shop",
@@ -122,4 +122,49 @@ test("checks and variable counts read the way Review reads them", () => {
   expect(checkTarget({ kind: "docker_health" })).toBe("the image's HEALTHCHECK")
   expect(variablesFact(3, 0)).toBe("3 declared")
   expect(variablesFact(0, 0)).toBe("None")
+})
+
+test("a template's stack reads as the template, pulled rather than built, keeping its volumes", () => {
+  const stack = {
+    ...flow,
+    name: "blog",
+    profile: "compose",
+    sourceLabel: "WordPress",
+    source: {
+      kind: "compose",
+      mode: "blueprint",
+      blueprintId: "wordpress",
+      blueprintVersion: "1.0.0",
+    },
+    candidate: { needsDecision: [] },
+    detection: {
+      source: { kind: "compose", template: "wordpress@1.0.0", digest: "sha256:abc" },
+      compose: {
+        services: [
+          {
+            name: "wordpress",
+            mounts: ["site:/var/www/html", "./uploads.ini:/usr/local/etc/php/conf.d/uploads.ini"],
+          },
+          { name: "db", mounts: ["database:/var/lib/mysql"] },
+        ],
+      },
+    },
+    configuration: {
+      ...flow.configuration,
+      build: { method: "compose", primaryService: "wordpress" },
+      runtime: { internalPort: 80, strategy: "stop_first", mounts: [] },
+    },
+  }
+  const rows = planGroups({ flow: stack, errors: {}, variableCount: 0, checking: false }).flatMap(
+    (group) => group.rows,
+  )
+  const source = rows.find((row) => row.key === "source")
+  expect(source?.code).toBe("wordpress@1.0.0")
+  expect(rows.find((row) => row.key === "build")?.reading).toBe("No build · a reviewed template")
+  // Only the stack's own named volumes are what it keeps; a bind is not.
+  expect(composeNamedVolumes(stack)).toEqual([
+    { service: "wordpress", name: "site", target: "/var/www/html" },
+    { service: "db", name: "database", target: "/var/lib/mysql" },
+  ])
+  expect(composeNamedVolumes(flow)).toEqual([])
 })

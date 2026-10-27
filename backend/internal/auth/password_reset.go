@@ -8,7 +8,7 @@ import "context"
 // whoever typed it twice at a root shell has already chosen it, and asking
 // for a third was the one thing between a locked-out operator and their
 // server. Authenticator enrollment and disabled state remain the account's
-// decisions.
+// decisions; its passkeys are removed with its sessions and tokens.
 func (s *Service) ResetPassword(ctx context.Context, userID int64, password string) error {
 	if err := ValidatePasswordStrength(password); err != nil {
 		return err
@@ -36,6 +36,12 @@ func (s *Service) ResetPassword(ctx context.Context, userID int64, password stri
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE api_tokens SET revoked = 1 WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	// Passkeys go with the tokens: a reset from a root shell is how an
+	// account somebody else may hold is taken back, and a passkey registered
+	// by whoever held it would otherwise survive the new password.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM webauthn_credentials WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -194,7 +194,15 @@ A change that weakens any of these has to say so explicitly.
    no "run this string" kind, and adding one would be adding a second request-defined shell by another
    name. No blueprint may ship a default credential, publish a database port, declare a stateful workload
    without persistence, download without https plus a size limit and a checksum or declared version
-   source, name an uncontained path, or take privilege without a written reason.
+   source, name an uncontained path, or take privilege without a written reason. A multi-service
+   (Compose) template publishes exactly one port — its public service's, on loopback — keeps every other
+   service on private networks the ingress never joins (`internal: true`, with no route out unless the
+   service declares egress), takes no privilege, device, host
+   network or Docker socket, and carries values only as typed references (`{{secret.…}}`,
+   `{{variable.…}}`) that render as interpolations of the deployment's sealed variables, so its document
+   holds no value; commands and healthchecks are argv that are never templated, so neither an
+   operator's input nor a secret reaches a process list or a shell. The stored document is the server's
+   own render of a shipped version, never one a client sent under a template's name.
 10. The game console is not a shell. `gameserver.ValidateCommand` refuses anything carrying a shell
     metacharacter, newline or NUL, the command reaches Docker exec as separate argv elements, and player
     actions come from a closed set with the account name validated before interpolation. The same
@@ -232,6 +240,12 @@ What did **not** change, and must not:
 - Setup, enrollment confirmation and code verification share one account-scoped attempt budget.
   Enrollment cannot be used again after TOTP is enabled. An accepted TOTP counter or recovery code is
   consumed atomically with session elevation; another session cannot reuse it.
+- A passkey replaces the password and nothing else. A passkey sign-in starts its session through the
+  same `auth.startSession` a password sign-in does, so an enrolled account still owes its code (the
+  session reaches only the 2FA routes until it is given) and `JD_REQUIRE_2FA` still decides only
+  whether an unenrolled account may sign in. A passkey is never counted as the second factor; making
+  it one would be a change to this invariant, and is not made. See
+  [passkeys](../architecture/runtime-boundaries.md#passkeys).
 - A temporary password does not grant feature access. After required factors, only authentication
   status/logout and the session-only password change are available until `must_change_pw` is
   cleared. API tokens cannot bypass this restriction.

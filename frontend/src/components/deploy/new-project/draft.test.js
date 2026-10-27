@@ -281,6 +281,21 @@ test("automatic hostnames are limited to HTTP workloads and preserve an explicit
   expect(withSuggestedHostname(web, "web", { kind: "git" }, hostname).domains).toEqual(web.domains)
 })
 
+test("a stack from a reviewed template is offered an address; a pasted one is not", () => {
+  const hostname = { hostname: "blog.example.test", method: "sslip" }
+  const stack = {
+    ...defaultConfiguration("compose"),
+    checks: [{ name: "Installer answers", kind: "http", phase: "readiness", config: {} }],
+  }
+  const template = { kind: "compose", mode: "blueprint", blueprintId: "wordpress" }
+  expect(withSuggestedHostname(stack, "compose", template, hostname).domains[0].hostname).toBe(
+    "blog.example.test",
+  )
+  // A pasted file publishes whatever it publishes; nothing names a service to route.
+  const pasted = { kind: "compose", mode: "compose_paste" }
+  expect(withSuggestedHostname(stack, "compose", pasted, hostname).domains).toEqual([])
+})
+
 test("re-detection changes defaults while preserving operator overrides", () => {
   const old = defaultConfiguration("web", candidate({ port: 3000, startCommand: "bun start" }))
   const edited = structuredClone(old)

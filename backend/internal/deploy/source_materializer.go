@@ -179,17 +179,17 @@ func (a *HostSourceAnalyzer) Materialize(
 			return nil, err
 		}
 	case SourceModeComposePaste, SourceModeComposeUpload:
-		for _, document := range source.ComposeFiles {
-			if !safeRelativePath(document.Path) {
-				_ = os.RemoveAll(workspace)
-				return nil, fmt.Errorf("%w: Compose materialization path is invalid", ErrInvalidCompose)
-			}
-			path := filepath.Join(sourceRoot, filepath.Clean(document.Path))
-			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-				_ = os.RemoveAll(workspace)
-				return nil, err
-			}
-			if err := os.WriteFile(path, []byte(document.Content), 0o600); err != nil {
+		if err := writeComposeDocuments(sourceRoot, source.ComposeFiles); err != nil {
+			_ = os.RemoveAll(workspace)
+			return nil, err
+		}
+	case SourceModeBlueprint:
+		// A Compose template's release is the document its source stored when
+		// it was saved, written exactly as a pasted file is. A single-image
+		// blueprint is an image release and has no filesystem source; one that
+		// would need files written here is refused by ValidateForDeployment.
+		if source.Kind == SourceCompose {
+			if err := writeComposeDocuments(sourceRoot, source.ComposeFiles); err != nil {
 				_ = os.RemoveAll(workspace)
 				return nil, err
 			}
@@ -200,10 +200,6 @@ func (a *HostSourceAnalyzer) Materialize(
 	case SourceModeExistingContainer, SourceModeExistingStack:
 		_ = os.RemoveAll(workspace)
 		return nil, fmt.Errorf("%w: observed imports must be adopted before materialization", ErrUnsupportedSource)
-	case SourceModeBlueprint:
-		// A blueprint release is an image release with reviewed defaults; it
-		// has no filesystem source either. Blueprints that would need files
-		// written here are refused by ValidateForDeployment above.
 	default:
 		_ = os.RemoveAll(workspace)
 		return nil, ErrUnsupportedSource
@@ -224,6 +220,24 @@ func (a *HostSourceAnalyzer) Materialize(
 		Revision: immutableSourceRevision(identity), Digest: identity.Digest,
 		Commit: commitMetadataForSource(ctx, source.Mode, sourceRoot, identity.Revision),
 	}, nil
+}
+
+// writeComposeDocuments writes Compose documents carried in a source into its
+// private workspace, each at its own contained relative path.
+func writeComposeDocuments(sourceRoot string, documents []ComposeDocument) error {
+	for _, document := range documents {
+		if !safeRelativePath(document.Path) {
+			return fmt.Errorf("%w: Compose materialization path is invalid", ErrInvalidCompose)
+		}
+		path := filepath.Join(sourceRoot, filepath.Clean(document.Path))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, []byte(document.Content), 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *HostSourceAnalyzer) materializeRemoteGit(

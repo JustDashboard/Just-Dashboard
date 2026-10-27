@@ -113,7 +113,17 @@ func compareReleaseSnapshots(from, to *ReleaseWithArtifacts) ReleaseDetailCompar
 		detail.Reason = "One of these releases has no readable runtime snapshot, so only its recorded digests can be compared."
 		return detail
 	}
-	detail.Status = statusAvailable
+	return compareRuntimeSnapshots(fromSnapshot, toSnapshot, from.Release.ExpectedDowntime, to.Release.ExpectedDowntime)
+}
+
+// compareRuntimeSnapshots is the comparison of two frozen runtime snapshots,
+// whichever releases — or, for a promotion's confirmation, which plan not yet
+// released — they came from.
+func compareRuntimeSnapshots(fromSnapshot, toSnapshot runtimeReleaseSnapshot, fromDowntime, toDowntime bool) ReleaseDetailComparison {
+	detail := ReleaseDetailComparison{
+		Status: statusAvailable, Fields: []ReleaseFieldChange{}, Variables: []ReleaseListChange{},
+		Dependencies: []ReleaseListChange{}, Checks: []ReleaseListChange{}, Domains: []ReleaseListChange{},
+	}
 	field := func(name, before, after string) {
 		detail.Fields = append(detail.Fields, ReleaseFieldChange{
 			Field: name, From: before, To: after, Changed: before != after,
@@ -136,12 +146,15 @@ func compareReleaseSnapshots(from, to *ReleaseWithArtifacts) ReleaseDetailCompar
 	field("allowed addresses", allowFromLabel(fromSnapshot.Plan.AllowFrom), allowFromLabel(toSnapshot.Plan.AllowFrom))
 	field("response headers", responseHeadersLabel(fromSnapshot.Plan.ResponseHeaders), responseHeadersLabel(toSnapshot.Plan.ResponseHeaders))
 	field("sign-in", signInLabel(fromSnapshot.Plan.ForwardAuth), signInLabel(toSnapshot.Plan.ForwardAuth))
+	field("let past maintenance", maintenanceBypassLabel(fromSnapshot.Plan.Maintenance), maintenanceBypassLabel(toSnapshot.Plan.Maintenance))
+	field("maintenance retry after", maintenanceRetryLabel(fromSnapshot.Plan.Maintenance), maintenanceRetryLabel(toSnapshot.Plan.Maintenance))
+	field("error pages", errorPagesLabel(fromSnapshot.Plan), errorPagesLabel(toSnapshot.Plan))
 	field("restart policy", fromSnapshot.Plan.EffectiveRestartPolicy(), toSnapshot.Plan.EffectiveRestartPolicy())
 	field("host network", boolLabel(fromSnapshot.Plan.HostNetwork), boolLabel(toSnapshot.Plan.HostNetwork))
 	field("privileged", boolLabel(fromSnapshot.Plan.Privileged), boolLabel(toSnapshot.Plan.Privileged))
 	field("capabilities", strings.Join(fromSnapshot.Plan.Capabilities, ", "), strings.Join(toSnapshot.Plan.Capabilities, ", "))
 	field("devices", strings.Join(fromSnapshot.Plan.Devices, ", "), strings.Join(toSnapshot.Plan.Devices, ", "))
-	field("expected downtime", boolLabel(from.Release.ExpectedDowntime), boolLabel(to.Release.ExpectedDowntime))
+	field("expected downtime", boolLabel(fromDowntime), boolLabel(toDowntime))
 
 	detail.Variables = diffNamedValues(
 		variableDigestPairs(fromSnapshot.Variables), variableDigestPairs(toSnapshot.Variables))
@@ -258,6 +271,40 @@ func signInLabel(gate *RouteForwardAuth) string {
 	label := gate.Provider + " · " + gate.Verify + " · " + gate.SignIn
 	if gate.PreviewsOnly {
 		label += " · previews only"
+	}
+	return label
+}
+
+// maintenanceBypassLabel names who reaches the application while the route
+// is in maintenance. Whether it is in maintenance is not a release's, so it
+// is never a difference between two.
+func maintenanceBypassLabel(m *RouteMaintenance) string {
+	if m == nil || len(m.BypassFrom) == 0 {
+		return "nobody"
+	}
+	return strings.Join(m.BypassFrom, ", ")
+}
+
+func maintenanceRetryLabel(m *RouteMaintenance) string {
+	if m == nil || m.RetryAfter == 0 {
+		return "not sent"
+	}
+	return fmt.Sprintf("%ds", m.RetryAfter)
+}
+
+// errorPagesLabel names the codes the route answers with its own page, and
+// whether the application's own answers get it too.
+func errorPagesLabel(plan RuntimePlanConfig) string {
+	if len(plan.ErrorPages) == 0 {
+		return "the proxy's own"
+	}
+	codes := make([]string, 0, len(plan.ErrorPages))
+	for _, code := range plan.ErrorPages {
+		codes = append(codes, strconv.Itoa(code))
+	}
+	label := strings.Join(codes, ", ")
+	if plan.InterceptErrors {
+		label += " · the application's too"
 	}
 	return label
 }

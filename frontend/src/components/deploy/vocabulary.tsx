@@ -44,6 +44,7 @@ import type {
   DeploymentDraftSource,
   DeploymentEnvironmentConfiguration,
   DeploymentGitWatch,
+  DeploymentPromotion,
   DeploymentRelease,
   DeploymentSourceKind,
   DeploymentEngineRun,
@@ -197,6 +198,7 @@ const OPERATION_LABELS: Record<string, string> = {
   redeploy: "Redeploy",
   force_build: "Rebuild",
   rollback: "Rollback",
+  promote: "Promote",
   restart: "Restart",
   stop: "Stop",
   start: "Start",
@@ -206,15 +208,45 @@ const OPERATION_LABELS: Record<string, string> = {
   scheduled_action: "Scheduled",
   import_adopt: "Adopt",
   remove_managed: "Remove resources",
+  instant_rollback: "Instant rollback",
 }
 
 export function operationLabel(operation: string) {
   return OPERATION_LABELS[operation] ?? humanize(operation)
 }
 
+/**
+ * The operation a run's steps are named for. An instant rollback is a
+ * rollback run that resumes the warm release instead of starting a new one
+ * (`deploy/rollback_executor.go`), and its steps say so.
+ */
+export function stepOperation(
+  run: Pick<DeploymentEngineRun, "operation"> & { metadata?: Record<string, unknown> },
+) {
+  return run.operation === "rollback" && run.metadata?.instant === true
+    ? "instant_rollback"
+    : run.operation
+}
+
+/**
+ * The staging release a promotion run takes its image from, as the run's
+ * metadata records it, or undefined for any other run.
+ */
+export function runPromotion(
+  run: Pick<DeploymentEngineRun, "operation" | "metadata">,
+): DeploymentPromotion | undefined {
+  if (run.operation !== "promote") return undefined
+  const promotion = run.metadata?.promotion as DeploymentPromotion | undefined
+  return promotion && typeof promotion.releaseNumber === "number" ? promotion : undefined
+}
+
 /** "#12 Deploy" — the run's name wherever it is listed. */
-export function runTitle(run: Pick<DeploymentEngineRun, "runNumber" | "operation">) {
-  return `#${run.runNumber} ${operationLabel(run.operation)}`
+export function runTitle(
+  run: Pick<DeploymentEngineRun, "runNumber" | "operation"> & {
+    metadata?: Record<string, unknown>
+  },
+) {
+  return `#${run.runNumber} ${operationLabel(stepOperation(run))}`
 }
 
 const TRIGGER_LABELS: Record<string, string> = {
@@ -231,6 +263,7 @@ const TRIGGER_LABELS: Record<string, string> = {
   preview: "preview",
   rollback: "rollback",
   migration: "migration",
+  auto_rollback: "automatically",
 }
 
 /**
@@ -647,7 +680,8 @@ export function projectProduct(
     | "recipe"
     | "framework"
     | "images"
-  >,
+  > &
+    Partial<Pick<DeploymentSummary, "sourceTemplate">>,
   configuration?: Pick<DeploymentEnvironmentConfiguration, "build" | "source">,
   blueprint?: Pick<BlueprintSummary, "id" | "image">,
 ): string | undefined {
@@ -661,8 +695,11 @@ export function projectProduct(
       return imageProduct(
         summary.sourceRepository || configuration?.source?.image || summary.sourceRef || "",
       )
-    case "compose":
-      return "docker-compose"
+    case "compose": {
+      // A stack rendered from a reviewed template is that application.
+      const id = blueprint?.id ?? summary.sourceTemplate?.split("@")[0]
+      return hasProductLogo(id) ? id : "docker-compose"
+    }
     case "import":
       return imageProducts(summary.images ?? []).find((id) => id !== "docker")
     default: {
@@ -689,7 +726,8 @@ export function sourceProduct(
   summary: Pick<
     DeploymentSummary,
     "sourceKind" | "sourceRef" | "sourceRepository" | "sourceRemote"
-  >,
+  > &
+    Partial<Pick<DeploymentSummary, "sourceTemplate">>,
   source?: Pick<DeploymentDraftSource, "url" | "provider" | "mode" | "image" | "blueprintId">,
 ): string | undefined {
   switch (summary.sourceKind) {
@@ -702,8 +740,11 @@ export function sourceProduct(
       )
     case "image":
       return imageProduct(summary.sourceRepository || source?.image || summary.sourceRef || "")
-    case "compose":
-      return "docker-compose"
+    case "compose": {
+      const id =
+        source?.mode === "blueprint" ? source.blueprintId : summary.sourceTemplate?.split("@")[0]
+      return hasProductLogo(id) ? id : "docker-compose"
+    }
     case "blueprint": {
       const id = source?.blueprintId ?? summary.sourceRef?.split("@")[0]
       return hasProductLogo(id) ? id : undefined
@@ -1057,7 +1098,11 @@ export function sourceLine(
         mono: true,
       }
     case "compose":
-      return { kind: "compose", primary: "Compose stack", secondary: deployment.sourceRef }
+      return {
+        kind: "compose",
+        primary: "Compose stack",
+        secondary: deployment.sourceTemplate ?? deployment.sourceRef,
+      }
     case "blueprint":
       return { kind: "blueprint", primary: deployment.sourceRef || "Template" }
     default:
@@ -1108,6 +1153,10 @@ export function autoDeployReading(
   watch: DeploymentGitWatch,
 ): { tone: DotTone; label: string; interval?: number } | undefined {
   if (watch.status === "not_applicable") return undefined
+  // A push never deploys production once it takes only promotions.
+  if (watch.status === "promotion_only" || watch.policy?.promotionOnly) {
+    return { tone: "stopped", label: "Promotions only" }
+  }
   const automatic = watch.policy?.automatic ?? watch.automatic
   if (["unavailable", "stale", "policy_conflict"].includes(watch.status)) {
     // A branch the watcher could not read says why when git's answer did.
@@ -1479,9 +1528,20 @@ const LIVE_RELEASE_STEPS: Record<string, string> = {
   start: "Start live release",
 }
 
+// An instant rollback takes three of the release path's steps against the
+// warm release and the one it replaces rather than a new one.
+const INSTANT_ROLLBACK_STEPS: Record<string, string> = {
+  start_candidate: "Resume warm release",
+  activate: "Switch traffic back",
+  retire_previous: "Remove rolled-back release",
+}
+
 export function stepName(key: string, operation?: string) {
   if (key === "start_candidate" && operation && LIVE_RELEASE_STEPS[operation]) {
     return LIVE_RELEASE_STEPS[operation]
+  }
+  if (operation === "instant_rollback" && INSTANT_ROLLBACK_STEPS[key]) {
+    return INSTANT_ROLLBACK_STEPS[key]
   }
   return STEP_LABELS[key] ?? sentence(key)
 }

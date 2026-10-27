@@ -70,9 +70,18 @@ const LEGACY_PROFILE_TAB: Record<string, SourceTabKey> = {
   web: "git",
 }
 
+// A source the strip has no button for, which a link still names: the Projects
+// page's Compose card. The Docker tab is where Compose stacks are offered, the
+// ones whose files are on this server and the ones made from several images.
+// Without this the link fell through to whichever tab was used last.
+const SOURCE_TAB: Record<string, SourceTabKey> = {
+  compose: "image",
+}
+
 /** The tab a link asked for, or nothing — in which case the last one used stands. */
 function arrivalTab(source?: string, profile?: string): SourceTabKey | undefined {
   if (source && TABS.some((tab) => tab.key === source)) return source as SourceTabKey
+  if (source && SOURCE_TAB[source]) return SOURCE_TAB[source]
   if (profile && LEGACY_PROFILE_TAB[profile]) return LEGACY_PROFILE_TAB[profile]
   return undefined
 }

@@ -74,7 +74,11 @@ func (s *Server) Routes() http.Handler {
 				r.Use(httpx.AuditMutations(s.Audit))
 				r.Use(httpx.RequireCSRF)
 				r.Method(http.MethodPost, "/auth/login", s.handle(s.handleLogin))
+				// A passkey's sign-in is a sign-in: the same budget per
+				// address, the same audit, the same session at the end.
+				s.mountPasskeySignInFinish(r)
 			})
+			s.mountPasskeySignIn(r)
 
 			// Half-authenticated: password proved, second factor outstanding.
 			r.Group(func(r chi.Router) {
@@ -178,6 +182,9 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/sessions", s.handle(s.handleListOwnSessions))
 		r.Method(http.MethodDelete, "/sessions/{id}", s.handle(s.handleRevokeOwnSession))
 		r.Method(http.MethodPost, "/sessions/revoke-others", s.handle(s.handleRevokeOtherSessions))
+		// Passkeys are the account holder's own, from a complete session;
+		// registering one asks for the password (and code) again.
+		s.mountAccountPasskeys(r)
 		r.Method(http.MethodPatch, "/profile", s.handle(s.handleUpdateProfile))
 		r.Method(http.MethodPut, "/workspace", s.handle(s.handleSetWorkspace))
 		r.Method(http.MethodGet, "/avatar", s.handle(s.handleOwnAvatar))

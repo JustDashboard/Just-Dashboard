@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -47,6 +48,11 @@ type DNSProvider struct {
 	// token itself is never read back; whether one exists is the whole of
 	// what the page shows, and the reason a "remove" control can exist.
 	HasCredentials bool `json:"hasCredentials"`
+	// nameservers matches the hostnames of the nameservers this provider
+	// gives a zone it hosts, which is how a deployment run tells whose
+	// saved credentials can write a zone's challenge record. RFC 2136 has
+	// none: those are the operator's own servers.
+	nameservers *regexp.Regexp
 }
 
 // dnsProviders is a closed set. Each entry is an argv this code is willing to
@@ -55,30 +61,37 @@ type DNSProvider struct {
 var dnsProviders = []DNSProvider{
 	{
 		Key: "cloudflare", Name: "Cloudflare", Plugin: "dns-cloudflare", DefaultWait: 30,
+		nameservers: regexp.MustCompile(`\.ns\.cloudflare\.com$`),
 		Credentials: "dns_cloudflare_api_token = your-scoped-token\n\nCreate the token with Zone:DNS:Edit on the zone you are issuing for.",
 	},
 	{
 		Key: "route53", Name: "AWS Route 53", Plugin: "dns-route53", DefaultWait: 30,
+		nameservers: regexp.MustCompile(`^ns-\d+\.awsdns-\d+\.(com|net|org|co\.uk)$`),
 		Credentials: "[default]\naws_access_key_id = AKIA...\naws_secret_access_key = ...\n\nSaved credentials are used for dashboard issuance and renewal. Host certbot timers must set AWS_SHARED_CREDENTIALS_FILE=/etc/letsencrypt/jd-dns/route53.ini and AWS_PROFILE=default. Leave empty to use the machine IAM role.",
 	},
 	{
 		Key: "digitalocean", Name: "DigitalOcean", Plugin: "dns-digitalocean", DefaultWait: 30,
+		nameservers: regexp.MustCompile(`^ns\d\.digitalocean\.com$`),
 		Credentials: "dns_digitalocean_token = your-personal-access-token",
 	},
 	{
 		Key: "google", Name: "Google Cloud DNS", Plugin: "dns-google", DefaultWait: 60,
+		nameservers: regexp.MustCompile(`^ns-cloud-[a-z]\d\.googledomains\.com$`),
 		Credentials: "Paste the service-account JSON key here.",
 	},
 	{
 		Key: "linode", Name: "Linode", Plugin: "dns-linode", DefaultWait: 120,
+		nameservers: regexp.MustCompile(`^ns\d\.linode\.com$`),
 		Credentials: "dns_linode_key = your-api-key\ndns_linode_version = 4",
 	},
 	{
 		Key: "ovh", Name: "OVH", Plugin: "dns-ovh", DefaultWait: 60,
+		nameservers: regexp.MustCompile(`\.(ovh\.net|ovh\.ca|anycast\.me)$`),
 		Credentials: "dns_ovh_endpoint = ovh-eu\ndns_ovh_application_key = ...\ndns_ovh_application_secret = ...\ndns_ovh_consumer_key = ...",
 	},
 	{
 		Key: "gandi", Name: "Gandi", Plugin: "dns-gandi", DefaultWait: 30,
+		nameservers: regexp.MustCompile(`\.gandi\.net$`),
 		Credentials: "dns_gandi_token = your-personal-access-token",
 	},
 	{

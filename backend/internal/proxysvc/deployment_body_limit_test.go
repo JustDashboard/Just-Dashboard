@@ -33,7 +33,7 @@ func TestDeploymentRouteRequestBodyLimitOnBothProxies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(caddy, "  request_body {\n    max_size 512MB\n  }\n  reverse_proxy \"http://10.0.0.2:3000\"") {
+	if !strings.Contains(caddy, "    request_body {\n      max_size 512MB\n    }\n    reverse_proxy \"http://10.0.0.2:3000\"") {
 		t.Fatalf("Caddy explicit limit missing:\n%s", caddy)
 	}
 	// The limit is a route setting the site editor reads back like any other.

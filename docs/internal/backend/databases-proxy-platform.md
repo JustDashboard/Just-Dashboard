@@ -3930,6 +3930,18 @@ containers/volumes/networks.
   reloads — refused (409 `not_managed`) for a file the form did not write or would drop lines of. Page
   paths are refused unless the site folder resolves directly under `jd-pages` inside the nginx directory
   and the file is not a link.
+  `SiteMaintenance.Switch` is the same maintenance behind a file instead of `On`, which is how a
+  deployment's route carries it: the check is always written, behind `if (-f
+  <pages>/maintenance.on)`, and a request it holds is rewritten to an internal `= /__jd/maintenance`
+  location that returns 503 with the maintenance page as its own `error_page`, so the server's
+  `error_page 503` stays the site's 503 page whichever way the file has it. nginx tests the file on every
+  request, so turning it on or off is the file (`SetDeploymentMaintenance`) and needs no reload. The
+  parser reads the switch back with `On` false (the file decides), `VHost.maintenance` reads the file
+  (a Docker Caddy route's card reads its file inside the ingress the same way),
+  and the access explainer takes no maintenance layer while the file is absent and the site's own
+  judgement, owned by the switch, while it is there. `ReadDeploymentPage`/`WriteDeploymentPage` keep a
+  deployment's pages the same way under its route's name, or in the Docker Caddy ingress
+  ([implementation](../deployments/implementation.md), [Caddy ingress](../deployments/caddy-ingress.md#maintenance-and-error-pages)).
 
   **Limits** (`sites_limits.go`, form section "Limits", a per-path override under the extra paths).
   `SiteSpec.Limits{Request{Rate, Burst, NoDelay, Key}, ConnPerIP, ExemptFrom, DryRun}` and
@@ -4447,6 +4459,16 @@ containers/volumes/networks.
   cron jobs renew these certificates, their environment must set the same two variables. Saving a
   dashboard credential does not reconfigure an external timer; an IAM-role-only installation can leave
   the credential form empty.
+  Deployment runs use the same saved files for a plan that serves a wildcard
+  (`deployment_certificate_dns.go`, see the deployments [implementation guide](../deployments/implementation.md)):
+  each provider carries a pattern for the nameservers it gives a zone it hosts, the run walks up from the
+  wildcard's base to the zone's NS records and uses the provider they name, failing that the single
+  provider with saved credentials and an installed plugin, and otherwise refuses with what to save here.
+  It passes `dnsIssueArgs`'s argv — the file's path, never its contents — through the page's certbot
+  runtime, so the lineage renews like one issued here; an IAM-role-only Route 53 (no saved file) is not
+  chosen. `DeploymentDNSProvider` answers the same question without ordering, for preflight and the
+  deployment Domains sheet. Removing a provider's credentials also stops runs issuing wildcards in its
+  zones; the next one is refused, naming this page.
   Site-validation rollback restores a replaced `sites-enabled` symlink to its exact previous target.
 - **Raw configuration edits carry a content revision** (`config_checked.go`). `GET /proxy/config`
   returns `content` and its SHA-256 `revision` under the proxy writer lock, so it cannot expose

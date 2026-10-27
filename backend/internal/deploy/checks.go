@@ -122,11 +122,40 @@ func validateCheckConfiguration(kind string, raw json.RawMessage) error {
 			return errors.New("command checks require a non-empty argv")
 		}
 	default:
-		// DNS/TLS/game/backup checks are owned by later feature joins. Their
-		// closed kind is already valid, but accepting arbitrary C5 fields here
-		// would make an unavailable check look executable.
+		// DNS/TLS/game/backup checks have no runner (see unrunnableCheck). A
+		// plan saved with one still validates so it keeps deploying, but
+		// accepting C5 fields here would make it look executable.
 		if config.URL != "" || config.Host != "" || config.Port != 0 || len(config.Command) != 0 || config.AcceptAnyAnswer {
 			return errors.New("this check kind has no C5 execution configuration")
+		}
+	}
+	return nil
+}
+
+// unrunnableCheck says why the runner would never execute a check of this
+// kind, or "" for a kind it runs. Such a check only ever reports
+// check_owner_unavailable, which blocks the phase when the check is required
+// and is a warning when it is not.
+func unrunnableCheck(kind string) string {
+	switch CheckKind(kind) {
+	case CheckDNS, CheckTLS:
+		return "the deployment runner has no " + kind + " check; a public_route check on the https address resolves the name and verifies the certificate"
+	case CheckBackupFreshness:
+		return "backup freshness is set on a storage dependency (requiredBeforeDeploy, maxAgeSeconds, requireRestoreTest), not as a check"
+	case CheckGameHandshake:
+		return "game handshakes run with the game-server integration, which is not available in this release"
+	}
+	return ""
+}
+
+// refuseUnrunnableChecks keeps a configuration being written from asking for
+// a check nothing runs. It applies where a configuration is saved, not in
+// Validate: a stored plan that already holds one is re-validated before it
+// runs, and refusing it there would stop a deployment that runs today.
+func refuseUnrunnableChecks(checks []PlannedCheck) error {
+	for index, check := range checks {
+		if reason := unrunnableCheck(check.Kind); reason != "" {
+			return invalidField(fmt.Sprintf("checks[%d]", index), "check %q of kind %s cannot run: %s", check.Name, check.Kind, reason)
 		}
 	}
 	return nil

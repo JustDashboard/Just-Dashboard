@@ -7,12 +7,15 @@
 - [`backup-coverage.md`](backup-coverage.md) — immutable archive manifests and persistent-data coverage limitations.
 - [`restore-verification.md`](restore-verification.md) — native SQLite snapshots and artifact-bound isolated application recovery checks.
 - [`recipes.md`](recipes.md) — build variable delivery, the framework catalogue (JavaScript, Python, Go, Rust, Java, .NET, Deno, PHP), environment discovery, Procfiles, where a server listens and whom it trusts behind the proxy, repository shape and candidate selection, other platforms' deployment files, background processes, ecosystems without a recipe, submodules and LFS, the single-page fallback and toolchain selection.
-- [`git-policy.md`](git-policy.md) — shared polling/hook policy, manual-only mode, complete path comparison and decision evidence.
+- [`git-policy.md`](git-policy.md) — shared polling/hook policy, manual-only mode, promotion-only production, complete path comparison and decision evidence.
+- [`staging-promotion.md`](staging-promotion.md) — the staging environment (what it copies from production and why), promoting a staging release's exact image into production with no build, promotion-only production, retention of a promotion's image, removal, routes, UI and the decision record.
 - [`database-networks.md`](database-networks.md) — logical database URLs, owned networks, replacement reconciliation and cleanup.
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
   logs, the request readings, container lifecycle events, and the three container-output fixes.
 - [`log-drains.md`](log-drains.md) — copying deployments' container output and requests to OpenTelemetry
   (OTLP), Loki or a JSON-lines endpoint: formats, severity, sealed headers, delivery, retries and status.
+- [`secret-stores.md`](secret-stores.md) — Vault, OpenBao, Infisical and Doppler connections, the
+  `${{store.NAME/path#KEY}}` reference, when a run reads it, what a rollback reads, previews, routes and audit.
 - [`notifications.md`](notifications.md) — run observers, chat (Discord, Slack, Teams, Mattermost, Telegram), push (ntfy, Gotify, Pushover), e-mail and webhook channels, delivery history, commit statuses and preview comments on GitHub, GitLab, Gitea and Forgejo, and what Settings and Credentials say about them.
 - [`github-app.md`](github-app.md) — the dashboard's GitHub App: manifest flow, installation credentials for clones, App-delivered triggers, statuses and pull request comments.
 - [`gap-closure-plan.md`](../../audits/2026-09-16-deployments/gap-closure-plan.md) — second-pass re-evaluation, defects D1–D7, competitive position and remaining phases.

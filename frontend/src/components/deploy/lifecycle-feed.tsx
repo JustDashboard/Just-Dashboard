@@ -97,8 +97,11 @@ export function LifecycleFeed({
   onClearMoment,
   outputFor,
   exists,
+  environmentId,
 }: {
   projectId: number
+  /** Staging's containers in place of production's. */
+  environmentId?: number
   /** What the deployment is, for a container event whose image names nothing better. */
   product?: string
   /** An instant to look around — a failing request's — scoping the list to ±2 minutes. */
@@ -123,9 +126,14 @@ export function LifecycleFeed({
   const wide = useMediaQuery("(min-width: 640px)")
 
   const feed = usePoll<DeploymentLifecycle>(
-    (signal) => get<DeploymentLifecycle>(`/deploy/${projectId}/lifecycle`, { limit: 200 }, signal),
+    (signal) =>
+      get<DeploymentLifecycle>(
+        `/deploy/${projectId}/lifecycle`,
+        { limit: 200, environment: environmentId },
+        signal,
+      ),
     10000,
-    [projectId],
+    [projectId, environmentId],
   )
 
   // The socket carries everything this environment produces and the filters are
@@ -137,6 +145,7 @@ export function LifecycleFeed({
   }, [])
   const socket = useSocket(`/deploy/${projectId}/lifecycle/stream`, {
     onMessage,
+    query: environmentId ? { environment: String(environmentId) } : undefined,
     enabled: following,
   })
 

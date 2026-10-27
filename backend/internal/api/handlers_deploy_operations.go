@@ -40,15 +40,9 @@ func (s *Server) operationsOwners() deploy.OperationsOwners {
 }
 
 func (s *Server) handleDeploymentOperations(w http.ResponseWriter, r *http.Request) error {
-	id, err := parseID(r)
+	summary, err := s.deploymentTarget(r)
 	if err != nil {
 		return err
-	}
-	summary, err := s.modules.deployRuns.DeploymentSummary(r.Context(), id, deploy.QueueBudget{
-		Heavy: s.Cfg.DeployHeavySlots, Light: s.Cfg.DeployLightSlots,
-	})
-	if err != nil {
-		return mapDeployError(err)
 	}
 	operations, err := s.modules.deployRuns.Operations(r.Context(), s.operationsOwners(), *summary)
 	if err != nil {

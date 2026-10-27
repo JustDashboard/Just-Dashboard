@@ -3,7 +3,15 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, External, FolderClosed, LockClosed, LockOpen } from "@/components/icons"
+import {
+  ArrowCircleUp,
+  ArrowRight,
+  External,
+  FolderClosed,
+  LockClosed,
+  LockOpen,
+} from "@/components/icons"
+import { del } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type {
@@ -18,6 +26,7 @@ import { Page, PageContext } from "@/components/page"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { VerbMenu } from "@/components/verbs"
+import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ProductGlyph, buildMethodProduct, hasProductLogo } from "@/components/product-logo"
 import { BranchChip } from "@/components/git/marks"
@@ -29,6 +38,9 @@ import { DeployVersionDialog } from "@/components/deploy/deploy-version-dialog"
 import { DuplicateProjectDialog } from "@/components/deploy/duplicate-dialog"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { PullRequestPicker } from "@/components/deploy/pull-request-picker"
+import { EnvironmentSwitch } from "@/components/deploy/environment-switch"
+import { AddStagingDialog } from "@/components/deploy/add-staging-dialog"
+import { PromoteDialog } from "@/components/deploy/promote-dialog"
 import {
   BUILD_METHOD_SHORT,
   CERTIFICATE_LABEL,
@@ -74,11 +86,18 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
   const [versionOpen, setVersionOpen] = useState(false)
   const [testPullOpen, setTestPullOpen] = useState(false)
   const [duplicateOpen, setDuplicateOpen] = useState(false)
+  const [addStagingOpen, setAddStagingOpen] = useState(false)
+  const [promote, setPromote] = useState<{ open: boolean; releaseId?: number }>({ open: false })
+  const { can } = useAuth()
   const project = useProject()
   const { deployment, project: record, runtime } = project.detail
   const url = deploymentURL(deployment.endpoint)
   const activeRun = deployment.activeRun
   const base = `/deploy/${project.projectId}`
+  const onStaging = project.environment === "staging"
+  // Promoting needs both ends, and what deploying production needs.
+  const canPromote =
+    Boolean(project.staging && project.production) && can("service.control") && !project.archived
 
   const verbs = useProjectVerbs(deployment, {
     confirm,
@@ -91,6 +110,43 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
     onTestPull: () => setTestPullOpen(true),
     onDuplicate: () => setDuplicateOpen(true),
     onArchived: () => router.push("/deploy"),
+    hasStaging: Boolean(project.staging),
+    promotionOnly: !onStaging && Boolean(project.production?.promotionOnly),
+    onPromote: canPromote
+      ? () =>
+          setPromote({ open: true, releaseId: onStaging ? deployment.liveReleaseId : undefined })
+      : undefined,
+    onAddStaging: () => setAddStagingOpen(true),
+    onRemoveStaging: () =>
+      confirm({
+        title: `Remove ${record.name}'s staging`,
+        confirmLabel: "Remove staging",
+        subject: {
+          mark: <ProjectMark deployment={deployment} size="sm" />,
+          name: `${record.name} · staging`,
+          facts: url ? hostOf(url) : undefined,
+        },
+        description: (
+          <>
+            <p>
+              Staging&apos;s containers, its route and the volumes adding staging created are
+              removed. Production is not touched, and neither is an image production was promoted
+              from.
+            </p>
+            <p>Staging can be added again; it starts from production&apos;s settings then.</p>
+          </>
+        ),
+        action: async () => {
+          await del(`${base}/environments/${deployment.environmentId}`, {
+            body: { volumes: true },
+          })
+        },
+        onDone: () => {
+          project.selectEnvironment("production")
+          project.refresh()
+          router.push(base)
+        },
+      }),
   })
   const command = projectCommand(verbs)
   const menu = verbs.filter((verb) => verb !== command)
@@ -130,6 +186,22 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2 max-sm:order-1 sm:row-span-2">
+          <EnvironmentSwitch className="max-sm:hidden" />
+          {/* Staging's way to production is its own button: it is the step
+              staging exists for, not one more item in the menu. On a phone
+              the row is the address's and the command's, and the menu
+              carries Promote instead. */}
+          {onStaging && canPromote && deployment.liveReleaseId && !activeRun && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="max-sm:hidden"
+              onClick={() => setPromote({ open: true, releaseId: deployment.liveReleaseId })}
+            >
+              <ArrowCircleUp className="size-3.5" />
+              Promote
+            </Button>
+          )}
           {command &&
             (command.key === "view" && activeRun ? (
               <Button size="sm" asChild>
@@ -174,9 +246,24 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
         </div>
       </section>
 
+      {/* On a phone the header's row has no room for the switch beside the
+          command, so it takes a row of its own under the facts. */}
+      {project.staging && <EnvironmentSwitch className="-mt-2 sm:hidden" />}
       {children}
       {dialog}
       <DeployVersionDialog open={versionOpen} onOpenChange={setVersionOpen} />
+      <AddStagingDialog open={addStagingOpen} onOpenChange={setAddStagingOpen} />
+      {project.staging && project.production && (
+        <PromoteDialog
+          open={promote.open}
+          onOpenChange={(open) => setPromote((current) => ({ ...current, open }))}
+          projectId={project.projectId}
+          productionId={project.production.id}
+          stagingId={project.staging.id}
+          remote={deployment.sourceRemote}
+          initialReleaseId={promote.releaseId}
+        />
+      )}
       <PullRequestPicker
         open={testPullOpen}
         onOpenChange={setTestPullOpen}
@@ -466,8 +553,8 @@ function RuntimeFact({
 
 /**
  * The live release's age stays visible, and says so only when it got there by
- * a rollback; who shipped it is read with that deployment's full provenance in
- * the history.
+ * a rollback or a promotion from staging; who shipped it is read with that
+ * deployment's full provenance in the history.
  */
 function ReleaseLine({ run, activatedAt }: { run?: DeploymentEngineRun; activatedAt?: string }) {
   if (!run)
@@ -475,6 +562,7 @@ function ReleaseLine({ run, activatedAt }: { run?: DeploymentEngineRun; activate
   return (
     <span className="truncate">
       {run.operation === "rollback" && "rolled back "}
+      {run.operation === "promote" && "promoted "}
       {relativeTime(run.endedAt ?? run.requestedAt)}
     </span>
   )

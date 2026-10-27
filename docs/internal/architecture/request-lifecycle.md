@@ -15,6 +15,11 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   per-account lockout), `apiLim` (600/120, per principal), `destrLim` (30/10, destructive routes).
   TOTP setup, enrollment confirmation and verification share a separate account-keyed `loginLim`
   bucket; changing IP or switching between these routes does not reset the second-factor budget.
+  A passkey sign-in's finish (`POST /auth/passkey/finish`) sits in the password sign-in's group and
+  spends the same per-address `loginLim` budget; its begin only hands out a sealed challenge and has
+  a budget of its own, `passkeyLim` (60/20 per address), so a sign-in page's autofill cannot exhaust
+  the password's. Registering a passkey re-checks the password and code on the account-keyed
+  second-factor bucket.
 - **Capabilities, not roles** (`auth/roles.go`): `read`, `service.control`, `file.write`, `terminal`,
   `destructive`, `system.admin`, `metrics.read`, held by `admin`/`limited`/`readonly`. Gate with
   `httpx.RequireCapability` so adding a role later cannot silently widen an endpoint.

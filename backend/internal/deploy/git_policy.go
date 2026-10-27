@@ -14,6 +14,12 @@ import (
 var (
 	ErrGitManualOnly     = errors.New("automatic deployments are disabled for this environment")
 	ErrGitPolicyConflict = errors.New("existing hook filters disagree; save one automatic deployment policy")
+	// ErrPromotionOnly refuses a build in an environment that takes only
+	// releases promoted from staging, whoever or whatever asked for it.
+	ErrPromotionOnly = errors.New("production takes only releases promoted from staging; deploy to staging and promote that release")
+	// ErrStagingRequired refuses promotion-only without a staging
+	// environment to promote from: production would have no way to change.
+	ErrStagingRequired = errors.New("only promotions can be required once the deployment has a staging environment")
 )
 
 type GitDeploymentPolicy struct {
@@ -24,23 +30,30 @@ type GitDeploymentPolicy struct {
 	// GitHub through the dashboard's own credential. Default on, so a
 	// repository that already deploys from here gains it without an edit.
 	CommitStatuses bool `json:"commitStatuses"`
-	Revision       int  `json:"revision"`
-	Inherited      bool `json:"inherited"`
-	Conflict       bool `json:"conflict"`
+	// PromotionOnly makes production refuse every build — a push, a hook, a
+	// schedule or a person pressing Deploy — so the only new code it runs is
+	// an image staging already ran, promoted. Redeploy, restart and rollback
+	// reuse releases production already has and stay available.
+	PromotionOnly bool `json:"promotionOnly"`
+	Revision      int  `json:"revision"`
+	Inherited     bool `json:"inherited"`
+	Conflict      bool `json:"conflict"`
 }
 
 // Key digests the fields that decide whether a change deploys. Commit-status
 // reporting is deliberately excluded: toggling it must not invalidate cached
-// polling decisions or race an in-flight enqueue.
+// polling decisions or race an in-flight enqueue. Promotion-only is omitted
+// while off, so every key stored before it existed still matches.
 func (p GitDeploymentPolicy) Key() string {
 	return digestBytes(mustJSON(struct {
-		Automatic    bool     `json:"automatic"`
-		WatchInclude []string `json:"watchInclude"`
-		WatchExclude []string `json:"watchExclude"`
-		Revision     int      `json:"revision"`
-		Inherited    bool     `json:"inherited"`
-		Conflict     bool     `json:"conflict"`
-	}{p.Automatic, p.WatchInclude, p.WatchExclude, p.Revision, p.Inherited, p.Conflict}))
+		Automatic     bool     `json:"automatic"`
+		WatchInclude  []string `json:"watchInclude"`
+		WatchExclude  []string `json:"watchExclude"`
+		Revision      int      `json:"revision"`
+		Inherited     bool     `json:"inherited"`
+		Conflict      bool     `json:"conflict"`
+		PromotionOnly bool     `json:"promotionOnly,omitempty"`
+	}{p.Automatic, p.WatchInclude, p.WatchExclude, p.Revision, p.Inherited, p.Conflict, p.PromotionOnly}))
 }
 
 type gitPolicyQuery interface {
@@ -50,13 +63,14 @@ type gitPolicyQuery interface {
 
 func gitDeploymentPolicy(ctx context.Context, q gitPolicyQuery, environmentID int64) (GitDeploymentPolicy, error) {
 	p := GitDeploymentPolicy{Automatic: true, CommitStatuses: true, WatchInclude: []string{}, WatchExclude: []string{}}
-	var automatic, commitStatuses int
+	var automatic, commitStatuses, promotionOnly int
 	var include, exclude string
-	err := q.QueryRowContext(ctx, `SELECT automatic,include_json,exclude_json,commit_statuses,revision FROM deploy_git_policies WHERE environment_id=?`, environmentID).
-		Scan(&automatic, &include, &exclude, &commitStatuses, &p.Revision)
+	err := q.QueryRowContext(ctx, `SELECT automatic,include_json,exclude_json,commit_statuses,promotion_only,revision FROM deploy_git_policies WHERE environment_id=?`, environmentID).
+		Scan(&automatic, &include, &exclude, &commitStatuses, &promotionOnly, &p.Revision)
 	if err == nil {
 		p.Automatic = automatic != 0
 		p.CommitStatuses = commitStatuses != 0
+		p.PromotionOnly = promotionOnly != 0
 		if json.Unmarshal([]byte(include), &p.WatchInclude) != nil || json.Unmarshal([]byte(exclude), &p.WatchExclude) != nil {
 			return p, ErrInvalidPlan
 		}
@@ -161,8 +175,8 @@ func (s *OrchestrationStore) SetGitDeploymentPolicy(ctx context.Context, project
 		return p, err
 	}
 	defer tx.Rollback()
-	var exists int
-	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM deploy_environments e JOIN deploy_projects p ON p.id=e.project_id WHERE e.id=? AND p.id=? AND e.archived_at=0 AND p.archived_at=0`, environmentID, projectID).Scan(&exists); err != nil {
+	var kind EnvironmentKind
+	if err := tx.QueryRowContext(ctx, `SELECT e.kind FROM deploy_environments e JOIN deploy_projects p ON p.id=e.project_id WHERE e.id=? AND p.id=? AND e.archived_at=0 AND p.archived_at=0`, environmentID, projectID).Scan(&kind); err != nil {
 		return p, ErrEnvironmentNotFound
 	}
 	current, err := gitDeploymentPolicy(ctx, tx, environmentID)
@@ -171,6 +185,17 @@ func (s *OrchestrationStore) SetGitDeploymentPolicy(ctx context.Context, project
 	}
 	if current.Revision != p.Revision {
 		return p, ErrRevisionConflict
+	}
+	if p.PromotionOnly && !current.PromotionOnly {
+		if kind != EnvironmentProduction {
+			return p, fmt.Errorf("%w: only production takes promotions", ErrInvalidPlan)
+		}
+		if _, err := stagingEnvironmentTx(ctx, tx, projectID); err != nil {
+			if errors.Is(err, ErrEnvironmentNotFound) {
+				return p, ErrStagingRequired
+			}
+			return p, err
+		}
 	}
 	p.Inherited, p.Conflict = false, false
 	p.Revision++
@@ -214,9 +239,9 @@ func commitGitPolicy(
 }
 
 func writeGitPolicyTx(ctx context.Context, tx *sql.Tx, environmentID int64, p GitDeploymentPolicy, now int64) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO deploy_git_policies(environment_id,automatic,include_json,exclude_json,commit_statuses,revision,updated_at) VALUES(?,?,?,?,?,?,?)
-		ON CONFLICT(environment_id) DO UPDATE SET automatic=excluded.automatic,include_json=excluded.include_json,exclude_json=excluded.exclude_json,commit_statuses=excluded.commit_statuses,revision=excluded.revision,updated_at=excluded.updated_at`,
-		environmentID, boolInt(p.Automatic), string(mustJSON(p.WatchInclude)), string(mustJSON(p.WatchExclude)), boolInt(p.CommitStatuses), p.Revision, now)
+	_, err := tx.ExecContext(ctx, `INSERT INTO deploy_git_policies(environment_id,automatic,include_json,exclude_json,commit_statuses,promotion_only,revision,updated_at) VALUES(?,?,?,?,?,?,?,?)
+		ON CONFLICT(environment_id) DO UPDATE SET automatic=excluded.automatic,include_json=excluded.include_json,exclude_json=excluded.exclude_json,commit_statuses=excluded.commit_statuses,promotion_only=excluded.promotion_only,revision=excluded.revision,updated_at=excluded.updated_at`,
+		environmentID, boolInt(p.Automatic), string(mustJSON(p.WatchInclude)), string(mustJSON(p.WatchExclude)), boolInt(p.CommitStatuses), boolInt(p.PromotionOnly), p.Revision, now)
 	return err
 }
 
@@ -245,6 +270,17 @@ func automaticDeploymentTrigger(trigger TriggerKind) bool {
 }
 
 func validateGitPolicyAdmissionTx(ctx context.Context, tx *sql.Tx, req RunRequest) error {
+	if req.Operation == OperationDeploy || req.Operation == OperationForceBuild {
+		// Every trigger, a person's included: a build is exactly what a
+		// promotion-only environment exists to refuse.
+		p, err := gitDeploymentPolicy(ctx, tx, req.EnvironmentID)
+		if err != nil {
+			return err
+		}
+		if p.PromotionOnly {
+			return ErrPromotionOnly
+		}
+	}
 	if !automaticDeploymentTrigger(req.Trigger) || (req.Operation != OperationDeploy && req.Operation != OperationForceBuild && req.Operation != OperationRedeploy) {
 		return nil
 	}

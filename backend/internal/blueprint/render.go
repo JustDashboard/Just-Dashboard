@@ -25,6 +25,9 @@ type RenderedVariable struct {
 	Required    bool   `json:"required,omitempty"`
 	Length      int    `json:"length,omitempty"`
 	Label       string `json:"label,omitempty"`
+	// Format is the generated secret's alphabet when it is not letters and
+	// digits ("hex").
+	Format string `json:"format,omitempty"`
 }
 
 type RenderedPort struct {
@@ -80,7 +83,13 @@ type Plan struct {
 	Files            []ConfigFile       `json:"files,omitempty"`
 	Automation       []Automation       `json:"automation,omitempty"`
 	Security         Security           `json:"security"`
-	Digest           string             `json:"digest"`
+	// Services and Compose are a Compose template's: what each service is,
+	// and the document the release runs. Compose holds no value, only
+	// interpolations of the deployment's variables, so it is part of the
+	// digest a fixture pins like everything else here.
+	Services []RenderedService `json:"services,omitempty"`
+	Compose  string            `json:"compose,omitempty"`
+	Digest   string            `json:"digest"`
 }
 
 // Acceptance records that the operator agreed to a specific linked document.
@@ -162,7 +171,7 @@ func Render(blueprint *Blueprint, inputs map[string]string) (*Plan, error) {
 	for _, secret := range blueprint.Secrets {
 		variables[secret.Variable] = RenderedVariable{
 			Name: secret.Variable, Sensitivity: "secret", Generated: true,
-			Length: secret.Length, Label: secret.Label,
+			Length: secret.Length, Label: secret.Label, Format: secret.Alphabet,
 		}
 	}
 
@@ -208,8 +217,16 @@ func Render(blueprint *Blueprint, inputs map[string]string) (*Plan, error) {
 		plan.Variables = append(plan.Variables, variables[name])
 	}
 
+	declaredPorts := blueprint.Ports
+	if blueprint.IsCompose() {
+		// The release follows the public service: its ports are the ones the
+		// route and the readiness checks reach.
+		if public := blueprint.PublicService(); public != nil {
+			declaredPorts = public.Ports
+		}
+	}
 	portsByName := map[string]int{}
-	for _, port := range blueprint.Ports {
+	for _, port := range declaredPorts {
 		internal := port.Internal
 		if override, found := values["port-"+port.Name]; found && override != "" {
 			parsed, convErr := strconv.Atoi(override)
@@ -243,6 +260,11 @@ func Render(blueprint *Blueprint, inputs map[string]string) (*Plan, error) {
 	}
 	plan.Files = append([]ConfigFile(nil), blueprint.Files...)
 	plan.Automation = append([]Automation(nil), blueprint.Automation...)
+	if blueprint.IsCompose() {
+		if err := renderComposeTemplate(blueprint, plan); err != nil {
+			return nil, err
+		}
+	}
 
 	digest, err := planDigest(plan)
 	if err != nil {

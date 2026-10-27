@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/secretstore"
 )
 
 type DeploymentStepExecutor struct {
@@ -66,6 +67,10 @@ type NormalizedStepExecutor struct {
 	// reachability check after a publish, replaced in tests.
 	tailnet      TailnetPublisher
 	tailnetProbe func(context.Context, string) error
+
+	// hostMemory reads available and total memory in bytes, for the warm
+	// release's memory floor; nil reads /proc/meminfo.
+	hostMemory func() (int64, int64)
 }
 
 func (e *NormalizedStepExecutor) WithNotifications(store *AutomationStore) *NormalizedStepExecutor {
@@ -188,6 +193,13 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 			return normalizedStepFailure(ErrPreviewApproval)
 		}
 	}
+	if request, ok := instantRollbackOf(execution.Run); ok {
+		return e.executeInstantRollback(ctx, execution, request)
+	}
+	e.endWarmWindow(ctx, execution)
+	if failure := e.readSecretStores(ctx, execution); failure != nil {
+		return *failure
+	}
 	switch execution.Step.Key {
 	case StepResolveSource:
 		if err := validateImmutableExecutionSource(plan); err != nil {
@@ -238,6 +250,29 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 		return StepResult{
 			State: StepUnavailable, ErrorCode: "unsupported_runtime",
 			ErrorMessage: fmt.Sprintf("normalized runtime step %s is not implemented yet", execution.Step.Key),
+		}
+	}
+}
+
+// executeInstantRollback runs the six steps an instant rollback takes.
+func (e *NormalizedStepExecutor) executeInstantRollback(ctx context.Context, execution StepExecution, request instantRollback) StepResult {
+	switch execution.Step.Key {
+	case StepStartCandidate:
+		return e.resumeWarmRelease(ctx, execution, request)
+	case StepVerifyReadiness:
+		return e.verifyWarmRelease(ctx, execution, request)
+	case StepActivate:
+		return e.activateWarmRelease(ctx, execution, request)
+	case StepRetirePrevious:
+		return e.retireRolledBackRelease(ctx, execution, request)
+	case StepRecordRelease:
+		return e.recordRelease(ctx, execution)
+	case StepNotify:
+		return e.notify(ctx, execution)
+	default:
+		return StepResult{
+			State: StepUnavailable, ErrorCode: "unsupported_runtime",
+			ErrorMessage: fmt.Sprintf("an instant rollback has no step %s", execution.Step.Key),
 		}
 	}
 }
@@ -303,8 +338,10 @@ func (e *NormalizedStepExecutor) notify(ctx context.Context, execution StepExecu
 	// through the same channels as successful ones. This step records which
 	// channels will hear about the outcome and keeps the scheduled-chain gate.
 	selected := 0
+	outcome := execution.Run
+	outcome.State = RunState(terminalState)
 	for _, channel := range channels {
-		if channel.Enabled && notificationEventSelected(channel.Events, notificationEventForState(RunState(terminalState))) {
+		if channel.Enabled && notificationEventSelected(channel.Events, notificationEventForRun(outcome)) {
 			selected++
 		}
 	}
@@ -330,6 +367,9 @@ func notificationEventSelected(events []string, want string) bool {
 			return true
 		}
 		if event == NotificationEventFinished && want != NotificationEventStarted {
+			return true
+		}
+		if event == NotificationEventFailed && want == NotificationEventRolledBack {
 			return true
 		}
 	}
@@ -547,6 +587,9 @@ func (e *NormalizedStepExecutor) renderRuntime(
 	execution StepExecution,
 	plan *StoredExecutionPlan,
 ) StepResult {
+	if execution.Run.Operation == OperationPromote {
+		return e.renderPromotedRuntime(ctx, execution, plan)
+	}
 	if execution.Run.Operation == OperationRedeploy || execution.Run.Operation == OperationRollback {
 		targetReleaseID, err := operationTargetReleaseID(execution.Run)
 		if err != nil {
@@ -605,12 +648,50 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 	execution StepExecution,
 	plan *StoredExecutionPlan,
 ) StepResult {
+	if execution.Run.Operation == OperationPromote && !needsSourceTree(plan.Build.ReleaseTasks) {
+		// A promotion has no workspace of its own to clean up, and a task in
+		// the release image reads no checkout: the promoted commit is fetched
+		// only when a task runs in the dashboard's shell against its tree.
+		if len(plan.Build.ReleaseTasks) == 0 {
+			return StepResult{State: StepSkipped, Evidence: mustJSON(map[string]any{"reason": "no release tasks configured"})}
+		}
+		return e.runReleaseTasksIn(ctx, execution, plan, &MaterializedSource{})
+	}
 	source, _, err := e.materializedBuildRoot(ctx, execution.Run, plan)
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
+	return e.runReleaseTasksIn(ctx, execution, plan, source)
+}
+
+// cleanupReleaseSource removes the run's workspace, where it has one; a
+// promotion running only image tasks never made one.
+func cleanupReleaseSource(source *MaterializedSource) (bool, error) {
+	if source.Workspace == "" {
+		return true, nil
+	}
+	return source.Cleanup()
+}
+
+// needsSourceTree reports whether any task runs in the dashboard's shell,
+// which is the only runner that reads the materialized source.
+func needsSourceTree(tasks []ReleaseTaskConfig) bool {
+	for _, task := range tasks {
+		if task.Runner != ReleaseTaskRunnerImage {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *NormalizedStepExecutor) runReleaseTasksIn(
+	ctx context.Context,
+	execution StepExecution,
+	plan *StoredExecutionPlan,
+	source *MaterializedSource,
+) StepResult {
 	if len(plan.Build.ReleaseTasks) == 0 {
-		cleaned, cleanupErr := source.Cleanup()
+		cleaned, cleanupErr := cleanupReleaseSource(source)
 		if cleanupErr != nil {
 			return StepResult{
 				State: StepFailed, ErrorCode: "cleanup_incomplete", ErrorMessage: "release workspace cleanup failed",
@@ -628,7 +709,7 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 	}
 	image, imageRunner, err := e.releaseTaskImageRequest(ctx, execution, plan)
 	if err != nil {
-		_, _ = source.Cleanup()
+		_, _ = cleanupReleaseSource(source)
 		return normalizedStepFailure(err)
 	}
 	evidence := []ReleaseTaskEvidence{}
@@ -660,7 +741,7 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 		}
 		evidence = append(evidence, taskEvidence)
 		if taskErr != nil {
-			cleaned, cleanupErr := source.Cleanup()
+			cleaned, cleanupErr := cleanupReleaseSource(source)
 			state := StepFailed
 			code, message, cause := releaseTaskFailure(task, taskEvidence, taskErr, output.lines, plan.Variables)
 			if ctx.Err() != nil {
@@ -680,7 +761,7 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 			}
 		}
 	}
-	cleaned, cleanupErr := source.Cleanup()
+	cleaned, cleanupErr := cleanupReleaseSource(source)
 	if cleanupErr != nil {
 		return StepResult{
 			State: StepFailed, ErrorCode: "cleanup_incomplete", ErrorMessage: "release tasks passed but workspace cleanup failed",
@@ -910,7 +991,11 @@ func normalizedStepFailure(err error) StepResult {
 	var sourceFailure *SourceFailure
 	var buildFailure *dockerx.BuildError
 	var release toolchainVersionError
+	var storeFailure *secretstore.Failure
 	switch {
+	case errors.As(err, &storeFailure):
+		// The store's own answer, which never holds a value.
+		result.ErrorCode, result.ErrorMessage = "secret_store_unreadable", storeFailure.Error()
 	case errors.As(err, &sourceFailure):
 		result.ErrorCode, result.ErrorMessage = sourceFailure.Code, sourceFailure.Error()
 	case errors.Is(err, dockerx.ErrBuildTimeout):

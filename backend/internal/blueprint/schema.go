@@ -191,7 +191,10 @@ type Secret struct {
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
 	Length      int    `json:"length"`
-	Alphabet    string `json:"alphabet,omitempty"`
+	// Alphabet is empty for letters and digits, which are safe inside a URL
+	// and a shell, or "hex" for an application that refuses any other shape
+	// (Outline's and Ghost's keys are hexadecimal).
+	Alphabet string `json:"alphabet,omitempty"`
 }
 
 type Port struct {
@@ -307,6 +310,82 @@ type Security struct {
 	Reason       string   `json:"reason,omitempty"`
 }
 
+// ServiceRole is what one service is to the stack it belongs to. The picker
+// names it, and validation holds each role to its own rule: a database keeps
+// its data on a volume, and only an application is ever the public service.
+type ServiceRole string
+
+const (
+	RoleApp      ServiceRole = "app"
+	RoleWorker   ServiceRole = "worker"
+	RoleDatabase ServiceRole = "database"
+	RoleCache    ServiceRole = "cache"
+)
+
+// StartCondition is what a dependency must reach before Compose starts the
+// service that waits for it. These are Compose's own three conditions.
+type StartCondition string
+
+const (
+	StartHealthy   StartCondition = "healthy"
+	StartStarted   StartCondition = "started"
+	StartCompleted StartCondition = "completed"
+)
+
+type Dependency struct {
+	Service   string         `json:"service"`
+	Condition StartCondition `json:"condition"`
+}
+
+// Healthcheck is the Docker healthcheck a service carries. Test is an argument
+// vector run without a shell, like every other command a blueprint declares,
+// and it is not templated: a secret in a healthcheck would sit in plain text
+// in every `docker inspect`.
+type Healthcheck struct {
+	Test               []string `json:"test"`
+	IntervalSeconds    int      `json:"intervalSeconds"`
+	TimeoutSeconds     int      `json:"timeoutSeconds"`
+	Retries            int      `json:"retries"`
+	StartPeriodSeconds int      `json:"startPeriodSeconds,omitempty"`
+}
+
+// Environment is one variable a service starts with. Value is literal text in
+// which two typed references may appear: {{secret.<name>}}, a secret this
+// blueprint generates, and {{variable.<NAME>}}, a variable the rendered plan
+// carries (an input's, or one a startup operation sets). Both render as
+// Compose interpolations of the deployment's own variables, so the rendered
+// document never holds a value — the generated password two services share is
+// sealed once and handed to each of them at start.
+type Environment struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// Service is one container of a multi-service template. A blueprint that
+// declares services is a Compose template: it deploys through the Compose
+// release path rather than as one image, exactly one of its services owns the
+// deployment's domain, and every other one stays on a private network with
+// nothing published.
+type Service struct {
+	Name        string        `json:"name"`
+	Role        ServiceRole   `json:"role"`
+	Purpose     string        `json:"purpose"`
+	Image       Image         `json:"image"`
+	Environment []Environment `json:"environment,omitempty"`
+	// Ports are what the service listens on. Exactly one port of the whole
+	// template is "proxy": the public service's, routed to the domain. Every
+	// other port is "internal" and documents what the stack talks to.
+	Ports       []Port       `json:"ports,omitempty"`
+	Volumes     []Volume     `json:"volumes,omitempty"`
+	Resources   Resources    `json:"resources"`
+	Healthcheck Healthcheck  `json:"healthcheck"`
+	DependsOn   []Dependency `json:"dependsOn,omitempty"`
+	// Egress lets a private service reach the internet, for a worker that
+	// sends mail or downloads models. Without it a private service is on an
+	// internal network that has no route out.
+	Egress bool `json:"egress,omitempty"`
+}
+
 // Fixture is the expected render for a named set of inputs. Every blueprint
 // ships at least one, and CI renders it and compares the digest.
 type Fixture struct {
@@ -344,6 +423,33 @@ type Blueprint struct {
 	Update     Update       `json:"update"`
 	Security   Security     `json:"security"`
 	Fixtures   []Fixture    `json:"fixtures,omitempty"`
+	// Services makes this a Compose template (profile "compose"): the
+	// top-level image, ports, volumes and resources stay empty and each
+	// service declares its own.
+	Services []Service `json:"services,omitempty"`
+}
+
+// IsCompose says whether this definition is a multi-service Compose template
+// rather than a single image.
+func (b *Blueprint) IsCompose() bool {
+	return b != nil && (b.Profile == ProfileCompose || len(b.Services) > 0)
+}
+
+// PublicService is the one service routed to the deployment's domain: the
+// service that owns the template's only proxy port. It is nil for a
+// single-image blueprint, and for a Compose template validation refuses.
+func (b *Blueprint) PublicService() *Service {
+	if b == nil {
+		return nil
+	}
+	for index := range b.Services {
+		for _, port := range b.Services[index].Ports {
+			if port.Exposure == "proxy" {
+				return &b.Services[index]
+			}
+		}
+	}
+	return nil
 }
 
 var ErrUnknownField = errors.New("blueprint contains an unsupported field")

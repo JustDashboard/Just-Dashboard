@@ -216,11 +216,15 @@ export function ProjectLogs() {
     (signal) =>
       get<DeploymentRequests>(
         `/deploy/${project.projectId}/requests`,
-        { since: new Date(Date.now() - 3_600_000).toISOString(), limit: 1 },
+        {
+          since: new Date(Date.now() - 3_600_000).toISOString(),
+          limit: 1,
+          ...project.environmentQuery,
+        },
         signal,
       ),
     30000,
-    [project.projectId],
+    [project.projectId, project.environmentQuery?.environment],
   )
   // Where the proxy in front of the project says why it failed a request,
   // and the names it answers to: what narrows the ingress, which is every
@@ -246,7 +250,7 @@ export function ProjectLogs() {
     async (signal) => {
       const feed = await get<DeploymentLifecycle>(
         `/deploy/${project.projectId}/lifecycle`,
-        { limit: 200 },
+        { limit: 200, ...project.environmentQuery },
         signal,
       )
       const from = Date.now() - 3_600_000
@@ -256,12 +260,15 @@ export function ProjectLogs() {
       return { feed, recent }
     },
     30000,
-    [project.projectId],
+    [project.projectId, project.environmentQuery?.environment],
   )
+  // Traffic alerts watch production's route; staging's readings carry none.
+  const staging = project.environment === "staging"
   const alerts = usePoll<TrafficAlertList>(
     (signal) => get<TrafficAlertList>(`/deploy/${project.projectId}/alerts`, undefined, signal),
     30000,
     [project.projectId],
+    { enabled: !staging },
   )
   // Who the rules tell, drawn as the services they are. Read once: channels
   // change on another page, and this line only has to name them.
@@ -338,12 +345,14 @@ export function ProjectLogs() {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-6">
       <TrafficReadings requests={requests.data} alerts={alerts.data?.alerts} />
-      <AlertsLine
-        projectId={project.projectId}
-        alerts={alerts.data}
-        channels={channels.data}
-        onAdd={canAddAlert ? () => setAdding(true) : undefined}
-      />
+      {!staging && (
+        <AlertsLine
+          projectId={project.projectId}
+          alerts={alerts.data}
+          channels={channels.data}
+          onAdd={canAddAlert ? () => setAdding(true) : undefined}
+        />
+      )}
 
       {/* A height of its own, the window's less the page's chrome: the
           project shell's `Page` is a flowing column, so a pane that only said
@@ -379,6 +388,7 @@ export function ProjectLogs() {
         {(view === "requests" || view === "insights") && (
           <RequestsWorkspace
             base={`/deploy/${project.projectId}`}
+            scope={project.environmentQuery}
             subject={`deployment ${project.projectId}`}
             view={view}
             query={query}
@@ -443,6 +453,7 @@ export function ProjectLogs() {
         {view === "events" && (
           <LifecycleFeed
             projectId={project.projectId}
+            environmentId={project.environmentQuery?.environment}
             product={project.product}
             moment={eventsMoment}
             onClearMoment={() => setEventsMoment(undefined)}
@@ -461,7 +472,7 @@ export function ProjectLogs() {
         )}
       </Pane>
 
-      {canAddAlert && (
+      {canAddAlert && !staging && (
         <AddAlertSheet
           open={adding}
           onOpenChange={setAdding}

@@ -104,8 +104,8 @@ strategy, and feature ownership behind those rules.
 - [`deployments/redesign-plan.md`](deployments/redesign-plan.md) — deployment experience redesign,
   delivered workflows, and validation evidence.
 - [`deployments/README.md`](deployments/README.md) — the index of the deployment subsystem's other
-  guides: preview isolation, backup coverage, restore verification, recipes, Git policy, database
-  networks, request observability, notifications, the GitHub App and permanent deletion.
+  guides: preview isolation, staging and promotion, backup coverage, restore verification, recipes, Git
+  policy, database networks, request observability, notifications, the GitHub App and permanent deletion.
 - [`frontend/design-system.md`](frontend/design-system.md) — the design system's rules in full: one mode,
   no lift, the colour roles, the component vocabulary, and which surface to reach for.
 - [`frontend/shell-design.md`](frontend/shell-design.md) — App Router shell, navigation, the sections an

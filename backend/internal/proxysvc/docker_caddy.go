@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -104,40 +105,79 @@ func selectDockerCaddy(containers []ingressContainer) (*dockerCaddy, error) {
 		if !public("80/tcp", "80") {
 			continue
 		}
-		command := c.Config.Cmd
-		if len(command) < 4 || filepath.Base(command[0]) != "caddy" || command[1] != "run" || !strings.Contains(strings.Join(command[2:], " "), "--config /etc/caddy/Caddyfile") {
+		if !runsCaddyfile(c) {
 			continue
 		}
 		if !public("443/tcp", "443") {
 			return nil, fmt.Errorf("Caddy container %s owns HTTP but does not publish HTTPS on port 443", strings.TrimPrefix(c.Name, "/"))
 		}
-		found := dockerCaddy{ID: c.ID, Name: strings.TrimPrefix(c.Name, "/"), StartedAt: c.State.StartedAt}
-		config, data := false, false
-		storage := map[string]string{}
-		for _, mount := range c.Mounts {
-			if mount.Destination == "/config" || mount.Destination == "/data" {
-				storage[mount.Destination] = mount.Source
-			}
-			if mount.Destination == "/etc/caddy/Caddyfile" && mount.Type == "bind" {
-				found.Source = mount.Source
-			}
-			if mount.Destination == "/config" && mount.RW {
-				config = true
-			}
-			if mount.Destination == "/data" && mount.RW {
-				data = true
-			}
-		}
-		if found.Source == "" || !config || !data {
-			return nil, fmt.Errorf("Caddy container %s needs a persisted Caddyfile, /config and /data before deployments can share it", found.Name)
+		found, err := dockerCaddyFrom(c)
+		if err != nil {
+			return nil, err
 		}
 		if edge != nil {
 			return nil, errors.New("multiple public Caddy containers require an explicit ingress selection")
 		}
-		found.Identity = routeDigest(found.Source + "\x00" + storage["/config"] + "\x00" + storage["/data"])
-		edge = &found
+		edge = found
 	}
 	return edge, nil
+}
+
+func runsCaddyfile(c ingressContainer) bool {
+	command := c.Config.Cmd
+	return len(command) >= 4 && filepath.Base(command[0]) == "caddy" && command[1] == "run" &&
+		strings.Contains(strings.Join(command[2:], " "), "--config /etc/caddy/Caddyfile")
+}
+
+// dockerCaddyFrom is everything discovery asks of an ingress apart from the
+// ports it publishes: a persisted Caddyfile and writable /config and /data.
+func dockerCaddyFrom(c ingressContainer) (*dockerCaddy, error) {
+	found := dockerCaddy{ID: c.ID, Name: strings.TrimPrefix(c.Name, "/"), StartedAt: c.State.StartedAt}
+	config, data := false, false
+	storage := map[string]string{}
+	for _, mount := range c.Mounts {
+		if mount.Destination == "/config" || mount.Destination == "/data" {
+			storage[mount.Destination] = mount.Source
+		}
+		if mount.Destination == "/etc/caddy/Caddyfile" && mount.Type == "bind" {
+			found.Source = mount.Source
+		}
+		if mount.Destination == "/config" && mount.RW {
+			config = true
+		}
+		if mount.Destination == "/data" && mount.RW {
+			data = true
+		}
+	}
+	if found.Source == "" || !config || !data {
+		return nil, fmt.Errorf("Caddy container %s needs a persisted Caddyfile, /config and /data before deployments can share it", found.Name)
+	}
+	found.Identity = routeDigest(found.Source + "\x00" + storage["/config"] + "\x00" + storage["/data"])
+	return &found, nil
+}
+
+// namedDockerCaddy is the ingress an operator named rather than the one
+// discovery would choose. It must still be a running Caddy over its own
+// persisted Caddyfile; only the public ports are not asked of it, which is
+// what makes it nameable at all.
+//
+// It inspects that one container by name rather than every running one: a
+// listing inspected a moment after it was taken fails whole when any other
+// container on the host went away in between.
+func namedDockerCaddy(ctx context.Context, name string) (*dockerCaddy, error) {
+	raw, err := hostexec.Command(ctx, "docker", "inspect", "--type", "container", name).Output()
+	if err != nil {
+		return nil, fmt.Errorf("the ingress container %s is not running", name)
+	}
+	var containers []ingressContainer
+	if json.Unmarshal(raw, &containers) != nil || len(containers) != 1 {
+		return nil, errors.New("could not read Docker ingress ownership")
+	}
+	c := containers[0]
+	if !c.State.Running || !runsCaddyfile(c) {
+		return nil, fmt.Errorf("the ingress container %s is not a running Caddy serving /etc/caddy/Caddyfile", name)
+	}
+	return dockerCaddyFrom(c)
 }
 
 func (c *dockerCaddy) command(ctx context.Context, input string, args ...string) ([]byte, error) {
@@ -301,6 +341,17 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	// A deployment's route has pages and a maintenance switch, named after
+	// it; the nameless route a certificate is issued through has neither.
+	pages := ""
+	if route.Name != "" {
+		var err error
+		if pages, err = dockerCaddyPagesDir(route.Name); err != nil {
+			return "", err
+		}
+	} else if len(route.ErrorPages) > 0 || route.InterceptErrors {
+		return "", errors.New("a route's pages are kept under its name")
+	}
 	directive := `respond "Deployment is preparing" 503`
 	if upstream != "" {
 		parsed, err := url.Parse(upstream)
@@ -308,6 +359,9 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 			return "", errors.New("invalid Caddy deployment upstream")
 		}
 		directive = "reverse_proxy " + strconv.Quote(upstream)
+		if route.InterceptErrors {
+			directive += renderCaddyInterceptErrors(route.ErrorPages)
+		}
 	}
 	tlsDirective := ""
 	if route.TLS && route.CertPath != "" && !strings.HasPrefix(filepath.Base(filepath.Dir(route.CertPath)), "caddy-") {
@@ -367,21 +421,27 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 			return "", err
 		}
 	}
-	handling := authDirective + gateDirective + bodyDirective + "  " + directive + "\n"
-	if len(route.AllowFrom) > 0 || route.ForwardAuth != nil {
-		// Caddy orders a site's directives itself and puts basic_auth before
-		// respond, which would ask a refused address for the password first,
-		// and a header it removes after forward_auth has set it. A route
-		// block runs in the order written, so the fence comes first and the
-		// sign-in check before the application.
-		fence := ""
-		if len(route.AllowFrom) > 0 {
-			fence = "  @outside not remote_ip " + strings.Join(route.AllowFrom, " ") + "\n" +
-				"  respond @outside \"Forbidden\" 403\n"
-		}
-		handling = "  route {\n" + indentCaddy(fence+handling) + "  }\n"
+	// Caddy orders a site's directives itself and puts basic_auth before
+	// respond, which would ask a refused address for the password first,
+	// and a header it removes after forward_auth has set it. A route block
+	// runs in the order written: the fence first, then maintenance, then the
+	// password or the sign-in, then the application. nginx decides in the
+	// same order, so a refused address is refused whether or not the route
+	// is in maintenance, and nobody is asked to sign in to read it.
+	fence := ""
+	if len(route.AllowFrom) > 0 {
+		fence = "  @outside not remote_ip " + strings.Join(route.AllowFrom, " ") + "\n" +
+			"  respond @outside \"Forbidden\" 403\n"
 	}
-	out := "# Managed by Just Dashboard\n" + strings.Join(names, ", ") + " {\n" + tlsDirective + logDirective + headerDirective + handling + "}\n"
+	maintenance, errorPages := "", ""
+	if pages != "" {
+		maintenance, errorPages = renderCaddyMaintenance(route.Maintenance, pages), renderCaddyErrorPages(route.ErrorPages, pages)
+	}
+	handling := fence + maintenance + authDirective + gateDirective + bodyDirective + "  " + directive + "\n"
+	if fence != "" || maintenance != "" || route.ForwardAuth != nil {
+		handling = "  route {\n" + indentCaddy(handling) + "  }\n"
+	}
+	out := "# Managed by Just Dashboard\n" + strings.Join(names, ", ") + " {\n" + tlsDirective + logDirective + headerDirective + handling + errorPages + "}\n"
 	redirects := append([]HostRedirect(nil), route.Redirects...)
 	sort.Slice(redirects, func(i, j int) bool { return redirects[i].From < redirects[j].From })
 	for _, redirect := range redirects {
@@ -455,6 +515,80 @@ func renderCaddyForwardAuth(gate SiteForwardAuth) (string, error) {
 	out.WriteString("    }\n")
 	out.WriteString("  }\n")
 	return out.String(), nil
+}
+
+// dockerCaddyPagesDir is where a route's maintenance and error pages live
+// inside the ingress, and its maintenance switch beside them: the ingress's
+// persistent /config, named after the route the way its request record is.
+func dockerCaddyPagesDir(name string) (string, error) {
+	if _, err := dockerCaddyRoutePath(name); err != nil {
+		return "", err
+	}
+	return dockerCaddyRoot + "/pages/" + strings.TrimSuffix(name, ".conf"), nil
+}
+
+// renderCaddyMaintenance is the switch every route carries. Caddy looks for
+// the file on every request, as nginx does, so turning maintenance on or off
+// is the file and nothing else: no reload and no rewrite of the route. The
+// ACME challenge is let through, as on nginx, though Caddy answers its own
+// before any route sees it.
+func renderCaddyMaintenance(m DeploymentMaintenance, pages string) string {
+	var out strings.Builder
+	out.WriteString("  @jd_maintenance {\n")
+	out.WriteString("    file {\n      root " + pages + "\n      try_files /" + maintenanceSwitchFile + "\n    }\n")
+	if len(m.BypassFrom) > 0 {
+		out.WriteString("    not remote_ip " + strings.Join(m.BypassFrom, " ") + "\n")
+	}
+	out.WriteString("    not path " + acmeChallengePath + "*\n")
+	out.WriteString("  }\n")
+	out.WriteString("  route @jd_maintenance {\n")
+	if m.RetryAfter > 0 {
+		out.WriteString("    header Retry-After " + strconv.Itoa(m.RetryAfter) + "\n")
+	}
+	out.WriteString("    root * " + pages + "\n")
+	out.WriteString("    rewrite * /maintenance.html\n")
+	out.WriteString("    file_server {\n      status 503\n    }\n")
+	out.WriteString("  }\n")
+	return out.String()
+}
+
+// renderCaddyErrorPages answers the route's chosen codes with its own pages.
+// A file served while Caddy handles an error keeps the error's status, so a
+// 502 is still a 502. Every other error keeps Caddy's own answer.
+func renderCaddyErrorPages(codes []int, pages string) string {
+	if len(codes) == 0 {
+		return ""
+	}
+	sorted := slices.Sorted(slices.Values(codes))
+	list := make([]string, 0, len(sorted))
+	for _, code := range sorted {
+		list = append(list, strconv.Itoa(code))
+	}
+	return "  handle_errors {\n" +
+		"    @jd_page expression `{err.status_code} in [" + strings.Join(list, ", ") + "]`\n" +
+		"    handle @jd_page {\n" +
+		"      root * " + pages + "\n" +
+		"      rewrite * /{err.status_code}.html\n" +
+		"      file_server\n" +
+		"    }\n" +
+		"  }\n"
+}
+
+// renderCaddyInterceptErrors turns the application's own answers with the
+// route's chosen codes into Caddy's errors, which its pages then answer, as
+// nginx's proxy_intercept_errors does. The status is the application's.
+func renderCaddyInterceptErrors(codes []int) string {
+	sorted := slices.Sorted(slices.Values(codes))
+	list := make([]string, 0, len(sorted))
+	for _, code := range sorted {
+		list = append(list, strconv.Itoa(code))
+	}
+	return " {\n" +
+		"    @jd_error status " + strings.Join(list, " ") + "\n" +
+		"    handle_response @jd_error {\n" +
+		"      error \"the application's error page was replaced\" {rp.status_code}\n" +
+		"    }\n" +
+		"  }"
 }
 
 // indentCaddy moves every line of a block one level in.
@@ -772,6 +906,9 @@ func (s *Service) applyDockerCaddyRoute(ctx context.Context, c *dockerCaddy, rou
 		if err := c.ensureAccessLogDir(ctx); err != nil {
 			return result, err
 		}
+	}
+	if err := c.ensurePages(ctx, route); err != nil {
+		return result, fmt.Errorf("the route's pages could not be written: %w", err)
 	}
 	if route.TLS && route.CertPath != "" && !strings.HasPrefix(filepath.Base(filepath.Dir(route.CertPath)), "caddy-") {
 		cert, err := os.ReadFile(route.CertPath)

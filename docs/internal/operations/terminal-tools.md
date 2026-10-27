@@ -64,8 +64,10 @@ backend accepts a single line of at most 4096 bytes and never prints it or puts 
 - Creation defaults to `readonly` and leaves `must_change_pw` clear: root typed the password twice
   on the host, so it is already chosen and the dashboard does not demand another at first sign-in.
 - `auth.ResetPassword` atomically replaces the hash, clears `must_change_pw`, `failed_count` and
-  `locked_until`, deletes browser sessions and revokes API tokens. A failed revocation rolls the whole
-  reset back. It preserves role, disabled state, TOTP seed/enrollment/counter and recovery codes.
+  `locked_until`, deletes browser sessions, revokes API tokens and deletes the account's passkeys. A
+  failed revocation rolls the whole reset back. It preserves role, disabled state, TOTP
+  seed/enrollment/counter and recovery codes, so recovery still works on an account whose passkeys
+  are lost, and a passkey registered by whoever held the account does not survive the reset.
 - `revoke-sessions` calls `auth.RevokeAllSessions`; it leaves API tokens unchanged.
 - `users` reports role, disabled status, TOTP enrollment and required password change, without secrets.
 - Mutations and failed account operations use `audit.Logger`: actor `cli`, username `root`, method

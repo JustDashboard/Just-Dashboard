@@ -383,7 +383,7 @@ func mapDeploymentPlanningError(err error) error {
 		return httpx.Err(status, "removal_failed", removal.Error())
 	}
 	switch {
-	case errors.Is(err, deploy.ErrPreviewApproval), errors.Is(err, deploy.ErrPreviewIsolation):
+	case errors.Is(err, deploy.ErrPreviewApproval), errors.Is(err, deploy.ErrPreviewIsolation), errors.Is(err, deploy.ErrStagingIsolation):
 		return mapAutomationError(err)
 	// Ownership and expiry are distinguished from a genuinely missing id: a
 	// 404 for someone else's draft would tell a caller that guessed ids that

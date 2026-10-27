@@ -158,14 +158,18 @@ func (o *deploymentDatabaseNetworks) bind(ctx context.Context, network deploymen
 	if err := s.Store.DB.QueryRowContext(ctx, `SELECT kind FROM deploy_environments WHERE id=?`, network.EnvironmentID).Scan(&kind); err != nil {
 		return err
 	}
-	// A preview may explicitly link its own database, but cannot join one
-	// already serving production under another saved connection identity.
+	// A preview or staging may explicitly link its own database, but cannot
+	// join one already serving production under another saved connection
+	// identity.
 	var crossKind int
 	if err := s.Store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM deploy_database_bindings b JOIN deploy_environments e ON e.id=b.environment_id
-		WHERE b.environment_id<>? AND (b.connection_id=? OR b.container_name=? OR b.container_id=?) AND (e.kind='preview' OR ?='preview')`, network.EnvironmentID, connectionID, strings.TrimPrefix(detail.Name, "/"), detail.ID, kind).Scan(&crossKind); err != nil {
+		WHERE b.environment_id<>? AND (b.connection_id=? OR b.container_name=? OR b.container_id=?) AND (e.kind IN ('preview','staging') OR ? IN ('preview','staging'))`, network.EnvironmentID, connectionID, strings.TrimPrefix(detail.Name, "/"), detail.ID, kind).Scan(&crossKind); err != nil {
 		return err
 	}
 	if crossKind > 0 {
+		if kind == string(deploy.EnvironmentStaging) {
+			return errors.New("staging and production need separate database containers")
+		}
 		return errors.New("preview and production environments need separate database containers")
 	}
 	var binding deploymentDatabaseBinding

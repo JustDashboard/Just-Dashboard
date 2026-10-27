@@ -38,17 +38,23 @@ export function activeNow(session: Pick<SessionInfo, "lastSeenAt">, now: number)
  * the 2FA routes, and one let in on a password alone is the one an operator
  * of a root-equivalent panel wants to see first.
  */
-export type Guard = "code" | "recovery" | "password" | "pending" | "unknown"
+export type Guard = "code" | "recovery" | "password" | "passkey" | "pending" | "unknown"
 
 export function sessionGuard(session: Pick<SessionInfo, "authMethod" | "twoFactorPassed">): Guard {
   if (!session.twoFactorPassed) return "pending"
   switch (session.authMethod) {
     case "totp":
+    case "passkey+totp":
       return "code"
     case "recovery":
+    case "passkey+recovery":
       return "recovery"
     case "password":
       return "password"
+    // A passkey verifies its user (a PIN or a fingerprint) and cannot be
+    // phished, so it is not drawn as the amber password-alone line.
+    case "passkey":
+      return "passkey"
     default:
       return "unknown"
   }

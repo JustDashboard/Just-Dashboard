@@ -46,6 +46,10 @@ const (
 	// And the host events, to the channels a host alert rule names.
 	NotificationEventHostFiring    = "host.alert.firing"
 	NotificationEventHostRecovered = "host.alert.recovered"
+	// An automatic rollback is not selected on its own: it reaches every
+	// channel that hears about failures, because a release that had to be
+	// taken back is one, however cleanly the taking back went.
+	NotificationEventRolledBack = "release.rolled_back"
 )
 
 // NotificationEvents is the closed vocabulary a channel may select from.
@@ -482,6 +486,22 @@ type NotificationEnvelope struct {
 	// Host carries a host alert's subject and reading; it is set on the two
 	// host events and on nothing else.
 	Host *HostAlertEnvelope `json:"host,omitempty"`
+	// Rollback carries what an instant rollback switched from and to, and
+	// why; it is set on an instant rollback run's events and nothing else.
+	Rollback *RollbackEnvelope `json:"rollback,omitempty"`
+}
+
+// RollbackEnvelope is an instant rollback's account of itself: the release
+// traffic was taken from, the warm release it went back to, and the reading
+// that decided it or the operator who pressed it.
+type RollbackEnvelope struct {
+	Automatic             bool   `json:"automatic"`
+	ReleaseNumber         int64  `json:"releaseNumber"`
+	RestoredReleaseNumber int64  `json:"restoredReleaseNumber"`
+	Reason                string `json:"reason,omitempty"`
+	// Rule is the verdict code that decided an automatic one: error_rate or
+	// latency.
+	Rule string `json:"rule,omitempty"`
 }
 
 // HostAlertEnvelope is what a host alert says when the machine itself is in
@@ -612,6 +632,8 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 		return renderDatabaseAlert(envelope)
 	case NotificationEventHostFiring, NotificationEventHostRecovered:
 		return renderHostAlert(envelope)
+	case NotificationEventRolledBack:
+		return renderAutomaticRollback(envelope, project, environment, run)
 	case NotificationEventTest:
 		message.Emoji, message.Color = "🔔", 0x5865f2
 		message.Title = "Test notification from Just Dashboard"
@@ -660,6 +682,36 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 	if envelope.Endpoint != "" && envelope.Event == NotificationEventSucceeded {
 		fields = append(fields, [2]string{"Address", envelope.Endpoint})
 	}
+	if rollback := envelope.Rollback; rollback != nil {
+		fields = append(fields, [2]string{"Rolled back", fmt.Sprintf("release #%d to the warm release #%d", rollback.ReleaseNumber, rollback.RestoredReleaseNumber)})
+		if rollback.Reason != "" && envelope.Event == NotificationEventFailed {
+			fields = append(fields, [2]string{"Why", rollback.Reason})
+		}
+	}
+	message.Fields = fields
+	return message
+}
+
+// renderAutomaticRollback is the message an automatic rollback sends: which
+// release was taken back, what the reading was, and that the previous
+// release is serving again — the last part being what lets the reader finish
+// breakfast.
+func renderAutomaticRollback(envelope NotificationEnvelope, project, environment, run string) notificationMessage {
+	rollback := envelope.Rollback
+	if rollback == nil {
+		rollback = &RollbackEnvelope{}
+	}
+	message := notificationMessage{URL: envelope.URL, Emoji: "↩️", Color: notificationRed}
+	message.Title = fmt.Sprintf("%s · %s — release #%d rolled back automatically", project, environment, rollback.ReleaseNumber)
+	message.Summary = strings.TrimSpace(fmt.Sprintf("%s Release #%d serves again from its warm container.", rollback.Reason, rollback.RestoredReleaseNumber))
+	fields := [][2]string{
+		{"Rolled back", fmt.Sprintf("release #%d", rollback.ReleaseNumber)},
+		{"Serving", fmt.Sprintf("release #%d (kept warm)", rollback.RestoredReleaseNumber)},
+	}
+	if rollback.Reason != "" {
+		fields = append(fields, [2]string{"Why", rollback.Reason})
+	}
+	fields = append(fields, [2]string{"Run", run})
 	message.Fields = fields
 	return message
 }
@@ -879,6 +931,8 @@ func humanizeOperation(operation string) string {
 		return "Rebuild without cache"
 	case OperationRollback:
 		return "Rollback"
+	case OperationPromote:
+		return "Promotion from staging"
 	case OperationRestart:
 		return "Restart"
 	case OperationStop:
@@ -1307,11 +1361,21 @@ func (d *NotificationDispatcher) RunStarted(ctx context.Context, run EngineRun) 
 }
 
 func (d *NotificationDispatcher) RunFinished(ctx context.Context, run EngineRun) {
-	event := notificationEventForState(run.State)
+	event := notificationEventForRun(run)
 	if event == "" {
 		return
 	}
 	d.dispatch(ctx, run, event)
+}
+
+// notificationEventForRun is the event a terminal run raises. A successful
+// automatic rollback raises its own: the run went well, the release it took
+// traffic from did not.
+func notificationEventForRun(run EngineRun) string {
+	if request, ok := instantRollbackOf(run); ok && request.Automatic && run.State == RunSucceeded {
+		return NotificationEventRolledBack
+	}
+	return notificationEventForState(run.State)
 }
 
 func (d *NotificationDispatcher) dispatch(ctx context.Context, run EngineRun, event string) {
@@ -1386,6 +1450,15 @@ func (d *NotificationDispatcher) envelope(ctx context.Context, run EngineRun, ev
 	if d.baseURL != nil {
 		if base := strings.TrimRight(strings.TrimSpace(d.baseURL()), "/"); base != "" {
 			envelope.URL = fmt.Sprintf("%s/deploy/%d/runs/%d", base, run.ProjectID, run.ID)
+		}
+	}
+	if request, ok := instantRollbackOf(run); ok && d.runs != nil {
+		envelope.Rollback = &RollbackEnvelope{Automatic: request.Automatic, Reason: request.Reason}
+		if watch, err := d.runs.RollbackWatch(ctx, request.WatchID); err == nil {
+			envelope.Rollback.ReleaseNumber, envelope.Rollback.RestoredReleaseNumber = watch.ReleaseNumber, watch.WarmReleaseNum
+			if request.Automatic && watch.Verdict != nil && watch.Verdict.Tripped {
+				envelope.Rollback.Rule = watch.Verdict.Code
+			}
 		}
 	}
 	return envelope

@@ -1,0 +1,267 @@
+{
+  "id": "gitea-postgres",
+  "version": "1.0.0",
+  "name": "Gitea with PostgreSQL",
+  "category": "http",
+  "profile": "compose",
+  "description": "The self-hosted Git forge on PostgreSQL, with installation done for you: no installer page, and the first account registered becomes the administrator.",
+  "iconId": "code",
+  "docsUrl": "https://docs.gitea.com/installation/install-with-docker-rootless",
+  "access": {
+    "kind": "setup",
+    "path": "/user/sign_up",
+    "note": "Gitea is installed and configured against PostgreSQL before it starts, so there is no installer page; instead the first account registered at https://<domain>/user/sign_up becomes the site administrator. Register yourself the moment the deployment is ready, then turn off open registration under Site Administration if nobody else should sign up. SSH is off; clone over HTTPS."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/go-gitea/gitea",
+    "reviewedAt": "2026-10-27",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Gitea writes this into clone URLs, so changing it later rewrites what users copy."
+    }
+  ],
+  "secrets": [
+    {
+      "name": "db-password",
+      "variable": "GITEA_DB_PASSWORD",
+      "label": "Database password",
+      "length": 40,
+      "description": "Generated here and given only to the services that sign in to the database."
+    },
+    {
+      "name": "secret-key",
+      "variable": "GITEA_SECRET_KEY",
+      "label": "Secret key",
+      "length": 64,
+      "description": "Encrypts two-factor secrets and other values Gitea stores; keep it with your backups."
+    }
+  ],
+  "services": [
+    {
+      "name": "gitea",
+      "role": "app",
+      "purpose": "The web interface and Git over HTTPS, behind the domain",
+      "image": {
+        "reference": "gitea/gitea:1.27.3-rootless",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "GITEA__database__DB_TYPE",
+          "value": "postgres"
+        },
+        {
+          "name": "GITEA__database__HOST",
+          "value": "db:5432"
+        },
+        {
+          "name": "GITEA__database__NAME",
+          "value": "gitea"
+        },
+        {
+          "name": "GITEA__database__USER",
+          "value": "gitea"
+        },
+        {
+          "name": "GITEA__database__PASSWD",
+          "value": "{{secret.db-password}}"
+        },
+        {
+          "name": "GITEA__security__INSTALL_LOCK",
+          "value": "true"
+        },
+        {
+          "name": "GITEA__security__SECRET_KEY",
+          "value": "{{secret.secret-key}}"
+        },
+        {
+          "name": "GITEA__server__ROOT_URL",
+          "value": "{{variable.GITEA__server__ROOT_URL}}"
+        },
+        {
+          "name": "GITEA__server__DOMAIN",
+          "value": "{{variable.GITEA__server__DOMAIN}}"
+        },
+        {
+          "name": "GITEA__server__DISABLE_SSH",
+          "value": "true"
+        },
+        {
+          "name": "GITEA__server__START_SSH_SERVER",
+          "value": "false"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 3000,
+          "protocol": "tcp",
+          "purpose": "The web interface and Git over HTTPS",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "data",
+          "target": "/var/lib/gitea",
+          "purpose": "Repositories, attachments, avatars and LFS objects",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "config",
+          "target": "/etc/gitea",
+          "purpose": "app.ini, with the settings Gitea generated on first start",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fsS",
+          "-o",
+          "/dev/null",
+          "http://127.0.0.1:3000/api/healthz"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 12,
+        "startPeriodSeconds": 30
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "PostgreSQL, holding every issue, pull request, user and setting",
+      "image": {
+        "reference": "postgres:17.11-alpine",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "POSTGRES_DB",
+          "value": "gitea"
+        },
+        {
+          "name": "POSTGRES_USER",
+          "value": "gitea"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "value": "{{secret.db-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "postgres",
+          "internal": 5432,
+          "protocol": "tcp",
+          "purpose": "SQL connections from Gitea",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/var/lib/postgresql/data",
+          "purpose": "Every table Gitea keeps",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "pg_isready",
+          "-h",
+          "127.0.0.1",
+          "-U",
+          "gitea",
+          "-d",
+          "gitea"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 20
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/healthz",
+      "port": "http",
+      "timeoutSeconds": 240
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "GITEA__server__ROOT_URL",
+        "value": "https://{{input.domain}}/"
+      },
+      {
+        "kind": "set_variable",
+        "name": "GITEA__server__DOMAIN",
+        "value": "{{input.domain}}"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "Gitea migrates its database on start and does not support downgrading; take a backup first. Read the release notes before skipping minor versions."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "git.example.test"
+      },
+      "digest": "sha256:8dc0a55121ba8b618c292bbd7b8d4b17093a005a440aa4643d3b9ece4c30a97f"
+    }
+  ]
+}

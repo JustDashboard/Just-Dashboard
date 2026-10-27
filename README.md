@@ -95,12 +95,17 @@ free.
 
 ### 🚀 Deployments
 
-- Deploy from a repository, an image, a Compose stack or **57 reviewed templates**
+- Deploy from a repository, an image, a Compose stack or **77 reviewed templates**, 20 of them
+  multi-service stacks — an application with its own database, cache or worker
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
 - Push to deploy, plus pull-request previews only your tailnet can reach
 - Immutable releases, one-click rollback and health-gated cutover
+- HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
+- A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Variables per environment, plus shared ones defined once for the server or a project
+- Variables read from HashiCorp Vault, OpenBao, Infisical or Doppler, fresh for each run
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
+- A maintenance page switched on at once, without a deploy, and the app's own error pages
 - Build logs, runtime, console, request logs and traffic alerts per project
 - A failed run named from its own output, and on request explained by your own model, secrets masked
 - Request insights that count real visitors apart from bots, with their devices and pages
@@ -208,7 +213,7 @@ free.
 - Host package updates on apt, dnf, yum, zypper, pacman or apk
 - System users, an audit log of every change and the panel's own settings
 - Address, certificate, allowlist and ports applied with automatic rollback
-- Roles, two-factor, sessions and API keys for every account
+- Roles, two-factor, passkeys, sessions and API keys for every account
 - Search and replace API keys, with explicit revocation and inactive-record cleanup
 - A first-run question that keeps the sections you don't use out of your sidebar
 - One-click self-update, with the release notes compiled in
@@ -428,7 +433,7 @@ Passwords are entered twice with hidden input and must meet the dashboard's stre
 password a script sets is the one the account signs in with — the dashboard does not ask for another
 at sign-in. An account an admin creates from Account → Users, and a bootstrap password the backend
 generated, are the ones replaced on first sign-in, after any required two-factor step. A reset
-clears failed-login lockout and revokes that account's sessions and API tokens, while keeping
+clears failed-login lockout and revokes that account's sessions, API tokens and passkeys, while keeping
 two-factor enrolment, recovery codes, role and disabled state. Account changes are audited as local
 root; `revoke-sessions` leaves API tokens unchanged.
 
@@ -527,7 +532,7 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - The backend refuses to start on a non-loopback address without a `JD_ALLOWED_CIDRS` allowlist,
   and the allowlist is checked **before** authentication.
 - Two-factor is enforced for every account that has enrolled; `JD_REQUIRE_2FA` decides whether an
-  account *must* enrol.
+  account *must* enrol. A passkey replaces the password at sign-in, never the code.
 - Capabilities are checked on every backend route, never in the UI alone.
 - Destructive actions are confirmed and audited; deleting a project, database, stack or Git checkout,
   and uninstalling with a wipe, asks for a typed phrase checked on the server.
@@ -624,6 +629,7 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_DEPLOY_ROOTS` | `/opt,/srv,/home,/root` | Where a deploy project's repository may live. A project outside these is refused. |
 | `JD_NGINX_DIR` | `/etc/nginx` | nginx configuration root. |
 | `JD_CADDYFILE` | `/etc/caddy/Caddyfile` | Caddy configuration file. |
+| `JD_INGRESS_CONTAINER` | — | Name of the Caddy container deployment domains are served through, when it is not one publishing 80 and 443 on every address (discovered otherwise). |
 | `JD_BACKUP_DIR` | `/var/backups/just-dashboard` | Local backup destination and staging. |
 | `JD_DB_UPLOAD_MAX_MB` | `2048` | Largest file one database import or uploaded dump may be, in MiB. |
 | `JD_DATA_DIR` | `/var/lib/just-dashboard` | The dashboard's own database. **Back this up.** |

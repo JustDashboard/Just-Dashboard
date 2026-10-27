@@ -672,12 +672,16 @@ func automationReason(err error) string {
 	switch {
 	case errors.Is(err, deploy.ErrGitManualOnly):
 		return "manual_only"
+	case errors.Is(err, deploy.ErrPromotionOnly):
+		return "promotion_only"
 	case errors.Is(err, deploy.ErrGitPolicyConflict):
 		return "policy_conflict"
 	case errors.Is(err, deploy.ErrPreviewApproval):
 		return "preview_approval_required"
 	case errors.Is(err, deploy.ErrPreviewIsolation):
 		return "preview_isolation_required"
+	case errors.Is(err, deploy.ErrStagingIsolation):
+		return "staging_isolation_required"
 	case errors.Is(err, deploy.ErrPreviewCleanupPending):
 		return "preview_cleanup_pending"
 	case errors.Is(err, deploy.ErrBadHookSignature):
