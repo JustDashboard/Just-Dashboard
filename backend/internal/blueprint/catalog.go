@@ -181,6 +181,23 @@ type Summary struct {
 	MemoryMB            int      `json:"memoryMb"`
 	RequiresAcceptance  bool     `json:"requiresAcceptance,omitempty"`
 	Privileged          bool     `json:"privileged,omitempty"`
+	// SourceKind is the deployment source this blueprint is deployed as:
+	// "blueprint" for one reviewed image, "compose" for a multi-service
+	// template that runs through the Compose release path. Image and
+	// MemoryMB are then the public service's image and the whole stack's
+	// footprint, and Services lists what the stack runs.
+	SourceKind string           `json:"sourceKind"`
+	Services   []ServiceSummary `json:"services,omitempty"`
+}
+
+// ServiceSummary is one service of a Compose template as the picker lists it.
+type ServiceSummary struct {
+	Name     string      `json:"name"`
+	Role     ServiceRole `json:"role"`
+	Purpose  string      `json:"purpose"`
+	Image    string      `json:"image"`
+	MemoryMB int         `json:"memoryMb"`
+	Public   bool        `json:"public,omitempty"`
 }
 
 func Summarize(blueprint *Blueprint) Summary {
@@ -197,6 +214,23 @@ func Summarize(blueprint *Blueprint) Summary {
 	for _, input := range blueprint.Inputs {
 		if input.Kind == InputAccept {
 			summary.RequiresAcceptance = true
+		}
+	}
+	summary.SourceKind = "blueprint"
+	if blueprint.IsCompose() {
+		summary.SourceKind = "compose"
+		summary.MemoryMB = 0
+		public := blueprint.PublicService()
+		for _, service := range blueprint.Services {
+			isPublic := public != nil && service.Name == public.Name
+			if isPublic {
+				summary.Image = service.Image.Reference
+			}
+			summary.MemoryMB += service.Resources.MemoryMB
+			summary.Services = append(summary.Services, ServiceSummary{
+				Name: service.Name, Role: service.Role, Purpose: service.Purpose,
+				Image: service.Image.Reference, MemoryMB: service.Resources.MemoryMB, Public: isPublic,
+			})
 		}
 	}
 	return summary

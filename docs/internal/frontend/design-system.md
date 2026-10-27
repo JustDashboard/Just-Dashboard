@@ -1731,7 +1731,12 @@ for the file manager's paper page, stay, while the tile draws light copies (`rus
 `pnpm-light.svg`), and two marks already keyed, Valkey's and FreshRSS's, were lifted after the
 contact sheet showed them failing the ground. The notification kinds added in 0.8.2 brought three
 more from the same set — Pushover's, Teams' and Mattermost's, the last with its navy lifted to the
-L 0.72 rung — and draw ntfy and Gotify with the files the webhook receivers already had.
+L 0.72 rung — and draw ntfy and Gotify with the files the webhook receivers already had. The
+multi-service templates brought thirteen more from the same set: WordPress, Ghost (its light variant,
+rasterised to 96px like Compose's), Plausible, Matomo, listmonk, Paperless-ngx (its leaf lifted to the
+L 0.72 rung), Miniflux (its light variant), Wiki.js, authentik, Keycloak, Docmost (rasterised), Firefly
+III and Planka; a template that pairs an application already drawn with its database
+(`nextcloud-mariadb`, `n8n-postgres`, …) is keyed to that application's file.
 
 The Databases section brought sixteen more, from the same three collections under the same rules:
 dashboard-icons' etcd, CouchDB, Cassandra, OpenSearch, FerretDB and Kafka (its white variant);
@@ -2694,6 +2699,18 @@ The passes, in order. Each one is a diff you can review on its own.
    lost their *Shares* paragraphs for a mark and one line, because what a scope shares is the list
    under them, which follows the card picked; that list and the snapshot's groups are drawn with
    their marks, a kind no product names taking its lane hue as the Schedule band's kinds do.
+
+   It took a second pass the same day, because the operator found it oversized once linked: on a
+   server with two dozen containers the Containers group wrapped every record over two or three
+   lines (an image digest is 71 characters), and the groups sat in a grid whose rows were as tall
+   as their tallest, so the short ones stood beside a screen of nothing. The groups are set in
+   columns now, so a short group sits under the one above it; each list of records — the
+   containers, and the stacks and alerts firing, which are groups of their own rather than lines
+   stretching *Heartbeat* — is a line per record led by its name, the rest truncated on the same
+   line with the whole record as its title, folded after five behind *Show all*. Values are body
+   text in tabular figures, mono kept for the fingerprints compared character by character, and
+   the sections stand at the deploy settings pages' `py-8`. At 1440 the linked page went from
+   3,387px to 2,112px.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed

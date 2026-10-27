@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -56,7 +57,35 @@ type DeploymentRoute struct {
 	// route has one or the other. PathsOnly is not a route's to set: a
 	// deployment has no paths of its own.
 	ForwardAuth *SiteForwardAuth `json:"forwardAuth,omitempty"`
+	// Maintenance is who still reaches the application while the route is
+	// in maintenance, and how long its 503 tells clients to wait. Whether
+	// the route is in maintenance is not part of it: every route carries the
+	// check, and a file beside it turns it on (SetDeploymentMaintenance), so
+	// it changes at once rather than with the next release.
+	Maintenance DeploymentMaintenance `json:"maintenance"`
+	// ErrorPages are the codes the route answers with a page of its own
+	// rather than the proxy's stock one: 404, 502, 503 or 504.
+	// InterceptErrors gives the application's own answers with those codes
+	// the page too, not only the proxy's.
+	ErrorPages      []int `json:"errorPages,omitempty"`
+	InterceptErrors bool  `json:"interceptErrors,omitempty"`
 }
+
+// DeploymentMaintenance is what a route's maintenance does while it is on.
+type DeploymentMaintenance struct {
+	// RetryAfter is the seconds the 503 tells clients and crawlers to wait;
+	// 0 sends no Retry-After.
+	RetryAfter int `json:"retryAfter,omitempty"`
+	// BypassFrom are the addresses and ranges that reach the application as
+	// usual while the route is in maintenance.
+	BypassFrom []string `json:"bypassFrom,omitempty"`
+}
+
+// MaxRetryAfter is the longest wait a maintenance 503 may ask for: a day.
+const MaxRetryAfter = 86400
+
+// ErrorPageCodes are the codes a route or a site may give a page of its own.
+func ErrorPageCodes() []int { return slices.Clone(errorPageCodes) }
 
 // Hostnames is every name the route answers, served and redirecting, which
 // is what its certificate has to cover.
@@ -136,6 +165,42 @@ func validateDeploymentRules(route DeploymentRoute) error {
 		if len(route.BasicAuth) > 0 {
 			return errors.New("signing in replaces the route's password — remove the password first")
 		}
+	}
+	return validateDeploymentPages(route)
+}
+
+// validateDeploymentPages checks a route's maintenance and error pages by
+// the rules a Proxy site's are held to.
+func validateDeploymentPages(route DeploymentRoute) error {
+	m := route.Maintenance
+	if m.RetryAfter < 0 || m.RetryAfter > MaxRetryAfter {
+		return fmt.Errorf("retry after must be between 0 and %d seconds", MaxRetryAfter)
+	}
+	if len(m.BypassFrom) > MaxDeploymentAllow {
+		return fmt.Errorf("at most %d addresses can be let past maintenance", MaxDeploymentAllow)
+	}
+	for _, entry := range m.BypassFrom {
+		if normalized, err := NormalizeAccessEntry(entry); err != nil {
+			return err
+		} else if normalized != entry {
+			return fmt.Errorf("%s is written %s", entry, normalized)
+		}
+	}
+	seen := map[int]bool{}
+	for _, code := range route.ErrorPages {
+		if !slices.Contains(errorPageCodes, code) {
+			return fmt.Errorf("an error page can be set for 404, 502, 503 or 504, not %d", code)
+		}
+		if seen[code] {
+			return fmt.Errorf("the %d page is listed twice", code)
+		}
+		seen[code] = true
+	}
+	if route.InterceptErrors && len(route.ErrorPages) == 0 {
+		return errors.New("replacing the application's error pages needs a page to replace them with")
+	}
+	if route.InterceptErrors && route.ForwardAuth != nil {
+		return errors.New("with the application's own error responses replaced, its own 401s would be sent to sign in — turn that off")
 	}
 	return nil
 }
@@ -248,7 +313,7 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 	if edge != nil {
 		return s.applyDockerCaddyRoute(ctx, edge, route)
 	}
-	spec := deploymentSiteSpec(route, s.deploymentAuthFile(route))
+	spec := s.deploymentSpec(route)
 	content, err := RenderNginx(spec)
 	if err != nil {
 		return DeploymentRouteResult{}, err
@@ -262,6 +327,11 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 	result := DeploymentRouteResult{Snapshot: snapshot}
 	if err := s.writeDeploymentAuthFile(route); err != nil {
 		return result, err
+	}
+	// Before the route that serves them, so nginx never answers with a page
+	// that is not there. A page the operator wrote is kept.
+	if err := s.writeMissingPages(spec); err != nil {
+		return result, fmt.Errorf("the route's pages could not be written: %w", err)
 	}
 	if _, err := s.applySiteLocked(ctx, spec, content, true, true, true); err != nil {
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
@@ -342,7 +412,9 @@ func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error 
 		// so leaving it behind after the deployment it described is gone would
 		// keep personal data on the host with nothing left to read it.
 		edge.removeAccessLog(ctx, name)
-		return nil
+		// So do its pages and its maintenance switch, which would otherwise
+		// put the next route written under this name into maintenance.
+		return edge.removePages(ctx, name)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -371,7 +443,9 @@ func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error 
 	if err := os.Remove(filepath.Join(s.authDir(), deploymentAuthFileName(name))); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return nil
+	// So are its pages and its maintenance switch, which would otherwise
+	// put the next route written under this name into maintenance.
+	return s.removeDeploymentPagesLocked(name)
 }
 
 func (s *Service) VerifyDeploymentRoute(ctx context.Context, route DeploymentRoute) error {
@@ -393,7 +467,7 @@ func (s *Service) VerifyDeploymentRoute(ctx context.Context, route DeploymentRou
 		}
 		return edge.configurationSynced(ctx)
 	}
-	content, err := RenderNginx(deploymentSiteSpec(route, s.deploymentAuthFile(route)))
+	content, err := RenderNginx(s.deploymentSpec(route))
 	if err != nil {
 		return err
 	}
@@ -535,6 +609,14 @@ func wildcardCertificateCovers(pattern, domain string) bool {
 	return prefix != "" && !strings.Contains(prefix, ".")
 }
 
+// deploymentSpec is the site a route is on this host's nginx: its password
+// file and the folder its pages are served from are the service's.
+func (s *Service) deploymentSpec(route DeploymentRoute) *SiteSpec {
+	spec := deploymentSiteSpec(route, s.deploymentAuthFile(route))
+	s.SetPagesDir(spec)
+	return spec
+}
+
 func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 	spec := &SiteSpec{
 		Name: route.Name, Domains: append([]string(nil), route.Domains...), Kind: "proxy", Upstream: route.Upstream,
@@ -569,6 +651,14 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 		gate := *route.ForwardAuth
 		spec.ForwardAuth = &gate
 	}
+	// Every route carries the switch, off until its file is written, so a
+	// deployment can be put into maintenance without a release.
+	spec.Maintenance = &SiteMaintenance{
+		Switch: true, RetryAfter: route.Maintenance.RetryAfter,
+		BypassFrom: append([]string{}, route.Maintenance.BypassFrom...),
+	}
+	spec.ErrorPages = slices.Sorted(slices.Values(route.ErrorPages))
+	spec.InterceptErrors = route.InterceptErrors
 	return spec
 }
 

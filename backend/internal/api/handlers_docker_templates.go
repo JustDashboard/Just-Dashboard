@@ -38,6 +38,12 @@ func (s *Server) handleDockerTemplates(w http.ResponseWriter, r *http.Request) e
 		if entry.Profile == blueprint.ProfileGame {
 			continue
 		}
+		// A multi-service template is a stack, not a container: it shares
+		// generated secrets and a private network between its services, which
+		// the single-container form has no way to express.
+		if entry.IsCompose() {
+			continue
+		}
 		rendered, renderErr := blueprint.Render(entry, nil)
 		if renderErr != nil {
 			continue

@@ -175,6 +175,8 @@ type PollResult struct {
 // means the site could not be asked this time and the request stands; a result
 // other than PollPending means the request is over.
 func (s *Service) PollLink(ctx context.Context) (PollResult, error) {
+	s.pollMu.Lock()
+	defer s.pollMu.Unlock()
 	if st, linked, err := s.kv.state(ctx); err != nil {
 		return PollResult{}, err
 	} else if linked {

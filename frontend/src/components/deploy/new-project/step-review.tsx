@@ -17,7 +17,12 @@ import { StepMark, type ReleaseNodeState } from "@/components/deploy/vocabulary"
 import { CODE, ShellWords } from "@/components/deploy/run-evidence"
 import { AutomaticDeployment } from "@/components/deploy/new-project/automatic-deployment"
 import type { ConfigureFlow, DraftGitPolicy } from "@/components/deploy/new-project/draft"
-import { checkBudget, checkTarget, secretShape } from "@/components/deploy/new-project/plan-reading"
+import {
+  checkBudget,
+  checkTarget,
+  composeNamedVolumes,
+  secretShape,
+} from "@/components/deploy/new-project/plan-reading"
 import type { Icon } from "@/components/icons"
 
 /**
@@ -112,6 +117,7 @@ export function StepReview({
       !suppliedVariables.includes(variable.name),
   )
   const mounts = configuration.runtime.mounts ?? []
+  const stackVolumes = composeNamedVolumes(flow)
   const readiness = configuration.checks.filter((check) => check.phase === "readiness")
   const smoke = configuration.checks.filter((check) => check.phase === "smoke")
   const gated = flow.profile === "web" || flow.profile === "static"
@@ -133,7 +139,22 @@ export function StepReview({
       />
 
       <FormSection title="Data it keeps">
-        {mounts.length === 0 ? (
+        {stackVolumes.length > 0 ? (
+          // A Compose stack keeps what its own file mounts: named volumes,
+          // which every release of the stack reuses and backups archive.
+          <ul aria-label="Kept between releases" className="min-w-0 space-y-1">
+            {stackVolumes.map((volume) => (
+              <ReviewItem
+                key={`${volume.service}:${volume.target}`}
+                glyph={Archive}
+                title={
+                  <code className={cn("font-mono break-all", CODE.path)}>{volume.target}</code>
+                }
+                detail={`${volume.service} · the stack's ${volume.name} volume · kept between releases`}
+              />
+            ))}
+          </ul>
+        ) : mounts.length === 0 ? (
           <FormNote>
             Nothing survives a rebuild. Every release starts from the image, so anything the
             application writes is gone when the next one replaces it.

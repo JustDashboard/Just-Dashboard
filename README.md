@@ -95,12 +95,15 @@ free.
 
 ### 🚀 Deployments
 
-- Deploy from a repository, an image, a Compose stack or **57 reviewed templates**
+- Deploy from a repository, an image, a Compose stack or **77 reviewed templates**, 20 of them
+  multi-service stacks — an application with its own database, cache or worker
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
 - Push to deploy, plus pull-request previews only your tailnet can reach
 - Immutable releases, one-click rollback and health-gated cutover
+- HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
 - Variables per environment, plus shared ones defined once for the server or a project
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
+- A maintenance page switched on at once, without a deploy, and the app's own error pages
 - Build logs, runtime, console, request logs and traffic alerts per project
 - A failed run named from its own output, and on request explained by your own model, secrets masked
 - Request insights that count real visitors apart from bots, with their devices and pages

@@ -80,6 +80,13 @@ func (c *dockerCaddy) vhosts(ctx context.Context) ([]VHost, error) {
 		if target, ok := parseDockerCaddyTarget(content); ok {
 			site.Upstreams = []string{target.upstream()}
 		}
+		// A deployment's route is in maintenance while its switch file is
+		// there, as on nginx; the matcher every route carries says nothing.
+		if pages, err := dockerCaddyPagesDir(site.Name); err == nil && strings.Contains(content, " try_files /"+maintenanceSwitchFile+"\n") {
+			if _, on, err := c.read(ctx, pages+"/"+maintenanceSwitchFile); err == nil {
+				site.Maintenance = on
+			}
+		}
 		sites = append(sites, site)
 	}
 	for name := range hosts {

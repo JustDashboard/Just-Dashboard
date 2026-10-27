@@ -222,8 +222,13 @@ only renderer/executor/validation authority for their feature.
   deterministic hostname is already a managed domain of another active project, the HMAC input gains a
   `#2`, `#3`, … counter and is recomputed until a free one is found. `covered` is whether a certificate
   already covers the name — the only thing activation accepts — and `certificateMethod` is the HTTP-01
-  challenge this host could issue one with. Both are reported so the screen can say what the run will do,
-  not so the operator has to do it. Asked about a hostname the operator typed (`?hostname=`), it also
+  challenge this host could issue one with. For a typed wildcard (`?hostname=*.example.com`) asked by
+  `system.admin` it is `dns-01` with `certificateDnsProvider`, the provider whose saved credentials the
+  run would prove it with, or empty with the run's own refusal in `certificateIssue` — one decision,
+  `proxysvc.DeploymentDNSProvider`, answers both. Other roles get a sentence saying a DNS challenge
+  proves it, because the answer looks up the zone's nameservers for a name the caller chose, which
+  stays with administrators for the reason `resolves` does. Both are reported so the screen can say what the run
+  will do, not so the operator has to do it. Asked about a hostname the operator typed (`?hostname=`), it also
   answers `address`, this server's public IPv4, which is the A record the name needs, and — for
   `system.admin` only — `resolves`, whether the name already points here, taken from the reverse
   proxy's own DNS check so the Domains sheet and the proxy page never disagree about one name. It is
@@ -243,14 +248,47 @@ only renderer/executor/validation authority for their feature.
   without certbot is `unavailable` (`certificate_unavailable`), which is terminal but is not a failure of
   the deployment's own work; a refused order is `failed` (`certificate_issue_failed`). Redeploy and
   rollback carry the step; restart and preview-remove do not, because neither applies a route.
-  Issuance is HTTP-01 only and never a wildcard — Let's Encrypt will not sign one that way — is bounded
-  at five minutes, is serialized against route application so two runs cannot race one account into a
-  rate limit, and passes `--keep-until-expiring` so a redeploy inside the renewal window asks the
-  authority for nothing. A first order on a host with no ACME account registers without a contact
-  address; an operator who wants expiry mail registers once on the Certificates page and every later
-  order reuses that account. certbot's exit code is not the evidence: the certificate is read back and
-  must cover the exact names before the step passes. Step evidence carries the lineage name, method and
-  outcome, never a key path or key material.
+  Reuse comes first, and covers wildcards both ways: a name under an existing wildcard (a preview's
+  `pr-7.preview.example.com` under `*.preview.example.com`) and a wildcard plan name an existing
+  certificate lists both ask the authority for nothing. Otherwise a plain name is ordered over HTTP-01,
+  and a plan with a wildcard among its names is ordered whole over DNS-01
+  (`proxysvc/deployment_certificate_dns.go`): only DNS proves a wildcard, and activation serves one
+  certificate for every name. The DNS challenge uses credentials the Certificates page already saved;
+  the run never asks for one and never reads one — certbot is handed the 0600 file's path, as the page
+  hands it. Credentials are kept per provider, not per zone, so the provider is the one the zone's
+  nameservers name (`*.ns.cloudflare.com` is Cloudflare, `ns-N.awsdns-N.*` Route 53, and so on through
+  the closed set; RFC 2136 servers are the operator's own and name nobody), failing that the single
+  provider with saved credentials and a plugin in the certbot that runs. No saved credentials, a zone
+  hosted by a provider that has none, its plugin missing, or two candidates the nameservers cannot tell
+  apart is `unavailable` (`certificate_wildcard_unavailable`) before certbot is asked: a wrong guess is a
+  failed validation the authority counts. The message names what to save and where — `Proxy →
+  Certificates → DNS challenge providers (/proxy/certificates)` — so it reads the same in a notification
+  or a commit status. The order runs through the Certificates page's certbot (`CertbotCommand`, the
+  host's when it has one, with the Route 53 environment), from the configured authority
+  (`JD_ACME_DIRECTORY`'s `--server`), bounded at five minutes plus the provider's propagation wait. The
+  lineage it leaves records the plugin and the credentials file in its renewal configuration, so
+  certbot's own schedule renews it like any lineage the page issued, and the page lists it with the
+  same renewal checks (a plugin that later goes missing is a `willFail`). A host whose deployments the
+  Docker Caddy ingress serves refuses a wildcard plan name outright, covered or not, since Caddy cannot
+  serve that route — see the [ingress decision](caddy-ingress.md). Every order a run places — issued,
+  or refused by the authority — is audited as `certificates.deployment.issue` (actor `system`; the
+  names, method, DNS provider and lineage, never a credential); a reuse or a refusal before ordering
+  changes nothing and is not. Preflight asks the same question for an uncovered wildcard (and for any
+  wildcard on the Caddy ingress): `certificate_automatic` naming the provider, or
+  `certificate_wildcard_unavailable`, blocked with the refusal and a deep link to `/proxy/certificates`.
+  HTTP-01 issuance is bounded at five minutes. Both are serialized against route application so two
+  runs cannot race one account into a rate limit, and pass `--keep-until-expiring` so a redeploy inside
+  the renewal window asks the authority for nothing. A first order on a host with no ACME account
+  registers without a contact address; an operator who wants expiry mail registers once on the
+  Certificates page and every later order reuses that account. certbot's exit code is not the evidence:
+  the certificate is read back and must cover the exact names before the step passes. Step evidence
+  carries the lineage name, method, outcome and, over DNS, the provider's name — never a key path, key
+  material or a credential. `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run
+  TestLiveCertificateStepProvesAWildcardOverDNS01` and `./internal/proxysvc -run
+  TestLiveDeploymentWildcardIsProvedOverDNS01AndServed` prove it against Pebble validating real DNS-01
+  records in a BIND (`proxysvc/acmetest`): refused without credentials, issued with them, reused by a
+  preview, renewed by `certbot renew` from the lineage's own configuration, and served by nginx on the
+  wildcard's route and the preview's, chaining to that Pebble's root.
   Before a new HTTP-01 order, a bounded DNS lookup rejects unresolved names and non-public destinations
   with a corrective message, including old saved sslip.io names based on a Tailscale address. Existing
   certificates are reused before this check, so private services can still use a certificate provisioned
@@ -690,7 +728,11 @@ only renderer/executor/validation authority for their feature.
   never`. The release's container identity and readiness target is the primary service — the one the
   operator chose (`build.primaryService`), else the analysis's, which builds or publishes a port and is
   never a database — and a snapshot recorded before there was one keeps its first service. Compose interpolation receives only the frozen runtime scope through a temporary `0600` env
-  file which is deleted on every exit path.
+  file which is deleted on every exit path. A Compose release keeps no single image of its own: its
+  row records the first of its services' image artifacts, so decoding the snapshot requires that
+  digest to be one of the snapshot's services (`snapshotNamesReleaseImage`), where a container release
+  still has to name exactly its image — compared with the empty single image, every Compose release
+  had been refused at its first activation step.
 - Archived projects keep their original display name in additive `archived_name` storage while the
   unique database name becomes an internal tombstone. Archiving and upgrading previously archived
   projects release the live name without deleting history or resources. New projects from the same
@@ -781,6 +823,12 @@ only renderer/executor/validation authority for their feature.
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime
   variable values. Disabled, unavailable, warning, passed and failed remain distinct outcomes.
+  The closed kind list also names `dns`, `tls`, `backup_freshness` and `game_handshake`, which no runner
+  executes. Saving one (Settings or a draft's configuration) is refused with the reason and what to use
+  instead (`refuseUnrunnableChecks`): a `public_route` check on the https address, a storage
+  dependency's backup requirement, or the game-server integration. `Validate` still accepts them, so a
+  plan stored with one keeps deploying; its check reports `check_owner_unavailable`, a warning unless
+  it is required.
   An HTTP check against the candidate introduces itself as the proxy does when the release has a
   domain — `Host`/`X-Forwarded-Host` the first domain that is not a wildcard, `X-Forwarded-Proto` its
   scheme, `X-Forwarded-For 127.0.0.1`, a browser's `Accept` — while connecting only to the candidate.
@@ -1443,15 +1491,73 @@ only renderer/executor/validation authority for their feature.
   next to a routed primary (Gitea's SSH, Syncthing's sync protocol) becomes an additional
   `runtime.ports[]` publication on its own number (see published ports below) instead of silently
   replacing the routed port; the primary always stays the one the proxy and the checks reach. The
-  catalogue ships 62 reviewed definitions, 57 of them offered (see "how the first sign-in works"
-  below for the five that are retired), every image reference resolved against
-  its registry (`docker manifest inspect`) and every deployable one started live:
-  `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks`
-  renders each definition from its fixture inputs, pulls the image, starts it through the real runtime
+  catalogue ships 82 reviewed definitions, 77 of them offered (see "how the first sign-in works"
+  below for the five that are retired; 20 are the multi-service templates of the next item), every
+  image reference resolved against its registry (`docker manifest inspect`) and every deployable one
+  started live: `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks` renders each single-image
+  definition from its fixture inputs, pulls the image, starts it through the real runtime
   owner with generated secrets, runs the definition's own readiness checks against the published
   loopback port (Mongo Express with a catalogue MongoDB beside it) and removes what it pulled;
   `JD_BLUEPRINT_ONLY=a,b` narrows it. Applications that validate the `Host` header (Homepage) are
   configured to accept any, since the proxy in front only ever forwards the domain.
+- **Multi-service templates** (`blueprint/compose_validate.go`, `compose_render.go`,
+  `deploy/blueprint_source.go`). A definition that declares `services` (profile `compose`) is a
+  Compose template: an application with the database, cache or worker it needs, deployed through the
+  existing Compose release path rather than a runtime of its own, so backups, logs, requests, alerts,
+  domains and rollback treat it as any Compose deployment. Each service declares its image, role
+  (`app`, `worker`, `database`, `cache`), purpose, environment, ports, volumes, memory and CPU,
+  a Docker healthcheck and its start order (`dependsOn` with Compose's `healthy`, `started` or
+  `completed`); the top-level image, ports, volumes and resources stay empty. Environment values are
+  literal text with two typed references: `{{secret.<name>}}`, a secret the definition generates, and
+  `{{variable.<NAME>}}`, a plan variable an input writes or a startup operation sets. Both render as
+  `${NAME}` interpolations (literal dollars are doubled), so the rendered document holds no value and
+  is a function of the definition alone; a generated password two services share is one sealed
+  variable, generated at commit and handed to each through the release's private `0600` env file.
+  `Render` returns the document as `Plan.Compose` (inside the fixture digest) with `Plan.Services`,
+  the public service's image and port, and the stack's summed memory. The document publishes exactly
+  one port — the public service's proxy port, on `127.0.0.1` at a preference derived from the
+  template id (`TemplateHostPort`, moved by Compose's own port recovery when taken) — puts the public
+  service on Compose's `default` network and the private `internal` one, and every other service on
+  `internal` only, which is declared `internal: true` (no route out; a private service that sends mail
+  or downloads models declares `egress` and joins a separate `egress` network). The ingress joins the
+  public container on the first of its networks by name (`proxysvc.publishedTarget`), and `default`
+  sorts before `internal`, so the proxy facing the internet shares a network with the public service
+  and nothing behind it. Every service gets `mem_limit` (and `cpus`) from its own resources, a CMD-form
+  healthcheck and the capped `json-file` log every dashboard container gets. Validation refuses at
+  catalogue load — that is, at build time — fewer than two or more than eight services, a template
+  with no proxy port or two, a public service that is not an `app`, any `direct` or UDP port, the
+  Docker socket, a database without a data volume, a shared volume described two ways, a literal for a
+  credential-shaped variable (the Compose planner's `secretShapedKey` set and the single-image set
+  together) or a literal password inside a URL, a reference to a secret or variable nothing declares,
+  any other placeholder, a templated command or healthcheck, a healthcheck that is missing, untimed or
+  prefixed `CMD`/`CMD-SHELL`, a dependency cycle, a generated secret no service references,
+  privileges, configuration files, and install, release or stop operations. A secret's `alphabet`
+  (`hex`) becomes `PlannedVariable.generateFormat`.
+  A template deploys as `kind: compose, mode: blueprint` — `validModeForKind` allows the blueprint mode
+  under the Compose kind, and `blueprintSourceKindMatches` refuses a stack saved as a blueprint source or
+  an image saved as a Compose one (`BlueprintSourceKind` names the right one; the summary carries it as
+  `sourceKind`). Saving the source — the draft's source step and the settings source route alike —
+  stores the server's render in `composeFiles` (`WithTemplateDocuments`), replacing anything the
+  browser sent, and `validateForNewDeployment` refuses a document that is not that render. From then on
+  the stored document is the release: materialization writes it exactly as a pasted file, so a later
+  dashboard that no longer ships the version still redeploys it byte for byte
+  (`ValidateForDeployment` needs only the stored document), and moving to a newer version is a source
+  change that renders it. Detection (`analyzeComposeTemplate`) runs the same structural analysis and
+  Docker Compose validation as a pasted file over the render, and names the definition in
+  `SourceIdentity.template` (`id@version`; the render digest is `revision`, the document's is `digest`),
+  surfaced as `sourceTemplate` on the fleet summary and archived facts. The rendered configuration is a
+  Compose build whose `primaryService` is the public service, `runtime.internalPort` its proxy port,
+  stop-first, with the definition's variables, checks and domains; every variable the document
+  interpolates is planned, so preflight has no `compose_variable_*` decision left. `GET
+  /docker/templates` leaves stacks out. The template picker labels a stack on its card (`N services`),
+  lists its services with role, image, limit and the public one marked, adds up the footprint, and
+  states before the press what the stack does by itself: only the public service is reachable, the
+  rest publish nothing on a network with no route out, each deploy stops the stack first, shared
+  passwords are generated here, and a backup is a file copy of a running database rather than a dump.
+  Compose previews stay refused (`preview_isolation.go`); a template is not a Git source, so it is
+  never offered one. `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
+  through the real build step and runtime owner and requires every check to pass, every service's
+  healthcheck to report healthy, and only the public port to be published, on loopback.
 - **How the first sign-in works**, declared rather than described. Every definition carries an
   `access` block: a closed `kind` — `setup` (the application asks the first visitor to create the
   account), `credentials` (a name from an input plus a password from a generated secret, both
@@ -1550,6 +1656,40 @@ only renderer/executor/validation authority for their feature.
   **Require sign-in** offers the Proxy page's four presets (`lib/sso-providers.ts`), **Here and on
   previews** or **Previews only**, and names a password or plain-HTTP name the server would refuse before
   the save (`settings/route-access.ts`).
+- Maintenance and error pages. Maintenance is a switch beside the live route, not a plan field, so it
+  applies at once and no release turns it on or off. Every route a release writes carries the check
+  (`DeploymentRoute.Maintenance`, rendered on nginx as a Proxy site's maintenance behind
+  `SiteMaintenance.Switch`, on Caddy as a `file` matcher), and the check looks on every request for
+  `maintenance.on` in the route's pages folder: `<nginxDir>/jd-pages/<route>/` on nginx,
+  `/config/just-dashboard/pages/<route without .conf>/` inside the Docker Caddy ingress. Turning it on
+  writes that file and turning it off removes it (`proxysvc.SetDeploymentMaintenance`, under the
+  service lock): nothing is reloaded and the route's bytes never change, so the switch never rewrites a
+  route outside activation, never meets a cutover's snapshot, verify and restore, and survives the next
+  release, a rollback and a cutover in the middle of which it was turned. Turning it on is refused
+  (`ErrMaintenanceUnready`, 409 `no_public_route` or `maintenance_unready`) for an environment with no
+  route and for a route written before the switch existed, which gets the check with its next
+  deployment; turning it off is always allowed. While on, every visitor gets the maintenance page with a 503
+  except the ACME challenge and the plan's `runtime.maintenance.bypassFrom` (addresses and ranges in
+  `NormalizeAccessEntry`'s spelling, at most 64); `runtime.maintenance.retryAfter` (0–86400, 0 sends
+  none) is the `Retry-After`. It is decided before the password and the sign-in and after the address
+  list, on both proxies, so a refused address is still refused and nobody signs in to read the page.
+  `runtime.errorPages` (404, 502, 503, 504) answer those codes with the route's own page, and
+  `runtime.interceptErrors` gives the application's own answers with them the page too (refused with
+  a sign-in, whose 401s it would replace). Those three plan fields are kept only when set, so a plan
+  without them keeps its digest, and change with the next deployment like the rest of the plan; the
+  release comparison lists them as **let past maintenance**, **maintenance retry after** and **error
+  pages**. Activation writes the pages a route serves that it has no file for, from the ones Proxy
+  ships, before the route, and route removal takes the folder, switch included. A page is edited at
+  `GET`/`PUT /deploy/{id}/environments/{env}/pages/{page}` (`maintenance`, `404`, `502`, `503`, `504`;
+  the write is `system.admin` in a session, at most 256 KiB, audited `deploy.page`) and served from the
+  next answer. The switch is `GET`/`PUT /deploy/{id}/environments/{env}/maintenance` `{on}`, the write
+  behind `s.destructive` as stopping a deployment and a Proxy site's maintenance are, audited
+  `deploy.maintenance` with the outcome. Readiness and smoke checks dial the candidate directly and are
+  untouched; a `public_route` check, which goes through the route and would read the maintenance page,
+  is not run while the switch is on and records `maintenance` as its code, so a release can be deployed
+  during a migration window. The Domains settings show the switch as its own **Maintenance** form,
+  which the save bar applies immediately (the destructive capability), and **Maintenance page and error
+  pages** under it for the plan fields and the page editor (`settings/route-pages.ts`).
 - The [GitHub App](github-app.md): one App per dashboard through the manifest flow, installation tokens
   for private clones through a `github_app` credential per installation, triggers on `delivery: "app"`
   fed by the App's single webhook (`POST /api/v1/hooks/github-app`, routed by repository through the

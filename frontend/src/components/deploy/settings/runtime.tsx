@@ -114,15 +114,19 @@ function linesOf(text: string) {
 }
 
 /**
- * The route's allowed addresses, response headers and sign-in are in
- * `runtime` but are the Domains page's to edit, so this form neither holds
- * them nor writes them: a Runtime save keeps whatever the latest copy has.
+ * The route's allowed addresses, response headers, sign-in, maintenance and
+ * error pages are in `runtime` but are the Domains page's to edit, so this
+ * form neither holds them nor writes them: a Runtime save keeps whatever the
+ * latest copy has.
  */
 function runtimeDraftOf(saved: RuntimePlan): RuntimeDraft {
   const runtime = { ...saved }
   delete runtime.allowFrom
   delete runtime.responseHeaders
   delete runtime.forwardAuth
+  delete runtime.maintenance
+  delete runtime.errorPages
+  delete runtime.interceptErrors
   return {
     ...runtime,
     commandText: (runtime.command ?? []).join("\n"),
@@ -359,6 +363,9 @@ function RuntimeForm({
           allowFrom: latest.runtime.allowFrom,
           responseHeaders: latest.runtime.responseHeaders,
           forwardAuth: latest.runtime.forwardAuth,
+          maintenance: latest.runtime.maintenance,
+          errorPages: latest.runtime.errorPages,
+          interceptErrors: latest.runtime.interceptErrors,
         }),
       })
       // The lists go to the server one entry per line, trimmed; the draft

@@ -666,7 +666,8 @@ export function projectProduct(
     | "recipe"
     | "framework"
     | "images"
-  >,
+  > &
+    Partial<Pick<DeploymentSummary, "sourceTemplate">>,
   configuration?: Pick<DeploymentEnvironmentConfiguration, "build" | "source">,
   blueprint?: Pick<BlueprintSummary, "id" | "image">,
 ): string | undefined {
@@ -680,8 +681,11 @@ export function projectProduct(
       return imageProduct(
         summary.sourceRepository || configuration?.source?.image || summary.sourceRef || "",
       )
-    case "compose":
-      return "docker-compose"
+    case "compose": {
+      // A stack rendered from a reviewed template is that application.
+      const id = blueprint?.id ?? summary.sourceTemplate?.split("@")[0]
+      return hasProductLogo(id) ? id : "docker-compose"
+    }
     case "import":
       return imageProducts(summary.images ?? []).find((id) => id !== "docker")
     default: {
@@ -708,7 +712,8 @@ export function sourceProduct(
   summary: Pick<
     DeploymentSummary,
     "sourceKind" | "sourceRef" | "sourceRepository" | "sourceRemote"
-  >,
+  > &
+    Partial<Pick<DeploymentSummary, "sourceTemplate">>,
   source?: Pick<DeploymentDraftSource, "url" | "provider" | "mode" | "image" | "blueprintId">,
 ): string | undefined {
   switch (summary.sourceKind) {
@@ -721,8 +726,11 @@ export function sourceProduct(
       )
     case "image":
       return imageProduct(summary.sourceRepository || source?.image || summary.sourceRef || "")
-    case "compose":
-      return "docker-compose"
+    case "compose": {
+      const id =
+        source?.mode === "blueprint" ? source.blueprintId : summary.sourceTemplate?.split("@")[0]
+      return hasProductLogo(id) ? id : "docker-compose"
+    }
     case "blueprint": {
       const id = source?.blueprintId ?? summary.sourceRef?.split("@")[0]
       return hasProductLogo(id) ? id : undefined
@@ -1076,7 +1084,11 @@ export function sourceLine(
         mono: true,
       }
     case "compose":
-      return { kind: "compose", primary: "Compose stack", secondary: deployment.sourceRef }
+      return {
+        kind: "compose",
+        primary: "Compose stack",
+        secondary: deployment.sourceTemplate ?? deployment.sourceRef,
+      }
     case "blueprint":
       return { kind: "blueprint", primary: deployment.sourceRef || "Template" }
     default:
