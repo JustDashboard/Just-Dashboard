@@ -74,6 +74,9 @@ export function AutomationSettings({
   const scheduleSheet = useScheduleSheet(projectId, environmentId)
   const watching =
     project.gitWatch && project.gitWatch.status !== "not_applicable" ? project.gitWatch : undefined
+  // Previews are made from production and traffic alerts watch its route;
+  // staging's own automation is its branch, webhooks and schedules.
+  const staging = project.environment === "staging"
 
   return (
     <>
@@ -99,11 +102,11 @@ export function AutomationSettings({
                   repository={source.repository}
                   triggers={automation.triggers.data ?? []}
                   schedules={automation.schedules.data ?? []}
-                  previews={automation.previews.data ?? []}
+                  previews={staging ? [] : (automation.previews.data ?? [])}
                   onAddWebhook={canAdmin ? () => webhookSheet.openAdd() : undefined}
                   onAddSchedule={canAdmin ? () => scheduleSheet.openAdd() : undefined}
                   onTurnOnPreviews={
-                    canAdmin ? () => webhookSheet.openAdd({ preview: true }) : undefined
+                    canAdmin && !staging ? () => webhookSheet.openAdd({ preview: true }) : undefined
                   }
                 />
               </SettingSection>
@@ -119,13 +122,17 @@ export function AutomationSettings({
                 automation={automation}
                 sheet={scheduleSheet}
               />
-              <Previews
-                projectId={projectId}
-                automation={automation}
-                source={source}
-                onTurnOn={() => webhookSheet.openAdd({ preview: true })}
-              />
-              <TrafficAlerts projectId={projectId} automation={automation} />
+              {!staging && (
+                <>
+                  <Previews
+                    projectId={projectId}
+                    automation={automation}
+                    source={source}
+                    onTurnOn={() => webhookSheet.openAdd({ preview: true })}
+                  />
+                  <TrafficAlerts projectId={projectId} automation={automation} />
+                </>
+              )}
             </>
           ) : (
             <>

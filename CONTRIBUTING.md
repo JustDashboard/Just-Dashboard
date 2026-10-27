@@ -318,6 +318,14 @@ to the contribution terms above, including the additional licence grant to the p
   environment, a pinned version included, then stops OpenBao and checks the next run's first step fails in
   the store's own words. It removes everything it made. Doppler has no self-hosted server and is covered
   by an httptest server that follows its documented API (`secretstore_test.go`).
+- Changes to staging environments, promotion or how a release is cloned also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveStagingReleaseIsPromotedAsTheSameImageAndRolledBack -count=1 -v`
+  on a Docker and Buildx host (as root, through `go test -c` and `sudo`, like the others). Through the
+  real routes and engine it builds a local Git checkout in staging, promotes the staging release and
+  checks production runs the very image id staging built with no build step in its run, serves with
+  production's variable and runs production's release task with production's value, then promotes a
+  second staging build and rolls production back to the first promoted release. Its environment and
+  run ids start far from 1, and it removes only the containers and tags its own store recorded.
 - Object-storage backups against a real S3 API (MinIO in a container: target test, upload, retention,
   restore): `JD_DEPLOY_LIVE=1 go test ./internal/backups -run TestLiveObjectStorageBackupUploadsPrunesAndRestores -count=1 -v`.
   Encrypted archives in a bucket take an S3-compatible service you started yourself, named by

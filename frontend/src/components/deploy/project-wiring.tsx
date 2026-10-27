@@ -245,8 +245,12 @@ export function ProjectWiring({
                   <span>The first deployment records it here</span>
                 ) : liveRun ? (
                   <span className="numeric">
-                    {liveRun.operation === "rollback" ? "rolled back" : "released"} in{" "}
-                    {formatDuration(runDurationSeconds(liveRun))}
+                    {liveRun.operation === "rollback"
+                      ? "rolled back"
+                      : liveRun.operation === "promote"
+                        ? "promoted from staging"
+                        : "released"}{" "}
+                    in {formatDuration(runDurationSeconds(liveRun))}
                   </span>
                 ) : (
                   liveRelease.activatedAt && (

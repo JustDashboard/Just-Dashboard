@@ -1076,7 +1076,10 @@ CREATE TABLE IF NOT EXISTS deploy_git_policies (
   exclude_json    TEXT NOT NULL DEFAULT '[]',
   commit_statuses INTEGER NOT NULL DEFAULT 1,
   revision        INTEGER NOT NULL DEFAULT 1,
-  updated_at      INTEGER NOT NULL DEFAULT 0
+  updated_at      INTEGER NOT NULL DEFAULT 0,
+  -- Production can refuse every build and take only staging's promotions;
+  -- shipped without it through addedColumns.
+  promotion_only  INTEGER NOT NULL DEFAULT 0
 );
 
 -- The last thing written back to the Git host for an environment: one row
@@ -1697,6 +1700,9 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Commit statuses default on: an environment that already deploys from
 	// GitHub gains them without an edit, and the policy editor can turn them off.
 	{"deploy_git_policies", "commit_statuses", "INTEGER NOT NULL DEFAULT 1"},
+	// Production may take only promotions from staging. Every policy saved
+	// before builds as it always did.
+	{"deploy_git_policies", "promotion_only", "INTEGER NOT NULL DEFAULT 0"},
 	// 0.6.7 keeps the shipped project/run rows as stable compatibility
 	// identities while normalized environments, releases, steps and events
 	// grow beside them. Every legacy row receives a usable zero/default before

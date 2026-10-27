@@ -44,6 +44,7 @@ import type {
   DeploymentDraftSource,
   DeploymentEnvironmentConfiguration,
   DeploymentGitWatch,
+  DeploymentPromotion,
   DeploymentRelease,
   DeploymentSourceKind,
   DeploymentEngineRun,
@@ -197,6 +198,7 @@ const OPERATION_LABELS: Record<string, string> = {
   redeploy: "Redeploy",
   force_build: "Rebuild",
   rollback: "Rollback",
+  promote: "Promote",
   restart: "Restart",
   stop: "Stop",
   start: "Start",
@@ -224,6 +226,18 @@ export function stepOperation(
   return run.operation === "rollback" && run.metadata?.instant === true
     ? "instant_rollback"
     : run.operation
+}
+
+/**
+ * The staging release a promotion run takes its image from, as the run's
+ * metadata records it, or undefined for any other run.
+ */
+export function runPromotion(
+  run: Pick<DeploymentEngineRun, "operation" | "metadata">,
+): DeploymentPromotion | undefined {
+  if (run.operation !== "promote") return undefined
+  const promotion = run.metadata?.promotion as DeploymentPromotion | undefined
+  return promotion && typeof promotion.releaseNumber === "number" ? promotion : undefined
 }
 
 /** "#12 Deploy" — the run's name wherever it is listed. */
@@ -1139,6 +1153,10 @@ export function autoDeployReading(
   watch: DeploymentGitWatch,
 ): { tone: DotTone; label: string; interval?: number } | undefined {
   if (watch.status === "not_applicable") return undefined
+  // A push never deploys production once it takes only promotions.
+  if (watch.status === "promotion_only" || watch.policy?.promotionOnly) {
+    return { tone: "stopped", label: "Promotions only" }
+  }
   const automatic = watch.policy?.automatic ?? watch.automatic
   if (["unavailable", "stale", "policy_conflict"].includes(watch.status)) {
     // A branch the watcher could not read says why when git's answer did.

@@ -53,8 +53,10 @@ Network labels, name, environment and driver must match before adoption or mutat
 not change host bindings: a database quick setup provisions is published to loopback only, and a
 database the operator opened or created as reachable from anywhere keeps that binding. This is environment
 network separation, not a sandbox against an administrator or arbitrary outbound network access.
-Previews cannot share a linked database endpoint/container with another environment, including another
-preview or a different saved connection ID. Reference resolution checks known links and bindings before
+Previews and staging environments cannot share a linked database endpoint/container with another
+environment, including another preview or a different saved connection ID: a staging release task would
+otherwise migrate production's schema from code that was never promoted (`staging_isolation_required`;
+[staging and promotion](staging-promotion.md)). Reference resolution checks known links and bindings before
 returning build/runtime credentials; runtime joins also check observed container identity. This does not
 discover arbitrary untracked services, DNS aliases or literal credentials. Preview approval still clears
 inherited credentials and dependencies.

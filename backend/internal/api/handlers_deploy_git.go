@@ -36,11 +36,24 @@ func (s *Server) handleDeploymentGitPolicyPut(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return err
 	}
-	var policy deploy.GitDeploymentPolicy
-	if err := httpx.DecodeJSON(r, &policy); err != nil {
+	// promotionOnly is optional: a client that predates it keeps whatever
+	// the environment has rather than switching it off by omission.
+	var request struct {
+		deploy.GitDeploymentPolicy
+		PromotionOnly *bool `json:"promotionOnly"`
+	}
+	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
-	httpx.SetAudit(r, "deploy.git.policy", fmt.Sprint(projectID), map[string]any{"environmentId": environmentID, "automatic": policy.Automatic})
+	policy := request.GitDeploymentPolicy
+	if request.PromotionOnly != nil {
+		policy.PromotionOnly = *request.PromotionOnly
+	} else if current, err := s.modules.deployRuns.GitDeploymentPolicy(r.Context(), projectID, environmentID); err == nil {
+		policy.PromotionOnly = current.PromotionOnly
+	}
+	httpx.SetAudit(r, "deploy.git.policy", fmt.Sprint(projectID), map[string]any{
+		"environmentId": environmentID, "automatic": policy.Automatic, "promotionOnly": policy.PromotionOnly,
+	})
 	updated, err := s.modules.deployRuns.SetGitDeploymentPolicy(r.Context(), projectID, environmentID, policy)
 	if err != nil {
 		return mapDeployError(err)

@@ -140,6 +140,14 @@ export function GeneralSettings({
                   projectName={record.name}
                 />
               )}
+              {project.environment === "production" && project.staging && (
+                <PromotionPolicy
+                  projectId={projectId}
+                  environmentId={environmentId}
+                  canEdit={canEdit}
+                  onSaved={project.refreshEnvironments}
+                />
+              )}
             </>
           )}
         </>
@@ -1022,6 +1030,113 @@ function AutomaticDeployment({
 
 type PolicyDraft = { automatic: boolean; commitStatuses: boolean; include: string; exclude: string }
 
+/**
+ * Whether production builds at all, once there is a staging environment to
+ * build in instead.
+ *
+ * It is the same saved policy Automatic deployment edits — the server checks
+ * it where it refuses a manual-only build, at queue admission — but it is
+ * drawn as a section of its own and for every source, because an image or a
+ * template deployment can stage and promote as well as a repository can.
+ * The other fields go back exactly as they were read, so saving this never
+ * moves the branch policy beside it.
+ */
+function PromotionPolicy({
+  projectId,
+  environmentId,
+  canEdit,
+  onSaved,
+}: {
+  projectId: number
+  environmentId: number
+  canEdit: boolean
+  onSaved: () => void
+}) {
+  const watch = usePoll(
+    (signal) =>
+      get<DeploymentGitWatch>(
+        `/deploy/${projectId}/environments/${environmentId}/git-watch`,
+        undefined,
+        signal,
+      ),
+    15000,
+    [projectId, environmentId],
+  )
+  const policy = watch.data?.policy
+  const draft = useSettingDraft<{ promotionOnly: boolean }>(
+    `deploy.${projectId}.settings.promotion`,
+    { promotionOnly: Boolean(policy?.promotionOnly) },
+  )
+  const [saving, setSaving] = useState(false)
+  const { promotionOnly } = draft.value
+
+  const save = async () => {
+    if (!policy) return false
+    setSaving(true)
+    try {
+      await put(`/deploy/${projectId}/environments/${environmentId}/git-policy`, {
+        automatic: policy.automatic,
+        commitStatuses: policy.commitStatuses ?? true,
+        watchInclude: policy.watchInclude,
+        watchExclude: policy.watchExclude,
+        revision: policy.revision,
+        promotionOnly,
+      })
+      watch.refresh()
+      onSaved()
+      return true
+    } catch (error) {
+      notify.error("Could not save the promotion policy", error)
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <SettingForm
+      name="Promotion"
+      onSave={save}
+      dirty={draft.dirty}
+      changes={draft.changes}
+      saving={saving}
+      canEdit={canEdit && Boolean(policy)}
+      onDiscard={draft.discard}
+      applies="immediately"
+    >
+      <SettingSection
+        id="promotion"
+        title="Promotion"
+        status={
+          <>
+            {policy && (
+              <Status
+                tone={policy.promotionOnly ? "running" : "stopped"}
+                label={policy.promotionOnly ? "Promotions only" : "Builds and promotions"}
+              />
+            )}
+            {settingStatus({ dirty: draft.dirty })}
+          </>
+        }
+      >
+        {!policy ? (
+          <Skeleton className="h-11 w-full" />
+        ) : (
+          <OptionList>
+            <OptionRow
+              title="Take only promotions from staging"
+              hint="Production builds nothing: a push, a webhook, a schedule and Deploy are all refused, and new code reaches production only as an image staging already ran. Redeploy, restart and rollback still work."
+              checked={promotionOnly}
+              onCheckedChange={(next) => draft.set({ promotionOnly: next })}
+              disabled={!canEdit}
+            />
+          </OptionList>
+        )}
+      </SettingSection>
+    </SettingForm>
+  )
+}
+
 function AutomaticDeploymentForm({
   watch,
   projectId,
@@ -1083,7 +1198,7 @@ function AutomaticDeploymentForm({
   const explanation = !automatic
     ? undefined
     : unavailable
-      ? "Could not check the production branch. Check repository access and credentials."
+      ? "Could not check the branch. Check repository access and credentials."
       : watch.status === "not_applicable"
         ? "Signed hooks and schedules can request deployments. This source has no branch to poll."
         : watch.status === "awaiting_first_deployment"

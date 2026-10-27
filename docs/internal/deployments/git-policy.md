@@ -1,7 +1,8 @@
 # Automatic deployment policy
 
-Every normalized environment has one automatic deployment policy. Remote production Git branches
-default to five-second outbound polling after the first explicit deployment. The policy is first
+Every normalized environment has one automatic deployment policy. Remote production and staging Git
+branches default to five-second outbound polling after the first explicit deployment; a staging
+environment's policy is written when it is added ([staging and promotion](staging-promotion.md)). The policy is first
 decided where the project is created: a Git source's draft commit may carry a `gitPolicy`
 (`automatic`, `watchInclude`, `watchExclude`, `commitStatuses`), written as the environment's row at
 revision 1 inside the same transaction. A commit that carries no decision writes no row, so every
@@ -11,6 +12,16 @@ automatic-deployment fact and the overview's source link to — or through the s
 `PUT /api/v1/deploy/{project}/environments/{environment}/git-policy`. The request contains `automatic`,
 `watchInclude`, `watchExclude` and the last observed integer `revision` (initially zero). Concurrent edits
 return HTTP 409. `GET .../git-watch` exposes the effective policy and the latest polling decision.
+
+Promotion-only mode (`promotionOnly`, `deploy_git_policies.promotion_only`, production only and only
+while the deployment has a staging environment, `409 staging_required` otherwise) rejects every `deploy`
+and `force_build` at the same admission — a person's included — with `422 promotion_only`; the watcher
+records `promotion_only` instead of observing the branch, and `git-watch` reports status
+`promotion_only`. Redeploy, restart, stop, start, rollback and promotion stay available. `PUT …/git-policy`
+keeps the stored value when the request omits `promotionOnly`, so an editor that predates it cannot turn
+it off, and the audit records it. It is drawn as Settings → General's **Promotion** section on production
+for any source kind. Promotion-only is part of the policy key only while it is on, so keys stored before
+it existed still match.
 
 Manual-only mode rejects new branch-poll, provider-hook, signed-hook, API-trigger and scheduled deploy,
 redeploy and force-build requests at transactional queue admission. Manual actions and retries remain

@@ -60,7 +60,7 @@ type InsightsFailure struct {
 // scheduler marker says nothing about delivery frequency.
 func insightsReleaseOperation(operation Operation) bool {
 	switch operation {
-	case OperationDeploy, OperationRedeploy, OperationForceBuild, OperationRollback:
+	case OperationDeploy, OperationRedeploy, OperationForceBuild, OperationRollback, OperationPromote:
 		return true
 	}
 	return false
@@ -69,16 +69,29 @@ func insightsReleaseOperation(operation Operation) bool {
 const insightsMaxRuns = 2000
 
 // ProjectInsights computes the figures over the project's runs requested in
-// the last `windowDays` days (bounded to 7..365, default 30).
+// the last `windowDays` days (bounded to 7..365, default 30). A staging
+// environment delivers to nobody, so its runs are left out of the project's
+// figures; EnvironmentInsights reads them on their own.
 func (s *OrchestrationStore) ProjectInsights(ctx context.Context, projectID int64, windowDays int) (*DeploymentInsights, error) {
+	return s.insights(ctx, projectID, 0, windowDays)
+}
+
+// EnvironmentInsights is ProjectInsights over one environment's runs.
+func (s *OrchestrationStore) EnvironmentInsights(ctx context.Context, projectID, environmentID int64, windowDays int) (*DeploymentInsights, error) {
+	return s.insights(ctx, projectID, environmentID, windowDays)
+}
+
+func (s *OrchestrationStore) insights(ctx context.Context, projectID, environmentID int64, windowDays int) (*DeploymentInsights, error) {
 	if windowDays <= 0 {
 		windowDays = 30
 	}
 	windowDays = max(7, min(365, windowDays))
 	now := s.now().UTC()
 	since := now.AddDate(0, 0, -windowDays).Truncate(24 * time.Hour)
+	scope, args := projectRunScope(environmentID)
 	rows, err := s.db.QueryContext(ctx, `SELECT `+engineRunColumns+` FROM deploy_runs
-		WHERE project_id = ? AND requested_at >= ? ORDER BY requested_at, id LIMIT ?`, projectID, since.Unix(), insightsMaxRuns)
+		WHERE project_id = ? AND `+scope+` AND requested_at >= ? ORDER BY requested_at, id LIMIT ?`,
+		append(append([]any{projectID}, args...), since.Unix(), insightsMaxRuns)...)
 	if err != nil {
 		return nil, err
 	}

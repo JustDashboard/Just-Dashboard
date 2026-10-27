@@ -3775,6 +3775,8 @@ export type DeploymentGitPolicy = {
   watchInclude: string[]
   watchExclude: string[]
   commitStatuses?: boolean
+  /** Production refuses every build and takes only releases promoted from staging. */
+  promotionOnly?: boolean
   revision: number
   inherited?: boolean
   conflict?: boolean
@@ -3967,6 +3969,67 @@ export type DeploymentInsights = {
   topFailures: { code: string; count: number }[]
 }
 
+/**
+ * Where a promoted release's image came from: the staging release it was
+ * promoted from, and the local image id the container is created from.
+ */
+export type DeploymentPromotion = {
+  environmentId: number
+  environmentName: string
+  releaseId: number
+  releaseNumber: number
+  runId: number
+  imageId: string
+  imageDigest: string
+  sourceRevision?: string
+}
+
+/** One of a deployment's long-lived environments, for the environment switcher. */
+export type DeploymentEnvironment = {
+  id: number
+  name: string
+  slug: string
+  kind: "production" | "staging"
+  desiredRevision: number
+  liveReleaseId?: number
+  /** Production refuses builds and takes only releases promoted from staging. */
+  promotionOnly?: boolean
+  createdAt: string
+}
+
+/** What adding staging copied from production, what it left behind, and why. */
+export type DeploymentStagingCopy = {
+  environment: DeploymentEnvironment
+  copied: string[]
+  skipped: { name: string; kind: string; reason: string }[]
+  adjusted: string[]
+}
+
+/** The Promote confirmation's read: the exact image and how production differs. */
+export type DeploymentPromotionPreview = {
+  source: {
+    environmentId: number
+    environmentName: string
+    release: DeploymentRelease
+    imageId: string
+    imageDigest: string
+    imageSizeBytes: number
+    imagePresent: boolean
+  }
+  target: {
+    environmentId: number
+    environmentName: string
+    liveRelease?: DeploymentRelease
+    desiredRevision: number
+    activeRuns: number
+    promotionOnly: boolean
+    pendingChanges: { kind: string; name: string; change: string }[]
+    releaseTasks: string[]
+  }
+  detail: ReleaseComparison["detail"]
+  blockers: { code: string; message: string }[]
+}
+
 export type DeploymentRelease = {
   id: number
   projectId: number
@@ -3974,7 +4037,7 @@ export type DeploymentRelease = {
   number: number
   runId: number
   predecessorReleaseId?: number
-  state: "candidate" | "live" | "retained"
+  state: "candidate" | "live" | "retained" | "failed" | "retired"
   planRevision: number
   sourceRevision?: string
   imageDigest?: string
@@ -3989,6 +4052,8 @@ export type DeploymentRelease = {
   /** Set on a release an instant rollback took traffic away from. */
   rolledBackAt?: string
   rollbackReason?: string
+  /** Set when the image was promoted from staging rather than built here. */
+  promotion?: DeploymentPromotion
 }
 
 /**

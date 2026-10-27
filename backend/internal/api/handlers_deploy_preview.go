@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
 
@@ -28,13 +27,9 @@ func deploymentPreviewURL(raw string) (*url.URL, error) {
 // The wrapper contains no script and never fetches the website on the server.
 // Its policy permits only the recorded origin, leaving the dashboard CSP intact.
 func (s *Server) handleDeploymentPreviewFrame(w http.ResponseWriter, r *http.Request) error {
-	id, err := parseID(r)
+	summary, err := s.deploymentTarget(r)
 	if err != nil {
 		return err
-	}
-	summary, err := s.modules.deployRuns.DeploymentSummary(r.Context(), id, deploy.QueueBudget{})
-	if err != nil {
-		return mapDeployError(err)
 	}
 	u, err := deploymentPreviewURL(summary.Endpoint)
 	if err != nil {

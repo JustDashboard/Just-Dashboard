@@ -931,6 +931,8 @@ func humanizeOperation(operation string) string {
 		return "Rebuild without cache"
 	case OperationRollback:
 		return "Rollback"
+	case OperationPromote:
+		return "Promotion from staging"
 	case OperationRestart:
 		return "Restart"
 	case OperationStop:

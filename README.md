@@ -101,6 +101,7 @@ free.
 - Push to deploy, plus pull-request previews only your tailnet can reach
 - Immutable releases, one-click rollback and health-gated cutover
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
+- A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Variables per environment, plus shared ones defined once for the server or a project
 - Variables read from HashiCorp Vault, OpenBao, Infisical or Doppler, fresh for each run
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy

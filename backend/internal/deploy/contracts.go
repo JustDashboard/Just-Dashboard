@@ -79,6 +79,7 @@ const (
 	OperationStart         Operation = "start"
 	OperationForceBuild    Operation = "force_build"
 	OperationRollback      Operation = "rollback"
+	OperationPromote       Operation = "promote"
 	OperationPreviewCreate Operation = "preview_create"
 	OperationPreviewUpdate Operation = "preview_update"
 	OperationPreviewRemove Operation = "preview_remove"
@@ -352,8 +353,8 @@ func stateSet[T ~string](states ...T) map[T]struct{} {
 func ValidOperation(value Operation) bool {
 	switch value {
 	case OperationDeploy, OperationRedeploy, OperationRestart, OperationStop, OperationStart,
-		OperationForceBuild, OperationRollback, OperationPreviewCreate, OperationPreviewUpdate,
-		OperationPreviewRemove, OperationScheduled, OperationImportAdopt,
+		OperationForceBuild, OperationRollback, OperationPromote, OperationPreviewCreate,
+		OperationPreviewUpdate, OperationPreviewRemove, OperationScheduled, OperationImportAdopt,
 		OperationRemoveManaged:
 		return true
 	default:

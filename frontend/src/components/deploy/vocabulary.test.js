@@ -5,7 +5,9 @@ import {
   projectProduct,
   runActor,
   runLabel,
+  runPromotion,
   runRevision,
+  runTitle,
   runTriggerLine,
   sourceLine,
   sourceProduct,
@@ -225,6 +227,30 @@ describe("autoDeployReading", () => {
     expect(autoDeployReading(watch({ status: "stale", reason: "ref_not_found" }))?.label).toBe(
       "Auto-deploy stopped",
     )
+  })
+})
+
+describe("a production that takes only promotions", () => {
+  test("says no push deploys it, whatever the branch's own state", () => {
+    const watch = { automatic: true, status: "promotion_only", intervalSeconds: 5 }
+    expect(autoDeployReading(watch)).toEqual({ tone: "stopped", label: "Promotions only" })
+    expect(
+      autoDeployReading({ ...watch, status: "not_applicable", policy: { promotionOnly: true } }),
+    ).toBeUndefined()
+  })
+})
+
+describe("a promotion run", () => {
+  const promotion = { environmentName: "Staging", releaseNumber: 3, imageId: "sha256:ab" }
+
+  test("is named for what it did and carries the staging release it took", () => {
+    expect(runTitle({ runNumber: 9, operation: "promote" })).toBe("#9 Promote")
+    expect(runPromotion(run({ operation: "promote", metadata: { promotion } }))).toBe(promotion)
+  })
+
+  test("is the only run that names one", () => {
+    expect(runPromotion(run({ operation: "deploy", metadata: { promotion } }))).toBeUndefined()
+    expect(runPromotion(run({ operation: "promote", metadata: {} }))).toBeUndefined()
   })
 })
 

@@ -67,7 +67,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/traffic", s.handle(s.handleDeploymentTrafficPulse))
 		r.Method(http.MethodGet, "/{id}/commits", s.handle(s.handleDeployCommits))
 		r.Method(http.MethodGet, "/{id}/env", s.handle(s.handleDeployEnvList))
+		r.Method(http.MethodGet, "/{id}/environments", s.handle(s.handleDeploymentEnvironments))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/releases", s.handle(s.handleDeploymentReleases))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/promotion", s.handle(s.handleDeploymentPromotionPreview))
 		r.Method(http.MethodGet, "/{id}/operations", s.handle(s.handleDeploymentOperations))
 		r.Method(http.MethodGet, "/{id}/insights", s.handle(s.handleDeploymentInsights))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/releases/{release}/comparison", s.handle(s.handleDeploymentReleaseComparison))
@@ -95,6 +97,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/{id}/run", s.handle(s.handleDeployRun))
 			r.Method(http.MethodPost, "/{id}/environments/{env}/runs", s.handle(s.handleDeploymentRunCreate))
+			// Promoting is deploying production: same capability, same
+			// queue, same checks and cutover, and a token may do it as it
+			// may deploy.
+			r.Method(http.MethodPost, "/{id}/environments/{env}/promote", s.handle(s.handleDeploymentPromote))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/cancel", s.handle(s.handleDeploymentRunCancel))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/retry", s.handle(s.handleDeploymentRunRetry))
 			// Keeping the new release only removes a container nothing routes
@@ -144,6 +150,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/{id}/environments/{env}/detect", s.handle(s.handleDeploymentDetect))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/git-policy", s.handle(s.handleDeploymentGitPolicyPut))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/rollback-policy", s.handle(s.handleDeploymentRollbackPolicyPut))
+				// Adding staging writes configuration and copies variables,
+				// so it is an administrator's, in a session, like saving them.
+				r.Method(http.MethodPost, "/{id}/environments", s.handle(s.handleDeploymentStagingCreate))
 				r.Method(http.MethodPost, "/{id}/previews/approvals/{approval}/approve", s.handle(s.handleDeploymentPreviewApprove))
 				// Testing a pull request is the approval of that head, so it
 				// sits with the approval route it stands in for.
@@ -196,6 +205,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// Switching traffic back to the warm release takes the live one out
 			// of service, exactly as a rollback from the list does.
 			r.Method(http.MethodPost, "/{id}/environments/{env}/rollback-watch/rollback", s.handle(s.handleDeploymentInstantRollback))
+			// Removing staging takes its containers, and its volumes when
+			// asked, off the host: destructive, ordinary confirmation, since
+			// staging is added again in a minute and production is untouched.
+			r.With(httpx.RequireSession).Method(http.MethodDelete, "/{id}/environments/{env}", s.handle(s.handleDeploymentStagingRemove))
 			// A saved credential is routine and recoverable exactly like a
 			// saved DNS-provider credential: destructive, but never a typed
 			// phrase, since the secret is pasted again in a minute.
@@ -217,8 +230,32 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 
 func mapDeployError(err error) error {
 	switch {
-	case errors.Is(err, deploy.ErrPreviewApproval), errors.Is(err, deploy.ErrPreviewIsolation), errors.Is(err, deploy.ErrPreviewCleanupPending), errors.Is(err, deploy.ErrGitManualOnly), errors.Is(err, deploy.ErrGitPolicyConflict):
+	case errors.Is(err, deploy.ErrPreviewApproval), errors.Is(err, deploy.ErrPreviewIsolation), errors.Is(err, deploy.ErrPreviewCleanupPending), errors.Is(err, deploy.ErrGitManualOnly), errors.Is(err, deploy.ErrGitPolicyConflict), errors.Is(err, deploy.ErrPromotionOnly), errors.Is(err, deploy.ErrStagingIsolation):
 		return mapAutomationError(err)
+	case errors.Is(err, deploy.ErrStagingRequired):
+		return httpx.Err(http.StatusConflict, "staging_required", err.Error())
+	case errors.Is(err, deploy.ErrStagingExists):
+		return httpx.Err(http.StatusConflict, "staging_exists", err.Error())
+	case errors.Is(err, deploy.ErrStagingUnsupported):
+		return httpx.Err(http.StatusConflict, "staging_unsupported", err.Error())
+	case errors.Is(err, deploy.ErrStagingDomainTaken):
+		return httpx.Err(http.StatusConflict, "domain_taken", err.Error())
+	case errors.Is(err, deploy.ErrStagingDomainInvalid):
+		return httpx.Err(http.StatusBadRequest, "invalid_domain", err.Error())
+	case errors.Is(err, deploy.ErrNotStaging):
+		return httpx.Err(http.StatusConflict, "not_staging", err.Error())
+	case errors.Is(err, deploy.ErrPromotionOnlyNeedsStaging):
+		return httpx.Err(http.StatusConflict, "promotion_only_requires_staging", err.Error())
+	case errors.Is(err, deploy.ErrPromotionImageMissing):
+		return httpx.Err(http.StatusConflict, "promotion_image_missing", err.Error())
+	case errors.Is(err, deploy.ErrPromotionSource):
+		return httpx.Err(http.StatusConflict, "promotion_source", err.Error())
+	case errors.Is(err, deploy.ErrPromotionTarget):
+		return httpx.Err(http.StatusConflict, "promotion_target", err.Error())
+	case errors.Is(err, deploy.ErrPromotionIncompatible):
+		return httpx.Err(http.StatusConflict, "promotion_incompatible", err.Error())
+	case errors.Is(err, deploy.ErrBuilderUnavailable):
+		return httpx.Err(http.StatusServiceUnavailable, "builder_unavailable", err.Error())
 	case errors.Is(err, deploy.ErrArchiveRequired):
 		return httpx.Err(http.StatusConflict, "deployment_not_archived", err.Error())
 	case errors.Is(err, deploy.ErrNotFound):
@@ -354,7 +391,11 @@ func (s *Server) handleDeployGet(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return httpx.Internal(err)
 	}
-	summary, err := s.modules.deployRuns.DeploymentSummary(r.Context(), id, deploy.QueueBudget{
+	environmentID, err := environmentQuery(r)
+	if err != nil {
+		return err
+	}
+	summary, err := s.modules.deployRuns.EnvironmentDeploymentSummary(r.Context(), id, environmentID, deploy.QueueBudget{
 		Heavy: s.Cfg.DeployHeavySlots,
 		Light: s.Cfg.DeployLightSlots,
 	})
@@ -614,6 +655,13 @@ func (s *Server) handleDeployRuns(w http.ResponseWriter, r *http.Request) error 
 			if err != nil || filter.Environment <= 0 {
 				return httpx.BadRequest("environment must be a positive integer")
 			}
+		}
+		switch query.Get("scope") {
+		case "":
+		case "production":
+			filter.LeaveOutStaging = true
+		default:
+			return httpx.BadRequest("scope must be \"production\"")
 		}
 		if raw := query.Get("operation"); raw != "" {
 			if !deploy.ValidOperation(deploy.Operation(raw)) {
@@ -1081,7 +1129,17 @@ func (s *Server) handleDeploymentInsights(w http.ResponseWriter, r *http.Request
 	if _, err := s.modules.deployStore.Get(r.Context(), projectID); err != nil {
 		return mapDeployError(err)
 	}
-	insights, err := s.modules.deployRuns.ProjectInsights(r.Context(), projectID, atoiDefault(r.URL.Query().Get("days"), 30))
+	environmentID, err := environmentQuery(r)
+	if err != nil {
+		return err
+	}
+	days := atoiDefault(r.URL.Query().Get("days"), 30)
+	var insights *deploy.DeploymentInsights
+	if environmentID > 0 {
+		insights, err = s.modules.deployRuns.EnvironmentInsights(r.Context(), projectID, environmentID, days)
+	} else {
+		insights, err = s.modules.deployRuns.ProjectInsights(r.Context(), projectID, days)
+	}
 	if err != nil {
 		return httpx.Internal(err)
 	}

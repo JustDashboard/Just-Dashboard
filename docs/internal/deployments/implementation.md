@@ -714,8 +714,9 @@ only renderer/executor/validation authority for their feature.
   joins the message, and the step evidence carries the cause (identifiers only) beside the task
   evidence.
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
-  retain-until windows, recent failed diagnostics, shared physical digests, and every environment under
-  an active deployment lease. Cleanup reports the reason for every retained row and removes a mutable
+  retain-until windows, recent failed diagnostics, shared physical digests, every environment under
+  an active deployment lease, and a staging release an unfinished promotion is about to take its image
+  from ([staging and promotion](staging-promotion.md)). Cleanup reports the reason for every retained row and removes a mutable
   Docker tag only after inspection proves it still names the recorded config/digest. A run that fails
   after `render_runtime` moves its candidate release to `failed` the moment the run itself reaches
   `failed`, `failed_activation`, `rolled_back` or `cancelled` — `TransitionRun` does it in the same
@@ -1007,7 +1008,10 @@ only renderer/executor/validation authority for their feature.
   Nothing the answer says is applied. The live check against a real model is
   `TestLiveFailedBuildIsDiagnosedByARealModel` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
 - Deploy and force-build resolve the current desired revision (force-build disables cache); redeploy and
-  rollback clone only available immutable artifacts and traverse the same checks/cutover path; restart
+  rollback clone only available immutable artifacts and traverse the same checks/cutover path (a clone
+  carries its target's own source identity and promotion provenance); promote takes a staging release's
+  exact image with production's current plan and variables, builds nothing, and runs a deploy's steps from
+  `render_runtime` on ([staging and promotion](staging-promotion.md)); restart
   stops and starts the existing live runtime without creating a release, then verifies the plan's
   readiness and smoke checks against that live release before recording it. Rollback, stop and restart use
   the destructive capability and ordinary confirmation, not a typed phrase; because stop and restart share
@@ -1707,7 +1711,8 @@ only renderer/executor/validation authority for their feature.
   same `dispatchAutomationEvent` decision as the per-trigger hooks), statuses posted as the App where it
   is installed, and one edited-in-place comment per preview on its pull request.
 - `GET /deploy/{id}/insights?days=N` (7–365, default 30) computes delivery figures from persisted runs
-  only: release runs (`deploy`, `redeploy`, `force_build`, `rollback`) that reached a terminal state,
+  only: release runs (`deploy`, `redeploy`, `force_build`, `rollback`, `promote`) that reached a terminal
+  state, production's and its previews' (a staging environment's runs are read with `?environment=`),
   success rate over decided runs, median and p95 claim-to-finish duration of successful releases,
   successful releases per week, mean time from a failed release's end to the next successful one,
   the current failure streak, a per-day series with zero-filled days, and the five most common terminal
@@ -1798,7 +1803,8 @@ only renderer/executor/validation authority for their feature.
   would otherwise hand it the source project's own live volume. A linked or observed dependency, and a
   bind-path mount, are left exactly as saved: nothing about their identity is owned by lifecycle re-derivation.
 - Closed vocabularies, route capabilities/confirmations/audit actions, retention limits and error codes
-  are contracts. Change one only with an ADR plus migration and exhaustive transition/route tests.
+  are contracts. Change one only with an ADR plus migration and exhaustive transition/route tests. The
+  `promote` operation's record is the Decisions section of [staging and promotion](staging-promotion.md).
 
 ## Public deployment ingress
 
