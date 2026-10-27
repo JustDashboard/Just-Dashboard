@@ -5380,6 +5380,12 @@ export type AuditEntry = {
   status: number
   success: boolean
   detail: string
+  /**
+   * The API key a row was written by, when one made the request: an
+   * ordinary key, an MCP key or a deploy key alike. Absent for a session.
+   */
+  keyId?: number
+  keyName?: string
 }
 
 export type ApiToken = {
@@ -5389,10 +5395,11 @@ export type ApiToken = {
   prefix: string
   role: Role
   /**
-   * The one capability the key is limited to, or `mcp` for a key that opens
-   * the MCP endpoint alone; empty for an ordinary key.
+   * The one capability the key is limited to, `mcp` for a key that opens the
+   * MCP endpoint alone, or `deploy` for a key that reaches the deployment
+   * routes alone; empty for an ordinary key.
    */
-  scope?: "" | "metrics.read" | "mcp"
+  scope?: "" | "metrics.read" | "mcp" | "deploy"
   createdAt: string
   expiresAt?: string
   lastUsedAt?: string
@@ -5401,6 +5408,11 @@ export type ApiToken = {
   connections?: ApiTokenConnection[]
   /** What an MCP key may do with the deployments; absent is nothing. */
   deployments?: ApiTokenDeployments
+  /**
+   * The deployments a deploy key is limited to. Absent or empty is every
+   * deployment, including the ones made after the key.
+   */
+  deploymentIds?: number[]
 }
 
 /** An MCP key's deployment grant: nothing, read them, or also deploy and roll back. */

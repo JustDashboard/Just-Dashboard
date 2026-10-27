@@ -1,5 +1,5 @@
 import type { Page, Route } from "@playwright/test"
-import type { ApiToken, DashboardUser, Role } from "../../src/lib/types"
+import type { ApiToken, DashboardUser, DeploymentSummary, Role } from "../../src/lib/types"
 
 const now = Date.now()
 const DAY = 86_400_000
@@ -91,6 +91,30 @@ export const keyTokens: ApiToken[] = [
   },
 ]
 
+/** The fleet a deploy key's deployments are chosen from. */
+const deployment = (id: number, name: string, image: string): DeploymentSummary => ({
+  id,
+  name,
+  profile: "web",
+  environmentId: id * 10,
+  environmentName: "production",
+  environmentKind: "production",
+  desiredRevision: 1,
+  strategy: "stop_first",
+  expectedDowntime: true,
+  sourceKind: "image",
+  buildMethod: "image",
+  sourceRepository: image,
+  health: "healthy",
+  pendingChanges: false,
+  updatedAt: iso(-1),
+})
+export const keyFleet = [
+  deployment(3, "shop", "nginx:1.27-alpine"),
+  deployment(5, "blog", "ghost:5"),
+  deployment(8, "status-page", "louislam/uptime-kuma:1"),
+]
+
 export async function mockKeys(page: Page, role: Role = "admin", initial = keyTokens) {
   let tokens = structuredClone(initial).filter((token) => role === "admin" || token.userId === 1)
   const calls: { method: string; path: string; body: unknown }[] = []
@@ -123,6 +147,12 @@ export async function mockKeys(page: Page, role: Role = "admin", initial = keyTo
         { id: 2, name: "blog", driver: "mysql", readOnly: true },
         { id: 7, name: "notes", driver: "sqlite", readOnly: false },
       ])
+    if (path === "/deploy/" && new URL(request.url()).searchParams.get("view") === "fleet")
+      return json(route, {
+        deployments: keyFleet,
+        activeWork: [],
+        slots: { heavyUsed: 0, heavyCapacity: 1, lightUsed: 0, lightCapacity: 2 },
+      })
     if (path === "/tokens/" && method === "GET") return json(route, tokens)
     if (path.startsWith("/tokens/")) {
       const body = request.postData() ? request.postDataJSON() : undefined
@@ -154,6 +184,29 @@ export async function mockKeys(page: Page, role: Role = "admin", initial = keyTo
           expiresAt: body.ttlDays ? iso(body.ttlDays) : undefined,
           revoked: false,
           connections: body.connections,
+        }
+        tokens.push(token)
+        return json(route, { token, secret: `vpsd_synthetic_key_${sequence}` }, 201)
+      }
+      if (method === "POST" && path === "/tokens/deploy") {
+        // The server's own rule: a deploy key is an administrator's alone.
+        if (role !== "admin")
+          return json(
+            route,
+            { error: { code: "forbidden", message: "your role does not permit this action" } },
+            403,
+          )
+        const token: ApiToken = {
+          id: ++sequence,
+          userId: 1,
+          prefix: "vpsd_synthetic",
+          name: body.name,
+          role: "admin",
+          scope: "deploy",
+          createdAt: new Date().toISOString(),
+          expiresAt: body.ttlDays ? iso(body.ttlDays) : undefined,
+          revoked: false,
+          deploymentIds: body.deploymentIds,
         }
         tokens.push(token)
         return json(route, { token, secret: `vpsd_synthetic_key_${sequence}` }, 201)

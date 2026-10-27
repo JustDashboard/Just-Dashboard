@@ -19,6 +19,8 @@ import {
   actorName,
   auditSection,
   isMachine,
+  keyTitle,
+  keyWords,
 } from "@/components/audit/marks"
 import { MethodWord, RequestPath, StatusCode } from "@/components/deploy/request-marks"
 import { TileTrend } from "@/components/metrics/sparkline"
@@ -369,6 +371,11 @@ export default function AuditPage() {
                               <p className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
                                 <span className="shrink-0 text-foreground">{actorName(entry)}</span>
                                 {entry.ip && <Address ip={entry.ip} className="min-w-0" />}
+                                {keyWords(entry) && (
+                                  <span className="min-w-0 truncate" title={keyTitle(entry)}>
+                                    · {keyWords(entry)}
+                                  </span>
+                                )}
                               </p>
                               {entry.detail && (
                                 <p className="truncate text-hint text-muted-foreground">
@@ -486,7 +493,11 @@ function Actor({ entry }: { entry: AuditEntry }) {
         </div>
         <p className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
           {entry.ip && <Address ip={entry.ip} className="min-w-0" />}
-          {entry.actor === "token" && <span className="shrink-0">· API key</span>}
+          {keyWords(entry) && (
+            <span className="min-w-0 truncate" title={keyTitle(entry)}>
+              · {keyWords(entry)}
+            </span>
+          )}
         </p>
       </div>
     </div>
