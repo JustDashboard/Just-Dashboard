@@ -291,9 +291,12 @@ func (s *OrchestrationStore) Enqueue(ctx context.Context, req RunRequest) (*Engi
 		if sourceErr != nil && !errors.Is(sourceErr, sql.ErrNoRows) {
 			return nil, false, sourceErr
 		}
-		if SourceKind(kind) == SourceBlueprint {
-			var source DraftSourceConfig
-			if json.Unmarshal([]byte(configJSON), &source) != nil {
+		// A Compose template is a Compose source rendered from a blueprint,
+		// so the blueprint mode, not the kind, is what asks for this check.
+		var source DraftSourceConfig
+		decoded := json.Unmarshal([]byte(configJSON), &source) == nil
+		if SourceKind(kind) == SourceBlueprint || (decoded && source.Mode == SourceModeBlueprint) {
+			if !decoded {
 				return nil, false, fmt.Errorf("%w: blueprint source configuration is malformed", ErrInvalidPlan)
 			}
 			if err := source.ValidateForDeployment(); err != nil {

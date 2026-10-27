@@ -1731,7 +1731,12 @@ for the file manager's paper page, stay, while the tile draws light copies (`rus
 `pnpm-light.svg`), and two marks already keyed, Valkey's and FreshRSS's, were lifted after the
 contact sheet showed them failing the ground. The notification kinds added in 0.8.2 brought three
 more from the same set — Pushover's, Teams' and Mattermost's, the last with its navy lifted to the
-L 0.72 rung — and draw ntfy and Gotify with the files the webhook receivers already had.
+L 0.72 rung — and draw ntfy and Gotify with the files the webhook receivers already had. The
+multi-service templates brought thirteen more from the same set: WordPress, Ghost (its light variant,
+rasterised to 96px like Compose's), Plausible, Matomo, listmonk, Paperless-ngx (its leaf lifted to the
+L 0.72 rung), Miniflux (its light variant), Wiki.js, authentik, Keycloak, Docmost (rasterised), Firefly
+III and Planka; a template that pairs an application already drawn with its database
+(`nextcloud-mariadb`, `n8n-postgres`, …) is keyed to that application's file.
 
 The Databases section brought sixteen more, from the same three collections under the same rules:
 dashboard-icons' etcd, CouchDB, Cassandra, OpenSearch, FerretDB and Kafka (its white variant);

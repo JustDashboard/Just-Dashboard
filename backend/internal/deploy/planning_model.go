@@ -169,6 +169,10 @@ type SourceIdentity struct {
 	// id rather than a registry manifest, and a release takes it from the
 	// daemon instead of pulling it.
 	Local bool `json:"local,omitempty"`
+	// Template is the reviewed multi-service template (`id@version`) a
+	// Compose source's document was rendered from, and empty for every other
+	// source. A blueprint source names its definition in Ref instead.
+	Template string `json:"template,omitempty"`
 }
 
 type DetectionConfidence string
@@ -1039,6 +1043,16 @@ func (c DraftSourceConfig) Validate() error {
 		}
 	case SourceModeBlueprint:
 		allowed = sourceFieldSet("blueprintId", "blueprintVersion", "blueprintInputs")
+		if c.Kind == SourceCompose {
+			// A Compose template stores the document rendered from it
+			// (WithTemplateDocuments), which every release then runs.
+			allowed["composeFiles"] = true
+			if len(c.ComposeFiles) > 0 {
+				if _, err := analyzeComposeDocuments(c.ComposeFiles); err != nil {
+					return err
+				}
+			}
+		}
 		if c.BlueprintID == "" || c.BlueprintVersion == "" || len(c.BlueprintID) > 128 ||
 			len(c.BlueprintVersion) > 128 || strings.ContainsAny(c.BlueprintID+c.BlueprintVersion, "\x00\r\n") {
 			return fmt.Errorf("%w: blueprint id and version are required", ErrInvalidSource)
@@ -1125,7 +1139,7 @@ func validModeForKind(kind SourceKind, mode SourceMode) bool {
 		return mode == SourceModeImageReference
 	case SourceCompose:
 		return mode == SourceModeComposePaste || mode == SourceModeComposeUpload ||
-			mode == SourceModeComposeGit || mode == SourceModeComposeLocal
+			mode == SourceModeComposeGit || mode == SourceModeComposeLocal || mode == SourceModeBlueprint
 	case SourceBlueprint:
 		return mode == SourceModeBlueprint
 	case SourceImport:
@@ -2055,11 +2069,15 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 	identity := detection.Source
 	for _, value := range []string{
 		identity.Remote, identity.Repository, identity.Ref, identity.Revision,
-		identity.Digest, identity.OS, identity.Architecture, identity.LocalPath,
+		identity.Digest, identity.OS, identity.Architecture, identity.LocalPath, identity.Template,
 	} {
 		if len(value) > 4096 || strings.ContainsAny(value, "\x00\r\n") {
 			return fmt.Errorf("%w: source identity is malformed", ErrInvalidPlan)
 		}
+	}
+	if identity.Template != "" && (source.Mode != SourceModeBlueprint || source.Kind != SourceCompose ||
+		identity.Template != source.BlueprintID+"@"+source.BlueprintVersion) {
+		return fmt.Errorf("%w: template identity does not match the saved source", ErrInvalidPlan)
 	}
 	if identity.Remote != "" {
 		if normalized, _, err := normalizeGitRemote(identity.Remote); err != nil || normalized != identity.Remote {

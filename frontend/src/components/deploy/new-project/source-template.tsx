@@ -10,6 +10,7 @@ import { useSessionState } from "@/lib/view-state"
 import type {
   BlueprintDetail,
   BlueprintInput,
+  BlueprintService,
   BlueprintSummary,
   DeploymentDraftSource,
   DeploymentHostnameSuggestion,
@@ -38,7 +39,7 @@ import {
 } from "@/components/ui/select"
 import { AccessPromise, AccessTag } from "@/components/deploy/first-sign-in"
 import { deploymentName } from "@/components/deploy/vocabulary"
-import { ProductLogo, ProductLogos, hasProductLogo } from "@/components/product-logo"
+import { ProductLogo, ProductLogos, hasProductLogo, imageProduct } from "@/components/product-logo"
 import { inspectAndPrepare, type ConfigureFlow } from "@/components/deploy/new-project/draft"
 import { useSourceInspection } from "./use-source-inspection"
 import { templateInputErrors } from "./template-inputs"
@@ -73,17 +74,25 @@ const BLUEPRINT_ID = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/
 
 const TOPIC_OF: Record<string, TopicKey> = {
   actual: "productivity",
+  docmost: "productivity",
   docuseal: "productivity",
   drawio: "productivity",
+  "firefly-iii": "productivity",
   freshrss: "productivity",
   linkding: "productivity",
+  mattermost: "productivity",
   memos: "productivity",
+  miniflux: "productivity",
   nextcloud: "productivity",
+  "nextcloud-mariadb": "productivity",
   nocodb: "productivity",
+  "paperless-ngx": "productivity",
+  planka: "productivity",
   "stirling-pdf": "productivity",
   trilium: "productivity",
   vaultwarden: "productivity",
   wallabag: "productivity",
+  wikijs: "productivity",
   audiobookshelf: "media",
   jellyfin: "media",
   kavita: "media",
@@ -93,21 +102,31 @@ const TOPIC_OF: Record<string, TopicKey> = {
   dozzle: "monitoring",
   grafana: "monitoring",
   healthchecks: "monitoring",
+  matomo: "monitoring",
   metabase: "monitoring",
+  "metabase-postgres": "monitoring",
+  plausible: "monitoring",
   prometheus: "monitoring",
   "uptime-kuma": "monitoring",
   gotify: "automation",
+  listmonk: "automation",
   n8n: "automation",
+  "n8n-postgres": "automation",
   ntfy: "automation",
   ollama: "ai",
   "open-webui": "ai",
   adminer: "developer",
+  authentik: "developer",
   "code-server": "developer",
   cyberchef: "developer",
   directus: "developer",
+  "directus-postgres": "developer",
+  forgejo: "developer",
   gitea: "developer",
+  "gitea-postgres": "developer",
   "it-tools": "developer",
   jupyter: "developer",
+  keycloak: "developer",
   "mongo-express": "developer",
   opengist: "developer",
   pgadmin: "developer",
@@ -116,12 +135,14 @@ const TOPIC_OF: Record<string, TopicKey> = {
   whoami: "developer",
   caddy: "web",
   filebrowser: "web",
+  ghost: "web",
   homepage: "web",
   minio: "web",
   "nginx-static": "web",
   searxng: "web",
   shlink: "web",
   syncthing: "web",
+  wordpress: "web",
 }
 
 const CATEGORY_TOPIC: Record<BlueprintSummary["category"], TopicKey> = {
@@ -236,6 +257,11 @@ export function SourceTemplate({
   }
 
   const declared = definition?.inputs ?? []
+  const stackServices = definition?.services ?? []
+  const stackFootprint = stackServices.reduce(
+    (total, service) => total + service.resources.memoryMb,
+    0,
+  )
   // A field that must be filled is never behind a fold. Everything else about
   // `advanced` holds; what does not hold is hiding the one answer without
   // which the template cannot be used at all.
@@ -316,9 +342,13 @@ export function SourceTemplate({
     setFailure(undefined)
     let current = true
     try {
-      const profile: WorkloadProfile = definition.profile === "game" ? "game" : "service"
+      // A multi-service template runs through the Compose release path, so
+      // it is a Compose source the server renders from the definition.
+      const stack = (definition.services?.length ?? 0) > 0
+      const profile: WorkloadProfile =
+        definition.profile === "game" ? "game" : stack ? "compose" : "service"
       const source: DeploymentDraftSource = {
-        kind: "blueprint",
+        kind: stack ? "compose" : "blueprint",
         mode: "blueprint",
         blueprintId: definition.id,
         blueprintVersion: definition.version,
@@ -443,6 +473,11 @@ export function SourceTemplate({
                         trailing={
                           <span className="mt-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pt-0.5">
                             <AccessTag access={entry.access} />
+                            {/* A stack says so where it is chosen: what it
+                                runs is part of what is being picked. */}
+                            {(entry.services?.length ?? 0) > 0 && (
+                              <Tag>{plural(entry.services?.length ?? 0, "service")}</Tag>
+                            )}
                             {entry.requiresAcceptance && <Tag tone="warning">licence</Tag>}
                             {entry.privileged && <Tag tone="danger">privileged</Tag>}
                             {!usable && <Tag tone="warning">Preview only</Tag>}
@@ -506,14 +541,20 @@ export function SourceTemplate({
                 <div className="min-w-0 space-y-1.5 text-xs text-muted-foreground">
                   <p className="flex min-w-0 flex-wrap items-center gap-2">
                     <Tag>{definition.provenance.license}</Tag>
-                    <Tag mono className="max-w-full truncate">
-                      {definition.image.reference}
-                    </Tag>
+                    {stackServices.length > 0 ? (
+                      <Tag>Compose stack</Tag>
+                    ) : (
+                      <Tag mono className="max-w-full truncate">
+                        {definition.image.reference}
+                      </Tag>
+                    )}
                   </p>
                   <p>
                     Reviewed {definition.provenance.reviewedAt} by{" "}
-                    {definition.provenance.maintainer}. Recommended memory{" "}
-                    {definition.resources.memoryMb} MB.
+                    {definition.provenance.maintainer}.{" "}
+                    {stackServices.length > 0
+                      ? `Memory limits add up to ${stackFootprint} MB across ${plural(stackServices.length, "service")}.`
+                      : `Recommended memory ${definition.resources.memoryMb} MB.`}
                   </p>
                   {definition.update.notes && <p>{definition.update.notes}</p>}
                   <p className="flex flex-wrap gap-3">
@@ -543,6 +584,8 @@ export function SourceTemplate({
                 )}
 
                 <AccessPromise access={definition.access} />
+
+                {stackServices.length > 0 && <StackServices services={stackServices} />}
 
                 {definition.profile === "game" && (
                   <ExistingServerImport
@@ -675,6 +718,98 @@ export function SourceTemplate({
       )}
     </div>
   )
+}
+
+/**
+ * What a multi-service template runs, and what deploying it does by itself.
+ *
+ * The stack is part of what is being chosen — an application with its own
+ * database is a different thing to adopt from one that needs a server found
+ * for it — so its services are listed where the template is decided, each
+ * with its role, image and limit, and the one that owns the domain marked.
+ * What happens without anybody deciding it is hint text (§14): the private
+ * network, the stop-first release, and what a backup of a running database
+ * is and is not.
+ */
+function StackServices({ services }: { services: BlueprintService[] }) {
+  const publicService = services.find((service) =>
+    service.ports?.some((port) => port.exposure === "proxy"),
+  )
+  const privateServices = services.filter((service) => service !== publicService)
+  const outbound = privateServices.filter((service) => service.egress)
+  return (
+    <div className="min-w-0 space-y-2">
+      <p className="eyebrow">Services</p>
+      <ul className="min-w-0 divide-y divide-border/60" aria-label="Services this template runs">
+        {services.map((service) => {
+          const owner = service === publicService
+          return (
+            <li key={service.name} className="flex min-w-0 items-start gap-2.5 py-2 first:pt-0">
+              <ProductLogo id={imageProduct(service.image.reference)} size="sm" />
+              <span className="min-w-0 flex-1 space-y-0.5">
+                <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="font-mono text-body text-foreground">{service.name}</span>
+                  <Tag tone={owner ? "success" : "default"}>
+                    {owner ? "Public" : ROLE_LABELS[service.role]}
+                  </Tag>
+                  <span className="numeric ml-auto text-hint text-muted-foreground">
+                    {service.resources.memoryMb} MB
+                  </span>
+                </span>
+                <span className="block text-hint leading-relaxed text-muted-foreground">
+                  {service.purpose}
+                </span>
+                <span className="block truncate font-mono text-hint text-muted-foreground">
+                  {service.image.reference}
+                </span>
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+      <ul className="min-w-0 list-disc space-y-1 pl-4 text-hint leading-relaxed text-muted-foreground">
+        {publicService && (
+          <li>
+            Only <span className="font-mono text-foreground">{publicService.name}</span> is
+            reachable, through the project&apos;s address.{" "}
+            {privateServices.length > 0 &&
+              (privateServices.length === 1
+                ? `${listNames(privateServices)} publishes no port and stays on a private network with no route out`
+                : `${listNames(privateServices)} publish no ports and stay on a private network with no route out`) +
+                (outbound.length > 0
+                  ? `, except ${listNames(outbound)} for outbound requests.`
+                  : ".")}
+          </li>
+        )}
+        <li>
+          Deploys as one Compose stack: each deploy stops the running stack before starting the new
+          one, so expect a short interruption.
+        </li>
+        <li>
+          Shared passwords are generated on this server and handed to each service that needs them;
+          you never type or see them unless you reveal them.
+        </li>
+        <li>
+          Backups archive every volume of the stack. A copy of a running database&apos;s files is
+          not a consistent dump, so restore one into a stopped stack.
+        </li>
+      </ul>
+    </div>
+  )
+}
+
+const ROLE_LABELS: Record<BlueprintService["role"], string> = {
+  app: "Application",
+  worker: "Worker",
+  database: "Database",
+  cache: "Cache",
+}
+
+function listNames(services: BlueprintService[]) {
+  const names = services.map((service) => service.name)
+  return names.length <= 1
+    ? (names[0] ?? "")
+    : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
 }
 
 function BlueprintField({
