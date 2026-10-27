@@ -179,7 +179,13 @@ is not drawn before that answer: it used to promise *Verify* to every account. *
 `scripts/reset-password.sh` with the typed name filled in, since recovery happens on the host. A forced
 password change does not ask again for the current password the page already holds, reads the server's
 rule as the reader types (`lib/password.ts`), and signs straight back in with the new password once the
-change has ended the session.
+change has ended the session. *Sign in with a passkey* sits under Continue, and the username field
+(`autocomplete="username webauthn"`) also lists this dashboard's passkeys in the browser's autofill where
+conditional mediation is available (`lib/passkeys.ts`); the autofill's request is withdrawn when the
+button asks out loud. Either way the server's answer moves the page on exactly as a password does, so
+an account with an authenticator lands on the code step. Opened at an IP address, at plain http off
+localhost, or in a browser without WebAuthn, the button is replaced by the reason
+(`passkeyPlace`), since a passkey needs the dashboard's name.
 
 `components/nav-scope.tsx` is for the two panels the route cannot describe. A section calls
 `useNavScope(...)` and the rail draws what it publishes: one database's layout

@@ -116,8 +116,13 @@ func (s *Service) verifySecondFactor(ctx context.Context, sessionID string, user
 	return tx.Commit()
 }
 
+// elevateTx completes a session with its second factor. One begun with a
+// passkey keeps saying so: it reads "passkey+totp", not "totp", since a code
+// after a passkey is not the password-and-code pair "totp" has always meant.
 func elevateTx(ctx context.Context, tx *sql.Tx, sessionID string, userID int64, method string) error {
-	res, err := tx.ExecContext(ctx, `UPDATE sessions SET twofa_passed = 1, auth_method = ? WHERE id = ? AND user_id = ? AND expires_at > ?`, method, sessionID, userID, time.Now().Unix())
+	res, err := tx.ExecContext(ctx, `UPDATE sessions SET twofa_passed = 1,
+		auth_method = CASE WHEN auth_method = 'passkey' THEN 'passkey+' || ? ELSE ? END
+		WHERE id = ? AND user_id = ? AND expires_at > ?`, method, method, sessionID, userID, time.Now().Unix())
 	if err != nil {
 		return err
 	}

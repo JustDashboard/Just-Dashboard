@@ -168,6 +168,12 @@ to the contribution terms above, including the additional licence grant to the p
   bounds, cancellation and independent timeout after killing its own applying process. It never
   captures production interfaces or starts public listeners. See
   [capture verification](docs/internal/backend/network-captures.md#verification).
+- Sign-in and passkey changes (`auth/passkeys.go`, the sign-in page, the account's Security page) run
+  the auth and API passkey tests, which drive the ceremonies with the software authenticator in
+  `internal/auth/passkeytest` (a replayed challenge, another origin or relying party, a counter going
+  backwards, a removed passkey, an enrolled account still asked for its code), and
+  `account-passkeys.spec.ts`, which uses Chrome's virtual authenticator over CDP at `localhost` —
+  WebAuthn refuses the `127.0.0.1` the other specs use, so the spec opens the same server by name.
 - Installer and terminal-admin changes also run `python3 scripts/test_manage.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.

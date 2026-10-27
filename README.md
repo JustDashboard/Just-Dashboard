@@ -207,7 +207,7 @@ free.
 - Host package updates on apt, dnf, yum, zypper, pacman or apk
 - System users, an audit log of every change and the panel's own settings
 - Address, certificate, allowlist and ports applied with automatic rollback
-- Roles, two-factor, sessions and API keys for every account
+- Roles, two-factor, passkeys, sessions and API keys for every account
 - Search and replace API keys, with explicit revocation and inactive-record cleanup
 - A first-run question that keeps the sections you don't use out of your sidebar
 - One-click self-update, with the release notes compiled in
@@ -426,7 +426,7 @@ Passwords are entered twice with hidden input and must meet the dashboard's stre
 password a script sets is the one the account signs in with — the dashboard does not ask for another
 at sign-in. An account an admin creates from Account → Users, and a bootstrap password the backend
 generated, are the ones replaced on first sign-in, after any required two-factor step. A reset
-clears failed-login lockout and revokes that account's sessions and API tokens, while keeping
+clears failed-login lockout and revokes that account's sessions, API tokens and passkeys, while keeping
 two-factor enrolment, recovery codes, role and disabled state. Account changes are audited as local
 root; `revoke-sessions` leaves API tokens unchanged.
 
@@ -476,7 +476,7 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - The backend refuses to start on a non-loopback address without a `JD_ALLOWED_CIDRS` allowlist,
   and the allowlist is checked **before** authentication.
 - Two-factor is enforced for every account that has enrolled; `JD_REQUIRE_2FA` decides whether an
-  account *must* enrol.
+  account *must* enrol. A passkey replaces the password at sign-in, never the code.
 - Capabilities are checked on every backend route, never in the UI alone.
 - Destructive actions are confirmed and audited; deleting a project, database, stack or Git checkout,
   and uninstalling with a wipe, asks for a typed phrase checked on the server.

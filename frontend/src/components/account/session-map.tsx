@@ -48,6 +48,7 @@ export const GUARD_WORDS: Record<Guard, string> = {
   code: "authenticator code",
   recovery: "recovery code",
   password: "password only",
+  passkey: "passkey",
   pending: "owes a code",
   unknown: "method not recorded",
 }

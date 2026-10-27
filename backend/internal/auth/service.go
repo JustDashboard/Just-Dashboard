@@ -496,14 +496,21 @@ func (s *Service) Login(ctx context.Context, username, password, ip, userAgent s
 		return nil, ErrInvalidCredentials
 	}
 	s.st.DB.ExecContext(ctx, `UPDATE users SET failed_count = 0, locked_until = 0 WHERE id = ?`, u.ID)
+	return s.startSession(ctx, u, ip, userAgent, "password")
+}
 
+// startSession is where every sign-in becomes a session, a password's and a
+// passkey's alike, so what a new session owes is decided in one place.
+func (s *Service) startSession(ctx context.Context, u *User, ip, userAgent, method string) (*LoginResult, error) {
 	// A session starts un-elevated whenever a second factor is still owed —
 	// an enrolled authenticator, or an unenrolled account on an install that
 	// demands one. Nothing beyond the 2FA endpoints accepts it until that
 	// factor is proved. The one case that starts complete is the account with
 	// nothing left to prove: no authenticator, and no policy requiring one.
+	// A passkey replaces the password here and nothing more: it does not
+	// count as the second factor.
 	complete := !u.TOTPEnabled && !s.require2FA
-	sess, token, err := s.newSession(ctx, u.ID, ip, userAgent, complete)
+	sess, token, err := s.newSession(ctx, u.ID, ip, userAgent, complete, method)
 	if err != nil {
 		return nil, err
 	}
@@ -518,7 +525,7 @@ func (s *Service) Login(ctx context.Context, username, password, ip, userAgent s
 		// that never passes through it would leave that column reading
 		// "never" for the accounts that sign in most often.
 		if _, err := s.st.DB.ExecContext(ctx,
-			`UPDATE users SET last_login_at = ? WHERE id = ?`, now.Unix(), u.ID); err != nil {
+			`UPDATE users SET last_login_at = ? WHERE id = ?`, time.Now().Unix(), u.ID); err != nil {
 			return nil, err
 		}
 	}

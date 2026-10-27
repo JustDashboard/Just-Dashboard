@@ -5429,7 +5429,8 @@ export type DbMetricsExport = {
 }
 
 export type SessionInfo = {
-  authMethod?: "unknown" | "password" | "totp" | "recovery"
+  authMethod?:
+    "unknown" | "password" | "totp" | "recovery" | "passkey" | "passkey+totp" | "passkey+recovery"
   id: string
   userId: number
   twoFactorPassed: boolean
@@ -9783,3 +9784,19 @@ export type ServerMap = {
 }
 
 export type MapLayoutResponse = { layout: unknown; updatedAt?: string }
+
+/**
+ * A passkey of the signed-in account: a WebAuthn credential that stands in
+ * for its password at sign-in. `rpId` is the host name it signs in at.
+ */
+export type Passkey = {
+  id: number
+  name: string
+  rpId: string
+  createdAt: string
+  /** Zero time when it has never signed in. */
+  lastUsedAt: string
+  /** Backed up by a password manager or a phone's keychain rather than held on one device. */
+  synced: boolean
+  transports: string[]
+}
