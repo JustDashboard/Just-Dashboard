@@ -103,8 +103,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/{id}/run", s.handle(s.handleDeployRun))
 			r.Method(http.MethodPost, "/{id}/environments/{env}/runs", s.handle(s.handleDeploymentRunCreate))
 			// Promoting is deploying production: same capability, same
-			// queue, same checks and cutover, and a token may do it as it
-			// may deploy.
+			// queue, same checks and cutover, and a key may do it as it
+			// may deploy — an ordinary key here, a deploy key by its line
+			// in deployKeyRoutes (deploy_keys.go).
 			r.Method(http.MethodPost, "/{id}/environments/{env}/promote", s.handle(s.handleDeploymentPromote))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/cancel", s.handle(s.handleDeploymentRunCancel))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/retry", s.handle(s.handleDeploymentRunRetry))

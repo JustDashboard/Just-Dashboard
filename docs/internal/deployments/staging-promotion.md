@@ -74,7 +74,8 @@ every environment as before.
 ## Promotion
 
 `POST /api/v1/deploy/{id}/environments/{production}/promote` `{releaseId}` (`service.control` — exactly
-what deploying production needs, since it changes production the same way; token-usable like a deploy;
+what deploying production needs, since it changes production the same way; token-usable like a deploy,
+by a deploy key too (`jd promote`, which takes staging's live release unless `--release` names one);
 `Idempotency-Key` honoured; audited `deploy.release.promote` with the staging release, its number, the
 image id and digest, the commit and the run) queues a production run with operation `promote` and trigger
 `manual`. `PromotionSource` refuses (`409`) unless the release is a `live` or `retained` release of this

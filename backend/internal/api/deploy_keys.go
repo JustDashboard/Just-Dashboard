@@ -21,8 +21,10 @@ import (
 // A deploy key (auth.ScopeDeploy) is the credential the jd command line and a
 // CI pipeline use. It deliberately changes one boundary: several deployment
 // writes that were a session's alone — drafts, configuration, source, Git
-// policy, triggers, variables and shared variables — answer it too. Everything
-// else holds:
+// policy, triggers, variables and shared variables — answer it too, and so do
+// the operating verbs beside a deploy: promoting staging, switching back to
+// the warm release or keeping the new one, and the maintenance switch.
+// Everything else holds:
 //
 //   - It reaches the routes deployKeyRoutes lists and nothing else, here or
 //     anywhere in the API; a route added later is refused until it is given a
@@ -39,15 +41,18 @@ import (
 //   - Its writes are audited under the key's id and name (httpx.AuditMutations).
 //
 // A key may be narrowed to chosen deployments (api_token_deployments). It then
-// reaches only routes about those, and none that create a deployment or touch
-// what every deployment shares.
+// reaches only routes about those, and none that touch what every deployment
+// shares. Its drafts are its own (every deploy key's are: a draft records the
+// key that made it, and the handlers hold a key to those), and a deployment
+// one of its commits creates is added to its grant in the same transaction,
+// so a narrowed key keeps reaching what it made.
 
 // deployKeyRule is one route's answer to a deploy key. The zero rule admits
 // the key; every narrows it to keys that reach every deployment; session and
 // deny refuse it, with the reason in words.
 type deployKeyRule struct {
-	// every is a route that creates a deployment or reaches what all of them
-	// share, which a key narrowed to some deployments may not.
+	// every is a route that reaches what all deployments share, which a key
+	// narrowed to some deployments may not.
 	every bool
 	// session is a route that stays an interactive session's whatever the
 	// key: answered session_required.
@@ -80,6 +85,15 @@ const (
 	whyGame        = "operating a game server is not deploying it"
 	whySecretStore = "secret store connections hold credentials of their own and are managed only in the dashboard"
 	whyEnvironment = "adding or removing an environment is done in the dashboard"
+	// The list of secret stores is an ordinary key's to read and a deploy
+	// key's not: it carries each connection's address and sign-in fields and
+	// which variables of every deployment read it, and the key cannot point a
+	// variable at a store (keyReferenceGuard), so nothing in it is the key's
+	// to use.
+	whySecretStoreList = "the secret-store list carries each connection's address and sign-in fields and which variables of every deployment read it; a deploy key cannot point a variable at a store, so there is nothing in it for the key"
+	whyPages           = "a route's maintenance and error pages are files on the server beside the proxy's route, and are edited in the dashboard"
+	whyRollbackTerms   = "the terms a release is kept warm and rolled back on are set in the dashboard"
+	whyRehearsalTerms  = "a migration rehearsal restores a database's backup, and which database and on what terms is chosen in the dashboard"
 )
 
 // deployKeyRoutes is the decision table: every route a deploy key may make,
@@ -133,6 +147,12 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/{id}/game/":                                            keyOpen,
 	"GET /deploy/{id}/game/players":                                     keyOpen,
 	"GET /deploy/{id}/game/properties":                                  keyOpen,
+	"GET /deploy/{id}/environments":                                     keyOpen,
+	"GET /deploy/{id}/environments/{env}/promotion":                     keyOpen,
+	"GET /deploy/{id}/environments/{env}/rollback-watch":                keyOpen,
+	"GET /deploy/{id}/environments/{env}/maintenance":                   keyOpen,
+	"GET /deploy/{id}/environments/{env}/pages/{page}":                  keyOpen, // what every visitor is shown
+	"GET /deploy/{id}/environments/{env}/rehearsal":                     keyOpen, // the terms; the last report is the run's
 	"GET /deploy/{id}/environments/{env}/releases":                      keyOpen,
 	"GET /deploy/{id}/environments/{env}/releases/{release}/comparison": keyOpen,
 	"GET /deploy/{id}/environments/{env}/variables":                     keyOpen, // names and digests, never values
@@ -154,17 +174,36 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"POST /deploy/{id}/runs/{run}/diagnosis":        keyOpen,
 	"POST /deploy/{id}/rollback":                    keyOpen,
 	"POST /deploy/{id}/environments/{env}/rollback": keyOpen,
+	// Promoting is deploying production with staging's image: the same
+	// capability, queue, checks and cutover as a deploy.
+	"POST /deploy/{id}/environments/{env}/promote": keyOpen,
+	// The warm release's window. Switching traffic back to it is a rollback,
+	// destructive as the one from the release list is, and the key spends
+	// the destructive budget for it the same way; keeping the new release
+	// retires a container nothing routes to.
+	"POST /deploy/{id}/environments/{env}/rollback-watch/rollback": keyOpen,
+	"POST /deploy/{id}/environments/{env}/rollback-watch/keep":     keyOpen,
+	// The maintenance switch takes the application from its visitors as
+	// stopping it does, and is behind the same gate. Who is let past is the
+	// configuration's (runtime.maintenance.bypassFrom), which the key writes
+	// as any configuration, and reaches the route with the next release.
+	"PUT /deploy/{id}/environments/{env}/maintenance": keyOpen,
 
-	// Creating a deployment: session-only until a deploy key.
-	"GET /deploy/drafts":                    keyEvery,
-	"POST /deploy/drafts":                   keyEvery,
-	"GET /deploy/drafts/{draft}":            keyEvery,
-	"PUT /deploy/drafts/{draft}":            keyEvery,
-	"DELETE /deploy/drafts/{draft}":         keyEvery,
-	"POST /deploy/drafts/{draft}/detect":    keyEvery,
-	"POST /deploy/drafts/{draft}/preflight": keyEvery,
-	"POST /deploy/drafts/{draft}/commit":    keyEvery,
-	"POST /deploy/{id}/duplicate":           keyEvery,
+	// Creating a deployment: session-only until a deploy key. A key's drafts
+	// are its own — the draft records the key, and the handlers hold a key to
+	// the drafts it made — so a key narrowed to some deployments makes them
+	// too, and the deployment its commit creates is added to its grant in the
+	// same transaction (DraftCommitRequest.GrantToKey). Duplicating takes a
+	// deployment the key reaches and leaves a draft that is the key's.
+	"GET /deploy/drafts":                    keyOpen,
+	"POST /deploy/drafts":                   keyOpen,
+	"GET /deploy/drafts/{draft}":            keyOpen,
+	"PUT /deploy/drafts/{draft}":            keyOpen,
+	"DELETE /deploy/drafts/{draft}":         keyOpen,
+	"POST /deploy/drafts/{draft}/detect":    keyOpen,
+	"POST /deploy/drafts/{draft}/preflight": keyOpen,
+	"POST /deploy/drafts/{draft}/commit":    keyOpen,
+	"POST /deploy/{id}/duplicate":           keyOpen,
 
 	// Changing a deployment: session-only until a deploy key.
 	"PUT /deploy/{id}/environments/{env}/configuration":            keyOpen,
@@ -240,9 +279,9 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"DELETE /deploy/secret-stores/{store}":                        keySession(whySecretStore),
 	"POST /deploy/{id}/environments":                              keySession(whyEnvironment),
 	"DELETE /deploy/{id}/environments/{env}":                      keySession(whyEnvironment),
-	"PUT /deploy/{id}/environments/{env}/pages/{page}":            keySession("a route's maintenance and error pages are edited in the dashboard"),
-	"PUT /deploy/{id}/environments/{env}/rollback-policy":         keySession("the terms a release is kept warm and rolled back on are set in the dashboard"),
-	"PUT /deploy/{id}/environments/{env}/rehearsal":               keySession("a migration rehearsal restores a database's backup, and its terms are set in the dashboard"),
+	"PUT /deploy/{id}/environments/{env}/pages/{page}":            keySession(whyPages),
+	"PUT /deploy/{id}/environments/{env}/rollback-policy":         keySession(whyRollbackTerms),
+	"PUT /deploy/{id}/environments/{env}/rehearsal":               keySession(whyRehearsalTerms),
 	"POST /deploy/blueprints/{id}/render":                         keySession("a template's plan is previewed in the dashboard; a draft from it is a deploy key's to make"),
 	"POST /deploy/import/preview":                                 keySession(whyHost),
 	"POST /deploy/import/adopt":                                   keySession(whyHost),
@@ -255,6 +294,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"DELETE /deploy/github-app/":                                  keySession(whyGitHubApp),
 
 	// What an ordinary key reaches and a deploy key does not.
+	"GET /deploy/secret-stores":               keyDeny(whySecretStoreList),
 	"POST /deploy/":                           keyDeny(whyLegacy),
 	"PUT /deploy/{id}":                        keyDeny(whyLegacy),
 	"POST /deploy/{id}/rotate-secret":         keyDeny(whyLegacy),

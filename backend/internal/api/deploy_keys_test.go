@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
 // sessionOnlyBefore is every deployment route that answered an ordinary API
@@ -552,14 +555,22 @@ func TestADeployKeyNarrowedToDeploymentsReachesOnlyThem(t *testing.T) {
 		"another deployment's variables":     {http.MethodPut, fmt.Sprintf("/api/v1/deploy/%d/environments/%d/variables/A", theirs, theirEnv)},
 		"another's environment through mine": {http.MethodPut, fmt.Sprintf("/api/v1/deploy/%d/environments/%d/variables/A", mine, theirEnv)},
 		"another deployment's runs":          {http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d/runs", theirs)},
-		"a new draft":                        {http.MethodPost, "/api/v1/deploy/drafts"},
-		"duplicating its own":                {http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/duplicate", mine)},
+		"duplicating another's":              {http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/duplicate", theirs)},
 		"a server shared variable":           {http.MethodPut, "/api/v1/deploy/shared-variables/SMTP"},
 		"the fleet's traffic":                {http.MethodGet, "/api/v1/deploy/traffic"},
+		"the secret stores":                  {http.MethodGet, "/api/v1/deploy/secret-stores"},
 	} {
 		if w := b.call(key, request[0], request[1], write); w.Code != http.StatusForbidden || keyErrorCode(w) != "key_scope" {
 			t.Errorf("%s = %d %s, want 403 key_scope", name, w.Code, w.Body.String())
 		}
+	}
+	// Drafts are the key's own to make, and duplicating a deployment it
+	// reaches leaves a draft that is its own too (the test of drafts below).
+	if w := b.call(key, http.MethodPost, "/api/v1/deploy/drafts", nil); w.Code != http.StatusCreated {
+		t.Errorf("a new draft = %d %s", w.Code, w.Body.String())
+	}
+	if w := b.call(key, http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/duplicate", mine), map[string]any{"name": "mine-copy"}); w.Code != http.StatusCreated {
+		t.Errorf("duplicating its own = %d %s", w.Code, w.Body.String())
 	}
 	shared := b.call(key, http.MethodPut, fmt.Sprintf("/api/v1/deploy/%d/shared-variables/TOKEN", mine), map[string]any{"value": "v", "sensitivity": "secret"})
 	if shared.Code != http.StatusCreated {
@@ -795,4 +806,324 @@ func seedKeyDeployment(t *testing.T, s *Server, name string, source deploy.Draft
 		}
 	}
 	return projectID, environmentID
+}
+
+// draftRef is what a test keeps of a draft a route answered.
+type draftRef struct {
+	ID       string `json:"id"`
+	Revision int    `json:"revision"`
+	KeyID    int64  `json:"keyId"`
+}
+
+// seedDraftReadyToCommit writes a draft the preflight step would leave for an
+// image, since inspecting an image needs a registry the tests do not have.
+func seedDraftReadyToCommit(t *testing.T, s *Server, draftID, name string) {
+	t.Helper()
+	data := deploy.DraftData{
+		Intent: &deploy.DraftIntentConfig{Name: name, Profile: deploy.ProfileWeb},
+		Source: &deploy.DraftSourceConfig{Kind: deploy.SourceImage, Mode: deploy.SourceModeImageReference, Image: "nginx:1.27-alpine"},
+		Detection: &deploy.DetectionResult{
+			Source: deploy.SourceIdentity{Kind: deploy.SourceImage, Repository: "nginx:1.27-alpine"},
+			Candidates: []deploy.DetectedCandidate{{
+				ID: "image", Name: name, Profile: deploy.ProfileWeb, BuildMethod: deploy.BuildImage, Confidence: deploy.ConfidenceHigh,
+			}},
+			SelectedID: "image",
+		},
+		Configuration: &deploy.PlanConfiguration{
+			Build:   deploy.BuildPlanConfig{Method: deploy.BuildImage},
+			Runtime: deploy.RuntimePlanConfig{Image: "nginx:1.27-alpine", Strategy: deploy.StrategyStopFirst, InternalPort: 80},
+		},
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Store.DB.Exec(`UPDATE deploy_drafts SET data_json = ?, current_step = 'preflight', plan_preview = 'seeded', findings_json = '[]' WHERE id = ?`,
+		string(raw), draftID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A deploy key's drafts are its own: it lists, reads, saves, detects,
+// preflights, commits and discards the drafts it made and no session's or
+// other key's, whoever owns them. A key narrowed to chosen deployments makes
+// drafts too, and the deployment its commit creates is added to its grant in
+// the same transaction, so it keeps reaching what it made; a key reaching
+// every deployment is given no row, or the first would narrow it.
+func TestADeployKeysDraftsAreItsOwnAndANarrowedKeyReachesWhatItMade(t *testing.T) {
+	b := newKeyBench(t)
+	image := deploy.DraftSourceConfig{Kind: deploy.SourceImage, Mode: deploy.SourceModeImageReference, Image: "nginx:1.27-alpine"}
+	mine, _ := seedCommittedDeployment(t, b.s, "mine", image, deploy.SourceIdentity{Kind: deploy.SourceImage})
+	theirs, _ := seedCommittedDeployment(t, b.s, "theirs", image, deploy.SourceIdentity{Kind: deploy.SourceImage})
+	narrowed, key, err := b.s.Auth.CreateDeployToken(t.Context(), b.admin, "mine-ci", time.Hour, []int64{mine})
+	if err != nil {
+		t.Fatal(err)
+	}
+	open := func(w *httptest.ResponseRecorder) draftRef {
+		t.Helper()
+		if w.Code != http.StatusCreated {
+			t.Fatalf("opening a draft = %d %s", w.Code, w.Body.String())
+		}
+		var ref draftRef
+		decodeDeployResponse(t, w.Body.Bytes(), &ref)
+		return ref
+	}
+	own := open(b.call(key, http.MethodPost, "/api/v1/deploy/drafts", nil))
+	if own.KeyID != narrowed.ID {
+		t.Fatalf("the key's draft records key %d, want %d", own.KeyID, narrowed.ID)
+	}
+	session := open(b.inSession(http.MethodPost, "/api/v1/deploy/drafts", nil))
+	every := open(b.call(b.deploy, http.MethodPost, "/api/v1/deploy/drafts", nil))
+	if session.KeyID != 0 || every.KeyID != b.deployID {
+		t.Fatalf("a session's draft records key %d and the other key's %d", session.KeyID, every.KeyID)
+	}
+
+	// Each lists its own; a person sees their account's, keys' included.
+	list := b.call(key, http.MethodGet, "/api/v1/deploy/drafts", nil)
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), own.ID) ||
+		strings.Contains(list.Body.String(), session.ID) || strings.Contains(list.Body.String(), every.ID) {
+		t.Errorf("the narrowed key's list = %d %s", list.Code, list.Body.String())
+	}
+	if list := b.inSession(http.MethodGet, "/api/v1/deploy/drafts", nil); !strings.Contains(list.Body.String(), own.ID) || !strings.Contains(list.Body.String(), session.ID) {
+		t.Errorf("the session's list = %d %s", list.Code, list.Body.String())
+	}
+	for _, foreign := range []draftRef{session, every} {
+		path := "/api/v1/deploy/drafts/" + foreign.ID
+		for name, request := range map[string][3]any{
+			"reading":      {http.MethodGet, path, nil},
+			"saving":       {http.MethodPut, path, map[string]any{"revision": foreign.Revision, "step": "intent", "intent": map[string]any{"name": "taken-over", "profile": "web"}}},
+			"detecting":    {http.MethodPost, path + "/detect", map[string]any{"revision": foreign.Revision}},
+			"preflighting": {http.MethodPost, path + "/preflight", map[string]any{"revision": foreign.Revision}},
+			"committing":   {http.MethodPost, path + "/commit", map[string]any{"revision": foreign.Revision}},
+			"discarding":   {http.MethodDelete, path, nil},
+		} {
+			w := b.call(key, request[0].(string), request[1].(string), request[2])
+			if w.Code != http.StatusForbidden || keyErrorCode(w) != "draft_forbidden" {
+				t.Errorf("%s another's draft (key %d) = %d %s, want 403 draft_forbidden", name, foreign.KeyID, w.Code, w.Body.String())
+			}
+		}
+	}
+
+	// The narrowed key commits its own draft and reaches the deployment it
+	// made from the next request on, through the one grant row.
+	seedDraftReadyToCommit(t, b.s, own.ID, "made-by-key")
+	committed := b.call(key, http.MethodPost, "/api/v1/deploy/drafts/"+own.ID+"/commit", map[string]any{"revision": own.Revision})
+	if committed.Code != http.StatusCreated {
+		t.Fatalf("the narrowed key's commit = %d %s", committed.Code, committed.Body.String())
+	}
+	var result deploy.DraftCommitResult
+	decodeDeployResponse(t, committed.Body.Bytes(), &result)
+	var granted int
+	if err := b.s.Store.DB.QueryRow(`SELECT COUNT(*) FROM api_token_deployments WHERE token_id = ? AND project_id = ?`, narrowed.ID, result.ProjectID).Scan(&granted); err != nil || granted != 1 {
+		t.Fatalf("grant rows for the made deployment = %d (%v)", granted, err)
+	}
+	if w := b.call(key, http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d", result.ProjectID), nil); w.Code != http.StatusOK {
+		t.Errorf("the key reading what it made = %d %s", w.Code, w.Body.String())
+	}
+	if w := b.call(key, http.MethodGet, "/api/v1/deploy/?view=fleet", nil); !strings.Contains(w.Body.String(), `"made-by-key"`) || strings.Contains(w.Body.String(), `"theirs"`) {
+		t.Errorf("the key's fleet after the commit = %s", w.Body.String())
+	}
+	if w := b.call(key, http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d", theirs), nil); keyErrorCode(w) != "key_scope" {
+		t.Errorf("another deployment after the commit = %d %s", w.Code, w.Body.String())
+	}
+	if row := b.lastAudit("deploy.create"); row.Actor != "token" || row.KeyID != narrowed.ID || row.KeyName != "mine-ci" ||
+		!strings.Contains(row.Detail, `"grantedToKey":true`) || row.Target != fmt.Sprint(result.ProjectID) {
+		t.Errorf("the commit's audit row = %+v", row)
+	}
+
+	// A key reaching every deployment keeps no rows.
+	seedDraftReadyToCommit(t, b.s, every.ID, "made-by-every")
+	if w := b.call(b.deploy, http.MethodPost, "/api/v1/deploy/drafts/"+every.ID+"/commit", map[string]any{"revision": every.Revision}); w.Code != http.StatusCreated {
+		t.Fatalf("the every-deployment key's commit = %d %s", w.Code, w.Body.String())
+	}
+	var rows int
+	if err := b.s.Store.DB.QueryRow(`SELECT COUNT(*) FROM api_token_deployments WHERE token_id = ?`, b.deployID).Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("an every-deployment key was given %d rows (%v)", rows, err)
+	}
+	if row := b.lastAudit("deploy.create"); row.KeyID != b.deployID || strings.Contains(row.Detail, "grantedToKey") {
+		t.Errorf("the every-deployment key's commit audit = %+v", row)
+	}
+	if w := b.call(b.deploy, http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d", theirs), nil); w.Code != http.StatusOK {
+		t.Errorf("the every-deployment key after its commit = %d %s", w.Code, w.Body.String())
+	}
+
+	// Duplicating a deployment the narrowed key reaches leaves a draft that
+	// is its own; another's is refused at the gate.
+	copied := open(b.call(key, http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/duplicate", mine), map[string]any{"name": "mine-copy"}))
+	if copied.KeyID != narrowed.ID {
+		t.Errorf("the duplicate records key %d, want %d", copied.KeyID, narrowed.ID)
+	}
+	if w := b.call(key, http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/duplicate", theirs), map[string]any{"name": "theirs-copy"}); keyErrorCode(w) != "key_scope" {
+		t.Errorf("duplicating another's = %d %s", w.Code, w.Body.String())
+	}
+	if w := b.call(key, http.MethodGet, "/api/v1/deploy/drafts/"+copied.ID, nil); w.Code != http.StatusOK {
+		t.Errorf("reading its duplicate = %d %s", w.Code, w.Body.String())
+	}
+	if w := b.call(key, http.MethodDelete, "/api/v1/deploy/drafts/"+copied.ID, nil); w.Code != http.StatusNoContent {
+		t.Errorf("discarding its duplicate = %d %s", w.Code, w.Body.String())
+	}
+	if row := b.lastAudit("deploy.draft.discard"); row.KeyID != narrowed.ID || row.Target != copied.ID {
+		t.Errorf("the discard's audit row = %+v", row)
+	}
+	// An administrator in a session still reads any draft, a key's included.
+	if w := b.inSession(http.MethodGet, "/api/v1/deploy/drafts/"+own.ID, nil); w.Code != http.StatusOK {
+		t.Errorf("a session reading the key's draft = %d %s", w.Code, w.Body.String())
+	}
+}
+
+// What a deploy key does beside deploying, on the deployments it reaches:
+// promote staging's release, keep the new release or switch back to the warm
+// one, turn maintenance on and off, and read the environments, the promotion
+// preview, the window, the switch, a page and the rehearsal terms. A key
+// narrowed to some deployments is refused each on any other, and every write
+// is audited under the key.
+func TestADeployKeyOperatesTheDeploymentsItReaches(t *testing.T) {
+	b := newKeyBench(t)
+	session := &client{t: t, h: b.h, cookie: b.session}
+	owner := &warmOwner{}
+	b.s.modules.deployExecutor = deploy.NewNormalizedStepExecutor(b.s.modules.deployRuns, b.s.modules.deployPlanning,
+		b.s.modules.deploySources, b.s.modules.deployArtifacts, owner, nil, nil, t.TempDir())
+
+	// The maintenance switch and the reads beside it, on a route the proxy
+	// can switch.
+	switched, switchedEnv, _ := insertDeploymentConfigurationAPI(t, b.s)
+	root := t.TempDir()
+	for _, dir := range []string{"sites-available", "sites-enabled"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b.s.modules.proxy = proxysvc.New(root, filepath.Join(root, "Caddyfile"))
+	name := deploy.RouteNameFor(switchedEnv)
+	flag := filepath.Join(root, "jd-pages", name, "maintenance.on")
+	if err := os.WriteFile(filepath.Join(root, "sites-available", name),
+		[]byte("server {\n    if (-f "+flag+") {\n        set $jd_x_maint $jd_x_maint_ip;\n    }\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := fmt.Sprintf("/api/v1/deploy/%d/environments/%d", switched, switchedEnv)
+	if w := b.call(b.deploy, http.MethodPut, base+"/maintenance", map[string]any{"on": true}); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"on":true`) {
+		t.Fatalf("switching maintenance on = %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(flag); err != nil {
+		t.Fatalf("the switch file = %v", err)
+	}
+	if row := b.lastAudit("deploy.maintenance"); row.KeyID != b.deployID || row.KeyName != "github-actions" || !strings.Contains(row.Detail, `"on":true`) {
+		t.Errorf("the switch's audit row = %+v", row)
+	}
+	if w := b.call(b.deploy, http.MethodPut, base+"/maintenance", map[string]any{"on": false}); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"on":false`) {
+		t.Errorf("switching maintenance off = %d %s", w.Code, w.Body.String())
+	}
+	for _, read := range []string{"/maintenance", "/pages/502", "/rehearsal", "/rollback-watch"} {
+		if w := b.call(b.deploy, http.MethodGet, base+read, nil); w.Code != http.StatusOK {
+			t.Errorf("GET %s = %d %s", read, w.Code, w.Body.String())
+		}
+	}
+	if w := b.call(b.deploy, http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d/environments", switched), nil); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"production"`) {
+		t.Errorf("the environments = %d %s", w.Code, w.Body.String())
+	}
+	// The terms stay a session's.
+	for _, write := range [][2]string{{"/pages/502", `{"content":"<h1>x</h1>"}`}, {"/rollback-policy", `{"keepWarm":true}`}, {"/rehearsal", `{"enabled":true}`}} {
+		if w := b.call(b.deploy, http.MethodPut, base+write[0], write[1]); keyErrorCode(w) != "session_required" {
+			t.Errorf("PUT %s = %d %s, want session_required", write[0], w.Code, w.Body.String())
+		}
+	}
+
+	// Keeping the new release ends its window and retires the warm one.
+	keepProject, keepEnv, first, _ := warmWindowFixture(t, b.s, session, "keep", true)
+	kept := b.call(b.deploy, http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/environments/%d/rollback-watch/keep", keepProject, keepEnv), nil)
+	if kept.Code != http.StatusOK || !strings.Contains(kept.Body.String(), `"endReason":"kept"`) {
+		t.Fatalf("keep = %d %s", kept.Code, kept.Body.String())
+	}
+	if row := b.lastAudit("deploy.release.keep"); row.Actor != "token" || row.KeyID != b.deployID || row.KeyName != "github-actions" ||
+		!strings.Contains(row.Detail, fmt.Sprintf(`"warmReleaseId":%d`, first.Release.ID)) {
+		t.Errorf("keep's audit row = %+v", row)
+	}
+	if len(owner.stopped) != 1 {
+		t.Errorf("stopped = %v", owner.stopped)
+	}
+
+	// A second window, opened before the promotion below queues a run the
+	// fixture's own claim would otherwise take.
+	warmProject, warmEnv, _, _ := warmWindowFixture(t, b.s, session, "warm", true)
+
+	// Promotion: staging's live release into production, by a key narrowed
+	// to this deployment alone.
+	promo := createLegacyDeploymentFixture(t, b.s, "promo")
+	production := convertToNormalizedDeploymentFixture(t, b.s, promo)
+	images := &fakePromotionImages{held: map[string]bool{}}
+	b.s.modules.promotionImages = images
+	added := session.do(http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/environments", promo.ID), `{"kind":"staging"}`, nil)
+	if added.Code != http.StatusCreated {
+		t.Fatalf("add staging = %d %s", added.Code, added.Body.String())
+	}
+	var copied deploy.StagingCopy
+	decodeDeployResponse(t, added.Body.Bytes(), &copied)
+	queued := session.do(http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/environments/%d/runs", promo.ID, copied.Environment.ID), `{"operation":"deploy"}`, nil)
+	if queued.Code != http.StatusAccepted {
+		t.Fatalf("staging deploy = %d %s", queued.Code, queued.Body.String())
+	}
+	var stagingRun deploy.EngineRun
+	decodeDeployResponse(t, queued.Body.Bytes(), &stagingRun)
+	release := activateSyntheticNormalizedRelease(t, b.s, stagingRun, "staging")
+	images.held["sha256:"+strings.Repeat("c", 64)] = true
+	narrowed, key, err := b.s.Auth.CreateDeployToken(t.Context(), b.admin, "promo-ci", time.Hour, []int64{promo.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := b.call(key, http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d/environments", promo.ID), nil); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"staging"`) {
+		t.Errorf("the narrowed key's environments = %d %s", w.Code, w.Body.String())
+	}
+	preview := b.call(key, http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d/environments/%d/promotion?releaseId=%d", promo.ID, production, release.Release.ID), nil)
+	if preview.Code != http.StatusOK || !strings.Contains(preview.Body.String(), `"imagePresent":true`) {
+		t.Errorf("the narrowed key's promotion preview = %d %s", preview.Code, preview.Body.String())
+	}
+	promoted := b.call(key, http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/environments/%d/promote", promo.ID, production), map[string]any{"releaseId": release.Release.ID})
+	if promoted.Code != http.StatusAccepted {
+		t.Fatalf("the narrowed key's promote = %d %s", promoted.Code, promoted.Body.String())
+	}
+	var promotion deploy.EngineRun
+	decodeDeployResponse(t, promoted.Body.Bytes(), &promotion)
+	if promotion.Operation != deploy.OperationPromote || promotion.EnvironmentID != production {
+		t.Errorf("the promotion run = %+v", promotion)
+	}
+	if row := b.lastAudit("deploy.release.promote"); row.Actor != "token" || row.KeyID != narrowed.ID || row.KeyName != "promo-ci" ||
+		!strings.Contains(row.Detail, fmt.Sprintf(`"runId":%d`, promotion.ID)) {
+		t.Errorf("the promotion's audit row = %+v", row)
+	}
+
+	// Switching back to the warm release is the key's, and audited under it.
+	watch := fmt.Sprintf("/api/v1/deploy/%d/environments/%d/rollback-watch", warmProject, warmEnv)
+	if w := b.call(b.deploy, http.MethodGet, watch, nil); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"state":"watching"`) {
+		t.Errorf("reading the window = %d %s", w.Code, w.Body.String())
+	}
+	rolled := b.call(b.deploy, http.MethodPost, watch+"/rollback", nil)
+	if rolled.Code != http.StatusAccepted || !strings.Contains(rolled.Body.String(), `"operation":"rollback"`) {
+		t.Fatalf("instant rollback = %d %s", rolled.Code, rolled.Body.String())
+	}
+	if row := b.lastAudit("deploy.release.instant_rollback"); row.KeyID != b.deployID || row.KeyName != "github-actions" {
+		t.Errorf("the instant rollback's audit row = %+v", row)
+	}
+
+	// The narrowed key reaches none of this on a deployment it was not given.
+	other := fmt.Sprintf("/api/v1/deploy/%d/environments/%d", warmProject, warmEnv)
+	for name, request := range map[string][3]any{
+		"another's environments":      {http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d/environments", warmProject), nil},
+		"another's promotion preview": {http.MethodGet, other + "/promotion?releaseId=1", nil},
+		"promoting another's":         {http.MethodPost, other + "/promote", map[string]any{"releaseId": 1}},
+		"another's window":            {http.MethodGet, other + "/rollback-watch", nil},
+		"rolling another's back":      {http.MethodPost, other + "/rollback-watch/rollback", nil},
+		"keeping another's":           {http.MethodPost, other + "/rollback-watch/keep", nil},
+		"another's switch":            {http.MethodGet, base + "/maintenance", nil},
+		"switching another's":         {http.MethodPut, base + "/maintenance", map[string]any{"on": true}},
+		"another's page":              {http.MethodGet, base + "/pages/502", nil},
+		"another's rehearsal terms":   {http.MethodGet, base + "/rehearsal", nil},
+	} {
+		w := b.call(key, request[0].(string), request[1].(string), request[2])
+		if w.Code != http.StatusForbidden || keyErrorCode(w) != "key_scope" {
+			t.Errorf("%s = %d %s, want 403 key_scope", name, w.Code, w.Body.String())
+		}
+	}
+	if _, err := os.Stat(flag); !os.IsNotExist(err) {
+		t.Error("a refused switch was written")
+	}
 }

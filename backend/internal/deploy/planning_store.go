@@ -38,6 +38,13 @@ type DraftSaveRequest struct {
 type DraftCommitRequest struct {
 	Revision             int      `json:"revision"`
 	AcknowledgedWarnings []string `json:"acknowledgedWarnings"`
+	// GrantToKey is the deploy key, narrowed to chosen deployments, that is
+	// committing: the deployment the commit creates is added to its grant
+	// (api_token_deployments) in the same transaction, so the key keeps
+	// reaching what it made. Set by the handler from the key, never read
+	// from a request body; 0 for a session or a key reaching every deployment,
+	// which must stay without rows.
+	GrantToKey int64 `json:"-"`
 	// GitPolicy is the automatic-deployment decision, taken while the project
 	// is being created rather than after. A Git deployment polls its branch
 	// from the moment it exists and the default is to deploy every push, so
@@ -521,6 +528,13 @@ func composeServiceByName(services []ComposeServicePlan, name string) *ComposeSe
 }
 
 func (s *PlanningStore) Create(ctx context.Context, ownerUserID int64, ownerUsername string) (*Draft, error) {
+	return s.CreateForKey(ctx, ownerUserID, ownerUsername, 0)
+}
+
+// CreateForKey opens a draft for a deploy key (keyID 0 is a session's). The
+// owner is the key's owner, as every key acts as its owner; the key id is what
+// holds the key to the drafts it made.
+func (s *PlanningStore) CreateForKey(ctx context.Context, ownerUserID int64, ownerUsername string, keyID int64) (*Draft, error) {
 	if ownerUserID <= 0 || strings.TrimSpace(ownerUsername) == "" {
 		return nil, fmt.Errorf("deployment draft owner is required")
 	}
@@ -528,17 +542,17 @@ func (s *PlanningStore) Create(ctx context.Context, ownerUserID int64, ownerUser
 	defer s.mu.Unlock()
 	now := s.now().UTC()
 	draft := &Draft{
-		ID: auth.RandomToken(18), OwnerUserID: ownerUserID, OwnerUsername: ownerUsername,
+		ID: auth.RandomToken(18), OwnerUserID: ownerUserID, OwnerUsername: ownerUsername, KeyID: keyID,
 		CurrentStep: DraftIntent, Revision: 1, Data: DraftData{},
 		Findings: []PreflightFinding{}, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(draftTTL),
 	}
 	data, _ := json.Marshal(draft.Data)
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO deploy_drafts(
-		  id, owner_user_id, owner_username, current_step, revision, data_json,
+		  id, owner_user_id, owner_username, key_id, current_step, revision, data_json,
 		  findings_json, plan_preview, created_at, updated_at, expires_at)
-		VALUES(?, ?, ?, ?, ?, ?, '[]', '', ?, ?, ?)`,
-		draft.ID, draft.OwnerUserID, draft.OwnerUsername, draft.CurrentStep, draft.Revision,
+		VALUES(?, ?, ?, ?, ?, ?, ?, '[]', '', ?, ?, ?)`,
+		draft.ID, draft.OwnerUserID, draft.OwnerUsername, draft.KeyID, draft.CurrentStep, draft.Revision,
 		string(data), now.Unix(), now.Unix(), draft.ExpiresAt.Unix()); err != nil {
 		return nil, err
 	}
@@ -547,7 +561,7 @@ func (s *PlanningStore) Create(ctx context.Context, ownerUserID int64, ownerUser
 
 func (s *PlanningStore) Get(ctx context.Context, id string) (*Draft, error) {
 	draft, err := s.scanDraft(s.db.QueryRowContext(ctx, `
-		SELECT id, owner_user_id, owner_username, current_step, revision, data_json,
+		SELECT id, owner_user_id, owner_username, key_id, current_step, revision, data_json,
 		       findings_json, plan_preview, committed_project_id, created_at, updated_at, expires_at, environment_enc
 		  FROM deploy_drafts WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -590,12 +604,15 @@ func (s *PlanningStore) Discard(ctx context.Context, id string, userID int64, ad
 // ListDrafts returns the caller's own uncommitted, unexpired drafts, newest
 // first, so the new-project page can offer to resume one instead of starting
 // the wizard over. A committed or expired draft has nothing left to resume.
-func (s *PlanningStore) ListDrafts(ctx context.Context, ownerUserID int64) ([]DraftSummary, error) {
+// With a keyID the list is that deploy key's own drafts; with 0 it is every
+// draft of the owner's, those its keys made included, since a person sees
+// what their keys are doing.
+func (s *PlanningStore) ListDrafts(ctx context.Context, ownerUserID, keyID int64) ([]DraftSummary, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, data_json, current_step, updated_at, expires_at
 		  FROM deploy_drafts
-		 WHERE owner_user_id = ? AND committed_project_id = 0 AND expires_at > ?
-		 ORDER BY updated_at DESC, rowid DESC`, ownerUserID, s.now().UTC().Unix())
+		 WHERE owner_user_id = ? AND (? = 0 OR key_id = ?) AND committed_project_id = 0 AND expires_at > ?
+		 ORDER BY updated_at DESC, rowid DESC`, ownerUserID, keyID, keyID, s.now().UTC().Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -628,7 +645,7 @@ func (s *PlanningStore) scanDraft(row interface{ Scan(...any) error }) (*Draft, 
 	var draft Draft
 	var data, findings string
 	var created, updated, expires int64
-	if err := row.Scan(&draft.ID, &draft.OwnerUserID, &draft.OwnerUsername, &draft.CurrentStep,
+	if err := row.Scan(&draft.ID, &draft.OwnerUserID, &draft.OwnerUsername, &draft.KeyID, &draft.CurrentStep,
 		&draft.Revision, &data, &findings, &draft.PlanPreview, &draft.CommittedProjectID,
 		&created, &updated, &expires, &draft.environmentEnc); err != nil {
 		return nil, err
@@ -660,6 +677,18 @@ func (s *PlanningStore) scanDraft(row interface{ Scan(...any) error }) (*Draft, 
 
 func AuthorizeDraft(draft *Draft, userID int64, admin bool) error {
 	if draft.OwnerUserID != userID && !admin {
+		return ErrDraftForbidden
+	}
+	return nil
+}
+
+// AuthorizeDraftForKey holds a deploy key to the drafts it made itself. The
+// key acts as its owner, who as an administrator could read any draft, so
+// ownership is not the test: a session's drafts, and another key's, are a
+// different piece of work the key has no business in, and a key narrowed to
+// some deployments would otherwise commit a plan a person left half-made.
+func AuthorizeDraftForKey(draft *Draft, keyID int64) error {
+	if keyID <= 0 || draft.KeyID != keyID {
 		return ErrDraftForbidden
 	}
 	return nil
@@ -943,7 +972,7 @@ func (s *PlanningStore) persistDraft(ctx context.Context, draft *Draft) (*Draft,
 
 func (s *PlanningStore) getUnlocked(ctx context.Context, id string) (*Draft, error) {
 	draft, err := s.scanDraft(s.db.QueryRowContext(ctx, `
-		SELECT id, owner_user_id, owner_username, current_step, revision, data_json,
+		SELECT id, owner_user_id, owner_username, key_id, current_step, revision, data_json,
 		       findings_json, plan_preview, committed_project_id, created_at, updated_at, expires_at, environment_enc
 		  FROM deploy_drafts WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1235,6 +1264,18 @@ func (s *PlanningStore) Commit(
 	}
 	if affected, _ := update.RowsAffected(); affected != 1 {
 		return nil, ErrDraftRevision
+	}
+	// A narrowed deploy key's grant grows by the deployment it made, in the
+	// transaction that makes it: the key reaches its own deployment from the
+	// first request after this one, and never a deployment that failed to be
+	// made. The table is the key's (auth); the row is written here because
+	// nowhere else is atomic with the deployment's creation.
+	if request.GrantToKey > 0 {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO api_token_deployments(token_id, project_id) VALUES(?, ?)`,
+			request.GrantToKey, projectID); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
