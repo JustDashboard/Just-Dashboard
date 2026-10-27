@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 )
 
@@ -54,7 +55,31 @@ func (a *Authenticator) AuthenticatePasswordChange(next http.Handler) http.Handl
 	return a.authenticate(next, true, false)
 }
 
+// DeployKeyGate decides whether a deploy key may make this request: nil admits
+// it, and an error is the answer it gets instead. Only the feature routes'
+// authentication asks one; every other group refuses a deploy key outright.
+type DeployKeyGate func(r *http.Request, p *Principal) error
+
+// AuthenticateFeatures is Authenticate for the group that holds the feature
+// routes, where a deploy key may also be admitted: gate is asked about every
+// request that carries one, and a key it admits is held to its role from
+// there on, with the route recorded as admitted so RequireSession lets it by.
+// A nil gate admits no deploy key at all.
+//
+// A refusal is written to log: it is answered before the group's own audit
+// middleware runs, and a valid key tried where it does not reach — a reveal,
+// a credential — is the one refusal an operator most wants to find.
+func (a *Authenticator) AuthenticateFeatures(gate DeployKeyGate, log *audit.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return a.authenticateWith(next, false, false, gate, log)
+	}
+}
+
 func (a *Authenticator) authenticate(next http.Handler, allowPasswordChange, allowScoped bool) http.Handler {
+	return a.authenticateWith(next, allowPasswordChange, allowScoped, nil, nil)
+}
+
+func (a *Authenticator) authenticateWith(next http.Handler, allowPasswordChange, allowScoped bool, gate DeployKeyGate, log *audit.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, err := a.resolveWithPasswordChange(r, allowPasswordChange)
 		if err != nil {
@@ -68,6 +93,24 @@ func (a *Authenticator) authenticate(next http.Handler, allowPasswordChange, all
 			WriteError(w, r, Err(http.StatusForbidden, "key_scope",
 				"this is an MCP key: it opens the MCP endpoint, /api/v1/mcp, and nothing else"))
 			return
+		case p.Scope == auth.ScopeDeploy:
+			if gate == nil {
+				WriteError(w, r, Err(http.StatusForbidden, "key_scope",
+					"this is a deploy key: it reaches the deployment routes under /api/v1/deploy and nothing else"))
+				return
+			}
+			if err := gate(r, p); err != nil {
+				WriteError(w, r, err)
+				if log != nil {
+					recordKeyRefusal(log, r, p, err)
+				}
+				return
+			}
+			// The scope has done its work by choosing the route. From here
+			// the key is held to its role, as an MCP key is inside its
+			// endpoint, so it carries no capability scope that would make
+			// Principal.Can refuse everything.
+			p.Scope, p.DeployRoute = "", true
 		case p.Scope != "" && !allowScoped:
 			WriteError(w, r, Err(http.StatusForbidden, "key_scope",
 				"this API key is limited to "+p.Scope+" and cannot reach this route"))
@@ -245,13 +288,34 @@ func RequireToken(next http.Handler) http.Handler {
 
 // RequireSession blocks API-token principals from routes that must be driven
 // by a human — changing your own password, minting tokens, managing accounts.
+// The one key it lets by is a deploy key the deploy key table admitted to this
+// very route (AuthenticateFeatures): that table, not this middleware, is
+// where a deployment write is opened to a key, one line per route.
 func RequireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if MustPrincipal(r).Kind != "session" {
+		p := MustPrincipal(r)
+		if p.Kind != "session" && !p.DeployRoute {
 			WriteError(w, r, Err(http.StatusForbidden, "session_required",
 				"this action requires an interactive session, not an API token"))
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// recordKeyRefusal writes a deploy key's refused request to the audit trail
+// the way AuditMutations writes a refused write, reads included: what was
+// asked for is the target, and the refusal is the detail.
+func recordKeyRefusal(log *audit.Logger, r *http.Request, p *Principal, err error) {
+	status, detail := http.StatusForbidden, err.Error()
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		status, detail = apiErr.Status, apiErr.Code+": "+apiErr.Message
+	}
+	log.Record(r.Context(), audit.Entry{
+		UserID: p.UserID(), Username: p.Username(), Role: string(p.Role), IP: ClientIP(r),
+		Actor: principalKind(p), Action: "auth.deploy_key.refused", Target: r.Method + " " + r.URL.Path,
+		Method: r.Method, Path: r.URL.Path, Status: status, Success: false, Detail: detail,
+		KeyID: p.KeyID(), KeyName: p.KeyName(),
 	})
 }

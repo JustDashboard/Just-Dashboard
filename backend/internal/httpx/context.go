@@ -23,9 +23,13 @@ type Principal struct {
 	Kind  string // "session" | "token"
 	// Scope is the one capability a scoped API key holds; empty for a session
 	// and for an ordinary key.
-	Scope     string
-	IP        string
-	UserAgent string
+	Scope string
+	// DeployRoute is a deploy key the deploy key table admitted to the route
+	// this request matched. It is set by AuthenticateFeatures alone, and it is
+	// what lets such a key past RequireSession on that route and no other.
+	DeployRoute bool
+	IP          string
+	UserAgent   string
 	// Elevated is whether this credential has passed its second factor. It is
 	// always true behind Authenticate, which refuses anything else; only the
 	// partial routes see it false, and only one of them cares — enrolling an
@@ -45,6 +49,30 @@ func (p *Principal) Can(c auth.Capability) bool {
 		return false
 	}
 	return p.Role.Can(c)
+}
+
+// DeployKey reports whether the request came with a deploy key. A handler
+// asks before it answers with something a deploy key is never given, such as
+// a value it could otherwise read back, or before a write a deploy key may not
+// make whatever the route.
+func (p *Principal) DeployKey() bool {
+	return p != nil && p.Token != nil && p.Token.Scope == auth.ScopeDeploy
+}
+
+// KeyID and KeyName are the API key behind a token principal, for the audit
+// trail; zero and empty for a session.
+func (p *Principal) KeyID() int64 {
+	if p == nil || p.Token == nil {
+		return 0
+	}
+	return p.Token.ID
+}
+
+func (p *Principal) KeyName() string {
+	if p == nil || p.Token == nil {
+		return ""
+	}
+	return p.Token.Name
 }
 
 func (p *Principal) Username() string {

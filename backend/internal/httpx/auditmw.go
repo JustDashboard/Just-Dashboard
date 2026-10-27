@@ -108,6 +108,8 @@ func AuditMutations(log *audit.Logger) func(http.Handler) http.Handler {
 				Status:   sw.Status(),
 				Success:  sw.Status() < 400 && !info.Failed,
 				Detail:   detail,
+				KeyID:    p.KeyID(),
+				KeyName:  p.KeyName(),
 			})
 		})
 	}
@@ -178,5 +180,7 @@ func AuditRead(log *audit.Logger, r *http.Request, action, target string) {
 		Path:     r.URL.Path,
 		Status:   http.StatusOK,
 		Success:  true,
+		KeyID:    p.KeyID(),
+		KeyName:  p.KeyName(),
 	})
 }

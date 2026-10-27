@@ -101,3 +101,43 @@ func (s *OrchestrationStore) ProjectRunByNumber(ctx context.Context, projectID, 
 
 // StepLabel is a step's name as the run page writes it.
 func StepLabel(key StepKey, operation Operation) string { return stepLabel(key, operation) }
+
+// RunTranscriptAfter reads a run's log lines after a sequence number, oldest
+// first, at most limit of them, and whether more were left: what a client
+// following a run reads again and again from where it got to, without the
+// stream's socket. Lines already compacted away are not there to read; a
+// client starting at 0 on an old run gets what was kept.
+func (s *OrchestrationStore) RunTranscriptAfter(ctx context.Context, runID, after int64, limit int) ([]RunTranscriptLine, bool, error) {
+	if limit <= 0 || limit > RunEventReplayLimit {
+		limit = RunEventReplayLimit
+	}
+	if _, err := s.Run(ctx, runID); err != nil {
+		return nil, false, err
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT seq, step_id, stream, ts, text FROM deploy_log_chunks
+		 WHERE run_id = ? AND event_type = ? AND compacted = 0 AND seq > ?
+		 ORDER BY seq LIMIT ?`, runID, EventStepLog, after, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	lines := []RunTranscriptLine{}
+	for rows.Next() {
+		var line RunTranscriptLine
+		var ts int64
+		if err := rows.Scan(&line.Seq, &line.StepID, &line.Stream, &ts, &line.Text); err != nil {
+			return nil, false, err
+		}
+		line.At = unixTime(ts)
+		lines = append(lines, line)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	more := len(lines) > limit
+	if more {
+		lines = lines[:limit]
+	}
+	return lines, more, nil
+}
