@@ -25,7 +25,14 @@ import { BRANCHES, itemIndex, kindOf, relatedTo, shelfId, type KindDef } from "@
 import type { MapItem, ServerMap } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { VIA_LABEL } from "@/components/map/edges"
-import { ItemMark, KIND_GLYPH, TONE_DOT } from "@/components/map/marks"
+import {
+  HueTile,
+  ItemMark,
+  KIND_GLYPH,
+  TONE_DOT,
+  itemProduct,
+  strongestProducts,
+} from "@/components/map/marks"
 
 type Point = (id: string | null) => void
 
@@ -85,7 +92,11 @@ export function MapInspector({
       className="flex min-h-0 min-w-0 flex-col border-hairline max-lg:border-t lg:border-l"
     >
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline pr-2 pl-4">
-        {HeadGlyph && <HeadGlyph aria-hidden className="size-3.5 text-muted-foreground" />}
+        {HeadGlyph && (
+          <span data-branch={head?.branch} className="flex text-(--hue)">
+            <HeadGlyph aria-hidden className="size-3.5" />
+          </span>
+        )}
         <span className="eyebrow">{found ? head?.label : shelf ? "Shelf" : "This server"}</span>
         <span className="flex-1" />
         <IconAction label="Close the inspector (I)" className="size-7" onClick={onClose}>
@@ -465,18 +476,13 @@ function ShelfView({
   folded: boolean
 }) {
   const reading = map.kinds.find((k) => k.key === kind.key)
-  const Glyph = KIND_GLYPH[kind.key]
   const items = reading?.items ?? []
   const total = reading ? Math.max(reading.total, items.length) : 0
   const down = items.filter((item) => item.tone === "danger").length
   return (
     <>
       <Identity
-        mark={
-          <span className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-hairline bg-background text-muted-foreground [&>svg]:size-5">
-            {Glyph && <Glyph aria-hidden />}
-          </span>
-        }
+        mark={<HueTile kind={kind.key} className="size-11" />}
         title={kind.label}
         line={
           kind.tool ? (
@@ -635,11 +641,15 @@ function ServerView({
               return sum + (reading ? Math.max(reading.total, reading.items.length) : 0)
             }, 0)
             return (
-              <div key={branch.key}>
-                {/* A branch heads its kinds in weight rather than with a glyph:
-                    the first kind's glyph beside it was the same mark twice. */}
+              <div key={branch.key} data-branch={branch.key}>
+                {/* A branch heads its kinds in weight and in its hue, rather
+                    than with a glyph: the first kind's glyph beside it was the
+                    same mark twice. The hue makes this list the canvas's key. */}
                 <div className="mb-1 flex items-baseline justify-between px-0.5">
-                  <span className="text-xs font-semibold text-foreground">{branch.label}</span>
+                  <span className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                    <span aria-hidden className="size-2 rounded-full bg-(--hue)" />
+                    {branch.label}
+                  </span>
                   <span className="numeric text-hint text-muted-foreground">
                     {things.toLocaleString("en-US")}
                   </span>
@@ -680,6 +690,10 @@ function KindRow({
   const down = reading?.items.filter((item) => item.tone === "danger").length ?? 0
   const Glyph = KIND_GLYPH[kind.key]
   const id = shelfId(kind.key)
+  const products = strongestProducts(
+    (reading?.items ?? []).map((item) => itemProduct(item, kind.key)),
+    3,
+  )
   return (
     <li>
       <button
@@ -691,8 +705,15 @@ function KindRow({
         onFocus={() => onHover(id)}
         onBlur={() => onHover(null)}
       >
-        {Glyph && <Glyph aria-hidden className="size-3.5 text-muted-foreground" />}
+        {Glyph && <Glyph aria-hidden className="size-3.5 text-(--hue)" />}
         <span className="min-w-0 flex-1 truncate">{kind.label}</span>
+        {products.length > 0 && (
+          <span aria-hidden className="flex shrink-0 items-center gap-1">
+            {products.map((product) => (
+              <ProductGlyph key={product} id={product} />
+            ))}
+          </span>
+        )}
         {down > 0 && (
           <span className="flex items-center gap-1 text-hint text-destructive">
             <StatusDot tone="danger" />

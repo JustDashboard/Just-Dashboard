@@ -310,6 +310,27 @@
   --tag-violet: oklch(0.65 0.18 295);
   --tag-pink: oklch(0.68 0.19 350);
 
+  /* The server map's seven branches, a hue each (`/map`, design system §16).
+   *
+   * The operator asked for the map to have colour and life: three hundred
+   * boxes in one grey were a texture, and which of the seven things a server
+   * is for a box belongs to had to be read off the branch it hung from. A
+   * branch's hue is its wires, its tile, its shelves' glyphs and the light
+   * pooled behind it, so the eye finds Jobs from across the canvas the way
+   * it finds a language by its colour on a repository row.
+   *
+   * Five are `LANES`' hues (`lib/hue.ts`), the ones that cannot be read as a
+   * state; Jobs and People are two more at the same rung, lime and orchid, so
+   * no two branches on one side are neighbours in hue. None is red or amber,
+   * because every box on a branch also carries a state dot. */
+  --branch-deployed: var(--tag-blue);
+  --branch-web: var(--tag-cyan);
+  --branch-host: var(--tag-violet);
+  --branch-workspace: var(--tag-pink);
+  --branch-jobs: oklch(0.78 0.15 125);
+  --branch-people: oklch(0.7 0.16 320);
+  --branch-protection: var(--tag-green);
+
   /* The colour a language is already known by.
    *
    * §14 keeps one exception to "no decorative glyph": a mark the reader is
@@ -627,6 +648,62 @@
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+/* The server map's branches. A box, a line or a light names the branch it is
+ * on (`data-branch`), and what it is drawn in is that branch's hue: `--hue`
+ * itself for a glyph or a line, and the three steps of it the tone tokens
+ * take (§3) — a plot behind a glyph, a rule round a box, the light pooled
+ * under a branch. */
+[data-branch="deployed"] {
+  --hue: var(--branch-deployed);
+}
+[data-branch="web"] {
+  --hue: var(--branch-web);
+}
+[data-branch="host"] {
+  --hue: var(--branch-host);
+}
+[data-branch="workspace"] {
+  --hue: var(--branch-workspace);
+}
+[data-branch="jobs"] {
+  --hue: var(--branch-jobs);
+}
+[data-branch="people"] {
+  --hue: var(--branch-people);
+}
+[data-branch="protection"] {
+  --hue: var(--branch-protection);
+}
+[data-branch] {
+  --hue-plot: color-mix(in oklab, var(--hue) 18%, transparent);
+  --hue-rule: color-mix(in oklab, var(--hue) 34%, transparent);
+  --hue-wash: color-mix(in oklab, var(--hue) 6%, transparent);
+  --hue-light: color-mix(in oklab, var(--hue) 13%, transparent);
+}
+
+/* A line of the map's tree, on a path one long (`pathLength`): drawn out from
+ * the server once as the map arrives (§11's *arrived*), and the pulse a
+ * branch's line carries outward while the server's readings stream in
+ * (§11's *live*). Under reduced motion the root rule ends the first at once
+ * and runs the second a single time, past the line's end. */
+@keyframes jd-map-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes jd-map-pulse {
+  from {
+    stroke-dashoffset: 0.16;
+  }
+  to {
+    stroke-dashoffset: -1;
   }
 }
 

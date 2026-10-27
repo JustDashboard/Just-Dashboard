@@ -107,15 +107,19 @@ const stacks = [
 
 const volumes = [
   item("volume:pg-data", "pg-data", "ok", "in use", "/docker/volumes?volume=pg-data", {
+    product: "docker",
     detail: "4.2 GB",
   }),
   item("volume:redis-data", "redis-data", "ok", "in use", "/docker/volumes?volume=redis-data", {
+    product: "docker",
     detail: "180 MB",
   }),
   item("volume:mongo-data", "mongo-data", "ok", "in use", "/docker/volumes?volume=mongo-data", {
+    product: "docker",
     detail: "1.1 GB",
   }),
   item("volume:n8n-data", "n8n-data", "ok", "in use", "/docker/volumes?volume=n8n-data", {
+    product: "docker",
     detail: "64 MB",
   }),
   item(
@@ -124,12 +128,14 @@ const volumes = [
     "ok",
     "in use",
     "/docker/volumes?volume=grafana-storage",
-    { detail: "22 MB" },
+    { product: "docker", detail: "22 MB" },
   ),
   item("volume:minio", "minio-data", "ok", "in use", "/docker/volumes?volume=minio-data", {
+    product: "docker",
     detail: "38 GB",
   }),
   item("volume:old", "old-uploads", "idle", "unused", "/docker/volumes?volume=old-uploads", {
+    product: "docker",
     detail: "2.4 GB",
   }),
 ]
@@ -196,7 +202,10 @@ const databases = [
 ]
 
 const domain = (name: string, project: string, tone: Tone = "ok", state = "https") =>
-  item(`domain:${name}`, name, tone, state, `/proxy/sites/${name}`, { detail: project })
+  item(`domain:${name}`, name, tone, state, `/proxy/sites/${name}`, {
+    product: "nginx",
+    detail: project,
+  })
 
 const domains = [
   domain("shop.example.com", "shop"),

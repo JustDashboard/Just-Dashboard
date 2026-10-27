@@ -1,6 +1,6 @@
 "use client"
 
-import { memo } from "react"
+import { memo, useState } from "react"
 import {
   BaseEdge,
   EdgeLabelRenderer,
@@ -9,17 +9,47 @@ import {
   type Edge,
   type EdgeProps,
 } from "@xyflow/react"
+import type { BranchKey } from "@/lib/server-map"
 import { cn } from "@/lib/utils"
 
-export type BranchEdgeData = { lit?: boolean; dimmed?: boolean; tier: "branch" | "shelf" | "away" }
+export type BranchEdgeData = {
+  lit?: boolean
+  dimmed?: boolean
+  tier: "branch" | "shelf" | "away"
+  /** The branch the line is on, which names its hue. */
+  branch?: BranchKey
+  /** The server's readings are streaming: a branch's line carries a pulse out from it. */
+  live?: boolean
+}
+
+/**
+ * Until when a line drawn for the first time draws itself out rather than
+ * appearing: the map's arrival (`settleLines`). A line mounted after — panned
+ * into view, which mounts what was off screen — is simply there, because it
+ * was there all along.
+ */
+let drawingUntil = 0
+
+/** The map has arrived: the lines it draws in the next moment draw themselves out. */
+export function settleLines(ms = 1400) {
+  drawingUntil = performance.now() + ms
+}
+
+const WIDTH = { branch: 2.25, shelf: 1.5, away: 1.5 }
+const OPACITY = { branch: 0.9, shelf: 0.55, away: 0.8 }
 
 /**
  * A line of the tree: the server to a branch, a branch to a shelf, a shelf
- * to a thing pulled off it. It is still — nothing travels along a branch of
- * a mind map — and it leaves level and arrives level, the node editor's
- * `shape="s"`, so a column of shelves reads as one fan rather than as strings
- * pulled tight. A thing off its shelf hangs from a dashed line: it is where
- * the reader put it, not where it belongs.
+ * to a thing pulled off it, in the branch's hue — the line from the server
+ * running out of the brand into it — so a branch is read as one colour from
+ * the heart to its last shelf. It leaves level and arrives level, the node
+ * editor's `shape="s"`, so a column of shelves reads as one fan rather than as
+ * strings pulled tight. A thing off its shelf hangs from a dashed line: it is
+ * where the reader put it, not where it belongs.
+ *
+ * The lines draw themselves out from the server as the map arrives, and
+ * while the server's readings stream in, each branch's line carries a pulse
+ * out from the heart (§11: *arrived* once, *live* while it is true).
  */
 export const BranchEdge = memo(function BranchEdge({
   id,
@@ -31,6 +61,8 @@ export const BranchEdge = memo(function BranchEdge({
   targetPosition,
   data,
 }: EdgeProps<Edge<BranchEdgeData>>) {
+  const tier = data?.tier ?? "shelf"
+  const [drawing] = useState(() => tier !== "away" && performance.now() < drawingUntil)
   const [path] = getBezierPath({
     sourceX,
     sourceY,
@@ -40,23 +72,61 @@ export const BranchEdge = memo(function BranchEdge({
     targetPosition,
     curvature: 0.35,
   })
+  const gradient = tier === "branch" ? `map-line-${id}` : undefined
+  const width = WIDTH[tier] + (data?.lit ? 0.75 : 0)
   return (
-    <BaseEdge
-      id={id}
-      path={path}
-      className={cn("transition-[stroke,opacity]", data?.dimmed && "opacity-30")}
-      style={{
-        // A thing off its shelf hangs by a line that has to be seen: it is
-        // the only thing saying which shelf the box is still on.
-        stroke: data?.lit
-          ? "var(--color-chart-1)"
-          : data?.tier === "away"
-            ? "var(--color-muted-foreground)"
-            : "var(--color-border-strong)",
-        strokeWidth: data?.tier === "branch" ? 1.75 : data?.tier === "away" ? 1.5 : 1.25,
-        strokeDasharray: data?.tier === "away" ? "5 5" : undefined,
-      }}
-    />
+    <g
+      data-branch={data?.branch}
+      className={cn("transition-opacity", data?.dimmed && "opacity-30")}
+    >
+      {gradient && (
+        <defs>
+          <linearGradient
+            id={gradient}
+            gradientUnits="userSpaceOnUse"
+            x1={sourceX}
+            y1={sourceY}
+            x2={targetX}
+            y2={targetY}
+          >
+            <stop offset="0" style={{ stopColor: "var(--brand)" }} />
+            <stop offset="0.55" style={{ stopColor: "var(--hue, var(--brand))" }} />
+          </linearGradient>
+        </defs>
+      )}
+      <BaseEdge
+        id={id}
+        path={path}
+        pathLength={drawing ? 1 : undefined}
+        className="transition-[stroke-opacity]"
+        style={{
+          stroke: gradient ? `url(#${gradient})` : "var(--hue, var(--color-border-strong))",
+          strokeOpacity: data?.lit ? 1 : OPACITY[tier],
+          strokeWidth: width,
+          strokeLinecap: "round",
+          strokeDasharray: tier === "away" ? "5 5" : drawing ? 1 : undefined,
+          animation: drawing ? "jd-map-draw 0.9s cubic-bezier(0.16, 1, 0.3, 1) both" : undefined,
+        }}
+      />
+      {tier === "branch" && data?.live && (
+        <path
+          d={path}
+          pathLength={1}
+          fill="none"
+          aria-hidden
+          data-slot="map-pulse"
+          className="pointer-events-none"
+          style={{
+            stroke: "var(--hue, var(--brand))",
+            strokeWidth: width + 1.5,
+            strokeLinecap: "round",
+            strokeDasharray: "0.16 1.2",
+            strokeDashoffset: 0.16,
+            animation: "jd-map-pulse 3.2s cubic-bezier(0.45, 0, 0.25, 1) 0.9s infinite",
+          }}
+        />
+      )}
+    </g>
   )
 })
 

@@ -1,6 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { useRouter } from "next/navigation"
 import {
   MiniMap,
@@ -9,6 +17,7 @@ import {
   useReactFlow,
   useStore,
   useStoreApi,
+  ViewportPortal,
   type Edge,
   type Node,
   type Viewport,
@@ -50,6 +59,7 @@ import { WireHost } from "@/components/deploy/wire"
 import { Saved, fitPadding } from "@/components/database/diagram/chrome"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { post } from "@/lib/api"
+import { getState as metricsState, subscribe as onMetrics } from "@/lib/metrics-store"
 import { plural, relativeTime } from "@/lib/format"
 import {
   BRANCHES,
@@ -69,6 +79,8 @@ import {
   type Laid,
   type LaidNode,
   type MapDocument,
+  type Branch,
+  type BranchKey,
   type Point,
   type Rect,
 } from "@/lib/server-map"
@@ -76,8 +88,8 @@ import { notify } from "@/lib/toast"
 import type { Board } from "@/lib/boards"
 import type { Capability, ServerMap } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { KIND_GLYPH } from "@/components/map/marks"
-import { VIA_LABEL, edgeTypes } from "@/components/map/edges"
+import { KIND_GLYPH, branchOf, itemProduct, strongestProducts } from "@/components/map/marks"
+import { VIA_LABEL, edgeTypes, settleLines } from "@/components/map/edges"
 import { MapActionsContext, nodeTypes, type MapActions } from "@/components/map/nodes"
 import { MapInspector } from "@/components/map/inspector"
 import type { MemoryStatus } from "@/components/map/memory"
@@ -173,6 +185,17 @@ export function MapCanvas({
   const wide = useMediaQuery("(min-width: 1024px)")
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const zoom = useStore((s) => zoomBucket(s.transform[2]))
+  // Whether the server's readings are streaming in now: the branches' lines
+  // pulse only while they are. Read as one flag, so a frame of metrics
+  // re-renders nothing here.
+  const live = useSyncExternalStore(
+    onMetrics,
+    () => metricsState().connection === "open",
+    () => false,
+  )
+  // The lines drawn as the map arrives draw themselves out from the server:
+  // marked while the canvas first renders, before its lines do.
+  useState(() => settleLines())
   // Zoomed out, names are held to the screen by growing them against the
   // zoom; the factors are written straight onto the canvas as the view moves,
   // so they follow a zoom without React drawing anything. The names with
@@ -221,9 +244,38 @@ export function MapCanvas({
   }, [map, kinds])
 
   const readings = useMemo(() => new Map(map.kinds.map((k) => [k.key, k])), [map.kinds])
+  // What each shelf, each branch and the whole server hold most, as the
+  // products the boxes are drawn as — so a branch, a folded shelf and the
+  // server name what is on them by its marks.
+  const products = useMemo(() => {
+    const byKind = new Map<string, (string | undefined)[]>()
+    const byBranch = new Map<string, (string | undefined)[]>()
+    const all: (string | undefined)[] = []
+    for (const reading of map.kinds) {
+      const branch = branchOf(reading.key)
+      if (!branch) continue
+      const ids = reading.items.map((item) => itemProduct(item, reading.key))
+      byKind.set(reading.key, ids)
+      byBranch.set(branch, [...(byBranch.get(branch) ?? []), ...ids])
+      // The server's own row names what it runs, not the tools it is reached by.
+      if (branch === "deployed" || branch === "web") all.push(...ids)
+    }
+    return {
+      kind: (key: string) => strongestProducts(byKind.get(key) ?? [], 4),
+      branch: (key: string) => strongestProducts(byBranch.get(key) ?? [], 3),
+      server: strongestProducts(all, 6),
+    }
+  }, [map.kinds])
   const base = useMemo(
-    () => toFlowNodes(laid, { readings, branchCounts, counts, hostname: map.host.hostname }),
-    [laid, readings, branchCounts, counts, map.host.hostname],
+    () =>
+      toFlowNodes(laid, {
+        readings,
+        branchCounts,
+        counts,
+        hostname: map.host.hostname,
+        products,
+      }),
+    [laid, readings, branchCounts, counts, map.host.hostname, products],
   )
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(base)
   const drag = useRef<Drag | null>(null)
@@ -322,6 +374,8 @@ export function MapCanvas({
         targetHandle: side === "right" ? "tl" : "tr",
         data: {
           tier: edge.tier,
+          branch: edgeBranch(edge.source, edge.target),
+          live: edge.tier === "branch" && live,
           lit: lit ? lit.has(edge.source) && lit.has(edge.target) && Boolean(selected) : false,
           dimmed: lit ? !(lit.has(edge.source) && lit.has(edge.target)) : false,
         },
@@ -347,7 +401,7 @@ export function MapCanvas({
       })
     }
     return out
-  }, [laid.edges, links, nodes, lit, selected])
+  }, [laid.edges, links, nodes, lit, selected, live])
 
   // A thing chosen from the search or the inspector is brought into view
   // with what it is wired to: its branch and shelf unfolded and, where it
@@ -759,7 +813,11 @@ export function MapCanvas({
                         const Glyph = KIND_GLYPH[kind.key]
                         return (
                           <DropdownMenuItem key={kind.key} onSelect={() => void add(kind)}>
-                            {Glyph && <Glyph />}
+                            {Glyph && (
+                              <span data-branch={kind.branch} className="flex text-(--hue)">
+                                <Glyph />
+                              </span>
+                            )}
                             {kind.add?.label}
                           </DropdownMenuItem>
                         )
@@ -892,6 +950,9 @@ export function MapCanvas({
               multiSelectionKeyCode="Shift"
               aria-label="Map of the server"
             >
+              <ViewportPortal>
+                <MapLights nodes={nodes} />
+              </ViewportPortal>
               {doc.minimap && (
                 <MiniMap
                   pannable
@@ -1020,14 +1081,110 @@ function ZoomButtons({ onFit }: { onFit: () => void }) {
   )
 }
 
+/**
+ * The minimap in the canvas's own colours: the server in the brand, every
+ * branch, shelf and thing in its branch's hue — a shelf as a wash, so its
+ * things stand on it — and a thing that is down or needs a look in its
+ * state's colour, as its dot is.
+ */
 function minimapColor(node: Node) {
-  const tone = (node.data as { item?: { tone?: string } }).item?.tone
+  const data = node.data as { item?: { tone?: string }; kind?: KindDef | string; branch?: Branch }
+  const tone = data.item?.tone
   if (tone === "danger") return "var(--color-destructive)"
   if (tone === "warning") return "var(--color-warning)"
   if (node.type === "server") return "var(--color-chart-1)"
-  if (node.type === "shelf") return "color-mix(in oklab, var(--color-muted) 60%, transparent)"
-  return "color-mix(in oklab, var(--color-muted-foreground) 55%, var(--color-muted))"
+  const branch =
+    data.branch?.key ?? (typeof data.kind === "string" ? branchOf(data.kind) : data.kind?.branch)
+  if (!branch) return "color-mix(in oklab, var(--color-muted-foreground) 55%, var(--color-muted))"
+  if (node.type === "shelf") return `color-mix(in oklab, var(--branch-${branch}) 22%, transparent)`
+  return `var(--branch-${branch})`
 }
+
+/** The branch a line of the tree is on, from either end: a branch, or a shelf on one. */
+function edgeBranch(source: string, target: string): BranchKey | undefined {
+  for (const id of [target, source]) {
+    if (id.startsWith("branch:")) return id.slice(7) as BranchKey
+    if (id.startsWith("shelf:")) return branchOf(id.slice(6))
+  }
+  return undefined
+}
+
+/**
+ * The light pooled under the map: the brand's behind the server, and each
+ * branch's hue behind its column of shelves. The operator asked for the map
+ * to have colour and life, and this is the ground of it — drawn in the
+ * canvas's own space under the lines and the boxes, so it pans and zooms with
+ * them and follows a branch that is dragged. It is never more than a wash:
+ * every box keeps its own ground over it.
+ */
+const MapLights = memo(function MapLights({ nodes }: { nodes: Node[] }) {
+  const lights = useMemo(() => {
+    const boxes = new Map<string, { x0: number; y0: number; x1: number; y1: number }>()
+    let server: { x: number; y: number; w: number; h: number } | undefined
+    const grow = (key: string, x: number, y: number, w: number, h: number) => {
+      const box = boxes.get(key)
+      if (!box) boxes.set(key, { x0: x, y0: y, x1: x + w, y1: y + h })
+      else {
+        box.x0 = Math.min(box.x0, x)
+        box.y0 = Math.min(box.y0, y)
+        box.x1 = Math.max(box.x1, x + w)
+        box.y1 = Math.max(box.y1, y + h)
+      }
+    }
+    for (const node of nodes) {
+      if (node.parentId) continue
+      const { x, y } = node.position
+      const w = node.width ?? 0
+      const h = node.height ?? 0
+      if (node.type === "server") server = { x, y, w, h }
+      const data = node.data as { branch?: Branch; kind?: KindDef }
+      const branch =
+        node.type === "branch"
+          ? data.branch?.key
+          : node.type === "shelf"
+            ? data.kind?.branch
+            : undefined
+      if (branch) grow(branch, x, y, w, h)
+    }
+    return { server, branches: [...boxes.entries()] }
+  }, [nodes])
+  return (
+    <>
+      {lights.branches.map(([branch, box]) => {
+        const w = box.x1 - box.x0
+        const h = box.y1 - box.y0
+        return (
+          <div
+            key={branch}
+            aria-hidden
+            data-branch={branch}
+            className="pointer-events-none absolute -z-10"
+            style={{
+              left: box.x0 - w * 0.25,
+              top: box.y0 - h * 0.2,
+              width: w * 1.5,
+              height: h * 1.4,
+              background: "radial-gradient(closest-side, var(--hue-light), transparent)",
+            }}
+          />
+        )
+      })}
+      {lights.server && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -z-10"
+          style={{
+            left: lights.server.x + lights.server.w / 2 - 900,
+            top: lights.server.y + lights.server.h / 2 - 600,
+            width: 1800,
+            height: 1200,
+            background: "radial-gradient(closest-side, var(--plot-signal), transparent)",
+          }}
+        />
+      )}
+    </>
+  )
+})
 
 /** Whether a dragged thing's middle is over its own shelf. */
 function isOverShelf(nodes: Node[], dragged: Node, shelf: string) {
@@ -1117,6 +1274,11 @@ function toFlowNodes(
     branchCounts: Map<string, { things: number; down: number }>
     counts: { things: number; down: number }
     hostname: string
+    products: {
+      kind: (key: string) => string[]
+      branch: (key: string) => string[]
+      server: string[]
+    }
   },
 ): Node[] {
   return laid.nodes.map((node: LaidNode) => {
@@ -1137,7 +1299,12 @@ function toFlowNodes(
       case "server":
         return {
           ...common,
-          data: { things: ctx.counts.things, down: ctx.counts.down, hostname: ctx.hostname },
+          data: {
+            things: ctx.counts.things,
+            down: ctx.counts.down,
+            hostname: ctx.hostname,
+            products: ctx.products.server,
+          },
           zIndex: 2,
         }
       case "branch": {
@@ -1151,6 +1318,7 @@ function toFlowNodes(
             things: counted.things,
             down: counted.down,
             shelves: node.kinds.length,
+            products: ctx.products.branch(node.branch.key),
           },
         }
       }
@@ -1164,6 +1332,7 @@ function toFlowNodes(
             folded: node.folded,
             expanded: node.expanded,
             drawn: reading?.items.length ?? 0,
+            products: ctx.products.kind(node.kind.key),
           },
         }
       }

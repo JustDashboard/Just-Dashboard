@@ -12,14 +12,22 @@ import {
 import { rowReveal } from "@/components/icon-action"
 import { WireHost, WirePlaceholder } from "@/components/deploy/wire"
 import { Meter, utilisationTone } from "@/components/meter"
-import { ProductGlyph, platformProduct } from "@/components/product-logo"
+import { ProductGlyph, ProductLogo, platformProduct } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { useMetrics } from "@/hooks/use-metrics"
 import { duration, percent, plural } from "@/lib/format"
 import type { Branch, KindDef } from "@/lib/server-map"
 import type { MapItem, MapKindReading } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { BRANCH_GLYPH, ItemMark, KIND_GLYPH, TONE_DOT } from "@/components/map/marks"
+import {
+  BRANCH_GLYPH,
+  HueTile,
+  ItemGlyph,
+  ItemMark,
+  KIND_GLYPH,
+  TONE_DOT,
+  branchOf,
+} from "@/components/map/marks"
 
 /**
  * What a box can ask of the map: fold a branch or a shelf, open every thing
@@ -88,6 +96,7 @@ const SECOND_LINE = "group-data-[zoom=mid]/map:hidden group-data-[zoom=far]/map:
 const NOT_FAR = "group-data-[zoom=far]/map:hidden"
 const ONLY_NEAR = SECOND_LINE
 const NOT_NEAR = "group-data-[zoom=near]/map:hidden"
+const ONLY_FAR = "hidden group-data-[zoom=far]/map:flex"
 /** The words in a box held to the screen, from the ladder step they are set in. */
 const NAME = {
   hint: "[font-size:calc(var(--text-hint)*var(--map-name,1))]",
@@ -110,8 +119,30 @@ const HELD =
   "pointer-events-none origin-left [transform:scale(max(1,calc(var(--map-unzoom,1)*0.8)))]"
 /** A state's dot drawn on its own, a little larger the further out. */
 const HELD_DOT = "[transform:scale(min(2.5,max(1,calc(var(--map-unzoom,1)*0.5))))]"
+/** A thing's mark far out, beside its name and grown with it. */
+const HELD_MARK = "size-[calc(1rem*var(--map-name,1))]"
+/** The marks a folded shelf names what it holds by, grown with its head. */
+const HELD_STRIP = "size-[calc(0.875rem*var(--map-label,1))]"
 
-export type ServerNodeData = { things: number; down: number; hostname?: string }
+/** A row of bare marks after a count, as `ProductGlyphs` draws them, sized by the caller. */
+function MarkStrip({ ids, className }: { ids: string[]; className: string }) {
+  if (ids.length === 0) return null
+  return (
+    <span aria-hidden="true" className="flex shrink-0 items-center gap-1">
+      {ids.map((id) => (
+        <ProductGlyph key={id} id={id} className={className} />
+      ))}
+    </span>
+  )
+}
+
+export type ServerNodeData = {
+  things: number
+  down: number
+  hostname?: string
+  /** What runs here most, as marks: the products the map's things are. */
+  products: string[]
+}
 
 /**
  * The heart of the map: this server, drawn as every picture draws it (the
@@ -168,6 +199,8 @@ export const ServerNode = memo(function ServerNode({ data }: NodeProps<Node<Serv
             <span className="numeric text-destructive">{data.down} down</span>
           </>
         )}
+        <span className="flex-1" />
+        <MarkStrip ids={data.products} className="size-4" />
       </div>
     </div>
   )
@@ -196,12 +229,15 @@ export type BranchNodeData = {
   things: number
   down: number
   shelves: number
+  /** What the branch holds most, as marks. */
+  products: string[]
   dimmed?: boolean
 }
 
 /**
- * A branch: one of the seven things a server is for, with how much of it
- * there is. Its chevron folds every shelf it holds into this one head.
+ * A branch: one of the seven things a server is for, in its hue, with how
+ * much of it there is and the products it holds most. Its chevron folds
+ * every shelf it holds into this one head.
  */
 export const BranchNode = memo(function BranchNode({ data }: NodeProps<Node<BranchNodeData>>) {
   const { toggleFold } = useActions()
@@ -209,23 +245,35 @@ export const BranchNode = memo(function BranchNode({ data }: NodeProps<Node<Bran
   const id = `branch:${data.branch.key}`
   return (
     <div
+      data-branch={data.branch.key}
       className={cn(
-        "flex size-full items-center gap-3 rounded-xl border border-border bg-card px-3 transition-opacity",
+        "flex size-full items-center gap-3 rounded-xl border border-(--hue-rule) bg-card px-3 transition-opacity",
         data.dimmed && "opacity-40",
       )}
     >
       <Ports />
       <span
         className={cn(
-          "flex size-10 shrink-0 items-center justify-center rounded-lg border border-hairline bg-control text-foreground [&>svg]:size-5",
+          "flex size-10 shrink-0 items-center justify-center rounded-lg border border-(--hue-rule) bg-(--hue-plot) text-(--hue) [&>svg]:size-5",
           ONLY_NEAR,
         )}
       >
         <Glyph aria-hidden />
       </span>
       <div className={cn("min-w-0 flex-1", HELD)}>
-        <div className="truncate text-base font-semibold">{data.branch.label}</div>
-        <div className={cn("flex items-center gap-1.5 text-xs text-muted-foreground", SECOND_LINE)}>
+        <div className="flex min-w-0 items-center gap-2">
+          {/* Past near the tile is gone; the hue stays, as a dot before the name. */}
+          <span aria-hidden className={cn("size-2.5 shrink-0 rounded-full bg-(--hue)", NOT_NEAR)} />
+          <span className="truncate text-base font-semibold">{data.branch.label}</span>
+        </div>
+        {/* One line however much it says: the marks come last, so a branch
+            that is folded and has things down loses its marks, never its words. */}
+        <div
+          className={cn(
+            "flex min-w-0 items-center gap-1.5 overflow-hidden text-xs whitespace-nowrap text-muted-foreground",
+            SECOND_LINE,
+          )}
+        >
           <span className="numeric">{data.things.toLocaleString("en-US")}</span>
           {data.down > 0 && (
             <>
@@ -240,6 +288,7 @@ export const BranchNode = memo(function BranchNode({ data }: NodeProps<Node<Bran
               {plural(data.shelves, "shelf", "shelves")} folded
             </>
           )}
+          <MarkStrip ids={data.products} className="ml-1 size-3.5" />
         </div>
       </div>
       <button
@@ -276,6 +325,8 @@ export type ShelfNodeData = {
    * `over` while letting go would put it back.
    */
   home?: "away" | "over"
+  /** What it holds most, as marks: drawn in its head while it is folded. */
+  products: string[]
 }
 
 /**
@@ -308,16 +359,18 @@ export const ShelfNode = memo(function ShelfNode({ data }: NodeProps<Node<ShelfN
     <div
       data-home={data.home}
       data-hovered={data.hovered || undefined}
+      data-branch={kind.branch}
       className={cn(
         "size-full rounded-xl border bg-background transition-[opacity,border-color,background-color]",
         data.home === "away" && "border-dashed border-rule-brand",
         data.home === "over" && "border-rule-brand bg-wash-brand",
-        !data.home && (data.hovered ? "border-ring" : "border-hairline"),
+        !data.home && (data.hovered ? "border-ring" : "border-(--hue-rule)"),
         data.dimmed && !data.home && "opacity-40",
       )}
     >
       <Ports />
-      <div className="group/head flex h-14 items-center gap-2 pr-2 pl-3">
+      {/* The head is washed in the branch's hue, so a shelf is found by its colour from far out. */}
+      <div className="group/head flex h-14 items-center gap-2 rounded-t-xl bg-(--hue-wash) pr-2 pl-3">
         <button
           type="button"
           aria-label={data.folded ? `Unfold ${kind.label}` : `Fold ${kind.label}`}
@@ -335,9 +388,7 @@ export const ShelfNode = memo(function ShelfNode({ data }: NodeProps<Node<ShelfN
           )}
         </button>
         <span className={cn("flex min-w-0 items-center", SHELF.gap)}>
-          {Glyph && (
-            <Glyph aria-hidden className={cn("shrink-0 text-muted-foreground", SHELF.glyph)} />
-          )}
+          {Glyph && <Glyph aria-hidden className={cn("shrink-0 text-(--hue)", SHELF.glyph)} />}
           <span className={cn("eyebrow truncate", SHELF.label)}>{kind.label}</span>
           {!kind.tool && reading?.state !== "unread" && (
             <span className={cn("numeric text-muted-foreground", SHELF.count)}>
@@ -350,6 +401,7 @@ export const ShelfNode = memo(function ShelfNode({ data }: NodeProps<Node<ShelfN
               <span className="numeric">{down} down</span>
             </span>
           )}
+          {data.folded && <MarkStrip ids={data.products} className={HELD_STRIP} />}
         </span>
         <ShelfNote reading={reading} />
         <span className="flex-1" />
@@ -465,6 +517,7 @@ export const ItemNode = memo(function ItemNode({ data, dragging }: NodeProps<Nod
       data-tone={item.tone}
       data-away={data.away || undefined}
       data-face={card ? "card" : undefined}
+      data-branch={branchOf(data.kind)}
       className={cn(
         "group relative flex size-full items-center gap-3 rounded-lg border bg-card px-3 transition-[opacity,border-color,background-color]",
         card && "rounded-xl px-3.5",
@@ -476,12 +529,18 @@ export const ItemNode = memo(function ItemNode({ data, dragging }: NodeProps<Nod
               ? "border-rule-brand"
               : dragging
                 ? "border-rule-brand"
-                : "border-hairline hover:border-border-strong",
+                : // A thing that is down is edged in the colour its dot is
+                  // already: its own measured state, said by the box as well.
+                  TONE_EDGE[item.tone],
         data.dimmed && "opacity-35",
       )}
     >
       <Ports />
       <ItemMark item={item} kind={data.kind} size="md" className={NOT_FAR} />
+      {/* Far out the tile would be a speck: the mark alone, grown with the name. */}
+      <span data-slot="map-mark" className={cn("shrink-0", HELD_MARK, ONLY_FAR)}>
+        <ItemGlyph item={item} kind={data.kind} className="size-full" />
+      </span>
       <div className="min-w-0 flex-1">
         <div
           data-slot="map-name"
@@ -545,6 +604,15 @@ export const ItemNode = memo(function ItemNode({ data, dragging }: NodeProps<Nod
   )
 })
 
+/** A box's edge at rest, by its state: what is down or needs a look says so at its edge too. */
+const TONE_EDGE: Record<MapItem["tone"], string> = {
+  danger: "border-rule-danger hover:border-destructive",
+  warning: "border-rule-warning hover:border-warning",
+  ok: "border-hairline hover:border-border-strong",
+  idle: "border-hairline hover:border-border-strong",
+  unknown: "border-hairline hover:border-border-strong",
+}
+
 export type SlotNodeData = { kind: KindDef; count?: number; dimmed?: boolean }
 
 /** "+N more": the rest of a long shelf, a press away. */
@@ -553,8 +621,9 @@ export const MoreNode = memo(function MoreNode({ data }: NodeProps<Node<SlotNode
   return (
     <button
       type="button"
+      data-branch={data.kind.branch}
       className={cn(
-        "nodrag flex size-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-sm text-muted-foreground focus-ring transition-colors hover:bg-row-hover hover:text-foreground",
+        "nodrag flex size-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-(--hue-rule) text-sm text-muted-foreground focus-ring transition-colors hover:bg-row-hover hover:text-foreground",
         data.dimmed && "opacity-35",
       )}
       onClick={(event) => {
@@ -564,7 +633,7 @@ export const MoreNode = memo(function MoreNode({ data }: NodeProps<Node<SlotNode
     >
       <Ports />
       <span className={cn("flex items-center gap-1.5", HELD, "origin-center")}>
-        <span className="numeric">+{(data.count ?? 0).toLocaleString("en-US")}</span>
+        <span className="numeric text-(--hue)">+{(data.count ?? 0).toLocaleString("en-US")}</span>
         <span className={NOT_FAR}>more</span>
       </span>
     </button>
@@ -591,7 +660,8 @@ export const AddNode = memo(function AddNode({ data }: NodeProps<Node<SlotNodeDa
   return (
     <button
       type="button"
-      className="nodrag group/add flex size-full items-center gap-3 rounded-lg border border-dashed border-border px-3 text-left focus-ring transition-colors hover:bg-row-hover"
+      data-branch={kind.branch}
+      className="nodrag group/add flex size-full items-center gap-3 rounded-lg border border-dashed border-(--hue-rule) px-3 text-left focus-ring transition-colors hover:bg-row-hover"
       onClick={(event) => {
         event.stopPropagation()
         actions.add(kind)
@@ -611,14 +681,18 @@ export const AddNode = memo(function AddNode({ data }: NodeProps<Node<SlotNodeDa
   )
 })
 
-/** A tool: one box that opens its page, where its contents are not boxes. */
+/**
+ * A tool: one box that opens its page, where its contents are not boxes.
+ * Packages are the system's own, so that tool is drawn as the distribution
+ * the server runs; Files is a glyph in its branch's hue.
+ */
 export const ToolNode = memo(function ToolNode({ data }: NodeProps<Node<SlotNodeData>>) {
   const { open } = useActions()
   const { kind } = data
-  const Glyph = KIND_GLYPH[kind.key]
   return (
     <button
       type="button"
+      data-branch={kind.branch}
       className="nodrag flex size-full items-center gap-3 rounded-lg border border-hairline bg-card px-3 text-left focus-ring transition-colors hover:border-border-strong"
       onClick={(event) => {
         event.stopPropagation()
@@ -626,14 +700,11 @@ export const ToolNode = memo(function ToolNode({ data }: NodeProps<Node<SlotNode
       }}
     >
       <Ports />
-      <span
-        className={cn(
-          "flex size-10 shrink-0 items-center justify-center rounded-lg border border-hairline bg-background text-muted-foreground [&>svg]:size-5",
-          ONLY_NEAR,
-        )}
-      >
-        {Glyph && <Glyph aria-hidden />}
-      </span>
+      {kind.key === "packages" ? (
+        <SystemMark fallback={kind.key} className={ONLY_NEAR} />
+      ) : (
+        <HueTile kind={kind.key} className={ONLY_NEAR} />
+      )}
       <span className="min-w-0">
         <span className={cn("block truncate leading-tight font-medium", NAME.sm)}>
           {kind.tool?.label}
@@ -645,6 +716,14 @@ export const ToolNode = memo(function ToolNode({ data }: NodeProps<Node<SlotNode
     </button>
   )
 })
+
+/** The distribution the server runs, from the shell's own host reading. */
+function SystemMark({ fallback, className }: { fallback: string; className?: string }) {
+  const { host } = useMetrics()
+  const platform = platformProduct(host?.platform)
+  if (!platform) return <HueTile kind={fallback} className={className} />
+  return <ProductLogo id={platform} size="md" className={className} />
+}
 
 export const nodeTypes = {
   server: ServerNode,

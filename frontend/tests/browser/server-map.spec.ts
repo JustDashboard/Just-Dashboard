@@ -376,7 +376,7 @@ test("a fresh server offers the first of each, and a source still being read say
   await expect(node(page, "shelf:tunnels")).toHaveCount(0)
 })
 
-test("from afar a thing is its name and its dot, and every name stays readable", async ({
+test("from afar a thing is its mark, its name and its dot, and every name stays readable", async ({
   page,
 }) => {
   await open(page)
@@ -387,13 +387,17 @@ test("from afar a thing is its name and its dot, and every name stays readable",
   const box = await label.boundingBox()
   // Held to the screen: a 16px name at a fifth of its size would be 3px.
   expect(box!.height).toBeGreaterThan(10)
-  // A thing keeps its name, grown to read at 11px, and gives up its second
-  // line and its mark for the room.
+  // A thing keeps its name, grown to read at 11px, and its mark beside it
+  // grown with it — the logo is what the overview is read by — and gives up
+  // its second line and its tile for the room.
   const api = node(page, "container:c-api")
   await expect(api.locator("[data-slot=map-name]")).toHaveText("api-1")
   expect(await onScreen(api.locator("[data-slot=map-name]"))).toBeGreaterThan(10.5)
   await expect(api.getByText("running", { exact: true })).toBeHidden()
   await expect(api.locator("img, svg").first()).toBeHidden()
+  const mark = api.locator("[data-slot=map-mark]")
+  await expect(mark.locator("img")).toHaveAttribute("src", "/logos/python.svg")
+  expect((await mark.boundingBox())!.height).toBeGreaterThan(10)
   // A shelf's name reads at least as large as the things on it.
   const shelf = node(page, "shelf:containers").getByText("Containers", { exact: true })
   expect(await onScreen(shelf)).toBeGreaterThan(10.5)
@@ -431,4 +435,43 @@ test("a database is a card, its engine on a line of its own under its state", as
   const row = await node(page, "container:c-api").boundingBox()
   expect(3 * card!.width).toBeGreaterThan(4 * row!.width)
   await expect(node(page, "container:c-api").locator("[data-face=card]")).toHaveCount(0)
+})
+
+test("every branch is drawn in its own hue, and every box as the thing it is", async ({ page }) => {
+  await open(page)
+  // A shelf, its things and the lines to it name their branch, and the hue
+  // follows from it: Jobs' lines are not People's.
+  await expect(node(page, "shelf:backups").locator("[data-branch]").first()).toHaveAttribute(
+    "data-branch",
+    "jobs",
+  )
+  const stroke = (id: string) =>
+    page
+      .getByTestId(`rf__edge-${id}`)
+      .locator(".react-flow__edge-path")
+      .evaluate((el) => getComputedStyle(el).stroke)
+  const jobs = await stroke("e:branch:jobs:shelf:backups")
+  const people = await stroke("e:branch:people:shelf:accounts")
+  expect(jobs).not.toBe(people)
+  expect(jobs).not.toBe("none")
+  // While the server's readings stream, a branch's line carries a pulse out
+  // from the heart; a shelf's line does not.
+  await expect(
+    page.getByTestId("rf__edge-e:server:branch:deployed").locator("[data-slot=map-pulse]"),
+  ).toHaveCount(1)
+  await expect(
+    page.getByTestId("rf__edge-e:branch:jobs:shelf:backups").locator("[data-slot=map-pulse]"),
+  ).toHaveCount(0)
+  // Every box is the product it is where the dashboard has the mark: a Mac
+  // is Apple's, a volume Docker's, a key named for GitHub GitHub's, a
+  // domain the proxy's that answers for it, and a person is a face.
+  const logo = (id: string) => node(page, id).locator("[data-slot=map-mark] img")
+  await expect(logo("computer:a")).toHaveAttribute("src", "/logos/apple.svg")
+  await expect(logo("volume:grafana")).toHaveAttribute("src", "/logos/docker.svg")
+  await expect(logo("key:1")).toHaveAttribute("src", "/logos/github.svg")
+  await expect(logo("domain:api.example.com")).toHaveAttribute("src", "/logos/nginx.svg")
+  await expect(node(page, "account:1").locator("[data-slot=user-avatar]").first()).toBeAttached()
+  // A thing that is no product is its kind's glyph in its branch's hue.
+  const alert = node(page, "alert:host:1")
+  await expect(alert.locator("[data-branch=jobs]").first()).toBeAttached()
 })
