@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button"
 type Link = NonNullable<AccountLinkStatus["link"]>
 
 /** On the section's own edge, under its title: the rows open nothing, so they take no bleed. */
-const ROW = "px-0 py-3.5"
+const ROW = "px-0 py-2.5"
 
 const COMMAND_STATUS = {
   succeeded: { tone: "running", label: "Succeeded" },

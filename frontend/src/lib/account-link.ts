@@ -1,4 +1,4 @@
-import { bytes, duration, percent } from "@/lib/format"
+import { bytes, duration, percent, rate } from "@/lib/format"
 import type { AccountLinkScope, AccountLinkStatus } from "@/lib/types"
 
 /**
@@ -154,13 +154,16 @@ export function policyWords(policy: Policy | undefined): { auto: string; window?
   }
 }
 
+/** One record of a list: what it is called, and everything else it was sent with. */
+export type SharedRecord = { title: string; detail: string }
+
 export type SharedRow = {
   label: string
   value: string
   /** The row is a moment: an ISO time the page can draw in the reader's locale. */
   time?: string
-  /** A list of records, one line each, under the row's count. */
-  items?: string[]
+  /** A list of records under the row's count. */
+  records?: SharedRecord[]
 }
 
 export type SharedGroup = { key: string; label: string; rows: SharedRow[] }
@@ -181,6 +184,7 @@ const WORDS: Record<string, string> = {
   net: "network",
   rx: "received",
   tx: "sent",
+  load1: "load (1 min)",
 }
 
 const words = (key: string) =>
@@ -225,33 +229,55 @@ function scalar(key: string, value: unknown): { value: string; time?: string } {
     }
     if (/Percent$/.test(key)) return { value: percent(value) }
     if (/Seconds$/.test(key)) return { value: duration(value) }
+    // The sampler's rates are bytes per second (metrics.Sample), so this is a unit, not a guess.
+    if (/^net(Rx|Tx)$/.test(key)) return { value: rate(value) }
     if (isSize(key)) return { value: bytes(value) }
     return { value: String(Math.round(value * 100) / 100) }
   }
   return { value: String(value) }
 }
 
-/** One record of a list on one line: `shop-web · ghcr.io/… · running · healthy`. */
-function summary(record: unknown): string {
-  if (!isRecord(record)) return scalar("", record).value
-  return Object.entries(record)
-    .filter(([, value]) => !isRecord(value) && !Array.isArray(value))
-    .map(([key, value]) => scalar(key, value).value)
-    .join(" · ")
+/**
+ * A record led by its name — `shop-web`, then `ghcr.io/… · running · healthy · 3f2` — so a list
+ * of forty containers is read down its names. A count or a flag says what it counts, since
+ * `3 · 3 · yes` under a stack names nothing; the id goes last because nobody looks for it first.
+ */
+function summary(record: unknown): SharedRecord {
+  if (!isRecord(record)) return { title: scalar("", record).value, detail: "" }
+  const fields = Object.entries(record).filter(
+    ([, value]) => !isRecord(value) && !Array.isArray(value),
+  )
+  const titled =
+    fields.find(([key]) => key === "name") ??
+    fields.find(([key, value]) => key !== "id" && typeof value === "string" && value !== "")
+  const rest = fields.filter((field) => field !== titled)
+  const detail = [
+    ...rest.filter(([key]) => key !== "id"),
+    ...rest.filter(([key]) => key === "id"),
+  ].map(([key, value]) => {
+    const text = scalar(key, value).value
+    return typeof value === "string" || isMoment(key, Number(value))
+      ? text
+      : `${words(key).join(" ")} ${text}`
+  })
+  return { title: titled ? String(titled[1]) : (detail.shift() ?? "—"), detail: detail.join(" · ") }
 }
+
+const isRecordList = (value: unknown): value is unknown[] =>
+  Array.isArray(value) && value.some((entry) => isRecord(entry) || Array.isArray(entry))
 
 function row(path: string[], value: unknown): SharedRow {
   const key = path[path.length - 1]
   const label = fieldLabel(path)
   if (!Array.isArray(value)) return { label, ...scalar(key, value) }
   if (value.length === 0) return { label, value: "none" }
-  if (!value.some((entry) => isRecord(entry) || Array.isArray(entry))) {
+  if (!isRecordList(value)) {
     return { label, value: value.map((entry) => scalar(key, entry).value).join(", ") }
   }
   return {
     label,
     value: `${value.length} ${value.length === 1 ? "entry" : "entries"}`,
-    items: value.map(summary),
+    records: value.map(summary),
   }
 }
 
@@ -264,10 +290,11 @@ function flatten(record: Record<string, unknown>, path: string[]): SharedRow[] {
 }
 
 /**
- * The last heartbeat as the groups a person reads it in: each top-level object is a group, and
- * the fields that sit beside them (the protocol, when it was sent, the alerts) are the first,
- * "Heartbeat". Built from what was actually sent rather than from a list of what should be, so
- * a field the dashboard adds shows up here the day it starts leaving the machine.
+ * The last heartbeat as the groups a person reads it in: each top-level object is a group, and so
+ * is each top-level list of records (the stacks, the alerts firing), which would otherwise stretch
+ * the first group; the fields left beside them (the protocol, when it was sent) are that first
+ * group, "Heartbeat". Built from what was actually sent rather than from a list of what should be,
+ * so a field the dashboard adds shows up here the day it starts leaving the machine.
  */
 export function sharedGroups(snapshot: Record<string, unknown> | undefined): SharedGroup[] {
   if (!snapshot) return []
@@ -276,6 +303,8 @@ export function sharedGroups(snapshot: Record<string, unknown> | undefined): Sha
   for (const [key, value] of Object.entries(snapshot)) {
     if (isRecord(value) && Object.keys(value).length > 0) {
       groups.push({ key, label: fieldLabel([key]), rows: flatten(value, []) })
+    } else if (isRecordList(value)) {
+      groups.push({ key, label: fieldLabel([key]), rows: [row(["list"], value)] })
     } else {
       loose.push(row([key], isRecord(value) ? null : value))
     }

@@ -140,7 +140,7 @@ export default function AccountLinkPage() {
                   sentAt={link.lastHeartbeatAt}
                   className={BLOCK}
                 />
-                <div className={cn("grid min-w-0 gap-x-16 gap-y-12 xl:grid-cols-2", BLOCK)}>
+                <div className={cn("grid min-w-0 gap-x-12 gap-y-8 xl:grid-cols-2", BLOCK)}>
                   <Policy policy={link.updatePolicy} scope={link.scope} site={site} />
                   <Keys fingerprint={status.fingerprint} siteKeys={link.siteKeys} />
                 </div>
@@ -165,8 +165,8 @@ export default function AccountLinkPage() {
   )
 }
 
-/** Each section stands alone under a hairline, with room enough round it to be read as one. */
-const BLOCK = "py-12 first:pt-6 last:pb-4"
+/** Each section stands alone under a hairline, at the deploy settings pages' rhythm. */
+const BLOCK = "py-8 first:pt-4 last:pb-2"
 
 function Facts({ status }: { status: AccountLinkStatus }) {
   if (!status.enabled) return <span>Turned off by JD_ACCOUNT_LINK</span>

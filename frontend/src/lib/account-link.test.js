@@ -51,6 +51,7 @@ const snapshot = {
       { id: "9a1", name: "shop-db", state: "running" },
     ],
   },
+  stacks: [{ name: "shop", services: 2, running: 2, managed: true }],
   alerts: [{ kind: "disk_filling", subject: "/var", reading: "91%", since: 1761340000 }],
   backups: { jobs: 2, lastRun: { status: "success", at: 1761300000 }, failed: 0 },
 }
@@ -149,6 +150,7 @@ test("field names are read as words, with the unit moved into the value", () => 
   expect(fieldLabel(["sshHost"])).toBe("SSH host")
   expect(fieldLabel(["netRx"])).toBe("Network received")
   expect(fieldLabel(["psiCpu"])).toBe("PSI CPU")
+  expect(fieldLabel(["load1"])).toBe("Load (1 min)")
   // A key that is only the unit keeps it.
   expect(fieldLabel(["percent"])).toBe("Percent")
 })
@@ -161,6 +163,8 @@ test("the heartbeat is grouped as it was sent", () => {
     "access",
     "metrics",
     "containers",
+    "stacks",
+    "alerts",
     "backups",
   ])
   expect(groups.map((group) => group.label)).toEqual([
@@ -169,8 +173,11 @@ test("the heartbeat is grouped as it was sent", () => {
     "Access",
     "Metrics",
     "Containers",
+    "Stacks",
+    "Alerts",
     "Backups",
   ])
+  expect(rows("heartbeat").map((row) => row.label)).toEqual(["Protocol", "Sent at"])
   expect(sharedGroups(undefined)).toEqual([])
   expect(sharedGroups({})).toEqual([])
 })
@@ -183,8 +190,8 @@ test("values are read the way a person reads them", () => {
   expect(value("metrics", "Memory")).toBe("61.0%")
   expect(value("metrics", "Memory used")).toBe("3.8 GB")
   expect(value("metrics", "Disk mount")).toBe("/")
-  // No unit is guessed for a rate the heartbeat does not label.
-  expect(value("metrics", "Network received")).toBe("1200.5")
+  // The sampler's network rates are bytes per second.
+  expect(value("metrics", "Network received")).toBe("1.2 KB/s")
   expect(value("containers", "Running")).toBe("12")
 })
 
@@ -209,16 +216,27 @@ test("moments are drawn from unix seconds and keep their ISO form for the locale
   expect(heartbeat.rows[0].time).toBe("2025-10-25T00:00:00.000Z")
 })
 
-test("a list of records is a count with one line per record", () => {
+test("a list of records is a count with each record led by its name and its id last", () => {
   const list = rows("containers").find((row) => row.label === "List")
   expect(list.value).toBe("2 entries")
-  expect(list.items).toEqual([
-    "3f2 · shop-web · ghcr.io/x/shop · running · healthy",
-    "9a1 · shop-db · running",
+  expect(list.records).toEqual([
+    { title: "shop-web", detail: "ghcr.io/x/shop · running · healthy · 3f2" },
+    { title: "shop-db", detail: "running · 9a1" },
   ])
-  const alerts = rows("heartbeat").find((row) => row.label === "Alerts")
-  expect(alerts.value).toBe("1 entry")
-  expect(alerts.items).toEqual(["disk_filling · /var · 91% · 2025-10-24 21:06 UTC"])
+})
+
+test("a top-level list of records is a group of its own, its counts named", () => {
+  expect(rows("stacks")).toEqual([
+    {
+      label: "List",
+      value: "1 entry",
+      records: [{ title: "shop", detail: "services 2 · running 2 · managed yes" }],
+    },
+  ])
+  // Without a name, the first word it was sent with leads.
+  expect(rows("alerts")[0].records).toEqual([
+    { title: "disk_filling", detail: "/var · 91% · 2025-10-24 21:06 UTC" },
+  ])
 })
 
 test("empty and missing values say so instead of vanishing", () => {
