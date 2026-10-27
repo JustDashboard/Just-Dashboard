@@ -67,9 +67,48 @@ are a `header` block with `defer`, so each is set as the answer is written and r
 application's header of that name. nginx's `add_header` only appends, so its routes also
 `proxy_hide_header` each name. Allowed addresses are `@outside not remote_ip …` and a 403 `respond`.
 Caddy sorts a site's directives itself and puts `basic_auth` before `respond`, which would ask a refused
-address for the password first, so a route with an allow list wraps its handling in a `route` block,
-which runs in the order written. A route with none of these renders byte for byte what it did before
-they existed, so no live route reads as changed after an upgrade.
+address for the password first, so a deployment's route wraps its handling in a `route` block, which
+runs in the order written: the fence, the maintenance switch, the password or the sign-in, then the
+application. A route asking for none of the rules carries the switch and nothing else of theirs.
+
+## Maintenance and error pages
+
+Every deployment route carries its maintenance switch, so maintenance can be turned on at once, from
+the Domains settings, without a release and without the route being written again outside activation:
+
+```
+@jd_maintenance {
+  file {
+    root /config/just-dashboard/pages/<route>
+    try_files /maintenance.on
+  }
+  not remote_ip <the plan's bypassFrom>
+  not path /.well-known/acme-challenge/*
+}
+route @jd_maintenance {
+  header Retry-After <retryAfter>
+  root * /config/just-dashboard/pages/<route>
+  rewrite * /maintenance.html
+  file_server {
+    status 503
+  }
+}
+```
+
+The `file` matcher looks for `maintenance.on` on every request, so writing that file into the
+ingress (`docker exec`, as route files are written) turns maintenance on and removing it turns it off;
+Caddy is not reloaded and the route's bytes do not change, so the switch neither meets a cutover's
+snapshot and restore nor is undone by the next release. The `<route>` folder holds the route's pages
+too, written with the shipped ones by activation when it has none and removed with the route. The
+nameless route a certificate is issued through has no switch. The route's own error pages are a
+`handle_errors` block, `@jd_page expression {err.status_code} in [...]` rewriting to
+`/{err.status_code}.html` and served by `file_server`, which keeps the error's status, so Caddy's own
+502 for an application that is down is still a 502 with the route's page. With `interceptErrors` the
+`reverse_proxy` turns the application's answers with those codes into Caddy errors
+(`@jd_error status …` and `handle_response @jd_error { error … {rp.status_code} }`), as nginx's
+`proxy_intercept_errors` does. A password's 401 keeps its `WWW-Authenticate` under `handle_errors`.
+A route written before the switch existed has no matcher, and the switch says so until its next
+deployment; the reconcile pass does not add it.
 
 ## Sign-in
 
@@ -170,7 +209,15 @@ signing in at Authelia the application is told `Remote-User: alice` and `Remote-
 request claimed another user; that the redirecting name answers 308 without asking; that a Caddy
 disconnected from Authelia's network refuses everyone until one maintenance pass rejoins it; and that
 with Authelia stopped the route refuses rather than passes. `TestLiveDeploymentRouteSignsInOnNginx`
-checks the nginx spelling against the host's real nginx without Docker. The deployment C5 live gate and
+checks the nginx spelling against the host's real nginx without Docker.
+`JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesMaintenanceAndErrorPages -count=1 -v`
+switches a real Caddy's route by its file alone: a visitor gets the maintenance page with a 503 and the
+route's `Retry-After`, the application answers again once it is off, the switch is still on after the
+route is written again by the next release, an address let past reaches the application while a
+visitor from another container on the network gets the 503, the application's own 404 gets the route's
+page, and with the application stopped Caddy's 502 gets the page the operator wrote.
+`TestLiveDeploymentRouteMaintenanceOnNginx` checks the same on the host's real nginx without Docker,
+the ACME challenge served through maintenance included. The deployment C5 live gate and
 deployment/API/Proxy race tests remain required. The browser regression covers automatic Caddy HTTPS without a Certbot warning.
 
 References: [Caddy commands](https://caddyserver.com/docs/command-line),

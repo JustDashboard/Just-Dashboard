@@ -3930,6 +3930,18 @@ containers/volumes/networks.
   reloads — refused (409 `not_managed`) for a file the form did not write or would drop lines of. Page
   paths are refused unless the site folder resolves directly under `jd-pages` inside the nginx directory
   and the file is not a link.
+  `SiteMaintenance.Switch` is the same maintenance behind a file instead of `On`, which is how a
+  deployment's route carries it: the check is always written, behind `if (-f
+  <pages>/maintenance.on)`, and a request it holds is rewritten to an internal `= /__jd/maintenance`
+  location that returns 503 with the maintenance page as its own `error_page`, so the server's
+  `error_page 503` stays the site's 503 page whichever way the file has it. nginx tests the file on every
+  request, so turning it on or off is the file (`SetDeploymentMaintenance`) and needs no reload. The
+  parser reads the switch back with `On` false (the file decides), `VHost.maintenance` reads the file
+  (a Docker Caddy route's card reads its file inside the ingress the same way),
+  and the access explainer takes no maintenance layer while the file is absent and the site's own
+  judgement, owned by the switch, while it is there. `ReadDeploymentPage`/`WriteDeploymentPage` keep a
+  deployment's pages the same way under its route's name, or in the Docker Caddy ingress
+  ([implementation](../deployments/implementation.md), [Caddy ingress](../deployments/caddy-ingress.md#maintenance-and-error-pages)).
 
   **Limits** (`sites_limits.go`, form section "Limits", a per-path override under the extra paths).
   `SiteSpec.Limits{Request{Rate, Burst, NoDelay, Key}, ConnPerIP, ExemptFrom, DryRun}` and

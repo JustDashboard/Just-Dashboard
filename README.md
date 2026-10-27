@@ -102,6 +102,7 @@ free.
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
 - Variables per environment, plus shared ones defined once for the server or a project
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
+- A maintenance page switched on at once, without a deploy, and the app's own error pages
 - Build logs, runtime, console, request logs and traffic alerts per project
 - A failed run named from its own output, and on request explained by your own model, secrets masked
 - Request insights that count real visitors apart from bots, with their devices and pages

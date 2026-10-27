@@ -238,7 +238,7 @@ func TestDeploymentRoutePasswordProtectionOnBothProxies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(caddy, "  basic_auth {\n    team "+hash+"\n  }\n  reverse_proxy") {
+	if !strings.Contains(caddy, "    basic_auth {\n      team "+hash+"\n    }\n    reverse_proxy") {
 		t.Fatalf("Caddy route lacks basic_auth:\n%s", caddy)
 	}
 }

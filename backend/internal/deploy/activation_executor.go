@@ -619,6 +619,20 @@ func (e *NormalizedStepExecutor) activate(
 			publicChecks = append(publicChecks, check)
 		}
 	}
+	if len(publicChecks) > 0 && route != nil && e.routeInMaintenance(ctx, route.Name) {
+		// Every visitor is answered with the maintenance page, so a check
+		// through the public route would read that page and fail a release
+		// it says nothing about. The candidate already passed its own checks,
+		// which dial it directly.
+		_ = stepLog(execution, "status", "Maintenance is on, so the public-route checks were not run: visitors get the maintenance page")
+		for _, check := range publicChecks {
+			evidence.PublicChecks = append(evidence.PublicChecks, CheckEvidence{
+				Name: check.Name, Kind: check.Kind, Phase: check.Phase, Required: check.Required, Outcome: HealthDisabled,
+				Attempts: []CheckAttemptEvidence{{Number: 1, Outcome: HealthDisabled, Code: "maintenance"}},
+			})
+		}
+		publicChecks = nil
+	}
 	if len(publicChecks) > 0 {
 		if e.checks == nil {
 			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
@@ -673,6 +687,20 @@ func (e *NormalizedStepExecutor) activate(
 	return StepResult{State: StepPassed, Evidence: mustJSON(evidence)}
 }
 
+// routeInMaintenance says whether the route's maintenance switch is on, on a
+// proxy that can say. One that cannot is taken as off, which runs the
+// checks as before.
+func (e *NormalizedStepExecutor) routeInMaintenance(ctx context.Context, name string) bool {
+	reader, ok := e.proxy.(interface {
+		DeploymentMaintenance(context.Context, string) (proxysvc.MaintenanceSwitch, error)
+	})
+	if !ok {
+		return false
+	}
+	state, err := reader.DeploymentMaintenance(ctx, name)
+	return err == nil && state.Ready && state.On
+}
+
 func publicRouteActivationEvidence(result proxysvc.DeploymentRouteResult) routeActivationEvidence {
 	return routeActivationEvidence{
 		Name: result.Snapshot.Name, PriorExisted: result.Snapshot.Existed,
@@ -693,6 +721,10 @@ func publicRoute(environmentID int64, snapshot runtimeReleaseSnapshot, host stri
 	if gate := snapshot.Plan.SignInGate(); gate != nil {
 		route.ForwardAuth = &proxysvc.SiteForwardAuth{Provider: gate.Provider, Verify: gate.Verify, SignIn: gate.SignIn}
 	}
+	if m := snapshot.Plan.Maintenance; m != nil {
+		route.Maintenance = proxysvc.DeploymentMaintenance{RetryAfter: m.RetryAfter, BypassFrom: m.BypassFrom}
+	}
+	route.ErrorPages, route.InterceptErrors = snapshot.Plan.ErrorPages, snapshot.Plan.InterceptErrors
 	return route
 }
 

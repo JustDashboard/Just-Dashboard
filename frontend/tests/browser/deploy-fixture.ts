@@ -2231,6 +2231,15 @@ export async function mockProject(
     },
   ]
   let notificationTests = 0
+  // The maintenance switch beside the live route, and the pages the route
+  // answers with that the operator wrote; the rest are the shipped ones.
+  let maintenanceSwitch: Record<string, unknown> = {
+    driver: "nginx",
+    route: true,
+    ready: true,
+    on: false,
+  }
+  const routePages: Record<string, string> = {}
   let scopedVariables: DeploymentVariable[] = showcase
     ? [...showcaseVariables]
     : [
@@ -2586,6 +2595,28 @@ export async function mockProject(
       body = { run: liveRun(), steps: showcase ? showcaseSteps : steps }
     } else if (path === "/deploy/7/environments/12/configuration" && method === "GET") {
       body = configurationBody()
+    } else if (path === "/deploy/7/environments/12/maintenance" && method === "GET") {
+      body = maintenanceSwitch
+    } else if (path === "/deploy/7/environments/12/maintenance" && method === "PUT") {
+      const { on } = request.postDataJSON() as { on: boolean }
+      // The page's clock is the real one, so the switch is turned on now.
+      maintenanceSwitch = {
+        ...maintenanceSwitch,
+        on,
+        since: on ? new Date().toISOString() : undefined,
+      }
+      body = maintenanceSwitch
+    } else if (path.startsWith("/deploy/7/environments/12/pages/")) {
+      const name = path.slice("/deploy/7/environments/12/pages/".length)
+      if (method === "PUT")
+        routePages[name] = (request.postDataJSON() as { content: string }).content
+      body = {
+        site: "just-dashboard-env-12.conf",
+        page: name,
+        content:
+          routePages[name] ?? `<!doctype html><title>${name}</title><h1>Shipped ${name} page</h1>`,
+        custom: name in routePages,
+      }
     } else if (path === "/deploy/7/environments/12/git-watch" && method === "GET") {
       body = {
         automatic: gitPolicy.automatic,
@@ -2891,6 +2922,15 @@ export async function mockProject(
     },
     configuration() {
       return normalizedConfiguration
+    },
+    maintenance() {
+      return maintenanceSwitch
+    },
+    setMaintenance(patch: Record<string, unknown>) {
+      maintenanceSwitch = { ...maintenanceSwitch, ...patch }
+    },
+    routePages() {
+      return routePages
     },
   }
 }

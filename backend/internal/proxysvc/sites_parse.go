@@ -120,6 +120,12 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				return
 			}
 		}
+		if m := maintSwitchRe.FindStringSubmatch(raw); m != nil {
+			maintenance().Switch = true
+			spec.PagesDir = m[1]
+			depth++
+			return
+		}
 		if maintIfRe.MatchString(raw) {
 			maintenance().On = true
 			depth++
@@ -146,8 +152,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				current = nil
 				return
 			}
-			// The check's location is the renderer's too.
-			if location == forwardAuthURI && m[1] == "=" {
+			// The check's location is the renderer's too, and so is the one
+			// a switched maintenance answers from.
+			if (location == forwardAuthURI || location == maintenanceAnswerURI) && m[1] == "=" {
 				current = nil
 				return
 			}
@@ -539,6 +546,11 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	headers.settle(spec)
 	access.settle(spec)
 	sso.settle(spec)
+	// A switched check is written whichever way the file has it, so the
+	// file, not the check, says whether maintenance is on.
+	if spec.Maintenance != nil && spec.Maintenance.Switch {
+		spec.Maintenance.On = false
+	}
 	// Extra locations that ended up with neither an upstream nor a root are
 	// something this form cannot express; dropping them is better than
 	// offering to save a location that proxies nowhere.
@@ -640,6 +652,10 @@ var (
 	maintIfRe  = regexp.MustCompile(`^if\s*\(\$jd_\w+_maint\)\s*\{$`)
 	pageURIRe  = regexp.MustCompile(`^/__jd/(maintenance|\d{3})\.html$`)
 )
+
+// maintSwitchRe is the test for the file a switched maintenance follows, in
+// the folder the site's pages are served from.
+var maintSwitchRe = regexp.MustCompile(`^if\s*\(-f\s+(/\S+)/maintenance\.on\)\s*\{$`)
 
 // pageFromURI is the page a location serves, when it is one of the site's.
 func pageFromURI(location string) (string, bool) {
