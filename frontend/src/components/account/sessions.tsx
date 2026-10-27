@@ -31,6 +31,12 @@ function factorLabel(session: SessionInfo) {
       return "password and authenticator code"
     case "recovery":
       return "password and recovery code"
+    case "passkey":
+      return "passkey"
+    case "passkey+totp":
+      return "passkey and authenticator code"
+    case "passkey+recovery":
+      return "passkey and recovery code"
     default:
       return "authentication method not recorded"
   }

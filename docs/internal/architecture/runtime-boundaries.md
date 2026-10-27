@@ -143,7 +143,7 @@ metadata is never trusted as the quota. `internal/sysinfo` reads the host throug
 
 ## Auth, secrets, state
 
-`internal/auth` owns users, sessions, TOTP, recovery codes, API tokens. Cookie `vpsd_session` (HttpOnly,
+`internal/auth` owns users, sessions, TOTP, recovery codes, passkeys, API tokens. Cookie `vpsd_session` (HttpOnly,
 SameSite=Strict, Secure unless `JD_DEV` or loopback-only `JD_TLS=off`). The WebSocket upgrader uses that
 same browser-facing scheme for its same-origin check, so HTTP tunnel installs can open live streams. A
 session that still owes a second factor is accepted only by
@@ -197,7 +197,7 @@ heap had doubled, which left the process at about 155 MB for up to half a minute
 Local host-root account recovery uses the same binary's isolated `--admin` mode through
 `scripts/manage.sh`. It opens only an existing store and starts no server or modules. Password resets
 atomically set the new password, clear any owed change and login lockout, and revoke sessions/API
-tokens while keeping TOTP enrollment, recovery codes and disabled state; account mutations are audited
+tokens and passkeys while keeping TOTP enrollment, recovery codes and disabled state; account mutations are audited
 as actor `cli`. See [terminal tools](../operations/terminal-tools.md) for commands and the local
 privilege boundary.
 
@@ -278,6 +278,54 @@ cancellation (bounded at five seconds), so a client that disconnects once its mu
 leaves the row. An `Entry` records who (user, role, `Actor` = session or token), from
 where, what (action, target, method, path), and how it went. Local root account commands use
 `Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target.
+
+## Passkeys
+
+`auth/passkeys.go` (library: `github.com/go-webauthn/webauthn`, BSD-3-Clause) adds WebAuthn passkeys
+that stand in for an account's password at sign-in. Tables: `webauthn_credentials` (the credential
+id, the library's record of it as JSON — public key, flags, signature counter — the relying party ID
+it was registered under and the name its owner gave it; `ON DELETE CASCADE` with the account) and
+`webauthn_spent_challenges` (`store/schema_passkeys.go`, additive).
+
+- **What a passkey is worth.** It replaces the password, never the code. A passkey sign-in starts
+  its session through `startSession`, the function a password sign-in calls, so an enrolled account
+  owes its code exactly as after a password and `JD_REQUIRE_2FA` keeps its meaning
+  ([invariant 2](../security/invariants.md#invariant-2-what-two-factor-still-guarantees)). Sessions
+  record `passkey`, then `passkey+totp` or `passkey+recovery` once the code is given.
+- **Relying party and origin.** The RP ID is the host name the browser reached the dashboard at, read
+  from the request's `Origin` (`auth.PasskeyParty`): it must be the request's own host or one of
+  `JD_ALLOWED_ORIGINS`, over https or plain http on `localhost`, and never an IP address, which
+  WebAuthn refuses. A credential is bound by the browser to the name it was made at, so one made at
+  `dash.example.com` does not sign in at the tailnet name; each is stored with its RP ID and the
+  security page says where a passkey made elsewhere works. At an IP address the sign-in and security
+  pages say why no passkey is offered instead of offering one that fails.
+- **Ceremonies.** Registration asks for a discoverable credential with user verification required,
+  excludes the account's existing ones, and takes no attestation. Sign-in is discoverable (no
+  username): the authenticator's user handle — an HMAC of the account id under the install's key, so
+  it names nobody — says whose it is, and must match the credential's account. A challenge is not
+  stored while in flight: its session data, kind, account, session, origin and a five-minute expiry
+  are sealed with the install's key and handed to the browser as the challenge id, so beginning a
+  sign-in writes nothing. The finish opens it, checks every field and spends it by inserting its id
+  into `webauthn_spent_challenges`, so a response is tried against a challenge once.
+- **Refusals.** User verification is required at both ends; a signature counter that does not move
+  forward (`CloneWarning`) refuses the sign-in as a possibly copied key; a removed credential, one
+  registered at another name, a disabled account, an expired, altered, replayed or misplaced
+  challenge and a response signed for another origin or relying party are each refused, and every
+  refusal is audited with its reason. A password lockout does not block a passkey: it brakes
+  password guessing, and a passkey is not guessed.
+- **Lifecycle.** Registering takes a complete session (`/account`, `RequireSession`) and a fresh
+  password plus, where enrolled, a TOTP code that is consumed as at sign-in. Renaming and removing
+  are the account holder's, from a session, with an ordinary confirmation; an account holds at most
+  25. Disabling an account keeps its passkeys and refuses them until it is enabled. A root shell's
+  `reset-password` deletes them with the sessions and API tokens, because that reset is how an
+  account somebody else may hold is taken back; an administrator's password set and the holder's
+  own password change keep them, as they keep API tokens. Role changes do not touch them.
+- **Routes and audit.** `POST /auth/passkey/begin`, `POST /auth/passkey/finish` (sign-in);
+  `GET /account/passkeys`, `POST /account/passkeys/register/begin` (password and code),
+  `POST …/register/finish`, `PATCH /account/passkeys/{id}`, `DELETE /account/passkeys/{id}`.
+  Audited as `auth.passkey.login` (success or the refusal), `auth.passkey.reauth`,
+  `auth.passkey.register`, `auth.passkey.rename` and `auth.passkey.remove`, with the passkey's name
+  and RP ID and never a credential.
 
 ## Session authentication provenance
 

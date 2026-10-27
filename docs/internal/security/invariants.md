@@ -198,6 +198,12 @@ What did **not** change, and must not:
 - Setup, enrollment confirmation and code verification share one account-scoped attempt budget.
   Enrollment cannot be used again after TOTP is enabled. An accepted TOTP counter or recovery code is
   consumed atomically with session elevation; another session cannot reuse it.
+- A passkey replaces the password and nothing else. A passkey sign-in starts its session through the
+  same `auth.startSession` a password sign-in does, so an enrolled account still owes its code (the
+  session reaches only the 2FA routes until it is given) and `JD_REQUIRE_2FA` still decides only
+  whether an unenrolled account may sign in. A passkey is never counted as the second factor; making
+  it one would be a change to this invariant, and is not made. See
+  [passkeys](../architecture/runtime-boundaries.md#passkeys).
 - A temporary password does not grant feature access. After required factors, only authentication
   status/logout and the session-only password change are available until `must_change_pw` is
   cleared. API tokens cannot bypass this restriction.

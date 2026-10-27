@@ -8,6 +8,7 @@ import {
   SessionsSection,
   TwoFactorSection,
 } from "@/components/account/security-panels"
+import { PasskeysSection } from "@/components/account/passkeys"
 import { useSessions } from "@/components/account/sessions"
 import { SignInPath } from "@/components/account/sign-in-path"
 
@@ -20,7 +21,8 @@ import { SignInPath } from "@/components/account/sign-in-path"
  * I protected" is the question the page is opened with; the password and the
  * sessions it would sign out stand side by side under it, the way
  * Configuration's settings do, each head over its fields with its state
- * under it (§7).
+ * under it (§7). Passkeys follow the second factor across the width: they
+ * stand in for the password, and the page says the code is still asked for.
  */
 export default function AccountSecurityPage() {
   const { status } = useAuth()
@@ -39,6 +41,9 @@ export default function AccountSecurityPage() {
       <div className="min-w-0 divide-y divide-hairline">
         <SettingsRow>
           <TwoFactorSection className={SECTION} />
+        </SettingsRow>
+        <SettingsRow>
+          <PasskeysSection className={SECTION} />
         </SettingsRow>
         <SettingsRow columns>
           <PasswordSection className={SECTION} />
