@@ -293,6 +293,16 @@ to the contribution terms above, including the additional licence grant to the p
   Each sweep uses unique volume names. Startup/readiness is separate from first-use account setup;
   the [template matrix](docs/audits/2026-09-22-deploy-new/template-matrix.md) records which templates
   generate credentials, require setup, have no application login, or remain unavailable.
+- Multi-service (Compose) templates have a sweep of their own. It saves each template's source the way
+  the new-project page does (the server's render of the definition), resolves and pulls every service
+  image through the Compose build step, starts the stack through the runtime owner with generated
+  secrets, and requires the definition's readiness checks to pass, every service's Docker healthcheck
+  to report healthy, and only the public service's port to be published, on loopback
+  (`JD_BLUEPRINT_ONLY=a,b` narrows it; each stack's containers, volumes and networks are removed after
+  it, and so are images it pulled):
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks -count=1 -v -timeout 2h`.
+  A template's schema rules run at build time: every definition is parsed and validated when the
+  catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship.
 - Changes to shared variables or to how a run opens its variables also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSharedVariableReachesTheContainer -count=1 -v`,
   which starts a real container with the values a run opens for references to a server, a secret and a

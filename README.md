@@ -95,7 +95,8 @@ free.
 
 ### 🚀 Deployments
 
-- Deploy from a repository, an image, a Compose stack or **57 reviewed templates**
+- Deploy from a repository, an image, a Compose stack or **77 reviewed templates**, 20 of them
+  multi-service stacks — an application with its own database, cache or worker
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
 - Push to deploy, plus pull-request previews only your tailnet can reach
 - Immutable releases, one-click rollback and health-gated cutover

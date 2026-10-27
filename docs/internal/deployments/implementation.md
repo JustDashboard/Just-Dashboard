@@ -690,7 +690,11 @@ only renderer/executor/validation authority for their feature.
   never`. The release's container identity and readiness target is the primary service — the one the
   operator chose (`build.primaryService`), else the analysis's, which builds or publishes a port and is
   never a database — and a snapshot recorded before there was one keeps its first service. Compose interpolation receives only the frozen runtime scope through a temporary `0600` env
-  file which is deleted on every exit path.
+  file which is deleted on every exit path. A Compose release keeps no single image of its own: its
+  row records the first of its services' image artifacts, so decoding the snapshot requires that
+  digest to be one of the snapshot's services (`snapshotNamesReleaseImage`), where a container release
+  still has to name exactly its image — compared with the empty single image, every Compose release
+  had been refused at its first activation step.
 - Archived projects keep their original display name in additive `archived_name` storage while the
   unique database name becomes an internal tombstone. Archiving and upgrading previously archived
   projects release the live name without deleting history or resources. New projects from the same
@@ -1382,15 +1386,73 @@ only renderer/executor/validation authority for their feature.
   next to a routed primary (Gitea's SSH, Syncthing's sync protocol) becomes an additional
   `runtime.ports[]` publication on its own number (see published ports below) instead of silently
   replacing the routed port; the primary always stays the one the proxy and the checks reach. The
-  catalogue ships 62 reviewed definitions, 57 of them offered (see "how the first sign-in works"
-  below for the five that are retired), every image reference resolved against
-  its registry (`docker manifest inspect`) and every deployable one started live:
-  `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks`
-  renders each definition from its fixture inputs, pulls the image, starts it through the real runtime
+  catalogue ships 82 reviewed definitions, 77 of them offered (see "how the first sign-in works"
+  below for the five that are retired; 20 are the multi-service templates of the next item), every
+  image reference resolved against its registry (`docker manifest inspect`) and every deployable one
+  started live: `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks` renders each single-image
+  definition from its fixture inputs, pulls the image, starts it through the real runtime
   owner with generated secrets, runs the definition's own readiness checks against the published
   loopback port (Mongo Express with a catalogue MongoDB beside it) and removes what it pulled;
   `JD_BLUEPRINT_ONLY=a,b` narrows it. Applications that validate the `Host` header (Homepage) are
   configured to accept any, since the proxy in front only ever forwards the domain.
+- **Multi-service templates** (`blueprint/compose_validate.go`, `compose_render.go`,
+  `deploy/blueprint_source.go`). A definition that declares `services` (profile `compose`) is a
+  Compose template: an application with the database, cache or worker it needs, deployed through the
+  existing Compose release path rather than a runtime of its own, so backups, logs, requests, alerts,
+  domains and rollback treat it as any Compose deployment. Each service declares its image, role
+  (`app`, `worker`, `database`, `cache`), purpose, environment, ports, volumes, memory and CPU,
+  a Docker healthcheck and its start order (`dependsOn` with Compose's `healthy`, `started` or
+  `completed`); the top-level image, ports, volumes and resources stay empty. Environment values are
+  literal text with two typed references: `{{secret.<name>}}`, a secret the definition generates, and
+  `{{variable.<NAME>}}`, a plan variable an input writes or a startup operation sets. Both render as
+  `${NAME}` interpolations (literal dollars are doubled), so the rendered document holds no value and
+  is a function of the definition alone; a generated password two services share is one sealed
+  variable, generated at commit and handed to each through the release's private `0600` env file.
+  `Render` returns the document as `Plan.Compose` (inside the fixture digest) with `Plan.Services`,
+  the public service's image and port, and the stack's summed memory. The document publishes exactly
+  one port — the public service's proxy port, on `127.0.0.1` at a preference derived from the
+  template id (`TemplateHostPort`, moved by Compose's own port recovery when taken) — puts the public
+  service on Compose's `default` network and the private `internal` one, and every other service on
+  `internal` only, which is declared `internal: true` (no route out; a private service that sends mail
+  or downloads models declares `egress` and joins a separate `egress` network). The ingress joins the
+  public container on the first of its networks by name (`proxysvc.publishedTarget`), and `default`
+  sorts before `internal`, so the proxy facing the internet shares a network with the public service
+  and nothing behind it. Every service gets `mem_limit` (and `cpus`) from its own resources, a CMD-form
+  healthcheck and the capped `json-file` log every dashboard container gets. Validation refuses at
+  catalogue load — that is, at build time — fewer than two or more than eight services, a template
+  with no proxy port or two, a public service that is not an `app`, any `direct` or UDP port, the
+  Docker socket, a database without a data volume, a shared volume described two ways, a literal for a
+  credential-shaped variable (the Compose planner's `secretShapedKey` set and the single-image set
+  together) or a literal password inside a URL, a reference to a secret or variable nothing declares,
+  any other placeholder, a templated command or healthcheck, a healthcheck that is missing, untimed or
+  prefixed `CMD`/`CMD-SHELL`, a dependency cycle, a generated secret no service references,
+  privileges, configuration files, and install, release or stop operations. A secret's `alphabet`
+  (`hex`) becomes `PlannedVariable.generateFormat`.
+  A template deploys as `kind: compose, mode: blueprint` — `validModeForKind` allows the blueprint mode
+  under the Compose kind, and `blueprintSourceKindMatches` refuses a stack saved as a blueprint source or
+  an image saved as a Compose one (`BlueprintSourceKind` names the right one; the summary carries it as
+  `sourceKind`). Saving the source — the draft's source step and the settings source route alike —
+  stores the server's render in `composeFiles` (`WithTemplateDocuments`), replacing anything the
+  browser sent, and `validateForNewDeployment` refuses a document that is not that render. From then on
+  the stored document is the release: materialization writes it exactly as a pasted file, so a later
+  dashboard that no longer ships the version still redeploys it byte for byte
+  (`ValidateForDeployment` needs only the stored document), and moving to a newer version is a source
+  change that renders it. Detection (`analyzeComposeTemplate`) runs the same structural analysis and
+  Docker Compose validation as a pasted file over the render, and names the definition in
+  `SourceIdentity.template` (`id@version`; the render digest is `revision`, the document's is `digest`),
+  surfaced as `sourceTemplate` on the fleet summary and archived facts. The rendered configuration is a
+  Compose build whose `primaryService` is the public service, `runtime.internalPort` its proxy port,
+  stop-first, with the definition's variables, checks and domains; every variable the document
+  interpolates is planned, so preflight has no `compose_variable_*` decision left. `GET
+  /docker/templates` leaves stacks out. The template picker labels a stack on its card (`N services`),
+  lists its services with role, image, limit and the public one marked, adds up the footprint, and
+  states before the press what the stack does by itself: only the public service is reachable, the
+  rest publish nothing on a network with no route out, each deploy stops the stack first, shared
+  passwords are generated here, and a backup is a file copy of a running database rather than a dump.
+  Compose previews stay refused (`preview_isolation.go`); a template is not a Git source, so it is
+  never offered one. `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
+  through the real build step and runtime owner and requires every check to pass, every service's
+  healthcheck to report healthy, and only the public port to be published, on loopback.
 - **How the first sign-in works**, declared rather than described. Every definition carries an
   `access` block: a closed `kind` — `setup` (the application asks the first visitor to create the
   account), `credentials` (a name from an input plus a password from a generated secret, both
