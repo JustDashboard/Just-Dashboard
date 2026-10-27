@@ -188,6 +188,36 @@ func TestMapSaysWhatWasMeasured(t *testing.T) {
 	}
 }
 
+// A box's mark is the product it is: a volume is Docker's, a domain the
+// proxy's that answers for it, and an account with a picture is that picture.
+func TestMapDrawsEachThingAsTheProductItIs(t *testing.T) {
+	in := sampleInputs()
+	in.vhosts = mapGot([]proxysvc.VHost{
+		{Name: "shop.conf", Kind: proxysvc.KindNginx, Enabled: true, ServerNames: []string{"shop.example.com"}},
+		{Name: "app", Kind: proxysvc.KindCaddyIngress, Enabled: true, ServerNames: []string{"app.example.com"}},
+	})
+	in.accounts = mapGot([]*auth.User{
+		{ID: 1, Username: "mira", Role: auth.RoleAdmin, AvatarVersion: 1730000000},
+		{ID: 2, Username: "ci", Role: auth.RoleReadOnly},
+	})
+	m := buildServerMap(in)
+	if v := itemOf(t, m, "volumes", "volume:orphan"); v.Product != "docker" {
+		t.Errorf("volume = %+v", v)
+	}
+	if d := itemOf(t, m, "domains", "domain:shop.example.com"); d.Product != "nginx" {
+		t.Errorf("an nginx site's name = %+v", d)
+	}
+	if d := itemOf(t, m, "domains", "domain:app.example.com"); d.Product != "caddy" {
+		t.Errorf("the shared Caddy's name = %+v", d)
+	}
+	if a := itemOf(t, m, "accounts", "account:1"); a.Icon != "/api/v1/dashboard-users/1/avatar?v=1730000000" {
+		t.Errorf("an account with a picture = %+v", a)
+	}
+	if a := itemOf(t, m, "accounts", "account:2"); a.Icon != "" {
+		t.Errorf("an account with none = %+v", a)
+	}
+}
+
 func TestMapContainerStatesFollowTheExitCode(t *testing.T) {
 	for _, tc := range []struct {
 		c     dockerx.Container

@@ -922,7 +922,9 @@ func mapStacks(list []dockerx.Container) []mapItem {
 func mapVolume(v dockerx.Volume, mounted bool) mapItem {
 	item := mapItem{
 		ID: "volume:" + v.Name, Name: v.Name, Href: "/docker/volumes?volume=" + url.QueryEscape(v.Name),
-		Tone: mapIdle, State: "unused",
+		// Docker's, as a network is: the volume is Docker's storage whatever
+		// mounts it.
+		Product: "docker", Tone: mapIdle, State: "unused",
 	}
 	if mounted || v.InUse || v.RefCount > 0 {
 		item.Tone, item.State = mapOK, "in use"
@@ -1024,6 +1026,9 @@ func mapDomain(v proxysvc.VHost, name string) mapItem {
 	item := mapItem{
 		ID: "domain:" + strings.ToLower(name), Name: name,
 		Href: "/proxy/sites/" + url.PathEscape(v.Name),
+		// The proxy that answers for the name, as a stream is drawn as nginx;
+		// the deployments' shared Caddy is Caddy.
+		Product: strings.TrimSuffix(string(v.Kind), "-ingress"),
 	}
 	switch {
 	case v.Broken != "":
@@ -1414,6 +1419,11 @@ func mapAccount(u *auth.User) mapItem {
 	}
 	if u.Disabled {
 		item.Tone, item.State = mapIdle, "disabled"
+	}
+	// The account's own picture, where it has one, from the route the users
+	// table reads it from; the shelf is an administrator's, as that route is.
+	if u.AvatarVersion != 0 {
+		item.Icon = "/api/v1/dashboard-users/" + id + "/avatar?v=" + strconv.FormatInt(u.AvatarVersion, 10)
 	}
 	if item.Detail == "" {
 		if u.TOTPEnabled {
