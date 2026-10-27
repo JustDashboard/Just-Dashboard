@@ -81,3 +81,40 @@ func TestRunTranscriptTailReadsAPreEngineRunsLog(t *testing.T) {
 		t.Fatalf("a run that is not there: %v", err)
 	}
 }
+
+// Following a run is reading after the last line read: oldest first, a page at
+// a time, saying whether more were left, and nothing but log lines — a step's
+// state changes are in the run, not the transcript.
+func TestRunTranscriptAfterPagesForward(t *testing.T) {
+	f := newOrchestrationFixture(t)
+	ctx := context.Background()
+	environmentID := f.addEnvironment(t, "production", EnvironmentProduction)
+	run := f.enqueue(t, environmentID, func(req *RunRequest) { req.Steps = []StepKey{StepResolveSource} })
+	lease, err := f.runs.ClaimNext(ctx, "worker", QueueBudget{}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step, err := f.runs.TransitionStep(ctx, run.ID, StepResolveSource, lease.Token, StepTransition{State: StepRunning})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := f.runs.AppendLog(ctx, run.ID, step.ID, lease.Token, "stdout", fmt.Sprintf("line-%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, more, err := f.runs.RunTranscriptAfter(ctx, run.ID, 0, 2)
+	if err != nil || !more || len(first) != 2 || first[0].Text != "line-0" || first[1].Text != "line-1" || first[0].StepID != step.ID {
+		t.Fatalf("first page = %+v more=%v %v", first, more, err)
+	}
+	rest, more, err := f.runs.RunTranscriptAfter(ctx, run.ID, first[1].Seq, 10)
+	if err != nil || more || len(rest) != 3 || rest[0].Text != "line-2" || rest[2].Text != "line-4" {
+		t.Fatalf("rest = %+v more=%v %v", rest, more, err)
+	}
+	if none, more, err := f.runs.RunTranscriptAfter(ctx, run.ID, rest[2].Seq, 10); err != nil || more || len(none) != 0 {
+		t.Fatalf("after the last line = %+v more=%v %v", none, more, err)
+	}
+	if _, _, err := f.runs.RunTranscriptAfter(ctx, run.ID+999, 0, 10); err != ErrRunNotFound {
+		t.Fatalf("a run that is not there: %v", err)
+	}
+}

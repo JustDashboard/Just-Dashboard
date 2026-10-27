@@ -113,6 +113,7 @@ free.
   e-mail and webhooks
 - Commit statuses and preview comments on GitHub, GitLab, Gitea and Forgejo
 - Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint
+- The `jd` command line and deploy keys for CI: create, configure, deploy, follow, roll back, set variables
 
 </td>
 </tr>
@@ -420,6 +421,7 @@ while the backend is stopped.
 | `sudo ./scripts/manage.sh status` | Show the containers and their health |
 | `sudo ./scripts/manage.sh logs [backend\|frontend\|proxy]` | Follow logs (Ctrl+C exits) |
 | `sudo ./scripts/manage.sh restart` | Recreate the stack to apply `.env` edits |
+| `sudo ./scripts/manage.sh install-cli` | Install (or reinstall) the `jd` command line at `/usr/local/bin/jd` |
 | `./scripts/manage.sh --help` | Usage, no sudo needed |
 
 <details>
@@ -442,6 +444,55 @@ disconnects the web terminal; it recreates containers with current settings, whi
 `docker compose restart` alone does not.
 
 </details>
+
+## The jd command line
+
+`jd` drives your deployments from a terminal or a CI job, over the dashboard's own API. The installer
+puts it at `/usr/local/bin/jd` on the server, and the dashboard keeps that copy current after every
+update (`sudo ./scripts/manage.sh install-cli` installs it again by hand). For another Linux machine
+of the same architecture, **Account → API keys** links the same file (`GET /api/v1/cli/jd`, for any
+signed-in account); anywhere else, build it from a checkout with Go 1.26: `cd backend && go build ./cmd/jd`
+— it uses only Go's standard library.
+
+It signs in with a **deploy key**: under **Account → API keys → New key**, an administrator chooses
+*Deploy key*, a name, an expiry and the deployments it reaches (every one, or only those you pick).
+The key is shown once.
+
+```bash
+jd login https://dash.example.com --key - < key   # the key read from stdin; stored 0600 in ~/.config/jd
+jd deployments                                    # every deployment with its health and last run
+jd deploy shop --wait                             # exit status is the run's result
+jd logs shop --follow                             # or --run 12 for an earlier run
+jd runs shop / jd releases shop
+jd rollback shop                                  # to the release before the live one, or --to <id>
+jd vars ls shop                                   # names, scopes and digests: never values
+jd vars set shop STRIPE_KEY=- < stripe.key        # KEY=- reads the value from stdin, out of shell history
+jd vars import shop .env --dry-run                # then without --dry-run
+jd vars rm shop OLD_FLAG
+jd config get shop --json > shop.json             # edit, then: jd config set shop shop.json
+jd create --name blog --image nginx:1.27-alpine --port 80   # a new deployment, through a draft
+```
+
+Every read takes `--json`. In CI, set `JD_URL` and `JD_KEY` instead of logging in; nothing is written.
+`--env` picks an environment other than production, `--ca-file` trusts the internal Caddy certificate
+authority, and plain `http://` is refused except to loopback (an SSH tunnel). Exit codes: 0 done (the
+run succeeded), 1 refused or the run failed, 2 usage, 3 not logged in or the key is no longer valid.
+
+**What a deploy key can do.** Everything an ordinary key could on the deployments — list, read, deploy,
+cancel, retry, roll back, runs and logs — plus what used to need a browser session: create deployments
+from drafts (a key that reaches every deployment), change configuration, source, Git policy and
+triggers, and set, import, generate, rotate and delete variables and shared variables. Variables are
+write-only to it: it sees names and digests, never a value. **What it cannot do, whatever it reaches:**
+reveal a value; list, add, change or test saved registry and Git credentials; merge or comment on pull
+requests as the dashboard's GitHub account; approve previews; archive or delete deployments; or reach
+anything outside Deployments. It also cannot give a deployment access to the server itself — a
+privileged container, the host's network, a host folder, a release task in the host's shell, a Compose
+file — nor point a saved credential somewhere new; a deployment that already has such settings, or
+reads a saved credential through a variable, can be deployed and its variables set, but its
+configuration and source are changed in the dashboard. Every
+write is in the audit log under the key's name. See [the security notes](docs/internal/security/invariants.md)
+for the full boundary; a key that can deploy code can still read that deployment's own variables from
+inside it, as in any CI system.
 
 ## Linking to just-dashboard.com
 

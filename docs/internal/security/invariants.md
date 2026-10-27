@@ -87,6 +87,46 @@ A change that weakens any of these has to say so explicitly.
    every route with an MCP key (`TestAnMCPKeyOpensNoOtherRoute`) holds the first half; the grants
    are re-checked by the handler rather than trusted from the key.
 
+   A deploy key (`scope = 'deploy'`, made by `CreateDeployToken` on `POST /tokens/deploy`, which an
+   administrator reaches only in a session) **deliberately changes the session-only rule** for part of
+   the deployment surface. Until it, every deployment write that handles a secret — drafts,
+   configuration, source, Git policy, triggers, variables and shared variables — answered any API key
+   with `403 session_required`. A deploy key reaches those writes; nothing else changed for any other
+   key. It holds the administrator role (narrowed to its owner's now, like every key), and where it
+   goes is decided once, before any other middleware of the route runs: `Authenticate`,
+   `AuthenticateScoped` and `AuthenticateMCP` refuse it, and the feature group's
+   `httpx.AuthenticateFeatures` admits it only when `api.deployKeyRoutes` (`deploy_keys.go`) has a
+   line for the exact route the router's own `Find` resolves (a mount's root, which the router serves
+   with and without its trailing slash, being one route; no two routes differ by the slash alone). A route without a line answers
+   `key_scope`, so a route added later is refused until someone writes its line; a line marked
+   session-only answers `session_required` with the reason. Admission is what lets the key past
+   `httpx.RequireSession` (`Principal.DeployRoute`), on that route and no other. What stays a
+   session's whatever the key: every reveal (`…/variables/{name}/reveal`, shared variables, the legacy
+   `…/env/reveal`), the saved registry and Git credentials (list, create, update, test and delete), the secret-store
+   connections that hold credentials of their own (create, update, test and delete),
+   the pull-request merge and comment that speak as the dashboard's GitHub account, preview approval,
+   and the removals that take a typed phrase (`DELETE /deploy/{id}/permanent`, `remove-managed` and its
+   plan). Variables are write-only to the key: lists carry names and digests, and
+   `withholdGeneratedValue` drops the value a generate or rotate would return. A key narrowed to some
+   deployments (`api_token_deployments`; none is every deployment) reaches only routes about those —
+   the gate checks the route's `{id}` and that its `{env}` belongs to it — lists only those, and none
+   that create a deployment or reach what every deployment shares. Because a host-level setting or a
+   saved credential sent somewhere new would hand the key what the session-only routes keep from it,
+   the handlers hold what the key writes (`hostAuthority`, `keySourceGuard`, `keyReferenceGuard`): no
+   privileged container, host network, capability, device, host path, host-shell release task,
+   folder on the server or Compose file, in a plan it commits or an environment it changes — and an
+   environment that already has one, or whose variables a person pointed at a saved credential, is
+   changed (configuration and source) by a person only, though the key may still deploy it and set its
+   variables; no saved credential chosen, or a Git credential sent to a different repository; no
+   variable pointed at a saved credential, a database or a secret store — checked on a draft at commit, where its
+   variables reach the form they are stored in — nor, for a narrowed key, at a server shared variable.
+   A key that can change a deployment's source and deploy it can still run code that reads that
+   deployment's own variables at run time, a database reference a person gave it included:
+   write-only is a property of the API, not a sandbox. The walk `TestADeployKeyGetsTheDecidedAnswerOnEveryRoute` holds the table on every
+   route of the API and an ordinary key's answers as they were, and
+   `TestEverySessionOnlyDeploymentRouteHasADeployKeyDecision` fails when a session-only deployment
+   route has no line.
+
    A database connection marked read-only adds one rule in front of all of these, and it fails closed
    the other way round: `protectReadOnlyConnections` refuses every request under `/databases/{id}` that
    is not a `GET` unless its route is on an allowlist, so a mutating route added later is refused until
@@ -94,7 +134,10 @@ A change that weakens any of these has to say so explicitly.
    carry are judged by the same classifiers as above. It guards the dashboard's own controls; it is
    not a sandbox around the server. Each check and the rule are stated in
    [request lifecycle](../architecture/request-lifecycle.md#checks-that-depend-on-what-a-request-carries).
-5. Every state-changing request lands in the audit log.
+5. Every state-changing request lands in the audit log. A request made with an API key carries the
+   key's id and name (`audit_log.key_id`, `key_name`) as well as its account, and a deploy key refused
+   by the gate is written as `auth.deploy_key.refused`, reads included, since it is answered before the
+   group's audit middleware runs.
 6. Client-supplied paths go through `files.Resolve` — including the ones that do not look like file
    operations (bind-mount source, build context, a new stack's directory). Host commands go through
    `hostexec` with an argv, never a shell string. Request-defined shell source is confined to `deploy.Deployer.shell`, deliberately:

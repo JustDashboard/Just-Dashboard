@@ -41,11 +41,11 @@ only renderer/executor/validation authority for their feature.
   admin-authored stored release task (including migrated pre/post commands) with a resolved working
   directory and explicit scoped environment; a task with `runner: "image"` runs that command inside a
   throwaway container of the release's own image rather than in the dashboard's shell.
-- Creation is a revisioned, owner-scoped server draft. `GET /deploy/drafts` (session) lists the caller's
+- Creation is a revisioned, owner-scoped server draft. `GET /deploy/drafts` (session, or a deploy key reaching every deployment) lists the caller's
   own uncommitted, unexpired drafts newest first — id, name from intent, a one-line source summary,
   `currentStep`, `updatedAt`, `expiresAt` — so the new-project page can offer to resume one instead of
   starting a new setup over; a committed or expired draft has nothing left to resume and is excluded.
-  `DELETE /deploy/drafts/{draft}` (session, audited `deploy.draft.discard`) throws one away: every
+  `DELETE /deploy/drafts/{draft}` (session or deploy key, audited `deploy.draft.discard`) throws one away: every
   press of Import creates a draft, so an abandoned attempt would otherwise sit in that list for its
   whole thirty-day life and three tries at one repository would read as three pieces of unfinished
   work. Only the owner's own uncommitted setup can go — a committed draft is the record a project was
@@ -1069,7 +1069,7 @@ only renderer/executor/validation authority for their feature.
   rotation. Execution resolves external credential/database/domain/Compose-service references only through
   their owning stores; missing or ambiguous targets fail closed instead of reaching a workload as literal
   reference text. Run-scoped domain and Compose references use the frozen run plan/dependency snapshots.
-  `POST …/variables/import?dryRun=1` (the import's own tier: `system.admin`, session) takes the
+  `POST …/variables/import?dryRun=1` (the import's own tier: `system.admin`, session or deploy key) takes the
   import's body and writes nothing: it answers one verdict per name, in the order the names were
   written, with the line — `added`, `changed` (the value, sensitivity or scopes differ), `unchanged`,
   `skipped` (a name the body's `skip` list leaves out: the sheet sends `PORT` and `NODE_ENV`, which the
@@ -1104,8 +1104,9 @@ only renderer/executor/validation authority for their feature.
   Routes: `GET /deploy/shared-variables` and `GET /deploy/{id}/shared-variables` list them masked with
   every active variable that reads each (`usedBy`, with `waiting` where the environment's live release
   started before the value last changed) for anyone who may read an environment's variables; `PUT …/{name}`
-  (create or change; an omitted value keeps the sealed one) and `GET …/{name}/reveal` are an
-  administrator's in a session, like a variable's; `DELETE …/{name}` is `s.destructive` in a session and
+  (create or change; an omitted value keeps the sealed one) is an administrator's in a session or a
+  deploy key's, like a variable's, and `GET …/{name}/reveal` a session's only; `DELETE …/{name}` is
+  `s.destructive` in a session or with a deploy key and
   answers `409 shared_variable_in_use` naming each reader while any active environment's variable reads it.
   Audited as `deploy.shared_variable.{create,update,reveal,delete}` with the scope and never the value. A
   project's shared variables go with the project when it is purged.
@@ -1232,18 +1233,41 @@ only renderer/executor/validation authority for their feature.
   retry, redeploy or rollback. `GET /deploy/{id}/commits` still reads a legacy project's local checkout
   only; a normalized Git-URL project's private release mirror keeps only narrow per-revision snapshot
   refs, not a maintained branch tip, so listing its history cheaply from that mirror remains open.
+- **Deploy keys and `jd`.** A deploy key (`api_tokens.scope = 'deploy'`, `POST /tokens/deploy`, an
+  administrator's in a session) is admitted to the deployment routes `deployKeyRoutes` in
+  `api/deploy_keys.go` lists and to no other route; wherever this document gives a drafts,
+  configuration, source, Git policy, trigger, variable or shared-variable write the tier
+  "`system.admin`, session", a deploy key is admitted too, and every other session-only deployment route
+  (reveals, saved credentials, secret-store connections, pull-request merge/comment and previews,
+  schedules, alerts, channels, drains, adding and removing an environment, a route's maintenance and
+  error pages, the warm-release terms, the typed-phrase removals) stays a session's and answers it `session_required`. Its writes are
+  held to what a person in a session could not be refused: a generate or rotate answers it without
+  `generatedValue`; a plan it commits, or an environment change it makes, may not carry host authority
+  (`hostAuthority`: a folder on the server, Docker Compose, privileged, host network, capabilities,
+  devices, a host path mounted, a release task without `runner: "image"`), and an environment that
+  already does, or whose variables read a `credential` reference, is changed by a person only (it may
+  still be deployed and have its variables set); a source may not gain a saved credential or send its
+  Git credential to another repository; a variable may not be pointed at a `credential`, `database` or
+  `store` reference (on a draft, checked at commit with `Draft.VariableReferences`, which reads a value's mode
+  as the commit stores it), nor, for a key narrowed to some deployments, at a `server` shared
+  variable. A key narrowed to chosen deployments
+  (`api_token_deployments`) lists and reaches only those. `GET /deploy/{id}/runs/{run}/transcript?after=&limit=`
+  reads a run's log lines after a sequence number, oldest first, with the run and its steps and
+  `{next, more}` (`OrchestrationStore.RunTranscriptAfter`): what the stream route sends over its socket,
+  for a client without one — `jd logs --follow` and `jd deploy --wait` poll it. The `jd` program itself
+  (`backend/cmd/jd`) is described in the README.
 - Additional automation provider hooks verify each provider's exact raw-body signature before parsing and then fence
   event, repository, ref and delivery identity. The delivery row is reserved before preview or queue side
   effects, while legacy HMAC and scoped generic hooks retain their existing contracts. Environment branch/
   path policy applies to polling and provider/generic hooks; manual and rollback runs are not path-filtered.
-  `GET …/triggers/{trigger}/deliveries` (`system.admin`, session) reads the last 50 `deploy_webhook_deliveries`
+  `GET …/triggers/{trigger}/deliveries` (`system.admin`, session or deploy key) reads the last 50 `deploy_webhook_deliveries`
   rows for a trigger — delivery id, event, ref, decision, reason, run id, received at — or `?limit=` of
   them, 1 to 200 (anything else reads 50), and
   `POST …/triggers/{trigger}/rotate-secret` (same tier, audited `deploy.trigger.rotate_secret`) issues a new
   HMAC secret shown once, mirroring the legacy project's own secret rotation. The trigger list carries a
   summary of that log — each trigger's `lastDelivery` and `recent`, its last fourteen decisions oldest
   first, read for every trigger in one windowed statement (`AttachTriggerDeliveries`) — but only for a
-  session holding `system.admin`, the caller who could read the log itself; the list is readable by any
+  session or deploy key holding `system.admin`, the caller who could read the log itself; the list is readable by any
   account, and a read-only one still sees `lastStatus` alone. Absent means not allowed or never
   delivered, and the page then draws no strip rather than an error.
   A new *automatic* run only supersedes an older queued one in the same environment when its own
@@ -1775,7 +1799,7 @@ only renderer/executor/validation authority for their feature.
   from this environment, so an agent identity cannot be tried either. A draft's source step and the
   source-change route below both refuse a `credentialId` that names no row before saving, rather than
   waiting for detection to discover it.
-- `PUT /deploy/{id}/environments/{env}/source` (`system.admin`, session, audited `deploy.source.update`)
+- `PUT /deploy/{id}/environments/{env}/source` (`system.admin`, session or deploy key, audited `deploy.source.update`)
   changes a committed project's source without touching the live release: the same `DraftSourceConfig` shape
   a draft's source step uses, plus the caller's current `revision`. The handler validates it with
   `ValidateForDeployment`, runs the exact read-only inspection a draft's detect step runs
@@ -1790,7 +1814,7 @@ only renderer/executor/validation authority for their feature.
   source revision alone is what makes it report a `source` pending change, and the Git watcher already keys
   its cursor on the desired source's own config digest, so a changed URL/ref/subdirectory resets that cursor
   and the very next poll reports `branch_changed` on its own.
-- `POST /deploy/{id}/duplicate` `{name}` (`system.admin`, session, audited `deploy.project.duplicate`) creates
+- `POST /deploy/{id}/duplicate` `{name}` (`system.admin`, session or a deploy key reaching every deployment, audited `deploy.project.duplicate`) creates
   a draft pre-filled from the project's current desired source and configuration — the same draft the
   new-project page resumes with `?draft=`, landing at the `configuration` step with no `detection` yet, so
   the operator still runs detect/preflight/commit like any other draft. `PlanningStore.Duplicate` copies the

@@ -143,3 +143,22 @@ func variableWriteMode(request VariableWriteRequest) string {
 	}
 	return "literal"
 }
+
+// VariableReferences is every variable the draft would commit as a typed
+// reference, by name: an explicit reference, or a value whose mode leaves it
+// read as one, exactly as commit stores it and a run resolves it. It is for a
+// caller deciding whether the draft may be committed by whoever is asking.
+func (d *Draft) VariableReferences() map[string]VariableReference {
+	out := map[string]VariableReference{}
+	if d.Data.Configuration == nil {
+		return out
+	}
+	configuration := *d.Data.Configuration
+	values, modes := d.variableValues(configuration), d.variableModes(configuration)
+	for name, value := range values {
+		if reference, ok := parseStoredReference(value, modes[name]); ok {
+			out[name] = reference
+		}
+	}
+	return out
+}

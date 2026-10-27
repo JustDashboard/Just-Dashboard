@@ -72,6 +72,8 @@ func (s *Server) recordAudit(r *http.Request, action, target string, detail any)
 		Status:   http.StatusOK,
 		Success:  true,
 		Detail:   audit.Detail(detail),
+		KeyID:    p.KeyID(),
+		KeyName:  p.KeyName(),
 	})
 }
 

@@ -20,6 +20,9 @@ import (
 // cannot use, but the server re-decides every request on its own.
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
+	// The deploy key gate asks this router which route a request will reach,
+	// so it is the whole tree, read at request time once it is built.
+	root := r
 	r.Use(middleware.RequestID)
 	r.Use(httpx.RealIP(s.Cfg.TrustedProxies))
 	r.Use(httpx.Recoverer(s.Log))
@@ -106,7 +109,9 @@ func (s *Server) Routes() http.Handler {
 			if s.Cfg.AgentMode {
 				r.Use(httpx.HubOnly(s.Agent))
 			} else {
-				r.Use(s.Authn.Authenticate)
+				// The one group a deploy key can enter, and only for the
+				// routes deployKeyRoutes lists (deploy_keys.go).
+				r.Use(s.Authn.AuthenticateFeatures(s.deployKeyGate(root), s.Audit))
 			}
 			r.Use(s.apiLim.ByPrincipal)
 			r.Use(httpx.AuditMutations(s.Audit))
@@ -133,6 +138,7 @@ func (s *Server) Routes() http.Handler {
 			s.mountJobRoutes(r)
 			s.mountRemoteDesktopRoutes(r)
 			s.mountMapRoutes(r)
+			s.mountCLIRoutes(r)
 		})
 
 		if !s.Cfg.AgentMode {
@@ -194,6 +200,10 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 			// A key for an AI client, and the databases it reaches
 			// (handlers_mcp_keys.go).
 			r.Method(http.MethodPost, "/mcp", s.handle(s.handleCreateMCPToken))
+			// A key for the jd command line and CI (deploy_keys.go): it holds
+			// the administrator role, so only an administrator makes one.
+			r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
+				Method(http.MethodPost, "/deploy", s.handle(s.handleCreateDeployToken))
 			r.Method(http.MethodPut, "/{id}/connections", s.handle(s.handleSetMCPTokenConnections))
 			r.Method(http.MethodDelete, "/{id}", s.handle(s.handleRevokeToken))
 			r.Group(func(r chi.Router) {

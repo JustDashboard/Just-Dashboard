@@ -68,6 +68,18 @@ func (s *Server) handleDeploymentSourceUpdate(w http.ResponseWriter, r *http.Req
 	if err := source.ValidateForDeployment(); err != nil {
 		return mapDeploymentPlanningError(err)
 	}
+	if httpx.MustPrincipal(r).DeployKey() {
+		current, err := s.keyEnvironmentGuard(r.Context(), projectID, environmentID)
+		if err != nil {
+			return err
+		}
+		if err := keySourceGuard(source, current.Source); err != nil {
+			return err
+		}
+		if reasons := hostAuthority(&source, current.Build, current.Runtime); len(reasons) > 0 {
+			return refuseHostAuthority("this source", reasons)
+		}
+	}
 	if deploy.IsProviderPullRef(source.Ref) {
 		target, err := s.modules.deployRuns.EnvironmentExecutionTarget(r.Context(), projectID, environmentID)
 		if err != nil {

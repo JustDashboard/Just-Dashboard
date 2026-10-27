@@ -1640,8 +1640,8 @@ GitHub's marks, PM2's, fail2ban's, the terminal's, Let's Encrypt's for an issued
 certificate, the dashboard's own for its settings, and the sidebar's glyph for every section that is
 no product), the action's first word in its `LANES` hue the way the log console draws a program, the
 route's method and path in the request log's hues, and who acted as their face — an API key's use
-with a key in the tile's corner, a webhook as the webhook's mark and the dashboard's reconcilers as
-the dashboard.
+with a key in the tile's corner and the key's name after the account's, a webhook as the webhook's
+mark and the dashboard's reconcilers as the dashboard.
 
 **A project is drawn as its website, else as what it is.** `ProjectMark` tries three things in
 order, all on `ProductLogo`'s tile so a card does not change shape when an icon arrives: the icon

@@ -845,6 +845,20 @@ docker run --rm --network host --pid host \
   -v "$PWD:$PWD" \
   just-dashboard-backend:latest -prepare-ports "$PWD" -start-stack
 
+# The jd command line was built into the backend's image beside the dashboard.
+# It goes where a shell finds it, so deploying from this server is `jd deploy`;
+# the dashboard keeps it current after an update. A failure here leaves the
+# dashboard as installed and says how to try again.
+step "Installing the jd command"
+CLI_TMP="$(mktemp)"
+if docker run --rm --entrypoint cat just-dashboard-backend:latest /usr/local/bin/jd >"$CLI_TMP" 2>/dev/null &&
+	[ -s "$CLI_TMP" ] && install -D -m 0755 "$CLI_TMP" /usr/local/bin/jd; then
+	ok "jd is at /usr/local/bin/jd"
+else
+	warn "jd was not installed; sudo ./scripts/manage.sh install-cli tries again"
+fi
+rm -f "$CLI_TMP"
+
 stage 4 "Verify startup"
 step "Waiting for the dashboard to answer"
 
@@ -1021,6 +1035,9 @@ say "    sudo ./scripts/manage.sh status              # containers and health"
 say "    sudo ./scripts/manage.sh logs                # follow backend logs"
 say "    sudo ./scripts/manage.sh restart             # apply .env edits; use SSH"
 say "    ./scripts/manage.sh --help                   # all commands and options"
+say ""
+say "  ${BOLD}Deploying from a shell or CI${RESET} · make a deploy key under Account → API keys"
+say "    jd login $SCHEME://<dashboard address> --key vpsd_…   # then: jd deployments, jd deploy APP --wait"
 say ""
 say "  Password prompts are hidden. The password you set is the one you sign in with;"
 say "  a reset keeps two-factor enrollment and revokes sessions and API tokens."

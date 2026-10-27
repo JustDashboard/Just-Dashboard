@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +54,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/runs", s.handle(s.handleDeployRuns))
 		r.Method(http.MethodGet, "/{id}/runs/{run}", s.handle(s.handleDeploymentRunGet))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/logs", s.handle(s.handleDeploymentRunLogs))
+		// The transcript the stream sends, read from a sequence number on, for
+		// a client without the stream's socket: jd logs --follow.
+		r.Method(http.MethodGet, "/{id}/runs/{run}/transcript", s.handle(s.handleDeploymentRunTranscript))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/metrics", s.handle(s.handleDeploymentRunMetrics))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/stream", s.handle(s.handleDeploymentRunStream))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/settings-drift", s.handle(s.handleDeploymentRunSettingsDrift))
@@ -332,6 +336,9 @@ func (s *Server) enrichProject(r *http.Request, p *deploy.Project) {
 }
 
 func (s *Server) handleDeployList(w http.ResponseWriter, r *http.Request) error {
+	// A deploy key narrowed to some deployments lists those and no others,
+	// in every view: the rest are not its to know about.
+	p := httpx.MustPrincipal(r)
 	if r.URL.Query().Get("view") == "fleet" {
 		fleet, err := s.modules.deployRuns.Fleet(r.Context(), deploy.QueueBudget{
 			Heavy: s.Cfg.DeployHeavySlots,
@@ -340,6 +347,8 @@ func (s *Server) handleDeployList(w http.ResponseWriter, r *http.Request) error 
 		if err != nil {
 			return httpx.Internal(err)
 		}
+		fleet.Deployments = slices.DeleteFunc(fleet.Deployments, func(d deploy.DeploymentSummary) bool { return !keyReaches(p, d.ID) })
+		fleet.ActiveWork = slices.DeleteFunc(fleet.ActiveWork, func(a deploy.ActiveWork) bool { return !keyReaches(p, a.Run.ProjectID) })
 		httpx.JSON(w, http.StatusOK, fleet)
 		return nil
 	}
@@ -347,6 +356,7 @@ func (s *Server) handleDeployList(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return httpx.Internal(err)
 	}
+	projects = slices.DeleteFunc(projects, func(project *deploy.Project) bool { return !keyReaches(p, project.ID) })
 	if r.URL.Query().Get("view") == "archived" {
 		facts, err := s.modules.deployRuns.ArchivedDeploymentFacts(r.Context())
 		if err != nil {
@@ -1430,7 +1440,7 @@ func (s *Server) handleDeployEnvReveal(w http.ResponseWriter, r *http.Request) e
 	p := httpx.MustPrincipal(r)
 	s.Audit.Record(r.Context(), audit.Entry{
 		UserID: p.UserID(), Username: p.Username(), Role: string(p.Role),
-		IP: httpx.ClientIP(r), Actor: p.Kind,
+		IP: httpx.ClientIP(r), Actor: p.Kind, KeyID: p.KeyID(), KeyName: p.KeyName(),
 		Action: "deploy.env.reveal", Target: project.Name,
 		Method: r.Method, Path: r.URL.Path, Status: http.StatusOK, Success: true,
 		Detail: audit.Detail(map[string]any{"count": len(vars)}),

@@ -26,6 +26,11 @@ type Entry struct {
 	Status   int       `json:"status"`
 	Success  bool      `json:"success"`
 	Detail   string    `json:"detail"`
+	// KeyID and KeyName are the API key the request came with, when it came
+	// with one: an account can hold many keys, and a leaked one is found by
+	// which of them acted.
+	KeyID   int64  `json:"keyId,omitempty"`
+	KeyName string `json:"keyName,omitempty"`
 }
 
 type Logger struct {
@@ -56,15 +61,18 @@ func (l *Logger) Record(ctx context.Context, e Entry) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if _, err := l.st.DB.ExecContext(ctx,
-		`INSERT INTO audit_log(ts, user_id, username, role, ip, actor, action, target, method, path, status, success, detail)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO audit_log(ts, user_id, username, role, ip, actor, action, target, method, path, status, success, detail, key_id, key_name)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		e.TS.Unix(), e.UserID, e.Username, e.Role, e.IP, e.Actor, e.Action, e.Target,
-		e.Method, e.Path, e.Status, success, truncate(e.Detail, 4000)); err != nil {
+		e.Method, e.Path, e.Status, success, truncate(e.Detail, 4000), e.KeyID, truncate(e.KeyName, 200)); err != nil {
 		l.log.Error("audit write failed", "err", err, "action", e.Action)
 	}
-	l.log.Info("audit",
-		"user", e.Username, "role", e.Role, "ip", e.IP, "actor", e.Actor,
-		"action", e.Action, "target", e.Target, "status", e.Status, "success", e.Success)
+	attrs := []any{"user", e.Username, "role", e.Role, "ip", e.IP, "actor", e.Actor,
+		"action", e.Action, "target", e.Target, "status", e.Status, "success", e.Success}
+	if e.KeyID != 0 {
+		attrs = append(attrs, "key", e.KeyID, "keyName", e.KeyName)
+	}
+	l.log.Info("audit", attrs...)
 }
 
 type Filter struct {
@@ -121,7 +129,7 @@ func (l *Logger) List(ctx context.Context, f Filter) ([]Entry, int, error) {
 		f.Limit = 100
 	}
 	rows, err := l.st.DB.QueryContext(ctx,
-		`SELECT id, ts, user_id, username, role, ip, actor, action, target, method, path, status, success, detail
+		`SELECT id, ts, user_id, username, role, ip, actor, action, target, method, path, status, success, detail, key_id, key_name
 		 FROM audit_log WHERE `+clause+` ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?`,
 		append(args, f.Limit, f.Offset)...)
 	if err != nil {
@@ -134,7 +142,7 @@ func (l *Logger) List(ctx context.Context, f Filter) ([]Entry, int, error) {
 		var ts int64
 		var success int
 		if err := rows.Scan(&e.ID, &ts, &e.UserID, &e.Username, &e.Role, &e.IP, &e.Actor,
-			&e.Action, &e.Target, &e.Method, &e.Path, &e.Status, &success, &e.Detail); err != nil {
+			&e.Action, &e.Target, &e.Method, &e.Path, &e.Status, &success, &e.Detail, &e.KeyID, &e.KeyName); err != nil {
 			return nil, 0, err
 		}
 		e.TS = time.Unix(ts, 0).UTC()

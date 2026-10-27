@@ -38,6 +38,9 @@ type APIToken struct {
 	// Deployments is what an MCP key may do with the deployments: nothing,
 	// read them, or also deploy and roll them back. Every other key has none.
 	Deployments DeployAccess `json:"deployments,omitempty"`
+	// DeploymentIDs are the deployments a deploy key was narrowed to; empty
+	// is every deployment. Every other key has none.
+	DeploymentIDs []int64 `json:"deploymentIds,omitempty"`
 }
 
 // CreateAPIToken mints a scripting credential. The role may narrow the owner's
@@ -166,7 +169,10 @@ func (s *Service) ListAPITokens(ctx context.Context, userID int64, all bool) ([]
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return out, s.fillTokenConnections(ctx, out)
+	if err := s.fillTokenConnections(ctx, out); err != nil {
+		return nil, err
+	}
+	return out, s.fillTokenDeployments(ctx, out)
 }
 
 func (s *Service) RevokeAPIToken(ctx context.Context, id int64) error {
@@ -205,6 +211,13 @@ func (s *Service) ResolveAPIToken(ctx context.Context, presented string) (*APITo
 	effective := t.Role
 	if !roleAtMost(effective, u.Role) {
 		effective = u.Role
+	}
+	// A deploy key's deployments are part of what it is, read with it on
+	// every request: one taken off its list is refused the next call.
+	if t.Scope == ScopeDeploy {
+		if t.DeploymentIDs, err = s.TokenDeployments(ctx, t.ID); err != nil {
+			return nil, nil, "", err
+		}
 	}
 	s.st.DB.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, time.Now().Unix(), t.ID)
 	return t, u, effective, nil

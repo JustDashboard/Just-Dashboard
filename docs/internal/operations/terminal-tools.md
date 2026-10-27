@@ -24,8 +24,17 @@ for the earlier `JD_MASTER_KEY` (default no). A pasted key (64 hex characters, a
 it the installer generates a key and says what comes back by itself — connections made from found
 servers that state their credentials, repaired by the backend — and what has to be entered again.
 
+At the end of stage 3 the installer copies the `jd` command line out of the freshly built backend
+image (`docker run --rm --entrypoint cat just-dashboard-backend:latest /usr/local/bin/jd`) to
+`/usr/local/bin/jd` on the host, mode 0755. An image without it, or a failed copy, is a `[!]` line naming
+`sudo ./scripts/manage.sh install-cli` and never fails the install. After that the dashboard keeps the
+host's copy current: at every boot `internal/clihost` replaces `/host/usr/local/bin/jd` with the jd built
+beside the running binary when the file there is an older jd — recognised by a line of its usage text —
+and leaves a missing file, or any other program called `jd`, alone.
+
 The completion guide appears after backend health verification and shows the dashboard address,
-sign-in instructions and terminal command examples, including a shell-quoted checkout path.
+sign-in instructions and terminal command examples, including a shell-quoted checkout path, and a
+`jd login` line for deploying from a shell or CI with a deploy key from Account → API keys.
 `scripts/manage.sh` owns the commands; `scripts/create-user.sh` and `scripts/reset-password.sh` are
 executable convenience wrappers. All locate their own checkout, validate arguments before calling
 Docker and allow help without root, configuration or Docker. Actual commands require local root and
@@ -89,7 +98,10 @@ the last 100 lines; the default is backend. `restart` runs `up -d --force-recrea
 reach recreated containers rather than preserving the old environment as Compose `restart` would.
 Run it from SSH since a web terminal connection drops during recreation. It does not pull source or
 request an image rebuild. The dashboard configuration page remains the path for changes needing
-automatic rollback.
+automatic rollback. `install-cli` does what the installer's jd step does: it reads `/usr/local/bin/jd` out
+of the built backend image into a temporary file beside the target, makes it 0755 and moves it over
+`/usr/local/bin/jd` (`JD_CLI_PATH` chooses another path), so a jd already running keeps its file; an
+image with no jd fails with a message and leaves nothing behind.
 
 ## Verification
 
@@ -97,7 +109,7 @@ Run `scripts/test-changed.sh main`, plus `python3 scripts/test_manage.py` and
 `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`.
 The Python fixtures check command arguments, stdin preservation, root and input checks, checkout paths
 with spaces, Compose fallback, restoring a kept uninstall's `.env`, asking for the key of a store left
-without one, and the installer's successful/failing
+without one, installing jd from the image (and finishing without it), `install-cli`, and the installer's successful/failing
 completion flows without changing
 host packages or the installed stack. The linking cases prove what the installer asked by what its answers did
 (bash prints no prompt for piped input): the question is skipped under `--link`, `--no-link`, a kept `.env` and

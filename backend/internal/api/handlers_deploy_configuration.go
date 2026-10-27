@@ -194,6 +194,21 @@ func (s *Server) handleDeploymentVariablePut(w http.ResponseWriter, r *http.Requ
 	}
 	name := chi.URLParam(r, "name")
 	principal := httpx.MustPrincipal(r)
+	if principal.DeployKey() && request.Reference != "" {
+		previous := ""
+		variables, err := s.modules.deployPlanning.ListVariables(r.Context(), projectID, environmentID)
+		if err != nil {
+			return mapDeploymentPlanningError(err)
+		}
+		for _, variable := range variables {
+			if variable.Name == name {
+				previous = variableReference(variable)
+			}
+		}
+		if err := keyReferenceGuard(principal, name, request.Reference, previous); err != nil {
+			return err
+		}
+	}
 	result, err := s.modules.deployPlanning.PutVariable(
 		r.Context(), projectID, environmentID, name, principal.Username(), request,
 	)
@@ -233,6 +248,7 @@ func (s *Server) handleDeploymentVariableGenerate(w http.ResponseWriter, r *http
 		"deploymentId": projectID, "environmentId": environmentID,
 		"revision": result.DesiredRevision, "scopes": request.Scopes,
 	})
+	withholdGeneratedValue(principal, result)
 	httpx.JSON(w, http.StatusCreated, result)
 	return nil
 }
@@ -260,6 +276,7 @@ func (s *Server) handleDeploymentVariableRotate(w http.ResponseWriter, r *http.R
 		"deploymentId": projectID, "environmentId": environmentID,
 		"revision": result.DesiredRevision,
 	})
+	withholdGeneratedValue(principal, result)
 	httpx.JSON(w, http.StatusOK, result)
 	return nil
 }
@@ -369,6 +386,15 @@ func (s *Server) handleDeploymentConfigurationSave(w http.ResponseWriter, r *htt
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
+	if httpx.MustPrincipal(r).DeployKey() {
+		current, err := s.keyEnvironmentGuard(r.Context(), projectID, environmentID)
+		if err != nil {
+			return err
+		}
+		if reasons := hostAuthority(current.Source, request.Build, request.Runtime); len(reasons) > 0 {
+			return refuseHostAuthority("this configuration", reasons)
+		}
+	}
 	configuration, err := s.modules.deployPlanning.SaveEnvironmentConfiguration(
 		r.Context(), projectID, environmentID, request,
 	)
@@ -382,4 +408,14 @@ func (s *Server) handleDeploymentConfigurationSave(w http.ResponseWriter, r *htt
 	})
 	httpx.JSON(w, http.StatusOK, configuration)
 	return nil
+}
+
+// withholdGeneratedValue keeps a generated secret from a deploy key: variables
+// are write-only to it, a value it did not send as much as one it did. The
+// variable is generated and set all the same; a person reads it in the
+// dashboard, and the deployment reads it at run time.
+func withholdGeneratedValue(p *httpx.Principal, result *deploy.VariableMutationResult) {
+	if p.DeployKey() {
+		result.GeneratedValue = ""
+	}
 }

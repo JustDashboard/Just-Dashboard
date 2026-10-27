@@ -2,7 +2,7 @@
 
 import { useRef, type RefObject } from "react"
 import type { ApiToken, Role } from "@/lib/types"
-import { LineChart, Sparkles } from "@/components/icons"
+import { LineChart, Rocket, Sparkles } from "@/components/icons"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { WireHost, WireMark, WireNode } from "@/components/deploy/wire"
@@ -26,16 +26,31 @@ const SHOWN = 6
  * Where a key is wired: through its role, or — for a key limited to one job —
  * through that job, because the role beneath it says nothing of what it may do.
  */
-type Door = Role | "metrics" | "mcp"
-const DOORS: Door[] = [...ROLES, "metrics", "mcp"]
+type Door = Role | Job
+type Job = "metrics" | "mcp" | "deploy"
+const DOORS: Door[] = [...ROLES, "metrics", "mcp", "deploy"]
 const doorOf = (token: ApiToken): Door =>
-  token.scope === "metrics.read" ? "metrics" : token.scope === "mcp" ? "mcp" : token.role
+  token.scope === "metrics.read"
+    ? "metrics"
+    : token.scope === "mcp" || token.scope === "deploy"
+      ? token.scope
+      : token.role
 
 /** A job's door is drawn as the job: its glyph, a role's hue, its name. */
 const JOB_DOOR = {
   metrics: { Mark: LineChart, hue: "readonly", name: "Metrics only" },
   mcp: { Mark: Sparkles, hue: "limited", name: "MCP only" },
+  // An administrator's key, so the administrator's hue — but through the
+  // deployments' own glyph, since that is all it opens.
+  deploy: { Mark: Rocket, hue: "admin", name: "Deploy only" },
 } as const
+const isJob = (door: Door): door is Job => door in JOB_DOOR
+
+/** The door a key's node names over it: its job, else its role. */
+function doorName(token: ApiToken) {
+  const door = doorOf(token)
+  return isJob(door) ? JOB_DOOR[door].name : ROLE_NAME[token.role]
+}
 
 /**
  * Where the keys reach, drawn the way the deployment pages draw where a
@@ -65,12 +80,14 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
   const readonly = useRef<HTMLDivElement>(null)
   const metrics = useRef<HTMLDivElement>(null)
   const mcp = useRef<HTMLDivElement>(null)
+  const deploy = useRef<HTMLDivElement>(null)
   const roleRef: Record<Door, RefObject<HTMLDivElement | null>> = {
     admin,
     limited,
     readonly,
     metrics,
     mcp,
+    deploy,
   }
 
   const usable = usableKeys(tokens, now).sort(
@@ -106,12 +123,10 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
 
   // A job's door is drawn only when a key goes through it; the roles are
   // drawn whether or not they hold one, as the empty doors a key could have.
-  const doors = DOORS.filter(
-    (door) => !(door in JOB_DOOR) || usable.some((k) => doorOf(k) === door),
-  )
+  const doors = DOORS.filter((door) => !isJob(door) || usable.some((k) => doorOf(k) === door))
   const roles = doors.map((role) => {
     const held = usable.filter((k) => doorOf(k) === role)
-    const job = role === "metrics" || role === "mcp" ? JOB_DOOR[role] : undefined
+    const job = isJob(role) ? JOB_DOOR[role] : undefined
     const Mark = job ? job.Mark : ROLE_MARK[role as Role]
     const hue = ROLE_HUE[job ? job.hue : (role as Role)]
     const name = job ? job.name : ROLE_NAME[role as Role]
@@ -245,13 +260,7 @@ function KeyNode({
         nodeRef={node}
         align="end"
         mark={<KeyWireMark name={token.name} size="lg" />}
-        eyebrow={
-          token.scope === "metrics.read"
-            ? "Metrics only"
-            : token.scope === "mcp"
-              ? "MCP only"
-              : ROLE_NAME[token.role]
-        }
+        eyebrow={doorName(token)}
         title={<span className="font-mono">{token.name}</span>}
         hint={<span className={line.tone === "warning" ? "text-warning" : undefined}>{hint}</span>}
       />

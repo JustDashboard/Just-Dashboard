@@ -27,9 +27,10 @@ func (s *Server) handleDeploymentTriggers(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return httpx.Internal(err)
 	}
-	// The delivery log's own route is system.admin behind a session; the list
-	// carries a summary of it only for a caller who could read the log itself.
-	if principal := httpx.MustPrincipal(r); principal.Kind == "session" && principal.Can(auth.CapSystemAdmin) {
+	// The delivery log's own route is system.admin behind a session, or a
+	// deploy key; the list carries a summary of it only for a caller who
+	// could read the log itself.
+	if principal := httpx.MustPrincipal(r); (principal.Kind == "session" || principal.DeployKey()) && principal.Can(auth.CapSystemAdmin) {
 		if err := s.modules.deployAutomation.AttachTriggerDeliveries(r.Context(), items); err != nil {
 			return httpx.Internal(err)
 		}
