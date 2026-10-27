@@ -33,19 +33,26 @@ const TEXT_PAGES: SitePageName[] = ["security", "robots"]
  * script in the page cannot run here, in the dashboard's origin, whatever it
  * does once nginx serves it on the site. A page is a file nginx reads on
  * every response, so saving it needs no reload.
+ *
+ * A deployment's route keeps the same pages under its own address (`path`),
+ * on whichever proxy serves it (`server`).
  */
 export function PageEditor({
   open,
   onOpenChange,
   site,
   page,
+  path: pagePath,
+  server = "nginx",
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   site: string
   page: SitePageName
+  path?: string
+  server?: string
 }) {
-  const path = `/proxy/sites/${encodeURIComponent(site)}/pages/${page}`
+  const path = pagePath ?? `/proxy/sites/${encodeURIComponent(site)}/pages/${page}`
   const [read, setRead] = useState<SitePage | null>(null)
   const [error, setError] = useState<Error | null>(null)
   const [content, setContent] = useState("")
@@ -90,8 +97,8 @@ export function PageEditor({
       title={`${PAGE_LABEL[page]} · ${site}`}
       description={
         text
-          ? "Edit the text nginx serves at this address."
-          : "Edit the HTML nginx answers with, beside a preview of it."
+          ? `Edit the text ${server} serves at this address.`
+          : `Edit the HTML ${server} answers with, beside a preview of it.`
       }
       initialFocus="body"
       footer={

@@ -102,15 +102,16 @@ func TestDeploymentRouteRulesOnCaddy(t *testing.T) {
 	}
 }
 
-// A route asking for none of the rules renders exactly what it did before
-// they existed, so no live route reads as changed after an upgrade.
-func TestDeploymentRouteWithoutRulesIsUnchanged(t *testing.T) {
+// A route asking for none of the rules renders the application behind the
+// maintenance switch every route carries, and nothing else.
+func TestDeploymentRouteWithoutRulesCarriesOnlyTheSwitch(t *testing.T) {
 	route := DeploymentRoute{Name: "just-dashboard-env-9.conf", Domains: []string{"example.test"}, Upstream: "http://127.0.0.1:32123"}
 	content, err := renderDockerCaddyRoute(route, "http://10.0.0.2:3000")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "# Managed by Just Dashboard\nhttp://example.test {\n  reverse_proxy \"http://10.0.0.2:3000\"\n}\n"; content != want {
+	if want := "# Managed by Just Dashboard\nhttp://example.test {\n  route {\n" + indentCaddy(renderCaddyMaintenance(DeploymentMaintenance{}, "/config/just-dashboard/pages/just-dashboard-env-9")) +
+		"    reverse_proxy \"http://10.0.0.2:3000\"\n  }\n}\n"; content != want {
 		t.Fatalf("Caddy route = %q, want %q", content, want)
 	}
 	nginx := mustRender(t, deploymentSiteSpec(route, ""))

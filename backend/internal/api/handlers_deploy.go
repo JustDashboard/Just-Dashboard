@@ -74,6 +74,8 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/environments/{env}/variables", s.handle(s.handleDeploymentVariables))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/pending", s.handle(s.handleDeploymentPending))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfiguration))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/maintenance", s.handle(s.handleDeploymentMaintenance))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/pages/{page}", s.handle(s.handleDeploymentPageGet))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/triggers", s.handle(s.handleDeploymentTriggers))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/git-watch", s.handle(s.handleDeploymentGitWatch))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/database-links", s.handle(s.handleDeploymentDatabaseLinks))
@@ -130,6 +132,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPut, "/{id}/shared-variables/{name}", s.handle(s.handleSharedVariablePut))
 				r.Method(http.MethodGet, "/{id}/shared-variables/{name}/reveal", s.handle(s.handleSharedVariableReveal))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfigurationSave))
+				// What every visitor is shown when the route answers with one
+				// of its own pages: written as the configuration is.
+				r.Method(http.MethodPut, "/{id}/environments/{env}/pages/{page}", s.handle(s.handleDeploymentPagePut))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/source", s.handle(s.handleDeploymentSourceUpdate))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/detect", s.handle(s.handleDeploymentDetect))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/git-policy", s.handle(s.handleDeploymentGitPolicyPut))
@@ -177,6 +182,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/{id}/remove-managed", s.handle(s.handleDeploymentRemoveManaged))
 			r.Method(http.MethodPost, "/{id}/rollback", s.handle(s.handleDeployRollback))
 			r.Method(http.MethodPost, "/{id}/environments/{env}/rollback", s.handle(s.handleDeploymentReleaseRollback))
+			// Maintenance takes the application away from its visitors, as
+			// stopping it does and as a Proxy site's maintenance does, and
+			// sits behind the same gate as both.
+			r.Method(http.MethodPut, "/{id}/environments/{env}/maintenance", s.handle(s.handleDeploymentMaintenanceSet))
 			// A saved credential is routine and recoverable exactly like a
 			// saved DNS-provider credential: destructive, but never a typed
 			// phrase, since the secret is pasted again in a minute.

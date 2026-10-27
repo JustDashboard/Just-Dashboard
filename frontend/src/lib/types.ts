@@ -4969,6 +4969,12 @@ export type DeploymentConfiguration = {
     responseHeaders?: { name: string; value: string }[]
     /** An auth server asked about every request before the public route answers it. */
     forwardAuth?: DeploymentForwardAuth
+    /** What the route's maintenance does while it is on; whether it is on is the switch's. */
+    maintenance?: DeploymentRouteMaintenance
+    /** The codes the public route answers with a page of its own. */
+    errorPages?: DeploymentErrorPage[]
+    /** Gives the application's own answers with those codes the page too. */
+    interceptErrors?: boolean
     mounts?: {
       source: string
       target: string
@@ -5040,6 +5046,34 @@ export type DeploymentForwardAuth = {
   signIn: string
   /** Leaves this environment's route open and gates only the previews made from it. */
   previewsOnly?: boolean
+}
+
+/** What a deployment's maintenance does while it is on. */
+export type DeploymentRouteMaintenance = {
+  /** Seconds the 503 tells clients and crawlers to wait; empty sends no Retry-After. */
+  retryAfter?: number
+  /** The addresses and ranges that reach the application as usual while it is on. */
+  bypassFrom?: string[]
+}
+
+export type DeploymentErrorPage = 404 | 502 | 503 | 504
+
+/** A page a deployment's route answers with: its maintenance page or an error page. */
+export type DeploymentPageName = "maintenance" | "404" | "502" | "503" | "504"
+
+/**
+ * GET/PUT /deploy/{id}/environments/{env}/maintenance: the switch beside the
+ * live route, which the route reads on every request.
+ */
+export type DeploymentMaintenanceSwitch = {
+  driver: "nginx" | "caddy"
+  /** The environment has a route on the proxy at all. */
+  route: boolean
+  /** The route carries the check, so the switch acts at once. */
+  ready: boolean
+  on: boolean
+  /** When it was turned on (RFC 3339). */
+  since?: string
 }
 
 export type DeploymentVariable = {

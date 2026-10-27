@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -238,20 +239,38 @@ var (
 	jdAnyIfRe       = regexp.MustCompile(`^\(\$jd_\w+_(preflight|hotlink\w*|maint)\)$|^\(\$uri\s`)
 )
 
+// maintenanceSwitchRe is the test a switched maintenance makes for its file,
+// and switchSetRe the variable it sets when the file is there.
+var (
+	maintenanceSwitchRe = regexp.MustCompile(`^\(-f\s+(/\S+/` + regexp.QuoteMeta(maintenanceSwitchFile) + `)\)$`)
+	switchSetRe         = regexp.MustCompile(`^\$(jd_\w+)_maint$`)
+)
+
 // serverIfs reads the checks a site's server block makes before access is
 // looked at, in its rewrite phase: the ones this dashboard writes, which can
 // be judged for an address, and any other, which cannot.
 func (e accessEval) serverIfs() []AccessLayer {
 	var out []AccessLayer
+	switches := maintenanceSwitches(e.server)
 	for _, d := range e.server.Block {
 		if d.Name != "if" {
 			continue
 		}
 		cond := strings.Join(d.Args, " ")
 		switch {
+		case maintenanceSwitchRe.MatchString(cond):
+			// The switch's file decides whether the maintenance check below
+			// does anything; it is judged there, not as a layer of its own.
 		case maintenanceIfRe.MatchString(cond):
 			ident := maintenanceIfRe.FindStringSubmatch(cond)[1]
 			layer := AccessLayer{ID: "maintenance", Title: "Maintenance", Owner: "Site form", Rules: []RouteDirective{quoteDirective(d, false)}}
+			if path, switched := switches[ident]; switched {
+				if !switchFileExists(path) {
+					// Off: the check is written, but it lets everyone on.
+					continue
+				}
+				layer.Owner, layer.OwnerPath = "Maintenance switch", path
+			}
 			value, ok := e.geo(ident + "_maint_ip")
 			switch {
 			case maintenanceExemptRe.MatchString(e.uri):
@@ -290,6 +309,34 @@ func (e accessEval) serverIfs() []AccessLayer {
 		}
 	}
 	return out
+}
+
+// maintenanceSwitches are the files a server's switched maintenance follows,
+// by the ident of the variable each one sets.
+func maintenanceSwitches(server Directive) map[string]string {
+	out := map[string]string{}
+	for _, d := range server.Block {
+		m := maintenanceSwitchRe.FindStringSubmatch(strings.Join(d.Args, " "))
+		if d.Name != "if" || m == nil {
+			continue
+		}
+		for _, inner := range d.Block {
+			if inner.Name != "set" || len(inner.Args) == 0 {
+				continue
+			}
+			if set := switchSetRe.FindStringSubmatch(inner.Args[0]); set != nil {
+				out[set[1]] = m[1]
+			}
+		}
+	}
+	return out
+}
+
+// switchFileExists says whether a maintenance switch is on. A variable so a
+// test can say without a file; nginx and the dashboard name the same path.
+var switchFileExists = func(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // maintenanceExemptRe is maintenanceExempt as Go reads it.
