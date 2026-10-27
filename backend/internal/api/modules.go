@@ -41,6 +41,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/remotedesk"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/secretstore"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
@@ -102,17 +103,23 @@ type moduleSet struct {
 	// logDrainManager ships them, started with the server.
 	logDrains       *logdrain.Store
 	logDrainManager *logdrain.Manager
+	// secretStores are the connections to external secret managers that
+	// deployment variables reference.
+	secretStores *secretstore.Repository
 	// trafficAlerts watches the request record for the rules operators set,
 	// and tells the notification channels when one crosses its line;
 	// dbAlerts does the same for the databases' readings and their backups,
 	// and hostAlerts for the machine's own: CPU, memory, filesystems,
 	// containers and every backup job.
 	trafficAlerts *deploy.TrafficAlertEvaluator
-	dbAlerts      *dbAlerts
-	hostAlerts    *hostAlerts
-	dbs           *dbx.Manager
-	linuxUsers    *linuxusers.Service
-	netsec        *netsec.Service
+	// rollbackWatcher reads every open warm-release window and rolls a
+	// release back, or removes the warm one, when the window says so.
+	rollbackWatcher *deploy.RollbackWatcher
+	dbAlerts        *dbAlerts
+	hostAlerts      *hostAlerts
+	dbs             *dbx.Manager
+	linuxUsers      *linuxusers.Service
+	netsec          *netsec.Service
 	// blocks records the remote addresses blocked from the connection table
 	// with why and until when, and lifts the ones that end.
 	blocks *netsec.Blocks
@@ -161,6 +168,9 @@ type moduleSet struct {
 	// deployExecutor is the normalized release path, kept for the tailnet
 	// sweep Start runs once the engine is up.
 	deployExecutor *deploy.NormalizedStepExecutor
+	// promotionImages reads the images a promotion takes: deployArtifacts,
+	// unless a test puts a fake in its place.
+	promotionImages deploy.LocalImageReader
 	// rehearser makes the throwaway database copies release tasks are
 	// rehearsed against, and removes what a stopped process left behind.
 	rehearser *migrationRehearser
@@ -266,6 +276,9 @@ func (s *Server) initModules() {
 	s.modules.certKeeper = selfcfg.NewCertKeeper(
 		s.Cfg.Site, s.Cfg.TLSMode, s.Cfg.DataDir, s.restartProxy, s.Log)
 	s.modules.proxy = proxysvc.NewWithDockerIngress(s.Cfg.NginxDir, s.Cfg.CaddyFile)
+	if s.Cfg.IngressContainer != "" {
+		s.modules.proxy = proxysvc.NewWithIngressContainer(s.Cfg.NginxDir, s.Cfg.CaddyFile, s.Cfg.IngressContainer)
+	}
 	s.modules.requests = accesslog.NewStore(s.openRequestRecord)
 	s.modules.logDrains = logdrain.NewStore(s.Store, s.Sealer)
 	s.modules.dbs = dbx.NewManager()
@@ -326,7 +339,10 @@ func (s *Server) initModules() {
 	s.modules.deployRuns = deploy.NewOrchestrationStore(s.Store)
 	s.modules.deployDatabases = &deploymentDatabaseNetworks{server: s}
 	s.modules.poolers = &poolerKeeper{server: s}
-	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots).WithDatabaseURLResolver(s.modules.deployDatabases.ResolveVariable)
+	s.modules.secretStores = secretstore.NewRepository(s.Store, s.Sealer)
+	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots).
+		WithDatabaseURLResolver(s.modules.deployDatabases.ResolveVariable).
+		WithSecretStores(s.modules.secretStores)
 	s.modules.githubApp = githubapp.New(githubapp.NewStore(s.Store.DB, s.Sealer), s.modules.deployPlanning)
 	s.modules.deployPlanning.WithInstallationTokens(s.modules.githubApp)
 	s.modules.deployAutomation = deploy.NewAutomationStore(s.Store, s.Sealer)
@@ -350,6 +366,7 @@ func (s *Server) initModules() {
 	)
 	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker)
 	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
+	s.modules.promotionImages = s.modules.deployArtifacts
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
 	s.modules.deployRuntime = runtimeOwner
 	s.modules.deployPreviews = deploy.NewPreviewQuarantineController(s.modules.deployRuns, runtimeOwner, s.modules.proxy,
@@ -373,7 +390,7 @@ func (s *Server) initModules() {
 		// and activation still resolves an already-existing pair; what this
 		// join adds is that the run asks for one before it starts anything,
 		// instead of reaching a cutover that has nothing to serve.
-		WithCertificateIssuer(s.modules.proxy).
+		WithCertificateIssuer(auditedCertificateIssuer{issuer: s.modules.proxy, record: s.Audit.Record}).
 		WithNotifications(s.modules.deployAutomation).
 		WithTailnetPublisher(s.modules.tailnet).
 		// Release tasks are rehearsed against copies the Databases owner
@@ -407,6 +424,9 @@ func (s *Server) initModules() {
 		notifications,
 		s.modules.commitStatuses,
 		deploy.NewPullRequestCommenter(s.modules.deployRuns, s.modules.githubApp, s.dashboardEndpoint, s.Log).WithForges(forges),
+		// What a run read from the secret stores is held for its own steps
+		// and dropped the moment it finishes.
+		s.modules.deployPlanning.SecretStoreRunObserver(),
 	)
 	s.modules.deploySchedule = deploy.NewAutomationScheduler(s.modules.deployAutomation, s.dispatchDeploymentSchedule).
 		WithSweep(notifications.RetryFailedDeliveries)
@@ -418,6 +438,10 @@ func (s *Server) initModules() {
 			return s.modules.deployAutomation.DeliverNotification(ctx, nil, channelID, envelope)
 		},
 		s.trafficAlertNames, s.Log)
+	// The windows read the same record the traffic alerts do, and ask for
+	// a rollback through the same enqueue an operator's press takes.
+	s.modules.rollbackWatcher = deploy.NewRollbackWatcher(normalizedExecutor, s.modules.requests,
+		s.enqueueAutomaticRollback, s.auditRollbackWatch, s.Log)
 	s.modules.dbAlerts = s.newDBAlerts()
 	s.modules.hostAlerts = s.newHostAlerts()
 	s.modules.deployGit = deploy.NewGitWatcher(s.modules.deployRuns, s.modules.deploySources, s.dispatchGitDeployment)

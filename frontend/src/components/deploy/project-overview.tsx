@@ -49,6 +49,7 @@ import { Insights } from "@/components/deploy/insights"
 import { RunRow } from "@/components/deploy/run-row"
 import { UsageTiles } from "@/components/deploy/usage-tiles"
 import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
+import { ReleaseWatch, useReleaseWatch } from "@/components/deploy/release-watch"
 
 /**
  * The project's front page, in the order a visitor asks: is something
@@ -98,7 +99,14 @@ export function ProjectOverview() {
       get<ProjectPullRequests>(`/deploy/${project.projectId}/pull-requests`, undefined, signal),
     60000,
     [project.projectId],
-    { enabled: project.normalized && !project.archived && deployment.sourceKind === "git" },
+    {
+      // Pull requests build previews of production; staging follows a branch.
+      enabled:
+        project.normalized &&
+        !project.archived &&
+        deployment.sourceKind === "git" &&
+        project.environment !== "staging",
+    },
   )
   const pulls = usePullRequestVerbs({
     projectId: project.projectId,
@@ -128,6 +136,11 @@ export function ProjectOverview() {
   }, [opsDomains, url])
 
   const celebrate = useCelebration(deployment)
+  const releaseWatch = useReleaseWatch(
+    project.projectId,
+    project.environmentId,
+    project.normalized && !project.archived,
+  )
 
   const blocks: [string, React.ReactNode][] = []
   if (deployment.activeRun)
@@ -138,6 +151,19 @@ export function ProjectOverview() {
       </ChoiceList>,
     ])
 
+  // A release just cut over to is on watch while the one it replaced is kept
+  // warm: the window's readings come before the production panel they are
+  // about, and the panel draws nothing at all when there is no window.
+  if (releaseWatch.shown && releaseWatch.watch)
+    blocks.push([
+      "release-watch",
+      <ReleaseWatch
+        key="release-watch"
+        projectId={project.projectId}
+        state={{ ...releaseWatch, watch: releaseWatch.watch }}
+        onChange={project.refresh}
+      />,
+    ])
   blocks.push([
     "production",
     <Panel key="production" plain>
@@ -319,7 +345,11 @@ export function ProjectOverview() {
   if (project.normalized)
     blocks.push([
       "delivery",
-      <Insights key="delivery" projectId={project.projectId}>
+      <Insights
+        key="delivery"
+        projectId={project.projectId}
+        environmentId={project.environmentQuery?.environment}
+      >
         {history}
       </Insights>,
     ])
@@ -499,10 +529,12 @@ function useCelebration(deployment: DeploymentSummary) {
       return
     }
     if (isActiveRun(last.state)) return
-    // A Stop that succeeds takes the release down, which is no celebration.
-    if (last.state === "succeeded" && last.operation !== "stop") confetti.current?.fire()
+    // A Stop that succeeds takes the release down, and a rollback the
+    // release watch made takes one back: neither is a celebration.
+    if (last.state === "succeeded" && last.operation !== "stop" && last.trigger !== "auto_rollback")
+      confetti.current?.fire()
     watched.current = undefined
-  }, [active, last?.id, last?.state, last?.operation])
+  }, [active, last?.id, last?.state, last?.operation, last?.trigger])
   return confetti
 }
 

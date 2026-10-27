@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { AUDIT_SECTIONS, actorName, auditSection, isMachine } from "./marks"
+import { AUDIT_SECTIONS, actorName, auditSection, isMachine, keyTitle, keyWords } from "./marks"
 
 test("every action is drawn as the part of the product it touched", () => {
   const cases = {
@@ -60,4 +60,13 @@ test("who acted is named by the account, else by what acted without one", () => 
   expect(actorName({ actor: "anonymous", username: "" })).toBe("anonymous")
   expect(isMachine({ actor: "reconciler" })).toBe(true)
   expect(isMachine({ actor: "token" })).toBe(false)
+})
+
+test("a row written by an API key names the key when the server recorded it", () => {
+  expect(keyWords({ actor: "token", keyId: 12, keyName: "ci-deploy" })).toBe("key ci-deploy")
+  expect(keyTitle({ keyId: 12 })).toBe("key #12")
+  // A row from before the key was recorded still says a key acted.
+  expect(keyWords({ actor: "token" })).toBe("API key")
+  expect(keyTitle({})).toBeUndefined()
+  expect(keyWords({ actor: "session", keyName: "ignored" })).toBeUndefined()
 })

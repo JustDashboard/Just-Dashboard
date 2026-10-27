@@ -161,6 +161,8 @@ type Entry = {
   status: number
   success: boolean
   detail: string
+  keyId?: number
+  keyName?: string
 }
 
 let id = 0
@@ -226,6 +228,8 @@ const trail = [
     actor: "token",
     username: "mira",
     userId: 2,
+    keyId: 12,
+    keyName: "ci-deploy",
     ip: "192.168.1.20",
     method: "PUT",
     action: "file.write",
@@ -440,8 +444,9 @@ test.describe("audit log", () => {
     ).toHaveCount(1)
     // A refusal says why in its code's word.
     await expect(row("auth.login").filter({ hasText: "401" })).toContainText("Unauthorized")
-    // An API key's change says so beside the person.
-    await expect(row("file.write")).toContainText("API key")
+    // An API key's change says so beside the person, naming the key.
+    await expect(row("file.write")).toContainText("key ci-deploy")
+    await expect(row("file.write").getByTitle("key #12")).toBeVisible()
   })
 
   test("a section chip narrows the trail to its actions", async ({ page }) => {

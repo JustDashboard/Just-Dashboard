@@ -3,7 +3,13 @@
 import { useMemo, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { useRouter } from "next/navigation"
-import { GitPullRequest, Globe, Pin, RotateCounterClockwise } from "@/components/icons"
+import {
+  ArrowCircleUp,
+  GitPullRequest,
+  Globe,
+  Pin,
+  RotateCounterClockwise,
+} from "@/components/icons"
 import { get, post, put } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { previewURL } from "@/lib/pull-requests"
@@ -58,6 +64,9 @@ import {
 import { Insights } from "@/components/deploy/insights"
 import { deployWithCurrentSettings, runPlanIsStale } from "@/components/deploy/failure-cause"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
+import { useReleaseWatch } from "@/components/deploy/release-watch"
+import { watchOpen } from "@/components/deploy/rollback-watch-model"
+import { PromoteDialog } from "@/components/deploy/promote-dialog"
 import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-sheet"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { RunRow } from "@/components/deploy/run-row"
@@ -191,6 +200,17 @@ export function ProjectDeployments() {
     undefined,
   )
   const [rollback, setRollback] = useState<{ open: boolean; releaseId?: number }>({ open: false })
+  // The release kept warm for an open window is marked on the row of the run
+  // that made it, so the list says which release Roll back instantly reaches.
+  const releaseWatch = useReleaseWatch(
+    project.projectId,
+    project.environmentId,
+    project.normalized && !project.archived,
+  )
+  const warmReleaseId = watchOpen(releaseWatch.watch)
+    ? releaseWatch.watch?.warmReleaseId
+    : undefined
+  const [promote, setPromote] = useState<{ open: boolean; releaseId?: number }>({ open: false })
   const [compare, setCompare] = useState<{
     open: boolean
     releaseId?: number
@@ -224,7 +244,7 @@ export function ProjectDeployments() {
 
   const environments = useMemo(() => {
     const labels = new Map<number, string>()
-    labels.set(project.environmentId, "Production")
+    labels.set(project.environmentId, project.environment === "staging" ? "Staging" : "Production")
     for (const preview of previews.data ?? []) {
       if (!labels.has(preview.environmentId)) {
         labels.set(preview.environmentId, `PR ${preview.providerRef}`)
@@ -235,7 +255,7 @@ export function ProjectDeployments() {
         labels.set(run.environmentId, `Environment ${run.environmentId}`)
     }
     return [...labels.entries()].map(([id, label]) => ({ id, label }))
-  }, [project.environmentId, previews.data, project.runs])
+  }, [project.environmentId, project.environment, previews.data, project.runs])
   // A pull request's preview came through the forge that holds the repository.
   const forge = gitProviderProduct(hostProduct(deployment.sourceRemote))
 
@@ -464,6 +484,10 @@ export function ProjectDeployments() {
             }),
           rollback: (release) => setRollback({ open: true, releaseId: release.id }),
           pin: (release) => void togglePin(run, release),
+          promote:
+            project.environment === "staging" && project.production && !project.archived
+              ? (release) => setPromote({ open: true, releaseId: release.id })
+              : undefined,
         },
       }),
     ]
@@ -488,6 +512,7 @@ export function ProjectDeployments() {
       {project.normalized && (
         <Insights
           projectId={project.projectId}
+          environmentId={project.environmentQuery?.environment}
           presentation="history"
           onFailureClick={() => {
             changeFilter("failed")
@@ -589,9 +614,15 @@ export function ProjectDeployments() {
                       <ChoiceList aria-label={group.label}>
                         {group.runs.map((run) => {
                           const release = releaseOf(run)
+                          // One row reads Live: the run whose outcome is live
+                          // now, as the overview's list says it. An instant
+                          // rollback and the deploy that first made its release
+                          // both name that release, and only the newer is live.
                           const isLive =
-                            Boolean(run.releaseId) &&
-                            run.releaseId === standingOf(run).liveReleaseId
+                            run.environmentId === project.environmentId
+                              ? run.id === project.liveRun?.id
+                              : Boolean(run.releaseId) &&
+                                run.releaseId === standingOf(run).liveReleaseId
                           const pending = pendingOf(run, release)
                           const preview =
                             run.environmentId !== project.environmentId &&
@@ -611,6 +642,19 @@ export function ProjectDeployments() {
                                     <TextShimmer className="text-hint">{pending.word}</TextShimmer>
                                   )}
                                   {release?.pinned && <Tag icon={Pin}>Pinned</Tag>}
+                                  {release?.rolledBackAt && (
+                                    <Tag tone="danger" title={release.rollbackReason}>
+                                      Rolled back
+                                    </Tag>
+                                  )}
+                                  {release && release.id === warmReleaseId && <Tag>Warm</Tag>}
+                                  {/* Provenance, fixed with the release: the
+                                      image was staging's, not built here. */}
+                                  {release?.promotion && (
+                                    <Tag icon={ArrowCircleUp}>
+                                      From staging #{release.promotion.releaseNumber}
+                                    </Tag>
+                                  )}
                                   {preview && <Tag>{preview}</Tag>}
                                 </>
                               }
@@ -669,6 +713,17 @@ export function ProjectDeployments() {
         remote={deployment.sourceRemote}
         initialReleaseId={rollback.releaseId}
       />
+      {project.staging && project.production && (
+        <PromoteDialog
+          open={promote.open}
+          onOpenChange={(open) => setPromote((current) => ({ ...current, open }))}
+          projectId={project.projectId}
+          productionId={project.production.id}
+          stagingId={project.staging.id}
+          remote={deployment.sourceRemote}
+          initialReleaseId={promote.releaseId}
+        />
+      )}
       <ReleaseComparisonSheet
         open={compare.open}
         onOpenChange={(open) => setCompare((current) => ({ ...current, open }))}

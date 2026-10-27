@@ -253,6 +253,30 @@ type SiteMaintenance struct {
 	// BypassFrom are the addresses that reach the site as usual while it is
 	// in maintenance.
 	BypassFrom []string `json:"bypassFrom"`
+	// Switch puts the check behind a file instead of On: maintenance is on
+	// while maintenance.on exists in the site's pages folder, which nginx
+	// looks for on every request. A deployment's route is written only when
+	// a release goes live, so this is what lets its maintenance be turned on
+	// and off at once, with no reload and no rewrite of the route.
+	Switch bool `json:"switch,omitempty"`
+}
+
+// maintenanceSwitchFile is the file whose presence turns a switched site's
+// maintenance on.
+const maintenanceSwitchFile = "maintenance.on"
+
+// pagesDir is where the site's pages are served from: the service's folder
+// for them, or the one a spec read without a service would have.
+func (spec *SiteSpec) pagesDir() string {
+	if spec.PagesDir != "" {
+		return spec.PagesDir
+	}
+	return "/etc/nginx/jd-pages/" + spec.Name
+}
+
+// maintenanceSwitchPath is the file a switched site's maintenance follows.
+func (spec *SiteSpec) maintenanceSwitchPath() string {
+	return spec.pagesDir() + "/" + maintenanceSwitchFile
 }
 
 // errorPageCodes are the codes a site may give a page of its own, in the

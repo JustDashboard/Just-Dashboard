@@ -82,8 +82,13 @@ type DomainObservation struct {
 	CertificateAvailable  bool     `json:"certificateAvailable"`
 	CertificateAutomation bool     `json:"certificateAutomation"`
 	CertificateName       string   `json:"certificateName,omitempty"`
-	Conflict              bool     `json:"conflict"`
-	Detail                string   `json:"detail,omitempty"`
+	// CertificateDNSProvider is, for a wildcard no certificate covers yet,
+	// whose saved credentials the release would prove it with, and
+	// CertificateRefusal why it cannot be proved here at all.
+	CertificateDNSProvider string `json:"certificateDnsProvider,omitempty"`
+	CertificateRefusal     string `json:"certificateRefusal,omitempty"`
+	Conflict               bool   `json:"conflict"`
+	Detail                 string `json:"detail,omitempty"`
 }
 
 type FirewallObservation struct {
@@ -178,6 +183,12 @@ type PlanningProxy interface {
 	ListVHosts(context.Context) ([]proxysvc.VHost, error)
 }
 
+// wildcardIssuer is the optional half of PlanningProxy that says how a run
+// would prove a wildcard, without ordering anything.
+type wildcardIssuer interface {
+	DeploymentDNSProvider(context.Context, string) (proxysvc.DNSProvider, error)
+}
+
 func (o *HostPreflightObserver) WithFirewall(firewall PlanningFirewall) *HostPreflightObserver {
 	o.firewall = firewall
 	return o
@@ -245,6 +256,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	if len(request.Domains) > 0 {
 		proxyAvailable := false
 		certificateAutomation := false
+		caddyIngress := false
 		claimedDomains := map[string]bool{}
 		certificates := []proxysvc.Certificate{}
 		if o.proxy != nil {
@@ -254,6 +266,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 			// the domain as one already running does.
 			proxyAvailable = availability.Nginx || availability.Caddy || availability.IngressState != ""
 			certificateAutomation = availability.Certbot || availability.IngressState != ""
+			caddyIngress = availability.IngressState != ""
 			vhosts, err := o.proxy.ListVHosts(proxyCtx)
 			cancel()
 			if err == nil {
@@ -306,6 +319,21 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 						domain.CertificateAvailable, domain.CertificateName = true, certificate.Name
 						break
 					}
+				}
+				// A wildcard is asked about what the release would ask:
+				// whose saved DNS credentials prove it, or why nothing can.
+				// The Docker Caddy ingress cannot serve one even when a
+				// certificate covers it, so that host is asked either way.
+				if issuer, ok := o.proxy.(wildcardIssuer); ok && planned.HTTPS &&
+					strings.HasPrefix(strings.ToLower(planned.Hostname), "*.") &&
+					(!domain.CertificateAvailable || caddyIngress) {
+					wildcardCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+					if provider, err := issuer.DeploymentDNSProvider(wildcardCtx, strings.ToLower(planned.Hostname)); err != nil {
+						domain.CertificateRefusal = err.Error()
+					} else {
+						domain.CertificateDNSProvider = provider.Name
+					}
+					cancel()
 				}
 				if check.Error != "" {
 					domain.Detail = "DNS lookup did not return usable evidence"
@@ -835,7 +863,23 @@ func preflightFindings(
 				"The public route and HTTP certificate challenge will not reach this server.",
 				"Update DNS or explicitly accept the delayed cutover.", "proxy", field))
 		}
-		if planned.HTTPS && !observed.CertificateAvailable && observed.CertificateAutomation {
+		if planned.HTTPS && observed.CertificateRefusal != "" {
+			item := finding("certificate_wildcard_unavailable", PreflightBlocked,
+				"Wildcard certificate cannot be issued here", planned.Hostname,
+				"A wildcard is proved only over a DNS challenge, and this host has nothing that can answer one for this name.",
+				observed.CertificateRefusal, "certificates", field)
+			item.DeepLink = "/proxy/certificates"
+			findings = append(findings, item)
+		} else if planned.HTTPS && !observed.CertificateAvailable && observed.CertificateDNSProvider != "" {
+			item := finding("certificate_automatic", PreflightPass,
+				"HTTPS certificate will be issued during the release",
+				planned.Hostname+"; DNS challenge through "+observed.CertificateDNSProvider,
+				"No certificate covers this wildcard yet; the release proves it over a DNS challenge with the "+
+					observed.CertificateDNSProvider+" credentials saved under Certificates before it starts the candidate, and certbot renews it with them.",
+				"", "certificates", field)
+			item.DeepLink = "/proxy/certificates"
+			findings = append(findings, item)
+		} else if planned.HTTPS && !observed.CertificateAvailable && observed.CertificateAutomation {
 			// Not a blocker any more, because the release itself closes it:
 			// `provision_certificate` orders one over HTTP-01 before the
 			// candidate starts. What is measured here is the capability — a

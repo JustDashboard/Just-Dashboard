@@ -1,6 +1,6 @@
 "use client"
 
-import { useId } from "react"
+import { useId, useState } from "react"
 import { Archive, Bell, Clock, Gauge, Heart, Rocket, Slash, Terminal } from "@/components/icons"
 import {
   NEVER_SENT,
@@ -8,6 +8,7 @@ import {
   sharedGroups,
   sharedItems,
   type SharedGroup,
+  type SharedRecord,
 } from "@/lib/account-link"
 import { relativeTime, timestamp } from "@/lib/format"
 import type { AccountLinkScope } from "@/lib/types"
@@ -15,6 +16,7 @@ import { MarkTile, type Mark } from "@/components/account-link/marks"
 import { Reading, ReadingList } from "@/components/account-link/reading"
 import { Section } from "@/components/page"
 import { platformProduct } from "@/components/product-logo"
+import { Button } from "@/components/ui/button"
 
 const ITEM_MARK: Record<string, Mark> = {
   version: { brand: true },
@@ -106,7 +108,9 @@ export function SharedFields({
         )
       }
     >
-      <div className="grid min-w-0 gap-x-12 gap-y-10 lg:grid-cols-2 2xl:grid-cols-3">
+      {/* Columns rather than a grid: the groups run from three rows to a dozen, and a grid row
+          is as tall as its tallest, which left a screen of nothing beside the short ones. */}
+      <div className="min-w-0 gap-x-12 md:columns-2 xl:columns-3">
         {groups.map((group) => (
           <Group key={group.key} group={group} mark={groupMark(group.key, snapshot)} />
         ))}
@@ -120,7 +124,7 @@ export function SharedFields({
 function Withheld() {
   const heading = useId()
   return (
-    <div className="mt-4 min-w-0 space-y-3">
+    <div className="min-w-0 space-y-3 border-t border-hairline pt-5">
       <p id={heading} className="eyebrow">
         Never sent
       </p>
@@ -142,8 +146,8 @@ function Withheld() {
 function Group({ group, mark }: { group: SharedGroup; mark: Mark }) {
   const heading = useId()
   return (
-    <section aria-labelledby={heading} className="min-w-0 content-start">
-      <div className="flex min-w-0 items-center gap-3 border-b border-hairline pb-3">
+    <section aria-labelledby={heading} className="mb-8 min-w-0 break-inside-avoid">
+      <div className="flex min-w-0 items-center gap-2.5 border-b border-hairline pb-2.5">
         <MarkTile mark={mark} />
         <h3 id={heading} className="truncate text-body font-semibold">
           {group.label}
@@ -151,20 +155,57 @@ function Group({ group, mark }: { group: SharedGroup; mark: Mark }) {
       </div>
       <ReadingList>
         {group.rows.map((row, i) => (
-          <Reading key={`${row.label}-${i}`} label={row.label} mono>
+          <Reading
+            key={`${row.label}-${i}`}
+            label={row.label}
+            after={row.records && <Records records={row.records} />}
+          >
             {row.time ? timestamp(row.time) : row.value}
-            {row.items && (
-              <ul className="mt-1 space-y-0.5 font-sans text-hint text-muted-foreground">
-                {row.items.map((item, n) => (
-                  <li key={n} className="break-words">
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            )}
           </Reading>
         ))}
       </ReadingList>
     </section>
+  )
+}
+
+/** How many records a list shows before "Show all": a group stays about as tall as its peers. */
+const LISTED = 5
+
+/**
+ * A list the heartbeat carried, one record to a line led by its name. The rest of the line
+ * truncates rather than wraps — an image digest had made every container three lines — and the
+ * whole record is the line's title, so nothing that was sent is out of reach.
+ */
+function Records({ records }: { records: SharedRecord[] }) {
+  const [all, setAll] = useState(false)
+  const shown = all ? records : records.slice(0, LISTED)
+  return (
+    <div className="pt-1.5 pb-0.5">
+      <ul className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+        {shown.map((record, n) => (
+          <li
+            key={n}
+            title={[record.title, record.detail].filter(Boolean).join(" · ")}
+            className="col-span-2 grid grid-cols-subgrid items-baseline"
+          >
+            <span className="max-w-44 truncate">{record.title}</span>
+            <span className="min-w-0 truncate text-hint text-muted-foreground">
+              {record.detail}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {records.length > LISTED && (
+        <Button
+          size="xs"
+          variant="ghost"
+          className="mt-1 -ml-2 text-muted-foreground"
+          aria-expanded={all}
+          onClick={() => setAll(!all)}
+        >
+          {all ? "Show fewer" : `Show all ${records.length}`}
+        </Button>
+      )}
+    </div>
   )
 }

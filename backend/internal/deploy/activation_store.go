@@ -158,7 +158,7 @@ func (s *OrchestrationStore) SetRuntimeState(
 	state string,
 ) error {
 	if state != "candidate" && state != "ready" && state != "live" && state != "draining" &&
-		state != "stopped" && state != "retired" && state != "failed" {
+		state != "stopped" && state != "retired" && state != "failed" && state != "warm" {
 		return fmt.Errorf("invalid release runtime state %q", state)
 	}
 	s.writeMu.Lock()

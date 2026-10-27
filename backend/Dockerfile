@@ -28,6 +28,12 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/just-da
 # reason as above, and small so each session pins megabytes rather than the
 # whole dashboard. See internal/ptyhold.
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/jd-terminal-holder ./cmd/terminal-holder
+# The jd command line, for the server's own shell and for other machines.
+# install.sh and `manage.sh install-cli` copy it to /usr/local/bin/jd, the
+# dashboard keeps that copy current at boot (internal/clihost), and
+# GET /api/v1/cli/jd hands it to anyone signed in. Standard library only, so
+# it adds a few seconds and a few megabytes.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/version/version.go)" -o /out/jd ./cmd/jd
 
 # rclone, for backup jobs whose destination is one of the storage services it
 # speaks. Debian packages a release from 2022; this is the project's own
@@ -184,6 +190,7 @@ RUN set -eu; \
 
 COPY --from=build /out/just-dashboard /usr/local/bin/just-dashboard
 COPY --from=build /out/jd-terminal-holder /usr/local/bin/jd-terminal-holder
+COPY --from=build /out/jd /usr/local/bin/jd
 COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 
 # Runs as root deliberately: managing systemd units, the firewall, host

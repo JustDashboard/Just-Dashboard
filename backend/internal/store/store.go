@@ -22,7 +22,7 @@ type Store struct {
 // whether a pre-rename data directory should be adopted.
 const DatabaseFile = "vpsd.db"
 
-const schema = runDiagnosisSchema + rehearsalSchema + serverMapSchema + sharedVariableSchema + accountLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
+const schema = runDiagnosisSchema + rehearsalSchema + rollbackWatchSchema + serverMapSchema + sharedVariableSchema + secretStoreSchema + passkeySchema + accountLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -78,7 +78,9 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   role         TEXT NOT NULL,
   -- '' opens every route the key's role allows; a capability such as
   -- 'metrics.read' opens only the routes that name it; 'mcp' opens the MCP
-  -- endpoint and reaches only the databases api_token_connections grants it.
+  -- endpoint and reaches only the databases api_token_connections grants it;
+  -- 'deploy' opens the deployment routes its table lists, and only the
+  -- deployments api_token_deployments names when it names any.
   scope        TEXT NOT NULL DEFAULT '',
   -- What an MCP key may do with the deployments: '' nothing, 'read' read
   -- them and their runs, 'deploy' also queue deploys and rollbacks.
@@ -103,7 +105,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
   path      TEXT NOT NULL DEFAULT '',
   status    INTEGER NOT NULL DEFAULT 0,
   success   INTEGER NOT NULL DEFAULT 1,
-  detail    TEXT NOT NULL DEFAULT ''
+  detail    TEXT NOT NULL DEFAULT '',
+  -- The API key behind the request, when one was: which of an account's keys
+  -- acted is the question a leaked key raises, and the account alone cannot
+  -- answer it. The name is copied, so a key deleted later still reads.
+  key_id    INTEGER NOT NULL DEFAULT 0,
+  key_name  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
@@ -132,6 +139,18 @@ CREATE TABLE IF NOT EXISTS api_token_connections (
   PRIMARY KEY (token_id, connection_id)
 );
 CREATE INDEX IF NOT EXISTS idx_api_token_connections_conn ON api_token_connections(connection_id);
+
+-- The deployments a deploy key reaches. None is every deployment: a key for
+-- one pipeline names its own, a key for an operator's laptop names none. The
+-- project is deliberately not a foreign key: a deployment deleted for good
+-- leaves its row behind, so a key that reached only it goes on reaching
+-- nothing, where a cascade would have emptied the list into "everything".
+CREATE TABLE IF NOT EXISTS api_token_deployments (
+  token_id   INTEGER NOT NULL REFERENCES api_tokens(id) ON DELETE CASCADE,
+  project_id INTEGER NOT NULL,
+  PRIMARY KEY (token_id, project_id)
+);
+CREATE INDEX IF NOT EXISTS idx_api_token_deployments_project ON api_token_deployments(project_id);
 
 -- Databases brought over from another server. A replication import outlives the
 -- request that started it by hours, so it is a row: the target keeps the
@@ -769,6 +788,8 @@ CREATE TABLE IF NOT EXISTS deploy_releases (
   activated_at           INTEGER NOT NULL DEFAULT 0,
   retired_at             INTEGER NOT NULL DEFAULT 0,
   pinned                 INTEGER NOT NULL DEFAULT 0,
+  rolled_back_at         INTEGER NOT NULL DEFAULT 0,
+  rollback_reason        TEXT NOT NULL DEFAULT '',
   UNIQUE(environment_id, release_number)
 );
 CREATE INDEX IF NOT EXISTS idx_deploy_release_environment
@@ -1074,7 +1095,10 @@ CREATE TABLE IF NOT EXISTS deploy_git_policies (
   exclude_json    TEXT NOT NULL DEFAULT '[]',
   commit_statuses INTEGER NOT NULL DEFAULT 1,
   revision        INTEGER NOT NULL DEFAULT 1,
-  updated_at      INTEGER NOT NULL DEFAULT 0
+  updated_at      INTEGER NOT NULL DEFAULT 0,
+  -- Production can refuse every build and take only staging's promotions;
+  -- shipped without it through addedColumns.
+  promotion_only  INTEGER NOT NULL DEFAULT 0
 );
 
 -- The last thing written back to the Git host for an environment: one row
@@ -1695,6 +1719,9 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Commit statuses default on: an environment that already deploys from
 	// GitHub gains them without an edit, and the policy editor can turn them off.
 	{"deploy_git_policies", "commit_statuses", "INTEGER NOT NULL DEFAULT 1"},
+	// Production may take only promotions from staging. Every policy saved
+	// before builds as it always did.
+	{"deploy_git_policies", "promotion_only", "INTEGER NOT NULL DEFAULT 0"},
 	// 0.6.7 keeps the shipped project/run rows as stable compatibility
 	// identities while normalized environments, releases, steps and events
 	// grow beside them. Every legacy row receives a usable zero/default before
@@ -1837,6 +1864,15 @@ var addedColumns = []struct{ table, column, spec string }{
 	// An MCP key can be given the deployments as well as databases. Every
 	// key made before reaches none of them.
 	{"api_tokens", "deploy_access", "TEXT NOT NULL DEFAULT ''"},
+	// A release taken back by an instant rollback says when and why: the
+	// reading that decided it, or the operator who pressed it. Every release
+	// made before was never rolled back this way.
+	{"deploy_releases", "rolled_back_at", "INTEGER NOT NULL DEFAULT 0"},
+	{"deploy_releases", "rollback_reason", "TEXT NOT NULL DEFAULT ''"},
+	// The audit trail names the API key behind a request. Rows written
+	// before it name only the account, as they always did.
+	{"audit_log", "key_id", "INTEGER NOT NULL DEFAULT 0"},
+	{"audit_log", "key_name", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on

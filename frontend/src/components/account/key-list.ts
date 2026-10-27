@@ -12,10 +12,21 @@ export function inKeyFilter(token: ApiToken, filter: KeyFilter, now: number) {
   return inKeyScope(token, filter, now)
 }
 
-/** Search the facts the operator can see, including an administrator's owner names. */
+/**
+ * Search the facts the operator can see, including an administrator's owner
+ * names. A key limited to one job is found by the job as well — "deploy",
+ * "mcp" — since the row names the job where it would name the role.
+ */
 export function matchesKey(token: ApiToken, query: string, owner?: DashboardUser) {
   const words = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
-  const facts = [token.name, token.prefix, token.role, owner?.username, owner?.displayName]
+  const facts = [
+    token.name,
+    token.prefix,
+    token.role,
+    token.scope,
+    owner?.username,
+    owner?.displayName,
+  ]
     .join(" ")
     .toLocaleLowerCase()
   return words.every((word) => facts.includes(word))

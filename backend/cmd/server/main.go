@@ -27,6 +27,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/api"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/clihost"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
@@ -319,6 +320,7 @@ func run(agentFlag, agentReset bool) error {
 		return fmt.Errorf("start background workers: %w", err)
 	}
 	go janitor(ctx, svc, log)
+	refreshHostCLI(log)
 
 	if cfg.AgentMode {
 		tlsCfg, err := agentTLS(identity)
@@ -498,4 +500,22 @@ func agentTLS(id *agent.Identity) (*tls.Config, error) {
 		MinVersion:   tls.VersionTLS12,
 		ClientAuth:   tls.RequestClientCert,
 	}, nil
+}
+
+// refreshHostCLI brings the server's /usr/local/bin/jd up to the jd built
+// beside this binary, when the one there is an older jd (internal/clihost).
+// The server's root is mounted at /host in the backend's container; anywhere
+// else there is nothing there and nothing happens.
+func refreshHostCLI(log *slog.Logger) {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	replaced, err := clihost.Refresh("/host", filepath.Join(filepath.Dir(exe), "jd"))
+	switch {
+	case err != nil:
+		log.Warn("could not update the server's jd", "path", clihost.Path, "err", err)
+	case replaced:
+		log.Info("updated the server's jd to this build", "path", clihost.Path)
+	}
 }

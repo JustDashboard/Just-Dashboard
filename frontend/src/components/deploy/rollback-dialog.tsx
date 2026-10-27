@@ -248,7 +248,8 @@ export function RollbackDialog({
 
             <Notice tone="warning" title="Databases and files are not rolled back">
               The application image, its variables and its configuration move back. Anything a
-              database or a persistent volume holds stays exactly as it is now.
+              database or a persistent volume holds stays exactly as it is now, and so does a value
+              read from a shared variable or a secret store, unless the reference pins a version.
             </Notice>
           </div>
         )

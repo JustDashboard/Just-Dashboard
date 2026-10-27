@@ -22,12 +22,12 @@ type Session struct {
 	Current     bool      `json:"current"`
 }
 
-func (s *Service) newSession(ctx context.Context, userID int64, ip, ua string, twofaPassed bool) (*Session, string, error) {
+func (s *Service) newSession(ctx context.Context, userID int64, ip, ua string, twofaPassed bool, method string) (*Session, string, error) {
 	token := RandomToken(32)
 	now := time.Now()
 	sess := &Session{
 		ID:          RandomToken(12),
-		AuthMethod:  "password",
+		AuthMethod:  method,
 		UserID:      userID,
 		TwoFAPassed: twofaPassed,
 		IP:          ip,

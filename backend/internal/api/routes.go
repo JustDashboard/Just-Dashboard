@@ -20,6 +20,9 @@ import (
 // cannot use, but the server re-decides every request on its own.
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
+	// The deploy key gate asks this router which route a request will reach,
+	// so it is the whole tree, read at request time once it is built.
+	root := r
 	r.Use(middleware.RequestID)
 	r.Use(httpx.RealIP(s.Cfg.TrustedProxies))
 	r.Use(httpx.Recoverer(s.Log))
@@ -71,7 +74,11 @@ func (s *Server) Routes() http.Handler {
 				r.Use(httpx.AuditMutations(s.Audit))
 				r.Use(httpx.RequireCSRF)
 				r.Method(http.MethodPost, "/auth/login", s.handle(s.handleLogin))
+				// A passkey's sign-in is a sign-in: the same budget per
+				// address, the same audit, the same session at the end.
+				s.mountPasskeySignInFinish(r)
 			})
+			s.mountPasskeySignIn(r)
 
 			// Half-authenticated: password proved, second factor outstanding.
 			r.Group(func(r chi.Router) {
@@ -102,7 +109,9 @@ func (s *Server) Routes() http.Handler {
 			if s.Cfg.AgentMode {
 				r.Use(httpx.HubOnly(s.Agent))
 			} else {
-				r.Use(s.Authn.Authenticate)
+				// The one group a deploy key can enter, and only for the
+				// routes deployKeyRoutes lists (deploy_keys.go).
+				r.Use(s.Authn.AuthenticateFeatures(s.deployKeyGate(root), s.Audit))
 			}
 			r.Use(s.apiLim.ByPrincipal)
 			r.Use(httpx.AuditMutations(s.Audit))
@@ -129,6 +138,7 @@ func (s *Server) Routes() http.Handler {
 			s.mountJobRoutes(r)
 			s.mountRemoteDesktopRoutes(r)
 			s.mountMapRoutes(r)
+			s.mountCLIRoutes(r)
 		})
 
 		if !s.Cfg.AgentMode {
@@ -172,6 +182,9 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/sessions", s.handle(s.handleListOwnSessions))
 		r.Method(http.MethodDelete, "/sessions/{id}", s.handle(s.handleRevokeOwnSession))
 		r.Method(http.MethodPost, "/sessions/revoke-others", s.handle(s.handleRevokeOtherSessions))
+		// Passkeys are the account holder's own, from a complete session;
+		// registering one asks for the password (and code) again.
+		s.mountAccountPasskeys(r)
 		r.Method(http.MethodPatch, "/profile", s.handle(s.handleUpdateProfile))
 		r.Method(http.MethodPut, "/workspace", s.handle(s.handleSetWorkspace))
 		r.Method(http.MethodGet, "/avatar", s.handle(s.handleOwnAvatar))
@@ -187,6 +200,10 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 			// A key for an AI client, and the databases it reaches
 			// (handlers_mcp_keys.go).
 			r.Method(http.MethodPost, "/mcp", s.handle(s.handleCreateMCPToken))
+			// A key for the jd command line and CI (deploy_keys.go): it holds
+			// the administrator role, so only an administrator makes one.
+			r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
+				Method(http.MethodPost, "/deploy", s.handle(s.handleCreateDeployToken))
 			r.Method(http.MethodPut, "/{id}/connections", s.handle(s.handleSetMCPTokenConnections))
 			r.Method(http.MethodDelete, "/{id}", s.handle(s.handleRevokeToken))
 			r.Group(func(r chi.Router) {

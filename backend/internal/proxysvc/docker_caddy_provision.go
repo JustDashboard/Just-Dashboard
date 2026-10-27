@@ -23,7 +23,7 @@ const managedIngressConfig = "{\n  admin 127.0.0.1:2019\n}\n"
 // Planning observes sockets and Docker mappings without binding or provisioning.
 // A competing bind between this check and run is still rejected by Docker.
 func (s *Service) canProvisionIngress(ctx context.Context) bool {
-	if !s.dockerIngress || !hostexec.Available("docker") {
+	if !s.dockerIngress || s.ingressContainer != "" || !hostexec.Available("docker") {
 		return false
 	}
 	listeners, err := ListListeners(ctx)

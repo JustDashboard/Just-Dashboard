@@ -41,11 +41,11 @@ only renderer/executor/validation authority for their feature.
   admin-authored stored release task (including migrated pre/post commands) with a resolved working
   directory and explicit scoped environment; a task with `runner: "image"` runs that command inside a
   throwaway container of the release's own image rather than in the dashboard's shell.
-- Creation is a revisioned, owner-scoped server draft. `GET /deploy/drafts` (session) lists the caller's
+- Creation is a revisioned, owner-scoped server draft. `GET /deploy/drafts` (session, or a deploy key reaching every deployment) lists the caller's
   own uncommitted, unexpired drafts newest first — id, name from intent, a one-line source summary,
   `currentStep`, `updatedAt`, `expiresAt` — so the new-project page can offer to resume one instead of
   starting a new setup over; a committed or expired draft has nothing left to resume and is excluded.
-  `DELETE /deploy/drafts/{draft}` (session, audited `deploy.draft.discard`) throws one away: every
+  `DELETE /deploy/drafts/{draft}` (session or deploy key, audited `deploy.draft.discard`) throws one away: every
   press of Import creates a draft, so an abandoned attempt would otherwise sit in that list for its
   whole thirty-day life and three tries at one repository would read as three pieces of unfinished
   work. Only the owner's own uncommitted setup can go — a committed draft is the record a project was
@@ -222,8 +222,13 @@ only renderer/executor/validation authority for their feature.
   deterministic hostname is already a managed domain of another active project, the HMAC input gains a
   `#2`, `#3`, … counter and is recomputed until a free one is found. `covered` is whether a certificate
   already covers the name — the only thing activation accepts — and `certificateMethod` is the HTTP-01
-  challenge this host could issue one with. Both are reported so the screen can say what the run will do,
-  not so the operator has to do it. Asked about a hostname the operator typed (`?hostname=`), it also
+  challenge this host could issue one with. For a typed wildcard (`?hostname=*.example.com`) asked by
+  `system.admin` it is `dns-01` with `certificateDnsProvider`, the provider whose saved credentials the
+  run would prove it with, or empty with the run's own refusal in `certificateIssue` — one decision,
+  `proxysvc.DeploymentDNSProvider`, answers both. Other roles get a sentence saying a DNS challenge
+  proves it, because the answer looks up the zone's nameservers for a name the caller chose, which
+  stays with administrators for the reason `resolves` does. Both are reported so the screen can say what the run
+  will do, not so the operator has to do it. Asked about a hostname the operator typed (`?hostname=`), it also
   answers `address`, this server's public IPv4, which is the A record the name needs, and — for
   `system.admin` only — `resolves`, whether the name already points here, taken from the reverse
   proxy's own DNS check so the Domains sheet and the proxy page never disagree about one name. It is
@@ -243,14 +248,47 @@ only renderer/executor/validation authority for their feature.
   without certbot is `unavailable` (`certificate_unavailable`), which is terminal but is not a failure of
   the deployment's own work; a refused order is `failed` (`certificate_issue_failed`). Redeploy and
   rollback carry the step; restart and preview-remove do not, because neither applies a route.
-  Issuance is HTTP-01 only and never a wildcard — Let's Encrypt will not sign one that way — is bounded
-  at five minutes, is serialized against route application so two runs cannot race one account into a
-  rate limit, and passes `--keep-until-expiring` so a redeploy inside the renewal window asks the
-  authority for nothing. A first order on a host with no ACME account registers without a contact
-  address; an operator who wants expiry mail registers once on the Certificates page and every later
-  order reuses that account. certbot's exit code is not the evidence: the certificate is read back and
-  must cover the exact names before the step passes. Step evidence carries the lineage name, method and
-  outcome, never a key path or key material.
+  Reuse comes first, and covers wildcards both ways: a name under an existing wildcard (a preview's
+  `pr-7.preview.example.com` under `*.preview.example.com`) and a wildcard plan name an existing
+  certificate lists both ask the authority for nothing. Otherwise a plain name is ordered over HTTP-01,
+  and a plan with a wildcard among its names is ordered whole over DNS-01
+  (`proxysvc/deployment_certificate_dns.go`): only DNS proves a wildcard, and activation serves one
+  certificate for every name. The DNS challenge uses credentials the Certificates page already saved;
+  the run never asks for one and never reads one — certbot is handed the 0600 file's path, as the page
+  hands it. Credentials are kept per provider, not per zone, so the provider is the one the zone's
+  nameservers name (`*.ns.cloudflare.com` is Cloudflare, `ns-N.awsdns-N.*` Route 53, and so on through
+  the closed set; RFC 2136 servers are the operator's own and name nobody), failing that the single
+  provider with saved credentials and a plugin in the certbot that runs. No saved credentials, a zone
+  hosted by a provider that has none, its plugin missing, or two candidates the nameservers cannot tell
+  apart is `unavailable` (`certificate_wildcard_unavailable`) before certbot is asked: a wrong guess is a
+  failed validation the authority counts. The message names what to save and where — `Proxy →
+  Certificates → DNS challenge providers (/proxy/certificates)` — so it reads the same in a notification
+  or a commit status. The order runs through the Certificates page's certbot (`CertbotCommand`, the
+  host's when it has one, with the Route 53 environment), from the configured authority
+  (`JD_ACME_DIRECTORY`'s `--server`), bounded at five minutes plus the provider's propagation wait. The
+  lineage it leaves records the plugin and the credentials file in its renewal configuration, so
+  certbot's own schedule renews it like any lineage the page issued, and the page lists it with the
+  same renewal checks (a plugin that later goes missing is a `willFail`). A host whose deployments the
+  Docker Caddy ingress serves refuses a wildcard plan name outright, covered or not, since Caddy cannot
+  serve that route — see the [ingress decision](caddy-ingress.md). Every order a run places — issued,
+  or refused by the authority — is audited as `certificates.deployment.issue` (actor `system`; the
+  names, method, DNS provider and lineage, never a credential); a reuse or a refusal before ordering
+  changes nothing and is not. Preflight asks the same question for an uncovered wildcard (and for any
+  wildcard on the Caddy ingress): `certificate_automatic` naming the provider, or
+  `certificate_wildcard_unavailable`, blocked with the refusal and a deep link to `/proxy/certificates`.
+  HTTP-01 issuance is bounded at five minutes. Both are serialized against route application so two
+  runs cannot race one account into a rate limit, and pass `--keep-until-expiring` so a redeploy inside
+  the renewal window asks the authority for nothing. A first order on a host with no ACME account
+  registers without a contact address; an operator who wants expiry mail registers once on the
+  Certificates page and every later order reuses that account. certbot's exit code is not the evidence:
+  the certificate is read back and must cover the exact names before the step passes. Step evidence
+  carries the lineage name, method, outcome and, over DNS, the provider's name — never a key path, key
+  material or a credential. `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run
+  TestLiveCertificateStepProvesAWildcardOverDNS01` and `./internal/proxysvc -run
+  TestLiveDeploymentWildcardIsProvedOverDNS01AndServed` prove it against Pebble validating real DNS-01
+  records in a BIND (`proxysvc/acmetest`): refused without credentials, issued with them, reused by a
+  preview, renewed by `certbot renew` from the lineage's own configuration, and served by nginx on the
+  wildcard's route and the preview's, chaining to that Pebble's root.
   Before a new HTTP-01 order, a bounded DNS lookup rejects unresolved names and non-public destinations
   with a corrective message, including old saved sslip.io names based on a Tailscale address. Existing
   certificates are reused before this check, so private services can still use a certificate provisioned
@@ -723,8 +761,9 @@ only renderer/executor/validation authority for their feature.
   Build settings carries the terms under the release tasks (`settings/rehearsal.tsx`), and the run
   page reads the report as figures (`run-rehearsal.tsx`).
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
-  retain-until windows, recent failed diagnostics, shared physical digests, and every environment under
-  an active deployment lease. Cleanup reports the reason for every retained row and removes a mutable
+  retain-until windows, recent failed diagnostics, shared physical digests, every environment under
+  an active deployment lease, and a staging release an unfinished promotion is about to take its image
+  from ([staging and promotion](staging-promotion.md)). Cleanup reports the reason for every retained row and removes a mutable
   Docker tag only after inspection proves it still names the recorded config/digest. A run that fails
   after `render_runtime` moves its candidate release to `failed` the moment the run itself reaches
   `failed`, `failed_activation`, `rolled_back` or `cancelled` — `TransitionRun` does it in the same
@@ -737,7 +776,11 @@ only renderer/executor/validation authority for their feature.
   never`. The release's container identity and readiness target is the primary service — the one the
   operator chose (`build.primaryService`), else the analysis's, which builds or publishes a port and is
   never a database — and a snapshot recorded before there was one keeps its first service. Compose interpolation receives only the frozen runtime scope through a temporary `0600` env
-  file which is deleted on every exit path.
+  file which is deleted on every exit path. A Compose release keeps no single image of its own: its
+  row records the first of its services' image artifacts, so decoding the snapshot requires that
+  digest to be one of the snapshot's services (`snapshotNamesReleaseImage`), where a container release
+  still has to name exactly its image — compared with the empty single image, every Compose release
+  had been refused at its first activation step.
 - Archived projects keep their original display name in additive `archived_name` storage while the
   unique database name becomes an internal tombstone. Archiving and upgrading previously archived
   projects release the live name without deleting history or resources. New projects from the same
@@ -828,6 +871,12 @@ only renderer/executor/validation authority for their feature.
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime
   variable values. Disabled, unavailable, warning, passed and failed remain distinct outcomes.
+  The closed kind list also names `dns`, `tls`, `backup_freshness` and `game_handshake`, which no runner
+  executes. Saving one (Settings or a draft's configuration) is refused with the reason and what to use
+  instead (`refuseUnrunnableChecks`): a `public_route` check on the https address, a storage
+  dependency's backup requirement, or the game-server integration. `Validate` still accepts them, so a
+  plan stored with one keeps deploying; its check reports `check_owner_unavailable`, a warning unless
+  it is required.
   An HTTP check against the candidate introduces itself as the proxy does when the release has a
   domain — `Host`/`X-Forwarded-Host` the first domain that is not a wildcard, `X-Forwarded-Proto` its
   scheme, `X-Forwarded-For 127.0.0.1`, a browser's `Accept` — while connecting only to the candidate.
@@ -863,6 +912,67 @@ only renderer/executor/validation authority for their feature.
   stop-first failure restarts the predecessor from its exact immutable runtime spec. Cancellation between
   persisted steps removes an uncommitted candidate, or finishes predecessor retirement after a committed
   cutover, and records sequenced cleanup evidence.
+- Metric-gated rollback keeps the release a blue/green cutover replaced **warm** instead of removing
+  it (`deploy/rollback_watch.go`, `rollback_executor.go`, `rollback_watcher.go`). `retire_previous`
+  drains it as before, then — when the environment's terms allow, the environment is not a preview,
+  both releases are single containers and the host still has `max(256 MB, a tenth of its memory)`
+  available — records a window (`deploy_rollback_watches`, state `watching`) and the predecessor's
+  runtime `warm` in one leased transaction and only then `docker pause`s it. Paused rather than running:
+  the old release must not keep running schedulers, consumers or writes against a schema the new release
+  may have migrated, and a frozen process costs memory and nothing else; Docker counts it as not
+  running, so "exactly one release running" still holds. The step's evidence says `warm.kept` with the
+  window, or why not (`warm.reason`). A unique partial index allows one open window per environment, so
+  at most one release is ever warm. Terms are per environment (`deploy_rollback_policies`; no row is
+  `DefaultRollbackPolicy`: kept warm 10 minutes, automatic, 5 points over the old 5xx share or 2× its
+  p95 and at least 250 ms slower, over at least 20 requests) and are copied into the window when it
+  opens, so an edit applies from the next cutover. **On by default**: blue/green already runs both
+  containers at once for every cutover, so the peak memory is unchanged and only its duration grows,
+  the floor gives the memory back on a tight host (also re-checked on every pass of the window), and a
+  new run ends the window before it builds.
+  The watcher (`RollbackWatcher`, started after the engine, every 10 s) reads each open window: it
+  re-pauses a warm container a Docker restart brought back running, closes the window as `warm_lost`
+  when the container is gone and as `memory` below the floor, takes the warm release's baseline once
+  from the request record (its own traffic over the 30 minutes before the cutover, or since it went
+  live if later) and the watched release's reading since the cutover, and judges them with
+  `JudgeRollback`: nothing is decided over fewer than `minRequests` requests or fewer than five 5xx
+  answers; a baseline under `minRequests` is not trusted (the 5xx rule judges against a clean share, the
+  p95 rule does not judge); a record without durations (host nginx) never judges p95; a release with no
+  domain is never judged (`no_route`) — it is still kept warm for the button. A tripped verdict asks
+  for an instant rollback through the API's own enqueue (`enqueueAutomaticRollback`, trigger
+  `auto_rollback`, idempotency key `rollback-watch-<id>-<attempt>`, at most two automatic attempts per
+  window) and audits `deploy.release.auto_rollback` as `system`. A window that passes clean is closed
+  (`window_passed`): the warm container is resumed so it receives its stop signal, stopped and removed,
+  its runtime `retired` and its release `retired_at` — exactly the retirement it would have had — and
+  `deploy.release.warm_retired` is audited. Closing is a compare-and-set `watching → closing`, the same
+  row an instant rollback claims `watching → rolling_back`, so exactly one of them wins; a `closing`
+  window whose container could not be removed yet is retried on every pass.
+- An **instant rollback** is a `rollback` run with `{"instant":true,"watchId":…}` in its metadata and
+  six steps (`InstantRollbackSteps`): `start_candidate` claims the window under the run's lease and
+  resumes the warm container (the same container id, never recreated), `verify_readiness` runs the
+  warm release's own readiness checks against it, `activate` applies the warm release's own frozen
+  route (domains, redirects, headers, allow list, sign-in), runs its public-route checks, verifies the
+  route and moves the pointer in one transaction — the warm release `live` again with
+  `activated_at` now, the watched release `retained` with `rolled_back_at` and `rollback_reason` —,
+  `retire_previous` drains and removes the rolled-back release and closes the window `rolled_back`,
+  then `record_release` and `notify`. It takes a light slot at priority 1000 through the environment's
+  queue like every run, so nothing else is cutting over at the same moment; no release row is created,
+  because the release serving is the warm one with its own frozen configuration, and the release
+  history says so. A warm container that will not resume or fails its readiness check is removed and
+  the window closed `rollback_failed`; a refused route or commit restores the route, pauses the warm
+  container again and hands the window back. Every other run of the environment (except a scheduled
+  marker) ends an open window at its first step (`superseded`), so a deploy started during a window
+  never runs beside two warm releases and an instant rollback queued behind it finds the window closed.
+  Restart recovery: a window is only rows, so a restarted process's watcher resumes it where it was; an
+  instant rollback the engine ended as `restart_evidence_missing` is settled from the live pointer — if
+  it moved, the rolled-back release is removed and the window closed; if not, the route is put back on
+  the watched release, the warm container paused again and the window handed back to `watching`.
+  Cancellation does the same. `GET …/environments/{env}/rollback-watch` reads the terms and the latest
+  window; `PUT …/rollback-policy` (system admin, session) saves terms, audited
+  `deploy.rollback_policy.update`; `POST …/rollback-watch/rollback` is the instant rollback by hand
+  (destructive, ordinary confirmation, `409 no_warm_release` without a watching window, audited
+  `deploy.release.instant_rollback`); `POST …/rollback-watch/keep` (service control) ends the window now
+  and removes the warm container, audited `deploy.release.keep`. The live proof is
+  `TestLiveMetricGatedRollbackSwitchesBackToTheWarmRelease` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
 - A failed build names its cause instead of `internal_error` and exec's `exit status 1`. `dockerx`
   reads buildx's plain progress as it streams (over `os.Pipe`s read to EOF, because a `StdoutPipe` is
   closed by `Wait` and dropped BuildKit's closing lines; once buildx has exited a read waits at most
@@ -945,7 +1055,10 @@ only renderer/executor/validation authority for their feature.
   Nothing the answer says is applied. The live check against a real model is
   `TestLiveFailedBuildIsDiagnosedByARealModel` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
 - Deploy and force-build resolve the current desired revision (force-build disables cache); redeploy and
-  rollback clone only available immutable artifacts and traverse the same checks/cutover path; restart
+  rollback clone only available immutable artifacts and traverse the same checks/cutover path (a clone
+  carries its target's own source identity and promotion provenance); promote takes a staging release's
+  exact image with production's current plan and variables, builds nothing, and runs a deploy's steps from
+  `render_runtime` on ([staging and promotion](staging-promotion.md)); restart
   stops and starts the existing live runtime without creating a release, then verifies the plan's
   readiness and smoke checks against that live release before recording it. Rollback, stop and restart use
   the destructive capability and ordinary confirmation, not a typed phrase; because stop and restart share
@@ -1003,7 +1116,7 @@ only renderer/executor/validation authority for their feature.
   rotation. Execution resolves external credential/database/domain/Compose-service references only through
   their owning stores; missing or ambiguous targets fail closed instead of reaching a workload as literal
   reference text. Run-scoped domain and Compose references use the frozen run plan/dependency snapshots.
-  `POST …/variables/import?dryRun=1` (the import's own tier: `system.admin`, session) takes the
+  `POST …/variables/import?dryRun=1` (the import's own tier: `system.admin`, session or deploy key) takes the
   import's body and writes nothing: it answers one verdict per name, in the order the names were
   written, with the line — `added`, `changed` (the value, sensitivity or scopes differ), `unchanged`,
   `skipped` (a name the body's `skip` list leaves out: the sheet sends `PORT` and `NODE_ENV`, which the
@@ -1038,11 +1151,23 @@ only renderer/executor/validation authority for their feature.
   Routes: `GET /deploy/shared-variables` and `GET /deploy/{id}/shared-variables` list them masked with
   every active variable that reads each (`usedBy`, with `waiting` where the environment's live release
   started before the value last changed) for anyone who may read an environment's variables; `PUT …/{name}`
-  (create or change; an omitted value keeps the sealed one) and `GET …/{name}/reveal` are an
-  administrator's in a session, like a variable's; `DELETE …/{name}` is `s.destructive` in a session and
+  (create or change; an omitted value keeps the sealed one) is an administrator's in a session or a
+  deploy key's, like a variable's, and `GET …/{name}/reveal` a session's only; `DELETE …/{name}` is
+  `s.destructive` in a session or with a deploy key and
   answers `409 shared_variable_in_use` naming each reader while any active environment's variable reads it.
   Audited as `deploy.shared_variable.{create,update,reveal,delete}` with the scope and never the value. A
   project's shared variables go with the project when it is purged.
+- Store references (`deploy/secret_store_references.go`, connections in `internal/secretstore`, table
+  `deploy_secret_stores`) read a value from Vault, OpenBao, Infisical or Doppler as
+  `${{store.NAME/path#KEY}}` (`@N` pins a version). They resolve through the same graph, as secret
+  literals, and only from a secret variable. A run reads every store it references at its first step
+  (`resolve_source`, a rollback's `render_runtime`, a restart's `start_candidate`; never a stop's),
+  fresh, keeps the values in memory for its own later steps, and fails as `secret_store_unreadable` in the
+  store's words with nothing touched when a store refuses. The transcript and `secretStoreReads` in the
+  run's metadata record each reference's version, never its value. A release freezes the reference, so a
+  rollback re-reads the store and says when the version differs from the restored release's; a pinned
+  version rolls back exactly. A preview reads only a store that allows previews. Contract, routes and
+  audit: [`secret-stores.md`](secret-stores.md).
 - Domains, persistent storage, backup jobs and database entries remain resources of Proxy, Docker,
   Backups and Databases. Deployments store typed ownership links and use read-only owner observations for
   domain conflicts, DNS, existing certificate pairs, ports, public binds, firewall policy and dependency
@@ -1155,18 +1280,41 @@ only renderer/executor/validation authority for their feature.
   retry, redeploy or rollback. `GET /deploy/{id}/commits` still reads a legacy project's local checkout
   only; a normalized Git-URL project's private release mirror keeps only narrow per-revision snapshot
   refs, not a maintained branch tip, so listing its history cheaply from that mirror remains open.
+- **Deploy keys and `jd`.** A deploy key (`api_tokens.scope = 'deploy'`, `POST /tokens/deploy`, an
+  administrator's in a session) is admitted to the deployment routes `deployKeyRoutes` in
+  `api/deploy_keys.go` lists and to no other route; wherever this document gives a drafts,
+  configuration, source, Git policy, trigger, variable or shared-variable write the tier
+  "`system.admin`, session", a deploy key is admitted too, and every other session-only deployment route
+  (reveals, saved credentials, secret-store connections, pull-request merge/comment and previews,
+  schedules, alerts, channels, drains, adding and removing an environment, a route's maintenance and
+  error pages, the warm-release terms, the typed-phrase removals) stays a session's and answers it `session_required`. Its writes are
+  held to what a person in a session could not be refused: a generate or rotate answers it without
+  `generatedValue`; a plan it commits, or an environment change it makes, may not carry host authority
+  (`hostAuthority`: a folder on the server, Docker Compose, privileged, host network, capabilities,
+  devices, a host path mounted, a release task without `runner: "image"`), and an environment that
+  already does, or whose variables read a `credential` reference, is changed by a person only (it may
+  still be deployed and have its variables set); a source may not gain a saved credential or send its
+  Git credential to another repository; a variable may not be pointed at a `credential`, `database` or
+  `store` reference (on a draft, checked at commit with `Draft.VariableReferences`, which reads a value's mode
+  as the commit stores it), nor, for a key narrowed to some deployments, at a `server` shared
+  variable. A key narrowed to chosen deployments
+  (`api_token_deployments`) lists and reaches only those. `GET /deploy/{id}/runs/{run}/transcript?after=&limit=`
+  reads a run's log lines after a sequence number, oldest first, with the run and its steps and
+  `{next, more}` (`OrchestrationStore.RunTranscriptAfter`): what the stream route sends over its socket,
+  for a client without one — `jd logs --follow` and `jd deploy --wait` poll it. The `jd` program itself
+  (`backend/cmd/jd`) is described in the README.
 - Additional automation provider hooks verify each provider's exact raw-body signature before parsing and then fence
   event, repository, ref and delivery identity. The delivery row is reserved before preview or queue side
   effects, while legacy HMAC and scoped generic hooks retain their existing contracts. Environment branch/
   path policy applies to polling and provider/generic hooks; manual and rollback runs are not path-filtered.
-  `GET …/triggers/{trigger}/deliveries` (`system.admin`, session) reads the last 50 `deploy_webhook_deliveries`
+  `GET …/triggers/{trigger}/deliveries` (`system.admin`, session or deploy key) reads the last 50 `deploy_webhook_deliveries`
   rows for a trigger — delivery id, event, ref, decision, reason, run id, received at — or `?limit=` of
   them, 1 to 200 (anything else reads 50), and
   `POST …/triggers/{trigger}/rotate-secret` (same tier, audited `deploy.trigger.rotate_secret`) issues a new
   HMAC secret shown once, mirroring the legacy project's own secret rotation. The trigger list carries a
   summary of that log — each trigger's `lastDelivery` and `recent`, its last fourteen decisions oldest
   first, read for every trigger in one windowed statement (`AttachTriggerDeliveries`) — but only for a
-  session holding `system.admin`, the caller who could read the log itself; the list is readable by any
+  session or deploy key holding `system.admin`, the caller who could read the log itself; the list is readable by any
   account, and a read-only one still sees `lastStatus` alone. Absent means not allowed or never
   delivered, and the page then draws no strip rather than an error.
   A new *automatic* run only supersedes an older queued one in the same environment when its own
@@ -1429,15 +1577,73 @@ only renderer/executor/validation authority for their feature.
   next to a routed primary (Gitea's SSH, Syncthing's sync protocol) becomes an additional
   `runtime.ports[]` publication on its own number (see published ports below) instead of silently
   replacing the routed port; the primary always stays the one the proxy and the checks reach. The
-  catalogue ships 62 reviewed definitions, 57 of them offered (see "how the first sign-in works"
-  below for the five that are retired), every image reference resolved against
-  its registry (`docker manifest inspect`) and every deployable one started live:
-  `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks`
-  renders each definition from its fixture inputs, pulls the image, starts it through the real runtime
+  catalogue ships 82 reviewed definitions, 77 of them offered (see "how the first sign-in works"
+  below for the five that are retired; 20 are the multi-service templates of the next item), every
+  image reference resolved against its registry (`docker manifest inspect`) and every deployable one
+  started live: `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks` renders each single-image
+  definition from its fixture inputs, pulls the image, starts it through the real runtime
   owner with generated secrets, runs the definition's own readiness checks against the published
   loopback port (Mongo Express with a catalogue MongoDB beside it) and removes what it pulled;
   `JD_BLUEPRINT_ONLY=a,b` narrows it. Applications that validate the `Host` header (Homepage) are
   configured to accept any, since the proxy in front only ever forwards the domain.
+- **Multi-service templates** (`blueprint/compose_validate.go`, `compose_render.go`,
+  `deploy/blueprint_source.go`). A definition that declares `services` (profile `compose`) is a
+  Compose template: an application with the database, cache or worker it needs, deployed through the
+  existing Compose release path rather than a runtime of its own, so backups, logs, requests, alerts,
+  domains and rollback treat it as any Compose deployment. Each service declares its image, role
+  (`app`, `worker`, `database`, `cache`), purpose, environment, ports, volumes, memory and CPU,
+  a Docker healthcheck and its start order (`dependsOn` with Compose's `healthy`, `started` or
+  `completed`); the top-level image, ports, volumes and resources stay empty. Environment values are
+  literal text with two typed references: `{{secret.<name>}}`, a secret the definition generates, and
+  `{{variable.<NAME>}}`, a plan variable an input writes or a startup operation sets. Both render as
+  `${NAME}` interpolations (literal dollars are doubled), so the rendered document holds no value and
+  is a function of the definition alone; a generated password two services share is one sealed
+  variable, generated at commit and handed to each through the release's private `0600` env file.
+  `Render` returns the document as `Plan.Compose` (inside the fixture digest) with `Plan.Services`,
+  the public service's image and port, and the stack's summed memory. The document publishes exactly
+  one port — the public service's proxy port, on `127.0.0.1` at a preference derived from the
+  template id (`TemplateHostPort`, moved by Compose's own port recovery when taken) — puts the public
+  service on Compose's `default` network and the private `internal` one, and every other service on
+  `internal` only, which is declared `internal: true` (no route out; a private service that sends mail
+  or downloads models declares `egress` and joins a separate `egress` network). The ingress joins the
+  public container on the first of its networks by name (`proxysvc.publishedTarget`), and `default`
+  sorts before `internal`, so the proxy facing the internet shares a network with the public service
+  and nothing behind it. Every service gets `mem_limit` (and `cpus`) from its own resources, a CMD-form
+  healthcheck and the capped `json-file` log every dashboard container gets. Validation refuses at
+  catalogue load — that is, at build time — fewer than two or more than eight services, a template
+  with no proxy port or two, a public service that is not an `app`, any `direct` or UDP port, the
+  Docker socket, a database without a data volume, a shared volume described two ways, a literal for a
+  credential-shaped variable (the Compose planner's `secretShapedKey` set and the single-image set
+  together) or a literal password inside a URL, a reference to a secret or variable nothing declares,
+  any other placeholder, a templated command or healthcheck, a healthcheck that is missing, untimed or
+  prefixed `CMD`/`CMD-SHELL`, a dependency cycle, a generated secret no service references,
+  privileges, configuration files, and install, release or stop operations. A secret's `alphabet`
+  (`hex`) becomes `PlannedVariable.generateFormat`.
+  A template deploys as `kind: compose, mode: blueprint` — `validModeForKind` allows the blueprint mode
+  under the Compose kind, and `blueprintSourceKindMatches` refuses a stack saved as a blueprint source or
+  an image saved as a Compose one (`BlueprintSourceKind` names the right one; the summary carries it as
+  `sourceKind`). Saving the source — the draft's source step and the settings source route alike —
+  stores the server's render in `composeFiles` (`WithTemplateDocuments`), replacing anything the
+  browser sent, and `validateForNewDeployment` refuses a document that is not that render. From then on
+  the stored document is the release: materialization writes it exactly as a pasted file, so a later
+  dashboard that no longer ships the version still redeploys it byte for byte
+  (`ValidateForDeployment` needs only the stored document), and moving to a newer version is a source
+  change that renders it. Detection (`analyzeComposeTemplate`) runs the same structural analysis and
+  Docker Compose validation as a pasted file over the render, and names the definition in
+  `SourceIdentity.template` (`id@version`; the render digest is `revision`, the document's is `digest`),
+  surfaced as `sourceTemplate` on the fleet summary and archived facts. The rendered configuration is a
+  Compose build whose `primaryService` is the public service, `runtime.internalPort` its proxy port,
+  stop-first, with the definition's variables, checks and domains; every variable the document
+  interpolates is planned, so preflight has no `compose_variable_*` decision left. `GET
+  /docker/templates` leaves stacks out. The template picker labels a stack on its card (`N services`),
+  lists its services with role, image, limit and the public one marked, adds up the footprint, and
+  states before the press what the stack does by itself: only the public service is reachable, the
+  rest publish nothing on a network with no route out, each deploy stops the stack first, shared
+  passwords are generated here, and a backup is a file copy of a running database rather than a dump.
+  Compose previews stay refused (`preview_isolation.go`); a template is not a Git source, so it is
+  never offered one. `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
+  through the real build step and runtime owner and requires every check to pass, every service's
+  healthcheck to report healthy, and only the public port to be published, on loopback.
 - **How the first sign-in works**, declared rather than described. Every definition carries an
   `access` block: a closed `kind` — `setup` (the application asks the first visitor to create the
   account), `credentials` (a name from an input plus a password from a generated secret, both
@@ -1536,13 +1742,48 @@ only renderer/executor/validation authority for their feature.
   **Require sign-in** offers the Proxy page's four presets (`lib/sso-providers.ts`), **Here and on
   previews** or **Previews only**, and names a password or plain-HTTP name the server would refuse before
   the save (`settings/route-access.ts`).
+- Maintenance and error pages. Maintenance is a switch beside the live route, not a plan field, so it
+  applies at once and no release turns it on or off. Every route a release writes carries the check
+  (`DeploymentRoute.Maintenance`, rendered on nginx as a Proxy site's maintenance behind
+  `SiteMaintenance.Switch`, on Caddy as a `file` matcher), and the check looks on every request for
+  `maintenance.on` in the route's pages folder: `<nginxDir>/jd-pages/<route>/` on nginx,
+  `/config/just-dashboard/pages/<route without .conf>/` inside the Docker Caddy ingress. Turning it on
+  writes that file and turning it off removes it (`proxysvc.SetDeploymentMaintenance`, under the
+  service lock): nothing is reloaded and the route's bytes never change, so the switch never rewrites a
+  route outside activation, never meets a cutover's snapshot, verify and restore, and survives the next
+  release, a rollback and a cutover in the middle of which it was turned. Turning it on is refused
+  (`ErrMaintenanceUnready`, 409 `no_public_route` or `maintenance_unready`) for an environment with no
+  route and for a route written before the switch existed, which gets the check with its next
+  deployment; turning it off is always allowed. While on, every visitor gets the maintenance page with a 503
+  except the ACME challenge and the plan's `runtime.maintenance.bypassFrom` (addresses and ranges in
+  `NormalizeAccessEntry`'s spelling, at most 64); `runtime.maintenance.retryAfter` (0–86400, 0 sends
+  none) is the `Retry-After`. It is decided before the password and the sign-in and after the address
+  list, on both proxies, so a refused address is still refused and nobody signs in to read the page.
+  `runtime.errorPages` (404, 502, 503, 504) answer those codes with the route's own page, and
+  `runtime.interceptErrors` gives the application's own answers with them the page too (refused with
+  a sign-in, whose 401s it would replace). Those three plan fields are kept only when set, so a plan
+  without them keeps its digest, and change with the next deployment like the rest of the plan; the
+  release comparison lists them as **let past maintenance**, **maintenance retry after** and **error
+  pages**. Activation writes the pages a route serves that it has no file for, from the ones Proxy
+  ships, before the route, and route removal takes the folder, switch included. A page is edited at
+  `GET`/`PUT /deploy/{id}/environments/{env}/pages/{page}` (`maintenance`, `404`, `502`, `503`, `504`;
+  the write is `system.admin` in a session, at most 256 KiB, audited `deploy.page`) and served from the
+  next answer. The switch is `GET`/`PUT /deploy/{id}/environments/{env}/maintenance` `{on}`, the write
+  behind `s.destructive` as stopping a deployment and a Proxy site's maintenance are, audited
+  `deploy.maintenance` with the outcome. Readiness and smoke checks dial the candidate directly and are
+  untouched; a `public_route` check, which goes through the route and would read the maintenance page,
+  is not run while the switch is on and records `maintenance` as its code, so a release can be deployed
+  during a migration window. The Domains settings show the switch as its own **Maintenance** form,
+  which the save bar applies immediately (the destructive capability), and **Maintenance page and error
+  pages** under it for the plan fields and the page editor (`settings/route-pages.ts`).
 - The [GitHub App](github-app.md): one App per dashboard through the manifest flow, installation tokens
   for private clones through a `github_app` credential per installation, triggers on `delivery: "app"`
   fed by the App's single webhook (`POST /api/v1/hooks/github-app`, routed by repository through the
   same `dispatchAutomationEvent` decision as the per-trigger hooks), statuses posted as the App where it
   is installed, and one edited-in-place comment per preview on its pull request.
 - `GET /deploy/{id}/insights?days=N` (7–365, default 30) computes delivery figures from persisted runs
-  only: release runs (`deploy`, `redeploy`, `force_build`, `rollback`) that reached a terminal state,
+  only: release runs (`deploy`, `redeploy`, `force_build`, `rollback`, `promote`) that reached a terminal
+  state, production's and its previews' (a staging environment's runs are read with `?environment=`),
   success rate over decided runs, median and p95 claim-to-finish duration of successful releases,
   successful releases per week, mean time from a failed release's end to the next successful one,
   the current failure streak, a per-day series with zero-filled days, and the five most common terminal
@@ -1605,7 +1846,7 @@ only renderer/executor/validation authority for their feature.
   from this environment, so an agent identity cannot be tried either. A draft's source step and the
   source-change route below both refuse a `credentialId` that names no row before saving, rather than
   waiting for detection to discover it.
-- `PUT /deploy/{id}/environments/{env}/source` (`system.admin`, session, audited `deploy.source.update`)
+- `PUT /deploy/{id}/environments/{env}/source` (`system.admin`, session or deploy key, audited `deploy.source.update`)
   changes a committed project's source without touching the live release: the same `DraftSourceConfig` shape
   a draft's source step uses, plus the caller's current `revision`. The handler validates it with
   `ValidateForDeployment`, runs the exact read-only inspection a draft's detect step runs
@@ -1620,7 +1861,7 @@ only renderer/executor/validation authority for their feature.
   source revision alone is what makes it report a `source` pending change, and the Git watcher already keys
   its cursor on the desired source's own config digest, so a changed URL/ref/subdirectory resets that cursor
   and the very next poll reports `branch_changed` on its own.
-- `POST /deploy/{id}/duplicate` `{name}` (`system.admin`, session, audited `deploy.project.duplicate`) creates
+- `POST /deploy/{id}/duplicate` `{name}` (`system.admin`, session or a deploy key reaching every deployment, audited `deploy.project.duplicate`) creates
   a draft pre-filled from the project's current desired source and configuration — the same draft the
   new-project page resumes with `?draft=`, landing at the `configuration` step with no `detection` yet, so
   the operator still runs detect/preflight/commit like any other draft. `PlanningStore.Duplicate` copies the
@@ -1633,7 +1874,8 @@ only renderer/executor/validation authority for their feature.
   would otherwise hand it the source project's own live volume. A linked or observed dependency, and a
   bind-path mount, are left exactly as saved: nothing about their identity is owned by lifecycle re-derivation.
 - Closed vocabularies, route capabilities/confirmations/audit actions, retention limits and error codes
-  are contracts. Change one only with an ADR plus migration and exhaustive transition/route tests.
+  are contracts. Change one only with an ADR plus migration and exhaustive transition/route tests. The
+  `promote` operation's record is the Decisions section of [staging and promotion](staging-promotion.md).
 
 ## Public deployment ingress
 

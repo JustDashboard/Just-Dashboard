@@ -7,6 +7,7 @@ import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentConfiguration, DeploymentEnvironmentConfiguration } from "@/lib/types"
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useDraftScope } from "@/components/deploy/project-context"
 
 type Owned = Pick<
   DeploymentConfiguration,
@@ -233,7 +234,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function useSettingDraft<T>(key: string, saved: T) {
   const digest = settingDigest(saved)
-  const stored = `${key}@${digest}`
+  // Staging starts as a copy of production, so the two hold equal saved
+  // values often enough that the digest alone would hand one's draft to
+  // the other.
+  const scope = useDraftScope()
+  const stored = `${key}${scope}@${digest}`
   const [value, set] = useSessionState<T>(stored, saved)
 
   // Once the saved value has moved on, the draft typed against the old one is

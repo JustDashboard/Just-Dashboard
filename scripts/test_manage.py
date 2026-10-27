@@ -48,6 +48,8 @@ if admin_link:
     sys.exit(int(os.environ.get("TEST_ADMIN_EXIT", "0")))
 if args == ["compose", "build"]:
     sys.exit(int(os.environ.get("TEST_BUILD_FAIL", "0")))
+if args[:4] == ["run", "--rm", "--entrypoint", "cat"]:
+    sys.stdout.write(os.environ.get("TEST_JD_BINARY", ""))
 ''')
         # Sourcing this as shell code would execute the marker command.
         (self.root / ".env").write_text('JD_MASTER_KEY=fixture\nUNTRUSTED=$(touch sourced-env)\n')
@@ -152,7 +154,7 @@ if args == ["compose", "build"]:
     def run_installer(self, build_fail=False, env_file=True, answers="\n", args=(), env=None, env_body=None):
         script = (REPO / "install.sh").read_text()
         # Every writable absolute host path is confined to this disposable fixture.
-        for prefix in ("/var/lib/", "/var/backups/", "/tmp/just-dashboard"):
+        for prefix in ("/var/lib/", "/var/backups/", "/tmp/just-dashboard", "/usr/local/bin/jd"):
             script = script.replace(prefix, str(pathlib.Path(self.temp.name) / "host") + prefix)
         installer = self.root / "install.sh"
         installer.write_text(script)
@@ -196,6 +198,53 @@ JD_FRONTEND_PORT=42002
         self.assertNotIn("\x1b", result.stdout)
         self.assertIn("./scripts/manage.sh restart", result.stdout)
         self.assertNotIn("compose restart", result.stdout)
+
+    def test_installer_installs_jd_from_the_built_image_and_says_how_to_use_it(self):
+        fake_jd = "#!/bin/sh\necho jd 0.8.2\n"
+        result = self.run_installer(env={"TEST_JD_BINARY": fake_jd})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        installed = pathlib.Path(self.temp.name) / "host/usr/local/bin/jd"
+        self.assertEqual(installed.read_text(), fake_jd)
+        self.assertEqual(installed.stat().st_mode & 0o777, 0o755)
+        # The fixture moves every host path under its own directory, so the
+        # message names the moved one.
+        self.assertIn(f"jd is at {installed}", result.stdout)
+        self.assertIn("jd login", result.stdout)
+        self.assertIn(["run", "--rm", "--entrypoint", "cat", "just-dashboard-backend:latest"],
+                      [call["args"][:5] for call in self.read_calls()])
+
+    def test_installer_finishes_when_the_image_has_no_jd(self):
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("jd was not installed; sudo ./scripts/manage.sh install-cli tries again", result.stdout)
+        self.assertFalse((pathlib.Path(self.temp.name) / "host/usr/local/bin/jd").exists())
+        self.assertIn("Setup complete", result.stdout)
+
+    def test_install_cli_copies_jd_out_of_the_image(self):
+        target = pathlib.Path(self.temp.name) / "bin-target" / "jd"
+        target.parent.mkdir()
+        fake_jd = "#!/bin/sh\necho jd 0.8.2\n"
+        result = self.run_tool("manage.sh", "install-cli", env={"JD_CLI_PATH": str(target), "TEST_JD_BINARY": fake_jd})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(target.read_text(), fake_jd)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o755)
+        self.assertIn(f"Installed {target}: jd 0.8.2", result.stdout)
+        self.assertEqual(self.read_calls()[-1]["args"],
+                         ["run", "--rm", "--entrypoint", "cat", "just-dashboard-backend:latest", "/usr/local/bin/jd"])
+        self.assertEqual([p.name for p in target.parent.iterdir()], ["jd"])
+
+    def test_install_cli_refuses_an_image_without_jd_and_leaves_nothing(self):
+        target = pathlib.Path(self.temp.name) / "bin-target" / "jd"
+        target.parent.mkdir()
+        result = self.run_tool("manage.sh", "install-cli", env={"JD_CLI_PATH": str(target)})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("The backend image has no jd", result.stderr)
+        self.assertEqual(list(target.parent.iterdir()), [])
+        result = self.run_tool("manage.sh", "install-cli", "extra")
+        self.assertNotEqual(result.returncode, 0)
+        result = self.run_tool("manage.sh", "install-cli", env={"TEST_UID": "1000", "JD_CLI_PATH": str(target)})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("sudo", result.stderr)
 
     def test_installer_restores_the_env_a_kept_uninstall_left(self):
         kept = pathlib.Path(self.temp.name) / "host/var/lib/just-dashboard/install.env"

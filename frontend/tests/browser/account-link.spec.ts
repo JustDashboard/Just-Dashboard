@@ -81,8 +81,17 @@ const lastSnapshot = {
   metrics: { cpuPercent: 23.4, memPercent: 61, diskMount: "/", diskPercent: 71.2 },
   containers: {
     running: 12,
-    list: [{ id: "3f2", name: "shop-web", image: "ghcr.io/acme/shop", state: "running" }],
+    list: [
+      { id: "3f2", name: "shop-web", image: "ghcr.io/acme/shop", state: "running" },
+      ...Array.from({ length: 11 }, (_, n) => ({
+        id: `c${n}`,
+        name: `worker-${n}`,
+        image: `sha256:${"0123456789abcdef".repeat(4)}`,
+        state: "running",
+      })),
+    ],
   },
+  stacks: [{ name: "shop", services: 2, running: 2, managed: true }],
   alerts: [],
 }
 
@@ -402,14 +411,30 @@ test("linked: the link's state, what is shared as it was sent, the policy and th
 
   // What was actually sent, grouped as it was.
   const shared = page.locator("section", { hasText: "What this server shares" }).first()
-  for (const group of ["Heartbeat", "Server", "Access", "Metrics", "Containers"]) {
+  for (const group of ["Heartbeat", "Server", "Access", "Metrics", "Containers", "Stacks"]) {
     await expect(shared.getByRole("heading", { name: group, exact: true })).toBeVisible()
   }
   await expect(shared.getByText("Ubuntu 24.04")).toBeVisible()
   await expect(shared.getByText("23.4%")).toBeVisible()
   await expect(shared.getByText("atlas.tail1234.ts.net", { exact: true })).toBeVisible()
-  await expect(shared.getByText(/shop-web · ghcr.io\/acme\/shop/)).toBeVisible()
+  await expect(shared.getByText("services 2 · running 2 · managed yes")).toBeVisible()
   await expect(shared.getByText(/Never sent/)).toBeVisible()
+
+  // A long list is led by names, one line each, and folds after five.
+  const containers = shared.locator("section", { hasText: "Containers" })
+  await expect(containers.getByText("12 entries")).toBeVisible()
+  const shop = containers.getByRole("listitem").filter({ hasText: "shop-web" })
+  await expect(shop).toHaveAttribute("title", "shop-web · ghcr.io/acme/shop · running · 3f2")
+  await expect(containers.getByRole("listitem")).toHaveCount(5)
+  const unfold = containers.getByRole("button", { name: "Show all 12" })
+  await expect(unfold).toHaveAttribute("aria-expanded", "false")
+  await unfold.click()
+  await expect(containers.getByRole("listitem")).toHaveCount(12)
+  await containers.getByRole("button", { name: "Show fewer" }).click()
+  await expect(containers.getByRole("listitem")).toHaveCount(5)
+  for (const line of await containers.getByRole("listitem").all()) {
+    expect((await line.boundingBox())?.height).toBeLessThan(24)
+  }
 
   // The policy is a mirror, set elsewhere.
   const policy = page.locator("section", { hasText: "Automatic updates" })

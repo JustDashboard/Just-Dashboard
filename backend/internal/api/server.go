@@ -36,8 +36,11 @@ type Server struct {
 	// and the record of which hub this server answers to.
 	Agent    *agent.Identity
 	loginLim *httpx.Limiter
-	apiLim   *httpx.Limiter
-	destrLim *httpx.Limiter
+	// passkeyLim is beginning a passkey sign-in, which only hands out a
+	// sealed challenge; the finish spends loginLim like a password does.
+	passkeyLim *httpx.Limiter
+	apiLim     *httpx.Limiter
+	destrLim   *httpx.Limiter
 	// streamLim is Remote Desktop's stream bridge, whose page loads a
 	// hundred of its own files at once; on apiLim that one page would spend
 	// the whole dashboard's burst.
@@ -146,8 +149,9 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, svc *auth.Servic
 		WS:    wsx.NewUpgrader(cfg.AllowedOrigins, !cfg.Dev && cfg.TLSMode != selfcfg.TLSOff),
 		// Login is deliberately tight: five attempts a minute per address on
 		// top of the per-account lockout.
-		loginLim: httpx.NewLimiter(10, 5),
-		apiLim:   httpx.NewLimiter(600, 120),
+		loginLim:   httpx.NewLimiter(10, 5),
+		passkeyLim: httpx.NewLimiter(60, 20),
+		apiLim:     httpx.NewLimiter(600, 120),
 		// Destructive routes get their own budget so a scripted delete loop
 		// cannot run away even with a valid admin token.
 		destrLim:  httpx.NewLimiter(30, 10),
@@ -311,6 +315,9 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.startDeployEngine(ctx); err != nil {
 		return err
 	}
+	// After the engine, so a window a restart interrupted is settled by a
+	// watcher that can already ask the engine for its rollback.
+	s.modules.rollbackWatcher.Start(ctx)
 	s.modules.deployGit.Start(ctx)
 	s.modules.previewReconciler.Start(ctx)
 	s.modules.deployDatabases.Start(ctx)

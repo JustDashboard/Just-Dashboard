@@ -143,7 +143,7 @@ metadata is never trusted as the quota. `internal/sysinfo` reads the host throug
 
 ## Auth, secrets, state
 
-`internal/auth` owns users, sessions, TOTP, recovery codes, API tokens. Cookie `vpsd_session` (HttpOnly,
+`internal/auth` owns users, sessions, TOTP, recovery codes, passkeys, API tokens. Cookie `vpsd_session` (HttpOnly,
 SameSite=Strict, Secure unless `JD_DEV` or loopback-only `JD_TLS=off`). The WebSocket upgrader uses that
 same browser-facing scheme for its same-origin check, so HTTP tunnel installs can open live streams. A
 session that still owes a second factor is accepted only by
@@ -176,6 +176,14 @@ role may not deploy. `PUT /tokens/{id}/connections`
 other key) replaces what a key reaches without a new secret; it is audited as
 `dashboard.token.connections` with the databases by name and the deployment grant. Forgetting a connection removes its grants
 with it (`ON DELETE CASCADE`).
+A deploy key (`auth.ScopeDeploy`) is made on `POST /tokens/deploy` (session only, `system.admin`) from
+`{name, ttlDays, deploymentIds}` and always holds the administrator role, which `CreateDeployToken`
+refuses to an owner without it; `ResolveAPIToken` narrows it to the owner's role on every call like any
+key. Its deployments live in `api_token_deployments` and are read with the key on every request; none
+is every deployment. The project is deliberately not a foreign key there: purging a deployment leaves
+the row, so a key that reached only it keeps reaching nothing rather than everything. There is no route
+to re-point one; a replacement is minted with the same list. Where it may go is the API's decision
+(`api/deploy_keys.go`, [request lifecycle](request-lifecycle.md)).
 `DELETE /tokens/{id}` revokes and retains the record. The session-only
 `DELETE /tokens/{id}/record` additionally requires `system.admin` and `s.destructive`; it deletes
 only revoked or expired metadata through `auth.DeleteInactiveAPIToken`'s conditional SQL write.
@@ -197,7 +205,7 @@ heap had doubled, which left the process at about 155 MB for up to half a minute
 Local host-root account recovery uses the same binary's isolated `--admin` mode through
 `scripts/manage.sh`. It opens only an existing store and starts no server or modules. Password resets
 atomically set the new password, clear any owed change and login lockout, and revoke sessions/API
-tokens while keeping TOTP enrollment, recovery codes and disabled state; account mutations are audited
+tokens and passkeys while keeping TOTP enrollment, recovery codes and disabled state; account mutations are audited
 as actor `cli`. See [terminal tools](../operations/terminal-tools.md) for commands and the local
 privilege boundary.
 
@@ -244,7 +252,7 @@ and another SQLite closing its connection afterwards would believe it was the la
 `-wal` and `-shm` the store is still writing through, corrupting the database. Inspect a live store
 read-only: `sqlite3 'file:/var/lib/just-dashboard/vpsd.db?mode=ro'`.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
-`api_tokens`, `api_token_connections` — the databases an MCP key reaches —, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`, the statement history's `db_statement_intervals`, `db_statement_shapes` and `db_statement_samples`, point-in-time recovery's `db_wal_archives` — with the destination's keys and the archive's private key sealed — `db_wal_restore_points` and `db_wal_restores`, `db_upgrades`, and `db_tls_ca` and `db_server_tls` for the certificate authority, whose key is sealed, and the certificates issued from it); boards (`boards`, the images placed on them in `board_files`, the install's shape library in `board_library`, and `sticky_boards`, which nothing reads since Stickyboard was removed in 0.8 but which stays so the boards made with it in 0.7.2–0.7.5 survive an update); Remote Desktop (`remote_desktop_computers`, with sealed passwords and the stream bridge's id once paired, and
+`api_tokens`, `api_token_connections` — the databases an MCP key reaches —, `api_token_deployments` — the deployments a deploy key was narrowed to —, `audit_log`, whose `key_id` and `key_name` name the API key behind a request); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`, the statement history's `db_statement_intervals`, `db_statement_shapes` and `db_statement_samples`, point-in-time recovery's `db_wal_archives` — with the destination's keys and the archive's private key sealed — `db_wal_restore_points` and `db_wal_restores`, `db_upgrades`, and `db_tls_ca` and `db_server_tls` for the certificate authority, whose key is sealed, and the certificates issued from it); boards (`boards`, the images placed on them in `board_files`, the install's shape library in `board_library`, and `sticky_boards`, which nothing reads since Stickyboard was removed in 0.8 but which stays so the boards made with it in 0.7.2–0.7.5 survive an update); Remote Desktop (`remote_desktop_computers`, with sealed passwords and the stream bridge's id once paired, and
 `remote_desktop_sessions`); backups
 (`backup_jobs`, `backup_runs`, `backup_restore_tests`); legacy deployment compatibility (`deploy_projects`, `deploy_env`,
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,
@@ -278,6 +286,54 @@ cancellation (bounded at five seconds), so a client that disconnects once its mu
 leaves the row. An `Entry` records who (user, role, `Actor` = session or token), from
 where, what (action, target, method, path), and how it went. Local root account commands use
 `Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target.
+
+## Passkeys
+
+`auth/passkeys.go` (library: `github.com/go-webauthn/webauthn`, BSD-3-Clause) adds WebAuthn passkeys
+that stand in for an account's password at sign-in. Tables: `webauthn_credentials` (the credential
+id, the library's record of it as JSON — public key, flags, signature counter — the relying party ID
+it was registered under and the name its owner gave it; `ON DELETE CASCADE` with the account) and
+`webauthn_spent_challenges` (`store/schema_passkeys.go`, additive).
+
+- **What a passkey is worth.** It replaces the password, never the code. A passkey sign-in starts
+  its session through `startSession`, the function a password sign-in calls, so an enrolled account
+  owes its code exactly as after a password and `JD_REQUIRE_2FA` keeps its meaning
+  ([invariant 2](../security/invariants.md#invariant-2-what-two-factor-still-guarantees)). Sessions
+  record `passkey`, then `passkey+totp` or `passkey+recovery` once the code is given.
+- **Relying party and origin.** The RP ID is the host name the browser reached the dashboard at, read
+  from the request's `Origin` (`auth.PasskeyParty`): it must be the request's own host or one of
+  `JD_ALLOWED_ORIGINS`, over https or plain http on `localhost`, and never an IP address, which
+  WebAuthn refuses. A credential is bound by the browser to the name it was made at, so one made at
+  `dash.example.com` does not sign in at the tailnet name; each is stored with its RP ID and the
+  security page says where a passkey made elsewhere works. At an IP address the sign-in and security
+  pages say why no passkey is offered instead of offering one that fails.
+- **Ceremonies.** Registration asks for a discoverable credential with user verification required,
+  excludes the account's existing ones, and takes no attestation. Sign-in is discoverable (no
+  username): the authenticator's user handle — an HMAC of the account id under the install's key, so
+  it names nobody — says whose it is, and must match the credential's account. A challenge is not
+  stored while in flight: its session data, kind, account, session, origin and a five-minute expiry
+  are sealed with the install's key and handed to the browser as the challenge id, so beginning a
+  sign-in writes nothing. The finish opens it, checks every field and spends it by inserting its id
+  into `webauthn_spent_challenges`, so a response is tried against a challenge once.
+- **Refusals.** User verification is required at both ends; a signature counter that does not move
+  forward (`CloneWarning`) refuses the sign-in as a possibly copied key; a removed credential, one
+  registered at another name, a disabled account, an expired, altered, replayed or misplaced
+  challenge and a response signed for another origin or relying party are each refused, and every
+  refusal is audited with its reason. A password lockout does not block a passkey: it brakes
+  password guessing, and a passkey is not guessed.
+- **Lifecycle.** Registering takes a complete session (`/account`, `RequireSession`) and a fresh
+  password plus, where enrolled, a TOTP code that is consumed as at sign-in. Renaming and removing
+  are the account holder's, from a session, with an ordinary confirmation; an account holds at most
+  25. Disabling an account keeps its passkeys and refuses them until it is enabled. A root shell's
+  `reset-password` deletes them with the sessions and API tokens, because that reset is how an
+  account somebody else may hold is taken back; an administrator's password set and the holder's
+  own password change keep them, as they keep API tokens. Role changes do not touch them.
+- **Routes and audit.** `POST /auth/passkey/begin`, `POST /auth/passkey/finish` (sign-in);
+  `GET /account/passkeys`, `POST /account/passkeys/register/begin` (password and code),
+  `POST …/register/finish`, `PATCH /account/passkeys/{id}`, `DELETE /account/passkeys/{id}`.
+  Audited as `auth.passkey.login` (success or the refusal), `auth.passkey.reauth`,
+  `auth.passkey.register`, `auth.passkey.rename` and `auth.passkey.remove`, with the passkey's name
+  and RP ID and never a credential.
 
 ## Session authentication provenance
 

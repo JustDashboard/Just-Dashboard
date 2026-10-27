@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  ArrowCircleUp,
   ArrowLeftRight,
   ArrowRight,
   External,
@@ -34,6 +35,8 @@ export type ReleaseVerbHandlers = {
   compare: (release: DeploymentRelease) => void
   rollback: (release: DeploymentRelease) => void
   pin: (release: DeploymentRelease) => void
+  /** Offered for a staging release: into production, as the same image. */
+  promote?: (release: DeploymentRelease) => void
 }
 
 /**
@@ -168,6 +171,21 @@ export function releaseVerbs({
       run: () => on.compare(release),
     })
   }
+  // Promoting changes production, so it takes what deploying production takes.
+  if (
+    on.promote &&
+    (release.state === "live" || release.state === "retained") &&
+    can("service.control")
+  ) {
+    const promote = on.promote
+    verbs.push({
+      key: "promote",
+      label: "Promote to production…",
+      icon: ArrowCircleUp,
+      group,
+      run: () => promote(release),
+    })
+  }
   if (release.state === "retained" && !isLive && can("destructive")) {
     verbs.push({
       key: "rollback",
@@ -201,4 +219,5 @@ export type RunVerbKey =
   | "changes"
   | "compare"
   | "rollback"
+  | "promote"
   | "pin"

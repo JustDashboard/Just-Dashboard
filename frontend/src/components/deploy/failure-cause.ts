@@ -124,6 +124,7 @@ export const CAUSE_TITLES: Record<string, string> = {
   release_task_timeout: "Release task timed out",
   release_task_failed: "Release task failed",
   step_timeout: "Step timed out",
+  secret_store_unreadable: "Secret store unreadable",
 }
 
 /** A terminal or step code in the reader's words: its cause title, else the code as a sentence. */

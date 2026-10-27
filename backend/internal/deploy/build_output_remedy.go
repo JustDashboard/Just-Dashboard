@@ -13,6 +13,9 @@ import (
 // have room for no more: a commit status, a notification field, a diagnosis
 // finding. The frontend keeps the same vocabulary.
 var causeTitles = map[string]string{
+	// A run that could not read a secret store a variable references stops
+	// at its first step, in the store's own words (secret_store_references.go).
+	"secret_store_unreadable":            "Secret store unreadable",
 	"build_lockfile_out_of_sync":         "Lockfile out of sync",
 	"build_lockfile_incompatible":        "Lockfile from another package-manager release",
 	"build_package_manager_mismatch":     "Package manager differs from the project's",

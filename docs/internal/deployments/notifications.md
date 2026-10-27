@@ -93,6 +93,16 @@ selects everything. The historical `run.finished` value remains valid as "every 
 so channels created before failure notifications existed start receiving them without an edit.
 Unknown events are rejected.
 
+An automatic instant rollback (`deploy/rollback_watch.go`) that succeeds raises
+`release.rolled_back` rather than `run.succeeded`: the run went well, the release it took traffic from
+did not. It is not selectable on its own; it reaches every channel that selects `run.failed` (or
+`run.finished`, or everything), and the providers render it red — "release #42 rolled back
+automatically", the reading that decided it, and that the previous release serves again from its warm
+container. An instant rollback that fails raises `run.failed` as any run does. Every instant rollback's
+envelope, automatic or pressed by hand, carries a `rollback` block: `automatic`, `releaseNumber` (the
+release taken back), `restoredReleaseNumber` (the warm one serving again), `reason` and, for an
+automatic one, `rule` (`error_rate` or `latency`).
+
 Deliveries are recorded per `(channel, run, event, attempt)` with only a status class
 (`2xx`, `5xx`, `network`, `smtp`, `sealed`); response bodies are discarded. The dispatcher skips a
 channel that already has a delivered row for the same run and event, so a reclaimed lease or a
@@ -148,7 +158,10 @@ All mutations require `system.admin` and are audited as `deploy.notification.*`.
 `deploy.CommitStatusPublisher` is a second observer. For a run whose environment source is a Git
 remote on a host it can report to, it posts `pending` on start and `success`, `failure` or `error` on
 the terminal state for the exact commit the run deployed, named `just-dashboard/<environment slug>` and
-linked to the run. Restarts, stops, starts and preview removals deploy no new commit and post nothing.
+linked to the run — so a staging run reports as `just-dashboard/staging`, and promoting its release
+reports the same commit again as `just-dashboard/production`. Restarts, stops, starts and preview
+removals deploy no new commit and post nothing. A notification names its environment in the title and a
+promotion's operation as "Promotion from staging".
 A status that cannot be posted never changes a run's outcome; since the host's answer is otherwise
 only a log line, the publisher keeps the newest outcome per environment (see
 [What Settings shows](#what-settings-shows)).

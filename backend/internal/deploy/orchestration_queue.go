@@ -567,7 +567,9 @@ func (s *OrchestrationStore) supersedeEligibleTx(
 			candidate.operation == OperationRollback || candidate.operation == OperationRemoveManaged {
 			continue
 		}
-		if environmentKind == "production" &&
+		// Staging is a long-lived environment with its own branch, so it
+		// keeps production's conservative rule rather than a preview's.
+		if (environmentKind == "production" || environmentKind == "staging") &&
 			(!automaticTrigger(req.Trigger) || !automaticTrigger(candidate.trigger)) {
 			continue
 		}

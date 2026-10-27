@@ -212,6 +212,110 @@ test("an MCP key replaced by an owner who can no longer change a database only r
     })
 })
 
+test("an administrator makes a deploy key for chosen deployments and is shown how jd uses it", async ({
+  page,
+}) => {
+  const { calls } = await mockKeys(page, "admin", [])
+  await page.goto("/account/keys")
+  await page.getByRole("button", { name: "New key" }).click()
+  const dialog = page.getByRole("dialog", { name: "New API key" })
+  await dialog.getByLabel("Name", { exact: true }).fill("ci-shop")
+  await dialog.getByRole("button", { name: /^Deploy key/ }).click()
+  // The role cards give way to what the key reaches, and what it never does.
+  await expect(dialog.getByRole("button", { name: /^admin/ })).toHaveCount(0)
+  await expect(dialog.getByRole("region", { name: /It can.t/ })).toContainText("never a value")
+  await expect(dialog.getByRole("region", { name: /It can.t/ })).toContainText("credentials")
+  await expect(dialog).toContainText("change only in the dashboard")
+  await dialog.getByRole("radio", { name: "Only these" }).click()
+  const create = dialog.getByRole("button", { name: "Create key", exact: true })
+  await expect(create).toBeDisabled()
+  await dialog.getByRole("checkbox", { name: /status-page/ }).click()
+  await dialog.getByRole("checkbox", { name: /^shop/ }).click()
+  await dialog.getByRole("radio", { name: "30 days", exact: true }).click()
+  await create.click()
+  const secret = page.getByRole("dialog", { name: "Your new key" })
+  await expect(secret).toContainText(/jd login https?:\/\/\S+ --key vpsd_synthetic_key_101/)
+  await expect(secret.getByRole("link", { name: "download jd" })).toHaveAttribute(
+    "href",
+    "/api/v1/cli/jd",
+  )
+  expect(calls).toEqual([
+    {
+      method: "POST",
+      path: "/tokens/deploy",
+      body: { name: "ci-shop", ttlDays: 30, deploymentIds: [3, 8] },
+    },
+  ])
+  await secret.getByRole("button", { name: "Done", exact: true }).click()
+  const made = rows(page).filter({ hasText: "ci-shop" })
+  await expect(made).toContainText("deploy only")
+  await expect(made).toContainText("2 deployments")
+})
+
+test("a deploy key for every deployment is sent with no list", async ({ page }) => {
+  const { calls } = await mockKeys(page, "admin", [])
+  await page.goto("/account/keys")
+  await page.getByRole("button", { name: "New key" }).click()
+  const dialog = page.getByRole("dialog", { name: "New API key" })
+  await dialog.getByLabel("Name", { exact: true }).fill("github-actions")
+  await dialog.getByRole("button", { name: /^Deploy key/ }).click()
+  await expect(dialog.getByRole("radio", { name: "Every deployment" })).toBeChecked()
+  await dialog.getByRole("button", { name: "Create key", exact: true }).click()
+  await expect(page.getByRole("dialog", { name: "Your new key" })).toContainText("jd login")
+  expect(calls[0]).toEqual({
+    method: "POST",
+    path: "/tokens/deploy",
+    body: { name: "github-actions", ttlDays: 90, deploymentIds: [] },
+  })
+  await page.getByRole("button", { name: "Done", exact: true }).click()
+  await expect(rows(page).filter({ hasText: "github-actions" })).toContainText("every deployment")
+})
+
+test("only an administrator is offered a deploy key", async ({ page }) => {
+  await mockKeys(page, "limited", [])
+  await page.goto("/account/keys")
+  await page.getByRole("button", { name: "New key" }).click()
+  const dialog = page.getByRole("dialog", { name: "New API key" })
+  await expect(dialog.getByRole("button", { name: /^limited/ })).toBeVisible()
+  await expect(dialog.getByRole("button", { name: /^Deploy key/ })).toHaveCount(0)
+  await expect(dialog).not.toContainText("jd")
+})
+
+test("replacing a deploy key makes another deploy key for the same deployments", async ({
+  page,
+}) => {
+  const { calls } = await mockKeys(page, "admin", [
+    {
+      id: 9,
+      userId: 1,
+      name: "ci-shop",
+      prefix: "vpsd_99ee00ff",
+      role: "admin",
+      scope: "deploy",
+      deploymentIds: [3],
+      createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+      revoked: false,
+    },
+  ])
+  await page.goto("/account/keys")
+  await expect(rows(page)).toContainText("deploy only")
+  await expect(rows(page)).toContainText("1 deployment")
+  await action(page, "ci-shop", "Replace key")
+  const editor = page.getByRole("dialog", { name: "Replace API key" })
+  await expect(editor).toContainText("Reaches the same deployments")
+  await expect(editor.getByRole("button", { name: /^Deploy key/ })).toHaveCount(0)
+  await expect(editor.getByRole("button", { name: /^admin/ })).toHaveCount(0)
+  await editor.getByRole("button", { name: "Create replacement" }).click()
+  await expect
+    .poll(() => calls[0])
+    .toEqual({
+      method: "POST",
+      path: "/tokens/deploy",
+      body: { name: "ci-shop", ttlDays: 90, deploymentIds: [3] },
+    })
+  await expect(page.getByRole("dialog", { name: "Your new key" })).toContainText("jd login")
+})
+
 test("the first key keeps its one-time secret through refresh, then discards it on Done", async ({
   page,
 }) => {
@@ -363,5 +467,24 @@ for (const width of [390, 1280, 1720]) {
     const bounds = await modal.boundingBox()
     expect(bounds!.x).toBeGreaterThanOrEqual(0)
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width)
+    await page.keyboard.press("Escape")
+    // The deploy key's form — two kinds, a checklist and two lists — fits too.
+    await page.getByRole("button", { name: "New key" }).click()
+    const creating = page.getByRole("dialog", { name: "New API key" })
+    await creating.getByRole("button", { name: /^Deploy key/ }).click()
+    await creating.getByRole("radio", { name: "Only these" }).click()
+    await expect(creating.getByRole("checkbox", { name: /status-page/ })).toBeVisible()
+    const deployBounds = await creating.boundingBox()
+    expect(deployBounds!.x).toBeGreaterThanOrEqual(0)
+    expect(deployBounds!.x + deployBounds!.width).toBeLessThanOrEqual(width)
+    expect(
+      await creating.evaluate((node) =>
+        [...node.querySelectorAll("*")].some(
+          (child) =>
+            child.scrollWidth > child.clientWidth + 1 &&
+            getComputedStyle(child).overflowX === "auto",
+        ),
+      ),
+    ).toBe(false)
   })
 }

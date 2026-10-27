@@ -356,7 +356,7 @@ func validateVariableWrite(request VariableWriteRequest) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if (reference.Kind == "credential" || reference.Kind == "database") && request.Sensitivity != "secret" {
+		if (reference.Kind == "credential" || reference.Kind == "database" || reference.Kind == StoreReferenceKind) && request.Sensitivity != "secret" {
 			return "", fmt.Errorf("%w: %s references must be secret", ErrInvalidVariable, reference.Kind)
 		}
 	}
@@ -427,6 +427,9 @@ func (s *PlanningStore) PutVariable(
 	if request.Reference != "" {
 		reference, _ := ParseVariableReference(request.Reference)
 		if err := s.checkSharedReference(ctx, projectID, name, request.Sensitivity, reference); err != nil {
+			return nil, err
+		}
+		if err := s.checkStoreReference(ctx, environmentID, name, request.Sensitivity, reference); err != nil {
 			return nil, err
 		}
 	}
@@ -1347,6 +1350,9 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	if err := configuration.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
+	if err := refuseUnrunnableChecks(configuration.Checks); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -1524,7 +1530,12 @@ func (s *PlanningStore) saveEnvironmentSource(
 	detection *DetectionResult,
 ) (*EnvironmentConfiguration, *DetectionProposal, error) {
 	fail := func(err error) (*EnvironmentConfiguration, *DetectionProposal, error) { return nil, nil, err }
-	source = canonicalSourceConfig(source)
+	// A template source is saved as this dashboard's render of the version it
+	// names, which is also how a deployment moves to a newer version.
+	source, err := canonicalSourceConfig(source).WithTemplateDocuments()
+	if err != nil {
+		return fail(err)
+	}
 	if err := source.ValidateForDeployment(); err != nil {
 		return fail(err)
 	}

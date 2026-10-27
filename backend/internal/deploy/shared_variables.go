@@ -64,15 +64,15 @@ func SharedReference(projectID int64, name string) string {
 
 // parseStoredReference reads a stored variable value as a typed reference
 // under its value mode. A value saved before modes were recorded is inferred
-// from its shape, but only in the kinds that existed then: shared kinds
-// arrived later, so such a value naming one was always the literal text it
-// reads as, and still is.
+// from its shape, but only in the kinds that existed then: shared and store
+// kinds arrived later, so such a value naming one was always the literal text
+// it reads as, and still is.
 func parseStoredReference(value, mode string) (VariableReference, bool) {
 	if mode == "literal" {
 		return VariableReference{}, false
 	}
 	reference, err := ParseVariableReference(value)
-	if err != nil || (mode != "reference" && sharedReferenceKind(reference.Kind)) {
+	if err != nil || (mode != "reference" && (sharedReferenceKind(reference.Kind) || reference.Kind == StoreReferenceKind)) {
 		return VariableReference{}, false
 	}
 	return reference, true
@@ -480,7 +480,8 @@ func (s *PlanningStore) sharedReferenceProblem(ctx context.Context, projectID in
 // checkDraftSharedReferences holds a new project's references to the same
 // rule a saved variable is: a server variable must exist, and a project one
 // cannot yet, because the project it would belong to is the one being
-// created. A value staged in the wizard replaces the reference, so only
+// created; a store reference names a store that exists, from a secret
+// variable. A value staged in the wizard replaces the reference, so only
 // references that will be saved are checked.
 func (s *PlanningStore) checkDraftSharedReferences(ctx context.Context, draft *Draft) error {
 	if draft.Data.Configuration == nil {
@@ -491,7 +492,21 @@ func (s *PlanningStore) checkDraftSharedReferences(ctx context.Context, draft *D
 			continue
 		}
 		reference, err := ParseVariableReference(variable.Reference)
-		if err != nil || !sharedReferenceKind(reference.Kind) {
+		if err != nil {
+			continue
+		}
+		if reference.Kind == StoreReferenceKind {
+			// A new project's environment is production, never a preview.
+			problem, err := s.storeReferenceProblem(ctx, false, variable.Name, variable.Sensitivity, reference)
+			if err != nil {
+				return err
+			}
+			if problem != "" {
+				return fmt.Errorf("%w: %w", ErrInvalidPlan, invalidField(variable.Name, "%s", problem))
+			}
+			continue
+		}
+		if !sharedReferenceKind(reference.Kind) {
 			continue
 		}
 		if reference.Kind == SharedScopeProject {
