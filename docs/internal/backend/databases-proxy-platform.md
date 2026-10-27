@@ -3936,7 +3936,8 @@ containers/volumes/networks.
   location that returns 503 with the maintenance page as its own `error_page`, so the server's
   `error_page 503` stays the site's 503 page whichever way the file has it. nginx tests the file on every
   request, so turning it on or off is the file (`SetDeploymentMaintenance`) and needs no reload. The
-  parser reads the switch back with `On` false (the file decides), `VHost.maintenance` reads the file,
+  parser reads the switch back with `On` false (the file decides), `VHost.maintenance` reads the file
+  (a Docker Caddy route's card reads its file inside the ingress the same way),
   and the access explainer takes no maintenance layer while the file is absent and the site's own
   judgement, owned by the switch, while it is there. `ReadDeploymentPage`/`WriteDeploymentPage` keep a
   deployment's pages the same way under its route's name, or in the Docker Caddy ingress

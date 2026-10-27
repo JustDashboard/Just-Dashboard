@@ -263,6 +263,18 @@ func TestLiveDockerCaddyServesMaintenanceAndErrorPages(t *testing.T) {
 	if response.StatusCode != 503 || response.Header.Get("Retry-After") != "120" || body != maintenancePage {
 		t.Fatalf("a visitor in maintenance = %d %q %q", response.StatusCode, response.Header.Get("Retry-After"), body)
 	}
+	// The Proxy page marks the route by its switch.
+	inventory, err := edge.vhosts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked := false
+	for _, site := range inventory {
+		marked = marked || (site.Name == route.Name && site.Maintenance)
+	}
+	if !marked {
+		t.Fatalf("the inventory does not mark the route in maintenance: %+v", inventory)
+	}
 	switchTo(false)
 	if response, body := get("from this host", "/"); response.StatusCode != 200 || !strings.HasPrefix(body, "application answer") {
 		t.Fatalf("after maintenance = %d %q", response.StatusCode, body)
