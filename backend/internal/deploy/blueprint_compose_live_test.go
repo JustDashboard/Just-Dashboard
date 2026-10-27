@@ -67,11 +67,16 @@ func TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks(t *testing.T) {
 			if err := writeComposeDocuments(root, source.ComposeFiles); err != nil {
 				t.Fatal(err)
 			}
+			cached := map[string]bool{}
 			for _, service := range definition.Services {
-				liveComposeTemplateImage(t, ctx, service.Image.Reference)
+				_, err := liveDockerOutput(ctx, "image", "inspect", service.Image.Reference)
+				cached[service.Image.Reference] = err == nil
 			}
 			built, err := builder.Build(ctx, root, fmt.Sprintf("jd-live-template-%d:release", stamp),
 				plan.Configuration.Build, PreparedBuild{}, nil, nil, "", plan.Detection.Source, plan.Detection.Compose, nil)
+			if built.Compose != nil {
+				liveComposeTemplateImages(t, built.Compose, cached)
+			}
 			if err != nil {
 				t.Fatalf("resolve and pull the stack's images: %v", err)
 			}
@@ -248,31 +253,24 @@ func liveComposeTemplateHealth(ctx context.Context, project string, definition *
 	}
 }
 
-// liveComposeTemplateImage removes a service image after the test when the
-// sweep was the one to pull it; a full sweep pulls gigabytes.
-func liveComposeTemplateImage(t *testing.T, ctx context.Context, reference string) {
+// liveComposeTemplateImages removes, after the test, the exact images the
+// sweep pulled for a stack — each by the digest it was pulled at — and only
+// those whose tag was not already on the host. A full sweep pulls gigabytes,
+// and an image somebody else had cached is not this test's to delete.
+func liveComposeTemplateImages(t *testing.T, resolved *ResolvedComposeSnapshot, cached map[string]bool) {
 	t.Helper()
-	if _, err := liveDockerOutput(ctx, "image", "inspect", reference); err == nil {
-		return
-	}
-	repository := reference
-	if at := strings.LastIndex(repository, ":"); at > strings.LastIndex(repository, "/") {
-		repository = repository[:at]
-	}
-	t.Cleanup(func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		raw, err := liveDockerOutput(cleanup, "image", "ls", "--digests", "--format", "{{.Repository}}@{{.Digest}}", repository)
-		if err != nil {
-			return
+	for _, service := range resolved.Services {
+		reference := service.Plan.Image
+		if cached[reference] || service.Source != "pull" || !contentDigestRE.MatchString(service.Digest) {
+			continue
 		}
-		for _, image := range strings.Fields(string(raw)) {
-			if !strings.HasSuffix(image, "@<none>") {
-				_, _ = liveDockerOutput(cleanup, "image", "rm", "--force", image)
-			}
-		}
-		_, _ = liveDockerOutput(cleanup, "image", "rm", "--force", reference)
-	})
+		pinned := service.Reference + "@" + service.Digest
+		t.Cleanup(func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			_, _ = liveDockerOutput(cleanup, "image", "rm", "--force", pinned)
+		})
+	}
 }
 
 func liveComposeTemplateLogs(ctx context.Context, project string) string {
