@@ -71,7 +71,7 @@ func TestNamedIngressSkipsOnlyThePublicPorts(t *testing.T) {
 }
 
 func TestDockerCaddyRouteRejectsInjectionAndHostPathTraversal(t *testing.T) {
-	for _, domain := range []string{"app.test { respond bad }", "app.test\nadmin off", "*.example.test"} {
+	for _, domain := range []string{"app.test { respond bad }", "app.test\nadmin off"} {
 		if _, err := renderDockerCaddyRoute(DeploymentRoute{Domains: []string{domain}, TLS: true}, "http://127.0.0.1:8080"); err == nil {
 			t.Fatalf("accepted domain %q", domain)
 		}
@@ -334,7 +334,7 @@ func TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute(t *testing.
 		time.Sleep(100 * time.Millisecond)
 	}
 	repairs := 0
-	if err := edge.reconcile(ctx, func(name string, success bool) {
+	if _, err := edge.reconcile(ctx, func(name string, success bool) {
 		if name != route.Name || !success {
 			t.Fatalf("unexpected repair %s %v", name, success)
 		}
@@ -349,7 +349,7 @@ func TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute(t *testing.
 	if err != nil || status != 200 || !strings.Contains(body, "Welcome to nginx") {
 		t.Fatalf("recreated ingress response=%d %q %v", status, body, err)
 	}
-	if err := edge.reconcile(ctx, func(string, bool) { t.Fatal("unchanged route was mutated") }); err != nil {
+	if _, err := edge.reconcile(ctx, func(string, bool) { t.Fatal("unchanged route was mutated") }); err != nil {
 		t.Fatal(err)
 	}
 	foreign := result.Snapshot

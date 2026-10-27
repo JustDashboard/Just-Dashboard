@@ -158,26 +158,54 @@ import under `/etc/ssl/just-dashboard/caddy-*` supplies release evidence. Traffi
 renewed certificate storage. These evidence copies refresh when issuing again; they are not a live
 certificate-expiry measurement. The TLS scanner reports what a visitor actually receives.
 
-Existing imported certificates use immutable, content-addressed private certificate/key copies in Caddy's
-volume, so rotation cannot overwrite the keypair needed by a previous route snapshot. Caddy orders and
-renews one certificate per name, so a deployment with several non-wildcard names — the www. that
-redirects to the bare domain — has each name prepared in turn, and the first name's copy is the
-release's evidence. Activation then accepts, on a Docker Caddy host only, one Caddy copy per name in
-place of one certificate covering them all (`caddyEvidenceForEach`): a Caddy route never reads that
-path, while nginx would serve it for every name. Multi-name existing imported pairs remain usable.
+Existing certbot lineages and imported certificates are served from immutable, content-addressed
+private certificate/key copies in Caddy's volume (`/config/just-dashboard/certs/<sha256>.crt` and
+`.key`, named after the certificate's bytes), so a rotated import or a renewed lineage cannot overwrite
+the keypair a previous route snapshot names. Caddy orders and renews one certificate per name, so a
+deployment with several non-wildcard names — the www. that redirects to the bare domain — has each
+name prepared in turn, and the first name's copy is the release's evidence. Activation then accepts, on
+a Docker Caddy host only, one Caddy copy per name in place of one certificate covering them all
+(`caddyEvidenceForEach`): a Caddy route never reads that path, while nginx would serve it for every
+name. Multi-name existing imported pairs remain usable.
 
-A wildcard plan name is refused on this ingress before anything starts, with a covering certificate or
-without one (`certificate_wildcard_unavailable`, `wildcardCaddyRefusal`). Caddy would have to answer the
-DNS challenge itself, which it can only when it is built with that DNS provider's module —
-`caddy:2-alpine` (2.11.7 lists `tls.issuance.acme` and no `dns.providers.*`) has none — and given the
-provider's token, which the dashboard keeps for certbot and does not hand to another program; and the
-route renderer does not write wildcard site addresses either. The refusal says so and suggests naming
-each host, which Caddy certifies one by one. A plain name under a wildcard certbot already holds (a
-preview under `*.preview.example.com` issued on the Certificates page) is served as any other existing
-pair is: from an immutable copy taken at activation, which certbot's later renewals of the lineage do not
-reach until the next activation. Serving wildcards here would take an operator decision: a Caddy image
-built with the provider's module (`xcaddy build --with github.com/caddy-dns/<provider>`) plus a way to
-hand it the token, or refreshing the copies when certbot renews.
+### Wildcards
+
+A wildcard plan name is served on this ingress exactly as on nginx. The ingress image is the floating
+`caddy:2-alpine` tag (2.11.7 at the time of writing), which lists `tls.issuance.acme` and no
+`dns.providers.*` module, so Caddy itself cannot answer a DNS challenge; and the provider's token is
+kept for certbot and not handed to another program. So nothing asks Caddy to: the run proves the
+wildcard — and the zone's apex when the plan has it — through certbot over DNS-01 with the credentials
+saved on the Certificates page (`deployment_certificate_dns.go`, the same path nginx hosts take), the
+lineage is copied into Caddy's volume at activation, and the route is a `*.zone` site (plus the apex)
+with an explicit `tls <copy.crt> <copy.key>`, which keeps Caddy's automatic HTTPS from ordering for it.
+A wildcard route without such a certificate is refused by the renderer rather than left for Caddy to
+fail at. A name under the wildcard — a preview — reuses the lineage (`ResolveDeploymentCertificate`
+finds it) and gets a site of its own beside the wildcard's: a site claims the name it is written for,
+not the names under its wildcard (`domainClaimed`), since Caddy answers from its most specific site as
+nginx does from an exact `server_name`. Preflight and the Domains sheet ask the same question they ask
+on nginx — which saved provider proves it, `certificate_automatic` naming it, or
+`certificate_wildcard_unavailable` with where to save one — and no longer refuse for the ingress.
+
+### Renewal
+
+A route that serves a copy records where the copy came from, as a metadata line after the target's
+(`# Just Dashboard certificate: {"certPath":…,"keyPath":…}`, the lineage's `live/` paths or the
+import's). certbot renewing the lineage changes nothing Caddy reads, so the dashboard moves the routes
+on (`docker_caddy_copies.go`): the renewed pair is copied under its own hash, every `tls` line of the
+route and its redirecting names is rewritten to it, and Caddy is reloaded — a graceful reload keeps the
+listener and finishes requests in flight. Copies stay content-addressed rather than being replaced in
+place for two reasons: a snapshot taken before the renewal restores exactly the bytes it names, and a
+changed path is a changed configuration, which `caddy reload` applies, while a reload of an unchanged
+Caddyfile is a no-op that would have left the old certificate loaded. The dashboard's own renewal and
+issuance jobs refresh at once after certbot has run (`RefreshIngressCertificates`, reported in the job
+beside the nginx reload; an ingress that cannot be inspected is a status line, a refresh the ingress
+refused fails the job). The lifecycle worker's 30-second pass does the same for what certbot's timer
+renewed, so no deploy hook has to reach back into the dashboard, and the same pass records the source
+for a route written before this existed — found by hashing the host's lineages, their archived
+generations and the imports against the copy — so an upgrade turns refreshing on for every existing
+route within a tick. A copy no route names any more is removed once it is older than an activation
+could still be holding a snapshot of (an hour). A rollback does not depend on any of this: a retained
+release's route is rendered again from the lineage's current files at activation.
 
 The application remains published on loopback. Proxy resolves that publication to a running Docker
 container and an internal network address, then connects Caddy to that network. Managed route comments
@@ -226,7 +254,21 @@ route is written again by the next release, an address let past reaches the appl
 visitor from another container on the network gets the 503, the application's own 404 gets the route's
 page, and with the application stopped Caddy's 502 gets the page the operator wrote.
 `TestLiveDeploymentRouteMaintenanceOnNginx` checks the same on the host's real nginx without Docker,
-the ACME challenge served through maintenance included. The deployment C5 live gate and
+the ACME challenge served through maintenance included.
+`JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesAWildcardProvedOverDNS01 -count=1 -v`
+is the wildcard journey on this ingress against a Pebble that really validates DNS-01 in a BIND
+(`proxysvc/acmetest`; it needs certbot's `dns-rfc2136` plugin, as the nginx one does): the run proves
+`*.preview.jd-live.test` and the apex through certbot, a real `caddy:2-alpine` used by name serves both
+and a preview's own route beside them with the lineage's serial, chaining to that Pebble's root, with
+nothing ordered into Caddy's own storage; then `certbot renew --force-renewal` and
+`RefreshIngressCertificates` move both routes to the renewed serial, prune the old copy, and leave each
+route what activation would write.
+`JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyRefreshesRenewedCertificateCopies -count=1 -v`
+is the renewal refresh on a real Caddy without an authority: a lineage laid out as certbot keeps it is
+renewed under the route, the lifecycle pass moves the route on and Caddy serves the new serial, a route
+written without a recorded source is found through the archive and refreshed the same way, a snapshot
+restored after a renewal still finds its copy within the grace and is moved on by the next pass, and
+only the copies nothing names are removed. The deployment C5 live gate and
 deployment/API/Proxy race tests remain required. The browser regression covers automatic Caddy HTTPS without a Certbot warning.
 
 References: [Caddy commands](https://caddyserver.com/docs/command-line),
