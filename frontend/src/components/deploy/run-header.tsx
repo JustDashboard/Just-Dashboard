@@ -16,7 +16,6 @@ import { AuthorMark, BranchChip, ShortSha } from "@/components/git/marks"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { RunActorMark } from "@/components/deploy/run-marks"
 import {
-  RunStatus,
   formatDuration,
   isActiveRun,
   operationLabel,
@@ -24,12 +23,14 @@ import {
   runDurationSeconds,
   runRef,
   runRevision,
+  RunStatus,
   runSubject,
   runTriggerLine,
   shortIdentity,
   shortRevision,
   sourceProduct,
   stepName,
+  stepOperation,
 } from "@/components/deploy/vocabulary"
 
 /**
@@ -136,7 +137,7 @@ export function RunHeader({
           <RunStatus state={run.state} operation={run.operation} live />
           {working && (
             <TextShimmer className="font-medium">
-              {stepName(working.key, run.operation)}
+              {stepName(working.key, stepOperation(run))}
             </TextShimmer>
           )}
           <span className="inline-flex items-center gap-1.5 text-muted-foreground">

@@ -864,6 +864,67 @@ only renderer/executor/validation authority for their feature.
   stop-first failure restarts the predecessor from its exact immutable runtime spec. Cancellation between
   persisted steps removes an uncommitted candidate, or finishes predecessor retirement after a committed
   cutover, and records sequenced cleanup evidence.
+- Metric-gated rollback keeps the release a blue/green cutover replaced **warm** instead of removing
+  it (`deploy/rollback_watch.go`, `rollback_executor.go`, `rollback_watcher.go`). `retire_previous`
+  drains it as before, then — when the environment's terms allow, the environment is not a preview,
+  both releases are single containers and the host still has `max(256 MB, a tenth of its memory)`
+  available — records a window (`deploy_rollback_watches`, state `watching`) and the predecessor's
+  runtime `warm` in one leased transaction and only then `docker pause`s it. Paused rather than running:
+  the old release must not keep running schedulers, consumers or writes against a schema the new release
+  may have migrated, and a frozen process costs memory and nothing else; Docker counts it as not
+  running, so "exactly one release running" still holds. The step's evidence says `warm.kept` with the
+  window, or why not (`warm.reason`). A unique partial index allows one open window per environment, so
+  at most one release is ever warm. Terms are per environment (`deploy_rollback_policies`; no row is
+  `DefaultRollbackPolicy`: kept warm 10 minutes, automatic, 5 points over the old 5xx share or 2× its
+  p95 and at least 250 ms slower, over at least 20 requests) and are copied into the window when it
+  opens, so an edit applies from the next cutover. **On by default**: blue/green already runs both
+  containers at once for every cutover, so the peak memory is unchanged and only its duration grows,
+  the floor gives the memory back on a tight host (also re-checked on every pass of the window), and a
+  new run ends the window before it builds.
+  The watcher (`RollbackWatcher`, started after the engine, every 10 s) reads each open window: it
+  re-pauses a warm container a Docker restart brought back running, closes the window as `warm_lost`
+  when the container is gone and as `memory` below the floor, takes the warm release's baseline once
+  from the request record (its own traffic over the 30 minutes before the cutover, or since it went
+  live if later) and the watched release's reading since the cutover, and judges them with
+  `JudgeRollback`: nothing is decided over fewer than `minRequests` requests or fewer than five 5xx
+  answers; a baseline under `minRequests` is not trusted (the 5xx rule judges against a clean share, the
+  p95 rule does not judge); a record without durations (host nginx) never judges p95; a release with no
+  domain is never judged (`no_route`) — it is still kept warm for the button. A tripped verdict asks
+  for an instant rollback through the API's own enqueue (`enqueueAutomaticRollback`, trigger
+  `auto_rollback`, idempotency key `rollback-watch-<id>-<attempt>`, at most two automatic attempts per
+  window) and audits `deploy.release.auto_rollback` as `system`. A window that passes clean is closed
+  (`window_passed`): the warm container is resumed so it receives its stop signal, stopped and removed,
+  its runtime `retired` and its release `retired_at` — exactly the retirement it would have had — and
+  `deploy.release.warm_retired` is audited. Closing is a compare-and-set `watching → closing`, the same
+  row an instant rollback claims `watching → rolling_back`, so exactly one of them wins; a `closing`
+  window whose container could not be removed yet is retried on every pass.
+- An **instant rollback** is a `rollback` run with `{"instant":true,"watchId":…}` in its metadata and
+  six steps (`InstantRollbackSteps`): `start_candidate` claims the window under the run's lease and
+  resumes the warm container (the same container id, never recreated), `verify_readiness` runs the
+  warm release's own readiness checks against it, `activate` applies the warm release's own frozen
+  route (domains, redirects, headers, allow list, sign-in), runs its public-route checks, verifies the
+  route and moves the pointer in one transaction — the warm release `live` again with
+  `activated_at` now, the watched release `retained` with `rolled_back_at` and `rollback_reason` —,
+  `retire_previous` drains and removes the rolled-back release and closes the window `rolled_back`,
+  then `record_release` and `notify`. It takes a light slot at priority 1000 through the environment's
+  queue like every run, so nothing else is cutting over at the same moment; no release row is created,
+  because the release serving is the warm one with its own frozen configuration, and the release
+  history says so. A warm container that will not resume or fails its readiness check is removed and
+  the window closed `rollback_failed`; a refused route or commit restores the route, pauses the warm
+  container again and hands the window back. Every other run of the environment (except a scheduled
+  marker) ends an open window at its first step (`superseded`), so a deploy started during a window
+  never runs beside two warm releases and an instant rollback queued behind it finds the window closed.
+  Restart recovery: a window is only rows, so a restarted process's watcher resumes it where it was; an
+  instant rollback the engine ended as `restart_evidence_missing` is settled from the live pointer — if
+  it moved, the rolled-back release is removed and the window closed; if not, the route is put back on
+  the watched release, the warm container paused again and the window handed back to `watching`.
+  Cancellation does the same. `GET …/environments/{env}/rollback-watch` reads the terms and the latest
+  window; `PUT …/rollback-policy` (system admin, session) saves terms, audited
+  `deploy.rollback_policy.update`; `POST …/rollback-watch/rollback` is the instant rollback by hand
+  (destructive, ordinary confirmation, `409 no_warm_release` without a watching window, audited
+  `deploy.release.instant_rollback`); `POST …/rollback-watch/keep` (service control) ends the window now
+  and removes the warm container, audited `deploy.release.keep`. The live proof is
+  `TestLiveMetricGatedRollbackSwitchesBackToTheWarmRelease` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
 - A failed build names its cause instead of `internal_error` and exec's `exit status 1`. `dockerx`
   reads buildx's plain progress as it streams (over `os.Pipe`s read to EOF, because a `StdoutPipe` is
   closed by `Wait` and dropped BuildKit's closing lines; once buildx has exited a read waits at most

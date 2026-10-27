@@ -103,6 +103,9 @@ const (
 	TriggerPreview     TriggerKind = "preview"
 	TriggerRollback    TriggerKind = "rollback"
 	TriggerMigration   TriggerKind = "migration"
+	// TriggerAutoRollback is the rollback watch switching traffic back to a
+	// warm release on its own, from a reading of the request record.
+	TriggerAutoRollback TriggerKind = "auto_rollback"
 )
 
 type RunState string
@@ -362,7 +365,7 @@ func validTrigger(value TriggerKind) bool {
 	switch value {
 	case TriggerManual, TriggerGitPush, TriggerLegacyHook, TriggerGenericHook, TriggerGitHub,
 		TriggerGitLab, TriggerBitbucket, TriggerGitea, TriggerAPI, TriggerSchedule,
-		TriggerPreview, TriggerRollback, TriggerMigration:
+		TriggerPreview, TriggerRollback, TriggerMigration, TriggerAutoRollback:
 		return true
 	default:
 		return false

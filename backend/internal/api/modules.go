@@ -108,11 +108,14 @@ type moduleSet struct {
 	// and hostAlerts for the machine's own: CPU, memory, filesystems,
 	// containers and every backup job.
 	trafficAlerts *deploy.TrafficAlertEvaluator
-	dbAlerts      *dbAlerts
-	hostAlerts    *hostAlerts
-	dbs           *dbx.Manager
-	linuxUsers    *linuxusers.Service
-	netsec        *netsec.Service
+	// rollbackWatcher reads every open warm-release window and rolls a
+	// release back, or removes the warm one, when the window says so.
+	rollbackWatcher *deploy.RollbackWatcher
+	dbAlerts        *dbAlerts
+	hostAlerts      *hostAlerts
+	dbs             *dbx.Manager
+	linuxUsers      *linuxusers.Service
+	netsec          *netsec.Service
 	// blocks records the remote addresses blocked from the connection table
 	// with why and until when, and lifts the ones that end.
 	blocks *netsec.Blocks
@@ -263,6 +266,9 @@ func (s *Server) initModules() {
 	s.modules.certKeeper = selfcfg.NewCertKeeper(
 		s.Cfg.Site, s.Cfg.TLSMode, s.Cfg.DataDir, s.restartProxy, s.Log)
 	s.modules.proxy = proxysvc.NewWithDockerIngress(s.Cfg.NginxDir, s.Cfg.CaddyFile)
+	if s.Cfg.IngressContainer != "" {
+		s.modules.proxy = proxysvc.NewWithIngressContainer(s.Cfg.NginxDir, s.Cfg.CaddyFile, s.Cfg.IngressContainer)
+	}
 	s.modules.requests = accesslog.NewStore(s.openRequestRecord)
 	s.modules.logDrains = logdrain.NewStore(s.Store, s.Sealer)
 	s.modules.dbs = dbx.NewManager()
@@ -411,6 +417,10 @@ func (s *Server) initModules() {
 			return s.modules.deployAutomation.DeliverNotification(ctx, nil, channelID, envelope)
 		},
 		s.trafficAlertNames, s.Log)
+	// The windows read the same record the traffic alerts do, and ask for
+	// a rollback through the same enqueue an operator's press takes.
+	s.modules.rollbackWatcher = deploy.NewRollbackWatcher(normalizedExecutor, s.modules.requests,
+		s.enqueueAutomaticRollback, s.auditRollbackWatch, s.Log)
 	s.modules.dbAlerts = s.newDBAlerts()
 	s.modules.hostAlerts = s.newHostAlerts()
 	s.modules.deployGit = deploy.NewGitWatcher(s.modules.deployRuns, s.modules.deploySources, s.dispatchGitDeployment)

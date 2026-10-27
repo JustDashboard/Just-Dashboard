@@ -15,6 +15,15 @@ also provisions missing Certbot dependencies for the existing host nginx/standal
 The dashboard's own private Caddy, network allowlist, authentication and private backend/frontend
 publications are unchanged. The new public ingress serves deployment hostnames only.
 
+A host whose Caddy publishes 80 and 443 on one address rather than every address, or an isolated
+acceptance stack whose ingress is published on loopback, names the container instead:
+`JD_INGRESS_CONTAINER` (`proxysvc.NewWithIngressContainer`). That container — inspected by name alone,
+never as part of a listing a vanished neighbour can fail — must still be a running
+`caddy run --config /etc/caddy/Caddyfile` with a bind-mounted Caddyfile and writable `/config` and
+`/data`; only the public ports are not asked of it. A named ingress is the only one used: nothing is
+provisioned beside it and nothing falls back to host nginx while it is missing, so a deployment that
+needs a route fails rather than writing one somewhere else.
+
 ## Ownership and persistence
 
 - Discovery requires one running Caddy with wildcard public TCP 80 and 443 mappings, a bind-mounted

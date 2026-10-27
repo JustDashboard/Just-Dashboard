@@ -437,6 +437,17 @@ to the contribution terms above, including the additional licence grant to the p
   iteration, never for an acceptance run, and `JD_CUTOVER_EVIDENCE` to retain the measured counts.
   The second kills real containers in the blue/green window and at a live release, and requires that
   exactly one release is running afterwards.
+- Changes to the warm-release window, instant rollback or the rollback watcher (`deploy/rollback_*.go`,
+  `api/handlers_deploy_rollback_watch.go`) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveMetricGatedRollbackSwitchesBackToTheWarmRelease -count=1 -v`.
+  It starts a Caddy ingress of its own published on a loopback port and named to the server
+  (`JD_INGRESS_CONTAINER`, so nothing binds 80 or 443), a webhook receiver, and a real engine and
+  watcher; deploys a healthy release, then one that passes readiness and answers 500 to everything
+  else, restarts the dashboard in the middle of that release's window, drives requests through the
+  ingress, and requires the automatic switch back to the first release's same, paused-then-resumed
+  container, the `release.rolled_back` delivery and its audit; then deploys a healthy third release and
+  requires the warm container removed when its one-minute window passes. It numbers its environment
+  far from any other and removes its containers.
 - Changes to the engine, its reconciler or run persistence also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun -count=1 -v`.
   It builds `internal/deploy/testdata/engine-host`, SIGKILLs that real second process inside every

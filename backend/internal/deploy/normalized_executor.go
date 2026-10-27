@@ -66,6 +66,10 @@ type NormalizedStepExecutor struct {
 	// reachability check after a publish, replaced in tests.
 	tailnet      TailnetPublisher
 	tailnetProbe func(context.Context, string) error
+
+	// hostMemory reads available and total memory in bytes, for the warm
+	// release's memory floor; nil reads /proc/meminfo.
+	hostMemory func() (int64, int64)
 }
 
 func (e *NormalizedStepExecutor) WithNotifications(store *AutomationStore) *NormalizedStepExecutor {
@@ -188,6 +192,10 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 			return normalizedStepFailure(ErrPreviewApproval)
 		}
 	}
+	if request, ok := instantRollbackOf(execution.Run); ok {
+		return e.executeInstantRollback(ctx, execution, request)
+	}
+	e.endWarmWindow(ctx, execution)
 	switch execution.Step.Key {
 	case StepResolveSource:
 		if err := validateImmutableExecutionSource(plan); err != nil {
@@ -238,6 +246,29 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 		return StepResult{
 			State: StepUnavailable, ErrorCode: "unsupported_runtime",
 			ErrorMessage: fmt.Sprintf("normalized runtime step %s is not implemented yet", execution.Step.Key),
+		}
+	}
+}
+
+// executeInstantRollback runs the six steps an instant rollback takes.
+func (e *NormalizedStepExecutor) executeInstantRollback(ctx context.Context, execution StepExecution, request instantRollback) StepResult {
+	switch execution.Step.Key {
+	case StepStartCandidate:
+		return e.resumeWarmRelease(ctx, execution, request)
+	case StepVerifyReadiness:
+		return e.verifyWarmRelease(ctx, execution, request)
+	case StepActivate:
+		return e.activateWarmRelease(ctx, execution, request)
+	case StepRetirePrevious:
+		return e.retireRolledBackRelease(ctx, execution, request)
+	case StepRecordRelease:
+		return e.recordRelease(ctx, execution)
+	case StepNotify:
+		return e.notify(ctx, execution)
+	default:
+		return StepResult{
+			State: StepUnavailable, ErrorCode: "unsupported_runtime",
+			ErrorMessage: fmt.Sprintf("an instant rollback has no step %s", execution.Step.Key),
 		}
 	}
 }
@@ -303,8 +334,10 @@ func (e *NormalizedStepExecutor) notify(ctx context.Context, execution StepExecu
 	// through the same channels as successful ones. This step records which
 	// channels will hear about the outcome and keeps the scheduled-chain gate.
 	selected := 0
+	outcome := execution.Run
+	outcome.State = RunState(terminalState)
 	for _, channel := range channels {
-		if channel.Enabled && notificationEventSelected(channel.Events, notificationEventForState(RunState(terminalState))) {
+		if channel.Enabled && notificationEventSelected(channel.Events, notificationEventForRun(outcome)) {
 			selected++
 		}
 	}
@@ -330,6 +363,9 @@ func notificationEventSelected(events []string, want string) bool {
 			return true
 		}
 		if event == NotificationEventFinished && want != NotificationEventStarted {
+			return true
+		}
+		if event == NotificationEventFailed && want == NotificationEventRolledBack {
 			return true
 		}
 	}

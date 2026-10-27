@@ -50,6 +50,11 @@ type Release struct {
 	ActivatedAt          *time.Time      `json:"activatedAt,omitempty"`
 	RetiredAt            *time.Time      `json:"retiredAt,omitempty"`
 	Pinned               bool            `json:"pinned"`
+	// RolledBackAt and RollbackReason are set on a release an instant
+	// rollback took traffic away from: the reading that decided it, or who
+	// pressed the button. The release itself stays retained and deployable.
+	RolledBackAt   *time.Time `json:"rolledBackAt,omitempty"`
+	RollbackReason string     `json:"rollbackReason,omitempty"`
 }
 
 type ReleaseArtifact struct {
@@ -812,23 +817,24 @@ id, project_id, environment_id, release_number, run_id, predecessor_release_id,
 state, plan_revision, source_id, build_plan_id, runtime_plan_id, source_revision,
 source_identity_json, image_digest, config_digest, variables_digest, strategy, expected_downtime,
 provenance_json, blueprint_id, blueprint_version, created_at, activated_at,
-retired_at, pinned`
+retired_at, pinned, rolled_back_at, rollback_reason`
 
 func scanRelease(row scanner) (*Release, error) {
 	var release Release
 	var sourceIdentity, provenance string
-	var createdAt, activatedAt, retiredAt int64
+	var createdAt, activatedAt, retiredAt, rolledBackAt int64
 	var pinned, expectedDowntime int
 	if err := row.Scan(&release.ID, &release.ProjectID, &release.EnvironmentID, &release.Number,
 		&release.RunID, &release.PredecessorReleaseID, &release.State, &release.PlanRevision,
 		&release.SourceID, &release.BuildPlanID, &release.RuntimePlanID, &release.SourceRevision,
 		&sourceIdentity, &release.ImageDigest, &release.ConfigDigest, &release.VariablesDigest,
 		&release.Strategy, &expectedDowntime, &provenance, &release.BlueprintID, &release.BlueprintVersion,
-		&createdAt, &activatedAt, &retiredAt, &pinned); err != nil {
+		&createdAt, &activatedAt, &retiredAt, &pinned, &rolledBackAt, &release.RollbackReason); err != nil {
 		return nil, err
 	}
 	release.SourceIdentity, release.Provenance = json.RawMessage(sourceIdentity), json.RawMessage(provenance)
 	release.CreatedAt, release.ActivatedAt, release.RetiredAt = unixTime(createdAt), unixTimePtr(activatedAt), unixTimePtr(retiredAt)
+	release.RolledBackAt = unixTimePtr(rolledBackAt)
 	release.Pinned = pinned != 0
 	release.ExpectedDowntime = expectedDowntime != 0
 	return &release, nil

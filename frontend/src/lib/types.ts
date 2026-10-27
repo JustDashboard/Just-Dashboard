@@ -3928,6 +3928,81 @@ export type DeploymentRelease = {
   activatedAt?: string
   retiredAt?: string
   pinned: boolean
+  /** Set on a release an instant rollback took traffic away from. */
+  rolledBackAt?: string
+  rollbackReason?: string
+}
+
+/**
+ * An environment's terms for keeping the previous release warm after a
+ * blue/green cutover (`deploy/rollback_watch.go`).
+ */
+export type RollbackPolicy = {
+  keepWarm: boolean
+  windowSeconds: number
+  automatic: boolean
+  /** Percentage points over the previous release's 5xx share. */
+  errorRateMargin: number
+  /** Multiple of the previous release's p95. */
+  latencyFactor: number
+  minRequests: number
+  updatedBy?: string
+  updatedAt?: string
+}
+
+export type RollbackReading = {
+  requests: number
+  failures: number
+  /** A share, 0–1. */
+  errorRate: number
+  p95?: number
+  from: string
+  until: string
+}
+
+export type RollbackVerdictCode =
+  "no_route" | "no_record" | "not_enough_requests" | "within_baseline" | "error_rate" | "latency"
+
+export type RollbackVerdict = {
+  code: RollbackVerdictCode
+  judged: boolean
+  tripped: boolean
+  reason: string
+  latencyJudged: boolean
+}
+
+export type RollbackWatchState = "watching" | "rolling_back" | "rolled_back" | "closing" | "closed"
+
+export type RollbackWatch = {
+  id: number
+  projectId: number
+  environmentId: number
+  runId: number
+  releaseId: number
+  warmReleaseId: number
+  warmRuntimeId: string
+  state: RollbackWatchState
+  policy: RollbackPolicy
+  cutoverAt: string
+  expiresAt: string
+  baseline?: RollbackReading
+  observed?: RollbackReading
+  verdict?: RollbackVerdict
+  checkedAt?: string
+  rollbackRunId?: number
+  attempts: number
+  endReason?: string
+  endMessage?: string
+  endedAt?: string
+  createdAt: string
+  releaseNumber: number
+  warmReleaseNumber: number
+}
+
+export type RollbackWatchResponse = {
+  policy: RollbackPolicy
+  watch: RollbackWatch | null
+  preview: boolean
 }
 
 export type DeploymentTrigger = {
