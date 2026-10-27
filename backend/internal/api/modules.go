@@ -41,6 +41,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/remotedesk"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/secretstore"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
@@ -102,6 +103,9 @@ type moduleSet struct {
 	// logDrainManager ships them, started with the server.
 	logDrains       *logdrain.Store
 	logDrainManager *logdrain.Manager
+	// secretStores are the connections to external secret managers that
+	// deployment variables reference.
+	secretStores *secretstore.Repository
 	// trafficAlerts watches the request record for the rules operators set,
 	// and tells the notification channels when one crosses its line;
 	// dbAlerts does the same for the databases' readings and their backups,
@@ -323,7 +327,10 @@ func (s *Server) initModules() {
 	s.modules.deployRuns = deploy.NewOrchestrationStore(s.Store)
 	s.modules.deployDatabases = &deploymentDatabaseNetworks{server: s}
 	s.modules.poolers = &poolerKeeper{server: s}
-	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots).WithDatabaseURLResolver(s.modules.deployDatabases.ResolveVariable)
+	s.modules.secretStores = secretstore.NewRepository(s.Store, s.Sealer)
+	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots).
+		WithDatabaseURLResolver(s.modules.deployDatabases.ResolveVariable).
+		WithSecretStores(s.modules.secretStores)
 	s.modules.githubApp = githubapp.New(githubapp.NewStore(s.Store.DB, s.Sealer), s.modules.deployPlanning)
 	s.modules.deployPlanning.WithInstallationTokens(s.modules.githubApp)
 	s.modules.deployAutomation = deploy.NewAutomationStore(s.Store, s.Sealer)
@@ -400,6 +407,9 @@ func (s *Server) initModules() {
 		notifications,
 		s.modules.commitStatuses,
 		deploy.NewPullRequestCommenter(s.modules.deployRuns, s.modules.githubApp, s.dashboardEndpoint, s.Log).WithForges(forges),
+		// What a run read from the secret stores is held for its own steps
+		// and dropped the moment it finishes.
+		s.modules.deployPlanning.SecretStoreRunObserver(),
 	)
 	s.modules.deploySchedule = deploy.NewAutomationScheduler(s.modules.deployAutomation, s.dispatchDeploymentSchedule).
 		WithSweep(notifications.RetryFailedDeliveries)

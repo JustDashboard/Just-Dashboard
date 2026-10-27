@@ -3799,6 +3799,64 @@ export type LogDrain = {
   }
 }
 
+/**
+ * A connection to an external secret manager that deployment variables read
+ * as `${{store.NAME/path#KEY}}`. Vault and OpenBao share the KV version 2
+ * API; Infisical signs in with a Universal Auth machine identity; Doppler
+ * with a service token.
+ */
+export type SecretStoreKind = "vault" | "openbao" | "infisical" | "doppler"
+
+export type SecretStoreSettings = {
+  /** Vault and OpenBao: where the KV version 2 engine is mounted ("secret"). */
+  mount?: string
+  namespace?: string
+  auth?: "token" | "approle"
+  authMount?: string
+  /** Infisical: the project id and environment slug a reference reads in. */
+  project?: string
+  environment?: string
+  /** A PEM certificate authority for a self-hosted store's TLS. */
+  caCert?: string
+}
+
+/** When something was tried against a store and what it answered. */
+export type SecretStoreOutcome = { at: string; ok: boolean; message: string }
+
+/** An environment variable that references a store. */
+export type SecretStoreUse = {
+  projectId: number
+  projectName: string
+  environmentId: number
+  environmentName: string
+  environmentKind: string
+  variable: string
+  /** The reference's target, `name/path#KEY`. */
+  reference: string
+}
+
+export type SecretStore = {
+  id: number
+  name: string
+  kind: SecretStoreKind
+  address: string
+  settings: SecretStoreSettings
+  /** The credentials that are set, by name; their values are sealed and never read back. */
+  credentialNames: string[]
+  /** A pull request preview's variables may read this store. */
+  allowPreviews: boolean
+  createdBy: string
+  updatedBy: string
+  createdAt: string
+  updatedAt: string
+  test?: SecretStoreOutcome
+  lastRead?: SecretStoreOutcome
+  usedBy: SecretStoreUse[]
+}
+
+/** What Test found: the store's own words, and a probe's version. */
+export type SecretStoreTest = { ok: boolean; message: string; version?: string }
+
 /** One page of a project's run history, newest first. */
 export type DeploymentRunsPage = {
   runs: DeploymentEngineRun[]

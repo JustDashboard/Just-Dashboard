@@ -100,6 +100,7 @@ free.
 - Push to deploy, plus pull-request previews only your tailnet can reach
 - Immutable releases, one-click rollback and health-gated cutover
 - Variables per environment, plus shared ones defined once for the server or a project
+- Variables read from HashiCorp Vault, OpenBao, Infisical or Doppler, fresh for each run
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
 - Build logs, runtime, console, request logs and traffic alerts per project
 - A failed run named from its own output, and on request explained by your own model, secrets masked

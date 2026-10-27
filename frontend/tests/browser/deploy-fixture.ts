@@ -2841,6 +2841,9 @@ export async function mockProject(
     // Shared variables are empty here; deploy-shared-variables.spec.ts
     // routes its own over these.
     else if (/^\/deploy\/(\d+\/)?shared-variables$/.test(path) && method === "GET") body = []
+    // No secret store is connected here; deploy-secret-stores.spec.ts routes
+    // its own over this.
+    else if (path === "/deploy/secret-stores" && method === "GET") body = []
     else {
       body = showcase && method === "GET" ? showcaseRead(path, url) : undefined
       if (body === undefined) {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/secretstore"
 )
 
 type DeploymentStepExecutor struct {
@@ -187,6 +188,9 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 		if !approved {
 			return normalizedStepFailure(ErrPreviewApproval)
 		}
+	}
+	if failure := e.readSecretStores(ctx, execution); failure != nil {
+		return *failure
 	}
 	switch execution.Step.Key {
 	case StepResolveSource:
@@ -910,7 +914,11 @@ func normalizedStepFailure(err error) StepResult {
 	var sourceFailure *SourceFailure
 	var buildFailure *dockerx.BuildError
 	var release toolchainVersionError
+	var storeFailure *secretstore.Failure
 	switch {
+	case errors.As(err, &storeFailure):
+		// The store's own answer, which never holds a value.
+		result.ErrorCode, result.ErrorMessage = "secret_store_unreadable", storeFailure.Error()
 	case errors.As(err, &sourceFailure):
 		result.ErrorCode, result.ErrorMessage = sourceFailure.Code, sourceFailure.Error()
 	case errors.Is(err, dockerx.ErrBuildTimeout):

@@ -63,6 +63,10 @@ type PlanningStore struct {
 	// installationTokens mints GitHub App credentials; nil until an App is
 	// connected.
 	installationTokens InstallationTokenMinter
+	// secretStores reads the values store references name; storeReads is
+	// what each run read, for the run's own later steps.
+	secretStores SecretStoreResolver
+	storeReads   storeReadCache
 }
 
 func (s *PlanningStore) WithDatabaseURLResolver(resolve func(context.Context, int64, int, string) (string, error)) *PlanningStore {
@@ -159,7 +163,14 @@ func (s *PlanningStore) OpenScopedVariables(
 		}
 		return nil, err
 	}
+	reads, err := s.readStores(ctx, 0, environmentID, all, false)
+	if err != nil {
+		return nil, err
+	}
 	return resolveScopedVariableValues(all, scope, func(reference VariableReference) (string, bool, error) {
+		if reference.Kind == StoreReferenceKind {
+			return storeValue(reads, reference)
+		}
 		return s.resolveExternalVariableReference(ctx, environmentID, revision, 0, reference)
 	})
 }
@@ -176,6 +187,25 @@ func (s *PlanningStore) OpenRunScopedVariables(
 	if scope != "build" && scope != "runtime" && scope != "release_task" {
 		return nil, fmt.Errorf("invalid deployment variable scope %q", scope)
 	}
+	all, planRevision, err := s.runVariableValues(ctx, runID, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	reads, err := s.readStores(ctx, runID, environmentID, all, false)
+	if err != nil {
+		return nil, err
+	}
+	return resolveScopedVariableValues(all, scope, func(reference VariableReference) (string, bool, error) {
+		if reference.Kind == StoreReferenceKind {
+			return storeValue(reads, reference)
+		}
+		return s.resolveExternalVariableReference(ctx, environmentID, planRevision, runID, reference)
+	})
+}
+
+// runVariableValues opens every variable revision a run's snapshot holds,
+// unresolved, with the plan revision the run deploys.
+func (s *PlanningStore) runVariableValues(ctx context.Context, runID, environmentID int64) ([]ScopedVariableValue, int, error) {
 	var snapshotEnvironmentID int64
 	var planRevision int
 	var expectedDigest string
@@ -185,12 +215,12 @@ func (s *PlanningStore) OpenRunScopedVariables(
 		  JOIN deploy_runs run ON run.id = snapshot.run_id
 		 WHERE snapshot.run_id = ?`, runID).Scan(&snapshotEnvironmentID, &expectedDigest, &planRevision); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("%w: run has no variable snapshot", ErrInvalidPlan)
+			return nil, 0, fmt.Errorf("%w: run has no variable snapshot", ErrInvalidPlan)
 		}
-		return nil, err
+		return nil, 0, err
 	}
 	if snapshotEnvironmentID != environmentID {
-		return nil, fmt.Errorf("%w: run variable snapshot belongs to another environment", ErrInvalidPlan)
+		return nil, 0, fmt.Errorf("%w: run variable snapshot belongs to another environment", ErrInvalidPlan)
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT v.key, v.sensitivity, v.scopes, v.value_enc, v.value_digest, v.value_mode
@@ -199,7 +229,7 @@ func (s *PlanningStore) OpenRunScopedVariables(
 		 WHERE rv.run_id = ? AND v.environment_id = ?
 		 ORDER BY rv.ordinal`, runID, environmentID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	all := []ScopedVariableValue{}
@@ -210,10 +240,10 @@ func (s *PlanningStore) OpenRunScopedVariables(
 		var value ScopedVariableValue
 		var scopes, sealed string
 		if err := rows.Scan(&value.Name, &value.Sensitivity, &scopes, &sealed, &value.ValueDigest, &value.ValueMode); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if seen[value.Name] || !contentDigestRE.MatchString(value.ValueDigest) {
-			return nil, fmt.Errorf("%w: run variable snapshot has invalid revision metadata", ErrInvalidPlan)
+			return nil, 0, fmt.Errorf("%w: run variable snapshot has invalid revision metadata", ErrInvalidPlan)
 		}
 		seen[value.Name] = true
 		value.Scopes = strings.Split(scopes, ",")
@@ -225,20 +255,18 @@ func (s *PlanningStore) OpenRunScopedVariables(
 		all = append(all, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if digestReleaseVariables(snapshot) != expectedDigest {
-		return nil, fmt.Errorf("%w: run variable snapshot digest is inconsistent", ErrInvalidPlan)
+		return nil, 0, fmt.Errorf("%w: run variable snapshot digest is inconsistent", ErrInvalidPlan)
 	}
 	for index := range all {
 		all[index].Value, err = s.sealer.Open(sealedValues[all[index].Name])
 		if err != nil {
-			return nil, fmt.Errorf("deployment variable %s cannot be decrypted", all[index].Name)
+			return nil, 0, fmt.Errorf("deployment variable %s cannot be decrypted", all[index].Name)
 		}
 	}
-	return resolveScopedVariableValues(all, scope, func(reference VariableReference) (string, bool, error) {
-		return s.resolveExternalVariableReference(ctx, environmentID, planRevision, runID, reference)
-	})
+	return all, planRevision, nil
 }
 
 func resolveScopedVariableValues(
@@ -349,6 +377,10 @@ func (s *PlanningStore) resolveExternalVariableReference(
 			return "", false, err
 		}
 		return s.sharedVariableValue(ctx, projectID, reference.Target)
+	case StoreReferenceKind:
+		// Read where the variables are opened, all of a run's at once; one
+		// reaching here was never read, and fails closed.
+		return "", false, fmt.Errorf("%w: %s was not read from its store", ErrInvalidVariable, reference.Target)
 	default:
 		return "", false, fmt.Errorf("%w: unsupported external reference kind", ErrInvalidVariable)
 	}

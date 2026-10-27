@@ -996,6 +996,17 @@ only renderer/executor/validation authority for their feature.
   answers `409 shared_variable_in_use` naming each reader while any active environment's variable reads it.
   Audited as `deploy.shared_variable.{create,update,reveal,delete}` with the scope and never the value. A
   project's shared variables go with the project when it is purged.
+- Store references (`deploy/secret_store_references.go`, connections in `internal/secretstore`, table
+  `deploy_secret_stores`) read a value from Vault, OpenBao, Infisical or Doppler as
+  `${{store.NAME/path#KEY}}` (`@N` pins a version). They resolve through the same graph, as secret
+  literals, and only from a secret variable. A run reads every store it references at its first step
+  (`resolve_source`, a rollback's `render_runtime`, a restart's `start_candidate`; never a stop's),
+  fresh, keeps the values in memory for its own later steps, and fails as `secret_store_unreadable` in the
+  store's words with nothing touched when a store refuses. The transcript and `secretStoreReads` in the
+  run's metadata record each reference's version, never its value. A release freezes the reference, so a
+  rollback re-reads the store and says when the version differs from the restored release's; a pinned
+  version rolls back exactly. A preview reads only a store that allows previews. Contract, routes and
+  audit: [`secret-stores.md`](secret-stores.md).
 - Domains, persistent storage, backup jobs and database entries remain resources of Proxy, Docker,
   Backups and Databases. Deployments store typed ownership links and use read-only owner observations for
   domain conflicts, DNS, existing certificate pairs, ports, public binds, firewall policy and dependency
