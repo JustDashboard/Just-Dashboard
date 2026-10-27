@@ -19,7 +19,8 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   `destructive`, `system.admin`, `metrics.read`, held by `admin`/`limited`/`readonly`. Gate with
   `httpx.RequireCapability` so adding a role later cannot silently widen an endpoint.
   `httpx.RequireSession` additionally blocks API tokens from human-only routes (password change,
-  minting tokens, account management).
+  minting tokens, account management). The one key it lets by is a deploy key that the deploy key
+  table admitted to that very route (below); for every other key the rule is unchanged.
 - **A scoped API key** (`api_tokens.scope`, minted with `scope: "metrics.read"` on `POST /tokens` or
   from Databases → Metrics export) holds one capability and nothing else. `Authenticate` refuses it
   on every group with `403 key_scope`; `AuthenticateScoped` admits it for
@@ -36,7 +37,29 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   is held to the databases `api_token_connections` grants the key, read again on each call, and to
   its deployment grant (`api_tokens.deploy_access`), read with the key; see
   [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
-- **`httpx.AuditMutations`** records every state-changing request. WebSocket routes are GET and
+- **A deploy key** (`api_tokens.scope = 'deploy'`, minted on `POST /tokens/deploy` by an administrator
+  in a session, or from Account → API keys) is what `jd` and CI use, and it **deliberately reopens
+  part of the session-only surface**: the deployment writes that were a session's alone — drafts,
+  configuration, source, Git policy, triggers, variables and shared variables — answer it. It holds
+  the administrator role, narrowed to its owner's now. `Authenticate`, `AuthenticateScoped` and
+  `AuthenticateMCP` refuse it with `403 key_scope`; the feature group authenticates with
+  `httpx.AuthenticateFeatures(s.deployKeyGate(root), …)`, which asks the router itself which route
+  the request will reach (`chi.Routes.Find`) and answers from `deployKeyRoutes` in
+  `api/deploy_keys.go`: a listed route admits the key (setting `Principal.DeployRoute`, which is what
+  `RequireSession` honours), a line marked session-only answers `403 session_required` with its
+  reason, and anything unlisted — including any route added later until it is given a line — answers
+  `403 key_scope`. A refusal is audited as `auth.deploy_key.refused` with the key, because it happens
+  before the group's audit middleware. Reveals, saved credentials, the GitHub-speaking pull-request
+  verbs, preview approval and the typed-phrase removals stay session-only for it. A key narrowed to
+  chosen deployments (`api_token_deployments`, read with the key on every request) reaches only
+  routes whose `{id}` it was given and whose `{env}` belongs to that deployment, and none marked
+  `every` (drafts, duplication, server shared variables, fleet-wide reads); `GET /deploy/` lists only
+  its deployments. The handlers hold what a deploy key writes: generated values are withheld, and a
+  plan or environment change that would reach the host, redirect a saved credential, or point a
+  variable at a credential or database is refused with `session_required` (see
+  [invariant 4](../security/invariants.md)).
+- **`httpx.AuditMutations`** records every state-changing request, with the API key's id and name
+  (`audit_log.key_id`, `key_name`) when the request carried one. WebSocket routes are GET and
   long-lived, so they call `s.recordAudit(...)` at open time — the event is "a terminal was opened".
 - **`httpx.RequireCSRF`** requires `X-JD-CSRF: 1` on every browser-session mutation, including login
   and partial 2FA sessions. The header makes a same-site sibling origin preflight, and this application

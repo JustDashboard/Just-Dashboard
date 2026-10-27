@@ -10,7 +10,7 @@ fields.
 | --- | --- | --- |
 | `docker-compose.yml`, `deploy/Caddyfile`, `deploy/proxy-entrypoint.sh` | Single-host production topology, loopback-only services, the Caddy listener and its three TLS modes, mounts, and health checks | [`../deployments/implementation.md`](../deployments/implementation.md#deployment-topology) |
 | `install.sh`, `.env.example` | Installation: two reachability routes (Tailscale, SSH tunnel), certificate issuance, randomised internal ports, secrets, and operator configuration | [`../overview.md`](../overview.md), public [`../../../README.md`](../../../README.md) |
-| `scripts/manage.sh`, `scripts/create-user.sh`, `scripts/reset-password.sh`, `scripts/test_manage.py` | Local root account administration, stack status/logs/recreation, and isolated terminal/installer fixtures | [`../operations/terminal-tools.md`](../operations/terminal-tools.md) |
+| `scripts/manage.sh`, `scripts/create-user.sh`, `scripts/reset-password.sh`, `scripts/test_manage.py` | Local root account administration, stack status/logs/recreation, installing `jd` (`install-cli`), and isolated terminal/installer fixtures | [`../operations/terminal-tools.md`](../operations/terminal-tools.md) |
 | `scripts/release.sh`, `backend/scripts/`, `.github/workflows/release.yml` | Version update, generated changelog, build verification, release commit preparation, and the GitHub release published after Verify passes on `main` | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#cutting-a-release) |
 | `AGENTS.md`, `CONTRIBUTING.md` | Mandatory contributor workflow, security baseline, licensing, and the validation gate | [`../contributing/conventions.md`](../contributing/conventions.md) |
 | `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/`, `.github/TEMPLATE_LICENSE` | PR guidance, structured bug and feature reports, private security-report routing, and upstream template attribution | [`../contributing/conventions.md`](../contributing/conventions.md#contribution-templates) |
@@ -23,7 +23,11 @@ fields.
 `backend/cmd/server` loads configuration, opens the store, creates the API server, starts background
 services, handles signals, and supports the isolated self-update worker and local `--admin` modes.
 `backend/cmd/terminal-holder` is the terminal holder (`ptyhold`), shipped beside it in the image and copied to the data directory
-for the host to run. The packages under
+for the host to run. `backend/cmd/jd` is the `jd` command line (standard library only): it drives the deployment
+routes with an API key — normally a deploy key — keeps its URL and key in the user config directory (0600), and is
+built into the image beside the dashboard, installed to `/usr/local/bin/jd` by `install.sh` and `manage.sh install-cli`,
+and served at `GET /api/v1/cli/jd` (README, "The jd command line"; the key's boundary is in
+[`../security/invariants.md`](../security/invariants.md)). The packages under
 `backend/internal/` are:
 
 | Package | Responsibility | Detailed reference |
@@ -38,6 +42,7 @@ for the host to run. The packages under
 | `auth` | Passwords, TOTP enrolment and policy, recovery codes, sessions, roles/capabilities, and API tokens | [`../architecture/runtime-boundaries.md`](../architecture/runtime-boundaries.md#auth-secrets-state) |
 | `backups` | Backup definitions/runs, scheduler, object stores, SFTP (with host-key pinning) and rclone destinations, retention by count and age, container pausing, archive encryption with the install's sealed age key and its export, archive listing, subset and in-place restore, and artifact download | [`../backend/git-backups-users.md`](../backend/git-backups-users.md#backups) |
 | `blueprint` | The reviewed, versioned workload definitions: parsing with unknown fields rejected, pure rendering into a plan, and the supply-chain rules enforced as refusals | [`../deployments/implementation.md`](../deployments/implementation.md), [invariant 9](../security/invariants.md#invariants-that-must-not-regress) |
+| `clihost` | Keeping the server's `/usr/local/bin/jd` as current as the dashboard: at boot an older jd there (known by its usage line) is replaced by the one built beside the dashboard, and nothing else called jd is touched | [`../operations/terminal-tools.md`](../operations/terminal-tools.md) |
 | `contentguard` | The SHA-256 revision an editor read and the check that refuses a save over newer content with `409 content_conflict`, shared by file, Compose and crontab edits | [`../backend/docker-files-logs.md`](../backend/docker-files-logs.md#files), [`../backend/processes-terminal-github.md`](../backend/processes-terminal-github.md#processes) |
 | `config` | Environment parsing, defaults, bounds, legacy aliases, and network safety validation | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#configuration-version-release-self-update) |
 | `dbx` | The database engines: connections and one `Dialect` per SQL engine, flavours and the capability table, discovery of what is on the machine, statement lexing, classification and read scopes, browsing, change sets and cell reads, the catalogue and planned DDL, sessions, locks, statistics, maintenance, settings, roles and privileges, PostgreSQL extensions with their catalogue and the libraries a server loads at start (`extensions.go`, `extension_catalogue.go`, `preload.go`), the advisor, the Redis and MongoDB surfaces with their command classifiers, code generation, seed data (`seed*.go`), import/export, dumps and restores, the statements a server recorded as slow (`querylog.go`), and what an alert reads beyond the recorder's snapshot — replication lag, a server's own disk and its data directory (`alerts.go`, `alert_capabilities.go`) | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#databases-every-database-on-the-server-each-engine-as-itself) |
