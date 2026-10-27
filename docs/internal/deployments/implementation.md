@@ -1287,7 +1287,8 @@ only renderer/executor/validation authority for their feature.
   "`system.admin`, session", a deploy key is admitted too, and every other session-only deployment route
   (reveals, saved credentials, secret-store connections, pull-request merge/comment and previews,
   schedules, alerts, channels, drains, adding and removing an environment, a route's maintenance and
-  error pages, the warm-release terms, the typed-phrase removals) stays a session's and answers it `session_required`. Its writes are
+  error pages, the warm-release terms, the migration rehearsal's terms, the
+  typed-phrase removals) stays a session's and answers it `session_required`. Its writes are
   held to what a person in a session could not be refused: a generate or rotate answers it without
   `generatedValue`; a plan it commits, or an environment change it makes, may not carry host authority
   (`hostAuthority`: a folder on the server, Docker Compose, privileged, host network, capabilities,

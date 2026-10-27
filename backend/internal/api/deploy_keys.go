@@ -242,6 +242,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"DELETE /deploy/{id}/environments/{env}":                      keySession(whyEnvironment),
 	"PUT /deploy/{id}/environments/{env}/pages/{page}":            keySession("a route's maintenance and error pages are edited in the dashboard"),
 	"PUT /deploy/{id}/environments/{env}/rollback-policy":         keySession("the terms a release is kept warm and rolled back on are set in the dashboard"),
+	"PUT /deploy/{id}/environments/{env}/rehearsal":               keySession("a migration rehearsal restores a database's backup, and its terms are set in the dashboard"),
 	"POST /deploy/blueprints/{id}/render":                         keySession("a template's plan is previewed in the dashboard; a draft from it is a deploy key's to make"),
 	"POST /deploy/import/preview":                                 keySession(whyHost),
 	"POST /deploy/import/adopt":                                   keySession(whyHost),
