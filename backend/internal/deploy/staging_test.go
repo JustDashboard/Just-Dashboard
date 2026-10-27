@@ -636,6 +636,17 @@ func TestStagingRemovalNamesOnlyItsOwnResourcesAndFreesTheName(t *testing.T) {
 	if _, err := f.base.DB.Exec("UPDATE deploy_runs SET state = 'cancelled', status = 'cancelled' WHERE id = ?", run.ID); err != nil {
 		t.Fatal(err)
 	}
+	promoted := stagedRelease(t, f, staging, fakeContentDigest("removal"))
+	promotion, err := enqueuePromotion(t, f, promoted.Release.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.variables.BeginStagingRemoval(ctx, f.projectID, staging, true); !errors.Is(err, ErrAlreadyDeploying) {
+		t.Fatalf("removal under an unfinished promotion error = %v", err)
+	}
+	if _, err := f.base.DB.Exec("UPDATE deploy_runs SET state = 'cancelled', status = 'cancelled' WHERE id = ?", promotion.ID); err != nil {
+		t.Fatal(err)
+	}
 	// A mount the operator pointed back at production's volume is never
 	// staging's to delete.
 	if _, err := f.base.DB.Exec(`INSERT INTO deploy_runtime_plans(environment_id, revision, config_json, preview, digest, created_at)

@@ -22,6 +22,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentEngineRun,
+  DeploymentEnvironment,
   DeploymentOperations,
   DeploymentPreview,
   DeploymentRelease,
@@ -46,6 +47,7 @@ import {
   latestAttempts,
   projectProduct,
   runFailed,
+  runPromotion,
   runLabel,
   runStopped,
   stepName,
@@ -134,13 +136,31 @@ export function RunPage() {
   const events = stream.events
   const snapshot = stream.snapshot ?? initial.data
 
+  // A staging run is read against staging's own summary — its live release,
+  // its address, its name — not production's, and not as a preview.
+  const environmentList = usePoll(
+    (signal) =>
+      get<DeploymentEnvironment[]>(`/deploy/${projectId}/environments`, undefined, signal),
+    0,
+    [projectId],
+    { enabled: validIds },
+  )
+  const stagingId = environmentList.data?.find(
+    (environment) =>
+      environment.kind === "staging" && environment.id === snapshot?.run.environmentId,
+  )?.id
   // The project is read separately, on its own poll, purely to answer "is
   // this run's release still the one live today" — the run itself never
   // changes once it exists, but the project's live release does.
   const project = usePoll(
-    (signal) => get<ProjectDetail>(`/deploy/${projectId}`, undefined, signal),
+    (signal) =>
+      get<ProjectDetail>(
+        `/deploy/${projectId}`,
+        stagingId ? { environment: stagingId } : undefined,
+        signal,
+      ),
     5000,
-    [projectId],
+    [projectId, stagingId],
     { enabled: validIds },
   )
   // Worth asking once the run has a release to place — the one it made, the
@@ -199,9 +219,14 @@ export function RunPage() {
     { enabled: validIds && rollbackOpen },
   )
   const operations = usePoll(
-    (signal) => get<DeploymentOperations>(`/deploy/${projectId}/operations`, undefined, signal),
+    (signal) =>
+      get<DeploymentOperations>(
+        `/deploy/${projectId}/operations`,
+        stagingId ? { environment: stagingId } : undefined,
+        signal,
+      ),
     0,
-    [projectId],
+    [projectId, stagingId],
     { enabled: validIds && rollbackOpen },
   )
   // Whether the settings have moved on since a run that can be retried: then
@@ -577,6 +602,7 @@ export function RunPage() {
             ? releaseNumbers.get(targetReleaseId)
             : undefined
         }
+        promotion={runPromotion(run)}
         projectId={projectId}
         verbs={verbs}
       />

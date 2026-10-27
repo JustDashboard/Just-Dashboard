@@ -147,7 +147,10 @@ All mutations require `system.admin` and are audited as `deploy.notification.*`.
 `deploy.CommitStatusPublisher` is a second observer. For a run whose environment source is a Git
 remote on a host it can report to, it posts `pending` on start and `success`, `failure` or `error` on
 the terminal state for the exact commit the run deployed, named `just-dashboard/<environment slug>` and
-linked to the run. Restarts, stops, starts and preview removals deploy no new commit and post nothing.
+linked to the run — so a staging run reports as `just-dashboard/staging`, and promoting its release
+reports the same commit again as `just-dashboard/production`. Restarts, stops, starts and preview
+removals deploy no new commit and post nothing. A notification names its environment in the title and a
+promotion's operation as "Promotion from staging".
 A status that cannot be posted never changes a run's outcome; since the host's answer is otherwise
 only a log line, the publisher keeps the newest outcome per environment (see
 [What Settings shows](#what-settings-shows)).

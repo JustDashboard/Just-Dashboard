@@ -254,7 +254,7 @@ func livePlanLocalProject(t *testing.T, c *client, repository, name string) (int
 			"internalPort": 8080, "hostPort": 0, "bindAddress": "127.0.0.1", "strategy": "blue_green",
 			"command": []any{}, "privileged": false, "hostNetwork": false, "capabilities": []any{}, "devices": []any{}, "mounts": []any{},
 		},
-		"variables": []any{map[string]any{"name": "GREETING", "sensitivity": "secret", "scopes": []any{"runtime"}, "required": true}},
+		"variables":    []any{map[string]any{"name": "GREETING", "sensitivity": "secret", "scopes": []any{"runtime"}, "required": true}},
 		"dependencies": []any{},
 		"checks": []any{map[string]any{
 			"name": "home", "kind": "http", "phase": "readiness", "required": true,

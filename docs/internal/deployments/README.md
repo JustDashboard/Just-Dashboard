@@ -7,7 +7,8 @@
 - [`backup-coverage.md`](backup-coverage.md) — immutable archive manifests and persistent-data coverage limitations.
 - [`restore-verification.md`](restore-verification.md) — native SQLite snapshots and artifact-bound isolated application recovery checks.
 - [`recipes.md`](recipes.md) — build variable delivery, the framework catalogue (JavaScript, Python, Go, Rust, Java, .NET, Deno, PHP), environment discovery, Procfiles, where a server listens and whom it trusts behind the proxy, repository shape and candidate selection, other platforms' deployment files, background processes, ecosystems without a recipe, submodules and LFS, the single-page fallback and toolchain selection.
-- [`git-policy.md`](git-policy.md) — shared polling/hook policy, manual-only mode, complete path comparison and decision evidence.
+- [`git-policy.md`](git-policy.md) — shared polling/hook policy, manual-only mode, promotion-only production, complete path comparison and decision evidence.
+- [`staging-promotion.md`](staging-promotion.md) — the staging environment (what it copies from production and why), promoting a staging release's exact image into production with no build, promotion-only production, retention of a promotion's image, removal, routes, UI and the decision record.
 - [`database-networks.md`](database-networks.md) — logical database URLs, owned networks, replacement reconciliation and cleanup.
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
   logs, the request readings, container lifecycle events, and the three container-output fixes.

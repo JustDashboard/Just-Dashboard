@@ -110,12 +110,18 @@ export function RequestsWorkspace({
   outputFor,
   renderInline,
   afterInsights,
+  scope,
 }: {
   /**
    * Where this record lives on the API — `/deploy/12` or `/proxy/sites/shop` —
    * so a deployment's requests and a site's are one workspace over two routes.
    */
   base: string
+  /**
+   * Parameters every read of the record carries — a deployment's
+   * `{ environment }` while its staging environment is the one shown.
+   */
+  scope?: Record<string, number>
   /** What the record belongs to, in the audit comment of a block. */
   subject: string
   /** The empty state's title, which names what has no record. */
@@ -164,11 +170,11 @@ export function RequestsWorkspace({
   // poll asks, so "the last hour" moves with the clock.
   const poll = usePoll<Answer>(
     async (signal) => {
-      const asked = requestParams(query, Date.now())
+      const asked = { ...requestParams(query, Date.now()), ...scope }
       return { window: await get<DeploymentRequests>(`${base}/requests`, asked, signal), asked }
     },
     live ? 0 : 10000,
-    [base, JSON.stringify(query)],
+    [base, JSON.stringify(query), JSON.stringify(scope)],
   )
   const data = poll.data?.window
   const blocks = useRequestBlocks(can("system.admin"), subject, data?.driver === "docker-caddy")
@@ -180,7 +186,11 @@ export function RequestsWorkspace({
   // than a timestamp, because two requests can share a second and the window
   // may hold one of them; a socket that started "after the newest time" would
   // send the other again, or never.
-  const tail = useLiveRequests(base, live ? narrowing : null, data?.coverage.cursor)
+  const tail = useLiveRequests(
+    base,
+    live ? { ...narrowing, ...scope } : null,
+    data?.coverage.cursor,
+  )
 
   const onReset = useCallback(
     () => onQueryChange({ ...query, range: "1h", since: undefined, until: undefined }),

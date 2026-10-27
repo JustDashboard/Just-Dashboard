@@ -5,11 +5,13 @@ import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { ArrowLeft } from "@/components/icons"
 import { get } from "@/lib/api"
+import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import type {
   BlueprintDetail,
   DeploymentEngineRun,
+  DeploymentEnvironment,
   DeploymentEnvironmentConfiguration,
   DeploymentGitWatch,
   DeploymentOperations,
@@ -55,9 +57,31 @@ export type ProjectDetail = {
 
 export type ProjectOperation = "deploy" | "redeploy" | "restart" | "force_build" | "stop" | "start"
 
+export type ProjectEnvironmentKind = "production" | "staging"
+
 export type ProjectContextValue = {
   projectId: number
+  /** The environment these pages read and act on: production's, or staging's when chosen. */
   environmentId: number
+  environment: ProjectEnvironmentKind
+  /** The deployment's production and staging environments, production first. */
+  environments: DeploymentEnvironment[]
+  production?: DeploymentEnvironment
+  staging?: DeploymentEnvironment
+  selectEnvironment: (kind: ProjectEnvironmentKind) => void
+  refreshEnvironments: () => void
+  /**
+   * `{ environment: id }` while staging is chosen, for the project-level reads
+   * that answer for one environment (operations, requests, lifecycle,
+   * insights, the preview frame); undefined for production, which is their
+   * default.
+   */
+  environmentQuery?: { environment: number }
+  /**
+   * A segment for the keys unsaved settings drafts are kept under, so a
+   * draft typed in staging never turns up in production's form.
+   */
+  draftScope: string
   detail: ProjectDetail
   /** `buildMethod !== "legacy_compose"`: the persistent engine rather than the compatibility pipeline. */
   normalized: boolean
@@ -116,6 +140,11 @@ export function useProject() {
   return value
 }
 
+/** The chosen environment's draft key segment, or nothing outside a project. */
+export function useDraftScope() {
+  return useContext(ProjectContext)?.draftScope ?? ""
+}
+
 export function ProjectProvider({
   projectId,
   children,
@@ -126,18 +155,56 @@ export function ProjectProvider({
   const valid = Number.isInteger(projectId) && projectId > 0
   const [archivedLocally, setArchivedLocally] = useState(false)
 
-  const detail = usePoll(
-    (signal) => get<ProjectDetail>(`/deploy/${projectId}`, undefined, signal),
-    5000,
+  // Which environment the pages read is remembered for the tab, so every
+  // link inside the project keeps it without carrying it; `?env=` on arrival
+  // (a deep link, a notification) picks it explicitly.
+  const [chosen, setChosen] = useSessionState<ProjectEnvironmentKind>(
+    `deploy.${projectId}.environment`,
+    "production",
+  )
+  useEffect(() => {
+    const asked = new URLSearchParams(window.location.search).get("env")
+    if (asked === "staging" || asked === "production") setChosen(asked)
+  }, [setChosen])
+  const environmentList = usePoll(
+    (signal) =>
+      get<DeploymentEnvironment[]>(`/deploy/${projectId}/environments`, undefined, signal),
+    30000,
     [projectId],
     { enabled: valid },
+  )
+  const production = environmentList.data?.find((environment) => environment.kind === "production")
+  const staging = environmentList.data?.find((environment) => environment.kind === "staging")
+  const environment: ProjectEnvironmentKind =
+    chosen === "staging" && staging ? "staging" : "production"
+  // Undefined is production, every read's default; staging is asked for by id.
+  const stagingId = environment === "staging" ? staging?.id : undefined
+  const environmentQuery = useMemo(
+    () => (stagingId ? { environment: stagingId } : undefined),
+    [stagingId],
+  )
+
+  const detail = usePoll(
+    (signal) => get<ProjectDetail>(`/deploy/${projectId}`, environmentQuery, signal),
+    5000,
+    [projectId, stagingId],
+    { enabled: valid && (chosen !== "staging" || environmentList.data !== undefined) },
   )
   const archived = archivedLocally || Boolean(detail.data?.project.archivedAt)
   const environmentId = detail.data?.deployment.environmentId ?? 0
   const runs = usePoll(
-    (signal) => get<DeploymentRunsPage>(`/deploy/${projectId}/runs`, { view: "engine" }, signal),
+    (signal) =>
+      get<DeploymentRunsPage>(
+        `/deploy/${projectId}/runs`,
+        // Production's pages read its runs and its previews'; staging's
+        // own builds are asked for by naming it.
+        stagingId
+          ? { view: "engine", environment: stagingId }
+          : { view: "engine", scope: "production" },
+        signal,
+      ),
     5000,
-    [projectId],
+    [projectId, stagingId],
     { enabled: valid },
   )
   const releases = usePoll(
@@ -154,9 +221,10 @@ export function ProjectProvider({
   // Operational evidence reads five feature owners, so it polls on its own
   // slower cadence rather than riding the five-second detail poll.
   const operations = usePoll(
-    (signal) => get<DeploymentOperations>(`/deploy/${projectId}/operations`, undefined, signal),
+    (signal) =>
+      get<DeploymentOperations>(`/deploy/${projectId}/operations`, environmentQuery, signal),
     20000,
-    [projectId],
+    [projectId, stagingId],
     { enabled: valid && !archived },
   )
   const configuration = usePoll(
@@ -205,12 +273,14 @@ export function ProjectProvider({
   const refreshRuns = runs.refresh
   const refreshReleases = releases.refresh
   const refreshConfiguration = configuration.refresh
+  const refreshEnvironments = environmentList.refresh
   const refresh = useCallback(() => {
     refreshDetail()
     refreshRuns()
     refreshReleases()
     refreshConfiguration()
-  }, [refreshDetail, refreshRuns, refreshReleases, refreshConfiguration])
+    refreshEnvironments()
+  }, [refreshDetail, refreshRuns, refreshReleases, refreshConfiguration, refreshEnvironments])
   // Every configuration write advances the environment's desired revision,
   // which the five-second summary carries: a save on any settings page — each
   // edits its own copy — is re-read here when it moves, so the rail's
@@ -254,6 +324,14 @@ export function ProjectProvider({
     return {
       projectId,
       environmentId: summary.environmentId,
+      environment,
+      environments: environmentList.data ?? [],
+      production,
+      staging,
+      selectEnvironment: setChosen,
+      refreshEnvironments,
+      environmentQuery,
+      draftScope: environment === "staging" ? ".staging" : "",
       detail: detail.data,
       normalized: summary.buildMethod !== "legacy_compose",
       archived,
@@ -297,6 +375,13 @@ export function ProjectProvider({
     refresh,
     start,
     starting,
+    environment,
+    environmentList.data,
+    production,
+    staging,
+    setChosen,
+    refreshEnvironments,
+    environmentQuery,
   ])
 
   if (!valid || (detail.error && !detail.data)) {

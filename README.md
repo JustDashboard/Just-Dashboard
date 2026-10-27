@@ -99,6 +99,7 @@ free.
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
 - Push to deploy, plus pull-request previews only your tailnet can reach
 - Immutable releases, one-click rollback and health-gated cutover
+- A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Variables per environment, plus shared ones defined once for the server or a project
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
 - Build logs, runtime, console, request logs and traffic alerts per project

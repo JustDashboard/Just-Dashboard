@@ -6,6 +6,7 @@ import { plural, relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type {
   DeploymentEngineRun,
+  DeploymentPromotion,
   DeploymentRelease,
   DeploymentStep,
   DeploymentSummary,
@@ -60,6 +61,7 @@ export function RunHeader({
   steps,
   now,
   rollsBackTo,
+  promotion,
   projectId,
   verbs,
 }: {
@@ -76,6 +78,8 @@ export function RunHeader({
   now: number
   /** The release number a rollback run returns to. */
   rollsBackTo?: number
+  /** The staging release a promotion takes its image from. */
+  promotion?: DeploymentPromotion
   projectId: number
   /** What can be done to the run, at the line's end. */
   verbs: React.ReactNode
@@ -184,6 +188,21 @@ export function RunHeader({
         <span className="numeric">{slot}</span>
         {rollsBackTo !== undefined && (
           <span className="numeric">rolls back to release #{rollsBackTo}</span>
+        )}
+        {/* Where the image comes from, since a promotion built nothing: the
+            staging release and its image's own id, which production runs. */}
+        {promotion && (
+          <span data-slot="run-promotion" className="inline-flex min-w-0 items-center gap-1.5">
+            <Link
+              href={`/deploy/${projectId}/runs/${promotion.runId}`}
+              className="numeric rounded-sm focus-ring hover:text-foreground hover:underline"
+            >
+              from {promotion.environmentName.toLowerCase()} release #{promotion.releaseNumber}
+            </Link>
+            <span className="truncate font-mono" title={promotion.imageId}>
+              image {shortIdentity(promotion.imageId)}
+            </span>
+          </span>
         )}
         {run.retryOfRunId && (
           <Link

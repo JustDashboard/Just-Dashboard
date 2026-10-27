@@ -632,6 +632,13 @@ func (s *Server) handleDeployRuns(w http.ResponseWriter, r *http.Request) error 
 				return httpx.BadRequest("environment must be a positive integer")
 			}
 		}
+		switch query.Get("scope") {
+		case "":
+		case "production":
+			filter.LeaveOutStaging = true
+		default:
+			return httpx.BadRequest("scope must be \"production\"")
+		}
 		if raw := query.Get("operation"); raw != "" {
 			if !deploy.ValidOperation(deploy.Operation(raw)) {
 				return httpx.BadRequest("operation must be a supported deployment action")

@@ -98,7 +98,14 @@ export function ProjectOverview() {
       get<ProjectPullRequests>(`/deploy/${project.projectId}/pull-requests`, undefined, signal),
     60000,
     [project.projectId],
-    { enabled: project.normalized && !project.archived && deployment.sourceKind === "git" },
+    {
+      // Pull requests build previews of production; staging follows a branch.
+      enabled:
+        project.normalized &&
+        !project.archived &&
+        deployment.sourceKind === "git" &&
+        project.environment !== "staging",
+    },
   )
   const pulls = usePullRequestVerbs({
     projectId: project.projectId,
@@ -319,7 +326,11 @@ export function ProjectOverview() {
   if (project.normalized)
     blocks.push([
       "delivery",
-      <Insights key="delivery" projectId={project.projectId}>
+      <Insights
+        key="delivery"
+        projectId={project.projectId}
+        environmentId={project.environmentQuery?.environment}
+      >
         {history}
       </Insights>,
     ])

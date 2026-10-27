@@ -44,7 +44,9 @@ type EnvironmentSummary struct {
 	Kind            EnvironmentKind `json:"kind"`
 	DesiredRevision int             `json:"desiredRevision"`
 	LiveReleaseID   int64           `json:"liveReleaseId,omitempty"`
-	CreatedAt       time.Time       `json:"createdAt"`
+	// PromotionOnly is production refusing builds in favour of promotions.
+	PromotionOnly bool      `json:"promotionOnly,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
 }
 
 // StagingRequest is what adding staging decides beyond the copy itself. Ref
@@ -114,10 +116,11 @@ func (s *OrchestrationStore) ProjectEnvironments(ctx context.Context, projectID 
 		return nil, ErrNotFound
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, slug, kind, desired_revision, live_release_id, created_at
-		  FROM deploy_environments
-		 WHERE project_id = ? AND archived_at = 0 AND kind IN ('production', 'staging')
-		 ORDER BY CASE kind WHEN 'production' THEN 0 ELSE 1 END, id`, projectID)
+		SELECT e.id, e.name, e.slug, e.kind, e.desired_revision, e.live_release_id,
+		       COALESCE(g.promotion_only, 0), e.created_at
+		  FROM deploy_environments e LEFT JOIN deploy_git_policies g ON g.environment_id = e.id
+		 WHERE e.project_id = ? AND e.archived_at = 0 AND e.kind IN ('production', 'staging')
+		 ORDER BY CASE e.kind WHEN 'production' THEN 0 ELSE 1 END, e.id`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -126,10 +129,12 @@ func (s *OrchestrationStore) ProjectEnvironments(ctx context.Context, projectID 
 	for rows.Next() {
 		var environment EnvironmentSummary
 		var created int64
+		var promotionOnly int
 		if err := rows.Scan(&environment.ID, &environment.Name, &environment.Slug, &environment.Kind,
-			&environment.DesiredRevision, &environment.LiveReleaseID, &created); err != nil {
+			&environment.DesiredRevision, &environment.LiveReleaseID, &promotionOnly, &created); err != nil {
 			return nil, err
 		}
+		environment.PromotionOnly = promotionOnly != 0
 		environment.CreatedAt = unixTime(created)
 		result = append(result, environment)
 	}
@@ -515,8 +520,13 @@ func (s *PlanningStore) BeginStagingRemoval(ctx context.Context, projectID, envi
 	if promotionOnly != 0 {
 		return nil, ErrPromotionOnlyNeedsStaging
 	}
+	// A run in staging, or a production promotion still to take one of
+	// staging's images, would lose what it is working on.
 	var active int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM deploy_runs WHERE environment_id = ? AND `+activeRunWhere, environmentID).Scan(&active); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM deploy_runs
+		 WHERE `+activeRunWhere+` AND (environment_id = ? OR (operation = 'promote'
+		   AND CAST(json_extract(metadata_json, '$.promotion.environmentId') AS INTEGER) = ?))`,
+		environmentID, environmentID).Scan(&active); err != nil {
 		return nil, err
 	}
 	if active != 0 {

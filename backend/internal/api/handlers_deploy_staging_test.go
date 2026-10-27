@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -270,8 +271,39 @@ func TestPromotionOnlyIsKeptWhenOmittedAndRefusesDirectBuilds(t *testing.T) {
 	if watch.Code != http.StatusOK || !strings.Contains(watch.Body.String(), `"promotionOnly":true`) {
 		t.Fatalf("git watch = %d %s", watch.Code, watch.Body.String())
 	}
-	if response := f.admin.do(http.MethodPost, f.path(fmt.Sprintf("/environments/%d/runs", staging)), `{"operation":"deploy"}`, nil); response.Code != http.StatusAccepted {
-		t.Fatalf("staging still builds: %d %s", response.Code, response.Body.String())
+	stagingBuild := f.admin.do(http.MethodPost, f.path(fmt.Sprintf("/environments/%d/runs", staging)), `{"operation":"deploy"}`, nil)
+	var stagingRun deploy.EngineRun
+	if stagingBuild.Code != http.StatusAccepted || json.Unmarshal(stagingBuild.Body.Bytes(), &stagingRun) != nil {
+		t.Fatalf("staging still builds: %d %s", stagingBuild.Code, stagingBuild.Body.String())
+	}
+	// The unfiltered list keeps answering every environment; production's
+	// pages ask for its scope, which leaves staging's builds out.
+	listed := func(query string) []int64 {
+		t.Helper()
+		response := f.readonly.do(http.MethodGet, f.path("/runs?view=engine"+query), "", nil)
+		var page struct {
+			Runs []deploy.EngineRun `json:"runs"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &page) != nil {
+			t.Fatalf("runs%s = %d %s", query, response.Code, response.Body.String())
+		}
+		ids := []int64{}
+		for _, run := range page.Runs {
+			ids = append(ids, run.ID)
+		}
+		return ids
+	}
+	if ids := listed(""); !slices.Contains(ids, stagingRun.ID) {
+		t.Fatalf("the unfiltered run list lost staging's run: %v", ids)
+	}
+	if ids := listed("&scope=production"); slices.Contains(ids, stagingRun.ID) {
+		t.Fatalf("production's run list shows staging's run: %v", ids)
+	}
+	if ids := listed(fmt.Sprintf("&environment=%d", staging)); !slices.Contains(ids, stagingRun.ID) {
+		t.Fatalf("staging's run list lost its run: %v", ids)
+	}
+	if response := f.readonly.do(http.MethodGet, f.path("/runs?view=engine&scope=everything"), "", nil); response.Code != http.StatusBadRequest {
+		t.Fatalf("unknown scope = %d", response.Code)
 	}
 	if response := f.admin.do(http.MethodDelete, f.path(fmt.Sprintf("/environments/%d", staging)), `{}`, nil); response.Code != http.StatusConflict ||
 		!strings.Contains(response.Body.String(), "promotion_only_requires_staging") {

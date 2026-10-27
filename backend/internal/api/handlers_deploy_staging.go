@@ -313,10 +313,21 @@ func (s *Server) enqueuePromotion(
 		// would; the source identity itself comes from the staging release.
 		sourceRevision = source.Promotion.SourceRevision
 	}
-	metadata, err := json.Marshal(map[string]any{
+	values := map[string]any{
 		"compatibility": false, "targetReleaseId": 0, "changedPaths": []string{},
 		"promotion": source.Promotion,
-	})
+	}
+	// The commit the staging run read is the one production now runs; a
+	// promotion fetches no source of its own, so it carries that reading.
+	if stagingRun, err := s.modules.deployRuns.Run(ctx, source.Promotion.RunID); err == nil {
+		var recorded struct {
+			Commit json.RawMessage `json:"commit"`
+		}
+		if json.Unmarshal(stagingRun.Metadata, &recorded) == nil && len(recorded.Commit) > 0 {
+			values["commit"] = recorded.Commit
+		}
+	}
+	metadata, err := json.Marshal(values)
 	if err != nil {
 		return nil, nil, err
 	}

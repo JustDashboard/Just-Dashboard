@@ -48,7 +48,8 @@ tasks and explicit build-secret mappings are removed. Preview-specific values ca
 through the normal scoped-variable API. Existing previews without provenance lose copied variable/link
 state when approved configuration is regenerated. Production resource contents are never copied or deleted.
 Database references are checked before build or runtime values are returned: known links/bindings to
-another environment cannot share a connection or saved endpoint when either environment is a preview.
+another environment cannot share a connection or saved endpoint when either environment is a preview
+(or a staging environment, for its own reason: [staging and promotion](staging-promotion.md)).
 This includes aliases with another saved connection ID. Runtime joins also compare observed container
 identity. Separate preview databases must be configured explicitly; arbitrary literal credentials,
 untracked endpoints and outbound network access remain an administrator trust boundary.

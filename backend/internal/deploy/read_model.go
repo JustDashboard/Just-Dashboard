@@ -939,6 +939,11 @@ type RunListFilter struct {
 	State       string
 	Before      int64
 	Limit       int
+
+	// LeaveOutStaging narrows an unscoped list to the project as production
+	// reads it — its own runs and its previews' — without changing what the
+	// unfiltered list has always answered.
+	LeaveOutStaging bool
 }
 
 // ProjectRunsFiltered lists a project's runs newest-first, optionally
@@ -954,11 +959,11 @@ func (s *OrchestrationStore) ProjectRunsFiltered(
 	}
 	where := []string{"project_id = ?"}
 	args := []any{projectID}
-	// Unnarrowed, the list is the project as its summary reads it, so a
-	// staging environment's runs are asked for by naming it.
-	scope, scopeArgs := projectRunScope(filter.Environment)
-	where = append(where, scope)
-	args = append(args, scopeArgs...)
+	if filter.Environment > 0 || filter.LeaveOutStaging {
+		scope, scopeArgs := projectRunScope(filter.Environment)
+		where = append(where, scope)
+		args = append(args, scopeArgs...)
+	}
 	if filter.Operation != "" {
 		where = append(where, "operation = ?")
 		args = append(args, filter.Operation)

@@ -165,7 +165,11 @@ export function SitePreview({
             // which on the frame itself would undo the scale that shrinks it.
             <div className={cn("absolute inset-0", loaded ? "animate-rise" : "opacity-0")}>
               <iframe
-                src={`${API_BASE}/deploy/${deployment.id}/preview-frame`}
+                src={`${API_BASE}/deploy/${deployment.id}/preview-frame${
+                  deployment.environmentKind === "staging"
+                    ? `?environment=${deployment.environmentId}`
+                    : ""
+                }`}
                 title={`Website preview for ${deployment.name}`}
                 aria-hidden="true"
                 tabIndex={-1}
