@@ -117,7 +117,19 @@ redirects to the bare domain — has each name prepared in turn, and the first n
 release's evidence. Activation then accepts, on a Docker Caddy host only, one Caddy copy per name in
 place of one certificate covering them all (`caddyEvidenceForEach`): a Caddy route never reads that
 path, while nginx would serve it for every name. Multi-name existing imported pairs remain usable.
-Wildcards require DNS-01 credentials for a domain the operator controls.
+
+A wildcard plan name is refused on this ingress before anything starts, with a covering certificate or
+without one (`certificate_wildcard_unavailable`, `wildcardCaddyRefusal`). Caddy would have to answer the
+DNS challenge itself, which it can only when it is built with that DNS provider's module —
+`caddy:2-alpine` (2.11.7 lists `tls.issuance.acme` and no `dns.providers.*`) has none — and given the
+provider's token, which the dashboard keeps for certbot and does not hand to another program; and the
+route renderer does not write wildcard site addresses either. The refusal says so and suggests naming
+each host, which Caddy certifies one by one. A plain name under a wildcard certbot already holds (a
+preview under `*.preview.example.com` issued on the Certificates page) is served as any other existing
+pair is: from an immutable copy taken at activation, which certbot's later renewals of the lineage do not
+reach until the next activation. Serving wildcards here would take an operator decision: a Caddy image
+built with the provider's module (`xcaddy build --with github.com/caddy-dns/<provider>`) plus a way to
+hand it the token, or refreshing the copies when certbot renews.
 
 The application remains published on loopback. Proxy resolves that publication to a running Docker
 container and an internal network address, then connects Caddy to that network. Managed route comments

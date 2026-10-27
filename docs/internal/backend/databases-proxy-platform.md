@@ -4447,6 +4447,16 @@ containers/volumes/networks.
   cron jobs renew these certificates, their environment must set the same two variables. Saving a
   dashboard credential does not reconfigure an external timer; an IAM-role-only installation can leave
   the credential form empty.
+  Deployment runs use the same saved files for a plan that serves a wildcard
+  (`deployment_certificate_dns.go`, see the deployments [implementation guide](../deployments/implementation.md)):
+  each provider carries a pattern for the nameservers it gives a zone it hosts, the run walks up from the
+  wildcard's base to the zone's NS records and uses the provider they name, failing that the single
+  provider with saved credentials and an installed plugin, and otherwise refuses with what to save here.
+  It passes `dnsIssueArgs`'s argv — the file's path, never its contents — through the page's certbot
+  runtime, so the lineage renews like one issued here; an IAM-role-only Route 53 (no saved file) is not
+  chosen. `DeploymentDNSProvider` answers the same question without ordering, for preflight and the
+  deployment Domains sheet. Removing a provider's credentials also stops runs issuing wildcards in its
+  zones; the next one is refused, naming this page.
   Site-validation rollback restores a replaced `sites-enabled` symlink to its exact previous target.
 - **Raw configuration edits carry a content revision** (`config_checked.go`). `GET /proxy/config`
   returns `content` and its SHA-256 `revision` under the proxy writer lock, so it cannot expose

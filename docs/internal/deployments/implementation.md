@@ -222,8 +222,13 @@ only renderer/executor/validation authority for their feature.
   deterministic hostname is already a managed domain of another active project, the HMAC input gains a
   `#2`, `#3`, … counter and is recomputed until a free one is found. `covered` is whether a certificate
   already covers the name — the only thing activation accepts — and `certificateMethod` is the HTTP-01
-  challenge this host could issue one with. Both are reported so the screen can say what the run will do,
-  not so the operator has to do it. Asked about a hostname the operator typed (`?hostname=`), it also
+  challenge this host could issue one with. For a typed wildcard (`?hostname=*.example.com`) asked by
+  `system.admin` it is `dns-01` with `certificateDnsProvider`, the provider whose saved credentials the
+  run would prove it with, or empty with the run's own refusal in `certificateIssue` — one decision,
+  `proxysvc.DeploymentDNSProvider`, answers both. Other roles get a sentence saying a DNS challenge
+  proves it, because the answer looks up the zone's nameservers for a name the caller chose, which
+  stays with administrators for the reason `resolves` does. Both are reported so the screen can say what the run
+  will do, not so the operator has to do it. Asked about a hostname the operator typed (`?hostname=`), it also
   answers `address`, this server's public IPv4, which is the A record the name needs, and — for
   `system.admin` only — `resolves`, whether the name already points here, taken from the reverse
   proxy's own DNS check so the Domains sheet and the proxy page never disagree about one name. It is
@@ -243,14 +248,47 @@ only renderer/executor/validation authority for their feature.
   without certbot is `unavailable` (`certificate_unavailable`), which is terminal but is not a failure of
   the deployment's own work; a refused order is `failed` (`certificate_issue_failed`). Redeploy and
   rollback carry the step; restart and preview-remove do not, because neither applies a route.
-  Issuance is HTTP-01 only and never a wildcard — Let's Encrypt will not sign one that way — is bounded
-  at five minutes, is serialized against route application so two runs cannot race one account into a
-  rate limit, and passes `--keep-until-expiring` so a redeploy inside the renewal window asks the
-  authority for nothing. A first order on a host with no ACME account registers without a contact
-  address; an operator who wants expiry mail registers once on the Certificates page and every later
-  order reuses that account. certbot's exit code is not the evidence: the certificate is read back and
-  must cover the exact names before the step passes. Step evidence carries the lineage name, method and
-  outcome, never a key path or key material.
+  Reuse comes first, and covers wildcards both ways: a name under an existing wildcard (a preview's
+  `pr-7.preview.example.com` under `*.preview.example.com`) and a wildcard plan name an existing
+  certificate lists both ask the authority for nothing. Otherwise a plain name is ordered over HTTP-01,
+  and a plan with a wildcard among its names is ordered whole over DNS-01
+  (`proxysvc/deployment_certificate_dns.go`): only DNS proves a wildcard, and activation serves one
+  certificate for every name. The DNS challenge uses credentials the Certificates page already saved;
+  the run never asks for one and never reads one — certbot is handed the 0600 file's path, as the page
+  hands it. Credentials are kept per provider, not per zone, so the provider is the one the zone's
+  nameservers name (`*.ns.cloudflare.com` is Cloudflare, `ns-N.awsdns-N.*` Route 53, and so on through
+  the closed set; RFC 2136 servers are the operator's own and name nobody), failing that the single
+  provider with saved credentials and a plugin in the certbot that runs. No saved credentials, a zone
+  hosted by a provider that has none, its plugin missing, or two candidates the nameservers cannot tell
+  apart is `unavailable` (`certificate_wildcard_unavailable`) before certbot is asked: a wrong guess is a
+  failed validation the authority counts. The message names what to save and where — `Proxy →
+  Certificates → DNS challenge providers (/proxy/certificates)` — so it reads the same in a notification
+  or a commit status. The order runs through the Certificates page's certbot (`CertbotCommand`, the
+  host's when it has one, with the Route 53 environment), from the configured authority
+  (`JD_ACME_DIRECTORY`'s `--server`), bounded at five minutes plus the provider's propagation wait. The
+  lineage it leaves records the plugin and the credentials file in its renewal configuration, so
+  certbot's own schedule renews it like any lineage the page issued, and the page lists it with the
+  same renewal checks (a plugin that later goes missing is a `willFail`). A host whose deployments the
+  Docker Caddy ingress serves refuses a wildcard plan name outright, covered or not, since Caddy cannot
+  serve that route — see the [ingress decision](caddy-ingress.md). Every order a run places — issued,
+  or refused by the authority — is audited as `certificates.deployment.issue` (actor `system`; the
+  names, method, DNS provider and lineage, never a credential); a reuse or a refusal before ordering
+  changes nothing and is not. Preflight asks the same question for an uncovered wildcard (and for any
+  wildcard on the Caddy ingress): `certificate_automatic` naming the provider, or
+  `certificate_wildcard_unavailable`, blocked with the refusal and a deep link to `/proxy/certificates`.
+  HTTP-01 issuance is bounded at five minutes. Both are serialized against route application so two
+  runs cannot race one account into a rate limit, and pass `--keep-until-expiring` so a redeploy inside
+  the renewal window asks the authority for nothing. A first order on a host with no ACME account
+  registers without a contact address; an operator who wants expiry mail registers once on the
+  Certificates page and every later order reuses that account. certbot's exit code is not the evidence:
+  the certificate is read back and must cover the exact names before the step passes. Step evidence
+  carries the lineage name, method, outcome and, over DNS, the provider's name — never a key path, key
+  material or a credential. `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run
+  TestLiveCertificateStepProvesAWildcardOverDNS01` and `./internal/proxysvc -run
+  TestLiveDeploymentWildcardIsProvedOverDNS01AndServed` prove it against Pebble validating real DNS-01
+  records in a BIND (`proxysvc/acmetest`): refused without credentials, issued with them, reused by a
+  preview, renewed by `certbot renew` from the lineage's own configuration, and served by nginx on the
+  wildcard's route and the preview's, chaining to that Pebble's root.
   Before a new HTTP-01 order, a bounded DNS lookup rejects unresolved names and non-public destinations
   with a corrective message, including old saved sslip.io names based on a Tailscale address. Existing
   certificates are reused before this check, so private services can still use a certificate provisioned
