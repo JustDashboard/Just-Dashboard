@@ -54,7 +54,9 @@ The Settings page (`POST /dashboard/link`), the question in `install.sh` and `ma
 **Who polls a pending request** is decided by its `Driver`. A request begun in Settings is polled by the
 running dashboard (every `pollSeconds`). A request begun by `--admin link` is polled only by that command, so
 the approval, which the site delivers once, is never collected by two processes; if the other process did
-collect it (`request_consumed`) the poller looks at the stored state and reports it as linked. A terminal
+collect it (`request_consumed`) the poller looks at the stored state and reports it as linked. Within one
+process `PollLink` holds `pollMu`, so two polls that overlap never race for the approval: the one that collects
+it has stored the link before the other asks, and the other finds it stored. A terminal
 command that was killed outright leaves its request behind with nobody polling it; the next terminal command
 replaces it, whereas a request from Settings is never taken over from the terminal.
 

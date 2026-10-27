@@ -34,6 +34,9 @@ type certificateStepEvidence struct {
 	Outcome string   `json:"outcome"`
 	Name    string   `json:"certificate,omitempty"`
 	Method  string   `json:"method,omitempty"`
+	// DNSProvider names whose saved credentials answered a wildcard's DNS
+	// challenge; the credentials themselves never reach the run.
+	DNSProvider string `json:"dnsProvider,omitempty"`
 	// AccountExisted distinguishes an order against an ACME account this host
 	// already had from one that registered a new account.
 	AccountExisted bool `json:"accountExisted,omitempty"`
@@ -97,18 +100,31 @@ func (e *NormalizedStepExecutor) certificateStep(
 				ErrorMessage: err.Error(), Evidence: evidence,
 			}
 		}
+		// A wildcard this host cannot prove — no saved DNS credentials answer
+		// for its zone, or the Docker Caddy ingress serves the route — is the
+		// same kind of answer: nothing the deployment did, something to change
+		// on the host, which the message names.
+		if errors.Is(err, proxysvc.ErrCertificateWildcard) {
+			return StepResult{
+				State: StepUnavailable, ErrorCode: "certificate_wildcard_unavailable",
+				ErrorMessage: err.Error(), Evidence: evidence,
+			}
+		}
 		return StepResult{
 			State: StepFailed, ErrorCode: "certificate_issue_failed",
 			ErrorMessage: err.Error(), Evidence: evidence,
 		}
 	}
-	if result.Outcome == proxysvc.CertificateIssued {
+	switch {
+	case result.Outcome == proxysvc.CertificateIssued && result.DNSProvider != "":
+		log("status", "Issued "+result.Name+" over a DNS challenge through the saved "+result.DNSProvider+" credentials")
+	case result.Outcome == proxysvc.CertificateIssued:
 		log("status", "Issued "+result.Name+" over the "+result.Method+" challenge")
-	} else {
+	default:
 		log("status", "Reused the existing "+result.Name+" certificate")
 	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(certificateStepEvidence{
 		Domains: names, Outcome: string(result.Outcome), Name: result.Name,
-		Method: result.Method, AccountExisted: result.Registered,
+		Method: result.Method, DNSProvider: result.DNSProvider, AccountExisted: result.Registered,
 	})}
 }

@@ -96,6 +96,11 @@ type Service struct {
 	wake chan struct{}
 	kick chan struct{}
 
+	// pollMu lets one PollLink at a time ask the site. The site hands an
+	// approval over once; a second poll racing the first is told it is
+	// consumed before the first has stored it, and would call the link lost.
+	pollMu sync.Mutex
+
 	hbMu    sync.Mutex
 	hbTimes []time.Time
 	// hbPerMinute is the site's limit on heartbeats for one server.

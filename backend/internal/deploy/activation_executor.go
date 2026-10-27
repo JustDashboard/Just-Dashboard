@@ -66,6 +66,9 @@ func (e *NormalizedStepExecutor) CleanupCancelledRun(
 	if e == nil || e.store == nil || e.runtime == nil || operationTargetsLiveRelease(run.Operation) {
 		return mustJSON(map[string]any{"completed": true, "reason": "no candidate runtime cleanup required"}), nil
 	}
+	if request, ok := instantRollbackOf(run); ok {
+		return e.cleanupInstantRollback(ctx, run, request)
+	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 11*time.Minute)
 	defer cancel()
 	release, snapshot, err := e.releaseSnapshotForRun(cleanupCtx, run.ID)
@@ -77,7 +80,7 @@ func (e *NormalizedStepExecutor) CleanupCancelledRun(
 	}
 	execution := StepExecution{Run: run, ClaimToken: claimToken, Output: cancellationCleanupOutput{}}
 	if release.Release.State == "live" {
-		result := e.retirePrevious(cleanupCtx, execution, nil)
+		result := e.retirePredecessor(cleanupCtx, execution, false)
 		completed := result.State == StepPassed || result.State == StepSkipped
 		evidence := mustJSON(map[string]any{
 			"completed": completed, "action": "finish_retirement", "result": result,
@@ -619,6 +622,20 @@ func (e *NormalizedStepExecutor) activate(
 			publicChecks = append(publicChecks, check)
 		}
 	}
+	if len(publicChecks) > 0 && route != nil && e.routeInMaintenance(ctx, route.Name) {
+		// Every visitor is answered with the maintenance page, so a check
+		// through the public route would read that page and fail a release
+		// it says nothing about. The candidate already passed its own checks,
+		// which dial it directly.
+		_ = stepLog(execution, "status", "Maintenance is on, so the public-route checks were not run: visitors get the maintenance page")
+		for _, check := range publicChecks {
+			evidence.PublicChecks = append(evidence.PublicChecks, CheckEvidence{
+				Name: check.Name, Kind: check.Kind, Phase: check.Phase, Required: check.Required, Outcome: HealthDisabled,
+				Attempts: []CheckAttemptEvidence{{Number: 1, Outcome: HealthDisabled, Code: "maintenance"}},
+			})
+		}
+		publicChecks = nil
+	}
 	if len(publicChecks) > 0 {
 		if e.checks == nil {
 			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
@@ -673,6 +690,20 @@ func (e *NormalizedStepExecutor) activate(
 	return StepResult{State: StepPassed, Evidence: mustJSON(evidence)}
 }
 
+// routeInMaintenance says whether the route's maintenance switch is on, on a
+// proxy that can say. One that cannot is taken as off, which runs the
+// checks as before.
+func (e *NormalizedStepExecutor) routeInMaintenance(ctx context.Context, name string) bool {
+	reader, ok := e.proxy.(interface {
+		DeploymentMaintenance(context.Context, string) (proxysvc.MaintenanceSwitch, error)
+	})
+	if !ok {
+		return false
+	}
+	state, err := reader.DeploymentMaintenance(ctx, name)
+	return err == nil && state.Ready && state.On
+}
+
 func publicRouteActivationEvidence(result proxysvc.DeploymentRouteResult) routeActivationEvidence {
 	return routeActivationEvidence{
 		Name: result.Snapshot.Name, PriorExisted: result.Snapshot.Existed,
@@ -693,6 +724,10 @@ func publicRoute(environmentID int64, snapshot runtimeReleaseSnapshot, host stri
 	if gate := snapshot.Plan.SignInGate(); gate != nil {
 		route.ForwardAuth = &proxysvc.SiteForwardAuth{Provider: gate.Provider, Verify: gate.Verify, SignIn: gate.SignIn}
 	}
+	if m := snapshot.Plan.Maintenance; m != nil {
+		route.Maintenance = proxysvc.DeploymentMaintenance{RetryAfter: m.RetryAfter, BypassFrom: m.BypassFrom}
+	}
+	route.ErrorPages, route.InterceptErrors = snapshot.Plan.ErrorPages, snapshot.Plan.InterceptErrors
 	return route
 }
 
@@ -823,6 +858,18 @@ func (e *NormalizedStepExecutor) retirePrevious(
 	execution StepExecution,
 	_ *StoredExecutionPlan,
 ) StepResult {
+	return e.retirePredecessor(ctx, execution, true)
+}
+
+// retirePredecessor stops the release this run replaced, or keeps it warm
+// when the environment's terms allow. A cancellation finishing a committed
+// cutover retires plainly: the operator stopped the run, not asked for a
+// window.
+func (e *NormalizedStepExecutor) retirePredecessor(
+	ctx context.Context,
+	execution StepExecution,
+	allowWarm bool,
+) StepResult {
 	// Once the environment pointer has moved, cancellation must not strand the
 	// predecessor beside the new live runtime. Finish the bounded drain and
 	// retirement independently of the request context.
@@ -845,6 +892,7 @@ func (e *NormalizedStepExecutor) retirePrevious(
 		return normalizedStepFailure(err)
 	}
 	var stop *RuntimeStopEvidence
+	var warmNote map[string]any
 	// A stop-first Compose release reuses one stable project identity. Its old
 	// containers were already replaced by `up`; stopping that identity here
 	// would stop the newly activated release.
@@ -858,6 +906,20 @@ func (e *NormalizedStepExecutor) retirePrevious(
 				return runtimeStepFailure(retireCtx.Err(), "drain_timeout", "the prior release drain did not complete", nil)
 			case <-timer.C:
 			}
+		}
+		if allowWarm && snapshot.Plan.Strategy == StrategyBlueGreen {
+			watch, why := e.keepWarm(retireCtx, execution, release.Release, snapshot, *previous, e.cutoverMoment(retireCtx, execution.Run.ID))
+			if watch != nil {
+				_ = stepLog(execution, "status", warmKeptLine(*watch))
+				return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{
+					"releaseId": predecessorID, "warm": map[string]any{
+						"kept": true, "watchId": watch.ID, "until": watch.ExpiresAt,
+						"runtimeId": previous.RuntimeID, "automatic": watch.Policy.Automatic,
+					},
+				})}
+			}
+			warmNote = map[string]any{"kept": false, "reason": why}
+			_ = stepLog(execution, "status", "Not keeping the previous release warm: "+why)
 		}
 		variables, variablesErr := e.runtimeVariablesForRelease(retireCtx, predecessorID, *previous)
 		if variablesErr != nil {
@@ -874,9 +936,24 @@ func (e *NormalizedStepExecutor) retirePrevious(
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
-	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{
+	evidence := map[string]any{
 		"releaseId": retiredID, "stop": stop, "sharedComposeProject": sharedComposeProject,
-	})}
+	}
+	if warmNote != nil {
+		evidence["warm"] = warmNote
+	}
+	return StepResult{State: StepPassed, Evidence: mustJSON(evidence)}
+}
+
+// warmKeptLine is the transcript's account of a window opening.
+func warmKeptLine(watch RollbackWatch) string {
+	until := watch.ExpiresAt.UTC().Format("15:04:05 UTC")
+	if !watch.Policy.Automatic {
+		return fmt.Sprintf("Kept release #%d warm (paused) until %s, so it can be switched back to instantly",
+			watch.WarmReleaseNum, until)
+	}
+	return fmt.Sprintf("Kept release #%d warm (paused) until %s: if release #%d's 5xx share passes the previous release's by %.1f points or its p95 reaches %.4g× it, over at least %d requests, traffic goes back to it automatically",
+		watch.WarmReleaseNum, until, watch.ReleaseNumber, watch.Policy.ErrorRateMargin, watch.Policy.LatencyFactor, watch.Policy.MinRequests)
 }
 
 func (e *NormalizedStepExecutor) removePreview(ctx context.Context, execution StepExecution) StepResult {
@@ -960,7 +1037,8 @@ func (e *NormalizedStepExecutor) removePreview(ctx context.Context, execution St
 func (e *NormalizedStepExecutor) recordRelease(ctx context.Context, execution StepExecution) StepResult {
 	var release *ReleaseWithArtifacts
 	var err error
-	if operationTargetsLiveRelease(execution.Run.Operation) {
+	_, instant := instantRollbackOf(execution.Run)
+	if operationTargetsLiveRelease(execution.Run.Operation) || instant {
 		targetReleaseID, targetErr := operationTargetReleaseID(execution.Run)
 		if targetErr != nil {
 			return normalizedStepFailure(targetErr)
@@ -1062,13 +1140,34 @@ func decodeReleaseRuntimeSnapshot(release *ReleaseWithArtifacts) (runtimeRelease
 		if json.Unmarshal(envelope.Snapshot, &snapshot) != nil || snapshot.Version != 1 {
 			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot is malformed", ErrArtifactMissing)
 		}
-		if snapshot.Plan.Strategy != release.Release.Strategy ||
-			(release.Release.ImageDigest != "" && snapshot.Image.Digest != release.Release.ImageDigest) {
+		if snapshot.Plan.Strategy != release.Release.Strategy || !snapshotNamesReleaseImage(snapshot, release.Release.ImageDigest) {
 			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot does not match release identity", ErrInvalidPlan)
 		}
 		return snapshot, nil
 	}
 	return runtimeReleaseSnapshot{}, fmt.Errorf("%w: release runtime artifact is unavailable", ErrArtifactMissing)
+}
+
+// snapshotNamesReleaseImage is whether the runtime snapshot runs the image
+// the release row records. A container release has one image and both name
+// it. A Compose release records the first of its services' image artifacts
+// and keeps no single image of its own (snapshot.Image is empty), so the
+// recorded digest has to be one of the snapshot's services: comparing it with
+// the empty single image refused every Compose release at its first
+// activation step.
+func snapshotNamesReleaseImage(snapshot runtimeReleaseSnapshot, digest string) bool {
+	if digest == "" {
+		return true
+	}
+	if snapshot.Compose == nil {
+		return snapshot.Image.Digest == digest
+	}
+	for _, service := range snapshot.Compose.Services {
+		if service.Digest == digest {
+			return true
+		}
+	}
+	return false
 }
 
 // operationTargetsLiveRelease is true for the operations that act on the

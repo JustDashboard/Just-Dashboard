@@ -707,7 +707,10 @@ func (s *PlanningStore) Save(
 		if request.Source == nil || request.Intent != nil || request.Configuration != nil || request.Dotenv != nil {
 			return nil, fmt.Errorf("%w: source step requires only source data", ErrInvalidPlan)
 		}
-		copy := canonicalSourceConfig(*request.Source)
+		copy, err := canonicalSourceConfig(*request.Source).WithTemplateDocuments()
+		if err != nil {
+			return nil, err
+		}
 		if err := copy.validateForNewDeployment(); err != nil {
 			return nil, err
 		}
@@ -774,6 +777,9 @@ func (s *PlanningStore) Save(
 			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 		}
 		if err := copy.Validate(); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+		}
+		if err := refuseUnrunnableChecks(copy.Checks); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 		}
 		if _, _, err := ResolveVariableGraphWithModes(draft.variableValues(copy), draft.variableModes(copy), nil); err != nil {

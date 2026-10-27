@@ -1350,6 +1350,9 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	if err := configuration.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
+	if err := refuseUnrunnableChecks(configuration.Checks); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -1527,7 +1530,12 @@ func (s *PlanningStore) saveEnvironmentSource(
 	detection *DetectionResult,
 ) (*EnvironmentConfiguration, *DetectionProposal, error) {
 	fail := func(err error) (*EnvironmentConfiguration, *DetectionProposal, error) { return nil, nil, err }
-	source = canonicalSourceConfig(source)
+	// A template source is saved as this dashboard's render of the version it
+	// names, which is also how a deployment moves to a newer version.
+	source, err := canonicalSourceConfig(source).WithTemplateDocuments()
+	if err != nil {
+		return fail(err)
+	}
 	if err := source.ValidateForDeployment(); err != nil {
 		return fail(err)
 	}

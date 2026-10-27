@@ -303,6 +303,15 @@ function ArchivedMark({ project }: { project: ArchivedDeployment }) {
  */
 function ArchivedSource({ project }: { project: ArchivedDeployment }) {
   const facts = recorded(project)
+  if (facts?.sourceKind === "compose" && facts.sourceTemplate)
+    return (
+      <span className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
+        <span className="shrink-0">Template</span>
+        <Tag mono className="min-w-0 shrink">
+          <span className="truncate">{facts.sourceTemplate}</span>
+        </Tag>
+      </span>
+    )
   if (!facts?.sourceRepository) return null
   if (facts.sourceKind === "blueprint")
     return (

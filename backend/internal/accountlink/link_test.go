@@ -328,6 +328,39 @@ func TestConsumedApprovalIsLinkedIfAnotherProcessCollectedIt(t *testing.T) {
 	}
 }
 
+func TestPollsRacingForOneApprovalAllSeeTheLink(t *testing.T) {
+	t.Parallel()
+	// The site hands an approval over once. Polls from one process that race
+	// for it must all come back linked: the losers are told it was consumed,
+	// and that is only true once the winner has stored the link.
+	for round := 0; round < 20; round++ {
+		e := newEnv(t)
+		req, err := e.svc.BeginLink(t.Context(), ScopeObserve, "admin")
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.site.approve(req.ID, "ion@example.com")
+		results := make(chan PollResult, 4)
+		for range 4 {
+			go func() {
+				res, err := e.svc.PollLink(t.Context())
+				if err != nil {
+					res = PollResult{State: "error", Message: err.Error()}
+				}
+				results <- res
+			}()
+		}
+		for range 4 {
+			if res := <-results; res.State != PollLinked {
+				t.Fatalf("round %d: a racing poll = %+v", round, res)
+			}
+		}
+		if status, _ := e.svc.Status(t.Context()); status.LastOutcome != nil {
+			t.Fatalf("round %d: a linked install shows the outcome %+v", round, status.LastOutcome)
+		}
+	}
+}
+
 func TestATransientPollFailureLeavesTheRequestStanding(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)

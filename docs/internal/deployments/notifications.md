@@ -93,6 +93,16 @@ selects everything. The historical `run.finished` value remains valid as "every 
 so channels created before failure notifications existed start receiving them without an edit.
 Unknown events are rejected.
 
+An automatic instant rollback (`deploy/rollback_watch.go`) that succeeds raises
+`release.rolled_back` rather than `run.succeeded`: the run went well, the release it took traffic from
+did not. It is not selectable on its own; it reaches every channel that selects `run.failed` (or
+`run.finished`, or everything), and the providers render it red — "release #42 rolled back
+automatically", the reading that decided it, and that the previous release serves again from its warm
+container. An instant rollback that fails raises `run.failed` as any run does. Every instant rollback's
+envelope, automatic or pressed by hand, carries a `rollback` block: `automatic`, `releaseNumber` (the
+release taken back), `restoredReleaseNumber` (the warm one serving again), `reason` and, for an
+automatic one, `rule` (`error_rate` or `latency`).
+
 Deliveries are recorded per `(channel, run, event, attempt)` with only a status class
 (`2xx`, `5xx`, `network`, `smtp`, `sealed`); response bodies are discarded. The dispatcher skips a
 channel that already has a delivered row for the same run and event, so a reclaimed lease or a

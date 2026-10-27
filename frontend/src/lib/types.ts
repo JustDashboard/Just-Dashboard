@@ -2977,6 +2977,7 @@ export type DeploymentFacts = {
   sourceKind?: DeploymentSourceKind
   sourceRef?: string
   sourceRepository?: string
+  sourceTemplate?: string
   buildMethod?: DeploymentBuildMethod
   recipe?: DeploymentRecipe
   framework?: string
@@ -3299,6 +3300,48 @@ export type BlueprintSummary = {
   memoryMb: number
   requiresAcceptance?: boolean
   privileged?: boolean
+  /**
+   * The source kind it deploys as: one reviewed image, or a multi-service
+   * template that runs through the Compose release path — then `image` is
+   * the public service's, `memoryMb` the whole stack's limits added up, and
+   * `services` what the stack runs.
+   */
+  sourceKind?: "blueprint" | "compose"
+  services?: BlueprintServiceSummary[]
+}
+
+export type BlueprintServiceRole = "app" | "worker" | "database" | "cache"
+
+/** One service of a multi-service template as the catalogue lists it. */
+export type BlueprintServiceSummary = {
+  name: string
+  role: BlueprintServiceRole
+  purpose: string
+  image: string
+  memoryMb: number
+  /** The one service routed to the deployment's domain. */
+  public?: boolean
+}
+
+/** One service as the definition declares it, on the detail endpoint. */
+export type BlueprintService = {
+  name: string
+  role: BlueprintServiceRole
+  purpose: string
+  image: { reference: string; tagPolicy: string; command?: string[] }
+  ports?: {
+    name: string
+    internal: number
+    protocol: string
+    purpose: string
+    exposure: "proxy" | "internal"
+    primary?: boolean
+  }[]
+  volumes?: { name: string; target: string; purpose: string; data: boolean; backup: boolean }[]
+  resources: { memoryMb: number; minMemoryMb: number; cpus?: number }
+  dependsOn?: { service: string; condition: "healthy" | "started" | "completed" }[]
+  /** A private service that may reach the internet. */
+  egress?: boolean
 }
 
 export type BlueprintChoice = {
@@ -3367,6 +3410,8 @@ export type BlueprintDetail = Omit<
   | "reviewedAt"
   | "requiresAcceptance"
   | "privileged"
+  | "sourceKind"
+  | "services"
 > & {
   retired?: string
   image: {
@@ -3405,6 +3450,8 @@ export type BlueprintDetail = Omit<
   files?: BlueprintConfigFile[]
   automation?: BlueprintAutomation[]
   update: { detector: string; versionSource?: string; notes?: string; backupFirst?: boolean }
+  /** A multi-service template's services; the top-level image is then empty. */
+  services?: BlueprintService[]
 }
 
 export type GameImportPreview = {
@@ -3690,6 +3737,12 @@ export type DeploymentSummary = {
   sourceRepository?: string
   /** A Git source's remote without userinfo: `https://host/path` or `git@host:path`. */
   sourceRemote?: string
+  /**
+   * The reviewed template (`id@version`) the deployment was made from: a
+   * blueprint source's definition, or the multi-service template a Compose
+   * source was rendered from.
+   */
+  sourceTemplate?: string
   recipe?: DeploymentRecipe
   /** What detection recognised the source as (`nextjs`, `vite`, `django`…), recorded at creation. */
   framework?: string
@@ -3933,6 +3986,81 @@ export type DeploymentRelease = {
   activatedAt?: string
   retiredAt?: string
   pinned: boolean
+  /** Set on a release an instant rollback took traffic away from. */
+  rolledBackAt?: string
+  rollbackReason?: string
+}
+
+/**
+ * An environment's terms for keeping the previous release warm after a
+ * blue/green cutover (`deploy/rollback_watch.go`).
+ */
+export type RollbackPolicy = {
+  keepWarm: boolean
+  windowSeconds: number
+  automatic: boolean
+  /** Percentage points over the previous release's 5xx share. */
+  errorRateMargin: number
+  /** Multiple of the previous release's p95. */
+  latencyFactor: number
+  minRequests: number
+  updatedBy?: string
+  updatedAt?: string
+}
+
+export type RollbackReading = {
+  requests: number
+  failures: number
+  /** A share, 0–1. */
+  errorRate: number
+  p95?: number
+  from: string
+  until: string
+}
+
+export type RollbackVerdictCode =
+  "no_route" | "no_record" | "not_enough_requests" | "within_baseline" | "error_rate" | "latency"
+
+export type RollbackVerdict = {
+  code: RollbackVerdictCode
+  judged: boolean
+  tripped: boolean
+  reason: string
+  latencyJudged: boolean
+}
+
+export type RollbackWatchState = "watching" | "rolling_back" | "rolled_back" | "closing" | "closed"
+
+export type RollbackWatch = {
+  id: number
+  projectId: number
+  environmentId: number
+  runId: number
+  releaseId: number
+  warmReleaseId: number
+  warmRuntimeId: string
+  state: RollbackWatchState
+  policy: RollbackPolicy
+  cutoverAt: string
+  expiresAt: string
+  baseline?: RollbackReading
+  observed?: RollbackReading
+  verdict?: RollbackVerdict
+  checkedAt?: string
+  rollbackRunId?: number
+  attempts: number
+  endReason?: string
+  endMessage?: string
+  endedAt?: string
+  createdAt: string
+  releaseNumber: number
+  warmReleaseNumber: number
+}
+
+export type RollbackWatchResponse = {
+  policy: RollbackPolicy
+  watch: RollbackWatch | null
+  preview: boolean
 }
 
 export type DeploymentTrigger = {
@@ -4177,8 +4305,12 @@ export type DeploymentHostnameSuggestion = {
   /** Whether a certificate on this host already covers it — the only thing activation accepts. */
   covered: boolean
   certificateName?: string
-  /** The HTTP-01 challenge this host could issue one with now, if any. */
-  certificateMethod?: "nginx" | "webroot" | "standalone" | "caddy"
+  /**
+   * The HTTP-01 challenge this host could issue one with now, if any — or, for a
+   * wildcard, `dns-01` through the saved credentials of `certificateDnsProvider`.
+   */
+  certificateMethod?: "nginx" | "webroot" | "standalone" | "caddy" | "dns-01"
+  certificateDnsProvider?: string
   certificateIssue?: string
   method: "wildcard" | "sslip" | "custom" | "none"
   detail: string
@@ -4785,6 +4917,8 @@ export type DeploymentDetection = {
     dirty?: boolean
     composeFiles?: string[]
     services?: string[]
+    /** The multi-service template (`id@version`) a Compose source was rendered from. */
+    template?: string
   }
   candidates: DeploymentDetectionCandidate[]
   compose?: {
@@ -5027,6 +5161,12 @@ export type DeploymentConfiguration = {
     responseHeaders?: { name: string; value: string }[]
     /** An auth server asked about every request before the public route answers it. */
     forwardAuth?: DeploymentForwardAuth
+    /** What the route's maintenance does while it is on; whether it is on is the switch's. */
+    maintenance?: DeploymentRouteMaintenance
+    /** The codes the public route answers with a page of its own. */
+    errorPages?: DeploymentErrorPage[]
+    /** Gives the application's own answers with those codes the page too. */
+    interceptErrors?: boolean
     mounts?: {
       source: string
       target: string
@@ -5098,6 +5238,34 @@ export type DeploymentForwardAuth = {
   signIn: string
   /** Leaves this environment's route open and gates only the previews made from it. */
   previewsOnly?: boolean
+}
+
+/** What a deployment's maintenance does while it is on. */
+export type DeploymentRouteMaintenance = {
+  /** Seconds the 503 tells clients and crawlers to wait; empty sends no Retry-After. */
+  retryAfter?: number
+  /** The addresses and ranges that reach the application as usual while it is on. */
+  bypassFrom?: string[]
+}
+
+export type DeploymentErrorPage = 404 | 502 | 503 | 504
+
+/** A page a deployment's route answers with: its maintenance page or an error page. */
+export type DeploymentPageName = "maintenance" | "404" | "502" | "503" | "504"
+
+/**
+ * GET/PUT /deploy/{id}/environments/{env}/maintenance: the switch beside the
+ * live route, which the route reads on every request.
+ */
+export type DeploymentMaintenanceSwitch = {
+  driver: "nginx" | "caddy"
+  /** The environment has a route on the proxy at all. */
+  route: boolean
+  /** The route carries the check, so the switch acts at once. */
+  ready: boolean
+  on: boolean
+  /** When it was turned on (RFC 3339). */
+  since?: string
 }
 
 export type DeploymentVariable = {

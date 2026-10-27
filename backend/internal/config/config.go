@@ -56,13 +56,18 @@ type Config struct {
 	// not be skipped. Enrolment is still offered, still encouraged, and can be
 	// made compulsory again by setting this — but the default no longer
 	// decides on the operator's behalf.
-	Require2FA       bool
-	TerminalShell    string
-	TerminalUser     string
-	FileRoots        []string
-	LogRoots         []string
-	NginxDir         string
-	CaddyFile        string
+	Require2FA    bool
+	TerminalShell string
+	TerminalUser  string
+	FileRoots     []string
+	LogRoots      []string
+	NginxDir      string
+	CaddyFile     string
+	// IngressContainer names the Caddy container deployment domains are
+	// served through when discovery cannot choose it: one bound to a single
+	// address rather than every address, or an isolated acceptance stack's
+	// ingress on loopback. Empty discovers the public one.
+	IngressContainer string
 	ComposeRoots     []string
 	GitRoots         []string
 	DeployRoots      []string
@@ -134,6 +139,7 @@ func Load() (*Config, error) {
 		LogRoots:         envList("JD_LOG_ROOTS", "/var/log"),
 		NginxDir:         env("JD_NGINX_DIR", "/etc/nginx"),
 		CaddyFile:        env("JD_CADDYFILE", "/etc/caddy/Caddyfile"),
+		IngressContainer: env("JD_INGRESS_CONTAINER", ""),
 		ComposeRoots:     envList("JD_COMPOSE_ROOTS", "/opt,/srv,/home"),
 		GitRoots:         envList("JD_GIT_ROOTS", "/opt,/srv,/home,/root"),
 		DeployRoots:      deployRoots(l),

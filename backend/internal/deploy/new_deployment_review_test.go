@@ -23,7 +23,7 @@ func TestEveryDeployableBlueprintPassesConfigurationAndRuntimePreflight(t *testi
 		}
 		t.Run(definition.ID, func(t *testing.T) {
 			plan, err := RenderBlueprintPlan(DraftSourceConfig{
-				Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: definition.ID,
+				Kind: BlueprintSourceKind(definition), Mode: SourceModeBlueprint, BlueprintID: definition.ID,
 				BlueprintVersion: definition.Version, BlueprintInputs: definition.Fixtures[0].Inputs,
 			}, definition.ID)
 			if err != nil {
@@ -36,7 +36,7 @@ func TestEveryDeployableBlueprintPassesConfigurationAndRuntimePreflight(t *testi
 			// checks; a catalogue default must never conflict with its profile.
 			draft := &Draft{Data: DraftData{
 				Intent: &DraftIntentConfig{Name: definition.ID, Profile: plan.Detection.Candidates[0].Profile},
-				Source: &DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint,
+				Source: &DraftSourceConfig{Kind: BlueprintSourceKind(definition), Mode: SourceModeBlueprint,
 					BlueprintID: definition.ID, BlueprintVersion: definition.Version},
 				Detection: &plan.Detection, Configuration: &plan.Configuration,
 			}}
@@ -218,7 +218,7 @@ func TestBlueprintDomainDefaultsRetainTheirBindingAfterDetection(t *testing.T) {
 			continue
 		}
 		t.Run(definition.ID, func(t *testing.T) {
-			plan, err := RenderBlueprintPlan(DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint,
+			plan, err := RenderBlueprintPlan(DraftSourceConfig{Kind: BlueprintSourceKind(definition), Mode: SourceModeBlueprint,
 				BlueprintID: definition.ID, BlueprintVersion: definition.Version, BlueprintInputs: inputs}, definition.ID)
 			if err != nil {
 				t.Fatal(err)

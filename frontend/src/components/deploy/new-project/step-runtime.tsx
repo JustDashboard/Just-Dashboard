@@ -10,7 +10,7 @@ import {
   StorageMounts,
 } from "@/components/deploy/new-project/configure-advanced"
 import { PublicAddress } from "@/components/deploy/new-project/public-address"
-import { checkTarget } from "@/components/deploy/new-project/plan-reading"
+import { checkTarget, composeNamedVolumes } from "@/components/deploy/new-project/plan-reading"
 import { ShellWords } from "@/components/deploy/run-evidence"
 import type { ConfigureFlow, FlowUpdate } from "@/components/deploy/new-project/draft"
 import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
@@ -87,10 +87,13 @@ export function StepRuntime({
       .join(" · ") || "No limits"
 
   const mounts = runtime.mounts ?? []
+  const stackVolumes = composeNamedVolumes(flow)
   const storageFacts =
-    mounts.length === 0
-      ? "Nothing survives a rebuild"
-      : `${mounts.length} ${mounts.length === 1 ? "mount" : "mounts"}`
+    stackVolumes.length > 0
+      ? `${stackVolumes.length} ${stackVolumes.length === 1 ? "volume" : "volumes"} in the Compose stack`
+      : mounts.length === 0
+        ? "Nothing survives a rebuild"
+        : `${mounts.length} ${mounts.length === 1 ? "mount" : "mounts"}`
 
   const accessFacts =
     [

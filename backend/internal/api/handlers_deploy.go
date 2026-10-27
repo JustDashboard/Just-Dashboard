@@ -74,8 +74,11 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/environments/{env}/variables", s.handle(s.handleDeploymentVariables))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/pending", s.handle(s.handleDeploymentPending))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfiguration))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/maintenance", s.handle(s.handleDeploymentMaintenance))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/pages/{page}", s.handle(s.handleDeploymentPageGet))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/triggers", s.handle(s.handleDeploymentTriggers))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/git-watch", s.handle(s.handleDeploymentGitWatch))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/rollback-watch", s.handle(s.handleDeploymentRollbackWatch))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/database-links", s.handle(s.handleDeploymentDatabaseLinks))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/database-addresses", s.handle(s.handleDeploymentDatabaseAddresses))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/schedules", s.handle(s.handleDeploymentSchedules))
@@ -94,6 +97,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/{id}/environments/{env}/runs", s.handle(s.handleDeploymentRunCreate))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/cancel", s.handle(s.handleDeploymentRunCancel))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/retry", s.handle(s.handleDeploymentRunRetry))
+			// Keeping the new release only removes a container nothing routes
+			// to; it is the same control a deploy is.
+			r.Method(http.MethodPost, "/{id}/environments/{env}/rollback-watch/keep", s.handle(s.handleDeploymentKeepRelease))
 			// Asking about a failure takes what asking the SQL editor's
 			// assistant takes: it spends the install's model budget.
 			r.Method(http.MethodPost, "/{id}/runs/{run}/diagnosis", s.handle(s.handleDeploymentRunDiagnose))
@@ -131,9 +137,13 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPut, "/{id}/shared-variables/{name}", s.handle(s.handleSharedVariablePut))
 				r.Method(http.MethodGet, "/{id}/shared-variables/{name}/reveal", s.handle(s.handleSharedVariableReveal))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfigurationSave))
+				// What every visitor is shown when the route answers with one
+				// of its own pages: written as the configuration is.
+				r.Method(http.MethodPut, "/{id}/environments/{env}/pages/{page}", s.handle(s.handleDeploymentPagePut))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/source", s.handle(s.handleDeploymentSourceUpdate))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/detect", s.handle(s.handleDeploymentDetect))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/git-policy", s.handle(s.handleDeploymentGitPolicyPut))
+				r.Method(http.MethodPut, "/{id}/environments/{env}/rollback-policy", s.handle(s.handleDeploymentRollbackPolicyPut))
 				r.Method(http.MethodPost, "/{id}/previews/approvals/{approval}/approve", s.handle(s.handleDeploymentPreviewApprove))
 				// Testing a pull request is the approval of that head, so it
 				// sits with the approval route it stands in for.
@@ -179,6 +189,13 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/{id}/remove-managed", s.handle(s.handleDeploymentRemoveManaged))
 			r.Method(http.MethodPost, "/{id}/rollback", s.handle(s.handleDeployRollback))
 			r.Method(http.MethodPost, "/{id}/environments/{env}/rollback", s.handle(s.handleDeploymentReleaseRollback))
+			// Maintenance takes the application away from its visitors, as
+			// stopping it does and as a Proxy site's maintenance does, and
+			// sits behind the same gate as both.
+			r.Method(http.MethodPut, "/{id}/environments/{env}/maintenance", s.handle(s.handleDeploymentMaintenanceSet))
+			// Switching traffic back to the warm release takes the live one out
+			// of service, exactly as a rollback from the list does.
+			r.Method(http.MethodPost, "/{id}/environments/{env}/rollback-watch/rollback", s.handle(s.handleDeploymentInstantRollback))
 			// A saved credential is routine and recoverable exactly like a
 			// saved DNS-provider credential: destructive, but never a typed
 			// phrase, since the secret is pasted again in a minute.
@@ -230,6 +247,8 @@ func mapDeployError(err error) error {
 		return httpx.Err(http.StatusConflict, "run_not_cancellable", err.Error())
 	case errors.Is(err, deploy.ErrRunNotRetryable):
 		return httpx.Err(http.StatusConflict, "run_not_retryable", err.Error())
+	case errors.Is(err, deploy.ErrNoRollbackWatch):
+		return httpx.Err(http.StatusConflict, "no_warm_release", err.Error())
 	case errors.Is(err, deploy.ErrInvalidPlan), errors.Is(err, deploy.ErrArtifactMissing):
 		return httpx.Err(http.StatusUnprocessableEntity, "invalid_release", err.Error())
 	case errors.Is(err, deploy.ErrNameTaken):
@@ -1016,11 +1035,21 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 		steps = []deploy.StepKey{deploy.StepNotify}
 		slot = deploy.SlotLight
 	}
+	// An instant rollback builds and starts nothing: it resumes the warm
+	// release and switches back to it, so it takes a light slot.
+	instant, _ := extraMetadata["instant"].(bool)
+	if instant && operation == deploy.OperationRollback {
+		steps = append([]deploy.StepKey(nil), deploy.InstantRollbackSteps...)
+		slot = deploy.SlotLight
+	}
 	if operation == deploy.OperationRollback {
 		priority = 1000
 	}
 	digestInput := fmt.Sprintf("normalized:%d:%d:%s:%d:%d", project.ID, environmentID,
 		operation, planRevision, targetReleaseID)
+	if instant {
+		digestInput += fmt.Sprintf(":instant:%v", extraMetadata["watchId"])
+	}
 	digest := sha256.Sum256([]byte(digestInput))
 	policyKey := ""
 	if len(expectedGitPolicy) > 0 {

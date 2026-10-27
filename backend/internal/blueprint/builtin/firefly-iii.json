@@ -1,0 +1,261 @@
+{
+  "id": "firefly-iii",
+  "version": "1.0.0",
+  "name": "Firefly III",
+  "category": "http",
+  "profile": "compose",
+  "description": "A personal finance manager for budgets, accounts and transactions, with its MariaDB server on a private network.",
+  "iconId": "wallet",
+  "docsUrl": "https://docs.firefly-iii.org/how-to/firefly-iii/installation/docker/",
+  "access": {
+    "kind": "setup",
+    "note": "Firefly III asks the first visitor to https://<domain>/ to register, and that first account becomes the owner and administrator. Register yourself the moment the deployment is ready. Recurring transactions and other scheduled work need its cron job, which is not part of this template."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/firefly-iii/firefly-iii",
+    "reviewedAt": "2026-10-27",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Firefly III builds links and its OAuth endpoints from this."
+    }
+  ],
+  "secrets": [
+    {
+      "name": "app-key",
+      "variable": "APP_KEY",
+      "label": "Application key",
+      "length": 32,
+      "description": "Encrypts stored data; Firefly III requires exactly 32 characters and cannot read its data without it."
+    },
+    {
+      "name": "db-password",
+      "variable": "FIREFLY_DB_PASSWORD",
+      "label": "Database password",
+      "length": 40,
+      "description": "Generated here and given only to the services that sign in to the database."
+    },
+    {
+      "name": "db-root-password",
+      "variable": "MARIADB_ROOT_PASSWORD",
+      "label": "MariaDB root password",
+      "length": 40,
+      "description": "For administering the database by hand; the application never uses it."
+    }
+  ],
+  "services": [
+    {
+      "name": "firefly",
+      "role": "app",
+      "purpose": "The web interface and API, behind the domain",
+      "image": {
+        "reference": "fireflyiii/core:version-6.7.9",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "APP_KEY",
+          "value": "{{secret.app-key}}"
+        },
+        {
+          "name": "APP_URL",
+          "value": "{{variable.APP_URL}}"
+        },
+        {
+          "name": "APP_ENV",
+          "value": "production"
+        },
+        {
+          "name": "TRUSTED_PROXIES",
+          "value": "**"
+        },
+        {
+          "name": "DB_CONNECTION",
+          "value": "mysql"
+        },
+        {
+          "name": "DB_HOST",
+          "value": "db"
+        },
+        {
+          "name": "DB_PORT",
+          "value": "3306"
+        },
+        {
+          "name": "DB_DATABASE",
+          "value": "firefly"
+        },
+        {
+          "name": "DB_USERNAME",
+          "value": "firefly"
+        },
+        {
+          "name": "DB_PASSWORD",
+          "value": "{{secret.db-password}}"
+        },
+        {
+          "name": "TZ",
+          "value": "UTC"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 8080,
+          "protocol": "tcp",
+          "purpose": "The web interface and API",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "upload",
+          "target": "/var/www/html/storage/upload",
+          "purpose": "Attachments uploaded to transactions",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fsS",
+          "-o",
+          "/dev/null",
+          "http://127.0.0.1:8080/health"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 12,
+        "startPeriodSeconds": 60
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "MariaDB, holding every account, budget and transaction",
+      "image": {
+        "reference": "mariadb:11.8.9",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "MARIADB_DATABASE",
+          "value": "firefly"
+        },
+        {
+          "name": "MARIADB_USER",
+          "value": "firefly"
+        },
+        {
+          "name": "MARIADB_PASSWORD",
+          "value": "{{secret.db-password}}"
+        },
+        {
+          "name": "MARIADB_ROOT_PASSWORD",
+          "value": "{{secret.db-root-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "mysql",
+          "internal": 3306,
+          "protocol": "tcp",
+          "purpose": "SQL connections from Firefly III",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/var/lib/mysql",
+          "purpose": "Every table Firefly III keeps",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "healthcheck.sh",
+          "--connect",
+          "--innodb_initialized"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 12,
+        "startPeriodSeconds": 30
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health",
+      "port": "http",
+      "timeoutSeconds": 300
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "APP_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "Firefly III migrates its database on start; take a backup first and keep APP_KEY with it."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "money.example.test"
+      },
+      "digest": "sha256:65f992056544d031f38d795658458a9416788cdab8e4fd6e06dac66204a1da46"
+    }
+  ]
+}
