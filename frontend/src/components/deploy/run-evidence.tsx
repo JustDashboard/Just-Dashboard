@@ -8,6 +8,7 @@ import {
   Check,
   Copy,
   Crosshair,
+  Database,
   GitCommit,
   GitTag,
   Globe,
@@ -47,6 +48,7 @@ import {
   sourceProduct,
   type ReleaseNodeState,
 } from "@/components/deploy/vocabulary"
+import { rehearsalOf, rehearsalSummary } from "@/components/deploy/rehearsal-model"
 
 /**
  * What a run's steps recorded, drawn as what each thing is.
@@ -126,6 +128,7 @@ const STEP_GLYPH: Record<string, Icon> = {
   build_artifact: Box,
   render_runtime: Layers,
   backup_gate: Archive,
+  rehearse_migration: Database,
   release_task: Terminal,
   provision_certificate: LockClosed,
   start_candidate: Box,
@@ -185,6 +188,11 @@ function stepProduct(
         (runtime && RUNTIME_PRODUCT[runtime]) ??
         (deployment?.buildMethod === "compose" ? "docker-compose" : "docker")
       )
+    }
+    case "rehearse_migration": {
+      // The engine the copy ran, where the report names one.
+      const database = isRecord(evidence.database) ? evidence.database : undefined
+      return text(database?.engine)
     }
     case "provision_certificate":
       return "lets-encrypt"
@@ -279,6 +287,10 @@ export function stepSummary(step: DeploymentStep): string | undefined {
       const platform = Array.isArray(metadata.platforms) ? text(metadata.platforms[0]) : undefined
       const size = typeof artifact.sizeBytes === "number" ? bytes(artifact.sizeBytes) : undefined
       return [text(artifact.kind), size, platform].filter(Boolean).join(" · ")
+    }
+    case "rehearse_migration": {
+      const report = rehearsalOf(evidence)
+      return report ? rehearsalSummary(report) : undefined
     }
     case "render_runtime":
     case "record_release":

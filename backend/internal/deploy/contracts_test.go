@@ -81,8 +81,10 @@ func TestStepTransitionTableExhaustivelyAllowsOnlyFrozenEdges(t *testing.T) {
 }
 
 func TestDefaultReleasePathHasEveryFrozenStepOnce(t *testing.T) {
-	if len(DefaultStepKeys) != 16 {
-		t.Fatalf("default release path has %d steps, want 16", len(DefaultStepKeys))
+	// Seventeen since the migration rehearsal joined between the backup gate
+	// and the release task.
+	if len(DefaultStepKeys) != 17 {
+		t.Fatalf("default release path has %d steps, want 17", len(DefaultStepKeys))
 	}
 	seen := map[StepKey]bool{}
 	for _, step := range DefaultStepKeys {

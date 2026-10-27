@@ -1403,7 +1403,10 @@ export const LINK_STATUS: Record<
 export const RELEASE_GROUPS = [
   { label: "Source", keys: ["resolve_source", "acquire_source", "analyze_plan"] },
   { label: "Build", keys: ["prepare_context", "build_artifact"] },
-  { label: "Release", keys: ["render_runtime", "backup_gate", "release_task"] },
+  {
+    label: "Release",
+    keys: ["render_runtime", "backup_gate", "rehearse_migration", "release_task"],
+  },
   // Its own node rather than a detail of Release: a deployment publishing a
   // name for the first time spends real seconds here talking to a certificate
   // authority, and a progress line that reads "Release" throughout looks stuck.
@@ -1508,6 +1511,7 @@ const STEP_LABELS: Record<string, string> = {
   render_runtime: "Render runtime",
   release_task: "Release task",
   backup_gate: "Backup check",
+  rehearse_migration: "Migration rehearsal",
   provision_certificate: "Certificate",
   start_candidate: "Start new release",
   verify_readiness: "Readiness checks",

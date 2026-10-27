@@ -36,6 +36,7 @@ import type {
   NotificationChannel,
   NotificationDelivery,
   ProjectPullRequests,
+  RehearsalPolicy,
   ReleaseComparisonResponse,
   RollbackPolicy,
   RollbackWatch,
@@ -2189,9 +2190,18 @@ export async function mockProject(
      * is an environment that has never had one.
      */
     rollbackWatch?: RollbackWatch | null
+    /** The environment's migration rehearsal terms; off unless given. */
+    rehearsal?: RehearsalPolicy
   } = {},
 ) {
   const showcase = Boolean(options.showcase)
+  let rehearsalPolicy: RehearsalPolicy = options.rehearsal ?? {
+    enabled: false,
+    connectionId: 0,
+    whenUnavailable: "block",
+    restoreTimeoutSeconds: 600,
+    maxBackupMb: 2048,
+  }
   // The showcase runs on its own clock, two and a half minutes after the
   // moment its records were written, so every age on its pages reads as the
   // fixture meant it rather than as however long ago that date is today. The
@@ -2662,6 +2672,15 @@ export async function mockProject(
         intervalSeconds: 5,
         policy: gitPolicy,
       }
+    } else if (path === "/deploy/7/environments/12/rehearsal" && method === "GET") {
+      body = rehearsalPolicy
+    } else if (path === "/deploy/7/environments/12/rehearsal" && method === "PUT") {
+      rehearsalPolicy = {
+        ...(request.postDataJSON() as RehearsalPolicy),
+        updatedBy: "admin",
+        updatedAt: new Date().toISOString(),
+      }
+      body = rehearsalPolicy
     } else if (path === "/deploy/7/environments/12/git-policy" && method === "PUT") {
       const input = request.postDataJSON() as typeof gitPolicy
       gitPolicy = { ...input, revision: input.revision + 1 }

@@ -225,6 +225,11 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.modules.deployRuntime.RemoveOrphanedReleaseTasks(cleanupCtx); err != nil {
 		s.Log.Warn("release task containers left by a previous start could not be removed", "err", err)
 	}
+	// And the database copies a rehearsal it was running made: a resumed run
+	// makes its own again.
+	if err := s.modules.rehearser.RemoveOrphanedRehearsals(cleanupCtx); err != nil {
+		s.Log.Warn("migration rehearsal copies left by a previous start could not be removed", "err", err)
+	}
 	cleanupCancel()
 	// A database upgrade this process's predecessor was carrying out has
 	// nobody left to finish it or undo it: the old server is put back in the

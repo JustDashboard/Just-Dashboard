@@ -188,6 +188,7 @@ func TestContainerReadingTellsACrashFromAStop(t *testing.T) {
 		{Name: "unread", State: "exited"},
 		{Name: "migrate", State: "exited", Exit: stopped(1, nil), Labels: map[string]string{"io.just-dashboard.release-task": "migrate"}},
 		{Name: "shop-run-1", State: "exited", Exit: stopped(1, nil), Labels: map[string]string{"com.docker.compose.oneoff": "True"}},
+		{Name: "jd-e4-run9-rehearsal-db", State: "exited", Exit: stopped(137, nil), Labels: map[string]string{"io.just-dashboard.rehearsal": "9"}},
 		{Name: "fresh", State: "created"},
 	}
 	r := containerAlertReading(rule, list, true)

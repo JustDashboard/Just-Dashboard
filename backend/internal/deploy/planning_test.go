@@ -878,7 +878,7 @@ func TestPreflightIsPureStableAndSecretFree(t *testing.T) {
 	if first.Preview != second.Preview || first.Digest != second.Digest {
 		t.Fatalf("preflight changed with identical evidence:\n%s\n%s", first.Preview, second.Preview)
 	}
-	if len(first.Plan.Actions) != len(DefaultStepKeys) || len(first.Plan.Actions) != 16 {
+	if len(first.Plan.Actions) != len(DefaultStepKeys) || len(first.Plan.Actions) != 17 {
 		t.Fatalf("exact actions = %d", len(first.Plan.Actions))
 	}
 	if strings.Contains(first.Preview, "never-preview-this") || strings.Contains(first.Preview, "Observed") {

@@ -442,10 +442,12 @@ func (s *Server) judgeStop(id string, last dockerx.ContainerExit) hostContainerE
 }
 
 // hostContainerSkipped is a container that is never a subject: a deploy's
-// release task and a `compose run` are one-shot by design, and a container
-// that was never started, or is being removed, has nothing to be down from.
+// release task, a migration rehearsal's throwaway copy of a database and a
+// `compose run` are one-shot by design, and a container that was never
+// started, or is being removed, has nothing to be down from.
 func hostContainerSkipped(ct hostContainer) bool {
-	if ct.Labels["io.just-dashboard.release-task"] != "" || strings.EqualFold(ct.Labels["com.docker.compose.oneoff"], "true") {
+	if ct.Labels["io.just-dashboard.release-task"] != "" || ct.Labels[rehearsalLabel] != "" ||
+		strings.EqualFold(ct.Labels["com.docker.compose.oneoff"], "true") {
 		return true
 	}
 	return ct.State == "created" || ct.State == "removing"

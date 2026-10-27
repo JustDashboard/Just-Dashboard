@@ -85,6 +85,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/environments/{env}/triggers", s.handle(s.handleDeploymentTriggers))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/git-watch", s.handle(s.handleDeploymentGitWatch))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/rollback-watch", s.handle(s.handleDeploymentRollbackWatch))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/rehearsal", s.handle(s.handleDeploymentRehearsal))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/database-links", s.handle(s.handleDeploymentDatabaseLinks))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/database-addresses", s.handle(s.handleDeploymentDatabaseAddresses))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/schedules", s.handle(s.handleDeploymentSchedules))
@@ -157,6 +158,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				// Adding staging writes configuration and copies variables,
 				// so it is an administrator's, in a session, like saving them.
 				r.Method(http.MethodPost, "/{id}/environments", s.handle(s.handleDeploymentStagingCreate))
+				r.Method(http.MethodPut, "/{id}/environments/{env}/rehearsal", s.handle(s.handleDeploymentRehearsalPut))
 				r.Method(http.MethodPost, "/{id}/previews/approvals/{approval}/approve", s.handle(s.handleDeploymentPreviewApprove))
 				// Testing a pull request is the approval of that head, so it
 				// sits with the approval route it stands in for.

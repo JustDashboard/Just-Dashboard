@@ -71,6 +71,9 @@ type NormalizedStepExecutor struct {
 	// hostMemory reads available and total memory in bytes, for the warm
 	// release's memory floor; nil reads /proc/meminfo.
 	hostMemory func() (int64, int64)
+	// rehearser makes the throwaway database copies release tasks are
+	// rehearsed against (rehearsal.go); nil reports a rehearsal unavailable.
+	rehearser MigrationRehearser
 }
 
 func (e *NormalizedStepExecutor) WithNotifications(store *AutomationStore) *NormalizedStepExecutor {
@@ -223,6 +226,8 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 		return e.buildArtifact(ctx, execution, plan)
 	case StepRenderRuntime:
 		return e.renderRuntime(ctx, execution, plan)
+	case StepRehearseMigration:
+		return e.rehearseMigration(ctx, execution, plan)
 	case StepReleaseTask:
 		return e.runReleaseTasks(ctx, execution, plan)
 	case StepBackupGate:
@@ -1092,6 +1097,11 @@ func (r *NormalizedStepReconciler) Reconcile(ctx context.Context, request Reconc
 			return ReconcileResult{Action: ReconcileResume}
 		}
 		return ReconcileResult{Action: ReconcileFail, TerminalCode: "restart_evidence_missing", Reason: "candidate release evidence could not be read after restart"}
+	case StepRehearseMigration:
+		// A rehearsal changes nothing but a copy and a network of its own,
+		// which the step removes before it starts again: running it twice
+		// cannot touch production.
+		return ReconcileResult{Action: ReconcileResume}
 	case StepReleaseTask:
 		return ReconcileResult{
 			Action: ReconcileFail, TerminalCode: "restart_evidence_missing",

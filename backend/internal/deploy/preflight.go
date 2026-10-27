@@ -1338,6 +1338,8 @@ func exactPlan(draft *Draft, configuration PlanConfiguration) ExactPlan {
 			action.Action = "render runtime configuration"
 		case StepReleaseTask:
 			action.Action = "run stored release task when configured"
+		case StepRehearseMigration:
+			action.Action = "rehearse release tasks against a restored copy of the database when turned on"
 		case StepBackupGate:
 			action.Action = "verify required backup evidence"
 		case StepProvisionCertificate:
@@ -1410,6 +1412,8 @@ func stepOwner(step StepKey) string {
 		return "certificates"
 	case StepBackupGate:
 		return "backups"
+	case StepRehearseMigration:
+		return "databases"
 	default:
 		return "deploy"
 	}

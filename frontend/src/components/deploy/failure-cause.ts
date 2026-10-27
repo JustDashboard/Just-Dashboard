@@ -86,6 +86,8 @@ export const CAUSE_TITLES: Record<string, string> = {
   runtime_port_in_use: "Port already in use",
   image_missing: "Image missing",
   mount_invalid: "Mount cannot be created",
+  rehearsal_failed: "Migration failed on a copy of the database",
+  rehearsal_unavailable: "Migration could not be rehearsed",
   schema_missing: "Database schema not applied",
   runtime_oom: "Application ran out of memory",
   runtime_prisma_engine_missing: "Prisma engine cannot load",

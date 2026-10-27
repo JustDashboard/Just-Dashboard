@@ -35,6 +35,8 @@ import {
 } from "@/components/deploy/vocabulary"
 import { Segment } from "@/components/deploy/run-pipeline"
 import { FindingRow } from "@/components/deploy/deployment-findings"
+import { rehearsalOf } from "@/components/deploy/rehearsal-model"
+import { RehearsalView } from "@/components/deploy/run-rehearsal"
 import {
   runValidationFindings,
   findingFixAction,
@@ -112,6 +114,23 @@ function drawnElsewhere(step: DeploymentStep): string[] {
       return ["findings", "candidate", "candidateSource"]
     case "prepare_context":
       return ["source"]
+    case "rehearse_migration":
+      // The report is drawn as one (`RehearsalView`); a skipped step's
+      // reason has no report and is read as a fact.
+      return rehearsalOf(step.evidence)
+        ? [
+            "rehearsed",
+            "reason",
+            "database",
+            "source",
+            "restoreMs",
+            "tasks",
+            "locks",
+            "isolation",
+            "cleanedUp",
+            "totalMs",
+          ]
+        : []
     case "build_artifact": {
       const result = step.evidence?.result
       const artifacts =
@@ -482,6 +501,7 @@ function Inspector({
   const seconds = stepSeconds(step, now)
   const evidence = step.evidence ?? {}
   const preflight = step.key === "analyze_plan" ? preflightOf(evidence) : undefined
+  const rehearsal = step.key === "rehearse_migration" ? rehearsalOf(evidence) : undefined
   const tail = rows.filter((row) => row.stepId === step.id).slice(-TAIL)
   const recorded = Object.keys(evidence).length > 0
   const name = stepName(step.key, operation)
@@ -537,6 +557,7 @@ function Inspector({
       )}
 
       {preflight && <PreflightChecks projectId={projectId} {...preflight} />}
+      {rehearsal && <RehearsalView step={step} report={rehearsal} />}
 
       {tail.length > 0 && (
         <figure className="min-w-0 overflow-hidden rounded-lg border border-hairline bg-surface-sunken">

@@ -171,6 +171,9 @@ type moduleSet struct {
 	// promotionImages reads the images a promotion takes: deployArtifacts,
 	// unless a test puts a fake in its place.
 	promotionImages deploy.LocalImageReader
+	// rehearser makes the throwaway database copies release tasks are
+	// rehearsed against, and removes what a stopped process left behind.
+	rehearser *migrationRehearser
 	// tailnet publishes preview environments on this host's Tailscale node
 	// through `tailscale serve`; the executor and the preview route share it.
 	tailnet deploy.TailnetPublisher
@@ -371,6 +374,7 @@ func (s *Server) initModules() {
 			s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.preview.quarantine." + phase, Target: strconv.FormatInt(environmentID, 10), Success: success})
 		}, func(err error) { s.Log.Warn("preview isolation needs attention", "error", err) })
 	s.modules.tailnet = tailnetPublisher{serve: selfcfg.NewTailnetServe()}
+	s.modules.rehearser = &migrationRehearser{server: s}
 	normalizedExecutor := deploy.NewNormalizedStepExecutor(
 		s.modules.deployRuns,
 		s.modules.deployPlanning,
@@ -388,7 +392,10 @@ func (s *Server) initModules() {
 		// instead of reaching a cutover that has nothing to serve.
 		WithCertificateIssuer(auditedCertificateIssuer{issuer: s.modules.proxy, record: s.Audit.Record}).
 		WithNotifications(s.modules.deployAutomation).
-		WithTailnetPublisher(s.modules.tailnet)
+		WithTailnetPublisher(s.modules.tailnet).
+		// Release tasks are rehearsed against copies the Databases owner
+		// makes from its own backups, when an environment asks for it.
+		WithMigrationRehearser(s.modules.rehearser)
 	s.modules.deployExecutor = normalizedExecutor
 	s.modules.deployEngine = deploy.NewEngine(
 		s.modules.deployRuns,
