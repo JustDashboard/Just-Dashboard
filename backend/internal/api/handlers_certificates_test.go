@@ -57,6 +57,11 @@ if [ -n "$JD_TEST_CERTBOT_WAIT" ]; then
   while [ ! -f "$JD_TEST_CERTBOT_WAIT" ]; do sleep 0.02; done
 fi
 if [ -n "$JD_TEST_CERTBOT_REPLACE" ]; then cp "$JD_TEST_CERTBOT_REPLACE" "$JD_TEST_CERTBOT_TARGET"; fi
+if [ -n "$JD_TEST_CERTBOT_ISSUE" ] && [ "$1" = certonly ]; then
+  mkdir -p "$JD_TEST_CERTBOT_ISSUE" && cp "$JD_TEST_CERTBOT_STAGE"/*.pem "$JD_TEST_CERTBOT_ISSUE"/
+  echo "Successfully received certificate."
+  exit 0
+fi
 echo "Certificate not yet due for renewal; no action taken."
 exit 0
 `, host.log, listing.String())
@@ -66,6 +71,8 @@ exit 0
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("JD_TEST_CERTBOT_WAIT", "")
 	t.Setenv("JD_TEST_CERTBOT_REPLACE", "")
+	t.Setenv("JD_TEST_CERTBOT_ISSUE", "")
+	t.Setenv("JD_TEST_CERTBOT_STAGE", "")
 	t.Setenv("JD_ACME_DIRECTORY", "")
 	t.Cleanup(proxysvc.UseCertificateDirsForTest(host.letsencrypt, host.imported))
 	return host
