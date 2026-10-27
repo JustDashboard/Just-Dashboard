@@ -40,13 +40,18 @@ func TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks(t *testing.T) {
 			t.Logf("%s: not deployable in this release: %s", definition.ID, reason)
 			continue
 		}
+		if definition.IsCompose() {
+			// A stack is started through the Compose path by its own sweep,
+			// TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks.
+			continue
+		}
 		t.Run(definition.ID, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Minute)
 			defer cancel()
 			stamp := time.Now().UnixNano()
 			fixture := definition.Fixtures[0]
 			plan, err := RenderBlueprintPlan(DraftSourceConfig{
-				Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: definition.ID,
+				Kind: BlueprintSourceKind(definition), Mode: SourceModeBlueprint, BlueprintID: definition.ID,
 				BlueprintVersion: definition.Version, BlueprintInputs: fixture.Inputs,
 			}, fmt.Sprintf("catalogue %d %s", stamp, definition.ID))
 			if err != nil {

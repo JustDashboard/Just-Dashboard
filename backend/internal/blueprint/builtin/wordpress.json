@@ -1,0 +1,79 @@
+{
+  "id": "wordpress",
+  "version": "1.0.0",
+  "name": "WordPress",
+  "category": "http",
+  "profile": "compose",
+  "description": "The blogging and website platform, with its own MariaDB server beside it. The database is reachable only from WordPress, on a private network with nothing published.",
+  "iconId": "globe",
+  "docsUrl": "https://hub.docker.com/_/wordpress",
+  "access": {
+    "kind": "setup",
+    "path": "/wp-admin/install.php",
+    "note": "WordPress has no administrator until someone makes one: the first visitor to https://<domain>/wp-admin/install.php chooses the site title, the administrator's name and password, and becomes its owner — open it the moment the deployment is ready rather than leaving it unclaimed. The database password is generated here and only WordPress and MariaDB are given it."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "GPL-2.0-or-later",
+    "upstreamUrl": "https://github.com/docker-library/wordpress",
+    "reviewedAt": "2026-10-27",
+    "minimumDashboard": "0.8.2"
+  },
+  "secrets": [
+    { "name": "db-password", "variable": "WORDPRESS_DB_PASSWORD", "label": "Database password", "length": 40, "description": "WordPress signs in to MariaDB with this. Generated here and given to both services." },
+    { "name": "db-root-password", "variable": "MARIADB_ROOT_PASSWORD", "label": "MariaDB root password", "length": 40, "description": "For administering the database by hand; WordPress never uses it." }
+  ],
+  "services": [
+    {
+      "name": "wordpress",
+      "role": "app",
+      "purpose": "The site and its admin, behind the domain",
+      "image": { "reference": "wordpress:7.1.3-php8.4-apache", "tagPolicy": "pinned", "pullPolicy": "missing" },
+      "environment": [
+        { "name": "WORDPRESS_DB_HOST", "value": "db:3306" },
+        { "name": "WORDPRESS_DB_NAME", "value": "wordpress" },
+        { "name": "WORDPRESS_DB_USER", "value": "wordpress" },
+        { "name": "WORDPRESS_DB_PASSWORD", "value": "{{secret.db-password}}" }
+      ],
+      "ports": [
+        { "name": "http", "internal": 80, "protocol": "tcp", "purpose": "The site and wp-admin", "exposure": "proxy", "primary": true }
+      ],
+      "volumes": [
+        { "name": "site", "target": "/var/www/html", "purpose": "WordPress itself, its configuration, themes, plugins and uploads", "data": true, "backup": true }
+      ],
+      "resources": { "memoryMb": 512, "minMemoryMb": 256 },
+      "healthcheck": { "test": ["curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/wp-admin/install.php"], "intervalSeconds": 10, "timeoutSeconds": 5, "retries": 12, "startPeriodSeconds": 30 },
+      "dependsOn": [{ "service": "db", "condition": "healthy" }]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "MariaDB, holding every post, page, user and setting",
+      "image": { "reference": "mariadb:11.8.9", "tagPolicy": "pinned", "pullPolicy": "missing" },
+      "environment": [
+        { "name": "MARIADB_DATABASE", "value": "wordpress" },
+        { "name": "MARIADB_USER", "value": "wordpress" },
+        { "name": "MARIADB_PASSWORD", "value": "{{secret.db-password}}" },
+        { "name": "MARIADB_ROOT_PASSWORD", "value": "{{secret.db-root-password}}" }
+      ],
+      "ports": [
+        { "name": "mysql", "internal": 3306, "protocol": "tcp", "purpose": "SQL connections from WordPress", "exposure": "internal" }
+      ],
+      "volumes": [
+        { "name": "database", "target": "/var/lib/mysql", "purpose": "Every table WordPress keeps", "data": true, "backup": true }
+      ],
+      "resources": { "memoryMb": 512, "minMemoryMb": 256 },
+      "healthcheck": { "test": ["healthcheck.sh", "--connect", "--innodb_initialized"], "intervalSeconds": 10, "timeoutSeconds": 5, "retries": 12, "startPeriodSeconds": 30 }
+    }
+  ],
+  "checks": [
+    { "name": "Installer answers", "kind": "http", "phase": "readiness", "required": true, "path": "/wp-admin/install.php", "port": "http", "timeoutSeconds": 240 }
+  ],
+  "operations": {},
+  "automation": [
+    { "name": "Nightly backup", "description": "Archives the site and database volumes every night.", "cron": "0 3 * * *", "timezone": "UTC", "actions": ["backup"], "default": true }
+  ],
+  "update": { "detector": "registry", "backupFirst": true, "notes": "WordPress updates its own files from wp-admin; the image tag only decides the copy a fresh volume starts from. MariaDB moves between major versions with mariadb-upgrade, which the image runs on start when MARIADB_AUTO_UPGRADE is set; take a backup first." },
+  "security": {},
+  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:a0327830adc663fd99225a4c80aa9be29a9d571a32f3ef9e13f5b828f2ab0f46" }]
+}

@@ -59,7 +59,12 @@ func (s *Server) handleDeploymentSourceUpdate(w http.ResponseWriter, r *http.Req
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
-	source := request.DraftSourceConfig
+	// A template source is inspected and saved as this dashboard's render of
+	// the version it names; a document in the request is never used.
+	source, err := request.DraftSourceConfig.WithTemplateDocuments()
+	if err != nil {
+		return mapDeploymentPlanningError(err)
+	}
 	if err := source.ValidateForDeployment(); err != nil {
 		return mapDeploymentPlanningError(err)
 	}

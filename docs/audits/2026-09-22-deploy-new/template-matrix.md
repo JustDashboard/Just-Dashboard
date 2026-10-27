@@ -1,6 +1,6 @@
 # Template and recipe review, 2026-09-22
 
-The shipped catalogue contains **62 definitions**: **57 offered**, of which **55 can deploy** through the image runtime. The two Minecraft definitions remain preview-only. Five retired definitions stay resolvable for existing deployments and recovery; new drafts, preflight and commit refuse them.
+The shipped catalogue contains **82 definitions**: **77 offered**, of which **75 can deploy** — 55 single images through the image runtime and 20 multi-service templates through the Compose release path (added 2026-10-27, listed in their own table below). The two Minecraft definitions remain preview-only. Five retired definitions stay resolvable for existing deployments and recovery; new drafts, preflight and commit refuse them.
 
 This table records the current definitions and the automated configuration checks. Fresh runtime results are recorded in the companion review report; a rendered plan is not proof that an image started or that first sign-in succeeded.
 
@@ -73,7 +73,36 @@ Required inputs exclude supplied defaults. `domain` is filled by the hostname su
 | [wallabag](../../../backend/internal/blueprint/builtin/wallabag.json) | Retired | Existing deployments only | unavailable | domain (suggested) |
 | [whoami](../../../backend/internal/blueprint/builtin/whoami.json) | Yes | Yes | open | None |
 
-Among the 55 deployable definitions, access kinds are: 18 setup, 13 open, 12 credentials, seven client and five token. Four require an administrator email (Directus, NocoDB, Open WebUI and pgAdmin), and Mongo Express requires a database connection. The remaining definitions can render from defaults plus an available suggested domain.
+Among the 55 deployable single-image definitions, access kinds are: 18 setup, 13 open, 12 credentials, seven client and five token. Four require an administrator email (Directus, NocoDB, Open WebUI and pgAdmin), and Mongo Express requires a database connection. The remaining definitions can render from defaults plus an available suggested domain.
+
+## Multi-service templates (2026-10-27)
+
+Each runs as one Compose stack: one public service behind the domain, the others on a private network with no published port and no route out (except the authentik worker, which declares egress for outbound mail). Every one was started live by `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks`, which requires its readiness checks to pass, every service healthcheck to report healthy and only the public port to be published, on loopback.
+
+| Definition | Offered | Deployable | First access | Required inputs without defaults |
+| --- | --- | --- | --- | --- |
+| [authentik](../../../backend/internal/blueprint/builtin/authentik.json) | Yes | Yes | credentials | domain (suggested), admin-email |
+| [directus-postgres](../../../backend/internal/blueprint/builtin/directus-postgres.json) | Yes | Yes | credentials | domain (suggested), admin-email |
+| [docmost](../../../backend/internal/blueprint/builtin/docmost.json) | Yes | Yes | setup | domain (suggested) |
+| [firefly-iii](../../../backend/internal/blueprint/builtin/firefly-iii.json) | Yes | Yes | setup | domain (suggested) |
+| [forgejo](../../../backend/internal/blueprint/builtin/forgejo.json) | Yes | Yes | setup | domain (suggested) |
+| [ghost](../../../backend/internal/blueprint/builtin/ghost.json) | Yes | Yes | setup | domain (suggested) |
+| [gitea-postgres](../../../backend/internal/blueprint/builtin/gitea-postgres.json) | Yes | Yes | setup | domain (suggested) |
+| [keycloak](../../../backend/internal/blueprint/builtin/keycloak.json) | Yes | Yes | credentials | domain (suggested) |
+| [listmonk](../../../backend/internal/blueprint/builtin/listmonk.json) | Yes | Yes | credentials | domain (suggested) |
+| [matomo](../../../backend/internal/blueprint/builtin/matomo.json) | Yes | Yes | setup | None |
+| [mattermost](../../../backend/internal/blueprint/builtin/mattermost.json) | Yes | Yes | setup | domain (suggested) |
+| [metabase-postgres](../../../backend/internal/blueprint/builtin/metabase-postgres.json) | Yes | Yes | setup | domain (suggested) |
+| [miniflux](../../../backend/internal/blueprint/builtin/miniflux.json) | Yes | Yes | credentials | domain (suggested) |
+| [n8n-postgres](../../../backend/internal/blueprint/builtin/n8n-postgres.json) | Yes | Yes | setup | domain (suggested) |
+| [nextcloud-mariadb](../../../backend/internal/blueprint/builtin/nextcloud-mariadb.json) | Yes | Yes | credentials | domain (suggested) |
+| [paperless-ngx](../../../backend/internal/blueprint/builtin/paperless-ngx.json) | Yes | Yes | credentials | domain (suggested) |
+| [planka](../../../backend/internal/blueprint/builtin/planka.json) | Yes | Yes | credentials | domain (suggested), admin-email |
+| [plausible](../../../backend/internal/blueprint/builtin/plausible.json) | Yes | Yes | setup | domain (suggested) |
+| [wikijs](../../../backend/internal/blueprint/builtin/wikijs.json) | Yes | Yes | setup | None |
+| [wordpress](../../../backend/internal/blueprint/builtin/wordpress.json) | Yes | Yes | setup | None |
+
+Access kinds among them: 12 setup and eight credentials. Directus, authentik and Planka require an administrator e-mail; every other required input is the suggested domain. Umami (it creates `admin`/`umami` for everybody, with no variable to change it) and Outline (no sign-in without an external OIDC, Slack or Google provider or SMTP) were reviewed and not added; Immich was left for a later pass.
 
 ## Confirmed defects and fixes
 

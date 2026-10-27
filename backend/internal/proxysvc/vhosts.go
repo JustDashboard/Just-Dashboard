@@ -116,6 +116,10 @@ var (
 	cacheOnRe    = regexp.MustCompile(`(?m)^\s*proxy_cache\s+jd_\w+_cache\s*;`)
 )
 
+// maintSwitchLineRe finds a switched maintenance's file, whose presence
+// rather than the check says whether it is on.
+var maintSwitchLineRe = regexp.MustCompile(`(?m)^\s*if\s*\(-f\s+(/\S+/maintenance\.on)\)`)
+
 func (s *Service) ListVHosts(ctx context.Context) ([]VHost, error) {
 	out := []VHost{}
 	out = append(out, s.nginxVHosts()...)
@@ -439,6 +443,9 @@ func (s *Service) fileVHost(name, path, layout string, logs logDefaults) VHost {
 		v.CertPath = v.CertPaths[0]
 	}
 	v.Maintenance = maintOnRe.MatchString(text)
+	if m := maintSwitchLineRe.FindStringSubmatch(text); m != nil && filepath.Dir(filepath.Dir(m[1])) == s.pagesRoot() {
+		v.Maintenance = switchFileExists(m[1])
+	}
 	v.RateLimited = limitRe.MatchString(text)
 	v.Cached = cacheOnRe.MatchString(text)
 	s.siteDetails(&v, path, text, logs)

@@ -389,6 +389,133 @@ test.describe("Sign-in", () => {
   })
 })
 
+test.describe("Maintenance and error pages", () => {
+  test("the switch applies at once, and who is let past and the pages save beside the runtime", async ({
+    page,
+  }) => {
+    const mock = await mockProject(page)
+    const configurationPuts: Record<string, unknown>[] = []
+    const switchPuts: Record<string, unknown>[] = []
+    page.on("request", (request) => {
+      if (request.method() !== "PUT") return
+      if (request.url().endsWith("/configuration")) configurationPuts.push(request.postDataJSON())
+      if (request.url().endsWith("/maintenance")) switchPuts.push(request.postDataJSON())
+    })
+    await page.goto("/deploy/7/settings/domains")
+
+    // The switch is its own form, which the bar saves at once.
+    const maintenance = page.getByRole("form", { name: "Maintenance", exact: true })
+    await expect(maintenance.getByText("Off · visitors reach the application")).toBeVisible()
+    await maintenance.getByRole("switch", { name: "Answer with the maintenance page" }).click()
+    await expect(saveBar(page)).toContainText("Maintenance · Applies immediately")
+    await saveSettings(page)
+    await expectSaved(page)
+    expect(switchPuts).toEqual([{ on: true }])
+    expect(configurationPuts).toHaveLength(0)
+    await expect(maintenance.getByText(/On · visitors get the maintenance page/)).toBeVisible()
+    await expect(maintenance.getByText("In maintenance", { exact: true })).toBeVisible()
+
+    // Who is let past and the pages are the route's, written into the plan.
+    const pages = page.getByRole("form", { name: "Maintenance page and error pages" })
+    await expect(pages.getByText("Nobody let past · no Retry-After")).toBeVisible()
+    await expect(pages.getByText("The proxy's own pages")).toBeVisible()
+    await pages.getByRole("textbox", { name: "Let these addresses past" }).fill("203.0.113.7")
+    await pages.getByRole("button", { name: "Add to let these addresses past" }).click()
+    const retry = pages.getByRole("textbox", { name: "Retry after" })
+    await retry.fill("an hour")
+    await expect(pages.getByText("Whole seconds, at most 86400 (a day).")).toBeVisible()
+    await retry.fill("120")
+    await pages.getByRole("switch", { name: "Own 502 Bad gateway page" }).click()
+    await pages.getByRole("switch", { name: "Replace the application's own error pages" }).click()
+    await expect(saveBar(page)).toContainText("Applies on your next deployment")
+    await saveSettings(page)
+    await expectSaved(page)
+    const runtime = configurationPuts.at(-1)!.runtime as Record<string, unknown>
+    expect(runtime.maintenance).toEqual({ retryAfter: 120, bypassFrom: ["203.0.113.7"] })
+    expect(runtime.errorPages).toEqual([502])
+    expect(runtime.interceptErrors).toBe(true)
+    // The form writes its fields and keeps the rest of the runtime.
+    expect(runtime.internalPort).toBe(3000)
+    expect(runtime.command).toEqual(["bun", "start"])
+    expect(mock.configuration().runtime.maintenance).toEqual(runtime.maintenance)
+    await expect(pages.getByText("1 address let past · Retry-After 120s")).toBeVisible()
+    await expect(pages.getByText("Own 502 page · the application's too")).toBeVisible()
+
+    // A saved page opens beside a preview of what visitors get.
+    await pages.getByRole("button", { name: "Edit 502 Bad gateway" }).click()
+    const editor = page.getByRole("dialog", { name: /502 Bad gateway/ })
+    await expect(editor.getByTitle("Preview of 502 Bad gateway")).toBeVisible()
+    await editor.getByRole("button", { name: "Cancel" }).click()
+
+    // No page chosen, the fields leave the plan, and so does replacing the
+    // application's own.
+    await pages.getByRole("switch", { name: "Own 502 Bad gateway page" }).click()
+    await expect(
+      pages.getByRole("switch", { name: "Replace the application's own error pages" }),
+    ).toHaveCount(0)
+    await saveSettings(page)
+    await expectSaved(page)
+    const cleared = configurationPuts.at(-1)!.runtime as Record<string, unknown>
+    expect(cleared).not.toHaveProperty("errorPages")
+    expect(cleared).not.toHaveProperty("interceptErrors")
+
+    // Off again, at once.
+    await maintenance.getByRole("switch", { name: "Answer with the maintenance page" }).click()
+    await saveSettings(page)
+    await expectSaved(page)
+    expect(switchPuts.at(-1)).toEqual({ on: false })
+    await expect(maintenance.getByText("Off · visitors reach the application")).toBeVisible()
+  })
+
+  test("a route written before the switch says to deploy once, and cannot be switched on", async ({
+    page,
+  }) => {
+    const mock = await mockProject(page)
+    mock.setMaintenance({ ready: false })
+    await page.goto("/deploy/7/settings/domains")
+    const maintenance = page.getByRole("form", { name: "Maintenance", exact: true })
+    await expect(maintenance.getByText("Switches at once after the next deployment")).toBeVisible()
+    await expect(
+      maintenance.getByText(/Deploy once, and from then on it switches at once/),
+    ).toBeVisible()
+    await expect(
+      maintenance.getByRole("switch", { name: "Answer with the maintenance page" }),
+    ).toBeDisabled()
+  })
+
+  test("maintenance and error pages, for the pull request @shots", async ({ page }) => {
+    test.skip(!process.env.JD_SHOTS, "JD_SHOTS names the directory the pictures go in")
+    const shot = (name: string) =>
+      page.screenshot({ path: `${process.env.JD_SHOTS}/${name}`, animations: "disabled" })
+    const mock = await mockProject(page)
+    Object.assign(mock.configuration().runtime, {
+      maintenance: { retryAfter: 300, bypassFrom: ["203.0.113.7"] },
+      errorPages: [404, 502],
+      interceptErrors: true,
+    })
+    const maintenance = page.getByRole("form", { name: "Maintenance", exact: true })
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 1100 })
+      await page.goto("/deploy/7/settings/domains")
+      await expect(maintenance.getByText("Off · visitors reach the application")).toBeVisible()
+      await maintenance.evaluate((element) => element.scrollIntoView({ block: "start" }))
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+      ).toBe(false)
+      await shot(`deploy-maintenance-off-${width}.png`)
+    }
+    await page.setViewportSize({ width: 1280, height: 1100 })
+    await maintenance.getByRole("switch", { name: "Answer with the maintenance page" }).click()
+    await maintenance.evaluate((element) => element.scrollIntoView({ block: "start" }))
+    await shot("deploy-maintenance-switching-1280.png")
+    await saveSettings(page)
+    await expectSaved(page)
+    await expect(maintenance.getByText("In maintenance", { exact: true })).toBeVisible()
+    await maintenance.evaluate((element) => element.scrollIntoView({ block: "start" }))
+    await shot("deploy-maintenance-on-1280.png")
+  })
+})
+
 test.describe("Storage", () => {
   test("mounts render, a new one saves, and evidence reflects operations", async ({ page }) => {
     await mockProject(page)

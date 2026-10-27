@@ -60,23 +60,32 @@ func Validate(blueprint *Blueprint) error {
 	if err := validateAccess(blueprint); err != nil {
 		return fail("%v", err)
 	}
-	if err := validateImage(blueprint.Image); err != nil {
-		return fail("%v", err)
-	}
 	if err := validateInputs(blueprint); err != nil {
 		return fail("%v", err)
 	}
 	if err := validateSecrets(blueprint); err != nil {
 		return fail("%v", err)
 	}
-	if err := validatePorts(blueprint); err != nil {
-		return fail("%v", err)
-	}
-	if err := validateVolumes(blueprint); err != nil {
-		return fail("%v", err)
-	}
-	if err := validateResources(blueprint.Resources); err != nil {
-		return fail("%v", err)
+	if blueprint.IsCompose() {
+		// A Compose template declares its image, ports, volumes and limits per
+		// service; compose_validate.go holds the stack to the same rules a
+		// single image is held to below, and to the ones only a stack needs.
+		if err := validateComposeTemplate(blueprint); err != nil {
+			return fail("%v", err)
+		}
+	} else {
+		if err := validateImage(blueprint.Image); err != nil {
+			return fail("%v", err)
+		}
+		if err := validatePorts(blueprint); err != nil {
+			return fail("%v", err)
+		}
+		if err := validateVolumes(blueprint); err != nil {
+			return fail("%v", err)
+		}
+		if err := validateResources(blueprint.Resources); err != nil {
+			return fail("%v", err)
+		}
 	}
 	if err := validateChecks(blueprint); err != nil {
 		return fail("%v", err)
@@ -101,6 +110,11 @@ func Validate(blueprint *Blueprint) error {
 	}
 	if blueprint.Image.TagPolicy == "mutable" && strings.TrimSpace(blueprint.Update.Notes) == "" {
 		return fail("a mutable tag policy must explain itself in update notes")
+	}
+	for _, service := range blueprint.Services {
+		if service.Image.TagPolicy == "mutable" && strings.TrimSpace(blueprint.Update.Notes) == "" {
+			return fail("service %q uses a mutable tag policy, which must explain itself in update notes", service.Name)
+		}
 	}
 	if len(blueprint.Fixtures) == 0 {
 		return fail("at least one render fixture is required")
@@ -388,6 +402,9 @@ func validateSecrets(blueprint *Blueprint) error {
 		if strings.TrimSpace(secret.Label) == "" {
 			return fmt.Errorf("secret %q has no label", secret.Name)
 		}
+		if secret.Alphabet != "" && secret.Alphabet != "hex" {
+			return fmt.Errorf("secret %q asks for alphabet %q; the generator writes letters and digits, or hex", secret.Name, secret.Alphabet)
+		}
 	}
 	for _, input := range blueprint.Inputs {
 		for _, secret := range blueprint.Secrets {
@@ -506,7 +523,7 @@ func validateResources(resources Resources) error {
 func validateChecks(blueprint *Blueprint) error {
 	names := map[string]bool{}
 	ports := map[string]bool{}
-	for _, port := range blueprint.Ports {
+	for _, port := range checkedPorts(blueprint) {
 		ports[port.Name] = true
 	}
 	required := 0
@@ -551,6 +568,19 @@ func validateChecks(blueprint *Blueprint) error {
 		return errors.New("at least one required readiness check is needed to tell started from working")
 	}
 	return nil
+}
+
+// checkedPorts are the ports a readiness check may name: the image's own, or
+// for a Compose template the public service's, because the release's checks
+// run against the service that owns the domain.
+func checkedPorts(blueprint *Blueprint) []Port {
+	if blueprint.IsCompose() {
+		if public := blueprint.PublicService(); public != nil {
+			return public.Ports
+		}
+		return nil
+	}
+	return blueprint.Ports
 }
 
 func validateOperations(operations Operations) error {

@@ -1,5 +1,14 @@
 import { expect, test } from "@playwright/test"
-import { archivedProject, deployment, json, mockProject, now, run, user } from "./deploy-fixture"
+import {
+  archivedProject,
+  deployment,
+  json,
+  mockNewProject,
+  mockProject,
+  now,
+  run,
+  user,
+} from "./deploy-fixture"
 
 /**
  * Projects, Archived and Notifications — the fleet-level screens.
@@ -140,6 +149,65 @@ test("the empty state offers to start a project or clear the filters", async ({ 
   await expect(
     page.getByRole("list", { name: "Deployment projects" }).locator(":scope > li"),
   ).toHaveCount(1)
+})
+
+test("the Compose card opens the Docker tab, whatever tab was used last", async ({
+  page,
+}, testInfo) => {
+  await mockProject(page)
+  await mockNewProject(page)
+  await page.route("**/api/v1/deploy/?view=fleet", (route) =>
+    json(route, {
+      deployments: [],
+      activeWork: [],
+      slots: { heavyUsed: 0, heavyCapacity: 2, lightUsed: 0, lightCapacity: 4 },
+    }),
+  )
+  await page.route("**/api/v1/docker/images", (route) => json(route, []))
+  await page.route("**/api/v1/docker/containers/", (route) => json(route, []))
+  await page.route("**/api/v1/docker/stacks/", (route) =>
+    json(route, [
+      {
+        name: "shop",
+        workingDir: "/srv/shop",
+        configFiles: ["/srv/shop/compose.yaml"],
+        services: [],
+        running: 2,
+        total: 2,
+        managed: true,
+        declared: ["web", "db"],
+        containers: 2,
+        deployed: true,
+        orphans: [],
+        state: "running",
+      },
+    ]),
+  )
+  await page.setViewportSize({ width: 1280, height: 900 })
+
+  // The last source used is remembered for the session, and a link that names
+  // no tab the strip has used to fall through to it.
+  await page.goto("/deploy/new")
+  await page.getByRole("button", { name: "Template", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Application templates" })).toBeVisible()
+
+  await page.goto("/deploy")
+  await page.getByRole("link", { name: /Deploy a Compose stack/ }).click()
+  await expect(page).toHaveURL(/\/deploy\/new\?source=compose$/)
+  await expect(page.getByRole("button", { name: "Docker", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(page.getByRole("heading", { name: "Choose from this server" })).toBeVisible()
+  await expect(
+    page
+      .getByRole("list", { name: "Compose stacks on this server" })
+      .getByRole("button", { name: "Deploy the shop stack" }),
+  ).toBeVisible()
+  await testInfo.attach("compose-card-docker-tab", {
+    body: await page.screenshot({ path: testInfo.outputPath("compose-card-docker-tab.png") }),
+    contentType: "image/png",
+  })
 })
 
 test("New project is hidden for a read-only role", async ({ page }) => {

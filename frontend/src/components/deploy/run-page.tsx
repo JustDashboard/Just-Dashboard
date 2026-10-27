@@ -22,6 +22,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentEngineRun,
+  DeploymentEnvironment,
   DeploymentOperations,
   DeploymentPreview,
   DeploymentRelease,
@@ -46,9 +47,11 @@ import {
   latestAttempts,
   projectProduct,
   runFailed,
+  runPromotion,
   runLabel,
   runStopped,
   stepName,
+  stepOperation,
   useNow,
 } from "@/components/deploy/vocabulary"
 import { BuildConsole, consoleRows, transcriptSummary } from "@/components/deploy/build-console"
@@ -134,13 +137,31 @@ export function RunPage() {
   const events = stream.events
   const snapshot = stream.snapshot ?? initial.data
 
+  // A staging run is read against staging's own summary — its live release,
+  // its address, its name — not production's, and not as a preview.
+  const environmentList = usePoll(
+    (signal) =>
+      get<DeploymentEnvironment[]>(`/deploy/${projectId}/environments`, undefined, signal),
+    0,
+    [projectId],
+    { enabled: validIds },
+  )
+  const stagingId = environmentList.data?.find(
+    (environment) =>
+      environment.kind === "staging" && environment.id === snapshot?.run.environmentId,
+  )?.id
   // The project is read separately, on its own poll, purely to answer "is
   // this run's release still the one live today" — the run itself never
   // changes once it exists, but the project's live release does.
   const project = usePoll(
-    (signal) => get<ProjectDetail>(`/deploy/${projectId}`, undefined, signal),
+    (signal) =>
+      get<ProjectDetail>(
+        `/deploy/${projectId}`,
+        stagingId ? { environment: stagingId } : undefined,
+        signal,
+      ),
     5000,
-    [projectId],
+    [projectId, stagingId],
     { enabled: validIds },
   )
   // Worth asking once the run has a release to place — the one it made, the
@@ -199,9 +220,14 @@ export function RunPage() {
     { enabled: validIds && rollbackOpen },
   )
   const operations = usePoll(
-    (signal) => get<DeploymentOperations>(`/deploy/${projectId}/operations`, undefined, signal),
+    (signal) =>
+      get<DeploymentOperations>(
+        `/deploy/${projectId}/operations`,
+        stagingId ? { environment: stagingId } : undefined,
+        signal,
+      ),
     0,
-    [projectId],
+    [projectId, stagingId],
     { enabled: validIds && rollbackOpen },
   )
   // Whether the settings have moved on since a run that can be retried: then
@@ -558,7 +584,9 @@ export function RunPage() {
 
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         Deployment state: {runLabel(run.state, run.operation)}
-        {current ? `. Current step: ${stepName(current.key, run.operation)}, ${current.state}` : ""}
+        {current
+          ? `. Current step: ${stepName(current.key, stepOperation(run))}, ${current.state}`
+          : ""}
       </p>
 
       <RunHeader
@@ -577,6 +605,7 @@ export function RunPage() {
             ? releaseNumbers.get(targetReleaseId)
             : undefined
         }
+        promotion={runPromotion(run)}
         projectId={projectId}
         verbs={verbs}
       />
@@ -585,7 +614,7 @@ export function RunPage() {
         <p className="text-body text-muted-foreground">Compatibility pipeline</p>
       ) : (
         <div className="flex flex-col gap-3">
-          <ReleasePipeline steps={attempts} operation={run.operation} now={clock} />
+          <ReleasePipeline steps={attempts} operation={stepOperation(run)} now={clock} />
           {/* The path lights the stage at work; before there is one, this
               says why nothing has started. */}
           {active && attempts.length === 0 && (
@@ -677,7 +706,7 @@ export function RunPage() {
             steps={attempts}
             active={active}
             outcome={run.state}
-            operation={run.operation}
+            operation={stepOperation(run)}
             connected={stream.socket === "open"}
             startedAt={run.claimedAt ?? run.requestedAt}
             runNumber={run.runNumber}
@@ -694,7 +723,7 @@ export function RunPage() {
           projectId={projectId}
           deployment={deployment}
           steps={attempts}
-          operation={run.operation}
+          operation={stepOperation(run)}
           now={clock}
           rows={rows}
           lineCounts={transcript.perStep}

@@ -226,6 +226,15 @@ func NewArtifactBuilder(backend BuildBackend) *ArtifactBuilder {
 	return &ArtifactBuilder{backend: backend}
 }
 
+// LocalImage reads an image this server holds, by id or tag, without pulling:
+// a promotion must find the very image staging ran, or refuse.
+func (b *ArtifactBuilder) LocalImage(ctx context.Context, reference string) (ResolvedImage, error) {
+	if b == nil || b.backend == nil {
+		return ResolvedImage{}, ErrBuilderUnavailable
+	}
+	return b.backend.InspectImage(ctx, reference)
+}
+
 func (b *ArtifactBuilder) Prepare(
 	ctx context.Context,
 	root string,

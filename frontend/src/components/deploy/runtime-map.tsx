@@ -91,6 +91,7 @@ export function RuntimeMap({
   domainsReason,
   stores,
   storesReason,
+  composeStack,
 }: {
   services: MapService[]
   /** The routes the proxy owner reports; undefined while they are being read. */
@@ -99,6 +100,11 @@ export function RuntimeMap({
   domainsReason?: string
   stores?: MapStore[]
   storesReason?: string
+  /**
+   * A Compose stack keeps what its own file mounts, which the storage owner
+   * does not inventory, so an empty lane is not "keeps nothing".
+   */
+  composeStack?: boolean
 }) {
   const container = useRef<HTMLDivElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
@@ -358,8 +364,16 @@ export function RuntimeMap({
                       <Database />
                     </WirePlaceholder>
                   }
-                  title={<span className="text-muted-foreground">Keeps nothing</span>}
-                  hint="No volume, folder or database is declared"
+                  title={
+                    <span className="text-muted-foreground">
+                      {composeStack ? "Kept by the stack" : "Keeps nothing"}
+                    </span>
+                  }
+                  hint={
+                    composeStack
+                      ? "Its Compose file's own volumes, kept between releases"
+                      : "No volume, folder or database is declared"
+                  }
                 />
               </li>
             ) : (

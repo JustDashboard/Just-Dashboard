@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -110,6 +111,38 @@ func TestCertificateStepSeparatesUnavailableFromRefused(t *testing.T) {
 		context.Background(), []string{"app.example.com"}, discardCertificateLog)
 	if missing.State != StepUnavailable || missing.ErrorCode != "certificate_unavailable" {
 		t.Fatalf("no issuer configured = %#v, want unavailable", missing)
+	}
+}
+
+// A wildcard the host cannot prove is unavailable too — something the
+// operator saves once on the Certificates page, which the message names — and
+// one proved over DNS records whose saved credentials answered, never the
+// credentials themselves.
+func TestCertificateStepNamesAWildcardsDNSProviderOrWhyThereIsNone(t *testing.T) {
+	refusal := (&NormalizedStepExecutor{certificates: &certificateIssuerFake{
+		err: fmt.Errorf("*.preview.example.com is a wildcard: %w", proxysvc.ErrCertificateWildcard),
+	}}).certificateStep(context.Background(), []string{"*.preview.example.com"}, discardCertificateLog)
+	if refusal.State != StepUnavailable || refusal.ErrorCode != "certificate_wildcard_unavailable" ||
+		!strings.HasPrefix(refusal.ErrorMessage, "*.preview.example.com is a wildcard") {
+		t.Fatalf("wildcard refusal = %#v, want unavailable", refusal)
+	}
+
+	fake := &certificateIssuerFake{result: proxysvc.DeploymentCertificate{
+		Outcome: proxysvc.CertificateIssued, Name: "preview.example.com",
+		Method: "dns-cloudflare", DNSProvider: "Cloudflare", Registered: true,
+	}}
+	logged := []string{}
+	issued := (&NormalizedStepExecutor{certificates: fake}).certificateStep(
+		context.Background(), []string{"*.preview.example.com"},
+		func(_, text string) { logged = append(logged, text) },
+	)
+	evidence := string(issued.Evidence)
+	if issued.State != StepPassed || !strings.Contains(evidence, `"method":"dns-cloudflare"`) ||
+		!strings.Contains(evidence, `"dnsProvider":"Cloudflare"`) || !strings.Contains(evidence, `"accountExisted":true`) {
+		t.Fatalf("DNS issuance = %#v, evidence %s", issued, evidence)
+	}
+	if !strings.Contains(strings.Join(logged, "\n"), "Issued preview.example.com over a DNS challenge through the saved Cloudflare credentials") {
+		t.Fatalf("transcript = %#v", logged)
 	}
 }
 

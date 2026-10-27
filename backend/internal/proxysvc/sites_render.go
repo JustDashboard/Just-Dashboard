@@ -267,9 +267,13 @@ const maintenanceExempt = `"^/(\.well-known/acme-challenge/|__jd/maintenance\.ht
 // on every pass rather than a map, whose value nginx keeps for the rest of
 // the request.
 func renderErrorRouting(l *lines, spec *SiteSpec) {
-	on := spec.Maintenance != nil && spec.Maintenance.On
-	if !on && len(spec.ErrorPages) == 0 {
+	switched := spec.Maintenance != nil && spec.Maintenance.Switch
+	on := spec.Maintenance != nil && spec.Maintenance.On && !switched
+	if !on && !switched && len(spec.ErrorPages) == 0 {
 		return
+	}
+	if switched {
+		renderMaintenanceSwitch(l, spec)
 	}
 	if on {
 		l.add("    # Maintenance is on. It is checked before anything else the")
@@ -284,7 +288,9 @@ func renderErrorRouting(l *lines, spec *SiteSpec) {
 		l.add("    error_page 503 %s;", pageURI("maintenance"))
 	}
 	// The site's own 503 page waits while maintenance holds the code; its
-	// location stays written, which is what brings it back afterwards.
+	// location stays written, which is what brings it back afterwards. A
+	// switched site's maintenance answers from a location of its own, so
+	// the server's 503 stays the site's page whichever way it is switched.
 	for _, code := range errorPageCodes {
 		if spec.hasErrorPage(code) && !(on && code == 503) {
 			l.add("    error_page %d %s;", code, pageURI(strconv.Itoa(code)))
@@ -293,13 +299,46 @@ func renderErrorRouting(l *lines, spec *SiteSpec) {
 	l.blank()
 }
 
+// maintenanceAnswerURI is where a switched site sends a request maintenance
+// holds: a location that answers 503 with the maintenance page.
+const maintenanceAnswerURI = "/__jd/maintenance"
+
+// renderMaintenanceSwitch writes the check for a site whose maintenance
+// follows a file. It is the check renderErrorRouting writes for a site in
+// maintenance, behind a test for the file, and it hands the request to a
+// location rather than holding the server's error_page 503: that one stays
+// free for the site's own 503 page, so an application's 503 is never
+// answered with the maintenance page while maintenance is off.
+func renderMaintenanceSwitch(l *lines, spec *SiteSpec) {
+	l.add("    # Maintenance is on while this file exists. nginx looks for it on")
+	l.add("    # every request, so turning it on or off needs no reload. It is")
+	l.add("    # checked before anything else the server does, a redirect included.")
+	l.add("    set $%s 0;", spec.maintVar())
+	l.add("    if (-f %s) {", spec.maintenanceSwitchPath())
+	l.add("        set $%s $%s;", spec.maintVar(), spec.maintIPVar())
+	l.add("    }")
+	l.add("    if ($uri ~ %s) {", maintenanceExempt)
+	l.add("        set $%s 0;", spec.maintVar())
+	l.add("    }")
+	l.add("    if ($%s) {", spec.maintVar())
+	l.add("        rewrite ^ %s last;", maintenanceAnswerURI)
+	l.add("    }")
+}
+
 // renderPageLocations writes the locations the pages are served from. Each
 // is internal, so a visitor cannot ask for one, and exact, so no other path
 // reaches the folder. The response keeps the status that sent it there.
 func renderPageLocations(l *lines, spec *SiteSpec) {
-	dir := spec.PagesDir
-	if dir == "" {
-		dir = "/etc/nginx/jd-pages/" + spec.Name
+	dir := spec.pagesDir()
+	if m := spec.Maintenance; m != nil && m.Switch {
+		// Its return is answered in the location's rewrite phase, ahead of
+		// the address list and the password, so the page decides who sees
+		// it the way the site's own maintenance page does.
+		l.add("    location = %s {", maintenanceAnswerURI)
+		l.add("        internal;")
+		l.add("        error_page 503 %s;", pageURI("maintenance"))
+		l.add("        return 503;")
+		l.add("    }")
 	}
 	page := func(name string, extra func()) {
 		l.add("    location = %s {", pageURI(name))

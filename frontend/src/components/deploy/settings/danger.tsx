@@ -18,7 +18,7 @@ import {
   Trash,
   type Icon,
 } from "@/components/icons"
-import { ApiError, get, post } from "@/lib/api"
+import { ApiError, del, get, post } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
@@ -99,19 +99,31 @@ function DangerZone({ configuration }: { configuration: DeploymentEnvironmentCon
     !project.archived &&
     (stopped || destructive)
   const restore = project.archived && can("system.admin")
-  const rows = [
-    stopStart && <StopStartRow key="stop" configuration={configuration} stopped={stopped} />,
-    destructive && !project.archived && <ArchiveRow key="archive" configuration={configuration} />,
-    restore && <RestoreRow key="restore" />,
-    destructive && <RemovalRow key="removal" />,
-    destructive && <PurgeRow key="purge" configuration={configuration} />,
-  ].filter(Boolean)
+  // Archiving, restoring and deleting are the whole deployment's, so they
+  // stay on production's page; staging's own last act is its removal.
+  const staging = project.environment === "staging"
+  const rows = staging
+    ? [
+        stopStart && <StopStartRow key="stop" configuration={configuration} stopped={stopped} />,
+        destructive && !project.archived && (
+          <RemoveStagingRow key="remove-staging" configuration={configuration} />
+        ),
+      ].filter(Boolean)
+    : [
+        stopStart && <StopStartRow key="stop" configuration={configuration} stopped={stopped} />,
+        destructive && !project.archived && (
+          <ArchiveRow key="archive" configuration={configuration} />
+        ),
+        restore && <RestoreRow key="restore" />,
+        destructive && <RemovalRow key="removal" />,
+        destructive && <PurgeRow key="purge" configuration={configuration} />,
+      ].filter(Boolean)
 
   return (
     <SettingSection
       title="Danger zone"
       tone="danger"
-      state={<Lifecycle archived={project.archived} />}
+      state={staging ? undefined : <Lifecycle archived={project.archived} />}
     >
       {rows.length === 0 ? (
         <EmptyNote className="px-0 text-left">
@@ -284,6 +296,91 @@ function StopStartRow({
             : stopped
               ? "Start"
               : "Stop"}
+        </Button>
+      }
+    >
+      {dialog}
+    </DangerRow>
+  )
+}
+
+/**
+ * Removing staging: its containers, its route and the volumes adding staging
+ * made come off the host, and the environment is archived. Nothing of
+ * production's is named, so nothing of production's can go — an image
+ * production was promoted from stays, because production's release holds it.
+ * Held, with the reason, while production takes only promotions: staging is
+ * then the only way production can change.
+ */
+function RemoveStagingRow({
+  configuration,
+}: {
+  configuration: DeploymentEnvironmentConfiguration
+}) {
+  const project = useProject()
+  const router = useRouter()
+  const { confirm, dialog } = useConfirm()
+  const held = Boolean(project.production?.promotionOnly)
+  const hosts = configuration.domains.map((domain) => domain.hostname)
+  const prefix = `jd-staging-e${project.environmentId}-`
+  const volumes = (configuration.runtime.mounts ?? [])
+    .map((mount) => mount.source)
+    .filter((source) => source.startsWith(prefix))
+  return (
+    <DangerRow
+      title="Remove staging"
+      sentence={
+        held
+          ? "Production takes only promotions from staging. Turn that off in General → Promotion first."
+          : "Production is not touched. Staging can be added again from production's settings."
+      }
+      facts={
+        <>
+          {hosts.length > 0 && (
+            <Reach label="Stops answering" mono>
+              {hosts.join(", ")}
+            </Reach>
+          )}
+          <Reach label="Removes" mono={volumes.length > 0}>
+            {["containers", "route", ...volumes].join(" · ")}
+          </Reach>
+        </>
+      }
+      action={
+        <Button
+          variant="outline"
+          className="text-destructive"
+          disabled={held}
+          onClick={() =>
+            confirm({
+              title: "Remove staging",
+              confirmLabel: "Remove staging",
+              subject: {
+                mark: <ProjectMark deployment={project.detail.deployment} size="sm" />,
+                name: `${project.detail.project.name} · staging`,
+              },
+              description: (
+                <p>
+                  Staging&apos;s containers, its route
+                  {volumes.length > 0 ? " and its volumes" : ""} are removed. Production keeps
+                  running as it is.
+                </p>
+              ),
+              action: async () => {
+                await del(`/deploy/${project.projectId}/environments/${project.environmentId}`, {
+                  body: { volumes: true },
+                })
+              },
+              onDone: () => {
+                project.selectEnvironment("production")
+                project.refresh()
+                router.push(`/deploy/${project.projectId}`)
+              },
+            })
+          }
+        >
+          <Trash className="size-3.5" />
+          Remove staging
         </Button>
       }
     >

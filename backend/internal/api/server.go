@@ -310,6 +310,9 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.startDeployEngine(ctx); err != nil {
 		return err
 	}
+	// After the engine, so a window a restart interrupted is settled by a
+	// watcher that can already ask the engine for its rollback.
+	s.modules.rollbackWatcher.Start(ctx)
 	s.modules.deployGit.Start(ctx)
 	s.modules.previewReconciler.Start(ctx)
 	s.modules.deployDatabases.Start(ctx)

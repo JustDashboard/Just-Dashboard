@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -248,11 +249,13 @@ func TestUpstreamRepositoryOffersItsTemplateAndImage(t *testing.T) {
 		".github/workflows/docker.yml": "jobs:\n  build:\n    steps:\n      - uses: docker/build-push-action@v6\n" +
 			"        with:\n          tags: ghcr.io/${{ github.repository_owner }}/n8n:latest\n",
 	}, SourceIdentity{Kind: SourceGit, Remote: "https://github.com/n8n-io/n8n.git"})
-	kinds := map[string]string{}
+	kinds := map[string][]string{}
 	for _, alternative := range result.Alternatives {
-		kinds[alternative.Kind] = alternative.Ref
+		kinds[alternative.Kind] = append(kinds[alternative.Kind], alternative.Ref)
 	}
-	if kinds["template"] != "n8n" || kinds["image"] != "ghcr.io/n8n-io/n8n" {
+	// Every reviewed template of the project is offered: the single image and
+	// the stack that runs it on PostgreSQL.
+	if !slices.Equal(kinds["template"], []string{"n8n", "n8n-postgres"}) || !slices.Equal(kinds["image"], []string{"ghcr.io/n8n-io/n8n"}) {
 		t.Fatalf("alternatives = %#v", result.Alternatives)
 	}
 	findings := repoShapeFindings(&result, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe}})

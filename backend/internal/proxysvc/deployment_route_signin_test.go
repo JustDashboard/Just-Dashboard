@@ -94,10 +94,12 @@ func TestDeploymentRouteSignInOnCaddy(t *testing.T) {
 		t.Fatalf("the redirecting name signs in:\n%s", redirect)
 	}
 
-	// Without an allow list the route block is still there, for the order.
+	// Without an allow list the route block is still there, for the order:
+	// maintenance, then the sign-in.
 	route.AllowFrom = nil
 	content, err = renderDockerCaddyRoute(route, "http://10.0.0.2:3000")
-	if err != nil || !strings.Contains(content, "  route {\n    request_header -Remote-User\n") || strings.Contains(content, "remote_ip") {
+	if err != nil || !strings.Contains(content, "  route {\n    @jd_maintenance {\n") ||
+		!strings.Contains(content, "\n    }\n    request_header -Remote-User\n") || strings.Contains(content, "remote_ip") {
 		t.Fatalf("sign-in without a fence = %v:\n%s", err, content)
 	}
 }

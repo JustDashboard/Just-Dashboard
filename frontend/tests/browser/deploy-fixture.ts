@@ -37,6 +37,8 @@ import type {
   NotificationDelivery,
   ProjectPullRequests,
   ReleaseComparisonResponse,
+  RollbackPolicy,
+  RollbackWatch,
   SourceIdentity,
   TrafficPulse,
   VolumeDetail,
@@ -2182,6 +2184,11 @@ export async function mockProject(
      * draws. `runtime` and `operations` still win when given.
      */
     showcase?: boolean
+    /**
+     * The production environment's warm-release window; null, the default,
+     * is an environment that has never had one.
+     */
+    rollbackWatch?: RollbackWatch | null
   } = {},
 ) {
   const showcase = Boolean(options.showcase)
@@ -2202,6 +2209,15 @@ export async function mockProject(
   let configurationRevision = 3
   let configurationPending = true
   let automationTriggers: Record<string, unknown>[] = showcase ? [...showcaseTriggers] : []
+  let rollbackPolicy: RollbackPolicy = {
+    keepWarm: true,
+    windowSeconds: 600,
+    automatic: true,
+    errorRateMargin: 5,
+    latencyFactor: 2,
+    minRequests: 20,
+  }
+  let rollbackWatch: RollbackWatch | null = options.rollbackWatch ?? null
   let gitPolicy = {
     automatic: true,
     commitStatuses: true,
@@ -2231,6 +2247,15 @@ export async function mockProject(
     },
   ]
   let notificationTests = 0
+  // The maintenance switch beside the live route, and the pages the route
+  // answers with that the operator wrote; the rest are the shipped ones.
+  let maintenanceSwitch: Record<string, unknown> = {
+    driver: "nginx",
+    route: true,
+    ready: true,
+    on: false,
+  }
+  const routePages: Record<string, string> = {}
   let scopedVariables: DeploymentVariable[] = showcase
     ? [...showcaseVariables]
     : [
@@ -2586,6 +2611,49 @@ export async function mockProject(
       body = { run: liveRun(), steps: showcase ? showcaseSteps : steps }
     } else if (path === "/deploy/7/environments/12/configuration" && method === "GET") {
       body = configurationBody()
+    } else if (path === "/deploy/7/environments/12/maintenance" && method === "GET") {
+      body = maintenanceSwitch
+    } else if (path === "/deploy/7/environments/12/maintenance" && method === "PUT") {
+      const { on } = request.postDataJSON() as { on: boolean }
+      // The page's clock is the real one, so the switch is turned on now.
+      maintenanceSwitch = {
+        ...maintenanceSwitch,
+        on,
+        since: on ? new Date().toISOString() : undefined,
+      }
+      body = maintenanceSwitch
+    } else if (path.startsWith("/deploy/7/environments/12/pages/")) {
+      const name = path.slice("/deploy/7/environments/12/pages/".length)
+      if (method === "PUT")
+        routePages[name] = (request.postDataJSON() as { content: string }).content
+      body = {
+        site: "just-dashboard-env-12.conf",
+        page: name,
+        content:
+          routePages[name] ?? `<!doctype html><title>${name}</title><h1>Shipped ${name} page</h1>`,
+        custom: name in routePages,
+      }
+    } else if (path === "/deploy/7/environments/12/rollback-watch" && method === "GET") {
+      body = { policy: rollbackPolicy, watch: rollbackWatch, preview: false }
+    } else if (path === "/deploy/7/environments/12/rollback-policy" && method === "PUT") {
+      rollbackPolicy = { ...(request.postDataJSON() as RollbackPolicy), updatedBy: "operator" }
+      actions.push("rollback-policy")
+      body = rollbackPolicy
+    } else if (path === "/deploy/7/environments/12/rollback-watch/rollback" && method === "POST") {
+      actions.push("instant-rollback")
+      if (rollbackWatch) rollbackWatch = { ...rollbackWatch, rollbackRunId: 85 }
+      body = { ...liveRun(), id: 85, runNumber: 85, operation: "rollback", state: "queued" }
+    } else if (path === "/deploy/7/environments/12/rollback-watch/keep" && method === "POST") {
+      actions.push("keep-release")
+      if (rollbackWatch)
+        rollbackWatch = {
+          ...rollbackWatch,
+          state: "closed",
+          endReason: "kept",
+          endMessage: `operator kept release #${rollbackWatch.releaseNumber}.`,
+          endedAt: new Date().toISOString(),
+        }
+      body = rollbackWatch
     } else if (path === "/deploy/7/environments/12/git-watch" && method === "GET") {
       body = {
         automatic: gitPolicy.automatic,
@@ -2841,6 +2909,9 @@ export async function mockProject(
     // Shared variables are empty here; deploy-shared-variables.spec.ts
     // routes its own over these.
     else if (/^\/deploy\/(\d+\/)?shared-variables$/.test(path) && method === "GET") body = []
+    // No secret store is connected here; deploy-secret-stores.spec.ts routes
+    // its own over this.
+    else if (path === "/deploy/secret-stores" && method === "GET") body = []
     else {
       body = showcase && method === "GET" ? showcaseRead(path, url) : undefined
       if (body === undefined) {
@@ -2891,6 +2962,15 @@ export async function mockProject(
     },
     configuration() {
       return normalizedConfiguration
+    },
+    maintenance() {
+      return maintenanceSwitch
+    },
+    setMaintenance(patch: Record<string, unknown>) {
+      maintenanceSwitch = { ...maintenanceSwitch, ...patch }
+    },
+    routePages() {
+      return routePages
     },
   }
 }

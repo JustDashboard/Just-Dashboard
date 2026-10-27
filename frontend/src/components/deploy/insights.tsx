@@ -95,8 +95,11 @@ export function Insights({
   onFailureClick,
   children,
   presentation = "tiles",
+  environmentId,
 }: {
   projectId: number
+  /** Staging's figures in place of the project's, which leave staging out. */
+  environmentId?: number
   onFailureClick?: (code: string) => void
   /** Overview records placed between the delivery figures and their history. */
   children?: React.ReactNode
@@ -105,9 +108,14 @@ export function Insights({
   const history = presentation === "history"
   const [range, setRange] = useViewState<(typeof WINDOWS)[number][0]>("deploy.insights.range", "30")
   const insights = usePoll(
-    (signal) => get<DeploymentInsights>(`/deploy/${projectId}/insights`, { days: range }, signal),
+    (signal) =>
+      get<DeploymentInsights>(
+        `/deploy/${projectId}/insights`,
+        { days: range, environment: environmentId },
+        signal,
+      ),
     60000,
-    [projectId, range],
+    [projectId, range, environmentId],
   )
   const data = insights.data
   const decided = (data?.succeeded ?? 0) + (data?.failed ?? 0)

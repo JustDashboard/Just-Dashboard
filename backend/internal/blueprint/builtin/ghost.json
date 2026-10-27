@@ -1,0 +1,238 @@
+{
+  "id": "ghost",
+  "version": "1.0.0",
+  "name": "Ghost",
+  "category": "http",
+  "profile": "compose",
+  "description": "The publishing platform for blogs and newsletters, with the MySQL 8 server Ghost 6 requires beside it on a private network.",
+  "iconId": "globe",
+  "docsUrl": "https://ghost.org/docs/install/docker/",
+  "access": {
+    "kind": "setup",
+    "path": "/ghost",
+    "note": "Ghost has no staff account until someone makes one: the first visitor to https://<domain>/ghost creates the owner account and names the site, so open it the moment the deployment is ready. Staff invitations and member sign-ups need mail, which is configured in Ghost's own settings after the fact."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/TryGhost/Ghost",
+    "reviewedAt": "2026-10-27",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Ghost builds every link, feed and e-mail from this address and redirects any other host to it."
+    }
+  ],
+  "secrets": [
+    {
+      "name": "db-password",
+      "variable": "GHOST_DB_PASSWORD",
+      "label": "Database password",
+      "length": 40,
+      "description": "Generated here and given only to the services that sign in to the database."
+    },
+    {
+      "name": "db-root-password",
+      "variable": "MYSQL_ROOT_PASSWORD",
+      "label": "MySQL root password",
+      "length": 40,
+      "description": "For administering the database by hand; the application never uses it."
+    }
+  ],
+  "services": [
+    {
+      "name": "ghost",
+      "role": "app",
+      "purpose": "The site, its newsletters and the Ghost admin, behind the domain",
+      "image": {
+        "reference": "ghost:6.72.0-alpine",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "url",
+          "value": "{{variable.GHOST_URL}}"
+        },
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        },
+        {
+          "name": "database__client",
+          "value": "mysql"
+        },
+        {
+          "name": "database__connection__host",
+          "value": "db"
+        },
+        {
+          "name": "database__connection__user",
+          "value": "ghost"
+        },
+        {
+          "name": "database__connection__password",
+          "value": "{{secret.db-password}}"
+        },
+        {
+          "name": "database__connection__database",
+          "value": "ghost"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 2368,
+          "protocol": "tcp",
+          "purpose": "The site and /ghost",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "content",
+          "target": "/var/lib/ghost/content",
+          "purpose": "Images, themes and everything uploaded",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 768,
+        "minMemoryMb": 384
+      },
+      "healthcheck": {
+        "test": [
+          "node",
+          "-e",
+          "require('http').get({host:'127.0.0.1',port:2368,path:'/ghost/api/admin/site/',headers:{'X-Forwarded-Proto':'https'}},r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 12,
+        "startPeriodSeconds": 60
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "MySQL 8, holding every post, member and setting",
+      "image": {
+        "reference": "mysql:8.4.13",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "MYSQL_DATABASE",
+          "value": "ghost"
+        },
+        {
+          "name": "MYSQL_USER",
+          "value": "ghost"
+        },
+        {
+          "name": "MYSQL_PASSWORD",
+          "value": "{{secret.db-password}}"
+        },
+        {
+          "name": "MYSQL_ROOT_PASSWORD",
+          "value": "{{secret.db-root-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "mysql",
+          "internal": 3306,
+          "protocol": "tcp",
+          "purpose": "SQL connections from Ghost",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/var/lib/mysql",
+          "purpose": "Every table Ghost keeps",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 768,
+        "minMemoryMb": 384
+      },
+      "healthcheck": {
+        "test": [
+          "mysqladmin",
+          "ping",
+          "-h",
+          "127.0.0.1"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 12,
+        "startPeriodSeconds": 40
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Admin API answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/ghost/api/admin/site/",
+      "port": "http",
+      "timeoutSeconds": 300
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "GHOST_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "Ghost migrates its database on start and does not support downgrading; take a backup before moving to a newer image. Ghost 6 supports MySQL 8 only."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "blog.example.test"
+      },
+      "digest": "sha256:04d4a9eaa0cccef2de9cd6ed51de86ba65eca5c60c54838d202fdf2ecccfa969"
+    }
+  ]
+}
