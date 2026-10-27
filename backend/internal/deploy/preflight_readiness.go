@@ -93,6 +93,55 @@ func readinessPreflightFindings(draft *Draft, configuration PlanConfiguration) [
 	return findings
 }
 
+// ungatedCutoverFinding warns about a release nothing verifies before it is
+// cut over to. A web or static plan is refused without a readiness check
+// (readiness_missing, a decision above); every other kind that serves — a
+// service or a published container on a port or behind a domain, a Compose
+// stack, a game server — deploys without one, and used to without a word:
+// the candidate was started, never asked whether it answers, and the route
+// and the release pointer moved to it. A warning, never a refusal: a plan
+// without a check keeps deploying, and is told what that costs. A worker has
+// nothing to probe and is not asked; a plan that neither listens nor serves
+// a domain has no cutover a check could gate.
+func ungatedCutoverFinding(profile WorkloadProfile, configuration PlanConfiguration) (PreflightFinding, bool) {
+	switch profile {
+	case ProfileWeb, ProfileStatic, ProfileWorker, ProfileImported:
+		return PreflightFinding{}, false
+	}
+	if hasReadinessCheck(configuration.Checks) {
+		return PreflightFinding{}, false
+	}
+	runtime := configuration.Runtime
+	listens := runtime.InternalPort > 0 || runtime.HostPort > 0 || len(runtime.Ports) > 0
+	if runtime.Strategy != StrategyBlueGreen && !listens && len(configuration.Domains) == 0 {
+		return PreflightFinding{}, false
+	}
+	measured := "stop-first"
+	if runtime.Strategy == StrategyBlueGreen {
+		measured = "blue/green"
+	}
+	switch {
+	case runtime.InternalPort > 0:
+		measured += fmt.Sprintf(" · port %d", runtime.InternalPort)
+	case runtime.HostPort > 0:
+		measured += fmt.Sprintf(" · host port %d", runtime.HostPort)
+	}
+	for _, check := range configuration.Checks {
+		if check.Phase == "readiness" {
+			measured += " · readiness check not required"
+			break
+		}
+	}
+	action := "Add a required readiness check: TCP on the port it listens on, HTTP on a health path, or the container's own health."
+	if runtime.InternalPort > 0 {
+		action = fmt.Sprintf("Add a required readiness check: TCP on port %d, HTTP on a health path, or the container's own health.", runtime.InternalPort)
+	}
+	return finding("cutover_unverified", PreflightWarning,
+		"No readiness check gates this release", measured,
+		"The candidate is cut over to without being asked whether it answers, so a release that starts but never listens goes live and the previous one is not restored.",
+		action, "deploy", "checks"), true
+}
+
 // plannedReadinessCheck is the first required readiness check, the one
 // hasReadinessCheck counts, with its decoded configuration.
 func plannedReadinessCheck(checks []PlannedCheck) (PlannedCheck, CheckConfiguration, bool) {

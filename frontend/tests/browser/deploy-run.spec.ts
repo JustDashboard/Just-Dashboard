@@ -619,6 +619,42 @@ test("visit and the ready block appear only when this run's release is the live 
     "href",
     "https://api.example.test/",
   )
+  // The fixture's plan carries a readiness check; nothing says otherwise.
+  await expect(page.getByText(/without a readiness check/)).toHaveCount(0)
+
+  // A release whose activation recorded that no readiness check gated it is
+  // said to have gone live on nothing but having started — in the outcome,
+  // with the way to add one, and on the Route stage's own line.
+  const ungatedSteps = steps.map((step) =>
+    step.key === "activate"
+      ? {
+          ...step,
+          state: "passed" as const,
+          evidence: {
+            releaseId: 20,
+            route: { name: "just-dashboard-env-12.conf" },
+            readinessGated: false,
+          },
+        }
+      : step,
+  )
+  await page.route("**/api/v1/deploy/7/runs/84", (route) =>
+    json(route, snapshot(live, ungatedSteps)),
+  )
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(
+      JSON.stringify({ type: "snapshot", data: snapshot(live, ungatedSteps), ts: Date.now() }),
+    )
+  })
+  await page.reload()
+  await expect(page.getByText("Your release is ready", { exact: true })).toBeVisible()
+  const outcome = page.getByRole("region", { name: "Outcome" })
+  await expect(outcome.getByText(/Went live without a readiness check/)).toBeVisible()
+  await expect(outcome.getByRole("link", { name: "Add one", exact: true })).toHaveAttribute(
+    "href",
+    "/deploy/7/settings/runtime#health-checks",
+  )
+  await expect(page.getByText(/no readiness check gated the cutover/).first()).toBeVisible()
 
   // A run whose release has since been superseded by a newer one gets a
   // different story entirely, and no Visit anywhere on the page.

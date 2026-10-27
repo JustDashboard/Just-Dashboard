@@ -682,6 +682,9 @@ export function RunPage() {
           release={release}
           liveRelease={liveRelease}
           projectId={projectId}
+          ungated={attempts.some(
+            (step) => step.key === "activate" && step.evidence?.readinessGated === false,
+          )}
         />
       )}
 

@@ -276,9 +276,42 @@ describe("catalogue defaults carried into the plan", () => {
     )
     // Only once: a plan that already verifies itself is not given a second gate.
     expect(checksForRuntime(checks, "web", 8080)).toHaveLength(checks.length)
-    // And a workload preflight demands no gate from keeps what it had.
-    expect(checksForRuntime(plan.checks, "image", 8080)).toEqual(plan.checks)
+    // A worker has nothing to probe and keeps none.
     expect(checksForRuntime(checks, "worker", 8080)).toEqual([])
+  })
+  test("a service or a published container with a known port is gated on that port", () => {
+    // Nothing names a page, so the socket itself is the check — the gate a
+    // release that starts but never listens would otherwise slip past.
+    for (const profile of ["service", "image"]) {
+      const plan = defaultConfiguration(profile, candidate({ profile, port: 8080 }))
+      expect(plan.checks).toEqual([
+        {
+          name: "Port reachable",
+          kind: "tcp",
+          phase: "readiness",
+          required: true,
+          config: { port: 8080, attempts: 20, timeoutSeconds: 5, intervalSeconds: 3 },
+        },
+      ])
+      // Typing the port later proposes the same check, once.
+      const typed = checksForRuntime([], profile, 9000)
+      expect(typed).toEqual([
+        expect.objectContaining({ kind: "tcp", config: expect.objectContaining({ port: 9000 }) }),
+      ])
+      expect(checksForRuntime(typed, profile, 9000)).toHaveLength(1)
+    }
+    // No port, no proposal: a check on nothing would fail every release.
+    expect(defaultConfiguration("service", candidate({ profile: "service" })).checks).toEqual([])
+    // A health path the source names, or the image's own health, outranks the socket.
+    expect(
+      checksForRuntime([], "service", 8080, { kind: "http", path: "/healthz", attempts: 30 })[0],
+    ).toMatchObject({ kind: "http", config: { path: "/healthz", attempts: 30 } })
+    expect(
+      checksForRuntime([], "image", 8080, { kind: "docker_health", attempts: 44 })[0],
+    ).toMatchObject({ kind: "docker_health", config: { attempts: 44 } })
+    // The proposal is a draft default: a plan that carries its own check keeps it.
+    const own = [{ name: "mine", kind: "http", phase: "readiness", required: false, config: {} }]
+    expect(checksForRuntime(own, "service", 8080)).toEqual(own)
   })
   test("a Python candidate keeps its interpreter and framework port", () => {
     const plan = defaultConfiguration(
