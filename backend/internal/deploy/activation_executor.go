@@ -1062,13 +1062,34 @@ func decodeReleaseRuntimeSnapshot(release *ReleaseWithArtifacts) (runtimeRelease
 		if json.Unmarshal(envelope.Snapshot, &snapshot) != nil || snapshot.Version != 1 {
 			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot is malformed", ErrArtifactMissing)
 		}
-		if snapshot.Plan.Strategy != release.Release.Strategy ||
-			(release.Release.ImageDigest != "" && snapshot.Image.Digest != release.Release.ImageDigest) {
+		if snapshot.Plan.Strategy != release.Release.Strategy || !snapshotNamesReleaseImage(snapshot, release.Release.ImageDigest) {
 			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot does not match release identity", ErrInvalidPlan)
 		}
 		return snapshot, nil
 	}
 	return runtimeReleaseSnapshot{}, fmt.Errorf("%w: release runtime artifact is unavailable", ErrArtifactMissing)
+}
+
+// snapshotNamesReleaseImage is whether the runtime snapshot runs the image
+// the release row records. A container release has one image and both name
+// it. A Compose release records the first of its services' image artifacts
+// and keeps no single image of its own (snapshot.Image is empty), so the
+// recorded digest has to be one of the snapshot's services: comparing it with
+// the empty single image refused every Compose release at its first
+// activation step.
+func snapshotNamesReleaseImage(snapshot runtimeReleaseSnapshot, digest string) bool {
+	if digest == "" {
+		return true
+	}
+	if snapshot.Compose == nil {
+		return snapshot.Image.Digest == digest
+	}
+	for _, service := range snapshot.Compose.Services {
+		if service.Digest == digest {
+			return true
+		}
+	}
+	return false
 }
 
 // operationTargetsLiveRelease is true for the operations that act on the
