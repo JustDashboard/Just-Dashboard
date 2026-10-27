@@ -301,3 +301,20 @@ func TestLiveCreateSurvivesOccupiedPort(t *testing.T) {
 	}
 	t.Fatal("replacement port never served the application")
 }
+
+// A container's further names are set on the network it is created on, so it
+// answers by them from its first instant there.
+func TestNetworkAliasesAreSetOnTheFirstNetwork(t *testing.T) {
+	spec := ContainerSpec{Name: "copy", Image: "postgres:17", Networks: []string{"rehearsal"}, NetworkAliases: []string{"db-5.jd.internal", "db-5-pool.jd.internal"}}
+	_, host, networking, _, err := spec.toEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(host.NetworkMode) != "rehearsal" {
+		t.Fatalf("network mode = %s", host.NetworkMode)
+	}
+	endpoint := networking.EndpointsConfig["rehearsal"]
+	if endpoint == nil || len(endpoint.Aliases) != 2 || endpoint.Aliases[0] != "db-5.jd.internal" {
+		t.Fatalf("endpoint = %+v", endpoint)
+	}
+}

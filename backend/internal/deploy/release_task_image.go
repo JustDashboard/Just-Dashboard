@@ -45,6 +45,12 @@ type ReleaseTaskRuntimeRequest struct {
 	// Secret names the runtime variables whose values the task's output must
 	// never show; the task's own release_task values are always redacted.
 	Secret map[string]bool
+	// Rehearsal runs the task against a throwaway database copy: on Networks
+	// alone — the copy's — never the host's network or the environment's,
+	// and with none of the plan's volumes, so nothing it does reaches data
+	// production holds.
+	Rehearsal bool
+	Networks  []string
 }
 
 // releaseTaskImage is the image a release's tasks run in: the built or pulled
@@ -92,14 +98,19 @@ func (o *DockerRuntimeOwner) RunReleaseTask(
 	}
 	plan := request.Plan
 	networks := []string{}
-	if o.networks != nil {
+	if request.Rehearsal {
+		if len(request.Networks) == 0 {
+			return -1, true, fmt.Errorf("%w: a rehearsal task needs the copy's network", ErrInvalidPlan)
+		}
+		networks = append(networks, request.Networks...)
+	} else if o.networks != nil {
 		var err error
 		networks, err = o.networks.NetworksForRuntime(ctx, request.Release.EnvironmentID, plan, request.Variables)
 		if err != nil {
 			return -1, true, err
 		}
 	}
-	if plan.PreviewIsolation {
+	if plan.PreviewIsolation && !request.Rehearsal {
 		network, err := o.ensurePreviewResources(ctx, request.Release.EnvironmentID, plan)
 		if err != nil {
 			return -1, true, err
@@ -230,6 +241,11 @@ func releaseTaskContainerSpec(request ReleaseTaskRuntimeRequest, networks []stri
 	if plan.HostNetwork {
 		spec.Networks = nil
 	}
+	if request.Rehearsal {
+		spec.Name = rehearsalTaskContainerName(request.Release.EnvironmentID, request.Run.ID, request.Index)
+		spec.Labels = append(spec.Labels, dockerx.LabelSpec{Name: rehearsalLabel, Value: strconv.FormatInt(request.Run.ID, 10)})
+		spec.Networks, spec.NetworkMode, spec.Mounts = networks, "", nil
+	}
 	if request.Task.WorkingDirectory != "" {
 		// A relative directory is relative to the image's own working
 		// directory, which only the image knows; the shell resolves it.
@@ -248,6 +264,10 @@ func releaseTaskContainerName(environmentID, runID int64, index int) string {
 	return fmt.Sprintf("jd-e%d-run%d-task%d", environmentID, runID, index+1)
 }
 
+func rehearsalTaskContainerName(environmentID, runID int64, index int) string {
+	return fmt.Sprintf("jd-e%d-run%d-rehearsal-task%d", environmentID, runID, index+1)
+}
+
 // runImageReleaseTask runs one task in the candidate release's image with
 // the runtime variables the release will start with, plus the task's own
 // release_task-scoped ones.
@@ -261,10 +281,15 @@ func runImageReleaseTask(
 	task := request.Task
 	evidence := ReleaseTaskEvidence{Name: task.Name, VariableNames: append([]string(nil), task.Env...), ExitCode: -1, Runner: ReleaseTaskRunnerImage}
 	sort.Strings(evidence.VariableNames)
-	for _, mount := range request.Plan.Mounts {
-		evidence.Mounts = append(evidence.Mounts, mount.Target)
+	name := releaseTaskContainerName(request.Release.EnvironmentID, request.Run.ID, request.Index)
+	if request.Rehearsal {
+		name = rehearsalTaskContainerName(request.Release.EnvironmentID, request.Run.ID, request.Index)
+	} else {
+		for _, mount := range request.Plan.Mounts {
+			evidence.Mounts = append(evidence.Mounts, mount.Target)
+		}
 	}
-	cleanup := map[string]any{"container": releaseTaskContainerName(request.Release.EnvironmentID, request.Run.ID, request.Index), "removed": true}
+	cleanup := map[string]any{"container": name, "removed": true}
 	variables := map[string]string{}
 	for name, value := range request.Variables {
 		variables[name] = value

@@ -337,7 +337,28 @@ to the contribution terms above, including the additional licence grant to the p
   and the limits the daemon applied. Changes to release tasks that run in the release image also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveReleaseTaskRunsInTheReleaseImage -count=1 -v`,
   which builds a tiny image and runs tasks in it for their output, exit codes, timeout and cleanup,
-  including a container a stopped dashboard left under a task's name.
+  including a container a stopped dashboard left under a task's name. Changes to migration rehearsal,
+  the release-task runtime it shares, or the dump extraction and point-in-time recovery it restores
+  from also run, from `backend/internal/api` as root on a Docker host,
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run 'TestLive(MigrationRehearsal|RehearsalLeftovers)' -count=1 -v`:
+  it provisions a PostgreSQL through the routes and deploys an idle image whose release task
+  migrates through `${{database.N.url}}`. Before any backup the run ends `rehearsal_unavailable`
+  and production is untouched; once a backup job has dumped it, a column added passes against the
+  restored copy, holds its lock for two seconds the report measures, and reaches production; a
+  `SET NOT NULL` on a column holding a null fails against the copy, the run ends `rehearsal_failed`
+  before its release task, production's schema and rows are unchanged, and no container, volume or
+  network carrying the run's rehearsal label is left
+  (`TestLiveMigrationRehearsalBlocksAFailingMigration`; the dump is the built-in one unless a
+  `pg_dump` is on `PATH`, as it is in the dashboard's image, which makes it a custom-format archive
+  the copy restores with `pg_restore` — run it both ways after changing the restore).
+  `TestLiveMigrationRehearsalRestoresAMariaDBDump`
+  does the same against MariaDB (it pulls `mariadb:11.8` once), and
+  `TestLiveRehearsalLeftoversAreRemovedAtStart` checks the start-up sweep removes a copy, its volume,
+  a task container and the network by label and leaves a managed container without it. With
+  `JD_TEST_WALG=<path>` to the WAL-G release `backend/Dockerfile` pins,
+  `TestLiveMigrationRehearsalRecoversFromThePointInTimeArchive` runs as well: a PostgreSQL 17
+  archiving into a directory, the copy recovered from the archive. They remove their own
+  `jd-rehearsal-…` servers, volumes, networks and release containers.
 - `python3 scripts/e2e-deployments.py` is the real-backend acceptance lane for deployments: it builds the
   backend, starts it on loopback with a fresh data directory, and drives the public API through a signed
   webhook channel, an nginx image deployment with resource limits, a busybox image that exits before it

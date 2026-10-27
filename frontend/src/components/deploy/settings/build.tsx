@@ -68,6 +68,7 @@ import {
   settingStatus,
 } from "@/components/deploy/settings/setting-card"
 import { ReleaseTasks, type ReleaseTask } from "@/components/deploy/settings/release-tasks"
+import { RehearsalForm } from "@/components/deploy/settings/rehearsal"
 import { Segments } from "@/components/deploy/settings/segments"
 import { DockerfileView, dockerfileFacts } from "@/components/deploy/settings/dockerfile-view"
 import { DetectionProposalPanel } from "@/components/deploy/settings/detection-proposal"
@@ -449,6 +450,11 @@ export function BuildSettings({
               projectId={projectId}
               configuration={configuration}
               save={state.save}
+            />
+            <RehearsalForm
+              projectId={projectId}
+              environmentId={environmentId}
+              configuration={configuration}
             />
           </>
         )

@@ -219,7 +219,10 @@ failed dump fails the run. The Databases fleet and a connection's summary read t
 connection's dump is when a job last backed it up. `POST /backups/runs/{runID}/restore-database`
 (destructive, ordinary confirmation) extracts one recorded dump bounded by its manifest size,
 verifies its digest and restores it through `dbx.Restore` into the connection or a named drill
-database. Other sources retain ordinary filesystem capture. See
+database. The extraction is `Runner.ExtractDatabaseDump`, which a deployment's migration rehearsal
+also uses on the newest successful run that dumped the connection (`Store.LatestDatabaseDump`) to
+fill its throwaway copy ([implementation](../deployments/implementation.md)). Other sources retain
+ordinary filesystem capture. See
 [`../deployments/backup-coverage.md`](../deployments/backup-coverage.md).
 
 An optional recovery plan runs a pinned application image against a private extracted copy with no

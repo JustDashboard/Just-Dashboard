@@ -104,6 +104,7 @@ var stepLabels = map[StepKey]string{
 	StepBuildArtifact:        "Build",
 	StepRenderRuntime:        "Render runtime",
 	StepReleaseTask:          "Release task",
+	StepRehearseMigration:    "Migration rehearsal",
 	StepBackupGate:           "Backup check",
 	StepProvisionCertificate: "Certificate",
 	StepStartCandidate:       "Start new release",

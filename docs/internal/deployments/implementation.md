@@ -636,7 +636,7 @@ only renderer/executor/validation authority for their feature.
   JSON bytes and verified digest, not a pointer back to mutable desired configuration.
 - Release tasks are named, bounded shell gates that run after the backup gate and before the candidate
   starts (`DefaultStepKeys` puts `backup_gate` first, so a migration never changes a database whose
-  required backup is unverified). A task with `runner: "image"` — the default for new tasks and for a
+  required backup is unverified, and `rehearse_migration` between them, below). A task with `runner: "image"` — the default for new tasks and for a
   release command detection read — runs once in a throwaway container of the candidate release's image
   (a Compose release's primary service image) through the runtime owner (`release_task_image.go`,
   `dockerx.RunToCompletion`): the runtime variables the release starts with plus the task's
@@ -675,6 +675,53 @@ only renderer/executor/validation authority for their feature.
   line that calls itself a warning. The code is the step's and the run's terminal code, the sentence
   joins the message, and the step evidence carries the cause (identifiers only) beside the task
   evidence.
+- Migration rehearsal (`deploy/rehearsal.go`, the Databases side in `api/deployment_rehearsal.go`) is
+  the `rehearse_migration` step, between `backup_gate` and `release_task`, so it runs only after the
+  backup it restores from has been verified and before any task touches production. It is off by
+  default and turned on per environment (`deploy_rehearsal_policies`, `GET`/`PUT
+  /deploy/{id}/environments/{env}/rehearsal`, `system.admin` with a session, audited as
+  `deploy.rehearsal.update`; a preview has no row). A run with no release tasks, or with rehearsal
+  off, skips the step with the reason. Otherwise the target is the managed database the tasks'
+  resolved variables address by its `db-<id>.jd.internal` or `db-<id>-pool.jd.internal` name — the
+  only one, or the one the terms name when they reach several, never a guess. The copy is the
+  production server's container spec on a fresh volume: its image, command and environment, its
+  read-only mounts, none of its writable ones (a socket directory, a log, the WAL-G tool volume and
+  archive), none of its ports, labels or networks, and for PostgreSQL its archiving removed and
+  `archive_mode=off` on the command line, which outranks the data directory, so a copy never writes
+  into production's archive. It runs on a network of its own (`jd-e<env>-run<run>-rehearsal`,
+  `Internal`, no gateway out) under the aliases the production database answers by, so the task's
+  `DATABASE_URL` reaches the copy unchanged. PostgreSQL with an active point-in-time archive is
+  recovered from it — WAL-G fetches the newest base backup and the copy replays the log to its end
+  (at most `WALArchiveTimeout`, a minute, behind production), then is removed and started again
+  without the archive, the WAL-G tool volume holding its key, or the recovery settings; anything else
+  is restored from the newest native dump a backup job made of that connection
+  (`backups.Store.LatestDatabaseDump`, `Runner.ExtractDatabaseDump`, the same extraction
+  `RestoreDatabase` uses): `pg_restore --no-owner --no-privileges --exit-on-error`, `psql -f` or
+  `mysql`, with the application's role made first when it is not the superuser. MySQL and MariaDB
+  restore from dumps only; any other engine is reported as not supported. The tasks then run through
+  the same release-task runtime as for real (`runImageReleaseTask` with `Rehearsal`), in the release
+  image with the same variables and timeout, but on the rehearsal network alone — never the project's
+  database networks, the preview network or the host's — with no mounts and a
+  `jd-e<env>-run<run>-rehearsal-task<n>` name. While a PostgreSQL task runs the copy's `pg_locks` is
+  read every 250 ms for sessions waiting and for locks that block an application's reads or writes
+  (ACCESS EXCLUSIVE, EXCLUSIVE, SHARE ROW EXCLUSIVE, SHARE) on user relations, and how long each was
+  held is the report's estimate of how long production will wait. The evidence (`RehearsalReport`)
+  records the database, the source (dump run and time, or the archive's recovered moment), restore
+  time, each task's duration, exit code and last output line, the locks, the isolation and whether the
+  copy was removed. A task that fails against the copy fails the step and the run as
+  `rehearsal_failed`, naming the task, the copy and its source and saying production was not
+  touched; `release_task` never starts. A rehearsal that cannot be carried out — no backup, a dump
+  over the size limit (`maxBackupMb`, default 2048) or a base backup unpacking to more, a restore past
+  `restoreTimeoutSeconds` (default 600), a shell-runner task, no reachable database, an engine without
+  a restore path — is `rehearsal_unavailable` and stops the release, or with `whenUnavailable: "warn"`
+  becomes a warning step and the release continues. Everything a rehearsal makes carries
+  `io.just-dashboard.rehearsal=<run id>` (the WAL-G tool volume too): the step removes its own
+  leftovers before it starts and everything after, however it ends; a resumed run makes its copy
+  again (`ReconcileResume`); and `Server.Start` removes every rehearsal before the engine resumes.
+  Runtime observation never counts the copy (it has no release id) or its task (the release-task
+  label), and host container alerts leave both out.
+  Build settings carries the terms under the release tasks (`settings/rehearsal.tsx`), and the run
+  page reads the report as figures (`run-rehearsal.tsx`).
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
   retain-until windows, recent failed diagnostics, shared physical digests, and every environment under
   an active deployment lease. Cleanup reports the reason for every retained row and removes a mutable

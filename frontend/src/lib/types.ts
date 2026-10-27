@@ -5151,6 +5151,56 @@ export type DeploymentDatabaseLink = {
   checkedAt?: string
 }
 
+/**
+ * An environment's migration rehearsal terms (`deploy/rehearsal.go`): before
+ * its release tasks run against production, they run against a copy of the
+ * database restored from its newest backup.
+ */
+export type RehearsalPolicy = {
+  enabled: boolean
+  /** The database to rehearse against when the tasks reach several; 0 is the only one. */
+  connectionId: number
+  /** What a rehearsal that cannot be carried out does to the release. */
+  whenUnavailable: "block" | "warn"
+  restoreTimeoutSeconds: number
+  maxBackupMb: number
+  updatedBy?: string
+  updatedAt?: string
+}
+
+/** The rehearse_migration step's evidence. */
+export type RehearsalReport = {
+  rehearsed: boolean
+  /** Why it was not rehearsed. */
+  reason?: string
+  database?: {
+    connectionId: number
+    name: string
+    engine: "postgres" | "mysql" | "mariadb" | string
+    database: string
+    image: string
+  }
+  source?: {
+    kind: "pitr" | "dump"
+    backupRunId?: number
+    takenAt?: string
+    bytes?: number
+    method?: string
+  }
+  restoreMs?: number
+  tasks: { name: string; durationMs: number; exitCode: number; error?: string }[]
+  locks: {
+    read: boolean
+    samples: number
+    maxWaiting: number
+    waitedMs: number
+    held: { relation: string; mode: string; heldMs: number }[]
+  }
+  isolation?: { network: string; internal: boolean; published: boolean; volumesMounted: boolean }
+  cleanedUp: boolean
+  totalMs: number
+}
+
 /** A saved database a variable names by its address rather than a link. */
 export type DeploymentDatabaseAddress = {
   connectionId: number

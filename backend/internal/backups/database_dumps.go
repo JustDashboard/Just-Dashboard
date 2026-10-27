@@ -205,6 +205,45 @@ func (s *Store) LastDatabaseDumps(ctx context.Context) (map[int64]time.Time, err
 	return out, rows.Err()
 }
 
+// LatestDatabaseDump is the newest successful run whose archive holds this
+// connection's native dump, by the test a restore applies, with that dump's
+// entry. ErrNoDatabaseDump says there is none.
+func (s *Store) LatestDatabaseDump(ctx context.Context, connectionID int64) (int64, time.Time, DatabaseDump, error) {
+	rows, err := s.st.DB.QueryContext(ctx,
+		`SELECT id, started_at, manifest_json FROM backup_runs
+		 WHERE status = ? AND artifact != '' AND instr(manifest_json, '"databaseDumps"') > 0
+		 ORDER BY started_at DESC, id DESC`, string(StatusSuccess))
+	if err != nil {
+		return 0, time.Time{}, DatabaseDump{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id, started int64
+			raw         string
+		)
+		if err := rows.Scan(&id, &started, &raw); err != nil {
+			return 0, time.Time{}, DatabaseDump{}, err
+		}
+		var manifest Manifest
+		if json.Unmarshal([]byte(raw), &manifest) != nil || !manifest.CoversDatabase(connectionID) {
+			continue
+		}
+		for _, dump := range manifest.DatabaseDumps {
+			if dump.ConnectionID == connectionID {
+				return id, time.Unix(started, 0).UTC(), dump, nil
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, time.Time{}, DatabaseDump{}, err
+	}
+	return 0, time.Time{}, DatabaseDump{}, ErrNoDatabaseDump
+}
+
+// ErrNoDatabaseDump is a connection no successful backup holds a dump of.
+var ErrNoDatabaseDump = errors.New("no successful backup holds a native dump of this database")
+
 // VerifyDatabaseCoverage confirms the archive really holds the dump entries
 // the manifest names for these connections, with the recorded sizes.
 func (r *Runner) VerifyDatabaseCoverage(ctx context.Context, runID int64, connectionIDs []int64) error {
@@ -249,9 +288,28 @@ func (r *Runner) RestoreDatabase(ctx context.Context, runID, connectionID int64,
 	if r.databases == nil {
 		return "", errors.New("the database dump owner is unavailable")
 	}
-	run, archive, cleanup, err := r.localArtifact(ctx, runID)
+	if err := os.MkdirAll(r.stage, 0o700); err != nil {
+		return "", err
+	}
+	directory, err := os.MkdirTemp(r.stage, "restore-db-*")
 	if err != nil {
 		return "", err
+	}
+	defer os.RemoveAll(directory)
+	target, _, err := r.ExtractDatabaseDump(ctx, runID, connectionID, directory)
+	if err != nil {
+		return "", err
+	}
+	return r.databases.RestoreDatabase(ctx, connectionID, database, target)
+}
+
+// ExtractDatabaseDump writes one connection's native dump out of a run's
+// archive into directory, checked against the digest the manifest recorded,
+// and answers its path. The caller owns the directory.
+func (r *Runner) ExtractDatabaseDump(ctx context.Context, runID, connectionID int64, directory string) (string, DatabaseDump, error) {
+	run, archive, cleanup, err := r.localArtifact(ctx, runID)
+	if err != nil {
+		return "", DatabaseDump{}, err
 	}
 	defer cleanup()
 	var selected *DatabaseDump
@@ -261,16 +319,8 @@ func (r *Runner) RestoreDatabase(ctx context.Context, runID, connectionID int64,
 		}
 	}
 	if selected == nil || !run.Manifest.CoversDatabase(connectionID) {
-		return "", fmt.Errorf("run %d holds no native dump for database connection %d", runID, connectionID)
+		return "", DatabaseDump{}, fmt.Errorf("run %d holds no native dump for database connection %d", runID, connectionID)
 	}
-	if err := os.MkdirAll(r.stage, 0o700); err != nil {
-		return "", err
-	}
-	directory, err := os.MkdirTemp(r.stage, "restore-db-*")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(directory)
 	target := filepath.Join(directory, selected.File)
 	extracted := false
 	if err := walkArchive(ctx, archive, func(header *tar.Header, reader *tar.Reader) error {
@@ -291,19 +341,19 @@ func (r *Runner) RestoreDatabase(ctx context.Context, runID, connectionID int64,
 		extracted = true
 		return nil
 	}); err != nil {
-		return "", err
+		return "", DatabaseDump{}, err
 	}
 	if !extracted {
-		return "", fmt.Errorf("database dump %s is missing from the archive", selected.ArchivePath)
+		return "", DatabaseDump{}, fmt.Errorf("database dump %s is missing from the archive", selected.ArchivePath)
 	}
 	digest, err := fileDigest(ctx, target)
 	if err != nil {
-		return "", err
+		return "", DatabaseDump{}, err
 	}
 	if digest != selected.Digest {
-		return "", errors.New("extracted database dump does not match its recorded digest")
+		return "", DatabaseDump{}, errors.New("extracted database dump does not match its recorded digest")
 	}
-	return r.databases.RestoreDatabase(ctx, connectionID, database, target)
+	return target, *selected, nil
 }
 
 func walkArchive(ctx context.Context, archive ArchiveFile, visit func(*tar.Header, *tar.Reader) error) error {

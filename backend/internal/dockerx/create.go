@@ -55,6 +55,9 @@ type ContainerSpec struct {
 	// attached immediately after, because the Engine only takes one in the
 	// create call and silently ignores the others.
 	Networks []string `json:"networks,omitempty"`
+	// NetworkAliases are further names the container answers by on the
+	// first of Networks.
+	NetworkAliases []string `json:"networkAliases,omitempty"`
 	// NetworkMode is "bridge", "host", "none" or a container:<id>. It is
 	// mutually exclusive with Networks; the UI presents it as a choice of
 	// "its own network" / "the host's network" rather than as a mode string.
@@ -601,7 +604,7 @@ func (s ContainerSpec) toEngine() (*container.Config, *container.HostConfig, *ne
 		}
 	case len(s.Networks) > 0:
 		hostCfg.NetworkMode = container.NetworkMode(s.Networks[0])
-		netCfg.EndpointsConfig[s.Networks[0]] = &network.EndpointSettings{}
+		netCfg.EndpointsConfig[s.Networks[0]] = &network.EndpointSettings{Aliases: append([]string(nil), s.NetworkAliases...)}
 	}
 
 	if s.Privileged {

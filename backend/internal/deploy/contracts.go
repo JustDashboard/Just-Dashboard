@@ -201,6 +201,10 @@ const (
 	StepRenderRuntime  StepKey = "render_runtime"
 	StepReleaseTask    StepKey = "release_task"
 	StepBackupGate     StepKey = "backup_gate"
+	// StepRehearseMigration runs the release tasks against a throwaway copy
+	// of the linked database restored from its backup, before they run
+	// against production; a task that fails there stops the release here.
+	StepRehearseMigration StepKey = "rehearse_migration"
 	// StepProvisionCertificate runs before anything is started, so a run that
 	// cannot get the certificate its own plan asked for fails with nothing
 	// left behind — and so that activation, which only ever resolves an
@@ -217,10 +221,12 @@ const (
 )
 
 // The backup gate runs before release tasks: a migration must never change a
-// database whose required backup has not been verified.
+// database whose required backup has not been verified. The rehearsal sits
+// between them: it restores from that backup, and what it proves is about
+// the tasks that run next.
 var DefaultStepKeys = []StepKey{
 	StepResolveSource, StepAcquireSource, StepAnalyzePlan, StepPrepareContext,
-	StepBuildArtifact, StepRenderRuntime, StepBackupGate, StepReleaseTask,
+	StepBuildArtifact, StepRenderRuntime, StepBackupGate, StepRehearseMigration, StepReleaseTask,
 	StepProvisionCertificate, StepStartCandidate, StepVerifyReadiness, StepVerifySmoke,
 	StepActivate, StepRetirePrevious, StepRecordRelease, StepNotify,
 }
