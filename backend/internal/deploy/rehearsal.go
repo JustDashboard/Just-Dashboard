@@ -352,6 +352,12 @@ func (e *NormalizedStepExecutor) rehearseMigration(ctx context.Context, executio
 	if target == 0 {
 		return unavailable(why)
 	}
+	if execution.Run.Operation == OperationPromote {
+		// The tasks are production's and so are the variables; only the
+		// image is staging's. Saying so here is what tells a reader of the
+		// transcript which database the copy is of.
+		_ = stepLog(execution, "status", "Rehearsing production's release tasks in the promoted image "+request.Image+" with production's variables")
+	}
 	emit := func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) }
 	// Whatever the rehearsal made goes with it, however it ends; a run a
 	// restart interrupted finds its own leftovers removed before it starts
