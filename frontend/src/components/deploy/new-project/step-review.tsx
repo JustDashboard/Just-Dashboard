@@ -17,9 +17,13 @@ import { StepMark, type ReleaseNodeState } from "@/components/deploy/vocabulary"
 import { CODE, ShellWords } from "@/components/deploy/run-evidence"
 import { AutomaticDeployment } from "@/components/deploy/new-project/automatic-deployment"
 import type { ConfigureFlow, DraftGitPolicy } from "@/components/deploy/new-project/draft"
-import { checkBudget, checkTarget, secretShape } from "@/components/deploy/new-project/plan-reading"
+import {
+  checkBudget,
+  checkTarget,
+  composeNamedVolumes,
+  secretShape,
+} from "@/components/deploy/new-project/plan-reading"
 import type { Icon } from "@/components/icons"
-import { composeNamedVolumes } from "@/components/deploy/new-project/plan-reading"
 
 /**
  * Step four: **is this right.**

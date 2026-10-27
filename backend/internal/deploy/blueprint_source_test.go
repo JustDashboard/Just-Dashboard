@@ -301,10 +301,13 @@ func TestEveryTemplateDeploysFromWhatTheNewProjectPageCanFillIn(t *testing.T) {
 	// template that is broken — but the list is short on purpose: a new
 	// definition joining it is a new template nobody can deploy in one press.
 	typed := map[string][]string{
-		"pgadmin":    {"admin-email"},
-		"directus":   {"admin-email"},
-		"nocodb":     {"admin-email"},
-		"open-webui": {"admin-email"},
+		"pgadmin":           {"admin-email"},
+		"directus":          {"admin-email"},
+		"directus-postgres": {"admin-email"},
+		"nocodb":            {"admin-email"},
+		"open-webui":        {"admin-email"},
+		"authentik":         {"admin-email"},
+		"planka":            {"admin-email"},
 	}
 	definitions, err := blueprint.Catalog()
 	if err != nil {
