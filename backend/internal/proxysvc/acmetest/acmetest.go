@@ -105,8 +105,10 @@ zone "` + zone + `" {
 	address := docker("inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", bind)
 	_, port, _ := strings.Cut(docker("port", bind, "53/tcp"), "127.0.0.1:")
 
-	// Real validation, so no PEBBLE_VA_ALWAYS_VALID; no random sleeps and no
-	// refused nonces, which are Pebble testing the client rather than this.
+	// Real validation, so no PEBBLE_VA_ALWAYS_VALID, and every order proved
+	// again rather than half of them on an authorization Pebble kept from an
+	// earlier one; no random sleeps and no refused nonces, which are Pebble
+	// testing the client rather than this.
 	config := filepath.Join(dir, "pebble-config.json")
 	if err := os.WriteFile(config, []byte(`{"pebble": {
   "listenAddress": "0.0.0.0:14000", "managementListenAddress": "0.0.0.0:15000",
@@ -118,7 +120,7 @@ zone "` + zone + `" {
 		t.Fatal(err)
 	}
 	pebble := docker("run", "-d", "--name", prefix+"-pebble", "--network", network,
-		"-e", "PEBBLE_VA_NOSLEEP=1", "-e", "PEBBLE_WFE_NONCEREJECT=0",
+		"-e", "PEBBLE_VA_NOSLEEP=1", "-e", "PEBBLE_WFE_NONCEREJECT=0", "-e", "PEBBLE_AUTHZREUSE=0",
 		"-v", config+":/test/config/pebble-config.json:ro",
 		"-p", "127.0.0.1::14000", "-p", "127.0.0.1::15000",
 		"ghcr.io/letsencrypt/pebble:latest", "-config", "/test/config/pebble-config.json", "-dnsserver", address+":53")

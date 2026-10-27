@@ -120,8 +120,19 @@ func TestLiveDeploymentWildcardIsProvedOverDNS01AndServed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if output, err := renew.CombinedOutput(); err != nil {
+	output, err := renew.CombinedOutput()
+	if err != nil {
 		t.Fatalf("certbot renew: %v\n%s", err, output)
+	}
+	// The record is written again: the authority keeps no authorization to
+	// spare the renewal its challenge.
+	if !strings.Contains(string(output), "Waiting 60 seconds for DNS changes to propagate") {
+		t.Fatalf("certbot renew did not answer a DNS challenge:\n%s", output)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, "- -") {
+			t.Logf("  renew | %s", line)
+		}
 	}
 	after, err := readLeaf(issued.CertPath)
 	if err != nil || after.SerialNumber.Cmp(before.SerialNumber) == 0 {
