@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc/acmetest"
 )
@@ -76,5 +77,34 @@ func TestLiveCertificateStepProvesAWildcardOverDNS01(t *testing.T) {
 	if preview.State != StepPassed || !strings.Contains(string(preview.Evidence), `"outcome":"reused"`) ||
 		!strings.Contains(string(preview.Evidence), `"certificate":"preview.jd-live.test"`) {
 		t.Fatalf("preview = %#v", preview)
+	}
+
+	// On a host whose deployments the Docker Caddy ingress serves, the step
+	// answers the same: the lineage is reused for the wildcard and for a
+	// preview under it, where it used to be refused outright. The ingress
+	// is a real caddy:2-alpine on loopback, used by name.
+	docker := func(args ...string) string {
+		t.Helper()
+		raw, err := hostexec.Command(ctx, "docker", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("docker %s: %v: %s", strings.Join(args, " "), err, raw)
+		}
+		return strings.TrimSpace(string(raw))
+	}
+	source := filepath.Join(dir, "Caddyfile")
+	if err := os.WriteFile(source, []byte("{\n  admin 127.0.0.1:2019\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ingress := fmt.Sprintf("jd-step-ingress-%d", time.Now().UnixNano())
+	id := docker("run", "-d", "--name", ingress, "-p", "127.0.0.1::80", "-v", source+":/etc/caddy/Caddyfile:ro", "-v", "/config", "-v", "/data", "caddy:2-alpine")
+	defer hostexec.Command(context.Background(), "docker", "rm", "-f", "-v", id).Run()
+	onCaddy := (&NormalizedStepExecutor{}).WithCertificateIssuer(proxysvc.NewWithIngressContainer(filepath.Join(dir, "nginx"), source, ingress))
+	for _, name := range []string{"*.preview.jd-live.test", "pr-8.preview.jd-live.test"} {
+		result := onCaddy.certificateStep(ctx, []string{name}, transcript)
+		t.Logf("provision_certificate for %s on the Caddy ingress: state=%s code=%s\n  evidence: %s", name, result.State, result.ErrorCode, result.Evidence)
+		if result.State != StepPassed || !strings.Contains(string(result.Evidence), `"outcome":"reused"`) ||
+			!strings.Contains(string(result.Evidence), `"certificate":"preview.jd-live.test"`) {
+			t.Fatalf("%s on the Caddy ingress = %#v", name, result)
+		}
 	}
 }

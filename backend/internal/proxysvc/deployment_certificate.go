@@ -61,10 +61,9 @@ var (
 	// honest unavailable rather than a failure of the deployment's own work.
 	ErrCertbotUnavailable = errors.New("certbot is not installed on this host, so a certificate cannot be issued here")
 	// ErrCertificateWildcard is a wildcard this host cannot prove: no saved
-	// DNS credentials answer for its zone, or the Docker Caddy ingress
-	// serves the route. It is refused before certbot is asked, with what to
-	// do instead (wildcardError), rather than relayed from the authority a
-	// minute later.
+	// DNS credentials answer for its zone. It is refused before certbot is
+	// asked, with what to do instead (wildcardError), rather than relayed
+	// from the authority a minute later.
 	ErrCertificateWildcard = errors.New("a wildcard certificate needs a DNS challenge this host cannot answer")
 )
 
@@ -75,10 +74,13 @@ var (
 // Reuse is checked first and is the ordinary answer: a second deployment onto
 // the same wildcard — a preview under one issued for every preview — or a
 // redeploy inside the renewal window, asks the authority for nothing. A
-// wildcard name is reused too, which it was not while wildcards were refused
-// before the check. Issuance is serialized with the route lock for the
-// same reason a cutover is — two runs ordering certificates for the same host
-// at once is how an account hits a rate limit it did not need to.
+// wildcard is ordered through certbot whichever proxy serves the route: on
+// the Docker Caddy ingress the route serves a copy of the lineage, which the
+// ingress pass refreshes when certbot renews it (docker_caddy_copies.go), so
+// Caddy never has to answer the DNS challenge itself. Issuance is serialized
+// with the route lock for the same reason a cutover is — two runs ordering
+// certificates for the same host at once is how an account hits a rate limit
+// it did not need to.
 func (s *Service) EnsureDeploymentCertificate(
 	ctx context.Context,
 	domains []string,
@@ -102,13 +104,6 @@ func (s *Service) EnsureDeploymentCertificate(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Before reuse: the Docker Caddy ingress cannot serve a wildcard route at
-	// all, so a certificate that covers one is no answer there.
-	if wildcard != "" {
-		if err := s.wildcardCaddyRefusal(ctx, wildcard); err != nil {
-			return DeploymentCertificate{}, err
-		}
-	}
 	if certPath, keyPath, err := s.ResolveDeploymentCertificate(ctx, names); err == nil {
 		return DeploymentCertificate{
 			Outcome: CertificateReused, CertPath: certPath, KeyPath: keyPath,

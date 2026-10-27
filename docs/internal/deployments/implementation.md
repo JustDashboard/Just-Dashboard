@@ -269,13 +269,15 @@ only renderer/executor/validation authority for their feature.
   lineage it leaves records the plugin and the credentials file in its renewal configuration, so
   certbot's own schedule renews it like any lineage the page issued, and the page lists it with the
   same renewal checks (a plugin that later goes missing is a `willFail`). A host whose deployments the
-  Docker Caddy ingress serves refuses a wildcard plan name outright, covered or not, since Caddy cannot
-  serve that route — see the [ingress decision](caddy-ingress.md). Every order a run places — issued,
-  or refused by the authority — is audited as `certificates.deployment.issue` (actor `system`; the
-  names, method, DNS provider and lineage, never a credential); a reuse or a refusal before ordering
-  changes nothing and is not. Preflight asks the same question for an uncovered wildcard (and for any
-  wildcard on the Caddy ingress): `certificate_automatic` naming the provider, or
-  `certificate_wildcard_unavailable`, blocked with the refusal and a deep link to `/proxy/certificates`.
+  Docker Caddy ingress serves orders the wildcard the same way: the ingress serves a copy of the
+  lineage from a `*.zone` site with an explicit `tls`, and the dashboard refreshes that copy when
+  certbot renews — see the [ingress decision](caddy-ingress.md#wildcards). Every order a run places —
+  issued, or refused by the authority — is audited as `certificates.deployment.issue` (actor `system`;
+  the names, method, DNS provider and lineage, never a credential); a reuse or a refusal before
+  ordering changes nothing and is not. Preflight asks the same question for an uncovered wildcard on
+  either proxy: `certificate_automatic` naming the provider, or `certificate_wildcard_unavailable`,
+  blocked with the refusal and a deep link to `/proxy/certificates`; a covered one is
+  `certificate_available`.
   HTTP-01 issuance is bounded at five minutes. Both are serialized against route application so two
   runs cannot race one account into a rate limit, and pass `--keep-until-expiring` so a redeploy inside
   the renewal window asks the authority for nothing. A first order on a host with no ACME account
@@ -287,8 +289,11 @@ only renderer/executor/validation authority for their feature.
   TestLiveCertificateStepProvesAWildcardOverDNS01` and `./internal/proxysvc -run
   TestLiveDeploymentWildcardIsProvedOverDNS01AndServed` prove it against Pebble validating real DNS-01
   records in a BIND (`proxysvc/acmetest`): refused without credentials, issued with them, reused by a
-  preview, renewed by `certbot renew` from the lineage's own configuration, and served by nginx on the
-  wildcard's route and the preview's, chaining to that Pebble's root.
+  preview — on an nginx host and, through a real `caddy:2-alpine` used by name, on the Docker Caddy
+  ingress — renewed by `certbot renew` from the lineage's own configuration, and served by nginx on
+  the wildcard's route and the preview's, chaining to that Pebble's root.
+  `TestLiveDockerCaddyServesAWildcardProvedOverDNS01` is the same journey served by the ingress, the
+  renewal refresh included ([ingress decision](caddy-ingress.md#renewal)).
   Before a new HTTP-01 order, a bounded DNS lookup rejects unresolved names and non-public destinations
   with a corrective message, including old saved sslip.io names based on a Tailscale address. Existing
   certificates are reused before this check, so private services can still use a certificate provisioned

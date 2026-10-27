@@ -164,40 +164,13 @@ func chooseDeploymentDNSProvider(
 		lead, describeSites(names), unknown, wildcard, certificatesPage)
 }
 
-// wildcardCaddyRefusal refuses a wildcard on a host whose deployments the
-// Docker Caddy ingress serves, running or about to be started. Caddy obtains
-// each route's certificate itself, and it can answer a DNS challenge only
-// when it is built with that provider's module — the caddy:2-alpine image it
-// runs has none — and given the provider's token, which this dashboard keeps
-// for certbot and does not hand to another program. A certificate issued here
-// would not help either: the route's own names are what Caddy serves.
-func (s *Service) wildcardCaddyRefusal(ctx context.Context, wildcard string) error {
-	edge, err := s.dockerCaddy(ctx)
-	if err != nil {
-		return err
-	}
-	name := ""
-	switch {
-	case edge != nil:
-		name = edge.Name
-	case s.canProvisionIngress(ctx):
-		name = managedIngressName
-	default:
-		return nil
-	}
-	return wildcardRefusal(
-		"%s is a wildcard, which only a DNS challenge can prove, and deployments on this server are served by the Docker Caddy ingress (%s), which obtains each name's certificate itself over HTTP. Caddy answers a DNS challenge only when it is built with that DNS provider's module, which the caddy:2-alpine image does not include. Name each host instead, such as %s; Caddy certifies every one of them on its own.",
-		wildcard, name, "app"+strings.TrimPrefix(wildcard, "*"))
-}
-
 // DeploymentDNSProvider answers, without ordering anything, how a run would
 // prove a wildcard: the provider whose saved credentials it would use, or the
 // refusal it would stop with. Preflight and the Domains sheet ask it, so the
-// answer before a run and the run's own are one decision.
+// answer before a run and the run's own are one decision. The proxy serving
+// the route does not come into it: certbot proves the wildcard on the host
+// either way, and the Docker Caddy ingress serves a copy of what it issued.
 func (s *Service) DeploymentDNSProvider(ctx context.Context, wildcard string) (DNSProvider, error) {
-	if err := s.wildcardCaddyRefusal(ctx, wildcard); err != nil {
-		return DNSProvider{}, err
-	}
 	rt, err := deploymentCertbot(ctx)
 	if err != nil {
 		return DNSProvider{}, err

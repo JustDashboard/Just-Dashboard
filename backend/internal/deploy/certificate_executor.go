@@ -101,9 +101,10 @@ func (e *NormalizedStepExecutor) certificateStep(
 			}
 		}
 		// A wildcard this host cannot prove — no saved DNS credentials answer
-		// for its zone, or the Docker Caddy ingress serves the route — is the
-		// same kind of answer: nothing the deployment did, something to change
-		// on the host, which the message names.
+		// for its zone — is the same kind of answer: nothing the deployment
+		// did, something to save on the host, which the message names. The
+		// proxy serving the route is not a reason: the Docker Caddy ingress
+		// serves a copy of what certbot proves, as nginx serves the file.
 		if errors.Is(err, proxysvc.ErrCertificateWildcard) {
 			return StepResult{
 				State: StepUnavailable, ErrorCode: "certificate_wildcard_unavailable",
