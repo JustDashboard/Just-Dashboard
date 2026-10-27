@@ -402,7 +402,8 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
   fourteen runs as a strip and who started the last one — or, while a run is in flight, a light
   round the card and the stage it is at. Their verbs are the project header's own. The search also
   finds a product, a framework, an image or a commit subject. The empty fleet offers the five
-  sources as cards; the archive draws each project as what it deployed, at a step of opacity, with
+  sources as cards, each opening its tab of `/deploy/new` (Compose opens Docker, where stacks are
+  offered, whichever tab was used last); the archive draws each project as what it deployed, at a step of opacity, with
   its source and how many variables deleting it would lose, and deleting one asks for its name and
   lists what goes and what stays on the server.
 - **Credentials** opens on the GitHub App's own section — its state, its picture, its setup a
