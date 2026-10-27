@@ -29,6 +29,8 @@ Stack
   status                             Show containers and their health
   logs [backend|frontend|proxy]       Follow logs (default: backend; Ctrl+C exits)
   restart                            Recreate the stack with current .env settings
+  install-cli                        Install the jd command line to /usr/local/bin/jd from
+                                     the built backend image (install.sh does this too)
 
 Roles: readonly, limited, admin
 Password commands prompt twice with hidden input. For automation, append
@@ -73,7 +75,7 @@ case "$command" in
 			[ "$#" -eq 1 ] || die "reset-password accepts one username. See --help."
 		fi
 		;;
-	users|status|restart|unlink|link-status) [ "$#" -eq 0 ] || die "$command does not accept arguments. See --help." ;;
+	users|status|restart|unlink|link-status|install-cli) [ "$#" -eq 0 ] || die "$command does not accept arguments. See --help." ;;
 	link)
 		[ "$#" -le 1 ] || die "link accepts one scope. See --help."
 		case "${1:-observe}" in observe|operate|maintain) ;; *) die "Scope must be observe, operate or maintain." ;; esac
@@ -108,6 +110,21 @@ case "$command" in
 		;;
 	users|revoke-sessions|unlink|link-status)
 		exec "${compose[@]}" run --rm --no-deps -T backend --admin "$command" "$@"
+		;;
+	install-cli)
+		# The image install.sh built carries jd beside the dashboard; the copy
+		# is written whole and moved into place, so a jd already running keeps
+		# its file.
+		target="${JD_CLI_PATH:-/usr/local/bin/jd}"
+		tmp="$(mktemp "$(dirname -- "$target")/.jd-XXXXXX")" || die "Cannot write to $(dirname -- "$target")."
+		trap 'rm -f "$tmp"' EXIT
+		docker run --rm --entrypoint cat just-dashboard-backend:latest /usr/local/bin/jd >"$tmp" ||
+			die "The backend image has no jd. Build the stack first (install.sh, or a dashboard update)."
+		[ -s "$tmp" ] || die "The backend image has no jd. Build the stack first (install.sh, or a dashboard update)."
+		chmod 0755 "$tmp"
+		mv -f "$tmp" "$target"
+		trap - EXIT
+		printf 'Installed %s: %s\n' "$target" "$("$target" version 2>/dev/null || echo jd)"
 		;;
 	link)
 		# exec keeps the command's own exit status: 2 means declined or not approved in time.
