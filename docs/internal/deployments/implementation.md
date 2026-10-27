@@ -781,6 +781,12 @@ only renderer/executor/validation authority for their feature.
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime
   variable values. Disabled, unavailable, warning, passed and failed remain distinct outcomes.
+  The closed kind list also names `dns`, `tls`, `backup_freshness` and `game_handshake`, which no runner
+  executes. Saving one (Settings or a draft's configuration) is refused with the reason and what to use
+  instead (`refuseUnrunnableChecks`): a `public_route` check on the https address, a storage
+  dependency's backup requirement, or the game-server integration. `Validate` still accepts them, so a
+  plan stored with one keeps deploying; its check reports `check_owner_unavailable`, a warning unless
+  it is required.
   An HTTP check against the candidate introduces itself as the proxy does when the release has a
   domain — `Host`/`X-Forwarded-Host` the first domain that is not a wildcard, `X-Forwarded-Proto` its
   scheme, `X-Forwarded-For 127.0.0.1`, a browser's `Accept` — while connecting only to the candidate.

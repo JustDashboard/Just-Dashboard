@@ -744,6 +744,9 @@ func (s *PlanningStore) Save(
 		if err := copy.Validate(); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 		}
+		if err := refuseUnrunnableChecks(copy.Checks); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+		}
 		if _, _, err := ResolveVariableGraphWithModes(draft.variableValues(copy), draft.variableModes(copy), nil); err != nil {
 			return nil, err
 		}

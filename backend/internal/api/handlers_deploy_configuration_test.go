@@ -270,6 +270,45 @@ func TestDeploymentConfigurationSaveReportsAFieldForAnInvalidPort(t *testing.T) 
 	}
 }
 
+// A check kind nothing runs is refused on save with the field and the reason,
+// rather than saved to report check_owner_unavailable at every deploy.
+func TestDeploymentConfigurationSaveRefusesACheckNothingRuns(t *testing.T) {
+	s := testServer(t)
+	projectID, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "config-check-admin", auth.RoleAdmin)}
+	base := fmt.Sprintf("/api/v1/deploy/%d/environments/%d", projectID, environmentID)
+	configuration, err := s.modules.deployPlanning.EnvironmentConfiguration(t.Context(), projectID, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := deploy.ConfigurationWriteRequest{
+		Revision: configuration.Revision, Build: configuration.Build,
+		Runtime:      configuration.Runtime,
+		Dependencies: configuration.Dependencies, Checks: configuration.Checks, Domains: configuration.Domains,
+	}
+	request.Checks = append(request.Checks, deploy.PlannedCheck{Name: "certificate", Kind: "tls", Phase: "smoke"})
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := admin.do(http.MethodPut, base+"/configuration", string(body), nil)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("tls check save = %d %s", response.Code, response.Body.String())
+	}
+	t.Logf("PUT %s/configuration with a tls check: %d %s", base, response.Code, strings.TrimSpace(response.Body.String()))
+	var decoded struct {
+		Error httpx.APIError `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	field := fmt.Sprintf("checks[%d]", len(request.Checks)-1)
+	if decoded.Error.Code != "invalid_plan" || decoded.Error.Field != field ||
+		!strings.Contains(decoded.Error.Message, "public_route") {
+		t.Fatalf("error body = %#v", decoded.Error)
+	}
+}
+
 // Revealing a variable that does not exist is a missing resource, not a bad
 // request: the route answers 404 variable_not_found rather than the 400 an
 // operator would otherwise read as "you typed the name wrong".
