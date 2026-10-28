@@ -1217,8 +1217,9 @@ only renderer/executor/validation authority for their feature.
   Audited as `deploy.shared_variable.{create,update,reveal,delete}` with the scope and never the value. A
   project's shared variables go with the project when it is purged.
 - Store references (`deploy/secret_store_references.go`, connections in `internal/secretstore`, table
-  `deploy_secret_stores`) read a value from Vault, OpenBao, Infisical or Doppler as
-  `${{store.NAME/path#KEY}}` (`@N` pins a version). They resolve through the same graph, as secret
+  `deploy_secret_stores`) read a value from Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager or Azure
+  Key Vault as `${{store.NAME/path#KEY}}` (`@N` pins a version; for the last two the path is the secret's
+  name, the key is optional and the version is the store's own id or staging label). They resolve through the same graph, as secret
   literals, and only from a secret variable. A run reads every store it references at its first step
   (`resolve_source`, a rollback's `render_runtime`, a restart's `start_candidate`; never a stop's),
   fresh, keeps the values in memory for its own later steps, and fails as `secret_store_unreadable` in the
