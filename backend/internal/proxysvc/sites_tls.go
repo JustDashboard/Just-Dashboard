@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -102,4 +103,58 @@ func readHSTS(spec *SiteSpec, value string) {
 			spec.HSTSPreload = true
 		}
 	}
+}
+
+// validPlainDomains checks the names a TLS site serves over plain HTTP:
+// each is one of the site's domains, and a site without TLS, which serves
+// every name that way, names none.
+func validPlainDomains(spec *SiteSpec) error {
+	if len(spec.PlainDomains) == 0 && !slices.ContainsFunc(spec.HostRedirects, func(r HostRedirect) bool { return r.Plain }) {
+		return nil
+	}
+	if !spec.TLS {
+		return fmt.Errorf("a site without TLS serves every name over plain HTTP, so none can be singled out")
+	}
+	seen := map[string]bool{}
+	for _, name := range spec.PlainDomains {
+		if !containsFold(spec.Domains, name) {
+			return fmt.Errorf("%s is not one of the site's domains, so it cannot be served over plain HTTP", name)
+		}
+		if seen[strings.ToLower(name)] {
+			return fmt.Errorf("%s is listed twice as a plain-HTTP name", name)
+		}
+		seen[strings.ToLower(name)] = true
+	}
+	return nil
+}
+
+// servesPlain says whether the site answers the name over plain HTTP alone.
+func (spec *SiteSpec) servesPlain(name string) bool {
+	return !spec.TLS || containsFold(spec.PlainDomains, name)
+}
+
+// servedByScheme splits the site's domains into the names its TLS server
+// answers and the names served over plain HTTP alone, each in the order
+// the domains are listed.
+func (spec *SiteSpec) servedByScheme() (tls, plain []string) {
+	for _, name := range spec.Domains {
+		if spec.servesPlain(name) {
+			plain = append(plain, name)
+		} else {
+			tls = append(tls, name)
+		}
+	}
+	return tls, plain
+}
+
+// plainCopy is the site as its plain-HTTP server renders it for the given
+// names: the same everything, on port 80 alone, with nothing a certificate
+// gives — no TLS, no redirect to HTTPS, no HSTS and no HTTP/2.
+func (spec *SiteSpec) plainCopy(domains []string) *SiteSpec {
+	plain := *spec
+	plain.Domains = domains
+	plain.PlainDomains = nil
+	plain.TLS, plain.ForceHTTPS, plain.HSTS, plain.HTTP2 = false, false, false, false
+	plain.CertPath, plain.KeyPath = "", ""
+	return &plain
 }

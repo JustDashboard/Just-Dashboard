@@ -253,9 +253,17 @@ def main():
             "name": "e2e webhook", "kind": "webhook", "url": f"http://127.0.0.1:{HOOK_PORT}/hook",
             "events": [], "enabled": True})
         check("signed webhook channel created", channel["channel"]["kind"] == "webhook" and channel["secret"])
+        # The exact vocabularies the form may offer, as the backend declares
+        # them (deploy.NotificationKinds, deploy.NotificationEvents): a kind
+        # added or lost shows up here as the set it is, not as a count.
         options = call("GET", "/deploy/notifications/options")
-        check("notification options list five kinds and four events",
-              len(options["kinds"]) == 5 and len(options["events"]) == 4)
+        kinds = {"webhook", "discord", "slack", "telegram", "email",
+                 "ntfy", "gotify", "pushover", "mattermost", "teams"}
+        events = {"run.started", "run.succeeded", "run.failed", "run.cancelled"}
+        check("notification options list the ten kinds and four events",
+              set(options["kinds"]) == kinds and len(options["kinds"]) == len(kinds)
+              and set(options["events"]) == events and len(options["events"]) == len(events),
+              f"kinds={options['kinds']} events={options['events']}")
 
         # 1. A healthy image with resource limits.
         staged_secret = secrets.token_hex(24)
