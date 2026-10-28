@@ -69,7 +69,40 @@ type DeploymentRoute struct {
 	// the page too, not only the proxy's.
 	ErrorPages      []int `json:"errorPages,omitempty"`
 	InterceptErrors bool  `json:"interceptErrors,omitempty"`
+	// PlainHostnames are the names, among Domains and Redirects, served over
+	// plain HTTP alone while TLS is on for the rest of the route: no
+	// certificate, no redirect to HTTPS and no HSTS. Each domain of a plan
+	// chooses, so one HTTPS name no longer puts the others behind a
+	// certificate that does not cover them. A route whose TLS is off serves
+	// every name that way and lists none.
+	PlainHostnames []string `json:"plainHostnames,omitempty"`
+	// HSTS asks browsers to keep to HTTPS on the route's HTTPS names. Nil
+	// sends no header, which is where a route starts: the policy outlives
+	// a mistake for as long as it says.
+	HSTS *DeploymentHSTS `json:"hsts,omitempty"`
 }
+
+// DeploymentHSTS is a route's Strict-Transport-Security policy, held to the
+// bounds a Proxy site's own HSTS control is: MaxAge is seconds, zero six
+// months, at least five minutes and at most two years; Preload needs a year
+// and IncludeSubDomains, as the browsers' list does.
+type DeploymentHSTS struct {
+	MaxAge            int  `json:"maxAge,omitempty"`
+	IncludeSubDomains bool `json:"includeSubDomains,omitempty"`
+	Preload           bool `json:"preload,omitempty"`
+}
+
+// Value is the header the policy is sent as.
+func (h DeploymentHSTS) Value() string { return h.siteSpec().hstsValue() }
+
+// siteSpec is the policy as a site's renderer and validation read it.
+func (h DeploymentHSTS) siteSpec() *SiteSpec {
+	return &SiteSpec{HSTS: true, HSTSMaxAge: h.MaxAge, HSTSOwnNameOnly: !h.IncludeSubDomains, HSTSPreload: h.Preload}
+}
+
+// ValidateDeploymentHSTS checks a policy by the rules a Proxy site's is
+// held to, so a plan that saves is one either proxy sends.
+func ValidateDeploymentHSTS(h DeploymentHSTS) error { return validTLSOptions(h.siteSpec()) }
 
 // DeploymentMaintenance is what a route's maintenance does while it is on.
 type DeploymentMaintenance struct {
@@ -87,14 +120,43 @@ const MaxRetryAfter = 86400
 // ErrorPageCodes are the codes a route or a site may give a page of its own.
 func ErrorPageCodes() []int { return slices.Clone(errorPageCodes) }
 
-// Hostnames is every name the route answers, served and redirecting, which
-// is what its certificate has to cover.
+// Hostnames is every name the route answers, served and redirecting.
 func (route DeploymentRoute) Hostnames() []string {
 	names := append([]string(nil), route.Domains...)
 	for _, redirect := range route.Redirects {
 		names = append(names, redirect.From)
 	}
 	return names
+}
+
+// TLSHostnames is every name the route answers over HTTPS, served and
+// redirecting, which is what its certificate has to cover.
+func (route DeploymentRoute) TLSHostnames() []string {
+	var names []string
+	for _, name := range route.Hostnames() {
+		if !route.plain(name) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// plain says whether the route answers the name over plain HTTP alone.
+func (route DeploymentRoute) plain(name string) bool {
+	return !route.TLS || containsFold(route.PlainHostnames, name)
+}
+
+// servedByScheme splits the served names into those answered over HTTPS
+// and those over plain HTTP, each in the order Domains lists them.
+func (route DeploymentRoute) servedByScheme() (tls, plain []string) {
+	for _, name := range route.Domains {
+		if route.plain(name) {
+			plain = append(plain, name)
+		} else {
+			tls = append(tls, name)
+		}
+	}
+	return tls, plain
 }
 
 // Limits on a deployment route's own rules. A deployment has one route, so
@@ -146,6 +208,9 @@ func validateDeploymentRules(route DeploymentRoute) error {
 	if err := ValidateDeploymentHeaders(route.ResponseHeaders); err != nil {
 		return err
 	}
+	if err := validateDeploymentSchemes(route); err != nil {
+		return err
+	}
 	if len(route.AllowFrom) > MaxDeploymentAllow {
 		return fmt.Errorf("at most %d allowed addresses", MaxDeploymentAllow)
 	}
@@ -167,6 +232,29 @@ func validateDeploymentRules(route DeploymentRoute) error {
 		}
 	}
 	return validateDeploymentPages(route)
+}
+
+// validateDeploymentSchemes checks the names a TLS route serves over plain
+// HTTP, each one of the route's own, and its HSTS, which only a TLS route
+// has an answer to send on.
+func validateDeploymentSchemes(route DeploymentRoute) error {
+	if !route.TLS && (len(route.PlainHostnames) > 0 || route.HSTS != nil) {
+		return errors.New("a route without TLS serves every name over plain HTTP and sends no HSTS")
+	}
+	seen := map[string]bool{}
+	for _, name := range route.PlainHostnames {
+		if !containsFold(route.Hostnames(), name) {
+			return fmt.Errorf("%s is not one of the route's names, so it cannot be served over plain HTTP", name)
+		}
+		if seen[strings.ToLower(name)] {
+			return fmt.Errorf("%s is listed twice as a plain-HTTP name", name)
+		}
+		seen[strings.ToLower(name)] = true
+	}
+	if route.HSTS != nil {
+		return ValidateDeploymentHSTS(*route.HSTS)
+	}
+	return nil
 }
 
 // validateDeploymentPages checks a route's maintenance and error pages by
@@ -627,16 +715,35 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 		AllowFrom: append([]string{}, route.AllowFrom...), DenyFrom: []string{}, Locations: []SiteLocation{},
 		ClientMaxBody: deploymentBodyLimit(route),
 		HostRedirects: append([]HostRedirect(nil), route.Redirects...),
+		deployment:    true,
 	}
-	if len(route.ResponseHeaders) > 0 {
+	if route.TLS {
+		// Each name on the scheme its domain chose: the plain ones get a
+		// server of their own, and a redirecting plain name answers on
+		// port 80 alone.
+		_, spec.PlainDomains = route.servedByScheme()
+		for index := range spec.HostRedirects {
+			spec.HostRedirects[index].Plain = route.plain(spec.HostRedirects[index].From)
+		}
+		if route.HSTS != nil {
+			spec.HSTS, spec.HSTSMaxAge = true, route.HSTS.MaxAge
+			spec.HSTSOwnNameOnly, spec.HSTSPreload = !route.HSTS.IncludeSubDomains, route.HSTS.Preload
+		}
+	}
+	if len(route.ResponseHeaders) > 0 || spec.HSTS {
 		// Hidden as well as added: add_header only appends, so without the
 		// hide an application that sends the header itself would answer with
-		// two, where Caddy's deferred header replaces the application's.
+		// two, where Caddy's deferred header replaces the application's. The
+		// route's HSTS replaces the application's the same way: a browser
+		// reads the first of two and the operator's policy is the one meant.
 		headers := &SiteHeaders{Response: append([]HeaderValue(nil), route.ResponseHeaders...)}
 		for _, header := range route.ResponseHeaders {
 			if !containsFold(nginxHiddenHeaders, header.Name) {
 				headers.Hide = append(headers.Hide, header.Name)
 			}
+		}
+		if spec.HSTS {
+			headers.Hide = append(headers.Hide, "Strict-Transport-Security")
 		}
 		spec.Headers = headers
 	}

@@ -1,5 +1,14 @@
 import { expect, test } from "bun:test"
-import { gatesHere, routeAccessState, signInConflicts, signInThrough } from "./route-access"
+import {
+  gatesHere,
+  hstsOffered,
+  hstsPolicyState,
+  routeAccessState,
+  savedHSTS,
+  signInConflicts,
+  signInThrough,
+  withPreload,
+} from "./route-access"
 import { chooseSsoProvider } from "@/lib/sso-providers"
 
 const authelia = {
@@ -66,4 +75,43 @@ test("choosing a provider moves a preset check address and keeps a typed one", (
     provider: "authentik",
   })
   expect(signInThrough({ ...authelia, provider: "oauth2-proxy" })).toBe("oauth2-proxy")
+})
+
+test("HSTS is offered with a served HTTPS domain, or while a policy is saved", () => {
+  const https = { hostname: "app.example.test", https: true, ownership: "managed" }
+  const plain = { hostname: "old.example.test", https: false, ownership: "managed" }
+  const redirect = { ...https, hostname: "www.app.example.test", redirectTo: "app.example.test" }
+  expect(hstsOffered([https, plain], undefined)).toBe(true)
+  expect(hstsOffered([plain], undefined)).toBe(false)
+  // A redirecting HTTPS name serves nothing to send the header on.
+  expect(hstsOffered([plain, redirect], undefined)).toBe(false)
+  expect(hstsOffered([plain], { includeSubDomains: true })).toBe(true)
+  expect(hstsOffered([], {})).toBe(true)
+})
+
+test("the policy's state says how long and what it covers, and it saves without its defaults", () => {
+  expect(hstsPolicyState(undefined)).toBe("Off")
+  expect(hstsPolicyState({})).toBe("6 months")
+  expect(hstsPolicyState({ maxAge: 300, includeSubDomains: true })).toBe("5 minutes · subdomains")
+  expect(hstsPolicyState({ maxAge: 31536000, includeSubDomains: true, preload: true })).toBe(
+    "1 year · subdomains · preload",
+  )
+  expect(hstsPolicyState({ maxAge: 4000 })).toBe("4000 seconds")
+  expect(savedHSTS(undefined)).toBeUndefined()
+  expect(savedHSTS({ maxAge: 15552000, includeSubDomains: false })).toEqual({})
+  expect(savedHSTS({ maxAge: 86400, includeSubDomains: true, preload: false })).toEqual({
+    maxAge: 86400,
+    includeSubDomains: true,
+  })
+  // Preload raises the policy to what the browsers' list requires.
+  expect(withPreload({ maxAge: 86400 })).toEqual({
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true,
+  })
+  expect(withPreload({ maxAge: 63072000, includeSubDomains: true })).toEqual({
+    maxAge: 63072000,
+    includeSubDomains: true,
+    preload: true,
+  })
 })

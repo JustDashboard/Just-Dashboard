@@ -41,7 +41,14 @@ var (
 	// hostRedirectMarkerRe opens each host redirect's server, and carries
 	// everything the parser needs to read the redirect back, because the
 	// server itself is skipped the same way.
-	hostRedirectMarkerRe = regexp.MustCompile(`^# Host redirect \((301|302|307|308)\): (\S+) is sent to (\S+)\.$`)
+	// The scheme is named only where it differs from the site's own server:
+	// a plain-HTTP name on a TLS site, or an HTTPS name on a site whose
+	// served names are all plain.
+	hostRedirectMarkerRe = regexp.MustCompile(`^# Host redirect \((301|302|307|308)\): (\S+) is sent to (\S+)( over plain HTTP| over HTTPS)?\.$`)
+	// plainMarkerRe opens the server a TLS site serves its plain-HTTP names
+	// from. The parser skips that server whole, as it does a redirect's, and
+	// reads the names from the markers.
+	plainMarkerRe = regexp.MustCompile(`^# Plain HTTP: (\S+) is served without TLS\.$`)
 )
 
 // HostRedirect sends every request for From to the same path on To, one of
@@ -51,6 +58,10 @@ type HostRedirect struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	Code int    `json:"code,omitempty"`
+	// Plain answers on port 80 alone while the site is TLS: the name has no
+	// certificate, and sends visitors to its domain over the scheme that
+	// domain is served on.
+	Plain bool `json:"plain,omitempty"`
 }
 
 // HostRedirectCode is the status a host redirect answers with.
@@ -349,16 +360,30 @@ func renderCanonicalServers(l *lines, spec *SiteSpec) {
 // The marker line says the whole redirect, so the parser can skip the server
 // and still read it back.
 func renderHostRedirectServers(l *lines, spec *SiteSpec) {
-	scheme := "$scheme"
-	if spec.TLS && spec.ForceHTTPS {
-		scheme = "https"
-	}
+	tlsServed, _ := spec.servedByScheme()
 	for _, r := range spec.HostRedirects {
-		l.add("# Host redirect (%d): %s is sent to %s.", r.HostRedirectCode(), r.From, r.To)
+		// The visitor is sent on over the scheme the domain is served on: a
+		// plain domain's redirect never points at an HTTPS it does not have.
+		scheme := "$scheme"
+		switch {
+		case spec.servesPlain(r.To):
+			scheme = "http"
+		case spec.TLS && spec.ForceHTTPS:
+			scheme = "https"
+		}
+		tls := spec.TLS && !r.Plain
+		over := ""
+		switch {
+		case spec.TLS && r.Plain:
+			over = " over plain HTTP"
+		case tls && len(tlsServed) == 0:
+			over = " over HTTPS"
+		}
+		l.add("# Host redirect (%d): %s is sent to %s%s.", r.HostRedirectCode(), r.From, r.To, over)
 		l.add("server {")
 		l.add("    listen 80;")
 		l.add("    listen [::]:80;")
-		if spec.TLS {
+		if tls {
 			l.add("    listen 443 ssl;")
 			l.add("    listen [::]:443 ssl;")
 			if spec.HTTP2 {
@@ -366,7 +391,7 @@ func renderHostRedirectServers(l *lines, spec *SiteSpec) {
 			}
 		}
 		l.add("    server_name %s;", r.From)
-		if spec.TLS {
+		if tls {
 			l.add("    ssl_certificate     %s;", spec.CertPath)
 			l.add("    ssl_certificate_key %s;", spec.KeyPath)
 		}

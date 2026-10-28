@@ -66,7 +66,6 @@ func renderNginx(spec *SiteSpec) (string, error) {
 		return "", err
 	}
 	l := &lines{}
-	names := strings.Join(spec.Domains, " ")
 
 	l.add(managedMarker)
 	l.add("# Site: %s", spec.Name)
@@ -76,13 +75,41 @@ func renderNginx(spec *SiteSpec) (string, error) {
 
 	renderHTTPBlock(l, spec)
 
-	if spec.TLS && spec.ForceHTTPS {
-		renderRedirectServer(l, names, spec)
+	// The site's own server answers the names its TLS covers; the names it
+	// serves over plain HTTP get a server of their own, on port 80 alone,
+	// after it. When every served name is plain the site's own server is
+	// that plain one, and only its redirecting names answer on 443.
+	main, mainNames, plainServed := spec, spec.Domains, []string(nil)
+	if spec.TLS {
+		tlsServed, plain := spec.servedByScheme()
+		if len(tlsServed) == 0 {
+			main = spec.plainCopy(spec.Domains)
+		} else {
+			mainNames, plainServed = tlsServed, plain
+		}
+	}
+	names := strings.Join(mainNames, " ")
+	if main.TLS && main.ForceHTTPS {
+		renderRedirectServer(l, names, main)
 		l.blank()
 	}
 	renderCanonicalServers(l, spec)
 	renderHostRedirectServers(l, spec)
+	renderServer(l, main, names)
+	if len(plainServed) > 0 {
+		l.blank()
+		for _, name := range plainServed {
+			l.add("# Plain HTTP: %s is served without TLS.", name)
+		}
+		renderServer(l, spec.plainCopy(plainServed), strings.Join(plainServed, " "))
+	}
+	return l.String(), nil
+}
 
+// renderServer is one server answering names as spec says: the site's own,
+// or the plain-HTTP one a TLS site keeps for the names its certificate does
+// not cover, which differs only in what TLS gives.
+func renderServer(l *lines, spec *SiteSpec, names string) {
 	l.add("server {")
 	renderListen(l, spec)
 	l.add("    server_name %s;", names)
@@ -142,7 +169,6 @@ func renderNginx(spec *SiteSpec) (string, error) {
 		}
 	}
 	l.add("}")
-	return l.String(), nil
 }
 
 // timedLogFormat is combined followed by named fields, so a reader of the
