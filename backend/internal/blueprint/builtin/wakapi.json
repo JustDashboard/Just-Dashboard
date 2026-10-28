@@ -1,0 +1,118 @@
+{
+  "id": "wakapi",
+  "version": "1.0.0",
+  "name": "Wakapi",
+  "category": "http",
+  "profile": "web",
+  "description": "A self-hosted WakaTime backend: the editor plugins send heartbeats to it and it draws your coding time by project, language and editor, with badges and a leaderboard. One small container with its SQLite database on the data volume.",
+  "iconId": "chart",
+  "docsUrl": "https://github.com/muety/wakapi#-installation",
+  "access": {
+    "kind": "setup",
+    "path": "/signup",
+    "note": "Wakapi starts with no account and sign-up open: the first visitor to https://<domain>/signup creates one, and that page stays open to everybody until you set WAKAPI_ALLOW_SIGNUP to false in the deployment's variables. Each account's API key, shown on its settings page, is what the editor plugin is configured with."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/muety/wakapi",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "ghcr.io/muety/wakapi:2.18.2",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Wakapi writes this address into badge links and password-reset e-mails, so it cannot be left blank."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 3000,
+      "protocol": "tcp",
+      "purpose": "The dashboard and the heartbeat API the editor plugins post to",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/data",
+      "purpose": "The SQLite database of users, heartbeats and summaries",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 256,
+    "minMemoryMb": 128
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/health",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "WAKAPI_PUBLIC_URL",
+        "value": "https://{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "WAKAPI_INSECURE_COOKIES",
+        "value": "false"
+      },
+      {
+        "kind": "set_variable",
+        "name": "WAKAPI_ALLOW_SIGNUP",
+        "value": "true"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Wakapi migrates its database on start; a large heartbeat table can take a while. Keep the password salt: hashed passwords cannot be verified with another.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "wakapi.example.test"
+      },
+      "digest": "sha256:8ecb7b2eb051a73865d4e0e97a999f1400e021ebc521415d660918c4e226b073"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "password-salt",
+      "variable": "WAKAPI_PASSWORD_SALT",
+      "label": "Password salt",
+      "length": 48,
+      "description": "Salts every stored password hash; changing it locks every account out."
+    }
+  ]
+}
