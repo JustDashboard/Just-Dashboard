@@ -87,12 +87,14 @@ func TestTerminalBrowserEvidenceServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(holders) })
-	manager.SetHolderLauncherForTest(holders, terminalHolderLauncherForTest)
+	launched := &terminalHolders{}
+	manager.SetHolderLauncherForTest(holders, launched.launch)
 	t.Cleanup(func() {
 		for _, sess := range manager.List() {
 			manager.Kill(context.Background(), sess.ID)
 		}
 		manager.Shutdown()
+		launched.wait(t)
 	})
 	st, err := storetest.Open(t.TempDir())
 	if err != nil {
