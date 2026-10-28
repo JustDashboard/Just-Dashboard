@@ -79,7 +79,7 @@ func (r *Repository) resolveStore(ctx context.Context, item *row, references []R
 			return nil, fail(reference.Location(), errors.New(strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": ")))
 		}
 	}
-	session, err := openSession(ctx, item)
+	session, err := openSession(ctx, item, r.tokens)
 	if err != nil {
 		return nil, fail("", err)
 	}
@@ -91,7 +91,7 @@ func (r *Repository) resolveStore(ctx context.Context, item *row, references []R
 			continue
 		}
 		var value secretValue
-		if reference.Version > 0 {
+		if reference.Version != "" {
 			value, err = session.readVersion(ctx, reference.Path, reference.Key, reference.Version)
 			if err != nil {
 				return nil, fail(reference.Location(), err)
@@ -108,18 +108,29 @@ func (r *Repository) resolveStore(ctx context.Context, item *row, references []R
 			var ok bool
 			value, ok = values[reference.Key]
 			if !ok {
-				where := "the config"
-				if reference.Path != "" {
-					where = reference.Path
-				} else if item.Kind == KindInfisical {
-					where = "/"
-				}
-				return nil, fail(reference.Location(), fmt.Errorf("%s has no key %s", where, reference.Key))
+				return nil, fail(reference.Location(), errors.New(missingKey(item.Kind, reference)))
 			}
 		}
 		out[reference.String()] = Read{Value: value.value, Version: value.version}
 	}
 	return out, nil
+}
+
+// missingKey says a path was read and the key was not in it, in the words
+// of the store's shape: a path, a folder, the config, or a whole secret that
+// is not the JSON object a key would be a field of.
+func missingKey(kind string, reference Reference) string {
+	switch kind {
+	case KindAWS, KindAzure:
+		return fmt.Sprintf("%s has no field %s: its value is not a JSON object with that key", reference.Path, reference.Key)
+	case KindInfisical:
+		if reference.Path == "" {
+			return "/ has no key " + reference.Key
+		}
+	case KindDoppler:
+		return "the config has no key " + reference.Key
+	}
+	return reference.Path + " has no key " + reference.Key
 }
 
 // mask hides any credential of the connection that a store's answer, or an
@@ -164,7 +175,10 @@ func (r *Repository) Test(ctx context.Context, id int64, probe *Probe) (*TestRes
 		if path := strings.Trim(strings.TrimSpace(probe.Path), "/"); path != "" {
 			target += "/" + path
 		}
-		parsed, err := ParseReference(target + "#" + strings.TrimSpace(probe.Key))
+		if key := strings.TrimSpace(probe.Key); key != "" {
+			target += "#" + key
+		}
+		parsed, err := ParseReference(target)
 		if err == nil {
 			err = checkFits(item.Kind, parsed)
 		}
@@ -184,7 +198,7 @@ func (r *Repository) test(ctx context.Context, item *row, reference *Reference) 
 	failed := func(err error) *TestResult {
 		return &TestResult{Message: mask(err.Error(), item.credentials)}
 	}
-	session, err := openSession(ctx, item)
+	session, err := openSession(ctx, item, r.tokens)
 	if err != nil {
 		return failed(err)
 	}
@@ -203,11 +217,7 @@ func (r *Repository) test(ctx context.Context, item *row, reference *Reference) 
 	}
 	value, ok := values[reference.Key]
 	if !ok {
-		where := reference.Path
-		if where == "" {
-			where = "the top level"
-		}
-		return failed(fmt.Errorf("%s; %s has no key %s", result.Message, where, reference.Key))
+		return failed(fmt.Errorf("%s; %s", result.Message, missingKey(item.Kind, *reference)))
 	}
 	result.Version = value.version
 	found := "found " + reference.Location()
