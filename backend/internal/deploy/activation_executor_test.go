@@ -306,6 +306,79 @@ func TestHTTPSActivationWithoutExistingCertificateStopsCandidateBeforeCutover(t 
 	}
 }
 
+// A plan with no required readiness check is cut over to all the same, and
+// the run says so in words where it happens: the readiness step's record
+// and the activation's transcript, and the evidence the run page reads.
+func TestActivationSaysWhenNoReadinessCheckGatedTheCutover(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name     string
+		strategy ReleaseStrategy
+		checks   []PlannedCheck
+		gated    bool
+		words    string
+	}{
+		{"blue/green with no check", StrategyBlueGreen, nil, false, "Moving traffic to release #1 without a readiness check"},
+		{"stop-first with no check", StrategyStopFirst, nil, false, "Release #1 goes live without a readiness check"},
+		{"blue/green with a required check", StrategyBlueGreen, []PlannedCheck{{
+			Name: "port", Kind: string(CheckTCP), Phase: "readiness", Required: true, Config: json.RawMessage(`{"port":3000}`),
+		}}, true, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newReleaseStoreFixture(t)
+			plan := RuntimePlanConfig{
+				InternalPort: 3000, BindAddress: "127.0.0.1", Strategy: test.strategy,
+				Command: []string{}, Capabilities: []string{}, Devices: []string{}, Mounts: []RuntimeMount{},
+			}
+			fixture.addPlanWithRuntime(t, 1, strings.Repeat("a", 40), plan)
+			run, lease := fixture.claimedRun(t, 1)
+			release := createRuntimeCandidate(t, fixture, *run, lease, plan, "ungated-candidate", test.checks...)
+			if _, err := fixture.runs.RecordCandidateRuntime(context.Background(), *run, lease.Token, ReleaseRuntimeInput{
+				ReleaseID: release.Release.ID, Kind: "container", RuntimeID: "ungated-candidate",
+				Host: "127.0.0.1", Port: 32123, Metadata: json.RawMessage(`{"version":1}`),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			owner := &orderingRuntimeOwner{running: map[string]bool{"ungated-candidate": true}, allowConcurrent: true}
+			output := &recordingStepOutput{}
+			executor := &NormalizedStepExecutor{store: fixture.runs, variables: fixture.variables, runtime: owner}
+			execution := StepExecution{Run: *run, ClaimToken: lease.Token, Output: output}
+			stored := mustExecutionPlan(t, fixture, *run)
+			readiness := executor.verifyChecks(context.Background(), execution, stored, "readiness")
+			if test.gated {
+				// With a check and no runner, the step is unavailable rather
+				// than skipped: the point here is only that nothing claims
+				// the cutover went ungated.
+				if readiness.State != StepUnavailable || strings.Contains(string(readiness.Evidence), "unverified") {
+					t.Fatalf("readiness with a check = %#v", readiness)
+				}
+			} else if readiness.State != StepSkipped || !strings.Contains(string(readiness.Evidence), `"reason":"no readiness check in the plan`) ||
+				!strings.Contains(strings.Join(output.lines, "\n"), "counts as ready because it started") {
+				t.Fatalf("readiness with no check = %#v\n%s", readiness, strings.Join(output.lines, "\n"))
+			}
+			result := executor.activate(context.Background(), execution, stored)
+			if result.State != StepPassed {
+				t.Fatalf("activation = %#v\n%s", result, strings.Join(output.lines, "\n"))
+			}
+			var evidence activationStepEvidence
+			if err := json.Unmarshal(result.Evidence, &evidence); err != nil {
+				t.Fatal(err)
+			}
+			if evidence.ReadinessGated != test.gated {
+				t.Fatalf("readinessGated = %v, want %v", evidence.ReadinessGated, test.gated)
+			}
+			transcript := strings.Join(output.lines, "\n")
+			if test.gated && strings.Contains(transcript, "without a readiness check") {
+				t.Fatalf("a gated cutover claimed otherwise:\n%s", transcript)
+			}
+			if !test.gated && !strings.Contains(transcript, test.words) {
+				t.Fatalf("the transcript does not say the cutover was ungated:\n%s", transcript)
+			}
+		})
+	}
+}
+
 type discardStepOutput struct{}
 
 func (discardStepOutput) Log(string, string) error { return nil }

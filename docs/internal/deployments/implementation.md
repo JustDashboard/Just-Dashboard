@@ -200,7 +200,13 @@ only renderer/executor/validation authority for their feature.
   ordinary deployment there is unsavable over a control the operator was never shown. The check is the
   candidate's detected `readiness` — its path, whether any answer counts, Docker health for a
   Dockerfile `HEALTHCHECK` command, and a slow start's budget (recipes.md, "Readiness, workers and
-  start commands") — and GET `/` expecting a 2xx only when detection found nothing.
+  start commands") — and GET `/` expecting a 2xx only when detection found nothing. A service or a
+  published container (`service`, `image`) whose port detection knows is proposed a gate the same way
+  (`defaultChecks`, `checksForRuntime`): the image's own health where it declares one, HTTP on a
+  health path where the source names one, else a required TCP check on that port, as the catalogue's
+  starters carry; the proposal is a draft default, listed under Advanced and removable there, never
+  added to a saved plan. A readiness check is **not** required of those profiles: without one the
+  release deploys and preflight says what that costs, as a warning (`cutover_unverified`, below).
 - A draft route distinguishes why an id did not answer: `403 draft_forbidden` for another user's draft,
   `410 draft_expired` for one past `expiresAt`, and `404 draft_not_found` only for an id that names
   nothing at all — the first two used to collapse into the third, which hid an ownership refusal behind
@@ -925,7 +931,19 @@ only renderer/executor/validation authority for their feature.
 - Blue/green is limited to stateless proxy-owned HTTP candidates without fixed ports, host networking or
   writable mounts; dynamic candidate ports are loopback-leased. Fixed-port, Compose, game and exclusive
   writable-storage plans are honest `stop_first` deployments and advertise expected downtime. A route
-  moves only after required readiness/smoke checks pass.
+  moves only after the plan's required readiness/smoke checks pass — and a plan with none is cut over
+  to ungated: `verify_readiness` is skipped (`disabled`, with the reason in its evidence and a
+  transcript line saying the candidate counts as ready because it started), and `activate` records
+  `readinessGated: false` and writes, in the strategy's words, that traffic moved (or the release went
+  live) without a readiness check; the run page says it again on the Route stage's line and in the
+  outcome, with the way to the health-check settings. A readiness check is required only of a web or
+  static plan (`readiness_missing`, a decision, refused by a deploy's `analyze_plan`); a redeploy,
+  rollback or promotion has no `analyze_plan` and runs with whatever checks the plan carries. For every
+  other profile that serves — a service or published container on a port, a game server, a Compose
+  stack or anything behind a domain — preflight raises `cutover_unverified` as a warning
+  (`ungatedCutoverFinding`), with the port and strategy measured, field `checks`, and in a run's
+  preflight step a deep link to Settings → Runtime → Health checks; a worker is never asked. Not a
+  refusal: an existing plan without a check keeps deploying and is told what that costs.
 - A managed route lets request bodies up to `runtime.maxRequestBodyMb` through (1–10240). Zero is each
   proxy's deployment default, which differs: nginx's own default is 1 MB, which refused a phone photo
   before the application saw it, so an nginx route always writes `client_max_body_size` (64 MB unless the

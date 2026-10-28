@@ -2994,7 +2994,13 @@ export async function mockProject(
   }
 }
 
-export async function mockDraftJourney(page: Page) {
+export async function mockDraftJourney(
+  page: Page,
+  options: {
+    /** Findings `/preflight` answers besides its passes: a warning to acknowledge, say. */
+    preflightFindings?: Record<string, unknown>[]
+  } = {},
+) {
   let revision = 1
   let currentStep = "intent"
   let data: Record<string, unknown> = {}
@@ -3354,6 +3360,7 @@ export async function mockDraftJourney(page: Page) {
         { code: "build.ok", severity: "pass", title: "Build plan is valid", owner: "build" },
         { code: "runtime.ok", severity: "pass", title: "Runtime plan is valid", owner: "runtime" },
         { code: "checks.ok", severity: "pass", title: "Readiness is configured", owner: "checks" },
+        ...(options.preflightFindings ?? []),
       ]
       revision += 1
       currentStep = "preflight"
@@ -3403,8 +3410,11 @@ export async function mockDraftJourney(page: Page) {
   }
 }
 
-export async function mockNewProject(page: Page) {
-  const journey = await mockDraftJourney(page)
+export async function mockNewProject(
+  page: Page,
+  options: Parameters<typeof mockDraftJourney>[1] = {},
+) {
+  const journey = await mockDraftJourney(page, options)
   let runs = 0
   await page.route("**/api/v1/git/github**", (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")

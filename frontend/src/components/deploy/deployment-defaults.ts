@@ -868,6 +868,52 @@ export function defaultChecks(
       },
     ]
   }
+  if ((profile === "service" || profile === "image") && port > 0) {
+    // A service or a published container is not asked for a page, so it
+    // used to get no gate at all: it was started and cut over to, and a
+    // release that never listened went live. The port detection read is
+    // enough for the check the catalogue's own starters carry — the
+    // container's health where the image declares it, a health path where
+    // the source names one, else the socket itself.
+    const budget = {
+      attempts: readiness?.attempts ?? 20,
+      timeoutSeconds: 5,
+      intervalSeconds: readiness?.intervalSeconds ?? 3,
+    }
+    if (readiness?.kind === "docker_health")
+      return [
+        {
+          name: "Container health",
+          kind: "docker_health",
+          phase: "readiness",
+          required: true,
+          config: budget,
+        },
+      ]
+    if (readiness?.kind === "http" && readiness.path)
+      return [
+        {
+          name: "HTTP readiness",
+          kind: "http",
+          phase: "readiness",
+          required: true,
+          config: {
+            path: readiness.path,
+            ...(readiness.acceptAnyAnswer ? { acceptAnyAnswer: true } : {}),
+            ...budget,
+          },
+        },
+      ]
+    return [
+      {
+        name: "Port reachable",
+        kind: "tcp",
+        phase: "readiness",
+        required: true,
+        config: { port, ...budget },
+      },
+    ]
+  }
   return []
 }
 
@@ -880,6 +926,10 @@ export function defaultChecks(
  * of that question each: the type Select and the port field. Only the first
  * used to add the check, so a plan that got its port from the second reached
  * Deploy with `readiness_missing` standing over a control nobody had touched.
+ * A service or a published container is gated the same way once its port is
+ * known (preflight warns, `cutover_unverified`, rather than refusing); the
+ * check is proposed here, in the draft, where it is listed and can be
+ * removed — never added to a saved plan behind the operator's back.
  */
 export function checksForRuntime(
   checks: DeploymentConfiguration["checks"],
@@ -888,7 +938,8 @@ export function checksForRuntime(
   readiness?: DeploymentDetectedReadiness,
 ): DeploymentConfiguration["checks"] {
   if (profile === "worker") return checks.filter((check) => check.phase !== "readiness")
-  const gated = profile === "web" || profile === "static"
+  const gated =
+    profile === "web" || profile === "static" || profile === "service" || profile === "image"
   if (!gated || port <= 0 || checks.some((check) => check.phase === "readiness")) return checks
   return [...checks, ...defaultChecks(profile, port, readiness)]
 }

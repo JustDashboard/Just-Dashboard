@@ -227,3 +227,65 @@ func TestPreflightIncludesReadinessFindings(t *testing.T) {
 		t.Fatalf("findings = %+v", findings)
 	}
 }
+
+// A plan nothing verifies before it is cut over to is warned about, never
+// refused: a web or static plan already has its decision (readiness_missing),
+// a worker has nothing to probe, and a service that neither listens nor
+// serves a domain has no cutover to gate.
+func TestPreflightWarnsWhenNothingGatesTheCutover(t *testing.T) {
+	t.Parallel()
+	observation := HostObservation{Facilities: map[string]FacilityObservation{
+		"git": {Available: true}, "docker": {Available: true}, "buildx": {Available: true},
+	}}
+	serving := func(strategy ReleaseStrategy, port int, checks ...PlannedCheck) PlanConfiguration {
+		return PlanConfiguration{
+			Build:   BuildPlanConfig{Method: BuildDockerfile, Dockerfile: "Dockerfile"},
+			Runtime: RuntimePlanConfig{Strategy: strategy, InternalPort: port, BindAddress: "127.0.0.1"},
+			Checks:  checks,
+		}
+	}
+	tcp := PlannedCheck{Name: "port", Kind: string(CheckTCP), Phase: "readiness", Required: true, Config: json.RawMessage(`{"port":8080}`)}
+	optional := tcp
+	optional.Required = false
+	for _, test := range []struct {
+		name     string
+		profile  WorkloadProfile
+		plan     PlanConfiguration
+		want     bool
+		measured string
+	}{
+		{"a service on a port with no check", ProfileService, serving(StrategyStopFirst, 8080), true, "stop-first · port 8080"},
+		{"a published container on a port with no check", ProfileImage, serving(StrategyStopFirst, 8080), true, "stop-first · port 8080"},
+		{"a service whose only readiness check is not required", ProfileService, serving(StrategyStopFirst, 8080, optional), true, "readiness check not required"},
+		{"a game server on its host port", ProfileGame, PlanConfiguration{
+			Build: BuildPlanConfig{Method: BuildImage}, Runtime: RuntimePlanConfig{Strategy: StrategyStopFirst, HostPort: 25565}}, true, "host port 25565"},
+		{"a service with a required TCP check", ProfileService, serving(StrategyStopFirst, 8080, tcp), false, ""},
+		{"a service that neither listens nor serves a domain", ProfileService, serving(StrategyStopFirst, 0), false, ""},
+		{"a service behind a domain", ProfileService, PlanConfiguration{
+			Build: BuildPlanConfig{Method: BuildDockerfile, Dockerfile: "Dockerfile"}, Runtime: RuntimePlanConfig{Strategy: StrategyStopFirst},
+			Domains: []PlannedDomain{{Hostname: "svc.example.test", HTTPS: true}}}, true, "stop-first"},
+		{"a worker", ProfileWorker, serving(StrategyStopFirst, 8080), false, ""},
+		{"a web plan, which is refused instead", ProfileWeb, serving(StrategyBlueGreen, 3000), false, ""},
+	} {
+		draft := readinessDraft(test.profile, DetectedCandidate{BuildMethod: test.plan.Build.Method, Profile: test.profile})
+		draft.Data.Configuration = &test.plan
+		findings := preflightFindings(draft, test.plan, observation, false)
+		item := findingByCode(findings, "cutover_unverified")
+		if (item != nil) != test.want {
+			t.Fatalf("%s: cutover_unverified = %+v, want present=%v", test.name, item, test.want)
+		}
+		if item == nil {
+			if test.profile == ProfileWeb && findingSeverity(findings, "readiness_missing") != PreflightDecision {
+				t.Fatalf("%s: a web plan without a check lost its decision: %+v", test.name, findings)
+			}
+			continue
+		}
+		if item.Severity != PreflightWarning || item.FieldID != "checks" || item.Owner != "deploy" || item.Action == "" ||
+			!strings.Contains(item.Measured, test.measured) || !strings.Contains(item.Means, "never listens goes live") {
+			t.Fatalf("%s: %+v", test.name, *item)
+		}
+		if findingSeverity(findings, "readiness_missing") != "" {
+			t.Fatalf("%s: warned and refused at once: %+v", test.name, findings)
+		}
+	}
+}
