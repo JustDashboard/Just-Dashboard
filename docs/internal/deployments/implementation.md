@@ -1780,13 +1780,43 @@ only renderer/executor/validation authority for their feature.
   proxy sees them. The redirect is kept in the domain's dependency row only when present, and the two
   runtime fields only when non-empty, so a plan without them keeps its digest. Activation hands the proxy
   the redirecting names apart from the served ones (`DeploymentRoute.Redirects`); its certificate is
-  resolved for every name the route answers (`Hostnames`), and public-route checks ask only the served
-  names. nginx writes each redirecting name a server of its own marked `# Host redirect (<code>): …`,
+  resolved for every HTTPS name the route answers (`TLSHostnames`), and public-route checks ask only the
+  served names, each on its own scheme. nginx writes each redirecting name a server of its own marked `# Host redirect (<code>): …`,
   which keeps the ACME path and which the site parser reads back; Caddy writes it a site block of its own
   with `redir`. The release comparison lists the redirect on the domain's line and the two runtime fields
   as their own. The Domains settings offer **Redirect to another domain** in each row's menu and an
   **Access and headers** form under the list, which writes only those two runtime fields and the sign-in
   below; the Runtime form neither holds nor writes them.
+- Per-domain TLS and HSTS. Each `domains[].https` is honoured on its own: the route is TLS as soon as
+  one domain is HTTPS (`DeploymentRoute.TLS`, `ForceHTTPS`), and the domains with HTTPS off are its
+  `PlainHostnames`, served over plain HTTP with no certificate, no redirect to HTTPS and no HSTS, whatever
+  the other names on the route do. Before this one HTTPS domain made every name on the route TLS with a
+  forced redirect, and activation asked for a certificate covering the plain names too. Activation now
+  resolves the certificate for `TLSHostnames` alone, and the certificate step was already issuing for the
+  HTTPS domains alone. nginx writes the plain names a server of their own on port 80, after the site's
+  own, marked `# Plain HTTP: <name> is served without TLS.` (one marker per name, read back by the site
+  parser as `SiteSpec.PlainDomains`), and a redirecting plain name a server on port 80 alone marked
+  `… over plain HTTP`; a redirecting HTTPS name on a route whose served names are all plain keeps its
+  443 listen and is marked `… over HTTPS`, from which the parser reads the site's TLS and, from that
+  skipped server, its certificate and HTTP/2. A redirect sends visitors on over the scheme its target is
+  served on. Caddy writes the HTTPS names one site block and the plain names another with `http://`
+  addresses, the same handling in each, because Caddy refuses a `tls` directive beside an `http://`
+  address; a plain redirecting name is an `http://` block with `redir http://…`. The reconcile pass
+  repairs `reverse_proxy` and `forward_auth` in every block. `runtime.hsts` (`maxAge` seconds, absent is
+  six months, 300 to 63072000; `includeSubDomains`; `preload`, which needs a year and the subdomains —
+  `proxysvc.ValidateDeploymentHSTS`, the bounds a Proxy site's HSTS control is held to; field
+  `runtime.hsts`) sends `Strict-Transport-Security` on every HTTPS answer: nginx `add_header … always`
+  in the TLS server with `proxy_hide_header Strict-Transport-Security` in every server, Caddy a line of
+  the HTTPS block's deferred `header` block with `-Strict-Transport-Security` in the plain block, so the
+  route's policy replaces the application's own and a plain name is sent none. It is off until chosen,
+  because the policy outlives a mistake, and it is carried to a route only while the route is TLS.
+  A custom response header named `Strict-Transport-Security` is refused with the control named.
+  Preflight's `hsts` finding (`proxy`, `runtime.hsts`) says which served domains receive it and which plain
+  ones do not, and warns when no served domain is HTTPS, since then nobody does. The release comparison
+  lists `hsts` as the header's value or `off`. The Domains settings offer **HSTS** under Access and headers
+  while a served domain is HTTPS, or while a policy is saved so it stays removable, with the lifetimes,
+  subdomains and preload confirmation the Proxy site form has, and each served domain's row says whether
+  plain HTTP is redirected to HTTPS or served as asked. Previews copy the policy with the other rules.
 - Route sign-in. `runtime.forwardAuth` (`provider` authelia, authentik, oauth2-proxy or custom;
   `verify`, the auth server's check address; `signIn`, the page a visitor without a session is sent to;
   `previewsOnly`) has the public route ask an auth server about every request before the application

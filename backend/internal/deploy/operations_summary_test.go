@@ -355,6 +355,7 @@ func TestReleaseComparisonNamesEveryChangedFieldAndHidesVariableValues(t *testin
 			},
 			"maintenance": map[string]any{"retryAfter": 120, "bypassFrom": []string{"10.0.0.0/8"}},
 			"errorPages":  []int{502},
+			"hsts":        map[string]any{"maxAge": 31536000, "includeSubDomains": true},
 		},
 		"variables": []map[string]any{
 			{"name": "TOKEN", "sensitivity": "secret", "scopes": "runtime", "valueDigest": fakeContentDigest("rotated")},
@@ -400,7 +401,7 @@ func TestReleaseComparisonNamesEveryChangedFieldAndHidesVariableValues(t *testin
 		changed[field.Field] = field.Changed
 	}
 	for _, field := range []string{"source revision", "image", "command", "internal port", "strategy", "persistent storage", "sign-in",
-		"let past maintenance", "maintenance retry after", "error pages"} {
+		"let past maintenance", "maintenance retry after", "error pages", "hsts"} {
 		if !changed[field] {
 			t.Fatalf("%q reported unchanged: %#v", field, comparison.Detail.Fields)
 		}

@@ -51,6 +51,18 @@ func TestPlanValidationOfDomainRedirectsAndRouteRules(t *testing.T) {
 		{"a header value that ends the quotes", func(p *PlanConfiguration) {
 			p.Runtime.ResponseHeaders = []RouteHeader{{Name: "X-Note", Value: `a"b`}}
 		}, "runtime.responseHeaders"},
+		{"an HSTS max-age under five minutes", func(p *PlanConfiguration) {
+			p.Runtime.HSTS = &RouteHSTS{MaxAge: 60}
+		}, "runtime.hsts"},
+		{"HSTS preload without subdomains", func(p *PlanConfiguration) {
+			p.Runtime.HSTS = &RouteHSTS{MaxAge: 31536000, Preload: true}
+		}, "runtime.hsts"},
+		{"HSTS preload under a year", func(p *PlanConfiguration) {
+			p.Runtime.HSTS = &RouteHSTS{MaxAge: 2592000, IncludeSubDomains: true, Preload: true}
+		}, "runtime.hsts"},
+		{"the HSTS header set by hand", func(p *PlanConfiguration) {
+			p.Runtime.ResponseHeaders = []RouteHeader{{Name: "Strict-Transport-Security", Value: "max-age=300"}}
+		}, "runtime.responseHeaders"},
 	} {
 		plan := routingPlan()
 		fixture.edit(&plan)
@@ -91,8 +103,23 @@ func TestCanonicalRouteRulesAndDomainRowBytes(t *testing.T) {
 	}
 	empty := routingPlan()
 	empty.Runtime.AllowFrom, empty.Runtime.ResponseHeaders = []string{}, []RouteHeader{}
-	if raw, _ := json.Marshal(canonicalConfiguration(empty).Runtime); strings.Contains(string(raw), "allowFrom") || strings.Contains(string(raw), "responseHeaders") {
+	if raw, _ := json.Marshal(canonicalConfiguration(empty).Runtime); strings.Contains(string(raw), "allowFrom") || strings.Contains(string(raw), "responseHeaders") || strings.Contains(string(raw), "hsts") {
 		t.Fatalf("empty rules were kept: %s", raw)
+	}
+	// HSTS is kept as given, as a copy of its own, and validates with the
+	// defaults a site's control has: six months, the name alone.
+	policy := &RouteHSTS{IncludeSubDomains: true}
+	withHSTS := routingPlan()
+	withHSTS.Runtime.HSTS = policy
+	if err := withHSTS.Validate(); err != nil {
+		t.Fatalf("a default HSTS policy was refused: %v", err)
+	}
+	canonicalHSTS := canonicalConfiguration(withHSTS).Runtime.HSTS
+	if canonicalHSTS == policy || *canonicalHSTS != *policy {
+		t.Fatalf("canonical HSTS = %+v, want a copy of %+v", canonicalHSTS, policy)
+	}
+	if raw, _ := json.Marshal(canonicalConfiguration(withHSTS).Runtime); !strings.Contains(string(raw), `"hsts":{"includeSubDomains":true}`) {
+		t.Fatalf("HSTS was not kept: %s", raw)
 	}
 
 	if raw := string(mustJSON(plan.Domains[0].domainConfig())); raw != `{"hostname":"example.test","https":true}` {
@@ -161,5 +188,90 @@ func TestConfigurationStoreKeepsRedirectsAndRouteRules(t *testing.T) {
 	}
 	if strings.Join(read.Runtime.AllowFrom, ",") != "203.0.113.7" || len(read.Runtime.ResponseHeaders) != 1 {
 		t.Fatalf("runtime read back = %+v", read.Runtime)
+	}
+}
+
+// Each domain is served on the scheme it chose: the route is TLS as soon as
+// one is HTTPS, the plain ones are its plain-HTTP names, the certificate is
+// asked for the HTTPS names alone, and the public-route checks ask each
+// served name on its own scheme. A plan with no HTTPS name is a plain route
+// that singles out none.
+func TestDeploymentRouteServesEachDomainOnItsOwnScheme(t *testing.T) {
+	t.Parallel()
+	domains := []PlannedDomain{
+		{Hostname: "app.example.test", HTTPS: true, Ownership: OwnershipManaged},
+		{Hostname: "old.example.test", Ownership: OwnershipManaged},
+		{Hostname: "www.app.example.test", HTTPS: true, Ownership: OwnershipManaged, RedirectTo: "app.example.test"},
+		{Hostname: "www.old.example.test", Ownership: OwnershipManaged, RedirectTo: "old.example.test"},
+	}
+	route := deploymentRoute(7, domains, "127.0.0.1", 3000)
+	if !route.TLS || !route.ForceHTTPS || strings.Join(route.Domains, ",") != "app.example.test,old.example.test" {
+		t.Fatalf("route = %+v", route)
+	}
+	if strings.Join(route.PlainHostnames, ",") != "old.example.test,www.old.example.test" {
+		t.Fatalf("plain names = %v", route.PlainHostnames)
+	}
+	if strings.Join(route.TLSHostnames(), ",") != "app.example.test,www.app.example.test" {
+		t.Fatalf("certificate names = %v", route.TLSHostnames())
+	}
+	if urls := publicRouteURLs(domains); strings.Join(urls, ",") != "https://app.example.test/,http://old.example.test/" {
+		t.Fatalf("public checks ask %v", urls)
+	}
+	plain := deploymentRoute(7, domains[1:2], "127.0.0.1", 3000)
+	if plain.TLS || plain.PlainHostnames != nil {
+		t.Fatalf("a plain route singles out names: %+v", plain)
+	}
+}
+
+// schemeRouteProxy records which names activation asks a certificate for.
+type schemeRouteProxy struct {
+	recordingRouteProxy
+	certificateNames []string
+}
+
+func (p *schemeRouteProxy) ResolveDeploymentCertificate(_ context.Context, names []string) (string, string, error) {
+	p.certificateNames = append([]string(nil), names...)
+	return "/etc/ssl/app/fullchain.pem", "/etc/ssl/app/privkey.pem", nil
+}
+
+// Activation hands the proxy each domain on its own scheme and the plan's
+// HSTS, and resolves the certificate for the HTTPS names alone, so a plain
+// name no longer fails the release for a certificate it does not need.
+func TestActivationServesEachDomainOnItsOwnSchemeWithThePlansHSTS(t *testing.T) {
+	fixture := newReleaseStoreFixture(t)
+	plan := RuntimePlanConfig{
+		InternalPort: 3000, BindAddress: "127.0.0.1", Strategy: StrategyBlueGreen,
+		HSTS:    &RouteHSTS{MaxAge: 31536000, IncludeSubDomains: true},
+		Command: []string{}, Capabilities: []string{}, Devices: []string{}, Mounts: []RuntimeMount{},
+	}
+	fixture.addPlanWithRuntime(t, 1, strings.Repeat("a", 40), plan)
+	run, lease := fixture.claimedRun(t, 1)
+	release := createRuntimeCandidateWithDomains(t, fixture, *run, lease, plan, "scheme-candidate", nil, []PlannedDomain{
+		{Hostname: "app.example.test", HTTPS: true, Ownership: OwnershipManaged},
+		{Hostname: "old.example.test", Ownership: OwnershipManaged},
+	})
+	if _, err := fixture.runs.RecordCandidateRuntime(context.Background(), *run, lease.Token, ReleaseRuntimeInput{
+		ReleaseID: release.Release.ID, Kind: "container", RuntimeID: "scheme-candidate",
+		Host: "127.0.0.1", Port: 32125, Metadata: json.RawMessage(`{"version":1}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	owner := &orderingRuntimeOwner{running: map[string]bool{"scheme-candidate": true}, allowConcurrent: true}
+	proxy := &schemeRouteProxy{}
+	executor := &NormalizedStepExecutor{store: fixture.runs, variables: fixture.variables, runtime: owner, proxy: proxy}
+	result := executor.activate(context.Background(), StepExecution{Run: *run, ClaimToken: lease.Token, Output: discardStepOutput{}},
+		mustExecutionPlan(t, fixture, *run))
+	if result.State != StepPassed || len(proxy.routes) != 1 {
+		t.Fatalf("activation = %#v, routes = %+v", result, proxy.routes)
+	}
+	route := proxy.routes[0]
+	if !route.TLS || strings.Join(route.PlainHostnames, ",") != "old.example.test" || route.CertPath != "/etc/ssl/app/fullchain.pem" {
+		t.Fatalf("route = %+v", route)
+	}
+	if strings.Join(proxy.certificateNames, ",") != "app.example.test" {
+		t.Fatalf("the certificate was resolved for %v", proxy.certificateNames)
+	}
+	if route.HSTS == nil || route.HSTS.MaxAge != 31536000 || !route.HSTS.IncludeSubDomains || route.HSTS.Preload {
+		t.Fatalf("HSTS = %+v", route.HSTS)
 	}
 }
