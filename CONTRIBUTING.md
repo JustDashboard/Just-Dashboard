@@ -359,7 +359,14 @@ to the contribution terms above, including the additional licence grant to the p
   (`internetsystemsconsortium/bind9:9.20`) taking signed RFC 2136 updates, so the host's certbot needs
   its dns-rfc2136 plugin: `python3-certbot-dns-rfc2136`, or that plugin's wheel and dnspython's unpacked
   into a directory on `PYTHONPATH` (`sudo -n env JD_DEPLOY_LIVE=1 PATH=$PATH PYTHONPATH=<dir> <test binary>`);
-  without it both skip. Each waits out the plugin's 60-second propagation delay once, the first twice.
+  without it all three skip. Each waits out the plugin's 60-second propagation delay once, the first
+  and the Caddy one twice. The same changes, and any change to how a Docker Caddy route serves a
+  certificate copy or how a renewal reaches it (`docker_caddy_copies.go`, the ingress maintenance
+  pass, `reloadAfterRenewal`), also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesAWildcardProvedOverDNS01 -count=1 -v`
+  (the wildcard served by a real `caddy:2-alpine`, then renewed and refreshed; needs the plugin above)
+  and `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyRefreshesRenewedCertificateCopies -count=1 -v`
+  (the renewal refresh on a real Caddy with no authority involved).
   Changes to how a deployment route renders its redirects, response headers or allowed addresses also
   run `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules -count=1 -v`,
   which asks a real Caddy what it answers for each. Changes to a route's sign-in, how Caddy reaches the

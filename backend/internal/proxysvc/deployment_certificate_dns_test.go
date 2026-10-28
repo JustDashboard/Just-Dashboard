@@ -219,11 +219,20 @@ func TestDeploymentWildcardWithoutCredentialsIsRefusedWithWhereToSaveThem(t *tes
 }
 
 // On a host whose deployments the Docker Caddy ingress serves, a wildcard is
-// refused before anything else — even a certificate that covers it, since
-// Caddy cannot serve the route — and the refusal says why Caddy cannot prove
-// one and what to do instead.
-func TestDeploymentWildcardIsRefusedOnTheDockerCaddyIngress(t *testing.T) {
+// ordered exactly as on nginx — through certbot, over DNS-01, with the saved
+// credentials — rather than refused: the ingress serves a copy of the lineage
+// and never has to answer the challenge itself. The lineage is then reused
+// for the wildcard and for a preview under it, and the preflight read names
+// the provider rather than a refusal.
+func TestDeploymentWildcardIsIssuedAndReusedOnTheDockerCaddyIngress(t *testing.T) {
 	root := t.TempDir()
+	letsencrypt := filepath.Join(root, "letsencrypt")
+	t.Cleanup(UseCertificateDirsForTest(letsencrypt, filepath.Join(root, "imported")))
+	t.Setenv("JD_ACME_DIRECTORY", "")
+	previous := deploymentNSLookup
+	deploymentNSLookup = nameservers(map[string][]string{"example.test": {"ada.ns.cloudflare.com"}}, nil)
+	t.Cleanup(func() { deploymentNSLookup = previous })
+	argv := fakeDNSCertbot(t, letsencrypt, "webroot", "dns-cloudflare")
 	bin := t.TempDir()
 	writeExecutable(t, filepath.Join(bin, "docker"), `#!/bin/sh
 case "$1" in
@@ -241,28 +250,35 @@ JSON
 esac
 `)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	available := filepath.Join(root, "sites-available")
-	if err := os.MkdirAll(available, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	certPath, keyPath := writeDeploymentCertificate(t, root, []string{"*.preview.example.test"})
-	vhost := "server {\n listen 443 ssl;\n server_name *.preview.example.test;\n ssl_certificate " + certPath + ";\n ssl_certificate_key " + keyPath + ";\n}\n"
-	if err := os.WriteFile(filepath.Join(available, "wild.conf"), []byte(vhost), 0o640); err != nil {
+	if _, err := WriteDNSCredentials("cloudflare", "dns_cloudflare_api_token = secret-zone-token"); err != nil {
 		t.Fatal(err)
 	}
 	service := NewWithDockerIngress(root, filepath.Join(root, "Caddyfile"))
-	_, err := service.EnsureDeploymentCertificate(context.Background(), []string{"*.preview.example.test"}, nil)
-	if !errors.Is(err, ErrCertificateWildcard) {
-		t.Fatalf("Caddy host = %v, want a wildcard refusal", err)
+	if edge, err := service.dockerCaddy(context.Background()); err != nil || edge == nil || edge.Name != "edge" {
+		t.Fatalf("the fixture's ingress was not found: %+v, %v", edge, err)
 	}
-	for _, want := range []string{"Docker Caddy ingress (edge)", "caddy:2-alpine image does not include", "app.preview.example.test"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("refusal %q does not say %q", err, want)
+
+	provider, err := service.DeploymentDNSProvider(context.Background(), "*.preview.example.test")
+	if err != nil || provider.Name != "Cloudflare" {
+		t.Fatalf("preflight's read on a Caddy host = %+v, %v; want the provider", provider, err)
+	}
+	result, err := service.EnsureDeploymentCertificate(context.Background(), []string{"*.preview.example.test"}, nil)
+	if err != nil || result.Outcome != CertificateIssued || result.Method != "dns-cloudflare" || result.Name != "preview.example.test" ||
+		result.CertPath != filepath.Join(letsencrypt, "live", "preview.example.test", "fullchain.pem") {
+		t.Fatalf("Caddy host = %+v, %v; want the wildcard issued over DNS-01", result, err)
+	}
+	raw, _ := os.ReadFile(argv)
+	if !strings.Contains(string(raw), "certonly --dns-cloudflare") || strings.Contains(string(raw), "secret-zone-token") {
+		t.Fatalf("certbot ran:\n%s", raw)
+	}
+	for _, name := range []string{"*.preview.example.test", "pr-7.preview.example.test"} {
+		again, err := service.EnsureDeploymentCertificate(context.Background(), []string{name}, nil)
+		if err != nil || again.Outcome != CertificateReused || again.Name != "preview.example.test" {
+			t.Fatalf("%s = %+v, %v; want the wildcard reused", name, again, err)
 		}
 	}
-	// A name under the wildcard is not a wildcard route: it is reused as before.
-	result, err := service.EnsureDeploymentCertificate(context.Background(), []string{"pr-7.preview.example.test"}, nil)
-	if err != nil || result.Outcome != CertificateReused {
-		t.Fatalf("a preview name under the wildcard = %+v, %v", result, err)
+	raw, _ = os.ReadFile(argv)
+	if strings.Count(string(raw), "certonly ") != 1 {
+		t.Fatalf("certbot ordered again:\n%s", raw)
 	}
 }

@@ -210,7 +210,7 @@ func TestLiveDockerCaddyGatesRouteBehindForwardAuth(t *testing.T) {
 		t.Fatal("the route answered without being able to ask the auth server")
 	}
 	repaired := map[string]bool{}
-	if err := edge.reconcile(ctx, func(name string, ok bool) { repaired[name] = ok }); err != nil || !repaired[route.Name] {
+	if _, err := edge.reconcile(ctx, func(name string, ok bool) { repaired[name] = ok }); err != nil || !repaired[route.Name] {
 		t.Fatalf("maintenance = %v %v", err, repaired)
 	}
 	if res, body := signedIn(); res.StatusCode != http.StatusOK || !strings.Contains(body, "Remote-User: alice") {
