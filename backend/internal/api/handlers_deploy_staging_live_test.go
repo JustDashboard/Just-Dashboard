@@ -450,6 +450,12 @@ func removeLiveEnvironment(s *Server, environmentID int64) {
 	}
 	rows.Close()
 	for _, item := range tags {
+		// Only a tag a run of this store gave the image: an image source
+		// that was pulled records the registry's own reference, which is
+		// not this test's to remove.
+		if !strings.HasPrefix(item.reference, "just-dashboard/deployment-") {
+			continue
+		}
 		output, err := exec.Command("docker", "image", "inspect", "--format", "{{.Id}}", item.reference).Output()
 		if err == nil && strings.TrimSpace(string(output)) == item.image {
 			_ = exec.Command("docker", "rmi", item.reference).Run()

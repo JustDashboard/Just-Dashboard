@@ -413,7 +413,11 @@ to the contribution terms above, including the additional licence grant to the p
   `pg_dump` is on `PATH`, as it is in the dashboard's image, which makes it a custom-format archive
   the copy restores with `pg_restore` — run it both ways after changing the restore).
   `TestLiveMigrationRehearsalRestoresAMariaDBDump`
-  does the same against MariaDB (it pulls `mariadb:11.8` once), and
+  does the same against MariaDB (it pulls `mariadb:11.8` once),
+  `TestLiveMigrationRehearsalGatesAPromotedRelease` does the same through promotions — a staging
+  environment of the same image, its release promoted into production three times: refused for want
+  of a backup, passing against the copy and reaching production, then failing against the copy with
+  production's schema, rows and live release unchanged — so changes to promotion run it too, and
   `TestLiveRehearsalLeftoversAreRemovedAtStart` checks the start-up sweep removes a copy, its volume,
   a task container and the network by label and leaves a managed container without it. With
   `JD_TEST_WALG=<path>` to the WAL-G release `backend/Dockerfile` pins,
@@ -508,8 +512,9 @@ to the contribution terms above, including the additional licence grant to the p
 - Changes to the engine, its reconciler or run persistence also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun -count=1 -v`.
   It builds `internal/deploy/testdata/engine-host`, SIGKILLs that real second process inside every
-  step in turn, and requires that the restarted engine ends the run with `restart_evidence_missing`,
-  leaves no claimable run behind, and still has the killed process's step output.
+  step in turn — of a deploy's step list and of a promotion's, which starts at `render_runtime` — and
+  requires that the restarted engine ends the run with `restart_evidence_missing`, leaves no claimable
+  run behind, and still has the killed process's step output.
 - Backup consistency or restore-verification changes also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveSQLiteApplicationRecoveryVerification -count=1 -v`.
   This uses a real application image and live SQLite snapshot, destroys only the fixture's table,

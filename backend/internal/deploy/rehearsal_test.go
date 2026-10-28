@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestRehearsalTargetIsTheOneDatabaseTheTaskReaches(t *testing.T) {
@@ -133,6 +134,23 @@ type rehearsalFixture struct {
 func newRehearsalFixture(t *testing.T, rehearser MigrationRehearser, tasks []ReleaseTaskConfig) *rehearsalFixture {
 	t.Helper()
 	fixture := newReleaseStoreFixture(t)
+	plan := writeRehearsalPlan(t, fixture, tasks)
+	run, lease := fixture.claimedRun(t, 1)
+	createRuntimeCandidate(t, fixture, *run, lease, plan, "rehearsal-v1")
+	runtime := &rehearsalRuntime{orderingRuntimeOwner: orderingRuntimeOwner{running: map[string]bool{}}, fail: map[bool]bool{}}
+	executor := &NormalizedStepExecutor{store: fixture.runs, variables: fixture.variables, runtime: runtime, rehearser: rehearser}
+	return &rehearsalFixture{releaseStoreFixture: fixture, runtime: runtime, executor: executor, run: run, lease: lease}
+}
+
+// rehearsalDatabaseURL is production's DATABASE_URL: a managed database the
+// rehearsal restores a copy of.
+const rehearsalDatabaseURL = "postgres://app:secret@db-7.jd.internal:5432/app"
+
+// writeRehearsalPlan writes production's revision 1: a Dockerfile build with
+// the release tasks given, a stop-first runtime with one volume, and a
+// secret DATABASE_URL in the runtime and release-task scopes.
+func writeRehearsalPlan(t *testing.T, fixture *releaseStoreFixture, tasks []ReleaseTaskConfig) RuntimePlanConfig {
+	t.Helper()
 	plan := RuntimePlanConfig{
 		Strategy: StrategyStopFirst, Command: []string{}, Capabilities: []string{}, Devices: []string{},
 		Mounts: []RuntimeMount{{Source: "uploads", Target: "/data"}},
@@ -161,7 +179,7 @@ func newRehearsalFixture(t *testing.T, rehearser MigrationRehearser, tasks []Rel
 			t.Fatal(err)
 		}
 	}
-	sealed, err := fixture.variables.sealer.Seal("postgres://app:secret@db-7.jd.internal:5432/app")
+	sealed, err := fixture.variables.sealer.Seal(rehearsalDatabaseURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,11 +188,7 @@ func newRehearsalFixture(t *testing.T, rehearser MigrationRehearser, tasks []Rel
 		fixture.envID, sealed, fakeContentDigest("database-url"), fixture.now.Unix()); err != nil {
 		t.Fatal(err)
 	}
-	run, lease := fixture.claimedRun(t, 1)
-	createRuntimeCandidate(t, fixture, *run, lease, plan, "rehearsal-v1")
-	runtime := &rehearsalRuntime{orderingRuntimeOwner: orderingRuntimeOwner{running: map[string]bool{}}, fail: map[bool]bool{}}
-	executor := &NormalizedStepExecutor{store: fixture.runs, variables: fixture.variables, runtime: runtime, rehearser: rehearser}
-	return &rehearsalFixture{releaseStoreFixture: fixture, runtime: runtime, executor: executor, run: run, lease: lease}
+	return plan
 }
 
 func (f *rehearsalFixture) rehearse(t *testing.T) StepResult {
@@ -227,7 +241,7 @@ func TestRehearsalRunsTheTaskAgainstTheCopyAlone(t *testing.T) {
 	}
 	request := f.runtime.requests[0]
 	if !request.Rehearsal || fmt.Sprint(request.Networks) != "[jd-rehearsal-net]" ||
-		request.Variables["DATABASE_URL"] != "postgres://app:secret@db-7.jd.internal:5432/app" {
+		request.Variables["DATABASE_URL"] != rehearsalDatabaseURL {
 		t.Fatalf("the rehearsal task ran as %+v", request)
 	}
 	// Removed before it started, and again when it ended.
@@ -298,17 +312,160 @@ func TestRehearsalStepIsSafeToResumeAfterARestart(t *testing.T) {
 	if decision.Action != ReconcileResume {
 		t.Fatalf("an interrupted rehearsal = %+v", decision)
 	}
-	if stepLabel(StepRehearseMigration, OperationDeploy) == "" {
-		t.Fatal("the step has no label")
-	}
-	found := false
-	for index, key := range DefaultStepKeys {
-		if key == StepRehearseMigration {
-			found = DefaultStepKeys[index-1] == StepBackupGate && DefaultStepKeys[index+1] == StepReleaseTask
+	for _, operation := range []Operation{OperationDeploy, OperationPromote} {
+		if stepLabel(StepRehearseMigration, operation) == "" {
+			t.Fatalf("the step has no label for a %s", operation)
 		}
 	}
-	if !found {
-		t.Fatalf("the rehearsal is not between the backup gate and the release task: %v", DefaultStepKeys)
+	for name, keys := range map[string][]StepKey{"deploy": DefaultStepKeys, "promotion": PromotionStepKeys} {
+		if !rehearsalBetweenGateAndTask(keys) {
+			t.Fatalf("a %s's rehearsal is not between the backup gate and the release task: %v", name, keys)
+		}
+	}
+}
+
+func rehearsalBetweenGateAndTask(keys []StepKey) bool {
+	for index, key := range keys {
+		if key == StepRehearseMigration {
+			return index > 0 && index+1 < len(keys) && keys[index-1] == StepBackupGate && keys[index+1] == StepReleaseTask
+		}
+	}
+	return false
+}
+
+// A promotion's steps are a deploy's from render_runtime on, so every step
+// a promotion takes is one the crash-recovery matrices (engine_test.go,
+// engine_process_fault_live_test.go) already interrupt, and a release task
+// is rehearsed in a promotion exactly where it is in a build.
+func TestPromotionStepsAreADeploysFromRenderRuntimeOn(t *testing.T) {
+	t.Parallel()
+	from := -1
+	for index, key := range DefaultStepKeys {
+		if key == StepRenderRuntime {
+			from = index
+		}
+	}
+	if from < 0 || fmt.Sprint(DefaultStepKeys[from:]) != fmt.Sprint(PromotionStepKeys) {
+		t.Fatalf("promotion steps = %v, want a deploy's from render_runtime: %v", PromotionStepKeys, DefaultStepKeys[from:])
+	}
+	for _, key := range []StepKey{StepResolveSource, StepAcquireSource, StepAnalyzePlan, StepPrepareContext, StepBuildArtifact} {
+		for _, step := range PromotionStepKeys {
+			if step == key {
+				t.Fatalf("a promotion has a build step: %s", key)
+			}
+		}
+	}
+}
+
+// A promotion rehearses production's release tasks — production's
+// variables, so production's database — in the image staging built, and a
+// task that fails against the copy ends the promotion before any task
+// touches production, exactly as it ends a build's run.
+func TestPromotionRehearsesProductionsReleaseTasksInThePromotedImage(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	fixture := newReleaseStoreFixture(t)
+	writeRehearsalPlan(t, fixture, []ReleaseTaskConfig{migrateTask})
+	created, err := fixture.variables.CreateStagingEnvironment(ctx, fixture.projectID, StagingRequest{Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageID := fakeContentDigest("promoted-image")
+	source := stagedRelease(t, fixture, created.Environment.ID, imageID)
+	run, err := enqueuePromotion(t, fixture, source.Release.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps, err := fixture.runs.Steps(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := []StepKey{}
+	for _, step := range steps {
+		keys = append(keys, step.Key)
+	}
+	if !rehearsalBetweenGateAndTask(keys) {
+		t.Fatalf("the promotion's rehearsal is not between its backup gate and its release task: %v", keys)
+	}
+	lease, err := fixture.runs.ClaimNext(ctx, "production-worker", QueueBudget{Heavy: 1, Light: 1}, time.Minute)
+	if err != nil || lease == nil || lease.RunID != run.ID {
+		t.Fatalf("claim = %#v, %v", lease, err)
+	}
+	claimed, err := fixture.runs.Run(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := mustExecutionPlan(t, fixture, *claimed)
+	backend := &artifactBackendFake{
+		inspected: map[string]ResolvedImage{imageID: {Reference: imageID, Digest: imageID, ConfigDigest: imageID}},
+		local:     map[string]string{imageID: imageID},
+	}
+	runtime := &rehearsalRuntime{orderingRuntimeOwner: orderingRuntimeOwner{running: map[string]bool{}}, fail: map[bool]bool{}}
+	rehearser := &fakeRehearser{}
+	executor := &NormalizedStepExecutor{
+		store: fixture.runs, variables: fixture.variables, builder: NewArtifactBuilder(backend), runtime: runtime, rehearser: rehearser,
+	}
+	output := &recordingStepOutput{}
+	execution := StepExecution{Run: *claimed, ClaimToken: lease.Token, Output: output}
+	if result := executor.renderRuntime(ctx, execution, plan); result.State != StepPassed {
+		t.Fatalf("render = %#v\n%s", result, output.joined())
+	}
+
+	// Off for production: skipped with the reason, nothing restored.
+	if result := executor.rehearseMigration(ctx, execution, plan); result.State != StepSkipped || !strings.Contains(string(result.Evidence), "turned off") {
+		t.Fatalf("off = %+v", result)
+	}
+	if _, err := fixture.runs.PutRehearsalPolicy(ctx, fixture.projectID, fixture.envID, RehearsalPolicy{
+		Enabled: true, RestoreTimeoutSeconds: 600, MaxBackupMB: 2048,
+	}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	result := executor.rehearseMigration(ctx, execution, plan)
+	if result.State != StepPassed {
+		t.Fatalf("rehearsal = %+v\n%s", result, output.joined())
+	}
+	var report RehearsalReport
+	if err := json.Unmarshal(result.Evidence, &report); err != nil {
+		t.Fatal(err)
+	}
+	if !report.Rehearsed || report.Database.ConnectionID != 7 || len(report.Tasks) != 1 || report.Tasks[0].ExitCode != 0 || !report.CleanedUp {
+		t.Fatalf("report = %+v", report)
+	}
+	if len(runtime.requests) != 1 {
+		t.Fatalf("task runs = %d", len(runtime.requests))
+	}
+	request := runtime.requests[0]
+	// The task runs by the image's own id — staging's exact image, which
+	// the tag production gave it also names — never by a build of its own.
+	if !request.Rehearsal || request.Image != imageID || request.Run.Operation != OperationPromote ||
+		fmt.Sprint(request.Networks) != "[jd-rehearsal-net]" || request.Variables["DATABASE_URL"] != rehearsalDatabaseURL {
+		t.Fatalf("the rehearsal ran as image %s on %v with DATABASE_URL %q (rehearsal %v), want the promoted image %s with production's DATABASE_URL",
+			request.Image, request.Networks, request.Variables["DATABASE_URL"], request.Rehearsal, imageID)
+	}
+	if len(rehearser.prepared) != 1 || rehearser.prepared[0].ConnectionID != 7 || rehearser.prepared[0].Run.ID != run.ID {
+		t.Fatalf("copies prepared = %+v", rehearser.prepared)
+	}
+	if transcript := output.joined(); !strings.Contains(transcript, "promoted image "+imageID) || !strings.Contains(transcript, "production's variables") {
+		t.Fatalf("transcript does not say whose tasks ran in which image:\n%s", transcript)
+	}
+
+	// A task that fails against the copy ends the promotion before
+	// production is touched: no task ran outside a rehearsal.
+	runtime.fail[true] = true
+	failed := executor.rehearseMigration(ctx, execution, plan)
+	if failed.State != StepFailed || failed.ErrorCode != "rehearsal_failed" || !strings.Contains(failed.ErrorMessage, "before production was touched") {
+		t.Fatalf("failed rehearsal = %+v", failed)
+	}
+	for _, request := range runtime.requests {
+		if !request.Rehearsal {
+			t.Fatal("a task ran against production in a promotion whose rehearsal failed")
+		}
+	}
+
+	// Unavailable with blocking terms ends it the same way a build's run ends.
+	rehearser.err = fmt.Errorf("%w: no backup holds orders to restore a copy from", ErrRehearsalUnavailable)
+	if unavailable := executor.rehearseMigration(ctx, execution, plan); unavailable.State != StepFailed || unavailable.ErrorCode != "rehearsal_unavailable" {
+		t.Fatalf("unavailable = %+v", unavailable)
 	}
 }
 

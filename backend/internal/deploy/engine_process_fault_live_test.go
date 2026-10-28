@@ -25,89 +25,99 @@ func TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun(t *testing.T) {
 		t.Skip("set JD_DEPLOY_LIVE=1 to kill a real engine process")
 	}
 	host := buildEngineHost(t)
-	for _, stalled := range DefaultStepKeys {
-		t.Run(string(stalled), func(t *testing.T) {
-			dir := t.TempDir()
-			st, err := basestore.Open(dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer st.Close()
-			runs := NewOrchestrationStore(st)
-			projectID, environmentID := seedProcessFaultProject(t, st)
-			run, created, err := runs.Enqueue(context.Background(), RunRequest{
-				ProjectID: projectID, EnvironmentID: environmentID,
-				Operation: OperationDeploy, Trigger: TriggerManual, Actor: "admin",
-				RequestDigest: fmt.Sprintf("digest-%s-%d", stalled, time.Now().UnixNano()),
-				PlanRevision:  1, SlotClass: SlotLight,
+	// A deploy's steps and a promotion's (crashMatrixStepLists): the
+	// promotion's list starts at render_runtime, and the killed process is
+	// inside each of its steps in turn.
+	for _, list := range crashMatrixStepLists {
+		for _, stalled := range list.steps {
+			t.Run(list.name+"/"+string(stalled), func(t *testing.T) {
+				testLiveBackendKillAtStep(t, host, list.steps, stalled)
 			})
-			if err != nil || !created {
-				t.Fatalf("enqueue = %v, created=%v", err, created)
-			}
-
-			marker := filepath.Join(dir, "stalled")
-			child := exec.Command(host,
-				"-dir", dir, "-worker", "killed-backend", "-stall", string(stalled),
-				"-marker", marker, "-lease", "2s")
-			var output strings.Builder
-			child.Stdout, child.Stderr = &output, &output
-			if err := child.Start(); err != nil {
-				t.Fatal(err)
-			}
-			killed := false
-			defer func() {
-				if !killed {
-					_ = child.Process.Signal(syscall.SIGKILL)
-					_ = child.Wait()
-				}
-				if t.Failed() && output.Len() > 0 {
-					t.Logf("engine-host output:\n%s", output.String())
-				}
-			}()
-			waitForProcessFaultMarker(t, marker, 30*time.Second)
-
-			// SIGKILL, not SIGTERM: the engine's own shutdown path waits for
-			// adapters, and a test that used it would be measuring the clean
-			// path it is supposed to avoid.
-			if err := child.Process.Signal(syscall.SIGKILL); err != nil {
-				t.Fatal(err)
-			}
-			_ = child.Wait()
-			killed = true
-
-			// The step the killed process was inside must still carry its own
-			// output. Losing it is how a crash becomes unexplainable.
-			assertStepLogSurvived(t, runs, run.ID, stalled)
-
-			// A second backend starts against the same database, exactly as a
-			// restart would. Nothing tells it what the dead process was doing
-			// except the store.
-			recovered := NewEngine(runs, &recordingExecutor{}, nil, EngineConfig{
-				WorkerID: "restarted-backend", PollEvery: 10 * time.Millisecond, LeaseTTL: time.Minute,
-			}, nil)
-			if err := recovered.Start(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			defer func() {
-				shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				_ = recovered.Shutdown(shutdown)
-			}()
-
-			// The default reconciler refuses to guess: an interrupted step
-			// whose outcome cannot be proven ends the run rather than being
-			// replayed over side effects that may already exist.
-			final := waitForProcessFaultTerminal(t, runs, run.ID, 30*time.Second)
-			if final.State != RunFailed {
-				t.Fatalf("run state = %s, want %s", final.State, RunFailed)
-			}
-			if final.TerminalCode != "restart_evidence_missing" {
-				t.Fatalf("terminal code = %q, want restart_evidence_missing", final.TerminalCode)
-			}
-			assertNoActiveRuns(t, st, environmentID)
-			assertStepLogSurvived(t, runs, run.ID, stalled)
-		})
+		}
 	}
+}
+
+func testLiveBackendKillAtStep(t *testing.T, host string, planned []StepKey, stalled StepKey) {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := basestore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	runs := NewOrchestrationStore(st)
+	projectID, environmentID := seedProcessFaultProject(t, st)
+	run, created, err := runs.Enqueue(context.Background(), RunRequest{
+		ProjectID: projectID, EnvironmentID: environmentID,
+		Operation: OperationDeploy, Trigger: TriggerManual, Actor: "admin",
+		RequestDigest: fmt.Sprintf("digest-%s-%d", stalled, time.Now().UnixNano()),
+		PlanRevision:  1, SlotClass: SlotLight, Steps: append([]StepKey(nil), planned...),
+	})
+	if err != nil || !created {
+		t.Fatalf("enqueue = %v, created=%v", err, created)
+	}
+
+	marker := filepath.Join(dir, "stalled")
+	child := exec.Command(host,
+		"-dir", dir, "-worker", "killed-backend", "-stall", string(stalled),
+		"-marker", marker, "-lease", "2s")
+	var output strings.Builder
+	child.Stdout, child.Stderr = &output, &output
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	killed := false
+	defer func() {
+		if !killed {
+			_ = child.Process.Signal(syscall.SIGKILL)
+			_ = child.Wait()
+		}
+		if t.Failed() && output.Len() > 0 {
+			t.Logf("engine-host output:\n%s", output.String())
+		}
+	}()
+	waitForProcessFaultMarker(t, marker, 30*time.Second)
+
+	// SIGKILL, not SIGTERM: the engine's own shutdown path waits for
+	// adapters, and a test that used it would be measuring the clean
+	// path it is supposed to avoid.
+	if err := child.Process.Signal(syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	_ = child.Wait()
+	killed = true
+
+	// The step the killed process was inside must still carry its own
+	// output. Losing it is how a crash becomes unexplainable.
+	assertStepLogSurvived(t, runs, run.ID, stalled)
+
+	// A second backend starts against the same database, exactly as a
+	// restart would. Nothing tells it what the dead process was doing
+	// except the store.
+	recovered := NewEngine(runs, &recordingExecutor{}, nil, EngineConfig{
+		WorkerID: "restarted-backend", PollEvery: 10 * time.Millisecond, LeaseTTL: time.Minute,
+	}, nil)
+	if err := recovered.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = recovered.Shutdown(shutdown)
+	}()
+
+	// The default reconciler refuses to guess: an interrupted step
+	// whose outcome cannot be proven ends the run rather than being
+	// replayed over side effects that may already exist.
+	final := waitForProcessFaultTerminal(t, runs, run.ID, 30*time.Second)
+	if final.State != RunFailed {
+		t.Fatalf("run state = %s, want %s", final.State, RunFailed)
+	}
+	if final.TerminalCode != "restart_evidence_missing" {
+		t.Fatalf("terminal code = %q, want restart_evidence_missing", final.TerminalCode)
+	}
+	assertNoActiveRuns(t, st, environmentID)
+	assertStepLogSurvived(t, runs, run.ID, stalled)
 }
 
 func buildEngineHost(t *testing.T) string {

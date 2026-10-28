@@ -798,9 +798,13 @@ only renderer/executor/validation authority for their feature.
   leftovers before it starts and everything after, however it ends; a resumed run makes its copy
   again (`ReconcileResume`); and `Server.Start` removes every rehearsal before the engine resumes.
   Runtime observation never counts the copy (it has no release id) or its task (the release-task
-  label), and host container alerts leave both out.
-  Build settings carries the terms under the release tasks (`settings/rehearsal.tsx`), and the run
-  page reads the report as figures (`run-rehearsal.tsx`).
+  label), and host container alerts leave both out. A promotion takes the same step in the same place
+  (`PromotionStepKeys`, [staging and promotion](staging-promotion.md)): production's tasks with
+  production's variables, so the copy is of the database production's values reach, run in the image
+  staging built; the step reads production's terms, never staging's, and ends the promotion as it
+  would a deploy. Build settings carries the terms under the release tasks (`settings/rehearsal.tsx`),
+  the Promote confirmation says the tasks are rehearsed first while the terms are on, and the run page
+  reads the report as figures (`run-rehearsal.tsx`).
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
   retain-until windows, recent failed diagnostics, shared physical digests, every environment under
   an active deployment lease, and a staging release an unfinished promotion is about to take its image
@@ -1113,7 +1117,7 @@ only renderer/executor/validation authority for their feature.
   rollback clone only available immutable artifacts and traverse the same checks/cutover path (a clone
   carries its target's own source identity and promotion provenance); promote takes a staging release's
   exact image with production's current plan and variables, builds nothing, and runs a deploy's steps from
-  `render_runtime` on ([staging and promotion](staging-promotion.md)); restart
+  `render_runtime` on, the migration rehearsal included ([staging and promotion](staging-promotion.md)); restart
   stops and starts the existing live runtime without creating a release, then verifies the plan's
   readiness and smoke checks against that live release before recording it. Rollback, stop and restart use
   the destructive capability and ordinary confirmation, not a typed phrase; because stop and restart share

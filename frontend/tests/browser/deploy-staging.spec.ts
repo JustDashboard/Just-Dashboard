@@ -220,6 +220,7 @@ async function mockStaging(
           promotionOnly: false,
           pendingChanges: [],
           releaseTasks: ["migrate"],
+          rehearsal: true,
         },
         detail: {
           status: "available",
@@ -281,6 +282,9 @@ test("staging is added from the header, read through the switch and promoted wit
   )
   await expect(confirm.getByText("a different value")).toBeVisible()
   await expect(confirm.getByText("Production's release tasks run first")).toBeVisible()
+  await expect(
+    confirm.getByText(/rehearsed first in this image against a copy of production's database/),
+  ).toBeVisible()
   await expect(confirm.getByText("NODE_ENV")).toHaveCount(0)
   await confirm.getByRole("button", { name: "Promote to production" }).click()
   await expect(page).toHaveURL(/\/deploy\/7\/runs\/99$/)

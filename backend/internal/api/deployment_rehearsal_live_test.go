@@ -124,6 +124,21 @@ func TestLiveMigrationRehearsalRecoversFromThePointInTimeArchive(t *testing.T) {
 	live.rehearseBoth(conn.ID, "pitr", nil)
 }
 
+// The same gate in front of a promotion: production's release tasks, in the
+// image staging built, rehearsed against a copy of production's database
+// with production's variables before they run for real. Before any backup
+// the promotion ends rehearsal_unavailable; a migration that passes against
+// the copy reaches production; one that fails there ends the promotion
+// rehearsal_failed with production's schema, rows and live release as they
+// were, and the staging release still the one production last took.
+func TestLiveMigrationRehearsalGatesAPromotedRelease(t *testing.T) {
+	live := startLiveRehearsal(t, livePostgres)
+	live.promote = true
+	conn := live.database(fmt.Sprintf("jd-rehearsal-promote-%d", live.stamp))
+	live.seed(conn.ID)
+	live.rehearseBoth(conn.ID, "dump", func() { live.dump(conn.ID) })
+}
+
 // What a process stopped mid-rehearsal left — a copy, its volume, a task
 // container and the network — is removed at the next start, found by the
 // rehearsal label alone; a managed container without it is left.
@@ -189,6 +204,9 @@ type liveRehearsal struct {
 	ctx    context.Context
 	stamp  int64
 	engine liveEngine
+	// promote releases production by promoting a staging release of the
+	// same image instead of deploying production itself.
+	promote bool
 }
 
 func startLiveRehearsal(t *testing.T, engine liveEngine) *liveRehearsal {
@@ -318,6 +336,9 @@ func (l *liveRehearsal) rehearseBoth(connectionID int64, wantSource string, back
 	projectID, environmentID := liveRehearsalProject(t, admin, fmt.Sprintf("rehearsal-live-%d", l.stamp%1_000_000), image, connectionID, engine.addColumn)
 	t.Cleanup(func() {
 		removeEnvironmentArtifacts(t, environmentID)
+		// A promotion tags the image under production's release name; the
+		// tag goes with the environment, the image stays the database's.
+		removeLiveEnvironment(s, environmentID)
 		cleanup, stop := context.WithTimeout(context.Background(), time.Minute)
 		defer stop()
 		_ = s.modules.deployDatabases.RemoveRuntimeNetworks(cleanup, environmentID)
@@ -326,9 +347,33 @@ func (l *liveRehearsal) rehearseBoth(connectionID int64, wantSource string, back
 	if res := admin.do(http.MethodPut, base+"/rehearsal", `{"enabled":true,"whenUnavailable":"block","restoreTimeoutSeconds":600,"maxBackupMb":512}`, nil); res.Code != http.StatusOK {
 		t.Fatalf("rehearsal terms = %d %s", res.Code, res.Body.String())
 	}
+	release := func() deploy.RunSnapshot {
+		return liveRehearsalRun(t, admin, projectID, environmentID, "/runs", `{"operation":"deploy"}`)
+	}
+	var stagingRelease deploy.Release
+	if l.promote {
+		stagingRelease = l.stageRelease(projectID, environmentID)
+		release = func() deploy.RunSnapshot {
+			snapshot := liveRehearsalRun(t, admin, projectID, environmentID, "/promote", fmt.Sprintf(`{"releaseId":%d}`, stagingRelease.ID))
+			if snapshot.Run.Operation != deploy.OperationPromote || stepState(snapshot, deploy.StepBuildArtifact) != "" {
+				t.Fatalf("the promotion run is a %s with build step %q", snapshot.Run.Operation, stepState(snapshot, deploy.StepBuildArtifact))
+			}
+			if state := stepState(snapshot, deploy.StepRehearseMigration); state == "" {
+				t.Fatal("the promotion run has no rehearsal step")
+			}
+			return snapshot
+		}
+	}
+	liveReleaseID := func() int64 {
+		live, err := s.modules.deployRuns.LiveRelease(l.ctx, environmentID)
+		if err != nil {
+			return 0
+		}
+		return live.Release.ID
+	}
 
 	if backup != nil {
-		refused := liveRehearsalDeploy(t, admin, projectID, environmentID)
+		refused := release()
 		if refused.Run.State != deploy.RunFailed || refused.Run.TerminalCode != "rehearsal_unavailable" ||
 			!strings.Contains(refused.Run.TerminalReason, "no backup holds") {
 			t.Fatalf("a deploy with nothing to restore = %s %s: %s", refused.Run.State, refused.Run.TerminalCode, refused.Run.TerminalReason)
@@ -340,11 +385,14 @@ func (l *liveRehearsal) rehearseBoth(connectionID int64, wantSource string, back
 			t.Fatal("the migration reached production without a rehearsal")
 		}
 		liveRehearsalLeftNothing(t, refused)
+		if l.promote && liveReleaseID() != 0 {
+			t.Fatal("a promotion refused for want of a backup changed production's live release")
+		}
 		t.Logf("without a backup: %s", refused.Run.TerminalReason)
 		backup()
 	}
 
-	first := liveRehearsalDeploy(t, admin, projectID, environmentID)
+	first := release()
 	if first.Run.State != deploy.RunSucceeded {
 		t.Fatalf("the passing migration's run = %s %s: %s", first.Run.State, first.Run.TerminalCode, first.Run.TerminalReason)
 	}
@@ -376,11 +424,22 @@ func (l *liveRehearsal) rehearseBoth(connectionID int64, wantSource string, back
 	if !l.columnExists(connectionID, "sku") {
 		t.Fatal("the migration did not reach production after its rehearsal passed")
 	}
+	promoted := liveReleaseID()
+	if l.promote {
+		live, err := s.modules.deployRuns.LiveRelease(l.ctx, environmentID)
+		if err != nil || live.Release.Promotion == nil || live.Release.Promotion.ReleaseID != stagingRelease.ID {
+			t.Fatalf("production's live release after the promotion = %#v, %v", live, err)
+		}
+		if transcript := liveTranscript(t, s, first.Run.ID); !strings.Contains(transcript, "promoted image") || !strings.Contains(transcript, "no build") {
+			t.Fatalf("the promotion's transcript does not say the tasks were rehearsed in the promoted image with no build:\n%s", transcript)
+		}
+		t.Logf("production runs staging release %d, promoted with no build after its tasks were rehearsed", stagingRelease.Number)
+	}
 	before := l.columnNullable(connectionID, "name")
 
 	// The migration that fails on the data production holds.
 	liveRehearsalReleaseTask(t, admin, base, engine.setNotNull)
-	second := liveRehearsalDeploy(t, admin, projectID, environmentID)
+	second := release()
 	if second.Run.State != deploy.RunFailed || second.Run.TerminalCode != "rehearsal_failed" {
 		t.Fatalf("the failing migration's run = %s %s: %s", second.Run.State, second.Run.TerminalCode, second.Run.TerminalReason)
 	}
@@ -407,7 +466,51 @@ func (l *liveRehearsal) rehearseBoth(connectionID int64, wantSource string, back
 		t.Fatalf("the failing rehearsal's report = %+v", failed)
 	}
 	liveRehearsalLeftNothing(t, second)
+	if liveReleaseID() != promoted {
+		t.Fatalf("production's live release changed from %d to %d under a release whose rehearsal failed", promoted, liveReleaseID())
+	}
 	t.Logf("production schema unchanged (items.name is_nullable=%s), the copy's containers, volumes and network removed", before)
+}
+
+// stageRelease adds a staging environment beside production, takes its
+// release tasks away — staging has no database link, and the task is
+// production's to run — deploys it, and returns its live release: the image
+// production is promoted from.
+func (l *liveRehearsal) stageRelease(projectID, environmentID int64) deploy.Release {
+	t, s, admin := l.t, l.s, l.admin
+	t.Helper()
+	added := admin.do(http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/environments", projectID), `{"kind":"staging"}`, nil)
+	if added.Code != http.StatusCreated {
+		t.Fatalf("add staging = %d %s", added.Code, added.Body.String())
+	}
+	var copied deploy.StagingCopy
+	if err := json.Unmarshal(added.Body.Bytes(), &copied); err != nil {
+		t.Fatal(err)
+	}
+	staging := copied.Environment.ID
+	t.Cleanup(func() {
+		removeEnvironmentArtifacts(t, staging)
+		removeLiveEnvironment(s, staging)
+		cleanup, stop := context.WithTimeout(context.Background(), time.Minute)
+		defer stop()
+		_ = s.modules.deployDatabases.RemoveRuntimeNetworks(cleanup, staging)
+	})
+	liveRehearsalSetReleaseTasks(t, admin, fmt.Sprintf("/api/v1/deploy/%d/environments/%d", projectID, staging), nil)
+	built := liveRehearsalRun(t, admin, projectID, staging, "/runs", `{"operation":"deploy"}`)
+	if built.Run.State != deploy.RunSucceeded {
+		t.Fatalf("staging's deploy = %s %s: %s", built.Run.State, built.Run.TerminalCode, built.Run.TerminalReason)
+	}
+	live, err := s.modules.deployRuns.LiveRelease(l.ctx, staging)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.modules.deployRuns.PromotionSource(l.ctx, projectID, live.Release.ID); err != nil {
+		t.Fatalf("staging's release cannot be promoted: %v", err)
+	}
+	if _, err := s.modules.deployRuns.LiveRelease(l.ctx, environmentID); err == nil {
+		t.Fatal("production has a live release before anything was promoted")
+	}
+	return live.Release
 }
 
 // liveRehearsalLeftNothing checks the daemon for anything a run's rehearsal
@@ -527,12 +630,26 @@ func liveRehearsalProject(t *testing.T, c *client, name, image string, connectio
 
 func liveRehearsalReleaseTask(t *testing.T, c *client, base, task string) {
 	t.Helper()
+	liveRehearsalSetReleaseTasks(t, c, base, func(tasks []deploy.ReleaseTaskConfig) []deploy.ReleaseTaskConfig {
+		tasks[0].Command = task
+		return tasks
+	})
+}
+
+// liveRehearsalSetReleaseTasks saves the environment's configuration with
+// its release tasks changed by edit, or with none when edit is nil.
+func liveRehearsalSetReleaseTasks(t *testing.T, c *client, base string, edit func([]deploy.ReleaseTaskConfig) []deploy.ReleaseTaskConfig) {
+	t.Helper()
 	read := c.do(http.MethodGet, base+"/configuration", "", nil)
 	var current deploy.EnvironmentConfiguration
 	if err := json.Unmarshal(read.Body.Bytes(), &current); err != nil || read.Code != http.StatusOK {
 		t.Fatalf("configuration = %d %s", read.Code, read.Body.String())
 	}
-	current.Build.ReleaseTasks[0].Command = task
+	if edit == nil {
+		current.Build.ReleaseTasks = []deploy.ReleaseTaskConfig{}
+	} else {
+		current.Build.ReleaseTasks = edit(current.Build.ReleaseTasks)
+	}
 	body, _ := json.Marshal(deploy.ConfigurationWriteRequest{
 		Revision: current.Revision, Build: current.Build, Runtime: current.Runtime,
 		Dependencies: current.Dependencies, Checks: current.Checks, Domains: current.Domains,
@@ -542,12 +659,14 @@ func liveRehearsalReleaseTask(t *testing.T, c *client, base, task string) {
 	}
 }
 
-func liveRehearsalDeploy(t *testing.T, c *client, projectID, environmentID int64) deploy.RunSnapshot {
+// liveRehearsalRun queues a run through route — a deploy on /runs, a
+// promotion on /promote — and waits for it to end.
+func liveRehearsalRun(t *testing.T, c *client, projectID, environmentID int64, route, body string) deploy.RunSnapshot {
 	t.Helper()
-	res := c.do(http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/environments/%d/runs", projectID, environmentID), `{"operation":"deploy"}`, nil)
+	res := c.do(http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/environments/%d%s", projectID, environmentID, route), body, nil)
 	var run deploy.EngineRun
 	if err := json.Unmarshal(res.Body.Bytes(), &run); err != nil || res.Code != http.StatusAccepted {
-		t.Fatalf("deploy = %d %s", res.Code, res.Body.String())
+		t.Fatalf("POST %s = %d %s", route, res.Code, res.Body.String())
 	}
 	deadline := time.Now().Add(8 * time.Minute)
 	for {
