@@ -25,6 +25,17 @@ export default defineConfig({
   outputDir: "test-results",
   use: {
     baseURL,
+    /*
+      Every spec reads the same clock wherever it runs. CI is UTC; a
+      developer's machine is whatever it is, and a spec that typed a local
+      time and expected a `Z` string passed in one zone and failed in the
+      next. A spec that is about another zone sets `test.use({ timezoneId })`
+      itself, as logs-handoff.spec.ts does. The locale is pinned for the same
+      reason: formatted dates and numbers are what the page shows, and they
+      must not depend on the host's.
+    */
+    timezoneId: "UTC",
+    locale: "en-US",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },

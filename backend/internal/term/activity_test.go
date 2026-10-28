@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -260,4 +261,70 @@ func TestActivityFollowsTheForegroundJob(t *testing.T) {
 	type_("\x03")
 	until("prompt back after the CPU loop", 5*time.Second, func(a Activity) bool { return !a.Busy })
 	type_("exit\n")
+}
+
+// A change is sent to every subscriber's event channel, and Close, Unsubscribe
+// and a stalled broadcast close those channels. The sends used to run after
+// the session's lock was released, so a window closed while its read loop was
+// announcing a change could send on a channel that had just been closed: a
+// panic in the read loop, and under the race detector a report against any
+// API test that closed a window with a browser attached. Both now happen
+// under the one lock. This drives them against each other, with subscribers
+// that never read so the drain-and-retry path is covered as well, and checks
+// that every channel ends closed.
+func TestActivityDeliveryIsOrderedAgainstClose(t *testing.T) {
+	for round := 0; round < 25; round++ {
+		sess := &Session{
+			ID:          "test",
+			subscribers: map[int64]chan []byte{},
+			events:      map[int64]chan Activity{},
+			scrollback:  newRingBuffer(4096),
+		}
+		var ids []int64
+		var channels []<-chan Activity
+		for i := 0; i < 4; i++ {
+			_, id, _, err := sess.Subscribe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids = append(ids, id)
+			channels = append(channels, sess.Events(id))
+		}
+		var started, done sync.WaitGroup
+		for g := 0; g < 4; g++ {
+			started.Add(1)
+			done.Add(1)
+			go func() {
+				defer done.Done()
+				first := true
+				for !sess.isClosed() {
+					// Without a PTY every look finds an idle window, so the
+					// last answer is made to say otherwise: the next look is
+					// then a change, and a change is what gets delivered.
+					sess.mu.Lock()
+					sess.activity = Activity{Busy: true, Working: true, Process: "job"}
+					sess.mu.Unlock()
+					sess.Activity()
+					if first {
+						started.Done()
+						first = false
+					}
+				}
+			}()
+		}
+		started.Wait()
+		sess.Unsubscribe(ids[0])
+		sess.Close()
+		done.Wait()
+		for _, ch := range channels {
+			deadline := time.After(5 * time.Second)
+			for open := true; open; {
+				select {
+				case _, open = <-ch:
+				case <-deadline:
+					t.Fatal("an event channel was left open after Close")
+				}
+			}
+		}
+	}
 }

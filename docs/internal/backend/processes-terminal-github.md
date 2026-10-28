@@ -230,8 +230,12 @@ before native configuration runs. Their cleanup requests a native shell exit and
 including asynchronous editor helpers, before removing temporary HOME directories.
 PTY tests keep a background job in a different directory while
 checking the foreground prompt and new window, and also check a busy foreground program's directory,
-an empty argv and a pipeline whose leader has exited. These directory fixtures own and wait for their
-detached holders before removing temporary HOME directories, so shell history writes cannot race cleanup.
+an empty argv and a pipeline whose leader has exited. These directory fixtures, and the API fixture
+(`terminalServer`, `terminalHolders`), own and wait for their detached holders before removing temporary
+HOME directories, so shell history writes cannot race cleanup: a holder exits only after it has reaped its
+shell, and a hung-up bash writes `.bash_history` into `$HOME` on the way out, which once in a while landed
+between `t.TempDir`'s listing of that directory and its removal ("directory not empty"). Waiting is also
+what showed the lost hangup above: a holder that was never hung up never exits.
 API tests exercise live `cd` in a sibling source window, launch with a background job elsewhere, reject
 unknown agents and foreign source windows, and refuse an agent in a deleted source directory.
 For optional browser proof against real PTYs, set `JD_TERMINAL_BROWSER_EVIDENCE_DIR` to a temporary
@@ -286,7 +290,13 @@ the handshake, so the first browser to attach already gets it — and resumes re
 answers (a holder killed outright, a host reboot) is removed. `Shutdown` only lets go. Closing a window
 sends a hangup and drops the dashboard's copy of the master, the holder closes its own and the kernel
 hangs the terminal up; a shell still there after three seconds is killed, then the holder tells the
-dashboard and exits, and the unit is collected. `KillMode=process` makes the unit ending the holder
+dashboard and exits, and the unit is collected. The dashboard keeps the link open until that exit
+arrives, and its read loop closes it then (`Session.hangup`, bounded by `ptyhold.hangupAnswer`): `Kill`
+used to close the link in the same breath as the hangup, and a shell still printing when its window is
+closed — a prompt arriving just behind the last command, a build in full flow — has output on the link
+the dashboard has not read yet; closing a unixpacket socket with data unread on it resets the holder's
+end before it reads what is still queued, the hangup included, so the shell and its holder lived on,
+unlisted, until the host rebooted (`TestKillEndsAHeldShellThatIsStillPrinting`). `KillMode=process` makes the unit ending the holder
 ending: anything the operator deliberately left running (`nohup`, `disown`) survives as it would an ssh
 session closing. Terminals have no idle timeout, and the periodic clipboard cleanup never detaches or
 kills a session — work can run or wait for input with nobody watching. Protocol: SOCK_SEQPACKET,
@@ -358,6 +368,11 @@ keeps looking, so a silent job's CPU and the end of a run are noticed without ou
 window endpoints observe on request. Every change reaches attached browsers as a `state` control frame
 (`{title, busy, process, working, finishedAt}`), sent once after the replay and then on change, over a
 per-subscriber event channel beside the output channel so the byte stream is never interleaved with it.
+The sends never block and are made under the session's lock, the lock under which `Close`, `Unsubscribe`
+and a stalled `broadcast` close that channel, so a window closed while its read loop is announcing a
+change cannot send on a channel that was just closed; made after the lock was released, that was a panic
+in the read loop and a race report against any API test that closed a window with a browser attached
+(`TestActivityDeliveryIsOrderedAgainstClose`).
 `GET /terminal/` carries `named`, `busy` and `working` (any window), `finishedAt` (the latest) and
 `current` (the window last focused, else the newest) per workspace; `GET /terminal/{id}/windows` carries
 `named`, `title`, `busy`, `process`, `working` and `finishedAt` per window.

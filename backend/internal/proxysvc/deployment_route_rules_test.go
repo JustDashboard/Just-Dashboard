@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -159,6 +160,10 @@ func TestDeploymentRouteHostnamesIncludeRedirects(t *testing.T) {
 // What Caddy actually answers for a route's rules: the redirecting name
 // sends the path and query on, an address off the list is refused, and the
 // route's header replaces the application's own rather than joining it.
+// Then a route serving one name over HTTPS and another over plain HTTP, with
+// HSTS: the HTTPS name carries the policy and sends its plain-HTTP visitors
+// to HTTPS, the plain name is served as asked with neither, and the
+// inventory lists every name under the route.
 func TestLiveDockerCaddyServesRouteRules(t *testing.T) {
 	if os.Getenv("JD_DEPLOY_LIVE") != "1" {
 		t.Skip("set JD_DEPLOY_LIVE=1 for isolated Docker ingress test")
@@ -181,26 +186,45 @@ func TestLiveDockerCaddyServesRouteRules(t *testing.T) {
 	network := fmt.Sprintf("jd-ingress-rules-%d", time.Now().UnixNano())
 	docker("network", "create", network)
 	defer hostexec.Command(context.Background(), "docker", "network", "rm", network).Run()
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	bindings := []string{}
+	for _, port := range []string{"80", "443"} {
+		listener, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		bindings = append(bindings, "-p", fmt.Sprintf("127.0.0.1:%d:%s", listener.Addr().(*net.TCPAddr).Port, port))
+		listener.Close()
 	}
-	binding := fmt.Sprintf("127.0.0.1:%d:80", listener.Addr().(*net.TCPAddr).Port)
-	listener.Close()
-	id := docker("run", "-d", "--network", network, "-p", binding, "-v", source+":/etc/caddy/Caddyfile:ro", "-v", "/config", "-v", "/data", "caddy:2-alpine")
+	id := docker(append(append([]string{"run", "-d", "--network", network}, bindings...), "-v", source+":/etc/caddy/Caddyfile:ro", "-v", "/config", "-v", "/data", "caddy:2-alpine")...)
 	defer hostexec.Command(context.Background(), "docker", "rm", "-f", "-v", id).Run()
 	// The application sends the header the route is about to set, so the
 	// test can tell replaced from added.
 	app := docker("run", "-d", "-p", "127.0.0.1::80", "caddy:2-alpine", "caddy", "respond", "--listen", ":80", "--header", "X-Robots-Tag: all", "application answer")
 	defer hostexec.Command(context.Background(), "docker", "rm", "-f", "-v", app).Run()
-	published := func(id string) string { return strings.TrimPrefix(docker("port", id, "80/tcp"), "127.0.0.1:") }
+	published := func(id string, port string) string {
+		return strings.TrimPrefix(docker("port", id, port+"/tcp"), "127.0.0.1:")
+	}
 	edge := &dockerCaddy{ID: id, Name: "fixture", Source: source, Identity: "fixture-persistent-storage"}
-	endpoint := "http://127.0.0.1:" + published(id)
+	endpoint := "http://127.0.0.1:" + published(id, "80")
+	// The HTTPS name's certificate is the test's own, so the client trusts
+	// nothing and names the site; the name is what Caddy serves by.
 	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	get := func(host, path string) (*http.Response, error) {
 		req, _ := http.NewRequestWithContext(ctx, "GET", endpoint+path, nil)
 		req.Host = host
 		res, err := client.Do(req)
+		if err == nil {
+			res.Body.Close()
+		}
+		return res, err
+	}
+	getTLS := func(host, path string) (*http.Response, error) {
+		secure := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true, ServerName: host}, DisableKeepAlives: true,
+		}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		req, _ := http.NewRequestWithContext(ctx, "GET", "https://127.0.0.1:"+published(id, "443")+path, nil)
+		req.Host = host
+		res, err := secure.Do(req)
 		if err == nil {
 			res.Body.Close()
 		}
@@ -216,7 +240,7 @@ func TestLiveDockerCaddyServesRouteRules(t *testing.T) {
 	service := New(dir, source)
 	route := DeploymentRoute{
 		Name: "just-dashboard-env-43.conf", Domains: []string{"rules.example.test"},
-		Upstream:        "http://127.0.0.1:" + published(app),
+		Upstream:        "http://127.0.0.1:" + published(app, "80"),
 		Redirects:       []HostRedirect{{From: "www.rules.example.test", To: "rules.example.test"}},
 		ResponseHeaders: []HeaderValue{{Name: "X-Robots-Tag", Value: "noindex"}},
 		AllowFrom:       []string{"203.0.113.7"},
@@ -245,16 +269,75 @@ func TestLiveDockerCaddyServesRouteRules(t *testing.T) {
 	if got := res.Header.Values("X-Robots-Tag"); len(got) != 1 || got[0] != "noindex" {
 		t.Fatalf("X-Robots-Tag = %q, want the route's alone", got)
 	}
-	inventory, err := edge.vhosts(ctx)
-	if err != nil {
-		t.Fatal(err)
+	listed := func(want string) {
+		t.Helper()
+		inventory, err := edge.vhosts(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, site := range inventory {
+			names := append([]string(nil), site.ServerNames...)
+			sort.Strings(names)
+			if site.Name == route.Name && strings.Join(names, ",") == want {
+				return
+			}
+		}
+		t.Fatalf("the route's inventory does not carry %s: %+v", want, inventory)
 	}
-	for _, site := range inventory {
-		names := append([]string(nil), site.ServerNames...)
-		sort.Strings(names)
-		if site.Name == route.Name && strings.Join(names, ",") == "rules.example.test,www.rules.example.test" {
-			return
+	listed("rules.example.test,www.rules.example.test")
+
+	// One name over HTTPS with the test's own certificate and HSTS, the
+	// other over plain HTTP, each with a redirecting www. of its own scheme.
+	// The application sends an HSTS of its own, which the route's replaces.
+	certPEM, keyPEM, _ := selfSigned(t, "tls.rules.example.test", time.Now().Add(24*time.Hour))
+	certPath, keyPath := filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key")
+	for path, content := range map[string]string{certPath: certPEM, keyPath: keyPEM} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
 		}
 	}
-	t.Fatalf("the route's inventory does not carry both names: %+v", inventory)
+	hstsApp := docker("run", "-d", "-p", "127.0.0.1::80", "caddy:2-alpine", "caddy", "respond", "--listen", ":80", "--header", "Strict-Transport-Security: max-age=1", "application answer")
+	defer hostexec.Command(context.Background(), "docker", "rm", "-f", "-v", hstsApp).Run()
+	route = DeploymentRoute{
+		Name: route.Name, Domains: []string{"tls.rules.example.test", "rules.example.test"},
+		Upstream: "http://127.0.0.1:" + published(hstsApp, "80"), TLS: true, ForceHTTPS: true,
+		CertPath: certPath, KeyPath: keyPath,
+		Redirects: []HostRedirect{
+			{From: "www.tls.rules.example.test", To: "tls.rules.example.test"},
+			{From: "www.rules.example.test", To: "rules.example.test"},
+		},
+		PlainHostnames: []string{"rules.example.test", "www.rules.example.test"},
+		HSTS:           &DeploymentHSTS{MaxAge: 31536000, IncludeSubDomains: true},
+		AllowFrom:      []string{"0.0.0.0/0"},
+	}
+	if result, err := service.applyDockerCaddyRoute(ctx, edge, route); err != nil || !result.Verified {
+		t.Fatalf("mixed apply=%+v error=%v; fixture log: %s", result, err, docker("logs", id))
+	}
+	res, err = getTLS("tls.rules.example.test", "/")
+	if err != nil || res.StatusCode != 200 {
+		t.Fatalf("the HTTPS name over TLS = %v %v", res, err)
+	}
+	if got := res.Header.Values("Strict-Transport-Security"); len(got) != 1 || got[0] != "max-age=31536000; includeSubDomains" {
+		t.Fatalf("HSTS on the HTTPS name = %q, want the route's alone", got)
+	}
+	res, err = get("tls.rules.example.test", "/pricing?plan=team")
+	if err != nil || res.StatusCode != 308 || res.Header.Get("Location") != "https://tls.rules.example.test/pricing?plan=team" {
+		t.Fatalf("the HTTPS name over plain HTTP = %v %v", res, err)
+	}
+	res, err = get("rules.example.test", "/")
+	if err != nil || res.StatusCode != 200 || res.Header.Get("Location") != "" {
+		t.Fatalf("the plain name was not served as asked: %v %v", res, err)
+	}
+	if got := res.Header.Values("Strict-Transport-Security"); len(got) != 0 {
+		t.Fatalf("the plain name was sent HSTS: %q", got)
+	}
+	res, err = get("www.rules.example.test", "/pricing?plan=team")
+	if err != nil || res.StatusCode != 308 || res.Header.Get("Location") != "http://rules.example.test/pricing?plan=team" {
+		t.Fatalf("the plain redirecting name = %v %v", res, err)
+	}
+	res, err = get("www.tls.rules.example.test", "/pricing?plan=team")
+	if err != nil || res.StatusCode != 308 || res.Header.Get("Location") != "https://www.tls.rules.example.test/pricing?plan=team" {
+		t.Fatalf("the HTTPS redirecting name over plain HTTP = %v %v", res, err)
+	}
+	listed("rules.example.test,tls.rules.example.test,www.rules.example.test,www.tls.rules.example.test")
 }

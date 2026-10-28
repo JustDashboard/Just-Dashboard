@@ -330,7 +330,6 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 	if len(route.Domains) == 0 {
 		return "", errors.New("a public route needs a domain")
 	}
-	names := []string{}
 	for _, name := range route.Domains {
 		if !certDomainRe.MatchString(name) {
 			return "", errors.New("invalid managed Caddy domain")
@@ -340,15 +339,10 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		// Caddy's automatic HTTPS would try to order for the wildcard
 		// itself, which it can only answer with a DNS provider module the
 		// caddy:2-alpine image does not carry, and fail at every renewal.
-		if strings.HasPrefix(name, "*.") && route.TLS && !servesExplicitCertificate(route) {
+		if strings.HasPrefix(name, "*.") && !route.plain(name) && !servesExplicitCertificate(route) {
 			return "", errors.New("a wildcard route on the Caddy ingress serves a certificate issued over a DNS challenge, and none was resolved for " + name)
 		}
-		if !route.TLS {
-			name = "http://" + name
-		}
-		names = append(names, name)
 	}
-	sort.Strings(names)
 	// A deployment's route has pages and a maintenance switch, named after
 	// it; the nameless route a certificate is issued through has neither.
 	pages := ""
@@ -411,16 +405,29 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 	if err := validateDeploymentRules(route); err != nil {
 		return "", err
 	}
-	headerDirective := ""
-	if len(route.ResponseHeaders) > 0 {
-		lines := make([]string, 0, len(route.ResponseHeaders)+1)
+	// Deferred, so each header is set as the answer is written and replaces
+	// the application's own rather than being sent beside it. HSTS is one of
+	// them on the HTTPS block alone, and the plain block drops the
+	// application's own: the control owns the header on the route, a
+	// browser ignores it over plain HTTP anyway, and a plain name promising
+	// HTTPS it does not serve would be a lie.
+	headerDirective := func(https bool) string {
+		lines := []string{}
+		if route.HSTS != nil {
+			if https {
+				lines = append(lines, "    Strict-Transport-Security "+strconv.Quote(route.HSTS.Value()))
+			} else {
+				lines = append(lines, "    -Strict-Transport-Security")
+			}
+		}
 		for _, header := range route.ResponseHeaders {
 			lines = append(lines, "    "+header.Name+" "+strconv.Quote(header.Value))
 		}
-		// Deferred, so the header is set as the answer is written and
-		// replaces the application's own rather than being sent beside it.
+		if len(lines) == 0 {
+			return ""
+		}
 		lines = append(lines, "    defer")
-		headerDirective = "  header {\n" + strings.Join(lines, "\n") + "\n  }\n"
+		return "  header {\n" + strings.Join(lines, "\n") + "\n  }\n"
 	}
 	gateDirective := ""
 	if route.ForwardAuth != nil {
@@ -449,22 +456,59 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 	if fence != "" || maintenance != "" || route.ForwardAuth != nil {
 		handling = "  route {\n" + indentCaddy(handling) + "  }\n"
 	}
-	out := "# Managed by Just Dashboard\n" + strings.Join(names, ", ") + " {\n" + tlsDirective + logDirective + headerDirective + handling + errorPages + "}\n"
+	// The names served over HTTPS are one site block and the names served
+	// over plain HTTP another, the same handling in each: Caddy refuses a
+	// `tls` directive in a block with an http:// address, and the plain
+	// names have no certificate to serve. A route without TLS is the plain
+	// block alone, as it always was.
+	block := func(names []string, https bool) string {
+		addresses := append([]string(nil), names...)
+		sort.Strings(addresses)
+		content := ""
+		if https {
+			content = tlsDirective
+		} else {
+			for index := range addresses {
+				addresses[index] = "http://" + addresses[index]
+			}
+		}
+		return strings.Join(addresses, ", ") + " {\n" + content + logDirective + headerDirective(https) + handling + errorPages + "}\n"
+	}
+	tlsServed, plainServed := route.servedByScheme()
+	out := "# Managed by Just Dashboard\n"
+	if len(tlsServed) > 0 {
+		out += block(tlsServed, true)
+	}
+	if len(plainServed) > 0 {
+		if len(tlsServed) > 0 {
+			out += "\n"
+		}
+		out += block(plainServed, false)
+	}
 	redirects := append([]HostRedirect(nil), route.Redirects...)
 	sort.Slice(redirects, func(i, j int) bool { return redirects[i].From < redirects[j].From })
 	for _, redirect := range redirects {
-		from, scheme := strings.ToLower(redirect.From), "https://"
+		from, to := strings.ToLower(redirect.From), strings.ToLower(redirect.To)
 		if !certDomainRe.MatchString(from) {
 			return "", errors.New("invalid managed Caddy domain")
 		}
-		if !route.TLS {
-			from, scheme = "http://"+from, "http://"
-		}
 		// The redirecting name gets the same certificate handling as the
 		// route and nothing else: it serves no application, so it has no
-		// password, fence or request record of its own.
-		out += "\n" + from + " {\n" + tlsDirective +
-			"  redir " + scheme + strings.ToLower(redirect.To) + "{uri} " + strconv.Itoa(redirect.HostRedirectCode()) + "\n}\n"
+		// password, fence or request record of its own. A plain name
+		// answers on port 80 alone, and the visitor is sent on over the
+		// scheme the domain is served on.
+		tls := ""
+		if route.plain(from) {
+			from = "http://" + from
+		} else {
+			tls = tlsDirective
+		}
+		scheme := "https://"
+		if route.plain(to) {
+			scheme = "http://"
+		}
+		out += "\n" + from + " {\n" + tls +
+			"  redir " + scheme + to + "{uri} " + strconv.Itoa(redirect.HostRedirectCode()) + "\n}\n"
 	}
 	return out, nil
 }

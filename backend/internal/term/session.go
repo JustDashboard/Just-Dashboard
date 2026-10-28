@@ -77,7 +77,10 @@ type Session struct {
 	// process's copy of the master, for input, size and the foreground group,
 	// and the output arrives from the holder; cmd is nil, because the shell is
 	// not this process's child.
-	holder      *ptyhold.Conn
+	holder *ptyhold.Conn
+	// hungUp is set once the holder has been asked to end the session; the
+	// link to it then outlives Close, until the holder has answered.
+	hungUp      bool
 	subscribers map[int64]chan []byte
 	// events carries activity changes to the subscribers that asked for them,
 	// beside their output channel rather than inside it: the output stream is
@@ -378,6 +381,10 @@ func (s *Session) readLoop(onExit func()) {
 // this reads the holder.
 func (s *Session) readHolder(onExit func()) {
 	defer onExit()
+	// The link is this goroutine's to close: after a hangup it stays open
+	// until the holder's exit arrives (see hangup), and on the other paths
+	// Close has closed it already, which costs nothing to repeat.
+	defer s.holder.Close()
 	buf := make([]byte, ptyhold.MaxPacket)
 	for {
 		kind, data, err := s.holder.Read(buf)
@@ -403,6 +410,25 @@ func (s *Session) seed(past []byte) {
 	s.mu.Unlock()
 }
 
+// hangup asks a held session's holder to end it. Close, next, drops this
+// process's copy of the master, the other half of the hangup; the link itself
+// stays open until the holder has answered, and readHolder closes it then.
+// Kill used to close it here, in the same breath as the hangup, and a shell
+// still printing — a prompt arriving just behind the last command, a build in
+// full flow — has output on the link the dashboard has not read yet; closing a
+// unixpacket socket with data unread on it resets the holder's end before it
+// reads what is still queued, the hangup included. The shell lived on, and
+// the holder with it, unlisted, until the host rebooted.
+func (s *Session) hangup() {
+	s.mu.Lock()
+	link := s.holder
+	s.hungUp = link != nil
+	s.mu.Unlock()
+	if link != nil {
+		link.Hangup()
+	}
+}
+
 // Close tears down this process's hold on the PTY. A PTY this process owns ends
 // with it; a tmux-backed session keeps running inside tmux and a held one
 // inside its holder, so closing either only lets go of it, which is what makes
@@ -424,6 +450,10 @@ func (s *Session) Close() error {
 		s.tick = nil
 	}
 	f, cmd, link := s.pty, s.cmd, s.holder
+	if s.hungUp {
+		// readHolder closes the link once the holder has answered.
+		link = nil
+	}
 	s.mu.Unlock()
 
 	if link != nil {

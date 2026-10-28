@@ -489,7 +489,7 @@ func (e *NormalizedStepExecutor) activateWarmRelease(ctx context.Context, execut
 			if !ok {
 				return fail("certificate_unavailable", "TLS route activation cannot resolve an existing certificate.", nil)
 			}
-			certPath, keyPath, resolveErr := resolver.ResolveDeploymentCertificate(ctx, value.Hostnames())
+			certPath, keyPath, resolveErr := resolver.ResolveDeploymentCertificate(ctx, value.TLSHostnames())
 			if resolveErr != nil {
 				return fail("certificate_unavailable", "No existing certificate covers every HTTPS domain.", nil)
 			}
@@ -654,7 +654,7 @@ func (e *NormalizedStepExecutor) restoreLiveRoute(ctx context.Context, releaseID
 		if resolver, ok := e.proxy.(interface {
 			ResolveDeploymentCertificate(context.Context, []string) (string, string, error)
 		}); ok {
-			certPath, keyPath, err := resolver.ResolveDeploymentCertificate(ctx, route.Hostnames())
+			certPath, keyPath, err := resolver.ResolveDeploymentCertificate(ctx, route.TLSHostnames())
 			if err != nil {
 				return err
 			}
