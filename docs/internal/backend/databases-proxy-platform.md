@@ -1525,7 +1525,9 @@ the page.
   SQL engines export their counters and gauges by the engine's own key in snake case, beside the
   shared connection, size, uptime and pool series; Redis and MongoDB export the fixed sets in
   `redisPromReads` and `mongoPromReads`. The route is for **API keys only**: no credential is 401, a session
-  cookie is `403 token_required`, and a key narrowed to `metrics.read` is admitted here and
+  cookie is `403 token_required`, and a key narrowed to `metrics.read` is admitted here, at the
+  deployments' sibling `GET /api/v1/metrics/deployments`
+  ([request observability](../deployments/request-observability.md#the-prometheus-exposition)) and
   refused everywhere else ([request lifecycle](../architecture/request-lifecycle.md)). It is not
   audited per scrape, like every read; minting a key records `dashboard.token.create` with its
   `scope`. `GET /databases/metrics-export` (any role) answers the endpoint, the retention, the

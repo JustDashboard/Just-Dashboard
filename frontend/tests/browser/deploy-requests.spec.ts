@@ -1052,25 +1052,31 @@ test.describe("a deployment's traffic", () => {
       .toBe(true)
   })
 
-  test("an empty feed says the record began when the dashboard did", async ({ page }) => {
+  test("an empty feed says when the record began and how long it is kept", async ({ page }) => {
     await mockProject(page)
     await page.route("**/api/v1/deploy/7/lifecycle*", (route) =>
       json(route, {
         status: "available",
         watching: true,
-        // The buffer lives in the backend's memory, so this is a restart three
-        // minutes ago rather than a deployment that has been steady all week.
+        // The dashboard restarted three minutes ago; the record did not start
+        // with it, and the feed says so rather than hedging.
         since: new Date(Date.now() - 3 * 60_000).toISOString(),
+        recordSince: "2026-09-20T07:28:00Z",
+        retentionDays: 30,
         events: [],
       }),
     )
     await page.goto("/deploy/7/logs")
     await page.getByRole("button", { name: "Events", exact: true }).click()
 
-    await expect(page.getByText("Nothing has happened since the dashboard started")).toBeVisible()
-    await expect(
-      page.getByText(/not yet evidence that the deployment has been steady/),
-    ).toBeVisible()
+    await expect(page.getByText("Nothing has happened to these containers")).toBeVisible()
+    await expect(page.getByText(/since the record began on/)).toBeVisible()
+    await expect(page.getByText(/kept for 30 days and survives a restart/)).toBeVisible()
+    await expect(page.getByText("Nothing has happened since the dashboard started")).toHaveCount(0)
+    // The footer names the record rather than the process.
+    await expect(page.getByText(/record since/)).toBeVisible()
+    await expect(page.getByText("kept 30 days")).toBeVisible()
+    await expect(page.getByText("kept in memory")).toHaveCount(0)
   })
 
   test("the view and the moment it is scoped to survive a reload", async ({ page }) => {
