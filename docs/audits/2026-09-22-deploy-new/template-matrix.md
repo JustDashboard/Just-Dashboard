@@ -1,6 +1,6 @@
 # Template and recipe review, 2026-09-22
 
-The shipped catalogue contains **82 definitions**: **77 offered**, of which **75 can deploy** — 55 single images through the image runtime and 20 multi-service templates through the Compose release path (added 2026-10-27, listed in their own table below). The two Minecraft definitions remain preview-only. Five retired definitions stay resolvable for existing deployments and recovery; new drafts, preflight and commit refuse them.
+The shipped catalogue contains **102 definitions**: **97 offered**, of which **95 can deploy** — 69 single images through the image runtime and 26 multi-service templates through the Compose release path (20 added 2026-10-27 and listed in their own table below; the second batch of twenty one-click templates, fourteen single images and six stacks, added 2026-10-28, has its own table further down). The two Minecraft definitions remain preview-only. Five retired definitions stay resolvable for existing deployments and recovery; new drafts, preflight and commit refuse them.
 
 This table records the current definitions and the automated configuration checks. Fresh runtime results are recorded in the companion review report; a rendered plan is not proof that an image started or that first sign-in succeeded.
 
@@ -103,6 +103,37 @@ Each runs as one Compose stack: one public service behind the domain, the others
 | [wordpress](../../../backend/internal/blueprint/builtin/wordpress.json) | Yes | Yes | setup | None |
 
 Access kinds among them: 12 setup and eight credentials. Directus, authentik and Planka require an administrator e-mail; every other required input is the suggested domain. Umami (it creates `admin`/`umami` for everybody, with no variable to change it) and Outline (no sign-in without an external OIDC, Slack or Google provider or SMTP) were reviewed and not added; Immich was left for a later pass.
+
+## One-click templates, second batch (2026-10-28)
+
+Twenty more templates present in both Coolify's and Dokploy's catalogues: fourteen single images and six stacks. Every single image was started by `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks` and every stack by `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks`, with the same requirements as the tables above. Two images whose registry publishes no release tag (Excalidraw, BentoPDF) are pinned by content digest.
+
+| Definition | Offered | Deployable | Profile | First access | Required inputs without defaults |
+| --- | --- | --- | --- | --- | --- |
+| [bentopdf](../../../backend/internal/blueprint/builtin/bentopdf.json) | Yes | Yes | web | open | None |
+| [changedetection](../../../backend/internal/blueprint/builtin/changedetection.json) | Yes | Yes | web | open | domain (suggested) |
+| [convertx](../../../backend/internal/blueprint/builtin/convertx.json) | Yes | Yes | web | setup | None |
+| [dashy](../../../backend/internal/blueprint/builtin/dashy.json) | Yes | Yes | web | open | None |
+| [excalidraw](../../../backend/internal/blueprint/builtin/excalidraw.json) | Yes | Yes | web | open | None |
+| [gotenberg](../../../backend/internal/blueprint/builtin/gotenberg.json) | Yes | Yes | web | client | None |
+| [homarr](../../../backend/internal/blueprint/builtin/homarr.json) | Yes | Yes | web | setup | None |
+| [homebox](../../../backend/internal/blueprint/builtin/homebox.json) | Yes | Yes | web | setup | None |
+| [karakeep](../../../backend/internal/blueprint/builtin/karakeep.json) | Yes | Yes | compose (web, chrome, meilisearch) | setup | domain (suggested) |
+| [kimai](../../../backend/internal/blueprint/builtin/kimai.json) | Yes | Yes | compose (kimai, db) | credentials | domain (suggested), admin-email |
+| [librespeed](../../../backend/internal/blueprint/builtin/librespeed.json) | Yes | Yes | web | open | None |
+| [libretranslate](../../../backend/internal/blueprint/builtin/libretranslate.json) | Yes | Yes | web | open | None |
+| [linkwarden](../../../backend/internal/blueprint/builtin/linkwarden.json) | Yes | Yes | compose (linkwarden, db) | setup | domain (suggested) |
+| [mailpit](../../../backend/internal/blueprint/builtin/mailpit.json) | Yes | Yes | web | open | None |
+| [metube](../../../backend/internal/blueprint/builtin/metube.json) | Yes | Yes | web | open | None |
+| [onetimesecret](../../../backend/internal/blueprint/builtin/onetimesecret.json) | Yes | Yes | compose (app, maindb) | open | domain (suggested) |
+| [pairdrop](../../../backend/internal/blueprint/builtin/pairdrop.json) | Yes | Yes | web | open | None |
+| [privatebin](../../../backend/internal/blueprint/builtin/privatebin.json) | Yes | Yes | web | open | None |
+| [yamtrack](../../../backend/internal/blueprint/builtin/yamtrack.json) | Yes | Yes | compose (yamtrack, cache) | setup | domain (suggested) |
+| [zipline](../../../backend/internal/blueprint/builtin/zipline.json) | Yes | Yes | compose (zipline, db) | setup | domain (suggested) |
+
+Access kinds among them: 11 open, seven setup, one credentials (Kimai, whose `admin` account takes the generated `ADMINPASS` and the administrator e-mail typed in) and one client (Gotenberg, an API whose basic authentication the template switches on with a named user and a generated password; its `/health` route is registered outside that middleware, so the readiness probe still answers). The open ones are tools without accounts of their own (a whiteboard, a pastebin, a speed test, a mail catcher); each note says so and points at the domain's password protection. LibreSpeed generates a password for its statistics page and Mailpit's own interface authentication is one `user:password` variable the catalogue cannot compose, which is why both stay `open`.
+
+Reviewed and **not added**, each replaced from the agreed list of alternates: **Umami**, **BookStack** (`admin@admin.com`/`password`), **Calibre-Web** (`admin`/`admin123`) and **Mealie** (`changeme@example.com`/`MyPassword`, whose settings mark the two values as no longer settable) all create the same first account for everybody with no variable to change it, which is the `unavailable` access kind and may ship only retired; **PocketBase** has no official image and prints its first-superuser link only into its own log; **Glance** refuses to start without a `glance.yml` the template cannot install; **Hoppscotch** needs a one-shot `prisma migrate deploy` container before the first start (a service that must exit, which a stack cannot declare) and signs in only by e-mailed link or OAuth; **Vikunja**'s image is `FROM scratch` running as uid 1000 with no data directory in the image, so a fresh managed volume is root-owned and it exits with `permission denied` (upstream tells users to `chown` a bind mount). Among the alternates, **mosquitto** was skipped because any authentication needs a configuration file and the only file-less mode is the image's anonymous broker on a published port, **chibisafe** because it is two images behind a reverse-proxy configuration file, **Snipe-IT** on the Laravel `APP_KEY` rule that rejected Speedtest Tracker, **Fider** because it signs in only by e-mailed link, **Reactive Resume** because it needs MinIO and a headless browser beside it, and **SilverBullet** because its only authentication is one `user:password` variable, so it would ship open.
 
 ## Confirmed defects and fixes
 

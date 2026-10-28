@@ -242,3 +242,19 @@ collection's hashicorp-vault.svg, renamed after the store kind the page uses;
 infisical.svg and doppler.svg are unchanged. OpenBao has no file here: the
 collection's openbao.svg is a wordmark set in a web font that does not read at
 24px, so the page draws a lock rather than a mark that is not the project's.
+
+The one-click templates added in 0.8.2's second pass are drawn as the
+application each one runs, from the same collection under the Apache License
+2.0: homarr.svg, karakeep.svg, kimai.svg, mailpit.svg, metube.svg,
+privatebin.svg, yamtrack.svg and bentopdf.svg are the collection's files,
+unchanged; librespeed.svg is its librespeed-light variant, drawn for a dark
+ground; changedetection.svg had its #3056d3 lifted to #918cff and homebox.svg
+its black outlines (and one unfilled path) to #a4a4a4, each the same hue at
+the L 0.72 rung; libretranslate.svg is the collection's black glyph drawn in
+#ffffff, as the other black marks are, with its editor metadata removed.
+dashy.webp, gotenberg.webp, linkwarden.webp, pairdrop.webp and convertx.webp
+are the collection's PNG files, resized to 96px WebP the way docker-compose.webp
+was. excalidraw.svg, already here for the drawing editor, draws the Excalidraw
+template too. Onetime Secret has no file in any of the three collections, and
+Zipline's is a wordmark that does not read at 24px, so both keep the plain
+glyph rather than a mark that is not the project's.

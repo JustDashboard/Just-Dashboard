@@ -308,6 +308,7 @@ func TestEveryTemplateDeploysFromWhatTheNewProjectPageCanFillIn(t *testing.T) {
 		"open-webui":        {"admin-email"},
 		"authentik":         {"admin-email"},
 		"planka":            {"admin-email"},
+		"kimai":             {"admin-email"},
 	}
 	definitions, err := blueprint.Catalog()
 	if err != nil {

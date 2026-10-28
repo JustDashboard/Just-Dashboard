@@ -1648,10 +1648,13 @@ only renderer/executor/validation authority for their feature.
   next to a routed primary (Gitea's SSH, Syncthing's sync protocol) becomes an additional
   `runtime.ports[]` publication on its own number (see published ports below) instead of silently
   replacing the routed port; the primary always stays the one the proxy and the checks reach. The
-  catalogue ships 82 reviewed definitions, 77 of them offered (see "how the first sign-in works"
-  below for the five that are retired; 20 are the multi-service templates of the next item), every
+  catalogue ships 102 reviewed definitions, 97 of them offered (see "how the first sign-in works"
+  below for the five that are retired; 26 are the multi-service templates of the next item), every
   image reference resolved against its registry (`docker manifest inspect`) and every deployable one
-  started live: `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks` renders each single-image
+  started live. An image whose registry publishes no release tag (Excalidraw and BentoPDF on Docker
+  Hub ship only a moving `latest`) is pinned as `name:tag@sha256:…`, the content digest the
+  validator already admits, so the definition still names exactly one build; a newer build is a new
+  digest in the definition. The sweep: `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks` renders each single-image
   definition from its fixture inputs, pulls the image, starts it through the real runtime
   owner with generated secrets, runs the definition's own readiness checks against the published
   loopback port (Mongo Express with a catalogue MongoDB beside it) and removes what it pulled;

@@ -78,7 +78,8 @@ Unsupported automatic detection retains the explicit Dockerfile, image and Compo
 
 The [template matrix](template-matrix.md) records all 62 definitions shipped at the time of this audit:
 55 deployable entries, two game-server previews and five retired entries (it has since gained the 20
-multi-service templates of 0.8.2, with their own live sweep). All 55 deployable entries passed the real Docker
+multi-service templates of 0.8.2, with their own live sweep, and the second batch of twenty
+one-click templates — fourteen single images and six stacks — each started by the same sweeps). All 55 deployable entries passed the real Docker
 startup/readiness sweep. All five managed database engines passed real connection, replacement and
 reconnection tests. All 22 framework fixtures built and served their expected responses.
 
