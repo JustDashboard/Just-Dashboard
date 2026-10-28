@@ -242,9 +242,21 @@ func (c *Conn) Read(buf []byte) (Kind, []byte, error) {
 // SetMeta replaces the record the holder keeps for the dashboard.
 func (c *Conn) SetMeta(meta []byte) error { return c.send(kindMeta, meta) }
 
+// hangupAnswer is how long the dashboard keeps reading after a hangup for the
+// holder's exit: the shell's grace, the holder's flush and a loaded host's
+// margin. A holder that has not answered by then is given up on, which ends
+// the dashboard's read loop on the link.
+const hangupAnswer = 15 * time.Second
+
 // Hangup ends the session. The caller must also close its copy of the master,
-// because the terminal is hung up only once every descriptor on it is closed.
-func (c *Conn) Hangup() error { return c.send(kindHangup, nil) }
+// because the terminal is hung up only once every descriptor on it is closed,
+// and must keep reading the connection until the holder's Exit arrives rather
+// than close it: closing a unixpacket socket with data unread on it resets the
+// holder's end before it reads what is still queued, this packet included.
+func (c *Conn) Hangup() error {
+	c.conn.SetReadDeadline(time.Now().Add(hangupAnswer))
+	return c.send(kindHangup, nil)
+}
 
 // Close lets go of the holder, which carries on without us.
 func (c *Conn) Close() error { return c.conn.Close() }

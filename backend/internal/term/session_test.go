@@ -116,6 +116,39 @@ func TestCWDReportsEmptyArgvPipelineAfterLeaderExit(t *testing.T) {
 	}
 }
 
+// Kill asks the holder to end the session over the link, and used to close the
+// link in the same breath. A shell that is still printing — a prompt arriving
+// just behind the last command, a build in full flow — has output on that
+// link the dashboard has not read yet, and closing a unixpacket socket with
+// data unread on it resets the holder's end before it reads what is still
+// queued, the hangup included. The shell lived on, and the holder with it,
+// unlisted, until the host rebooted. The link now stays open until the holder
+// has answered. The shell here never stops printing, so there is always
+// output in flight when Kill runs.
+func TestKillEndsAHeldShellThatIsStillPrinting(t *testing.T) {
+	for round := 0; round < 5; round++ {
+		m, sess, out := cwdSession(t)
+		if _, err := sess.Write([]byte("while :; do echo tick; done\n")); err != nil {
+			t.Fatal(err)
+		}
+		await(t, out, "", "tick")
+		pid := sess.PID
+		if err := m.Kill(context.Background(), sess.ID); err != nil {
+			t.Fatal(err)
+		}
+		// The holder hangs the shell up, kills it after its grace if it is
+		// still there, reaps it and only then exits; a reaped process is one
+		// a signal no longer finds.
+		deadline := time.Now().Add(10 * time.Second)
+		for syscall.Kill(pid, 0) == nil {
+			if time.Now().After(deadline) {
+				t.Fatalf("round %d: shell %d is still running after Kill", round, pid)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+}
+
 func cwdSession(t *testing.T) (*Manager, *Session, <-chan []byte) {
 	return cwdSessionWithShell(t, "")
 }
