@@ -69,6 +69,13 @@ type SiteSpec struct {
 	// derives its names from the domains; these are named outright, which is
 	// what a deployment route needs: its www. is a domain the plan lists.
 	HostRedirects []HostRedirect `json:"hostRedirects,omitempty"`
+	// PlainDomains are names among Domains a TLS site serves over plain
+	// HTTP alone: a server of their own on port 80, with no certificate, no
+	// redirect to HTTPS and no HSTS, marked so the parser reads them back.
+	// A site without TLS serves every name that way and lists none. A
+	// deployment's domains each choose, so one HTTPS name no longer puts
+	// the others behind a certificate that does not cover them.
+	PlainDomains []string `json:"plainDomains,omitempty"`
 
 	TLS        bool   `json:"tls"`
 	CertPath   string `json:"certPath,omitempty"`
@@ -194,6 +201,10 @@ type SiteSpec struct {
 	// NginxVarIdent. RenderNginx sets it on its own copy when a variable
 	// would be too long for nginx under the whole NginxIdent.
 	shortVars bool
+	// deployment says the spec is a deployment's route, whose rules are
+	// set on its Domains settings rather than the Proxy page's form, so a
+	// refusal points at the control the reader has.
+	deployment bool
 	// Custom is appended verbatim inside the server block. It is the escape
 	// hatch, and it is the one field not validated beyond refusing an
 	// unbalanced brace — a form that cannot express everything needs
@@ -524,6 +535,9 @@ func ValidateSpec(spec *SiteSpec) error {
 		return err
 	}
 	if err := validTLSOptions(spec); err != nil {
+		return err
+	}
+	if err := validPlainDomains(spec); err != nil {
 		return err
 	}
 	switch spec.HostHeader {

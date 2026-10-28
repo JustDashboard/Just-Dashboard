@@ -236,6 +236,40 @@ func TestPreflightReportsProxyTrustAndTheBodyLimit(t *testing.T) {
 	}
 }
 
+// HSTS reaches the served HTTPS names and says which plain names it does
+// not; with no HTTPS name served it warns, since nobody receives it; and a
+// plan without it, or without a domain, has no finding.
+func TestPreflightReportsWhereHSTSReaches(t *testing.T) {
+	t.Parallel()
+	python := DetectedCandidate{Name: "api", BuildMethod: BuildRecipe, Recipe: "python", Framework: "django", StartCommand: "gunicorn x"}
+	configuration := networkConfiguration("python", "gunicorn x", 8000)
+	configuration.Domains = []PlannedDomain{
+		{Hostname: "app.example.test", HTTPS: true, Ownership: OwnershipManaged},
+		{Hostname: "old.example.test", Ownership: OwnershipManaged},
+		{Hostname: "www.app.example.test", HTTPS: true, Ownership: OwnershipManaged, RedirectTo: "app.example.test"},
+	}
+	if found := findingByCode(networkFindings(networkDraft(python, ProfileWeb), configuration), "hsts"); found != nil {
+		t.Fatalf("a plan without HSTS got a finding: %+v", found)
+	}
+	configuration.Runtime.HSTS = &RouteHSTS{MaxAge: 31536000, IncludeSubDomains: true}
+	found := findingByCode(networkFindings(networkDraft(python, ProfileWeb), configuration), "hsts")
+	if found == nil || found.Severity != PreflightPass || found.Title != "Browsers are told to keep to HTTPS on app.example.test" ||
+		found.Measured != "max-age=31536000; includeSubDomains" || found.FieldID != "runtime.hsts" ||
+		!strings.Contains(found.Means, "old.example.test is served over plain HTTP and is not sent it") {
+		t.Fatalf("HSTS = %+v", found)
+	}
+	configuration.Domains[0].HTTPS = false
+	found = findingByCode(networkFindings(networkDraft(python, ProfileWeb), configuration), "hsts")
+	if found == nil || found.Severity != PreflightWarning || found.Title != "HSTS is on, but no domain is served over HTTPS" ||
+		!strings.Contains(found.Action, "Turn HTTPS on") {
+		t.Fatalf("HSTS without an HTTPS name = %+v", found)
+	}
+	configuration.Domains = nil
+	if found := findingByCode(networkFindings(networkDraft(python, ProfileWeb), configuration), "hsts"); found != nil {
+		t.Fatalf("a plan without a domain got a finding: %+v", found)
+	}
+}
+
 func TestRequestBodyLimitIsValidated(t *testing.T) {
 	t.Parallel()
 	for limit, valid := range map[int]bool{0: true, 1: true, 64: true, MaxRequestBodyMB: true, -1: false, MaxRequestBodyMB + 1: false} {

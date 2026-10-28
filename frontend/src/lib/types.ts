@@ -5247,6 +5247,8 @@ export type DeploymentConfiguration = {
     errorPages?: DeploymentErrorPage[]
     /** Gives the application's own answers with those codes the page too. */
     interceptErrors?: boolean
+    /** Strict-Transport-Security on every HTTPS answer; absent sends none. */
+    hsts?: DeploymentRouteHSTS
     mounts?: {
       source: string
       target: string
@@ -5318,6 +5320,18 @@ export type DeploymentForwardAuth = {
   signIn: string
   /** Leaves this environment's route open and gates only the previews made from it. */
   previewsOnly?: boolean
+}
+
+/**
+ * A deployment route's HSTS policy, sent on its HTTPS domains alone and held
+ * to the bounds a Proxy site's control is: max-age in seconds (absent is six
+ * months; five minutes to two years), the subdomains too, and preload, which
+ * needs a year and the subdomains.
+ */
+export type DeploymentRouteHSTS = {
+  maxAge?: number
+  includeSubDomains?: boolean
+  preload?: boolean
 }
 
 /** What a deployment's maintenance does while it is on. */

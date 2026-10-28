@@ -122,7 +122,10 @@ the code on a network-restricted machine.
 
 **Browser testing.** Playwright tests live in `frontend/tests/browser`; `playwright.config.ts` starts a
 local frontend unless `JD_BROWSER_BASE_URL` points at an already-running disposable stack. Chromium is
-the required gate. Set `JD_BROWSER_PROJECTS=all` for the opt-in Firefox/WebKit evidence run. Deployment
+the required gate. Every spec runs in UTC with an `en-US` locale (`use.timezoneId`, `use.locale`), the
+zone CI runs in, so a local time typed into a page names the same instant on any developer's machine; a
+spec about another zone sets `test.use({ timezoneId })` itself (`logs-handoff.spec.ts`), and a spec that
+types a local time computes the instant it expects in the page rather than writing a `Z` string. Set `JD_BROWSER_PROJECTS=all` for the opt-in Firefox/WebKit evidence run. Deployment
 journeys use the real API, SQLite queue, and a uniquely labelled Docker fixture namespace; provider and
 DNS boundaries may be stubbed, but the orchestration path may not. Traces/screenshots are retained only
 on failure under ignored `test-results`/`playwright-report` directories.

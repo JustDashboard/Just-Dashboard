@@ -34,6 +34,7 @@ import type {
   DeploymentMaintenanceSwitch,
   DeploymentPageName,
   DeploymentRedirectCode,
+  DeploymentRouteHSTS,
   Exposure,
   ForwardAuthProvider,
 } from "@/lib/types"
@@ -73,9 +74,23 @@ import {
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import { OwnershipSelect } from "@/components/deploy/settings/mounts"
 import { useProject } from "@/components/deploy/project-context"
-import { HeaderListField, ListField } from "@/components/proxy/site-form"
+import {
+  HSTS_DEFAULT_MAX_AGE,
+  HSTS_MAX_AGES,
+  HSTS_PRELOAD_MAX_AGE,
+  HeaderListField,
+  ListField,
+} from "@/components/proxy/site-form"
 import { PAGE_LABEL, PageEditor } from "@/components/proxy/page-editor"
-import { routeAccessState, signInConflicts } from "@/components/deploy/settings/route-access"
+import { useConfirm } from "@/components/confirm-dialog"
+import {
+  hstsOffered,
+  hstsPolicyState,
+  routeAccessState,
+  savedHSTS,
+  signInConflicts,
+  withPreload,
+} from "@/components/deploy/settings/route-access"
 import {
   ERROR_PAGES,
   errorPagesState,
@@ -146,7 +161,8 @@ export function DomainsSettings({
           {(configuration.domains.length > 0 ||
             Boolean(configuration.runtime.allowFrom?.length) ||
             Boolean(configuration.runtime.responseHeaders?.length) ||
-            Boolean(configuration.runtime.forwardAuth)) && (
+            Boolean(configuration.runtime.forwardAuth) ||
+            Boolean(configuration.runtime.hsts)) && (
             <RouteRulesForm configuration={configuration} save={state.save} />
           )}
           {(configuration.domains.length > 0 ||
@@ -503,6 +519,14 @@ function DomainRow({
               <span className="truncate">
                 Redirects to <span className="font-mono">{domain.redirectTo}</span>
               </span>
+            </span>
+          )}
+          {/* Each name is served on its own scheme: an HTTPS name sends its
+              plain-HTTP visitors on, a plain one is served as asked, whatever
+              the other names on the route do — so the row says which. */}
+          {!domain.redirectTo && (
+            <span key={scheme} className="animate-rise text-muted-foreground">
+              {domain.https ? "Plain HTTP is redirected to HTTPS" : "Plain HTTP, no redirect"}
             </span>
           )}
           {/* The issuer is the row's mark, so the line carries the state and the
@@ -994,6 +1018,7 @@ type RouteRules = {
   allowFrom: string[]
   responseHeaders: { name: string; value: string }[]
   forwardAuth?: DeploymentForwardAuth
+  hsts?: DeploymentRouteHSTS
 }
 
 type SignInField = "provider" | "verify" | "signIn"
@@ -1004,6 +1029,7 @@ function refusedRule(
 ): { rule: keyof RouteRules; part?: SignInField } | undefined {
   if (field?.startsWith("runtime.allowFrom")) return { rule: "allowFrom" }
   if (field?.startsWith("runtime.responseHeaders")) return { rule: "responseHeaders" }
+  if (field?.startsWith("runtime.hsts")) return { rule: "hsts" }
   if (field?.startsWith("runtime.forwardAuth")) {
     const part = field.slice("runtime.forwardAuth.".length) as SignInField
     return {
@@ -1027,15 +1053,17 @@ function savedSignIn(gate: DeploymentForwardAuth | undefined): DeploymentForward
 
 /**
  * Who reaches the domains above, and what every answer carries: the route's
- * allowed addresses, its sign-in and its response headers. They are the
- * route's rather than a hostname's — the proxy serves every name from one
- * site — so they are one form under the list instead of a control repeated
- * on every row. They are listed in the order a request meets them: the
- * address list refuses first, then the sign-in, then the headers are set on
- * whatever is answered.
+ * allowed addresses, its sign-in, its HSTS and its response headers. They
+ * are the route's rather than a hostname's — the proxy serves every name
+ * from one site — so they are one form under the list instead of a control
+ * repeated on every row. They are listed in the order a request meets them:
+ * the address list refuses first, then the sign-in, then the headers are set
+ * on whatever is answered. HSTS is one of those headers, sent on the HTTPS
+ * domains alone, so it is offered only while one serves the application —
+ * or while a policy is saved and has to stay removable.
  *
  * They live in the plan's runtime, beside the upload limit, and this form
- * writes only those three fields of it, so a Runtime save never undoes them
+ * writes only those four fields of it, so a Runtime save never undoes them
  * and this save never undoes a Runtime edit.
  */
 function RouteRulesForm({
@@ -1052,6 +1080,7 @@ function RouteRulesForm({
     allowFrom: configuration.runtime.allowFrom ?? [],
     responseHeaders: configuration.runtime.responseHeaders ?? [],
     forwardAuth: configuration.runtime.forwardAuth,
+    hsts: configuration.runtime.hsts,
   }
   const draft = useSettingDraft(`deploy.${project.projectId}.settings.route-rules`, saved)
   const rules = draft.value
@@ -1073,6 +1102,7 @@ function RouteRulesForm({
           allowFrom: rules.allowFrom.length > 0 ? rules.allowFrom : undefined,
           responseHeaders: rules.responseHeaders.length > 0 ? rules.responseHeaders : undefined,
           forwardAuth: savedSignIn(rules.forwardAuth),
+          hsts: savedHSTS(rules.hsts),
         }),
       })
       return true
@@ -1124,6 +1154,15 @@ function RouteRulesForm({
           refusal={refusal?.rule === "forwardAuth" ? refusal : undefined}
           disabled={!canAdmin}
         />
+        {hstsOffered(configuration.domains, rules.hsts) && (
+          <RouteHSTS
+            hsts={rules.hsts}
+            domains={configuration.domains}
+            onChange={(hsts) => draft.set({ ...rules, hsts })}
+            refusal={refusal?.rule === "hsts" ? refusal.message : undefined}
+            disabled={!canAdmin}
+          />
+        )}
         <HeaderListField
           id="route-response-headers"
           label="Response headers"
@@ -1135,6 +1174,141 @@ function RouteRulesForm({
         />
       </SettingSection>
     </SettingForm>
+  )
+}
+
+/**
+ * HSTS: Strict-Transport-Security on every HTTPS answer the route gives,
+ * with the same lifetimes, subdomains and preload a Proxy site's control
+ * offers, because it is the same header. A domain served over plain HTTP is
+ * never sent it, and the row says which domains are. Preload is behind a
+ * confirmation, as it is on the Proxy page: once a browser ships with the
+ * name built in, removing the header changes nothing for months.
+ */
+function RouteHSTS({
+  hsts,
+  domains,
+  onChange,
+  refusal,
+  disabled,
+}: {
+  hsts: DeploymentRouteHSTS | undefined
+  domains: DeploymentEnvironmentConfiguration["domains"]
+  onChange: (hsts: DeploymentRouteHSTS | undefined) => void
+  refusal?: string
+  disabled: boolean
+}) {
+  const { confirm, dialog } = useConfirm()
+  const https = domains.filter((domain) => domain.https && !domain.redirectTo)
+  const plain = domains.filter((domain) => !domain.https && !domain.redirectTo)
+  const maxAge = hsts?.maxAge || HSTS_DEFAULT_MAX_AGE
+  const listed = HSTS_MAX_AGES.some((age) => age.value === maxAge)
+  const update = (patch: Partial<DeploymentRouteHSTS>) => hsts && onChange({ ...hsts, ...patch })
+  const askPreload = () =>
+    hsts &&
+    confirm({
+      title: "Ask browsers to preload HSTS",
+      description: (
+        <>
+          The header will carry <code className="font-mono">preload</code>, which lets{" "}
+          {https[0]?.hostname ?? "the domain"} be submitted to the list browsers ship with. Once it
+          is in, every subdomain must serve HTTPS, and leaving the list takes months of browser
+          releases. The policy is raised to at least a year and covers subdomains, as the list
+          requires.
+        </>
+      ),
+      confirmLabel: "Turn on preload",
+      action: async () => onChange(withPreload(hsts)),
+    })
+  const sentOn =
+    https.length > 0
+      ? `Sent on ${https.map((domain) => domain.hostname).join(", ")}`
+      : "Sent on no domain until one serves the application over HTTPS"
+  const notOn =
+    plain.length > 0
+      ? `; ${plain.map((domain) => domain.hostname).join(", ")} ${plain.length === 1 ? "is" : "are"} served over plain HTTP and not sent it.`
+      : "."
+  return (
+    <OptionList>
+      <OptionRow
+        title="HSTS"
+        hint={`Tells browsers never to use plain HTTP for the HTTPS domains above again. Hard to undo — a mistake sticks for as long as the policy says. ${sentOn}${notOn}`}
+        checked={Boolean(hsts)}
+        disabled={disabled}
+        onCheckedChange={(on) => onChange(on ? { includeSubDomains: true } : undefined)}
+      >
+        {hsts && (
+          <div className="space-y-3">
+            <Field
+              label="Remember for"
+              htmlFor="route-hsts-max-age"
+              hint="Start short while checking every subdomain works over HTTPS, then raise it."
+              trailing={
+                <Status
+                  key={hstsPolicyState(hsts)}
+                  tone="running"
+                  label={hstsPolicyState(hsts)}
+                  className="animate-rise"
+                />
+              }
+            >
+              <Select
+                value={String(maxAge)}
+                onValueChange={(value) =>
+                  update({
+                    maxAge: Number(value) === HSTS_DEFAULT_MAX_AGE ? undefined : Number(value),
+                  })
+                }
+                disabled={disabled}
+              >
+                <SelectTrigger id="route-hsts-max-age" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {!listed && <SelectItem value={String(maxAge)}>{`${maxAge} seconds`}</SelectItem>}
+                  {HSTS_MAX_AGES.map((age) => (
+                    <SelectItem
+                      key={age.value}
+                      value={String(age.value)}
+                      disabled={hsts.preload && age.value < HSTS_PRELOAD_MAX_AGE}
+                    >
+                      {age.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <OptionList>
+              <OptionRow
+                title="Include subdomains"
+                hint="Every name under the HTTPS domains must serve HTTPS too, including ones on other servers."
+                checked={Boolean(hsts.includeSubDomains)}
+                disabled={disabled}
+                onCheckedChange={(on) =>
+                  update({
+                    includeSubDomains: on || undefined,
+                    preload: on ? hsts.preload : undefined,
+                  })
+                }
+              />
+              <OptionRow
+                title="Preload"
+                hint="Lets the domain be built into browsers. Needs a year and subdomains; very slow to undo."
+                checked={Boolean(hsts.preload)}
+                disabled={disabled}
+                onCheckedChange={(on) => (on ? askPreload() : update({ preload: undefined }))}
+              />
+            </OptionList>
+            {refusal && (
+              <FormNote role="alert" tone="danger">
+                {refusal}
+              </FormNote>
+            )}
+          </div>
+        )}
+      </OptionRow>
+      {dialog}
+    </OptionList>
   )
 }
 
