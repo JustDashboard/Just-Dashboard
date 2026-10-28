@@ -41,8 +41,9 @@ only renderer/executor/validation authority for their feature.
   admin-authored stored release task (including migrated pre/post commands) with a resolved working
   directory and explicit scoped environment; a task with `runner: "image"` runs that command inside a
   throwaway container of the release's own image rather than in the dashboard's shell.
-- Creation is a revisioned, owner-scoped server draft. `GET /deploy/drafts` (session, or a deploy key reaching every deployment) lists the caller's
-  own uncommitted, unexpired drafts newest first — id, name from intent, a one-line source summary,
+- Creation is a revisioned, owner-scoped server draft. `GET /deploy/drafts` (session or deploy key; a deploy key lists
+  the drafts it made, recorded in `deploy_drafts.key_id`, and a session every draft of its account's, its keys'
+  included) lists the caller's own uncommitted, unexpired drafts newest first — id, name from intent, a one-line source summary,
   `currentStep`, `updatedAt`, `expiresAt` — so the new-project page can offer to resume one instead of
   starting a new setup over; a committed or expired draft has nothing left to resume and is excluded.
   `DELETE /deploy/drafts/{draft}` (session or deploy key, audited `deploy.draft.discard`) throws one away: every
@@ -750,7 +751,8 @@ only renderer/executor/validation authority for their feature.
   the `rehearse_migration` step, between `backup_gate` and `release_task`, so it runs only after the
   backup it restores from has been verified and before any task touches production. It is off by
   default and turned on per environment (`deploy_rehearsal_policies`, `GET`/`PUT
-  /deploy/{id}/environments/{env}/rehearsal`, `system.admin` with a session, audited as
+  /deploy/{id}/environments/{env}/rehearsal`: the read for whoever reads the environment, a deploy key
+  included; the write `system.admin` with a session, audited as
   `deploy.rehearsal.update`; a preview has no row). A run with no release tasks, or with rehearsal
   off, skips the step with the reason. Otherwise the target is the managed database the tasks'
   resolved variables address by its `db-<id>.jd.internal` or `db-<id>-pool.jd.internal` name — the
@@ -1004,7 +1006,9 @@ only renderer/executor/validation authority for their feature.
   `deploy.rollback_policy.update`; `POST …/rollback-watch/rollback` is the instant rollback by hand
   (destructive, ordinary confirmation, `409 no_warm_release` without a watching window, audited
   `deploy.release.instant_rollback`); `POST …/rollback-watch/keep` (service control) ends the window now
-  and removes the warm container, audited `deploy.release.keep`. The live proof is
+  and removes the warm container, audited `deploy.release.keep`. The read, the instant rollback and
+  keep are a deploy key's too (`jd status`, `jd rollback --instant`, `jd keep`); the terms stay a
+  session's. The live proof is
   `TestLiveMetricGatedRollbackSwitchesBackToTheWarmRelease` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
 - A failed build names its cause instead of `internal_error` and exec's `exit status 1`. `dockerx`
   reads buildx's plain progress as it streams (over `os.Pipe`s read to EOF, because a `StdoutPipe` is
@@ -1321,7 +1325,14 @@ only renderer/executor/validation authority for their feature.
   (reveals, saved credentials, secret-store connections, pull-request merge/comment and previews,
   schedules, alerts, channels, drains, adding and removing an environment, a route's maintenance and
   error pages, the warm-release terms, the migration rehearsal's terms, the
-  typed-phrase removals) stays a session's and answers it `session_required`. Its writes are
+  typed-phrase removals) stays a session's and answers it `session_required`. The operating verbs an
+  ordinary key already had are the deploy key's as well: `POST …/promote`,
+  `POST …/rollback-watch/rollback` and `…/keep`, `PUT …/maintenance` (who is let past is the
+  configuration's `runtime.maintenance.bypassFrom`, applied by the next release), with the reads
+  `GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/maintenance`,
+  `…/pages/{page}` and `…/rehearsal`; `GET /deploy/secret-stores`, an ordinary key's read, answers it
+  `key_scope`, since the list carries each connection's address and sign-in fields and every
+  deployment's variables that read a store, and the key cannot point a variable at one. Its writes are
   held to what a person in a session could not be refused: a generate or rotate answers it without
   `generatedValue`; a plan it commits, or an environment change it makes, may not carry host authority
   (`hostAuthority`: a folder on the server, Docker Compose, privileged, host network, capabilities,
@@ -1332,7 +1343,11 @@ only renderer/executor/validation authority for their feature.
   `store` reference (on a draft, checked at commit with `Draft.VariableReferences`, which reads a value's mode
   as the commit stores it), nor, for a key narrowed to some deployments, at a `server` shared
   variable. A key narrowed to chosen deployments
-  (`api_token_deployments`) lists and reaches only those. `GET /deploy/{id}/runs/{run}/transcript?after=&limit=`
+  (`api_token_deployments`) lists and reaches only those. Drafts are every deploy key's own
+  (`deploy_drafts.key_id`; `AuthorizeDraftForKey`): a key never reads, changes, commits or discards a
+  session's or another key's, and a narrowed key's commit adds the deployment it creates to its grant
+  in the commit's transaction (`DraftCommitRequest.GrantToKey`), so the key reaches what it made;
+  duplicating is of a deployment the key reaches, and the draft is the key's. `GET /deploy/{id}/runs/{run}/transcript?after=&limit=`
   reads a run's log lines after a sequence number, oldest first, with the run and its steps and
   `{next, more}` (`OrchestrationStore.RunTranscriptAfter`): what the stream route sends over its socket,
   for a client without one — `jd logs --follow` and `jd deploy --wait` poll it. The `jd` program itself
@@ -1804,7 +1819,9 @@ only renderer/executor/validation authority for their feature.
   the write is `system.admin` in a session, at most 256 KiB, audited `deploy.page`) and served from the
   next answer. The switch is `GET`/`PUT /deploy/{id}/environments/{env}/maintenance` `{on}`, the write
   behind `s.destructive` as stopping a deployment and a Proxy site's maintenance are, audited
-  `deploy.maintenance` with the outcome. Readiness and smoke checks dial the candidate directly and are
+  `deploy.maintenance` with the outcome; a deploy key reaches the switch and reads a page
+  (`jd maintenance APP on|off`, whose `--bypass` writes `runtime.maintenance.bypassFrom` through the
+  configuration first), while a page's write stays a session's. Readiness and smoke checks dial the candidate directly and are
   untouched; a `public_route` check, which goes through the route and would read the maintenance page,
   is not run while the switch is on and records `maintenance` as its code, so a release can be deployed
   during a migration window. The Domains settings show the switch as its own **Maintenance** form,
@@ -1895,7 +1912,8 @@ only renderer/executor/validation authority for their feature.
   source revision alone is what makes it report a `source` pending change, and the Git watcher already keys
   its cursor on the desired source's own config digest, so a changed URL/ref/subdirectory resets that cursor
   and the very next poll reports `branch_changed` on its own.
-- `POST /deploy/{id}/duplicate` `{name}` (`system.admin`, session or a deploy key reaching every deployment, audited `deploy.project.duplicate`) creates
+- `POST /deploy/{id}/duplicate` `{name}` (`system.admin`, session or a deploy key that reaches the deployment, the draft then
+  being the key's own, audited `deploy.project.duplicate`) creates
   a draft pre-filled from the project's current desired source and configuration — the same draft the
   new-project page resumes with `?draft=`, landing at the `configuration` step with no `detection` yet, so
   the operator still runs detect/preflight/commit like any other draft. `PlanningStore.Duplicate` copies the

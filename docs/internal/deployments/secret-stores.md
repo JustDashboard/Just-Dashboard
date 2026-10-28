@@ -98,7 +98,7 @@ store's last read, in amber with the store's words when it failed.
 
 | Route | Who | Notes |
 | --- | --- | --- |
-| `GET /deploy/secret-stores` | any signed-in role | No credential, no value; `usedBy` names each active variable that reads the store |
+| `GET /deploy/secret-stores` | any signed-in role, or an ordinary key; a deploy key is refused `key_scope` | No credential, no value; `usedBy` names each active variable that reads the store — which, with the address and sign-in fields, is why a deploy key does not read the list (it cannot point a variable at a store either) |
 | `POST /deploy/secret-stores`, `PUT …/{id}` | `system.admin`, session | `400` for an invalid connection, `409 name_taken` |
 | `POST …/{id}/test` | `system.admin`, session | Signs in, says who the store took the connection to be, and with `{path, key}` reads that key and reports its version; a refusal is `200` with `ok: false` and the store's words, recorded on the connection |
 | `DELETE …/{id}` | `s.destructive`, session | `409 secret_store_in_use` naming every variable that still reads it |

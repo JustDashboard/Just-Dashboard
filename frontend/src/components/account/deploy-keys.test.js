@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { curlExample, scopeWords } from "./api-keys"
 import {
+  DEPLOY_KEY_CAN,
   DEPLOY_KEY_CANNOT,
   deployKeyBody,
   deployKeyReady,
@@ -62,7 +63,17 @@ test("what a deploy key cannot do names the secrets it never reads", () => {
   const words = DEPLOY_KEY_CANNOT.join(" ")
   expect(words).toContain("never a value")
   expect(words).toContain("credentials")
+  expect(words).toContain("secret-store")
   expect(words).toContain("pull requests")
+  expect(words).toContain("rehearsal terms")
+})
+
+test("what a deploy key can do names the verbs beside a deploy and a narrowed key's drafts", () => {
+  const words = DEPLOY_KEY_CAN.join(" ")
+  for (const verb of ["promote", "warm release", "maintenance", "drafts", "narrowed"]) {
+    expect(words).toContain(verb)
+  }
+  expect(words).not.toContain("every deployment")
 })
 
 test("search finds a key by its job as well as its role", () => {

@@ -45,7 +45,9 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
 - **A deploy key** (`api_tokens.scope = 'deploy'`, minted on `POST /tokens/deploy` by an administrator
   in a session, or from Account → API keys) is what `jd` and CI use, and it **deliberately reopens
   part of the session-only surface**: the deployment writes that were a session's alone — drafts,
-  configuration, source, Git policy, triggers, variables and shared variables — answer it. It holds
+  configuration, source, Git policy, triggers, variables and shared variables — answer it, and so do
+  the operating verbs an ordinary key had (promote, the warm release's instant rollback and keep, the
+  maintenance switch) with their reads. It holds
   the administrator role, narrowed to its owner's now. `Authenticate`, `AuthenticateScoped` and
   `AuthenticateMCP` refuse it with `403 key_scope`; the feature group authenticates with
   `httpx.AuthenticateFeatures(s.deployKeyGate(root), …)`, which asks the router itself which route
@@ -55,11 +57,14 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   reason, and anything unlisted — including any route added later until it is given a line — answers
   `403 key_scope`. A refusal is audited as `auth.deploy_key.refused` with the key, because it happens
   before the group's audit middleware. Reveals, saved credentials, the GitHub-speaking pull-request
-  verbs, preview approval and the typed-phrase removals stay session-only for it. A key narrowed to
+  verbs, preview approval, the typed-phrase removals, the warm-release and rehearsal terms and a
+  route's pages stay session-only for it. A key narrowed to
   chosen deployments (`api_token_deployments`, read with the key on every request) reaches only
   routes whose `{id}` it was given and whose `{env}` belongs to that deployment, and none marked
-  `every` (drafts, duplication, server shared variables, fleet-wide reads); `GET /deploy/` lists only
-  its deployments. The handlers hold what a deploy key writes: generated values are withheld, and a
+  `every` (server shared variables, fleet-wide reads); `GET /deploy/` lists only its deployments. A
+  deploy key's drafts are its own (`deploy_drafts.key_id`; `deploymentDraftForPrincipal` holds the key
+  to them), and the deployment a narrowed key's commit creates joins its grant in the commit's
+  transaction. The handlers hold what a deploy key writes: generated values are withheld, and a
   plan or environment change that would reach the host, redirect a saved credential, or point a
   variable at a credential, database or secret store is refused with `session_required` (see
   [invariant 4](../security/invariants.md)).

@@ -24,8 +24,11 @@ func (s *Server) handleDeploymentDuplicate(w http.ResponseWriter, r *http.Reques
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
+	// A deploy key's draft is the key's own (draftKeyID); a key narrowed to
+	// some deployments reaches this route for those alone (deployKeyGate),
+	// and the deployment it commits the draft into is added to its grant.
 	principal := httpx.MustPrincipal(r)
-	draft, err := s.modules.deployPlanning.Duplicate(r.Context(), projectID, principal.UserID(), principal.Username(), request.Name)
+	draft, err := s.modules.deployPlanning.DuplicateForKey(r.Context(), projectID, principal.UserID(), principal.Username(), request.Name, draftKeyID(principal))
 	if err != nil {
 		return mapDeploymentPlanningError(err)
 	}

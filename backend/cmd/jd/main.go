@@ -45,6 +45,11 @@ Deployments
   logs APP [--run N] [--follow] Print a run's transcript (default: the active run, else the last)
   releases APP                  List retained releases
   rollback APP [--to ID] [--wait]  Go back to a release (default: the one before the live one)
+  rollback APP --instant [--wait]  Switch traffic back to the release kept warm after the last deploy
+  keep APP                      Keep the new release now and retire the warm one
+  promote APP [--wait]          Promote staging's live release to production (--release ID for another)
+  maintenance APP on|off        Switch the maintenance page at once (--bypass CIDR,... for who is let past)
+  status APP                    Environments, live release, rollback watch, maintenance and rehearsal
   create --name N --image IMG [--port P]  Create a deployment from an image, through a draft
 
 Variables (write-only: values are never shown, only their digests)
@@ -60,6 +65,7 @@ Settings
 
 Drafts (how a deployment is created)
   drafts ls | create | show ID | save ID FILE | detect ID | preflight ID | commit ID [--ack CODE] | rm ID
+  A key narrowed to some deployments makes drafts of its own and reaches what it commits.
 
 APP is a deployment's name or id. Commands that act on an environment take
 --env NAME|ID; without it they use the deployment's production environment.
@@ -194,6 +200,14 @@ func (a *app) dispatch(command string, pre, rest, words []string) error {
 		return a.releases(words)
 	case "rollback":
 		return a.rollback(words)
+	case "promote":
+		return a.promote(words)
+	case "keep":
+		return a.keep(words)
+	case "maintenance":
+		return a.maintenance(words)
+	case "status":
+		return a.status(words)
 	case "create":
 		return a.create(words)
 	case "vars", "variables":

@@ -114,7 +114,8 @@ free.
   e-mail and webhooks
 - Commit statuses and preview comments on GitHub, GitLab, Gitea and Forgejo
 - Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint
-- The `jd` command line and deploy keys for CI: create, configure, deploy, follow, roll back, set variables
+- The `jd` command line and deploy keys for CI: create, configure, deploy, follow, roll back, promote,
+  keep or switch back, maintenance, status, set variables
 
 </td>
 </tr>
@@ -466,6 +467,11 @@ jd deploy shop --wait                             # exit status is the run's res
 jd logs shop --follow                             # or --run 12 for an earlier run
 jd runs shop / jd releases shop
 jd rollback shop                                  # to the release before the live one, or --to <id>
+jd rollback shop --instant                        # straight back to the release kept warm after the last deploy
+jd keep shop                                      # keep the new release now; the warm one is retired
+jd promote shop --wait                            # staging's live release into production, as the same image
+jd maintenance shop on --bypass 10.0.0.0/8        # the switch acts at once; the bypass list with the next deploy
+jd status shop                                    # environments, live release, rollback watch, maintenance, rehearsal
 jd vars ls shop                                   # names, scopes and digests: never values
 jd vars set shop STRIPE_KEY=- < stripe.key        # KEY=- reads the value from stdin, out of shell history
 jd vars import shop .env --dry-run                # then without --dry-run
@@ -480,13 +486,16 @@ authority, and plain `http://` is refused except to loopback (an SSH tunnel). Ex
 run succeeded), 1 refused or the run failed, 2 usage, 3 not logged in or the key is no longer valid.
 
 **What a deploy key can do.** Everything an ordinary key could on the deployments — list, read, deploy,
-cancel, retry, roll back, runs and logs — plus what used to need a browser session: create deployments
-from drafts (a key that reaches every deployment), change configuration, source, Git policy and
-triggers, and set, import, generate, rotate and delete variables and shared variables. Variables are
-write-only to it: it sees names and digests, never a value. **What it cannot do, whatever it reaches:**
-reveal a value; list, add, change or test saved registry and Git credentials; merge or comment on pull
-requests as the dashboard's GitHub account; approve previews; archive or delete deployments; or reach
-anything outside Deployments. It also cannot give a deployment access to the server itself — a
+cancel, retry, roll back, promote staging, switch back to the warm release or keep the new one, switch
+maintenance, runs and logs — plus what used to need a browser session: create deployments from drafts
+and duplicates (a key's drafts are its own, and a key narrowed to some deployments reaches the
+deployments it commits), change configuration, source, Git policy and triggers, and set, import,
+generate, rotate and delete variables and shared variables. Variables are write-only to it: it sees
+names and digests, never a value. **What it cannot do, whatever it reaches:** reveal a value; list,
+add, change or test saved registry and Git credentials; see or change secret-store connections; set the
+rollback-watch or rehearsal terms or edit a route's maintenance and error pages; merge or comment on
+pull requests as the dashboard's GitHub account; approve previews; archive or delete deployments; or
+reach anything outside Deployments. It also cannot give a deployment access to the server itself — a
 privileged container, the host's network, a host folder, a release task in the host's shell, a Compose
 file — nor point a saved credential somewhere new; a deployment that already has such settings, or
 reads a saved credential through a variable, can be deployed and its variables set, but its

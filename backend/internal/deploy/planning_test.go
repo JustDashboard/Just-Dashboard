@@ -1123,7 +1123,7 @@ func TestListDraftsReturnsOnlyTheOwnersUncommittedUnexpiredDrafts(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	drafts, err := fixture.plans.ListDrafts(ctx, 41)
+	drafts, err := fixture.plans.ListDrafts(ctx, 41, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1151,7 +1151,7 @@ func TestListDraftsReturnsOnlyTheOwnersUncommittedUnexpiredDrafts(t *testing.T) 
 	if _, err := fixture.store.DB.Exec(`UPDATE deploy_drafts SET expires_at = 1 WHERE id = ?`, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	drafts, err = fixture.plans.ListDrafts(ctx, 41)
+	drafts, err = fixture.plans.ListDrafts(ctx, 41, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

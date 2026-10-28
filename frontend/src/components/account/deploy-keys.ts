@@ -51,8 +51,9 @@ export function deployKeyReady(name: string, every: boolean, chosen: ReadonlySet
 /** What a deploy key can do, one line each. */
 export const DEPLOY_KEY_CAN = [
   "List deployments, runs and releases, and read run logs",
-  "Deploy, cancel, retry and roll back",
-  "Create deployments from drafts, when it reaches every deployment",
+  "Deploy, cancel, retry and roll back; promote staging, switch back to the warm release or keep the new one",
+  "Switch maintenance on and off, and read the switch, the pages, the rollback watch and the rehearsal terms",
+  "Create deployments from drafts and duplicates: its drafts are its own, and a key narrowed to some deployments reaches what it commits",
   "Change configuration, source, Git policy and triggers",
   "Set, import, generate, rotate and delete variables and shared variables",
 ]
@@ -60,8 +61,9 @@ export const DEPLOY_KEY_CAN = [
 /** What a deploy key can never do, whichever deployments it reaches. */
 export const DEPLOY_KEY_CANNOT = [
   "Read a variable back: it sees names and digests, never a value",
-  "See or change saved registry and Git credentials",
+  "See or change saved registry and Git credentials, or the secret-store connections",
   "Merge or comment on pull requests as the dashboard’s GitHub account, or approve previews",
+  "Set the rollback-watch or rehearsal terms, or edit a route’s maintenance and error pages",
   "Archive or delete a deployment",
   "Reach anything outside Deployments",
 ]

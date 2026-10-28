@@ -1194,6 +1194,9 @@ CREATE TABLE IF NOT EXISTS deploy_drafts (
   id                   TEXT PRIMARY KEY,
   owner_user_id        INTEGER NOT NULL,
   owner_username       TEXT NOT NULL,
+  -- The deploy key that made the draft, or 0 for a session: a key's drafts
+  -- are its own, and it reaches no other.
+  key_id               INTEGER NOT NULL DEFAULT 0,
   current_step         TEXT NOT NULL DEFAULT 'intent',
   revision             INTEGER NOT NULL DEFAULT 1,
   data_json            TEXT NOT NULL DEFAULT '{}',
@@ -1732,6 +1735,7 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"deploy_projects", "archived_name", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_drafts", "environment_enc", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_drafts", "adoption_enc", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_drafts", "key_id", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_runs", "environment_id", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_runs", "run_number", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_runs", "source_revision", "TEXT NOT NULL DEFAULT ''"},
