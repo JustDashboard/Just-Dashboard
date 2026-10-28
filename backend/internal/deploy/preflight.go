@@ -256,7 +256,6 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	if len(request.Domains) > 0 {
 		proxyAvailable := false
 		certificateAutomation := false
-		caddyIngress := false
 		claimedDomains := map[string]bool{}
 		certificates := []proxysvc.Certificate{}
 		if o.proxy != nil {
@@ -266,7 +265,6 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 			// the domain as one already running does.
 			proxyAvailable = availability.Nginx || availability.Caddy || availability.IngressState != ""
 			certificateAutomation = availability.Certbot || availability.IngressState != ""
-			caddyIngress = availability.IngressState != ""
 			vhosts, err := o.proxy.ListVHosts(proxyCtx)
 			cancel()
 			if err == nil {
@@ -320,13 +318,14 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 						break
 					}
 				}
-				// A wildcard is asked about what the release would ask:
-				// whose saved DNS credentials prove it, or why nothing can.
-				// The Docker Caddy ingress cannot serve one even when a
-				// certificate covers it, so that host is asked either way.
+				// A wildcard no certificate covers is asked about what the
+				// release would ask: whose saved DNS credentials prove it,
+				// or why nothing can. A covered one is reused on either
+				// proxy — the Docker Caddy ingress serves a copy of the
+				// lineage, as nginx serves the file — so it is not asked.
 				if issuer, ok := o.proxy.(wildcardIssuer); ok && planned.HTTPS &&
 					strings.HasPrefix(strings.ToLower(planned.Hostname), "*.") &&
-					(!domain.CertificateAvailable || caddyIngress) {
+					!domain.CertificateAvailable {
 					wildcardCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 					if provider, err := issuer.DeploymentDNSProvider(wildcardCtx, strings.ToLower(planned.Hostname)); err != nil {
 						domain.CertificateRefusal = err.Error()
@@ -1021,6 +1020,9 @@ func preflightFindings(
 		findings = append(findings, finding("readiness_missing", PreflightDecision,
 			"Choose a readiness check", "", "Traffic must not move to an unverified candidate.",
 			"Add HTTP, TCP, or Docker-health readiness.", "deploy", "checks"))
+	}
+	if item, ok := ungatedCutoverFinding(draft.Data.Intent.Profile, configuration); ok {
+		findings = append(findings, item)
 	}
 	findings = append(findings, readinessPreflightFindings(draft, configuration)...)
 	findings = withoutSupersededHostFindings(append(findings, networkFindings(draft, configuration)...))

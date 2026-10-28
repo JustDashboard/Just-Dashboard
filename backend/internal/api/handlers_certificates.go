@@ -551,9 +551,24 @@ func (s *Server) handleCertAccount(w http.ResponseWriter, r *http.Request) error
 // startCertbotJob starts a certbot job unless another is running. A second
 // certbot fails on the lock the first holds, and the page's console would
 // swap the running job for the one that is about to fail.
+//
+// The job family keeps two of the page's jobs apart; certbot's turn
+// (proxysvc.HoldCertbot) keeps a job and a deployment run's order apart. A
+// job that finds a run ordering starts as it always did and waits for the
+// run inside its own console, saying so, as the run waits for a job.
 func (s *Server) startCertbotJob(w http.ResponseWriter, r *http.Request, spec jobs.Spec, run jobs.Runner) error {
 	spec.StartedBy = httpx.MustPrincipal(r).Username()
-	job, ok := s.modules.jobs.StartExclusive("certbot.", spec, run)
+	holder := spec.Title + " (started by " + spec.StartedBy + " from the Certificates page)"
+	job, ok := s.modules.jobs.StartExclusive("certbot.", spec, func(ctx context.Context, out jobs.Emitter) error {
+		release, err := proxysvc.HoldCertbot(ctx, holder, func(holder string) {
+			out.Status("Waiting for certbot, which is busy with %s; this job continues when it finishes.", holder)
+		})
+		if err != nil {
+			return err
+		}
+		defer release()
+		return run(ctx, out)
+	})
 	if !ok {
 		return httpx.Err(http.StatusConflict, "certbot_busy",
 			fmt.Sprintf("certbot is already running (%s, started by %s). Wait for it to finish.", job.Title, job.StartedBy))
@@ -602,31 +617,48 @@ func certbotJob(ctx context.Context, out jobs.Emitter, args []string, kept strin
 }
 
 // reloadAfterRenewal reloads nginx once a run has renewed a certificate an
-// enabled site serves. nginx keeps the certificate it read at its last
-// reload, and certbot reloads it only for a lineage its nginx plugin
-// installed — never for a brand-new one, whatever hooks are installed. The
-// reload tests the configuration first, and a failing test is the job's
-// failure: the certificate is renewed, but no browser gets it.
+// enabled site serves, and refreshes the Docker Caddy ingress's copies of
+// what it renewed. nginx keeps the certificate it read at its last reload,
+// and certbot reloads it only for a lineage its nginx plugin installed —
+// never for a brand-new one, whatever hooks are installed; a Caddy route
+// serves an immutable copy of its lineage, which only the dashboard moves
+// on. The reload tests the configuration first, and a failing test is the
+// job's failure, as is a copy that could not be refreshed: the certificate
+// is renewed, but no browser gets it.
 func (s *Server) reloadAfterRenewal(ctx context.Context, out jobs.Emitter, changed []string) error {
-	sites := s.modules.proxy.SitesServingLineages(changed)
-	if len(sites) == 0 {
+	if len(changed) == 0 {
 		return nil
 	}
-	res, err := s.modules.proxy.Reload(ctx, proxysvc.KindNginx)
-	if err != nil {
-		why := err.Error()
-		if errors.Is(err, proxysvc.ErrInvalidConf) {
-			why = "its configuration test failed"
-			if res != nil && res.Validation != nil {
-				for _, line := range strings.Split(strings.TrimSpace(res.Validation.Output), "\n") {
-					out.Line("stderr", line)
+	var failures []error
+	routes, err := s.modules.proxy.RefreshIngressCertificates(ctx)
+	switch {
+	case errors.Is(err, proxysvc.ErrIngressUnavailable):
+		// Nothing is known to serve a copy: the pass refreshes any route
+		// that does once the ingress answers, so this is said, not failed.
+		out.Status("%s", proxysvc.NotRefreshedFor(err).Error())
+	case err != nil:
+		failures = append(failures, proxysvc.NotRefreshedFor(err))
+	case len(routes) > 0:
+		out.Status("%s", proxysvc.RefreshedFor(routes))
+	}
+	if sites := s.modules.proxy.SitesServingLineages(changed); len(sites) > 0 {
+		res, err := s.modules.proxy.Reload(ctx, proxysvc.KindNginx)
+		if err != nil {
+			why := err.Error()
+			if errors.Is(err, proxysvc.ErrInvalidConf) {
+				why = "its configuration test failed"
+				if res != nil && res.Validation != nil {
+					for _, line := range strings.Split(strings.TrimSpace(res.Validation.Output), "\n") {
+						out.Line("stderr", line)
+					}
 				}
 			}
+			failures = append(failures, proxysvc.NotReloadedFor(sites, why))
+		} else {
+			out.Status("%s", proxysvc.ReloadedFor(sites))
 		}
-		return proxysvc.NotReloadedFor(sites, why)
 	}
-	out.Status("%s", proxysvc.ReloadedFor(sites))
-	return nil
+	return errors.Join(failures...)
 }
 
 type renewRequest struct {

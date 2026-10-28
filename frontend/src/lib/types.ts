@@ -4025,6 +4025,8 @@ export type DeploymentPromotionPreview = {
     promotionOnly: boolean
     pendingChanges: { kind: string; name: string; change: string }[]
     releaseTasks: string[]
+    /** Production's terms rehearse those tasks on a restored copy first. */
+    rehearsal: boolean
   }
   detail: ReleaseComparison["detail"]
   blockers: { code: string; message: string }[]

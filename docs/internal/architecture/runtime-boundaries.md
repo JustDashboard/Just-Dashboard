@@ -182,7 +182,10 @@ refuses to an owner without it; `ResolveAPIToken` narrows it to the owner's role
 key. Its deployments live in `api_token_deployments` and are read with the key on every request; none
 is every deployment. The project is deliberately not a foreign key there: purging a deployment leaves
 the row, so a key that reached only it keeps reaching nothing rather than everything. There is no route
-to re-point one; a replacement is minted with the same list. Where it may go is the API's decision
+to re-point one; a replacement is minted with the same list, and a narrowed key's own draft commit adds
+the deployment it created, in the commit's transaction (`deploy.DraftCommitRequest.GrantToKey`). A draft
+records the deploy key that made it (`deploy_drafts.key_id`, 0 for a session), which is what holds a key
+to its own drafts. Where it may go is the API's decision
 (`api/deploy_keys.go`, [request lifecycle](request-lifecycle.md)).
 `DELETE /tokens/{id}` revokes and retains the record. The session-only
 `DELETE /tokens/{id}/record` additionally requires `system.admin` and `s.destructive`; it deletes

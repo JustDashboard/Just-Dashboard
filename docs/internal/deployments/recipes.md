@@ -733,7 +733,10 @@ answered `/about` with 404 for every generator that writes `about.html`, redirec
   `.env` or `.htaccess` in the published directory is never served, and a host's `_redirects` and
   `_headers` files answer 404.
 
-Quick setup and the wizard generate required HTTP readiness checks for that serving port.
+Quick setup and the wizard generate required HTTP readiness checks for that serving port. A service
+or a published container with a known port is proposed a gate too — the image's own health, a health
+path the source names, else a required TCP check on the port — in the draft, where it is listed and
+can be removed ([Readiness](#readiness-workers-and-start-commands)).
 
 The catalogue in `deploy/frameworks_node.go` is ordered and the first match wins, so a meta-framework
 built on Vite is recognised before Vite itself — every one of them lists `vite`, and reading that alone
@@ -2631,8 +2634,10 @@ that builds a mist server with no `mist.bind` anywhere is a certain loopback lis
 
 ## Readiness, workers and start commands
 
-A release takes traffic only after its readiness check passes, and the check a detected plan carries is
-the one the source declares (`detect_readiness.go`), strongest first:
+A release takes traffic only after its readiness check passes — when the plan carries one; a plan with
+none is cut over to unverified, which preflight warns about (`cutover_unverified`) and the run says in
+its transcript and on its page ([implementation](implementation.md)). The check a detected plan
+carries is the one the source declares (`detect_readiness.go`), strongest first:
 
 1. The final stage's Dockerfile `HEALTHCHECK`. A `curl`/`wget` of `localhost` on the served port (or
    `$PORT`) becomes an HTTP check of that path; any other command becomes a `docker_health` check that

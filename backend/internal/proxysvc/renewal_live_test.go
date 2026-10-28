@@ -37,7 +37,7 @@ func TestLiveRenewalHookReloadsNginxAndAFailedRenewalIsRead(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	dir := t.TempDir()
-	directory, bundle := startPebble(ctx, t, dir)
+	directory, bundle, _ := startPebble(ctx, t, dir)
 
 	config := filepath.Join(dir, "letsencrypt")
 	work := filepath.Join(dir, "work")

@@ -47,14 +47,80 @@ func TestPreflightCountsAnIngressTheReleaseWouldStart(t *testing.T) {
 // names it was asked about.
 type wildcardProxyFake struct {
 	ingressProxyFake
-	provider proxysvc.DNSProvider
-	refusal  error
-	asked    *[]string
+	provider     proxysvc.DNSProvider
+	refusal      error
+	asked        *[]string
+	certificates []proxysvc.Certificate
 }
 
 func (f wildcardProxyFake) DeploymentDNSProvider(_ context.Context, wildcard string) (proxysvc.DNSProvider, error) {
 	*f.asked = append(*f.asked, wildcard)
 	return f.provider, f.refusal
+}
+
+func (f wildcardProxyFake) ListCertificates(context.Context) ([]proxysvc.Certificate, error) {
+	return f.certificates, nil
+}
+
+// On a host whose deployments the Docker Caddy ingress serves, a wildcard is
+// asked about exactly as on nginx: not at all while a certificate covers it
+// — the release reuses that lineage and the ingress serves a copy — and
+// otherwise for the provider whose credentials prove it, which the finding
+// names. The ingress used to be a refusal in both cases.
+func TestPreflightTreatsAWildcardOnTheCaddyIngressAsOnNginx(t *testing.T) {
+	cloudflare, _ := proxysvc.DNSProviderFor("cloudflare")
+	caddy := ingressProxyFake{proxysvc.Availability{Caddy: true, IngressContainer: "edge", IngressState: proxysvc.IngressRunning}}
+	wildcard := PlannedDomain{Hostname: "*.preview.localhost", HTTPS: true, Ownership: OwnershipManaged}
+	draft := &Draft{Data: DraftData{
+		Intent:    &DraftIntentConfig{Name: "site", Profile: ProfileWeb},
+		Source:    &DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/o/r.git", Ref: "main"},
+		Detection: &DetectionResult{Source: SourceIdentity{Kind: SourceGit, Revision: strings.Repeat("a", 40)}},
+	}}
+	configuration := PlanConfiguration{
+		Build:   BuildPlanConfig{Method: BuildNone, Secrets: []BuildSecretConfig{}, ReleaseTasks: []ReleaseTaskConfig{}},
+		Runtime: RuntimePlanConfig{Strategy: StrategyStopFirst, Command: []string{}, Capabilities: []string{}, Devices: []string{}, Mounts: []RuntimeMount{}},
+		Domains: []PlannedDomain{wildcard}, Checks: []PlannedCheck{}, Variables: []PlannedVariable{}, Dependencies: []PlannedDependency{},
+	}
+
+	var asked []string
+	covered := wildcardProxyFake{
+		ingressProxyFake: caddy, provider: cloudflare, asked: &asked,
+		certificates: []proxysvc.Certificate{{Name: "preview.localhost", Domains: []string{"*.preview.localhost"}, Source: "certbot"}},
+	}
+	observation, err := NewHostPreflightObserver([]string{t.TempDir()}, t.TempDir(), nil, covered).
+		Observe(context.Background(), ObservationRequest{Domains: []PlannedDomain{wildcard}})
+	if err != nil || len(observation.Domains) != 1 {
+		t.Fatalf("%#v, %v", observation.Domains, err)
+	}
+	if domain := observation.Domains[0]; len(asked) != 0 || !domain.CertificateAvailable || domain.CertificateName != "preview.localhost" || domain.CertificateRefusal != "" {
+		t.Fatalf("a covered wildcard on the Caddy ingress: asked %v, observed %#v", asked, domain)
+	}
+	findings := preflightFindings(draft, configuration, observation, false)
+	assertC6Finding(t, findings, "certificate_available", PreflightPass, "")
+	for _, item := range findings {
+		if item.Code == "certificate_wildcard_unavailable" || item.Code == "certificate_automatic" {
+			t.Fatalf("a covered wildcard was not simply available: %#v", item)
+		}
+	}
+
+	asked = nil
+	uncovered := wildcardProxyFake{ingressProxyFake: caddy, provider: cloudflare, asked: &asked}
+	observation, err = NewHostPreflightObserver([]string{t.TempDir()}, t.TempDir(), nil, uncovered).
+		Observe(context.Background(), ObservationRequest{Domains: []PlannedDomain{wildcard}})
+	if err != nil || len(observation.Domains) != 1 {
+		t.Fatalf("%#v, %v", observation.Domains, err)
+	}
+	if domain := observation.Domains[0]; len(asked) != 1 || asked[0] != "*.preview.localhost" || domain.CertificateDNSProvider != "Cloudflare" || domain.CertificateRefusal != "" {
+		t.Fatalf("an uncovered wildcard on the Caddy ingress: asked %v, observed %#v", asked, domain)
+	}
+	findings = preflightFindings(draft, configuration, observation, false)
+	assertC6Finding(t, findings, "certificate_automatic", PreflightPass, "/proxy/certificates")
+	if automatic := findingByCode(findings, "certificate_automatic"); automatic == nil || !strings.Contains(automatic.Measured, "DNS challenge through Cloudflare") {
+		t.Fatalf("automatic finding = %#v", automatic)
+	}
+	if blocked := findingByCode(findings, "certificate_wildcard_unavailable"); blocked != nil {
+		t.Fatalf("the Caddy ingress still refuses a wildcard: %#v", blocked)
+	}
 }
 
 // Preflight asks about a wildcard what the release's certificate step will:

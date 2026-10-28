@@ -26,7 +26,7 @@ func (s *Service) MaintainDockerIngress(ctx context.Context, record func(string,
 			edge, discoverErr := s.dockerCaddy(pass)
 			err = discoverErr
 			if err == nil && edge != nil {
-				err = edge.reconcile(pass, record)
+				_, err = edge.reconcile(pass, record)
 			}
 			s.mu.Unlock()
 		}
@@ -73,39 +73,55 @@ func parseDockerCaddyTargetLine(content, prefix string) (dockerCaddyTarget, bool
 	return dockerCaddyTarget{}, false
 }
 
-func (c *dockerCaddy) reconcile(ctx context.Context, record func(string, bool)) error {
+// reconcile is one pass over the managed routes. It answers with the routes
+// whose certificate copy it refreshed, for a renewal job to report.
+func (c *dockerCaddy) reconcile(ctx context.Context, record func(string, bool)) ([]string, error) {
 	// An unintegrated proxy has nothing to repair and must not be modified.
 	evidence, err := c.command(ctx, "", "sh", "-c", `if [ -d "$1" ]; then printf present; else printf absent; fi`, "sh", dockerCaddyRoot+"/routes")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if string(evidence) == "absent" {
-		return nil
+		return nil, nil
 	}
 	if string(evidence) != "present" {
-		return ErrRouteRecovery
+		return nil, ErrRouteRecovery
 	}
 	return c.reconcileRoutes(ctx, record)
 }
 
-func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, bool)) error {
+func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, bool)) ([]string, error) {
 	raw, err := c.command(ctx, "", "find", dockerCaddyRoot+"/routes", "-maxdepth", "1", "-type", "f", "-name", "just-dashboard-*.caddy")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	containers, err := ingressContainers(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var refreshed []string
+	// The copy each route serves as the pass leaves it — the one it was
+	// moved to, or the one it had when the move was skipped or failed — so
+	// the prune at the end keeps what is in use, two routes sharing a copy
+	// included; a pass that stops early prunes nothing.
+	serves := map[string]string{}
 	for _, path := range strings.Fields(string(raw)) {
 		name := strings.TrimSuffix(filepath.Base(path), ".caddy")
 		wantPath, err := dockerCaddyRoutePath(name)
 		if err != nil || wantPath != path {
-			return ErrRouteRecovery
+			return refreshed, ErrRouteRecovery
 		}
 		snapshot, err := c.snapshot(ctx, name)
 		if err != nil {
-			return err
+			return refreshed, err
+		}
+		// The certificate the route serves against the one the host holds:
+		// a lineage certbot renewed since the copy was taken is copied again
+		// and the route moved to it, and a route written before its source
+		// was recorded has it recorded (docker_caddy_copies.go).
+		certificate, servesCopy := planCertificateRefresh(snapshot.Content)
+		if servesCopy {
+			serves[name] = certificate.served
 		}
 		target, ok := parseDockerCaddyTarget(snapshot.Content)
 		if !ok {
@@ -127,11 +143,11 @@ func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, b
 		// through the same write, reload and restore a repair takes, so an
 		// upgrade turns recording on for every managed route within a tick.
 		unrecorded := !hasAccessLog(snapshot.Content)
-		if !found || (connected && next == target && !unrecorded && !authRepair) {
+		if !found || (connected && next == target && !unrecorded && !authRepair && !certificate.changed()) {
 			continue
 		}
 		if err := c.configurationSynced(ctx); err != nil {
-			return err
+			return refreshed, err
 		}
 		var repairErr error
 		if !connected || next != target {
@@ -160,6 +176,13 @@ func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, b
 				repairErr = c.ensureAccessLogDir(ctx)
 			}
 		}
+		if repairErr == nil && certificate.changed() {
+			// The copy goes in before the route that names it, so Caddy
+			// never reloads onto a path that is not there yet.
+			if repairErr = c.writeCertificateCopy(ctx, certificate); repairErr == nil {
+				content, rewrite = certificate.apply(content), true
+			}
+		}
 		if repairErr == nil && rewrite {
 			repairErr = c.write(ctx, path, content)
 			if repairErr == nil {
@@ -175,10 +198,18 @@ func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, b
 			record(name, repairErr == nil)
 		}
 		if repairErr != nil {
-			return repairErr
+			return refreshed, repairErr
+		}
+		if certificate.cert != nil {
+			serves[name] = certificate.hash
+			refreshed = append(refreshed, name)
 		}
 	}
-	return nil
+	referenced := map[string]bool{}
+	for _, hash := range serves {
+		referenced[hash] = true
+	}
+	return refreshed, c.pruneCertificateCopies(ctx, referenced)
 }
 
 // locateTarget finds a persisted target's container where it is now: its

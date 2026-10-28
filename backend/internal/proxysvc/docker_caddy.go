@@ -331,8 +331,16 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		return "", errors.New("a public route needs a domain")
 	}
 	for _, name := range route.Domains {
-		if !certDomainRe.MatchString(name) || strings.HasPrefix(name, "*.") {
+		if !certDomainRe.MatchString(name) {
 			return "", errors.New("invalid managed Caddy domain")
+		}
+		// A wildcard site is served from a certificate the run proved over
+		// a DNS challenge through certbot and copied here; without one,
+		// Caddy's automatic HTTPS would try to order for the wildcard
+		// itself, which it can only answer with a DNS provider module the
+		// caddy:2-alpine image does not carry, and fail at every renewal.
+		if strings.HasPrefix(name, "*.") && !route.plain(name) && !servesExplicitCertificate(route) {
+			return "", errors.New("a wildcard route on the Caddy ingress serves a certificate issued over a DNS challenge, and none was resolved for " + name)
 		}
 	}
 	// A deployment's route has pages and a maintenance switch, named after
@@ -358,12 +366,12 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		}
 	}
 	tlsDirective := ""
-	if route.TLS && route.CertPath != "" && !strings.HasPrefix(filepath.Base(filepath.Dir(route.CertPath)), "caddy-") {
-		certPath, keyPath, err := dockerCaddyCertificatePaths(route.CertPath)
+	if servesExplicitCertificate(route) {
+		hash, err := dockerCaddyCertificateCopy(route.CertPath)
 		if err != nil {
 			return "", err
 		}
-		tlsDirective = "  tls " + strconv.Quote(certPath) + " " + strconv.Quote(keyPath) + "\n"
+		tlsDirective = tlsCopyLine(hash) + "\n"
 	}
 	if route.TLS && tlsDirective == "" {
 		// Caddy issues and renews this one itself; the configured authority,
@@ -818,6 +826,11 @@ func (c *dockerCaddy) routeContent(ctx context.Context, route DeploymentRoute) (
 		content += auth.authMetadata()
 		targets = append(targets, *auth)
 	}
+	// Where the copy the route serves came from, so a renewal of that
+	// lineage refreshes it (docker_caddy_copies.go).
+	if source, ok := certificateSourceFor(route); ok {
+		content += source.metadata()
+	}
 	return content, targets, nil
 }
 
@@ -881,6 +894,10 @@ func (c *dockerCaddy) domainClaimed(ctx context.Context, domain, ownContent stri
 	if json.Unmarshal(raw, &config) != nil {
 		return false, errors.New("invalid adapted Caddy configuration")
 	}
+	// A site claims the name it is written for, not the names under its
+	// wildcard: Caddy answers a request from its most specific site, as
+	// nginx does from an exact server_name before a wildcard's, so a
+	// preview's own route lives beside the wildcard route one label above it.
 	claimed := false
 	var walk func(any)
 	walk = func(value any) {
@@ -888,7 +905,7 @@ func (c *dockerCaddy) domainClaimed(ctx context.Context, domain, ownContent stri
 		case map[string]any:
 			if hosts, ok := node["host"].([]any); ok {
 				for _, host := range hosts {
-					if name, ok := host.(string); ok && certificateCoversAll([]string{name}, []string{domain}) {
+					if name, ok := host.(string); ok && strings.EqualFold(name, domain) {
 						claimed = true
 					}
 				}
@@ -954,7 +971,7 @@ func (s *Service) applyDockerCaddyRoute(ctx context.Context, c *dockerCaddy, rou
 	if err := c.ensurePages(ctx, route); err != nil {
 		return result, fmt.Errorf("the route's pages could not be written: %w", err)
 	}
-	if route.TLS && route.CertPath != "" && !strings.HasPrefix(filepath.Base(filepath.Dir(route.CertPath)), "caddy-") {
+	if servesExplicitCertificate(route) {
 		cert, err := os.ReadFile(route.CertPath)
 		if err != nil {
 			return result, err
@@ -970,10 +987,7 @@ func (s *Service) applyDockerCaddyRoute(ctx context.Context, c *dockerCaddy, rou
 		if err := keyMatchesCertificate(string(key), leaf); err != nil {
 			return result, err
 		}
-		certPath, keyPath, err := dockerCaddyCertificatePaths(route.CertPath)
-		if err != nil {
-			return result, err
-		}
+		certPath, keyPath := certificateCopyPaths(certificateCopyHash(cert))
 		if err := c.write(ctx, certPath, string(cert)); err != nil {
 			return result, err
 		}
@@ -1194,13 +1208,25 @@ func (s *Service) ensureDockerCaddyName(ctx context.Context, c *dockerCaddy, hos
 	}
 }
 
-func dockerCaddyCertificatePaths(path string) (string, string, error) {
+// dockerCaddyCertificateCopy names the copy of the certificate at path, by
+// the hash of its bytes. Immutable, content-addressed copies keep route
+// rollback independent of a newer certificate at the same host path — a
+// rotated import, a renewed lineage — overwriting the pair an environment's
+// previous route snapshot names; a renewal gets a copy of its own and the
+// routes are moved to it (docker_caddy_copies.go).
+func dockerCaddyCertificateCopy(path string) (string, error) {
 	cert, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return certificateCopyHash(cert), nil
+}
+
+func dockerCaddyCertificatePaths(path string) (string, string, error) {
+	hash, err := dockerCaddyCertificateCopy(path)
 	if err != nil {
 		return "", "", err
 	}
-	// Immutable certificate copies keep route rollback independent of a newer
-	// imported certificate overwriting an environment's previous keypair.
-	prefix := dockerCaddyRoot + "/certs/" + strings.TrimPrefix(routeDigest(string(cert)), "sha256:")
-	return prefix + ".crt", prefix + ".key", nil
+	certPath, keyPath := certificateCopyPaths(hash)
+	return certPath, keyPath, nil
 }

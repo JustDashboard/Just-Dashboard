@@ -319,7 +319,11 @@ export function stepSummary(step: DeploymentStep): string | undefined {
     }
     case "activate": {
       const route = isRecord(evidence.route) ? evidence.route : undefined
-      return text(route?.name)
+      // Said here, not only in the transcript: a cutover nothing verified
+      // is the one fact about this step worth a glance at the rail.
+      const ungated =
+        evidence.readinessGated === false ? "no readiness check gated the cutover" : ""
+      return [text(route?.name), ungated].filter(Boolean).join(" · ") || undefined
     }
     case "notify":
       return typeof evidence.channels === "number"

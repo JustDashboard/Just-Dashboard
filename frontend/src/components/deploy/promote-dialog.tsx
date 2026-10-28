@@ -359,6 +359,8 @@ function PromotionReview({
         <Notice tone="warning" title="Production's release tasks run first">
           {reading.target.releaseTasks.join(", ")} run in this image against production, with
           production&apos;s variables and database, before traffic moves.
+          {reading.target.rehearsal &&
+            " They are rehearsed first in this image against a copy of production's database restored from its backup; a task that fails there stops the promotion with production untouched."}
         </Notice>
       )}
       {reading.target.pendingChanges.length > 0 && (

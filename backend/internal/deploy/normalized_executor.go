@@ -435,6 +435,13 @@ func (e *NormalizedStepExecutor) analyzePlan(
 	if err != nil {
 		return StepResult{State: StepUnavailable, ErrorCode: "preflight_unavailable", ErrorMessage: "deployment host evidence could not be refreshed"}
 	}
+	for index := range evaluation.Findings {
+		// A draft has no settings page yet; a run's plan does, and the
+		// finding about its missing gate leads to the control that adds one.
+		if evaluation.Findings[index].Code == "cutover_unverified" && evaluation.Findings[index].DeepLink == "" {
+			evaluation.Findings[index].DeepLink = fmt.Sprintf("/deploy/%d/settings/runtime#health-checks", execution.Run.ProjectID)
+		}
+	}
 	record := func(candidate DetectedCandidate) json.RawMessage {
 		return mustJSON(map[string]any{
 			"sourceDigest": plan.SourceDigest, "buildDigest": plan.BuildDigest,

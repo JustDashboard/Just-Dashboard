@@ -114,7 +114,8 @@ free.
   e-mail and webhooks
 - Commit statuses and preview comments on GitHub, GitLab, Gitea and Forgejo
 - Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint
-- The `jd` command line and deploy keys for CI: create, configure, deploy, follow, roll back, set variables
+- The `jd` command line and deploy keys for CI: create, configure, deploy, follow, roll back, promote,
+  keep or switch back, maintenance, status, set variables
 
 </td>
 </tr>
@@ -466,6 +467,11 @@ jd deploy shop --wait                             # exit status is the run's res
 jd logs shop --follow                             # or --run 12 for an earlier run
 jd runs shop / jd releases shop
 jd rollback shop                                  # to the release before the live one, or --to <id>
+jd rollback shop --instant                        # straight back to the release kept warm after the last deploy
+jd keep shop                                      # keep the new release now; the warm one is retired
+jd promote shop --wait                            # staging's live release into production, as the same image
+jd maintenance shop on --bypass 10.0.0.0/8        # the switch acts at once; the bypass list with the next deploy
+jd status shop                                    # environments, live release, rollback watch, maintenance, rehearsal
 jd vars ls shop                                   # names, scopes and digests: never values
 jd vars set shop STRIPE_KEY=- < stripe.key        # KEY=- reads the value from stdin, out of shell history
 jd vars import shop .env --dry-run                # then without --dry-run
@@ -480,13 +486,16 @@ authority, and plain `http://` is refused except to loopback (an SSH tunnel). Ex
 run succeeded), 1 refused or the run failed, 2 usage, 3 not logged in or the key is no longer valid.
 
 **What a deploy key can do.** Everything an ordinary key could on the deployments — list, read, deploy,
-cancel, retry, roll back, runs and logs — plus what used to need a browser session: create deployments
-from drafts (a key that reaches every deployment), change configuration, source, Git policy and
-triggers, and set, import, generate, rotate and delete variables and shared variables. Variables are
-write-only to it: it sees names and digests, never a value. **What it cannot do, whatever it reaches:**
-reveal a value; list, add, change or test saved registry and Git credentials; merge or comment on pull
-requests as the dashboard's GitHub account; approve previews; archive or delete deployments; or reach
-anything outside Deployments. It also cannot give a deployment access to the server itself — a
+cancel, retry, roll back, promote staging, switch back to the warm release or keep the new one, switch
+maintenance, runs and logs — plus what used to need a browser session: create deployments from drafts
+and duplicates (a key's drafts are its own, and a key narrowed to some deployments reaches the
+deployments it commits), change configuration, source, Git policy and triggers, and set, import,
+generate, rotate and delete variables and shared variables. Variables are write-only to it: it sees
+names and digests, never a value. **What it cannot do, whatever it reaches:** reveal a value; list,
+add, change or test saved registry and Git credentials; see or change secret-store connections; set the
+rollback-watch or rehearsal terms or edit a route's maintenance and error pages; merge or comment on
+pull requests as the dashboard's GitHub account; approve previews; archive or delete deployments; or
+reach anything outside Deployments. It also cannot give a deployment access to the server itself — a
 privileged container, the host's network, a host folder, a release task in the host's shell, a Compose
 file — nor point a saved credential somewhere new; a deployment that already has such settings, or
 reads a saved credential through a variable, can be deployed and its variables set, but its
@@ -608,8 +617,8 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_METRICS_INTERVAL` | `15s` | How often the backend samples the host, and every running container, into its own history. Clamped to 5s and 5m. |
 | `JD_METRICS_RETENTION` | `7d` | How long that history is kept. Accepts days. `0` records nothing and leaves only the live feed. |
 | `JD_UPDATE_CHECK` | `true` | Whether the dashboard may ask GitHub whether a newer version of *itself* exists — one unauthenticated GET of one file, four times a day, carrying nothing but a version number. `false` turns it off; the release notes for the version you run stay readable, since they are compiled in. |
-| `JD_ACME_DIRECTORY` | Let's Encrypt | Another ACME directory to order deployment certificates from: Let's Encrypt's staging endpoint for a rehearsal that spends no rate limit, or a private authority on a network that never sees the internet. Both the managed Caddy and certbot follow it. |
-| `JD_ACME_CA_ROOT` | system roots | A PEM bundle to trust when that authority signs with its own roots — its issuing roots, and the root behind its directory's TLS listener if that is private too. With it set, the public-DNS check before an order is skipped, because a private authority validates however it was set up to. |
+| `JD_ACME_DIRECTORY` | Let's Encrypt | Another ACME directory to order deployment certificates from: Let's Encrypt's staging endpoint for a rehearsal that spends no rate limit, or a private authority on a network that never sees the internet. Both the managed Caddy and certbot follow it — the Certificates page's orders and a deployment run's, over HTTP-01 and DNS-01 alike — and certbot registers an account with that directory rather than reusing one it has with another. |
+| `JD_ACME_CA_ROOT` | system roots | A PEM bundle to trust when that authority signs with its own roots — its issuing roots, and the root behind its directory's TLS listener if that is private too. Caddy is given it as its trusted roots and certbot as `REQUESTS_CA_BUNDLE`, so keep it where both read it (under `/etc`, `/srv`, `/opt` or the data directory, which the stack mounts at the same paths). With it set, the public-DNS check before an order is skipped, because a private authority validates however it was set up to. |
 | `JD_UPDATE_REPO` | `JustDashboard/Just-Dashboard` | The repository releases are read from. Change it to follow a fork. |
 | `JD_UPDATE_BRANCH` | `main` | The branch whose changelog decides what "newest" means, and which an in-app update fast-forwards to. |
 | `JD_ACCOUNT_LINK` | `true` | Whether this server may be linked to a just-dashboard.com account. Linking is always something an administrator does; `false` removes the Settings page's controls, the installer's question and the terminal command, and silences a link that already exists, so nothing is ever sent. |

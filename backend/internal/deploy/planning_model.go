@@ -52,9 +52,13 @@ const (
 )
 
 type Draft struct {
-	ID                 string             `json:"id"`
-	OwnerUserID        int64              `json:"ownerUserId"`
-	OwnerUsername      string             `json:"ownerUsername"`
+	ID            string `json:"id"`
+	OwnerUserID   int64  `json:"ownerUserId"`
+	OwnerUsername string `json:"ownerUsername"`
+	// KeyID is the deploy key that made the draft, or 0 for a session. A
+	// key's drafts are its own: it reaches the ones it made and no other,
+	// however they are owned (AuthorizeDraftForKey).
+	KeyID              int64              `json:"keyId,omitempty"`
 	CurrentStep        DraftStep          `json:"currentStep"`
 	Revision           int                `json:"revision"`
 	Data               DraftData          `json:"data"`

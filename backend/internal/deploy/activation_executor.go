@@ -26,6 +26,9 @@ type checkStepEvidence struct {
 	Phase   string          `json:"phase"`
 	Outcome HealthOutcome   `json:"outcome"`
 	Checks  []CheckEvidence `json:"checks"`
+	// Reason says, for a phase with no checks, what that means for the
+	// release: the run page shows it as the step's one line.
+	Reason string `json:"reason,omitempty"`
 }
 
 type recoveryEvidence struct {
@@ -42,6 +45,10 @@ type activationStepEvidence struct {
 	Tailnet      *tailnetActivationEvidence `json:"tailnet,omitempty"`
 	PublicChecks []CheckEvidence            `json:"publicChecks"`
 	Recovery     *recoveryEvidence          `json:"recovery,omitempty"`
+	// ReadinessGated says whether a required readiness check stood between
+	// the candidate's start and this cutover. False is a release that went
+	// live on nothing but having started, which the run page says in words.
+	ReadinessGated bool `json:"readinessGated"`
 }
 
 type routeActivationEvidence struct {
@@ -492,12 +499,15 @@ func (e *NormalizedStepExecutor) verifyChecks(
 		}
 	}
 	if len(selected) == 0 {
+		evidence := checkStepEvidence{Phase: phase, Outcome: HealthDisabled, Checks: []CheckEvidence{}}
 		if phase == "readiness" && !operationTargetsLiveRelease(execution.Run.Operation) {
 			_ = e.store.SetRuntimeState(ctx, execution.Run.ID, execution.ClaimToken, release.Release.ID, "ready")
+			// Skipped is not passed: nothing asked the candidate whether it
+			// answers, and the transcript must not read as if something did.
+			evidence.Reason = "no readiness check in the plan, so the candidate is cut over to unverified"
+			_ = stepLog(execution, "status", "No readiness check in the plan: the candidate counts as ready because it started, not because it answered")
 		}
-		return StepResult{State: StepSkipped, Evidence: mustJSON(checkStepEvidence{
-			Phase: phase, Outcome: HealthDisabled, Checks: []CheckEvidence{},
-		})}
+		return StepResult{State: StepSkipped, Evidence: mustJSON(evidence)}
 	}
 	if e.checks == nil {
 		return StepResult{State: StepUnavailable, ErrorCode: "checks_unavailable", ErrorMessage: "runtime health checks are unavailable"}
@@ -576,7 +586,10 @@ func (e *NormalizedStepExecutor) activate(
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
-	evidence := activationStepEvidence{ReleaseID: release.Release.ID, PublicChecks: []CheckEvidence{}}
+	evidence := activationStepEvidence{ReleaseID: release.Release.ID, PublicChecks: []CheckEvidence{}, ReadinessGated: hasReadinessCheck(snapshot.Checks)}
+	if !evidence.ReadinessGated {
+		_ = stepLog(execution, "status", ungatedCutoverLine(snapshot.Plan.Strategy, release.Release.Number))
+	}
 	var route *proxysvc.DeploymentRoute
 	var appliedRoute *proxysvc.DeploymentRouteResult
 	if len(snapshot.Domains) > 0 {
@@ -688,6 +701,17 @@ func (e *NormalizedStepExecutor) activate(
 	}
 	_ = stepLog(execution, "status", fmt.Sprintf("Activated immutable release #%d", release.Release.Number))
 	return StepResult{State: StepPassed, Evidence: mustJSON(evidence)}
+}
+
+// ungatedCutoverLine is the transcript's plain statement that no readiness
+// check stood between the candidate's start and this cutover, in the words
+// of the strategy: blue/green moves traffic, stop-first has already stopped
+// the previous release and now points visitors at the new one.
+func ungatedCutoverLine(strategy ReleaseStrategy, number int64) string {
+	if strategy == StrategyBlueGreen {
+		return fmt.Sprintf("Moving traffic to release #%d without a readiness check: the plan has none, so the candidate was started and never asked whether it answers. Add one under Settings → Runtime → Health checks to gate the next cutover.", number)
+	}
+	return fmt.Sprintf("Release #%d goes live without a readiness check: the plan has none, so it was started and never asked whether it answers before visitors reach it. Add one under Settings → Runtime → Health checks to gate the next release.", number)
 }
 
 // routeInMaintenance says whether the route's maintenance switch is on, on a

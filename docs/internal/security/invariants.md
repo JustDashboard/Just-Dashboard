@@ -92,7 +92,12 @@ A change that weakens any of these has to say so explicitly.
    the deployment surface. Until it, every deployment write that handles a secret — drafts,
    configuration, source, Git policy, triggers, variables and shared variables — answered any API key
    with `403 session_required`. A deploy key reaches those writes; nothing else changed for any other
-   key. It holds the administrator role (narrowed to its owner's now, like every key), and where it
+   key. The operating verbs beside a deploy that an ordinary key already had — promoting staging
+   (`POST …/promote`), the warm release's instant rollback and keep (`POST …/rollback-watch/rollback`,
+   `…/keep`) and the maintenance switch (`PUT …/maintenance`) — are the deploy key's as well, with
+   their reads (`GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/maintenance`,
+   `…/pages/{page}`, which is what every visitor is shown, and `…/rehearsal`, the terms alone). It
+   holds the administrator role (narrowed to its owner's now, like every key), and where it
    goes is decided once, before any other middleware of the route runs: `Authenticate`,
    `AuthenticateScoped` and `AuthenticateMCP` refuse it, and the feature group's
    `httpx.AuthenticateFeatures` admits it only when `api.deployKeyRoutes` (`deploy_keys.go`) has a
@@ -105,12 +110,27 @@ A change that weakens any of these has to say so explicitly.
    `…/env/reveal`), the saved registry and Git credentials (list, create, update, test and delete), the secret-store
    connections that hold credentials of their own (create, update, test and delete),
    the pull-request merge and comment that speak as the dashboard's GitHub account, preview approval,
-   and the removals that take a typed phrase (`DELETE /deploy/{id}/permanent`, `remove-managed` and its
-   plan). Variables are write-only to the key: lists carry names and digests, and
+   the removals that take a typed phrase (`DELETE /deploy/{id}/permanent`, `remove-managed` and its
+   plan), the terms of the warm-release window (`PUT …/rollback-policy`) and of migration rehearsal
+   (`PUT …/rehearsal`, which chooses a database whose backup is restored), and a route's maintenance
+   and error pages (`PUT …/pages/{page}`, files on the server beside the proxy's route). The
+   secret-store list (`GET /deploy/secret-stores`), which an ordinary key reads, answers a deploy key
+   `key_scope`: it carries each connection's address and sign-in fields and every deployment's
+   variables that read it, and the key cannot point a variable at a store. Variables are write-only to
+   the key: lists carry names and digests, and
    `withholdGeneratedValue` drops the value a generate or rotate would return. A key narrowed to some
    deployments (`api_token_deployments`; none is every deployment) reaches only routes about those —
    the gate checks the route's `{id}` and that its `{env}` belongs to it — lists only those, and none
-   that create a deployment or reach what every deployment shares. Because a host-level setting or a
+   that reach what every deployment shares (server shared variables, fleet-wide reads). Drafts are
+   every deploy key's own: a draft records the key that made it (`deploy_drafts.key_id`, 0 for a
+   session), and a key lists, reads, saves, detects, preflights, commits and discards those alone
+   (`deploy.AuthorizeDraftForKey`, through `deploymentDraftForPrincipal` on every draft route), never a
+   session's or another key's, while an administrator's session still sees every draft of its
+   account. A narrowed key's commit adds the deployment it creates to `api_token_deployments` in the
+   commit's own transaction (`DraftCommitRequest.GrantToKey`, set by the handler and never read from a
+   body), so the key reaches what it made from the next request and nothing that failed to be made; a
+   key reaching every deployment is given no row, since the first would narrow it. Duplicating takes a
+   deployment the key reaches and leaves a draft that is the key's. Because a host-level setting or a
    saved credential sent somewhere new would hand the key what the session-only routes keep from it,
    the handlers hold what the key writes (`hostAuthority`, `keySourceGuard`, `keyReferenceGuard`): no
    privileged container, host network, capability, device, host path, host-shell release task,
@@ -123,9 +143,11 @@ A change that weakens any of these has to say so explicitly.
    A key that can change a deployment's source and deploy it can still run code that reads that
    deployment's own variables at run time, a database reference a person gave it included:
    write-only is a property of the API, not a sandbox. The walk `TestADeployKeyGetsTheDecidedAnswerOnEveryRoute` holds the table on every
-   route of the API and an ordinary key's answers as they were, and
+   route of the API and an ordinary key's answers as they were,
    `TestEverySessionOnlyDeploymentRouteHasADeployKeyDecision` fails when a session-only deployment
-   route has no line.
+   route has no line, `TestADeployKeysDraftsAreItsOwnAndANarrowedKeyReachesWhatItMade` holds the
+   drafts and the grant, and `TestADeployKeyOperatesTheDeploymentsItReaches` the operating verbs,
+   their reads and a narrowed key's refusals, each write audited under the key.
 
    A database connection marked read-only adds one rule in front of all of these, and it fails closed
    the other way round: `protectReadOnlyConnections` refuses every request under `/databases/{id}` that

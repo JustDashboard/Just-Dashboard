@@ -201,6 +201,7 @@ export function RunReady({
   release,
   liveRelease,
   projectId,
+  ungated = false,
 }: {
   live: boolean
   /** The run was a Stop that succeeded. */
@@ -213,6 +214,8 @@ export function RunReady({
   release?: DeploymentRelease
   liveRelease?: DeploymentRelease
   projectId: number
+  /** The run's activation recorded that no readiness check gated the cutover. */
+  ungated?: boolean
 }) {
   const serving = live && (!stopped || startedSince)
   return (
@@ -268,6 +271,17 @@ export function RunReady({
               )}
               {release && <span className="numeric">Release #{release.number}</span>}
               {release?.activatedAt && <span>live since {relativeTime(release.activatedAt)}</span>}
+            </p>
+          )}
+          {serving && ungated && (
+            <p className="text-xs text-warning">
+              Went live without a readiness check: nothing verified it before the cutover.{" "}
+              <Link
+                href={`/deploy/${projectId}/settings/runtime#health-checks`}
+                className="rounded-sm underline underline-offset-2 focus-ring"
+              >
+                Add one
+              </Link>
             </p>
           )}
         </div>

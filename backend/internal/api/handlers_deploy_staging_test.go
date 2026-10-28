@@ -185,8 +185,18 @@ func TestPromotionNeedsServiceControlRefusesAMissingImageAndIsAudited(t *testing
 		t.Fatalf("promotion preview = %d %s", preview.Code, preview.Body.String())
 	}
 	if !reading.Source.ImagePresent || reading.Source.ImageID != "sha256:"+strings.Repeat("c", 64) || len(reading.Blockers) != 0 ||
-		reading.Detail.Status != "available" || reading.Target.EnvironmentID != f.production {
+		reading.Detail.Status != "available" || reading.Target.EnvironmentID != f.production || reading.Target.Rehearsal {
 		t.Fatalf("promotion preview = %#v", reading)
+	}
+	// Production's rehearsal terms are the confirmation's: a promotion
+	// rehearses production's release tasks exactly as a deploy does.
+	if response := f.admin.do(http.MethodPut, f.path(fmt.Sprintf("/environments/%d/rehearsal", f.production)),
+		`{"enabled":true,"whenUnavailable":"block","restoreTimeoutSeconds":600,"maxBackupMb":512}`, nil); response.Code != http.StatusOK {
+		t.Fatalf("rehearsal terms = %d %s", response.Code, response.Body.String())
+	}
+	rehearsed := f.readonly.do(http.MethodGet, f.path(fmt.Sprintf("/environments/%d/promotion?releaseId=%d", f.production, release.Release.ID)), "", nil)
+	if rehearsed.Code != http.StatusOK || json.Unmarshal(rehearsed.Body.Bytes(), &reading) != nil || !reading.Target.Rehearsal {
+		t.Fatalf("promotion preview with rehearsal on = %d %s", rehearsed.Code, rehearsed.Body.String())
 	}
 
 	if response := f.readonly.do(http.MethodPost, promote, body, nil); response.Code != http.StatusForbidden {

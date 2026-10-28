@@ -74,7 +74,8 @@ every environment as before.
 ## Promotion
 
 `POST /api/v1/deploy/{id}/environments/{production}/promote` `{releaseId}` (`service.control` — exactly
-what deploying production needs, since it changes production the same way; token-usable like a deploy;
+what deploying production needs, since it changes production the same way; token-usable like a deploy,
+by a deploy key too (`jd promote`, which takes staging's live release unless `--release` names one);
 `Idempotency-Key` honoured; audited `deploy.release.promote` with the staging release, its number, the
 image id and digest, the commit and the run) queues a production run with operation `promote` and trigger
 `manual`. `PromotionSource` refuses (`409`) unless the release is a `live` or `retained` release of this
@@ -88,7 +89,11 @@ The run is production's: plan revision = production's desired revision, variable
 production at enqueue like any run, metadata `promotion` (environment, release id and number, run, image
 id, digest, commit) plus the staging run's `commit` reading, `sourceRevision` the promoted commit when
 production's source is remote Git. Its steps are `PromotionStepKeys` — a deploy's from `render_runtime`
-on, with no source, plan analysis, context or build step. `render_runtime` (`renderPromotedRuntime`)
+on (`render_runtime`, `backup_gate`, `rehearse_migration`, `release_task`, `provision_certificate`,
+`start_candidate`, `verify_readiness`, `verify_smoke`, `activate`, `retire_previous`, `record_release`,
+`notify`), with no source, plan analysis, context or build step; `TestPromotionStepsAreADeploysFromRenderRuntimeOn`
+holds the list to exactly `DefaultStepKeys` from `render_runtime` on, so a step added to a deploy is
+not quietly left out of a promotion. `render_runtime` (`renderPromotedRuntime`)
 re-validates the source, inspects the image by its id, tags it as `just-dashboard/deployment-<prod>:run-<id>`
 and reads the tag back to prove it names the same id, then records a candidate release whose runtime
 snapshot is production's plan, production's variables, dependencies, checks and domains around the
@@ -101,7 +106,16 @@ release read model returns as `Release.promotion`.
 
 Everything after that is the release path every deploy takes: production's **release tasks run against
 production** (production's variables, so production's database) after the backup gate and before
-anything starts, then the certificate, the candidate, readiness and smoke checks, blue/green or stop-first
+anything starts — and, when production's [migration rehearsal](implementation.md) terms are on,
+**rehearsed first** in the promoted image against a copy of production's database restored from its
+backup (`rehearse_migration`, the same step a build's run takes, between `backup_gate` and
+`release_task`). The rehearsal is production's in every respect but the image: production's tasks,
+production's variables, so the copy is of the managed database production's values reach, and the
+transcript says so ("Rehearsing production's release tasks in the promoted image … with production's
+variables"). A task that fails against the copy ends the promotion `rehearsal_failed` before any task
+touches production, and a rehearsal that cannot be carried out ends it `rehearsal_unavailable` (or warns,
+as the terms say), exactly as either ends a deploy: production's schema, rows and live release are as
+they were. Then the certificate, the candidate, readiness and smoke checks, blue/green or stop-first
 activation, automatic restore of the previous release on a failed activation, retirement, notification
 ("Promotion from staging", titled with the environment) and a commit status under production's context
 (`just-dashboard/production`; staging's own runs report under `just-dashboard/staging`).
@@ -124,7 +138,8 @@ releases, pinned) even after staging's release ages out — the existing shared-
 
 `GET /api/v1/deploy/{id}/environments/{production}/promotion?releaseId=N` is the confirmation's read
 (any signed-in reader): the source release, the image id, digest and size and whether Docker holds it,
-production's live release, queued runs, promotion-only flag, pending changes and release task names, the
+production's live release, queued runs, promotion-only flag, pending changes, release task names and
+whether production's rehearsal terms are on (`target.rehearsal`), the
 blockers that would refuse it now, and `detail` — `compareRuntimeSnapshots` between the staging release's
 snapshot and what production would freeze if queued now (`desiredRuntimeSnapshot`, the same rows
 `Enqueue` snapshots): runtime fields, variables by name and value digest only, dependencies, checks and
@@ -155,7 +170,8 @@ promotion-only production **Promote from staging…** replaces Deploy while Rebu
 version are not offered. Project-wide verbs (duplicate, test a pull request, archive) stay with
 production. `AddStagingDialog` lists what crosses before anything is written and reads back what was
 left behind; `PromoteDialog` leads with the whole image id, the staging release and what it replaces,
-production's configuration difference, and notices for release tasks, pending changes and runs ahead.
+production's configuration difference, and notices for release tasks (saying they are rehearsed first
+when production's terms are on), pending changes and runs ahead.
 Release rows show a `From staging #N` tag; the run header shows "from staging release #N · image …";
 the live release line says "promoted". Settings → General has a **Promotion** section on production
 (any source kind) for promotion-only; Settings → Danger zone on staging holds Remove staging; Automation
@@ -172,13 +188,31 @@ and Logs leave out previews and traffic alerts on staging.
 - Promotion needs `service.control`, not `destructive`: it is a deploy of production, which needs
   `service.control`; rollback keeps its own capability.
 - One staging per deployment, named `staging`: the same project read twice, not an environment builder.
+- A promotion rehearses as a deploy does, under production's terms. The first version of promotion
+  left `rehearse_migration` out of `PromotionStepKeys`, so a release whose migration had only ever met
+  staging's data ran it on production's unrehearsed, with rehearsal on for the environment. The step is
+  the same one, placed the same way, reading the same terms: nothing about a rehearsal depends on where
+  the image came from, and staging's terms are never consulted — staging has no link to production's
+  database, and the proof is about production's data. The step list is held to a deploy's by test so
+  the crash-recovery matrices (`engine_test.go` in-process, `engine_process_fault_live_test.go` with
+  SIGKILL), which now interrupt a promotion's list as well as a deploy's, keep covering every step it
+  takes.
 
 ## Verification
 
 `deploy/staging_test.go` (copy rules, refusals, promotion render with the image tagged and proven by id,
 admission, retention of a queued promotion's source, promotion-only admission and watch status, rollback
-provenance, summary scoping, removal scope), `api/handlers_deploy_staging_test.go` (capability, session,
-audit, the missing-image refusal, idempotency, promotion-only kept when omitted),
-`frontend/tests/browser/deploy-staging.spec.ts`, and the live test against Docker:
+provenance, summary scoping, removal scope), `deploy/rehearsal_test.go`
+(`TestPromotionStepsAreADeploysFromRenderRuntimeOn`; `TestPromotionRehearsesProductionsReleaseTasksInThePromotedImage`
+renders a promotion and rehearses it: the task runs by the promoted image's id with production's
+`DATABASE_URL` on the copy's network alone, a failing task ends it `rehearsal_failed` with no task run
+outside the rehearsal, an unavailable one `rehearsal_unavailable`), `api/handlers_deploy_staging_test.go`
+(capability, session, audit, the missing-image refusal, idempotency, promotion-only kept when omitted,
+the confirmation's `rehearsal` flag following production's terms),
+`frontend/tests/browser/deploy-staging.spec.ts`, and the live tests against Docker:
 `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveStagingReleaseIsPromotedAsTheSameImageAndRolledBack -count=1 -v`
+and `TestLiveMigrationRehearsalGatesAPromotedRelease` of the migration rehearsal family — a PostgreSQL
+through the routes, a staging release of the same image promoted three times: refused
+`rehearsal_unavailable` before any backup, passing against the copy and reaching production, then failing
+against the copy with production's schema, rows and live release unchanged
 ([CONTRIBUTING](../../../CONTRIBUTING.md)).

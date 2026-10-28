@@ -41,8 +41,9 @@ only renderer/executor/validation authority for their feature.
   admin-authored stored release task (including migrated pre/post commands) with a resolved working
   directory and explicit scoped environment; a task with `runner: "image"` runs that command inside a
   throwaway container of the release's own image rather than in the dashboard's shell.
-- Creation is a revisioned, owner-scoped server draft. `GET /deploy/drafts` (session, or a deploy key reaching every deployment) lists the caller's
-  own uncommitted, unexpired drafts newest first — id, name from intent, a one-line source summary,
+- Creation is a revisioned, owner-scoped server draft. `GET /deploy/drafts` (session or deploy key; a deploy key lists
+  the drafts it made, recorded in `deploy_drafts.key_id`, and a session every draft of its account's, its keys'
+  included) lists the caller's own uncommitted, unexpired drafts newest first — id, name from intent, a one-line source summary,
   `currentStep`, `updatedAt`, `expiresAt` — so the new-project page can offer to resume one instead of
   starting a new setup over; a committed or expired draft has nothing left to resume and is excluded.
   `DELETE /deploy/drafts/{draft}` (session or deploy key, audited `deploy.draft.discard`) throws one away: every
@@ -199,7 +200,13 @@ only renderer/executor/validation authority for their feature.
   ordinary deployment there is unsavable over a control the operator was never shown. The check is the
   candidate's detected `readiness` — its path, whether any answer counts, Docker health for a
   Dockerfile `HEALTHCHECK` command, and a slow start's budget (recipes.md, "Readiness, workers and
-  start commands") — and GET `/` expecting a 2xx only when detection found nothing.
+  start commands") — and GET `/` expecting a 2xx only when detection found nothing. A service or a
+  published container (`service`, `image`) whose port detection knows is proposed a gate the same way
+  (`defaultChecks`, `checksForRuntime`): the image's own health where it declares one, HTTP on a
+  health path where the source names one, else a required TCP check on that port, as the catalogue's
+  starters carry; the proposal is a draft default, listed under Advanced and removable there, never
+  added to a saved plan. A readiness check is **not** required of those profiles: without one the
+  release deploys and preflight says what that costs, as a warning (`cutover_unverified`, below).
 - A draft route distinguishes why an id did not answer: `403 draft_forbidden` for another user's draft,
   `410 draft_expired` for one past `expiresAt`, and `404 draft_not_found` only for an id that names
   nothing at all — the first two used to collapse into the third, which hid an ownership refusal behind
@@ -269,26 +276,59 @@ only renderer/executor/validation authority for their feature.
   lineage it leaves records the plugin and the credentials file in its renewal configuration, so
   certbot's own schedule renews it like any lineage the page issued, and the page lists it with the
   same renewal checks (a plugin that later goes missing is a `willFail`). A host whose deployments the
-  Docker Caddy ingress serves refuses a wildcard plan name outright, covered or not, since Caddy cannot
-  serve that route — see the [ingress decision](caddy-ingress.md). Every order a run places — issued,
-  or refused by the authority — is audited as `certificates.deployment.issue` (actor `system`; the
-  names, method, DNS provider and lineage, never a credential); a reuse or a refusal before ordering
-  changes nothing and is not. Preflight asks the same question for an uncovered wildcard (and for any
-  wildcard on the Caddy ingress): `certificate_automatic` naming the provider, or
-  `certificate_wildcard_unavailable`, blocked with the refusal and a deep link to `/proxy/certificates`.
-  HTTP-01 issuance is bounded at five minutes. Both are serialized against route application so two
+  Docker Caddy ingress serves orders the wildcard the same way: the ingress serves a copy of the
+  lineage from a `*.zone` site with an explicit `tls`, and the dashboard refreshes that copy when
+  certbot renews — see the [ingress decision](caddy-ingress.md#wildcards). Every order a run places —
+  issued, or refused by the authority — is audited as `certificates.deployment.issue` (actor `system`;
+  the names, method, DNS provider and lineage, never a credential); a reuse or a refusal before
+  ordering changes nothing and is not. Preflight asks the same question for an uncovered wildcard on
+  either proxy: `certificate_automatic` naming the provider, or `certificate_wildcard_unavailable`,
+  blocked with the refusal and a deep link to `/proxy/certificates`; a covered one is
+  `certificate_available`.
+  HTTP-01 issuance (`issueDeploymentHTTP`) runs through the same certbot — whose plugins
+  `deploymentChallenge` reads, against probe directories, to choose webroot or standalone — names the
+  same directory (`deploymentHTTPIssueArgs` appends `ACMEDirectory.certbotArgs`), skips the public-DNS
+  check for a private authority as the Caddy path does, and is bounded at five minutes. Both are
+  serialized against route application so two
   runs cannot race one account into a rate limit, and pass `--keep-until-expiring` so a redeploy inside
-  the renewal window asks the authority for nothing. A first order on a host with no ACME account
+  the renewal window asks the authority for nothing. **One certbot at a time** (`proxysvc/certbot_gate.go`):
+  certbot holds a lock on its configuration directory and a second certbot fails on it at once, so
+  every certbot the dashboard runs takes the one turn `HoldCertbot` hands out — the Certificates page's
+  jobs (`startCertbotJob` wraps every `certbot.` job's runner, renewals and the timer's service run
+  included) and a run's HTTP-01 and DNS-01 orders (`holdCertbotFor`). A run that finds the page's job
+  holding it waits, within the step's own five-minute bound (plus the propagation wait over DNS-01),
+  with a transcript line naming the holder — `Waiting for certbot, which is busy with Renewing
+  app.example.com (started by alice from the Certificates page); the certificate step continues when it
+  finishes` — and then re-checks for a covering certificate before ordering, since the job may have
+  issued exactly that; a wait that outlasts the bound fails the step as `certificate_certbot_busy`, in
+  the step's own words (what it waited for and for how long, and to deploy again once that has
+  finished), never certbot's "another instance is already running". The page's job is accepted as it
+  always was, and a job that finds a run ordering waits in its console the same way, naming the run;
+  two of the page's jobs are still kept apart by the job family's `409 certbot_busy`. The turn is taken
+  before the route lock, never inside it, because the job holding the turn reloads nginx under that
+  lock when it is done. What needs no certbot — a covering certificate, the Docker Caddy ingress, a
+  refusal — waits for nobody. certbot's own lock still arbitrates against what the dashboard does not
+  run, the renewal timer first among them. A first order on a host with no ACME account *with that directory*
+  (`acmeAccountExists`, which files accounts by directory as certbot does; any
+  entry under `accounts/` used to count on the HTTP path, so a host registered with Let's Encrypt
+  ordering from a private authority skipped registering and was refused for want of a contact)
   registers without a contact address; an operator who wants expiry mail registers once on the
-  Certificates page and every later order reuses that account. certbot's exit code is not the evidence:
+  Certificates page and every later order reuses that account.
+  `TestLiveDeploymentHTTP01OrdersFromTheConfiguredDirectory` proves the HTTP-01 order against an
+  isolated Pebble: with a Let's Encrypt account already on disk, the run registers with Pebble, the
+  lineage's `server =` is Pebble's directory, the chain verifies against the root that Pebble minted,
+  and the next order finds Pebble's account rather than Let's Encrypt's. certbot's exit code is not the evidence:
   the certificate is read back and must cover the exact names before the step passes. Step evidence
   carries the lineage name, method, outcome and, over DNS, the provider's name — never a key path, key
   material or a credential. `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run
   TestLiveCertificateStepProvesAWildcardOverDNS01` and `./internal/proxysvc -run
   TestLiveDeploymentWildcardIsProvedOverDNS01AndServed` prove it against Pebble validating real DNS-01
   records in a BIND (`proxysvc/acmetest`): refused without credentials, issued with them, reused by a
-  preview, renewed by `certbot renew` from the lineage's own configuration, and served by nginx on the
-  wildcard's route and the preview's, chaining to that Pebble's root.
+  preview — on an nginx host and, through a real `caddy:2-alpine` used by name, on the Docker Caddy
+  ingress — renewed by `certbot renew` from the lineage's own configuration, and served by nginx on
+  the wildcard's route and the preview's, chaining to that Pebble's root.
+  `TestLiveDockerCaddyServesAWildcardProvedOverDNS01` is the same journey served by the ingress, the
+  renewal refresh included ([ingress decision](caddy-ingress.md#renewal)).
   Before a new HTTP-01 order, a bounded DNS lookup rejects unresolved names and non-public destinations
   with a corrective message, including old saved sslip.io names based on a Tailscale address. Existing
   certificates are reused before this check, so private services can still use a certificate provisioned
@@ -717,7 +757,8 @@ only renderer/executor/validation authority for their feature.
   the `rehearse_migration` step, between `backup_gate` and `release_task`, so it runs only after the
   backup it restores from has been verified and before any task touches production. It is off by
   default and turned on per environment (`deploy_rehearsal_policies`, `GET`/`PUT
-  /deploy/{id}/environments/{env}/rehearsal`, `system.admin` with a session, audited as
+  /deploy/{id}/environments/{env}/rehearsal`: the read for whoever reads the environment, a deploy key
+  included; the write `system.admin` with a session, audited as
   `deploy.rehearsal.update`; a preview has no row). A run with no release tasks, or with rehearsal
   off, skips the step with the reason. Otherwise the target is the managed database the tasks'
   resolved variables address by its `db-<id>.jd.internal` or `db-<id>-pool.jd.internal` name — the
@@ -757,9 +798,13 @@ only renderer/executor/validation authority for their feature.
   leftovers before it starts and everything after, however it ends; a resumed run makes its copy
   again (`ReconcileResume`); and `Server.Start` removes every rehearsal before the engine resumes.
   Runtime observation never counts the copy (it has no release id) or its task (the release-task
-  label), and host container alerts leave both out.
-  Build settings carries the terms under the release tasks (`settings/rehearsal.tsx`), and the run
-  page reads the report as figures (`run-rehearsal.tsx`).
+  label), and host container alerts leave both out. A promotion takes the same step in the same place
+  (`PromotionStepKeys`, [staging and promotion](staging-promotion.md)): production's tasks with
+  production's variables, so the copy is of the database production's values reach, run in the image
+  staging built; the step reads production's terms, never staging's, and ends the promotion as it
+  would a deploy. Build settings carries the terms under the release tasks (`settings/rehearsal.tsx`),
+  the Promote confirmation says the tasks are rehearsed first while the terms are on, and the run page
+  reads the report as figures (`run-rehearsal.tsx`).
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
   retain-until windows, recent failed diagnostics, shared physical digests, every environment under
   an active deployment lease, and a staging release an unfinished promotion is about to take its image
@@ -890,7 +935,19 @@ only renderer/executor/validation authority for their feature.
 - Blue/green is limited to stateless proxy-owned HTTP candidates without fixed ports, host networking or
   writable mounts; dynamic candidate ports are loopback-leased. Fixed-port, Compose, game and exclusive
   writable-storage plans are honest `stop_first` deployments and advertise expected downtime. A route
-  moves only after required readiness/smoke checks pass.
+  moves only after the plan's required readiness/smoke checks pass — and a plan with none is cut over
+  to ungated: `verify_readiness` is skipped (`disabled`, with the reason in its evidence and a
+  transcript line saying the candidate counts as ready because it started), and `activate` records
+  `readinessGated: false` and writes, in the strategy's words, that traffic moved (or the release went
+  live) without a readiness check; the run page says it again on the Route stage's line and in the
+  outcome, with the way to the health-check settings. A readiness check is required only of a web or
+  static plan (`readiness_missing`, a decision, refused by a deploy's `analyze_plan`); a redeploy,
+  rollback or promotion has no `analyze_plan` and runs with whatever checks the plan carries. For every
+  other profile that serves — a service or published container on a port, a game server, a Compose
+  stack or anything behind a domain — preflight raises `cutover_unverified` as a warning
+  (`ungatedCutoverFinding`), with the port and strategy measured, field `checks`, and in a run's
+  preflight step a deep link to Settings → Runtime → Health checks; a worker is never asked. Not a
+  refusal: an existing plan without a check keeps deploying and is told what that costs.
 - A managed route lets request bodies up to `runtime.maxRequestBodyMb` through (1–10240). Zero is each
   proxy's deployment default, which differs: nginx's own default is 1 MB, which refused a phone photo
   before the application saw it, so an nginx route always writes `client_max_body_size` (64 MB unless the
@@ -971,7 +1028,9 @@ only renderer/executor/validation authority for their feature.
   `deploy.rollback_policy.update`; `POST …/rollback-watch/rollback` is the instant rollback by hand
   (destructive, ordinary confirmation, `409 no_warm_release` without a watching window, audited
   `deploy.release.instant_rollback`); `POST …/rollback-watch/keep` (service control) ends the window now
-  and removes the warm container, audited `deploy.release.keep`. The live proof is
+  and removes the warm container, audited `deploy.release.keep`. The read, the instant rollback and
+  keep are a deploy key's too (`jd status`, `jd rollback --instant`, `jd keep`); the terms stay a
+  session's. The live proof is
   `TestLiveMetricGatedRollbackSwitchesBackToTheWarmRelease` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
 - A failed build names its cause instead of `internal_error` and exec's `exit status 1`. `dockerx`
   reads buildx's plain progress as it streams (over `os.Pipe`s read to EOF, because a `StdoutPipe` is
@@ -1058,7 +1117,7 @@ only renderer/executor/validation authority for their feature.
   rollback clone only available immutable artifacts and traverse the same checks/cutover path (a clone
   carries its target's own source identity and promotion provenance); promote takes a staging release's
   exact image with production's current plan and variables, builds nothing, and runs a deploy's steps from
-  `render_runtime` on ([staging and promotion](staging-promotion.md)); restart
+  `render_runtime` on, the migration rehearsal included ([staging and promotion](staging-promotion.md)); restart
   stops and starts the existing live runtime without creating a release, then verifies the plan's
   readiness and smoke checks against that live release before recording it. Rollback, stop and restart use
   the destructive capability and ordinary confirmation, not a typed phrase; because stop and restart share
@@ -1288,7 +1347,14 @@ only renderer/executor/validation authority for their feature.
   (reveals, saved credentials, secret-store connections, pull-request merge/comment and previews,
   schedules, alerts, channels, drains, adding and removing an environment, a route's maintenance and
   error pages, the warm-release terms, the migration rehearsal's terms, the
-  typed-phrase removals) stays a session's and answers it `session_required`. Its writes are
+  typed-phrase removals) stays a session's and answers it `session_required`. The operating verbs an
+  ordinary key already had are the deploy key's as well: `POST …/promote`,
+  `POST …/rollback-watch/rollback` and `…/keep`, `PUT …/maintenance` (who is let past is the
+  configuration's `runtime.maintenance.bypassFrom`, applied by the next release), with the reads
+  `GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/maintenance`,
+  `…/pages/{page}` and `…/rehearsal`; `GET /deploy/secret-stores`, an ordinary key's read, answers it
+  `key_scope`, since the list carries each connection's address and sign-in fields and every
+  deployment's variables that read a store, and the key cannot point a variable at one. Its writes are
   held to what a person in a session could not be refused: a generate or rotate answers it without
   `generatedValue`; a plan it commits, or an environment change it makes, may not carry host authority
   (`hostAuthority`: a folder on the server, Docker Compose, privileged, host network, capabilities,
@@ -1299,7 +1365,11 @@ only renderer/executor/validation authority for their feature.
   `store` reference (on a draft, checked at commit with `Draft.VariableReferences`, which reads a value's mode
   as the commit stores it), nor, for a key narrowed to some deployments, at a `server` shared
   variable. A key narrowed to chosen deployments
-  (`api_token_deployments`) lists and reaches only those. `GET /deploy/{id}/runs/{run}/transcript?after=&limit=`
+  (`api_token_deployments`) lists and reaches only those. Drafts are every deploy key's own
+  (`deploy_drafts.key_id`; `AuthorizeDraftForKey`): a key never reads, changes, commits or discards a
+  session's or another key's, and a narrowed key's commit adds the deployment it creates to its grant
+  in the commit's transaction (`DraftCommitRequest.GrantToKey`), so the key reaches what it made;
+  duplicating is of a deployment the key reaches, and the draft is the key's. `GET /deploy/{id}/runs/{run}/transcript?after=&limit=`
   reads a run's log lines after a sequence number, oldest first, with the run and its steps and
   `{next, more}` (`OrchestrationStore.RunTranscriptAfter`): what the stream route sends over its socket,
   for a client without one — `jd logs --follow` and `jd deploy --wait` poll it. The `jd` program itself
@@ -1801,7 +1871,9 @@ only renderer/executor/validation authority for their feature.
   the write is `system.admin` in a session, at most 256 KiB, audited `deploy.page`) and served from the
   next answer. The switch is `GET`/`PUT /deploy/{id}/environments/{env}/maintenance` `{on}`, the write
   behind `s.destructive` as stopping a deployment and a Proxy site's maintenance are, audited
-  `deploy.maintenance` with the outcome. Readiness and smoke checks dial the candidate directly and are
+  `deploy.maintenance` with the outcome; a deploy key reaches the switch and reads a page
+  (`jd maintenance APP on|off`, whose `--bypass` writes `runtime.maintenance.bypassFrom` through the
+  configuration first), while a page's write stays a session's. Readiness and smoke checks dial the candidate directly and are
   untouched; a `public_route` check, which goes through the route and would read the maintenance page,
   is not run while the switch is on and records `maintenance` as its code, so a release can be deployed
   during a migration window. The Domains settings show the switch as its own **Maintenance** form,
@@ -1892,7 +1964,8 @@ only renderer/executor/validation authority for their feature.
   source revision alone is what makes it report a `source` pending change, and the Git watcher already keys
   its cursor on the desired source's own config digest, so a changed URL/ref/subdirectory resets that cursor
   and the very next poll reports `branch_changed` on its own.
-- `POST /deploy/{id}/duplicate` `{name}` (`system.admin`, session or a deploy key reaching every deployment, audited `deploy.project.duplicate`) creates
+- `POST /deploy/{id}/duplicate` `{name}` (`system.admin`, session or a deploy key that reaches the deployment, the draft then
+  being the key's own, audited `deploy.project.duplicate`) creates
   a draft pre-filled from the project's current desired source and configuration — the same draft the
   new-project page resumes with `?draft=`, landing at the `configuration` step with no `detection` yet, so
   the operator still runs detect/preflight/commit like any other draft. `PlanningStore.Duplicate` copies the
@@ -1924,7 +1997,12 @@ renders `tls { issuer acme { dir … trusted_roots … } }`, the bundle is copie
 `/config/just-dashboard/acme-root.pem` in the container before the route is written, the issued chain
 is verified against those roots when it is read back, and the public-DNS precheck is skipped for a
 private authority (public DNS says nothing about it; Let's Encrypt and its staging twin still require the
-name to resolve here). certbot issuance adds `--server <directory>` for a non-staging override. The
+name to resolve here). Every certbot order the dashboard places — the Certificates page's, a run's
+HTTP-01 and DNS-01 — adds `--server <directory>` for any directory but Let's Encrypt's production one
+(certbot's own default, left unnamed so a `--dry-run` still goes to staging), checks for an account
+under that directory, and skips the public-DNS check for a private authority; `CertbotCommand` hands
+every certbot it runs the bundle as `REQUESTS_CA_BUNDLE`, which is how python-requests, and so certbot,
+trusts a private listener. The
 journey is proven end to end by `TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory`: an isolated
 Caddy on loopback ports and a Pebble that validates nothing (`PEBBLE_VA_ALWAYS_VALID=1`) on one Docker
 network; the certificate is issued, verified against Pebble's freshly minted root, reused on the second

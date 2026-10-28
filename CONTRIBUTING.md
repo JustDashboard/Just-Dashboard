@@ -345,6 +345,12 @@ to the contribution terms above, including the additional licence grant to the p
 - The public-certificate journey against a real ACME authority (an isolated Caddy and a Pebble that
   validates nothing, on one Docker network):
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory -count=1 -v`.
+  Changes to how a deployment run orders a certificate over HTTP-01 through certbot (the argv, the
+  account check, which certbot runs) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDeploymentHTTP01OrdersFromTheConfiguredDirectory -count=1 -v`,
+  which drives the host's certbot against a Pebble that validates nothing, in directories of the
+  test's own, and requires the order to register with and be signed by that Pebble while an account
+  with Let's Encrypt sits beside it; no port 80 is touched.
   Changes to how a deployment run issues a certificate over DNS-01 (a wildcard plan name, the provider
   choice, the saved credentials it uses) also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDeploymentWildcardIsProvedOverDNS01AndServed -count=1 -v`
@@ -353,7 +359,14 @@ to the contribution terms above, including the additional licence grant to the p
   (`internetsystemsconsortium/bind9:9.20`) taking signed RFC 2136 updates, so the host's certbot needs
   its dns-rfc2136 plugin: `python3-certbot-dns-rfc2136`, or that plugin's wheel and dnspython's unpacked
   into a directory on `PYTHONPATH` (`sudo -n env JD_DEPLOY_LIVE=1 PATH=$PATH PYTHONPATH=<dir> <test binary>`);
-  without it both skip. Each waits out the plugin's 60-second propagation delay once, the first twice.
+  without it all three skip. Each waits out the plugin's 60-second propagation delay once, the first
+  and the Caddy one twice. The same changes, and any change to how a Docker Caddy route serves a
+  certificate copy or how a renewal reaches it (`docker_caddy_copies.go`, the ingress maintenance
+  pass, `reloadAfterRenewal`), also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesAWildcardProvedOverDNS01 -count=1 -v`
+  (the wildcard served by a real `caddy:2-alpine`, then renewed and refreshed; needs the plugin above)
+  and `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyRefreshesRenewedCertificateCopies -count=1 -v`
+  (the renewal refresh on a real Caddy with no authority involved).
   Changes to how a deployment route renders its redirects, response headers, allowed addresses, HSTS
   or a domain's own scheme also
   run `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules -count=1 -v`,
@@ -404,7 +417,11 @@ to the contribution terms above, including the additional licence grant to the p
   `pg_dump` is on `PATH`, as it is in the dashboard's image, which makes it a custom-format archive
   the copy restores with `pg_restore` — run it both ways after changing the restore).
   `TestLiveMigrationRehearsalRestoresAMariaDBDump`
-  does the same against MariaDB (it pulls `mariadb:11.8` once), and
+  does the same against MariaDB (it pulls `mariadb:11.8` once),
+  `TestLiveMigrationRehearsalGatesAPromotedRelease` does the same through promotions — a staging
+  environment of the same image, its release promoted into production three times: refused for want
+  of a backup, passing against the copy and reaching production, then failing against the copy with
+  production's schema, rows and live release unchanged — so changes to promotion run it too, and
   `TestLiveRehearsalLeftoversAreRemovedAtStart` checks the start-up sweep removes a copy, its volume,
   a task container and the network by label and leaves a managed container without it. With
   `JD_TEST_WALG=<path>` to the WAL-G release `backend/Dockerfile` pins,
@@ -499,8 +516,9 @@ to the contribution terms above, including the additional licence grant to the p
 - Changes to the engine, its reconciler or run persistence also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun -count=1 -v`.
   It builds `internal/deploy/testdata/engine-host`, SIGKILLs that real second process inside every
-  step in turn, and requires that the restarted engine ends the run with `restart_evidence_missing`,
-  leaves no claimable run behind, and still has the killed process's step output.
+  step in turn — of a deploy's step list and of a promotion's, which starts at `render_runtime` — and
+  requires that the restarted engine ends the run with `restart_evidence_missing`, leaves no claimable
+  run behind, and still has the killed process's step output.
 - Backup consistency or restore-verification changes also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveSQLiteApplicationRecoveryVerification -count=1 -v`.
   This uses a real application image and live SQLite snapshot, destroys only the fixture's table,

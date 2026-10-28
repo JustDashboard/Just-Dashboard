@@ -372,9 +372,13 @@ func promotionStepFailure(err error) StepResult {
 // PromotionStepKeys are a promotion's steps: a deploy's from render_runtime
 // on. Production's release tasks run, against production's variables and
 // therefore production's database, after its backup gate and before
-// anything starts, exactly where a build's would.
+// anything starts, exactly where a build's would — and, when production's
+// terms ask for it, rehearsed first against a restored copy in the promoted
+// image, exactly as a build's would be. A promotion used to leave the
+// rehearsal out, so a release whose migration had only ever met staging's
+// data ran it on production's unrehearsed.
 var PromotionStepKeys = []StepKey{
-	StepRenderRuntime, StepBackupGate, StepReleaseTask, StepProvisionCertificate,
+	StepRenderRuntime, StepBackupGate, StepRehearseMigration, StepReleaseTask, StepProvisionCertificate,
 	StepStartCandidate, StepVerifyReadiness, StepVerifySmoke, StepActivate,
 	StepRetirePrevious, StepRecordRelease, StepNotify,
 }
@@ -418,6 +422,10 @@ type PromotionTargetView struct {
 	PendingChanges []PendingChange `json:"pendingChanges"`
 	// ReleaseTasks run before the cutover, against production.
 	ReleaseTasks []string `json:"releaseTasks"`
+	// Rehearsal says production's terms rehearse those tasks against a
+	// restored copy of its database before they run for real; a task that
+	// fails there ends the promotion with production untouched.
+	Rehearsal bool `json:"rehearsal"`
 }
 
 type PromotionBlocker struct {
@@ -506,6 +514,11 @@ func (s *OrchestrationStore) PromotionPreview(
 			target.ReleaseTasks = append(target.ReleaseTasks, task.Name)
 		}
 	}
+	terms, err := s.RehearsalPolicy(ctx, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	target.Rehearsal = terms.Enabled
 	preview.Target = target
 	preview.Detail = ReleaseDetailComparison{
 		Status: statusUnavailable, Fields: []ReleaseFieldChange{}, Variables: []ReleaseListChange{},

@@ -47,6 +47,14 @@ type nsLookup func(context.Context, string) ([]*net.NS, error)
 // for tests, which must not ask the network who hosts example.test.
 var deploymentNSLookup nsLookup = net.DefaultResolver.LookupNS
 
+// UseDeploymentNSLookupForTest answers a run's nameserver lookups from
+// lookup, for a test in another package, and restores the resolver.
+func UseDeploymentNSLookupForTest(lookup func(context.Context, string) ([]*net.NS, error)) (restore func()) {
+	previous := deploymentNSLookup
+	deploymentNSLookup = lookup
+	return func() { deploymentNSLookup = previous }
+}
+
 // zoneNameservers finds the zone a name sits in by asking it and then each
 // parent for NS records, stopping short of the top-level domain, and answers
 // with that zone and its nameservers. Nothing found is "not known", never "no
@@ -164,40 +172,13 @@ func chooseDeploymentDNSProvider(
 		lead, describeSites(names), unknown, wildcard, certificatesPage)
 }
 
-// wildcardCaddyRefusal refuses a wildcard on a host whose deployments the
-// Docker Caddy ingress serves, running or about to be started. Caddy obtains
-// each route's certificate itself, and it can answer a DNS challenge only
-// when it is built with that provider's module — the caddy:2-alpine image it
-// runs has none — and given the provider's token, which this dashboard keeps
-// for certbot and does not hand to another program. A certificate issued here
-// would not help either: the route's own names are what Caddy serves.
-func (s *Service) wildcardCaddyRefusal(ctx context.Context, wildcard string) error {
-	edge, err := s.dockerCaddy(ctx)
-	if err != nil {
-		return err
-	}
-	name := ""
-	switch {
-	case edge != nil:
-		name = edge.Name
-	case s.canProvisionIngress(ctx):
-		name = managedIngressName
-	default:
-		return nil
-	}
-	return wildcardRefusal(
-		"%s is a wildcard, which only a DNS challenge can prove, and deployments on this server are served by the Docker Caddy ingress (%s), which obtains each name's certificate itself over HTTP. Caddy answers a DNS challenge only when it is built with that DNS provider's module, which the caddy:2-alpine image does not include. Name each host instead, such as %s; Caddy certifies every one of them on its own.",
-		wildcard, name, "app"+strings.TrimPrefix(wildcard, "*"))
-}
-
 // DeploymentDNSProvider answers, without ordering anything, how a run would
 // prove a wildcard: the provider whose saved credentials it would use, or the
 // refusal it would stop with. Preflight and the Domains sheet ask it, so the
-// answer before a run and the run's own are one decision.
+// answer before a run and the run's own are one decision. The proxy serving
+// the route does not come into it: certbot proves the wildcard on the host
+// either way, and the Docker Caddy ingress serves a copy of what it issued.
 func (s *Service) DeploymentDNSProvider(ctx context.Context, wildcard string) (DNSProvider, error) {
-	if err := s.wildcardCaddyRefusal(ctx, wildcard); err != nil {
-		return DNSProvider{}, err
-	}
 	rt, err := deploymentCertbot(ctx)
 	if err != nil {
 		return DNSProvider{}, err
@@ -242,6 +223,27 @@ func (s *Service) issueDeploymentWildcard(
 	if err := directory.validate(); err != nil {
 		return DeploymentCertificate{}, err
 	}
+	environment, err := CertbotEnvironment()
+	if err != nil {
+		return DeploymentCertificate{}, err
+	}
+	// The HTTP path's bound, plus the propagation wait certbot sleeps
+	// through between writing the record and asking for validation. The
+	// wait for certbot's turn comes out of it too.
+	issueCtx, cancel := context.WithTimeout(ctx, 5*time.Minute+time.Duration(provider.DefaultWait)*time.Second)
+	defer cancel()
+	release, err := holdCertbotFor(issueCtx, names, log)
+	if err != nil {
+		return DeploymentCertificate{}, err
+	}
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Whoever had certbot may have issued the wildcard: the page, or the
+	// run queued before this one.
+	if reused, ok := s.reuseDeploymentCertificate(issueCtx, names); ok {
+		return reused, nil
+	}
 	registered := acmeAccountExists(letsencryptDir, certbotServer(false))
 	args := append([]string{"certonly"}, dnsIssueArgs(provider, provider.DefaultWait)...)
 	args = append(args, "--non-interactive", "--agree-tos", "--keep-until-expiring", "--no-eff-email")
@@ -255,14 +257,6 @@ func (s *Service) issueDeploymentWildcard(
 	for _, name := range names {
 		args = append(args, "-d", name)
 	}
-	environment, err := CertbotEnvironment()
-	if err != nil {
-		return DeploymentCertificate{}, err
-	}
-	// The HTTP path's bound, plus the propagation wait certbot sleeps
-	// through between writing the record and asking for validation.
-	issueCtx, cancel := context.WithTimeout(ctx, 5*time.Minute+time.Duration(provider.DefaultWait)*time.Second)
-	defer cancel()
 	cmd, err := CertbotCommand(issueCtx, environment, args...)
 	if err != nil {
 		return DeploymentCertificate{}, err

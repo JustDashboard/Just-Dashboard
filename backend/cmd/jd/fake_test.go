@@ -35,6 +35,7 @@ type fakeDashboard struct {
 	mu            sync.Mutex
 	revision      int
 	vars          map[string]fakeVar
+	maintenanceOn bool
 	finalState    string
 	transcriptHit int
 	conflicts     int // how many variable writes to refuse with revision_conflict
@@ -178,6 +179,29 @@ func (f *fakeDashboard) serve(w http.ResponseWriter, r *http.Request) {
 		f.write(w, 202, map[string]any{"id": 600, "runNumber": 5, "state": "queued", "projectId": 7, "environmentId": 70})
 	case route == "POST "+env+"/rollback":
 		f.write(w, 202, map[string]any{"id": 601, "runNumber": 6, "state": "queued"})
+	case route == "GET /api/v1/deploy/7/environments":
+		f.write(w, 200, []byte(`[{"id":70,"name":"Production","slug":"production","kind":"production","liveReleaseId":102},`+
+			`{"id":71,"name":"Staging","slug":"staging","kind":"staging","liveReleaseId":150}]`))
+	case route == "GET /api/v1/deploy/8/environments":
+		f.write(w, 200, []byte(`[{"id":80,"name":"Production","slug":"production","kind":"production"}]`))
+	case route == "POST "+env+"/promote":
+		f.write(w, 202, map[string]any{"id": 602, "runNumber": 7, "state": "queued", "operation": "promote"})
+	case route == "POST "+env+"/rollback-watch/rollback":
+		f.write(w, 202, map[string]any{"id": 603, "runNumber": 8, "state": "queued", "operation": "rollback"})
+	case route == "POST "+env+"/rollback-watch/keep":
+		f.write(w, 200, map[string]any{"state": "closed", "endReason": "kept", "releaseNumber": 3, "warmReleaseNumber": 2,
+			"endMessage": "ion kept release #3"})
+	case route == "GET "+env+"/rollback-watch":
+		f.write(w, 200, map[string]any{"policy": map[string]any{"keepWarm": true, "windowSeconds": 600, "automatic": true},
+			"watch":   map[string]any{"state": "watching", "releaseNumber": 3, "warmReleaseNumber": 2, "expiresAt": "2026-10-27T10:10:00Z"},
+			"preview": false})
+	case route == "GET "+env+"/maintenance":
+		f.write(w, 200, map[string]any{"driver": "caddy", "route": true, "ready": true, "on": f.maintenanceOn})
+	case route == "PUT "+env+"/maintenance":
+		f.maintenanceOn, _ = body["on"].(bool)
+		f.write(w, 200, map[string]any{"driver": "caddy", "route": true, "ready": true, "on": f.maintenanceOn})
+	case route == "GET "+env+"/rehearsal":
+		f.write(w, 200, map[string]any{"enabled": false, "connectionId": 0, "whenUnavailable": "block"})
 	case route == "GET "+env+"/releases":
 		f.write(w, 200, []byte(`[{"id":102,"number":3,"state":"live","createdAt":"2026-10-27T10:00:00Z"},`+
 			`{"id":101,"number":2,"state":"retained","sourceRevision":"abcdef1234567","createdAt":"2026-10-26T10:00:00Z"},`+

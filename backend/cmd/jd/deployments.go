@@ -593,20 +593,34 @@ func (a *app) releases(args []string) error {
 }
 
 func (a *app) rollback(args []string) error {
-	fs := a.newFlags("rollback", "rollback APP [--to RELEASE_ID] [--wait]")
+	fs := a.newFlags("rollback", "rollback APP [--to RELEASE_ID | --instant] [--wait]")
 	env := fs.String("env", "", "environment name or id")
 	to := fs.Int64("to", 0, "the release id to go back to (jd releases lists them)")
+	instant := fs.Bool("instant", false, "switch traffic back to the release kept warm, without starting anything")
 	wait := fs.Bool("wait", false, "follow the run and exit with its result")
 	positional, err := a.parse(fs, args)
 	if err != nil {
 		return err
 	}
-	if err := exactly(positional, 1, "rollback APP [--to RELEASE_ID] [--wait]"); err != nil {
+	if err := exactly(positional, 1, "rollback APP [--to RELEASE_ID | --instant] [--wait]"); err != nil {
 		return err
+	}
+	if *instant && *to != 0 {
+		return usagef("--instant goes back to the release kept warm, which the dashboard chose; it takes no --to")
 	}
 	t, err := a.resolve(positional[0], *env)
 	if err != nil {
 		return err
+	}
+	if *instant {
+		// The window's own route: the warm release is already running, so
+		// the run only switches traffic and retires the live release.
+		var run engineRun
+		raw, err := a.client.sendJSON(http.MethodPost, t.envPath("/rollback-watch/rollback"), nil, nil, &run)
+		if err != nil {
+			return err
+		}
+		return a.afterQueue(t, run, raw, *wait, "Switching back to the warm release of")
 	}
 	releaseID := *to
 	described := ""

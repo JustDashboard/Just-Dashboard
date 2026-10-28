@@ -3,7 +3,9 @@ package deploy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
@@ -101,13 +103,27 @@ func (e *NormalizedStepExecutor) certificateStep(
 			}
 		}
 		// A wildcard this host cannot prove — no saved DNS credentials answer
-		// for its zone, or the Docker Caddy ingress serves the route — is the
-		// same kind of answer: nothing the deployment did, something to change
-		// on the host, which the message names.
+		// for its zone — is the same kind of answer: nothing the deployment
+		// did, something to save on the host, which the message names. The
+		// proxy serving the route is not a reason: the Docker Caddy ingress
+		// serves a copy of what certbot proves, as nginx serves the file.
 		if errors.Is(err, proxysvc.ErrCertificateWildcard) {
 			return StepResult{
 				State: StepUnavailable, ErrorCode: "certificate_wildcard_unavailable",
 				ErrorMessage: err.Error(), Evidence: evidence,
+			}
+		}
+		// certbot was somebody else's for longer than this step's bound:
+		// nothing the authority said and nothing to fix on the host, so the
+		// step says what it waited for and how long, in its own words
+		// rather than certbot's "another instance is already running".
+		var busy *proxysvc.CertbotBusyError
+		if errors.As(err, &busy) {
+			return StepResult{
+				State: StepFailed, ErrorCode: "certificate_certbot_busy",
+				ErrorMessage: fmt.Sprintf("the certificate step waited %s for certbot, which was busy with %s, and its time ran out; deploy again once that has finished",
+					busy.Waited.Round(time.Second), busy.Holder),
+				Evidence: evidence,
 			}
 		}
 		return StepResult{
