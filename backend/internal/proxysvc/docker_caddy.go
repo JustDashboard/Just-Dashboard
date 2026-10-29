@@ -486,7 +486,11 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		}
 		maintenance, errorPages = renderCaddyMaintenance(route.Maintenance, pages), renderCaddyErrorPages(route.ErrorPages, pages, wake)
 	}
-	handling := fence + maintenance + authDirective + gateDirective + bodyDirective + sleep + "  " + directive + "\n"
+	trace := ""
+	if route.Trace && route.Name != "" && upstream != "" {
+		trace = caddyTraceDirectives
+	}
+	handling := trace + fence + maintenance + authDirective + gateDirective + bodyDirective + sleep + "  " + directive + "\n"
 	if fence != "" || maintenance != "" || route.ForwardAuth != nil {
 		handling = "  route {\n" + indentCaddy(handling) + "  }\n"
 	}
@@ -856,6 +860,12 @@ func (c *dockerCaddy) routeContent(ctx context.Context, route DeploymentRoute) (
 	rendered, auth, err := c.resolveForwardAuth(ctx, route)
 	if err != nil {
 		return "", nil, err
+	}
+	// The trace is recorded with log_append, which Caddy has had since 2.8;
+	// an operator's older ingress serves the route without one rather than
+	// refusing the whole Caddyfile.
+	if rendered.Trace && !c.recordsTraces(ctx) {
+		rendered.Trace = false
 	}
 	content, err := renderDockerCaddyRoute(rendered, target.upstream())
 	if err != nil {

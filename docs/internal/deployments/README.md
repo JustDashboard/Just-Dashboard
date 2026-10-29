@@ -22,7 +22,8 @@
   decision, stopping without removing, the route's wake on nginx and Caddy, the wake socket only the proxy
   reaches, waking on the first request, runs and repair, and what reads asleep as not down.
 - [`log-drains.md`](log-drains.md) — copying deployments' container output and requests to OpenTelemetry
-  (OTLP), Loki or a JSON-lines endpoint: formats, severity, sealed headers, delivery, retries and status.
+  (OTLP), Loki or a JSON-lines endpoint, and the requests as OTLP trace spans: formats, severity,
+  traces, sealed headers, delivery, retries and status.
 - [`secret-stores.md`](secret-stores.md) — Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager and Azure
   Key Vault connections, the `${{store.NAME/path#KEY}}` reference and each kind's shape of it, when a run
   reads it, what a rollback reads, previews, routes and audit.

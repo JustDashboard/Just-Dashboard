@@ -608,7 +608,9 @@ func (p *headersParse) directive(name, value string, serverLevel, rootLocation b
 	switch {
 	case name == "proxy_set_header" && rootLocation:
 		header, v, _ := strings.Cut(value, " ")
-		if containsFold(renderedRequestHeaders, header) {
+		// A deployment route's own trace header is the route's, read by the
+		// site parser as its Trace (trace.go).
+		if containsFold(renderedRequestHeaders, header) || traceHeaderLine(value) {
 			return false
 		}
 		// A deployment route's own: the Cookie header with the dashboard's

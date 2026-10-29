@@ -407,6 +407,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				rootTries, _ = strconv.Atoi(value)
 			}
 		case "proxy_set_header":
+			if traceHeaderLine(value) {
+				spec.Trace = true
+			}
 			if host, ok := strings.CutPrefix(value, "Host "); ok && current == nil {
 				switch host = strings.TrimSpace(host); host {
 				case "$host":
