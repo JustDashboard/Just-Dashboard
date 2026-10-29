@@ -1493,7 +1493,15 @@ only renderer/executor/validation authority for their feature.
   refuses it afterward without any extra check, and the trigger's next delivery for that pull request
   inserts an independent new `pending` row at its own revision — a rejection does not follow it. They start without
   inherited variables, linked databases or release tasks; container mounts become fresh preview volumes on
-  a dedicated bridge. Compose and host-access plans currently fail closed. PR close retires only owned
+  a dedicated bridge. A Compose stack is isolated service by service — every service on the preview's
+  bridge alone, its mounts on preview volumes (a read-only file of the commit itself excepted), no secret,
+  fixed name or published port but the public service's loopback one — and a stack whose service needs the
+  server itself, a compatibility Compose plan and other host-access plans fail closed ([Compose
+  previews](preview-isolation.md#compose-previews)). An environment can give its previews a
+  [database branch](preview-isolation.md#database-branches) of a database it links — the preview's own
+  copy, restored from the newest backup through the rehearsal's `prepareCopy` onto the preview's database
+  network with a password made for it, chosen columns masked in their shape, never for a fork, removed with
+  the preview — and the preview's `${{database.N…}}` resolves to it. PR close retires only owned
   resources and archives after successful cleanup. Reopening waits for cleanup and a new approval
   generation; closing cancels queued/build work. Startup quarantines older unsafe previews, stops owned
   containers without deleting data, withdraws routes, and blocks old releases from activation. Failed
@@ -1515,7 +1523,11 @@ only renderer/executor/validation authority for their feature.
   identity cached two minutes, listings 30 s, four gh subprocesses at a time). `GET /deploy/{id}/pull-requests`
   answers `{repository, host, available, reason?, identity?, checkoutPath?, pulls[] (each with its
   preview), previews[], production {environmentId, automatic, intervalSeconds, awaitingFirstDeployment},
-  tailnet, compose, localCheckout, internalPort, releaseTasks}` — `reason` is one of `not_github`,
+  tailnet, compose, composePreview?, databaseBranches, localCheckout, internalPort, releaseTasks}` —
+  `databaseBranches` are the databases production gives its previews a branch of, each preview carries its
+  `branches`, `composePreview` is a
+  Compose project's `{public, services[], refusals[]}` and a live Compose preview carries its `services`
+  as Docker reports them — `reason` is one of `not_github`,
   `sign_in_required`, `app_not_installed`, `not_installed`; `previews` lists the open ones and a closed
   one only while its newest `preview_remove` run has not succeeded; a read GitHub refuses answers an
   error (`429 github_rate_limited` for a quota refusal — a 429, or a 403 or gh's text saying rate limit,
@@ -1800,8 +1812,8 @@ only renderer/executor/validation authority for their feature.
   states before the press what the stack does by itself: only the public service is reachable, the
   rest publish nothing on a network with no route out, each deploy stops the stack first, shared
   passwords are generated here, and a backup is a file copy of a running database rather than a dump.
-  Compose previews stay refused (`preview_isolation.go`); a template is not a Git source, so it is
-  never offered one. `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
+  A template is not a Git source, so it is never offered a pull-request preview, though a Compose
+  stack from a Git source is ([Compose previews](preview-isolation.md#compose-previews)). `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
   through the real build step and runtime owner and requires every check to pass, every service's
   healthcheck to report healthy, and only the public port to be published, on loopback.
 - **How the first sign-in works**, declared rather than described. Every definition carries an
@@ -1934,6 +1946,12 @@ only renderer/executor/validation authority for their feature.
   **Require sign-in** offers the Proxy page's four presets (`lib/sso-providers.ts`), **Here and on
   previews** or **Previews only**, and names a password or plain-HTTP name the server would refuse before
   the save (`settings/route-access.ts`).
+- Tailnet-only environments. `runtime.tailnet` publishes an environment on this host's tailnet and
+  nowhere else, from the previews' own address range and table, with no public domain and no public
+  certificate; `runtime.tailnet.allow` (Tailscale logins and tags) puts a gate in front of it — nginx's
+  `auth_request` or the dashboard's own loopback Caddy's `forward_auth` — that asks
+  `GET /api/v1/tailnet/whois` about every request, which asks tailscaled who holds the address it came
+  from. Previews and staging inherit the list. See [tailnet-only deployments](tailnet-apps.md).
 - Maintenance and error pages. Maintenance is a switch beside the live route, not a plan field, so it
   applies at once and no release turns it on or off. Every route a release writes carries the check
   (`DeploymentRoute.Maintenance`, rendered on nginx as a Proxy site's maintenance behind

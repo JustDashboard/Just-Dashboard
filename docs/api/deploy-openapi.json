@@ -933,6 +933,13 @@
           "pooler": {
             "type": "boolean"
           },
+          "previews": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/deploy.PreviewBranchPolicy"
+              }
+            ]
+          },
           "status": {
             "type": "string"
           }
@@ -1795,6 +1802,62 @@
         "title": "api.previewApproveRequest",
         "type": "object"
       },
+      "api.previewBranchFact": {
+        "properties": {
+          "connectionId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "driver": {
+            "type": "string"
+          },
+          "maskedColumns": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "mode": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedBy": {
+            "type": "string"
+          }
+        },
+        "title": "api.previewBranchFact",
+        "type": "object"
+      },
+      "api.previewBranchPolicyRequest": {
+        "properties": {
+          "maskedColumns": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "mode": {
+            "type": "string"
+          }
+        },
+        "title": "api.previewBranchPolicyRequest",
+        "type": "object"
+      },
       "api.previewRejectRequest": {
         "properties": {
           "revision": {
@@ -1834,6 +1897,25 @@
           },
           "compose": {
             "type": "boolean"
+          },
+          "composePreview": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.ComposePreviewFacts"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "databaseBranches": {
+            "items": {
+              "$ref": "#/components/schemas/api.previewBranchFact"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "host": {
             "type": "string"
@@ -4245,6 +4327,81 @@
           }
         },
         "title": "deploy.ComposeOptionalVariable",
+        "type": "object"
+      },
+      "deploy.ComposePreviewFacts": {
+        "properties": {
+          "public": {
+            "type": "string"
+          },
+          "refusals": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.ComposePreviewService"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "deploy.ComposePreviewFacts",
+        "type": "object"
+      },
+      "deploy.ComposePreviewService": {
+        "properties": {
+          "checkout": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "leftOut": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "ports": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "volumes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "deploy.ComposePreviewService",
         "type": "object"
       },
       "deploy.ComposeServicePlan": {
@@ -9063,6 +9220,16 @@
                 "$ref": "#/components/schemas/deploy.StorageSummary"
               }
             ]
+          },
+          "tailnet": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.TailnetSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "title": "deploy.OperationsSummary",
@@ -9492,6 +9659,147 @@
         "title": "deploy.PreviewApproval",
         "type": "object"
       },
+      "deploy.PreviewBranch": {
+        "properties": {
+          "connectionId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "container": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "database": {
+            "type": "string"
+          },
+          "endedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "engine": {
+            "type": "string"
+          },
+          "environmentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "host": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "maskedColumns": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "maskedRows": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "projectId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "readyAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "recoveredTo": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requestedBy": {
+            "type": "string"
+          },
+          "restoreMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "source": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/deploy.RehearsalSource"
+              }
+            ]
+          },
+          "sourceEnvironmentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.PreviewBranch",
+        "type": "object"
+      },
+      "deploy.PreviewBranchPolicy": {
+        "properties": {
+          "connectionId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "maskedColumns": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "mode": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedBy": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.PreviewBranchPolicy",
+        "type": "object"
+      },
       "deploy.PreviewPromotion": {
         "properties": {
           "endedAt": {
@@ -9580,6 +9888,15 @@
           "author": {
             "type": "string"
           },
+          "branches": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.PreviewBranch"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "environmentId": {
             "format": "int64",
             "type": "integer"
@@ -9646,6 +9963,16 @@
           },
           "revision": {
             "type": "string"
+          },
+          "services": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.RuntimeServices"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "state": {
             "type": "string"
@@ -10043,6 +10370,33 @@
           }
         },
         "title": "deploy.RehearsalPolicy",
+        "type": "object"
+      },
+      "deploy.RehearsalSource": {
+        "properties": {
+          "backupRunId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "takenAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "deploy.RehearsalSource",
         "type": "object"
       },
       "deploy.Release": {
@@ -11075,6 +11429,21 @@
         "title": "deploy.RouteMaintenance",
         "type": "object"
       },
+      "deploy.RouteTailnet": {
+        "properties": {
+          "allow": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "deploy.RouteTailnet",
+        "type": "object"
+      },
       "deploy.Run": {
         "properties": {
           "actor": {
@@ -11659,6 +12028,16 @@
               "stop_first"
             ],
             "type": "string"
+          },
+          "tailnet": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.RouteTailnet"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "title": "deploy.RuntimePlanConfig",
@@ -12240,6 +12619,37 @@
           }
         },
         "title": "deploy.StorageSummary",
+        "type": "object"
+      },
+      "deploy.TailnetSummary": {
+        "properties": {
+          "allow": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "gate": {
+            "type": "string"
+          },
+          "gateRunning": {
+            "type": "boolean"
+          },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "published": {
+            "type": "boolean"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.TailnetSummary",
         "type": "object"
       },
       "deploy.TrafficAlert": {
@@ -18254,6 +18664,78 @@
         }
       ]
     },
+    "/deploy/{id}/environments/{env}/database-links/{connection}/previews": {
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The connection.",
+          "in": "path",
+          "name": "connection",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "description": "A preview of a fork never gets a branch.",
+        "operationId": "deploymentPreviewBranchPolicyPut",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/api.previewBranchPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/deploy.PreviewBranchPolicy"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Set what a linked database gives the environment's pull request previews: nothing, a branch from the newest backup, or a branch with columns masked.",
+        "tags": [
+          "database links"
+        ],
+        "x-deploy-key": "refused (session_required): what a database gives previews is a second copy of production's data next to a pull request's code: it is decided in the dashboard"
+      }
+    },
     "/deploy/{id}/environments/{env}/detect": {
       "parameters": [
         {
@@ -22524,6 +23006,85 @@
           }
         ],
         "summary": "Test a pull request: approve its head and start or update its preview, copying production's variables when asked.",
+        "tags": [
+          "previews"
+        ],
+        "x-deploy-key": "refused (session_required): a pull request's preview runs its code, and a person approves that in the dashboard"
+      }
+    },
+    "/deploy/{id}/pull-requests/{number}/preview/branches/{connection}/refresh": {
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The pull request's number.",
+          "in": "path",
+          "name": "number",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The connection.",
+          "in": "path",
+          "name": "connection",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "description": "Everything the preview wrote to the branch is discarded; production is not touched.",
+        "operationId": "deploymentPreviewBranchRefresh",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Assembled by the handler; these are its properties.",
+                  "properties": {
+                    "branch": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/deploy.PreviewBranch"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "replaced": {
+                      "format": "int64",
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Restore a preview's database branch again from the newest backup, keeping its address and password.",
         "tags": [
           "previews"
         ],

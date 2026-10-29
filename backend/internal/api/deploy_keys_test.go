@@ -72,6 +72,10 @@ var sessionOnlyBefore = []string{
 	"POST /deploy/{id}/environments/{env}/data-copies/{copy}/extend",
 	"DELETE /deploy/{id}/environments/{env}/data-copies/{copy}",
 	"GET /deploy/{id}/environments/{env}/data-copies/{copy}/comparison",
+	// A preview's database branch: what a database gives previews, and a
+	// branch again from the newest backup, decided in a session.
+	"PUT /deploy/{id}/environments/{env}/database-links/{connection}/previews",
+	"POST /deploy/{id}/pull-requests/{number}/preview/branches/{connection}/refresh",
 }
 
 // keyBench is a server with an administrator, a session, and the three kinds
@@ -1132,5 +1136,49 @@ func TestADeployKeyOperatesTheDeploymentsItReaches(t *testing.T) {
 	}
 	if _, err := os.Stat(flag); !os.IsNotExist(err) {
 		t.Error("a refused switch was written")
+	}
+}
+
+// Whether a deployment is tailnet-only, and who on the tailnet may open it,
+// is a person's to change: a deploy key keeps the publication as it is, and
+// a session sets it, which the audit trail records with the list.
+func TestADeployKeyCannotChangeWhoMayOpenATailnetOnlyDeployment(t *testing.T) {
+	b := newKeyBench(t)
+	image := deploy.DraftSourceConfig{Kind: deploy.SourceImage, Mode: deploy.SourceModeImageReference, Image: "nginx:1.27-alpine"}
+	projectID, environmentID := seedCommittedDeployment(t, b.s, "notes", image, deploy.SourceIdentity{Kind: deploy.SourceImage})
+	path := fmt.Sprintf("/api/v1/deploy/%d/environments/%d/configuration", projectID, environmentID)
+	configuration := func(revision int, tailnet map[string]any) map[string]any {
+		runtime := map[string]any{"strategy": "stop_first", "image": "nginx:1.27-alpine", "internalPort": 80, "bindAddress": "127.0.0.1"}
+		if tailnet != nil {
+			runtime["tailnet"] = tailnet
+		}
+		return map[string]any{"revision": revision, "build": map[string]any{"method": "image", "secrets": []any{}, "releaseTasks": []any{}},
+			"runtime": runtime, "dependencies": []any{}, "checks": []any{}, "domains": []any{}}
+	}
+	if w := b.call(b.deploy, http.MethodPut, path, configuration(1, map[string]any{"allow": []string{"mallory@example.com"}})); keyErrorCode(w) != "session_required" ||
+		!strings.Contains(w.Body.String(), "tailnet") {
+		t.Fatalf("a key making the deployment tailnet-only = %d %s", w.Code, w.Body.String())
+	}
+	if w := b.inSession(http.MethodPut, path, configuration(1, map[string]any{"allow": []string{"Alice@Example.com", "tag:ci"}})); w.Code != http.StatusOK {
+		t.Fatalf("a session making it tailnet-only = %d %s", w.Code, w.Body.String())
+	}
+	var detail string
+	if err := b.s.Store.DB.QueryRow(`SELECT detail FROM audit_log WHERE action = 'deploy.configuration.update' ORDER BY id DESC LIMIT 1`).Scan(&detail); err != nil ||
+		!strings.Contains(detail, `"allow":["alice@example.com","tag:ci"]`) {
+		t.Fatalf("audited = %q %v", detail, err)
+	}
+	// The key may still configure the rest, with the list it found, in any
+	// spelling of it; and may not drop or extend the list.
+	if w := b.call(b.deploy, http.MethodPut, path, configuration(2, map[string]any{"allow": []string{"tag:ci", "ALICE@example.com"}})); w.Code != http.StatusOK {
+		t.Fatalf("a key keeping the list = %d %s", w.Code, w.Body.String())
+	}
+	for name, tailnet := range map[string]map[string]any{
+		"dropped":  nil,
+		"extended": {"allow": []string{"alice@example.com", "tag:ci", "mallory@example.com"}},
+		"opened":   {},
+	} {
+		if w := b.call(b.deploy, http.MethodPut, path, configuration(3, tailnet)); keyErrorCode(w) != "session_required" {
+			t.Errorf("a key with the list %s = %d %s", name, w.Code, w.Body.String())
+		}
 	}
 }

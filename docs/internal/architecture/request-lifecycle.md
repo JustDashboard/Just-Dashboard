@@ -59,7 +59,8 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   `403 key_scope`. A refusal is audited as `auth.deploy_key.refused` with the key, because it happens
   before the group's audit middleware. Reveals, saved credentials, the GitHub-speaking pull-request
   verbs, preview approval, the typed-phrase removals, the warm-release and rehearsal terms, a copy of a
-  release's data and a route's pages stay session-only for it. A key narrowed to
+  release's data, what a linked database gives previews and a preview's database branch refreshed,
+  and a route's pages stay session-only for it. A key narrowed to
   chosen deployments (`api_token_deployments`, read with the key on every request) reaches only
   routes whose `{id}` it was given and whose `{env}` belongs to that deployment, and none marked
   `every` (server shared variables, fleet-wide reads); `GET /deploy/` lists only its deployments. A
@@ -93,9 +94,13 @@ password and revokes existing sessions; the sign-in page then signs straight bac
 password, through any required second factor. Password change has its own
 authentication middleware so it cannot bypass an outstanding second factor.
 
-Two deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname) and
+Three deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname),
 `/api/v1/hooks/deploy/{hookID}` (HMAC over the raw body, still allowlisted, still audited so
-enumerating hook ids is not silent).
+enumerating hook ids is not silent), and `GET /api/v1/tailnet/whois`, which a tailnet-only
+deployment's gate asks about every request: still behind the allowlist, outside the API rate limit,
+and answering only a loopback caller that no other proxy forwarded — the dashboard's own Caddy says it
+did in `X-Forwarded-For` — with every refusal audited as `deploy.tailnet.refused`
+([tailnet-only deployments](../deployments/tailnet-apps.md#the-whois-route)).
 
 ## Handler conventions
 

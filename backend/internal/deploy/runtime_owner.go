@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -431,18 +432,29 @@ func (o *DockerRuntimeOwner) startCompose(
 		return StartedRuntime{}, fmt.Errorf("%w: Compose runtime snapshot is incomplete", ErrArtifactMissing)
 	}
 	project := fmt.Sprintf("jd-e%d", request.Release.EnvironmentID)
-	override := filepath.Join(request.SourceRoot, ".just-dashboard", "release.yml")
+	primaryService := resolved.Services[0].Plan.Name
+	if resolved.PrimaryService != "" {
+		primaryService = resolved.PrimaryService
+	}
+	overrideName := ".just-dashboard/release.yml"
 	content, err := renderComposeReleaseOverride(request)
 	if err != nil {
 		return StartedRuntime{}, err
 	}
-	if len(request.Networks) > 0 {
-		content, err = o.client.ComposeRuntimeNetworks(ctx, dockerx.ComposeReleaseSpec{ProjectName: project, ProjectDirectory: request.SourceRoot, Files: resolved.Files, Environment: request.RuntimeVariables}, content, request.Networks)
+	resolvedSpec := dockerx.ComposeReleaseSpec{ProjectName: project, ProjectDirectory: request.SourceRoot, Files: resolved.Files, Environment: request.RuntimeVariables}
+	if request.Snapshot.Plan.PreviewIsolation {
+		content, overrideName, err = o.composePreviewRelease(ctx, request, resolvedSpec, primaryService, content, emit)
+		if err != nil {
+			return StartedRuntime{}, err
+		}
+	} else if len(request.Networks) > 0 {
+		content, err = o.client.ComposeRuntimeNetworks(ctx, resolvedSpec, content, request.Networks)
 		if err != nil {
 			return StartedRuntime{}, err
 		}
 	}
-	if err := writeImmutableRuntimeFile(request.SourceRoot, ".just-dashboard/release.yml", content); err != nil {
+	override := filepath.Join(request.SourceRoot, filepath.FromSlash(overrideName))
+	if err := writeImmutableRuntimeFile(request.SourceRoot, overrideName, content); err != nil {
 		return StartedRuntime{}, err
 	}
 	spec := dockerx.ComposeReleaseSpec{
@@ -452,10 +464,6 @@ func (o *DockerRuntimeOwner) startCompose(
 	}
 	if err := o.client.RunComposeRelease(ctx, spec, dockerx.ComposeReleaseUp, runtimeGrace(request.Snapshot.Plan), composeBuildEmitter(emit)); err != nil {
 		return StartedRuntime{}, err
-	}
-	primaryService := resolved.Services[0].Plan.Name
-	if resolved.PrimaryService != "" {
-		primaryService = resolved.PrimaryService
 	}
 	containers, err := o.client.ListContainersWithLabels(ctx, map[string]string{
 		"io.just-dashboard.managed":        "true",
@@ -498,6 +506,65 @@ func (o *DockerRuntimeOwner) startCompose(
 		},
 		Target: CheckTarget{ContainerID: primaryID, Host: runtimeCheckHost(request.Host), Port: request.Port},
 	}, nil
+}
+
+// composePreviewRelease isolates every service of a preview's stack the way
+// one preview container is: on the preview's own bridge and its database
+// links' networks alone, every mount on a volume of the preview's own (a
+// read-only file of the commit itself excepted), no secret, no fixed name,
+// and no port on the host but the public service's loopback one, which the
+// preview's route and tailnet address reach. The override names its port,
+// so it is a file of its own per port: a retried start on another lease must
+// not meet the immutable bytes of the first.
+func (o *DockerRuntimeOwner) composePreviewRelease(
+	ctx context.Context,
+	request CandidateRuntimeRequest,
+	spec dockerx.ComposeReleaseSpec,
+	public, content string,
+	emit func(BuildLog) error,
+) (string, string, error) {
+	environmentID := request.Release.EnvironmentID
+	plan := request.Snapshot.Plan
+	if err := validatePreviewPlan(environmentID, BuildPlanConfig{Method: BuildCompose}, plan); err != nil {
+		return "", "", err
+	}
+	host := net.ParseIP(request.Host)
+	if plan.InternalPort <= 0 || request.Port <= 0 || host == nil || !host.IsLoopback() {
+		return "", "", fmt.Errorf("%w: a Compose preview publishes its public service on loopback only", ErrPreviewIsolation)
+	}
+	// Before Compose reads anything: the pull request's files, not
+	// production's, are what runs.
+	if err := composePreviewSources(spec.ProjectDirectory, spec.Files); err != nil {
+		return "", "", err
+	}
+	network, err := o.ensurePreviewNetwork(ctx, environmentID)
+	if err != nil {
+		return "", "", err
+	}
+	isolated, err := o.client.ComposePreviewOverride(ctx, spec, content, dockerx.ComposePreviewIsolation{
+		Network: network, Networks: request.Networks, Public: public,
+		Publish: dockerx.PortMapping{HostIP: request.Host, HostPort: request.Port, ContainerPort: plan.InternalPort, Protocol: "tcp"},
+		Volume:  func(key string) string { return previewVolumeName(environmentID, "compose:"+key) },
+		Labels:  map[string]string{"io.just-dashboard.preview": "true"},
+	})
+	if errors.Is(err, dockerx.ErrComposePreviewRefused) {
+		return "", "", fmt.Errorf("%w: %s", ErrPreviewIsolation, strings.TrimPrefix(err.Error(), dockerx.ErrComposePreviewRefused.Error()+": "))
+	}
+	if err != nil {
+		return "", "", err
+	}
+	for _, volume := range isolated.Volumes {
+		if err := o.ensurePreviewVolume(ctx, environmentID, volume); err != nil {
+			return "", "", err
+		}
+	}
+	if emit != nil {
+		for _, item := range isolated.LeftOut {
+			service, target, _ := strings.Cut(item, ":")
+			_ = emit(BuildLog{Stream: "status", Text: fmt.Sprintf("Left out %s of service %s: a preview reads no path of this server", target, service)})
+		}
+	}
+	return isolated.Override, fmt.Sprintf(".just-dashboard/preview-%d.yml", request.Port), nil
 }
 
 func composeRuntimeIdentities(containers []dockerx.Container, environmentID, releaseID int64, project, primaryService string) ([]string, string) {

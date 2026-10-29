@@ -101,7 +101,10 @@ free.
 - Minecraft Java and Bedrock servers with their console, players and settings file, kept on
   loopback until you open the port and its firewall rule
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
-- Push to deploy, plus pull-request previews only your tailnet can reach
+- Push to deploy, plus pull-request previews only your tailnet can reach — Compose stacks too, every
+  service isolated on the preview's own network and storage
+- Database branches for previews: a preview's own copy of a linked PostgreSQL, MySQL or MariaDB,
+  restored from its newest backup with chosen columns masked, removed with the preview, never for a fork
 - Immutable releases, one-click rollback and health-gated cutover
 - Right-sizing from what each app actually used: the memory and CPU limits it should have, applied in one click
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
@@ -112,6 +115,8 @@ free.
 - Variables per environment, plus shared ones defined once for the server or a project
 - Variables read from HashiCorp Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager or Azure Key Vault, fresh for each run
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
+- Apps that exist only on your tailnet, opened only by the Tailscale logins and tags you list, with
+  no public domain, no sign-in server and no certificate to order
 - A maintenance page switched on at once, without a deploy, and the app's own error pages
 - Build logs, runtime, console, request logs and traffic alerts per project
 - A failed run named from its own output, and on request explained by your own model, secrets masked
