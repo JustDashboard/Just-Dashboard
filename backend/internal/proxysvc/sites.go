@@ -209,6 +209,9 @@ type SiteSpec struct {
 	// application may be stopped while nobody visits, and a request that
 	// finds it stopped is held while the dashboard starts it.
 	sleep *siteSleep
+	// dropCookies are the deployment route's DropCookies: taken out of the
+	// Cookie header every forwarding location and the sign-in check send.
+	dropCookies []string
 	// Custom is appended verbatim inside the server block. It is the escape
 	// hatch, and it is the one field not validated beyond refusing an
 	// unbalanced brace — a form that cannot express everything needs
@@ -346,6 +349,13 @@ func (spec *SiteSpec) timedLog() bool {
 func (spec *SiteSpec) logFormatName() string { return NginxIdent(spec.Name) + "_timed" }
 
 func (spec *SiteSpec) connectionVar() string { return spec.varIdent() + "_connection" }
+
+// cookieVar is the Cookie header the site forwards when it drops cookies,
+// the last of its cookie maps.
+func (spec *SiteSpec) cookieVar() string { return spec.varIdent() + "_cookie" }
+
+// dropsCookies says whether the site takes cookies out of what it forwards.
+func (spec *SiteSpec) dropsCookies() bool { return spec.Kind == "proxy" && len(spec.dropCookies) > 0 }
 
 // usesWebSockets says whether any location the renderer writes forwards
 // upgrades, which is when the site's connection map is needed.
