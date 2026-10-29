@@ -167,8 +167,9 @@ place a project is resolved to the product it is drawn as (`projectProduct`, `so
 project's verbs are declared once in `project-verbs.tsx` and a run's in `run-verbs.tsx`, for every
 surface that draws them. What a pull request and its preview say about themselves — the tone of the
 folded check state, whether the head moved past the built revision, the one word for where the preview
-stands — is decided in `lib/pull-requests.ts` so the Git page's card, the project Overview and the fleet
-card cannot disagree, and the verbs a deploy project offers a pull request are declared once in
+stands, why a project cannot have one at all, what each service of a Compose stack gets in its preview
+and how a Compose preview's services stand — is decided in `lib/pull-requests.ts` so the Git page's
+card, the project Overview and the fleet card cannot disagree, and the verbs a deploy project offers a pull request are declared once in
 `deploy/pull-request-verbs.tsx`.
 
 Cross-feature navigation is intentional: Files and Docker can open Git or a terminal in context; Git can

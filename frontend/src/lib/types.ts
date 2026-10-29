@@ -4435,8 +4435,33 @@ export type DeploymentPreview = {
   liveReleaseId?: number
   address?: DeploymentPreviewAddress
   lastRun?: DeploymentRecentRun
+  /** A live Compose preview's services as Docker reports them; absent for a single container. */
+  services?: DeploymentRuntimeServices
   /** The newest promotion of this preview's image into staging, however it ended. */
   promotion?: DeploymentPreviewPromotion
+}
+
+/** One service of a Compose stack, and what its preview gets in place of production's. */
+export type ComposePreviewService = {
+  name: string
+  /** The service the preview's route and tailnet address reach; the only one that answers. */
+  public: boolean
+  /** Ports production publishes on the host; the preview publishes none of them. */
+  ports: string[]
+  /** Mount targets that start empty on storage of the preview's own. */
+  volumes: string[]
+  /** Read-only files of the commit itself the preview mounts. */
+  checkout: string[]
+  /** Read-only paths of this server the preview does not get. */
+  leftOut: string[]
+}
+
+/** What a preview of a Compose stack gets, service by service, and what refuses one. */
+export type ComposePreviewFacts = {
+  public: string
+  services: ComposePreviewService[]
+  /** What no preview may have; any one refuses the preview. */
+  refusals: string[]
 }
 
 /** A deploy project's pull requests on GitHub, joined to the previews built from them. */
@@ -4458,8 +4483,10 @@ export type ProjectPullRequests = {
     awaitingFirstDeployment: boolean
   }
   tailnet: TailscaleIdentity
-  /** The production build is a Compose stack, which previews cannot isolate. */
+  /** The production build is a Compose stack; `composePreview` says what its preview gets. */
   compose: boolean
+  /** Present for a Compose stack: each service's isolation, and what refuses a preview. */
+  composePreview?: ComposePreviewFacts
   /** The production source is a local checkout, which has no remote to fetch a pull request from. */
   localCheckout: boolean
   /** The runtime plan's internal port; 0 means nothing to publish. */

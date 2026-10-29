@@ -1,7 +1,9 @@
 import type { DotTone } from "@/components/status-dot"
 import type {
+  ComposePreviewService,
   DeploymentPreview,
   DeploymentPromotion,
+  DeploymentRuntimeService,
   GitPullRequest,
   ProjectPullRequests,
 } from "@/lib/types"
@@ -140,6 +142,105 @@ export function previewURL(preview: DeploymentPreview | null | undefined): strin
 /** A preview whose removal ended short of success keeps its containers: the thing to retry. */
 export function cleanupFailed(preview: DeploymentPreview | null | undefined): boolean {
   return previewStatus(preview)?.label === "Cleanup failed"
+}
+
+/**
+ * Why a project cannot have a preview at all, as the sentence the dialog
+ * says in place of building; nothing when it can. The order is the route's:
+ * the server refuses for the same reasons, in the same order, before
+ * anything is written.
+ */
+export function previewBlocker(
+  info:
+    | Pick<
+        ProjectPullRequests,
+        "compose" | "composePreview" | "localCheckout" | "internalPort" | "tailnet"
+      >
+    | undefined,
+): string | undefined {
+  if (!info) return undefined
+  if (info.localCheckout)
+    return "This project deploys a local checkout; previews need a remote Git source."
+  if (info.compose && !info.composePreview)
+    return "A compatibility Compose deployment has no release engine to build a preview with. Deploy it from a Compose source first."
+  const refusals = info.composePreview?.refusals ?? []
+  if (refusals.length > 0)
+    return `A preview isolates every service of the stack, and ${refusals.join("; ")}, which no preview gets.`
+  if (info.internalPort === 0) return "The runtime plan has no port to publish."
+  if (!info.tailnet.running) return info.tailnet.detail || "Tailscale is not running on this host."
+  return undefined
+}
+
+/**
+ * What one service of a Compose stack gets in its preview, as the short
+ * sentences the dialog lists under its name: where it answers, the ports of
+ * production's it does not publish, the storage it starts with and what of
+ * this server it is not given.
+ */
+export function composeServiceLines(service: ComposePreviewService): string[] {
+  const lines = [
+    service.public
+      ? "Answers the preview's route and tailnet address, on loopback only"
+      : "Reached only by the stack's own services",
+  ]
+  if (service.ports.length > 0)
+    lines.push(`Publishes none of production's ports (${service.ports.join(", ")})`)
+  if (service.volumes.length > 0)
+    lines.push(
+      `${service.volumes.join(", ")} start${service.volumes.length === 1 ? "s" : ""} empty, on a volume of its own`,
+    )
+  if (service.checkout.length > 0)
+    lines.push(`${service.checkout.join(", ")} read from this commit, read-only`)
+  if (service.leftOut.length > 0)
+    lines.push(`${service.leftOut.join(", ")} from this server left out`)
+  return lines
+}
+
+/**
+ * A preview service as one dot and one word: Docker's health where the
+ * service has a check, otherwise whether it runs, and for one that stopped,
+ * how it ended.
+ */
+export function previewServiceReading(
+  service: Pick<DeploymentRuntimeService, "state" | "health" | "exitCode" | "oomKilled">,
+): PreviewReading {
+  if (service.state === "running") {
+    if (service.health === "healthy") return { tone: "running", label: "Healthy" }
+    if (service.health === "unhealthy") return { tone: "danger", label: "Unhealthy" }
+    if (service.health === "starting") return { tone: "warning", label: "Starting" }
+    return { tone: "running", label: "Running" }
+  }
+  if (service.state === "restarting") return { tone: "warning", label: "Restarting" }
+  if (service.oomKilled) return { tone: "danger", label: "Out of memory" }
+  if (service.state === "exited" || service.state === "dead")
+    return {
+      tone: "danger",
+      label: service.exitCode === undefined ? "Exited" : `Exited ${service.exitCode}`,
+    }
+  return {
+    tone: "stopped",
+    label: service.state
+      ? `${service.state[0].toUpperCase()}${service.state.slice(1)}`
+      : "Not running",
+  }
+}
+
+/**
+ * The live release's services of a Compose preview, by their Compose name,
+ * the public one first: what the preview's row lists under it.
+ */
+export function previewServices(
+  preview: DeploymentPreview | null | undefined,
+  publicService?: string,
+): { name: string; public: boolean; reading: PreviewReading }[] {
+  if (!preview?.services || preview.services.status !== "available") return []
+  return preview.services.services
+    .filter((service) => service.liveRelease)
+    .map((service) => {
+      const name = service.service || service.name
+      return { name, public: name === publicService, reading: previewServiceReading(service) }
+    })
+    .sort((a, b) => (a.public === b.public ? a.name.localeCompare(b.name) : a.public ? -1 : 1))
 }
 
 /**

@@ -1822,6 +1822,16 @@
           "compose": {
             "type": "boolean"
           },
+          "composePreview": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.ComposePreviewFacts"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "host": {
             "type": "string"
           },
@@ -4187,6 +4197,81 @@
           }
         },
         "title": "deploy.ComposeOptionalVariable",
+        "type": "object"
+      },
+      "deploy.ComposePreviewFacts": {
+        "properties": {
+          "public": {
+            "type": "string"
+          },
+          "refusals": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.ComposePreviewService"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "deploy.ComposePreviewFacts",
+        "type": "object"
+      },
+      "deploy.ComposePreviewService": {
+        "properties": {
+          "checkout": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "leftOut": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "ports": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "volumes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "deploy.ComposePreviewService",
         "type": "object"
       },
       "deploy.ComposeServicePlan": {
@@ -9560,6 +9645,16 @@
           },
           "revision": {
             "type": "string"
+          },
+          "services": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.RuntimeServices"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "state": {
             "type": "string"
