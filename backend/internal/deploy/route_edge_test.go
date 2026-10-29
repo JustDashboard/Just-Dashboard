@@ -104,7 +104,7 @@ func TestATailnetEnvironmentRefusesTheEdgeRules(t *testing.T) {
 func TestTheReleaseRouteCarriesTheEdgeRules(t *testing.T) {
 	t.Parallel()
 	plan := edgePlan()
-	route := publicRoute(7, runtimeReleaseSnapshot{Version: 1, Plan: plan.Runtime, Domains: plan.Domains}, "127.0.0.1", 30080)
+	route := publicRoute(7, runtimeReleaseSnapshot{Version: 1, Plan: plan.Runtime, Domains: plan.Domains}, ReleaseRuntime{Kind: "container", Host: "127.0.0.1", Port: 30080})
 	if len(route.EdgeRules) != 2 || route.EdgeRules[1].Name != "bots" || route.RateLimit == nil || route.RateLimit.Requests != 20 || !route.CrowdSec {
 		t.Fatalf("route = %+v", route)
 	}
