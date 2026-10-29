@@ -851,6 +851,22 @@
         "title": "api.blueprintRenderRequest",
         "type": "object"
       },
+      "api.canaryResponse": {
+        "properties": {
+          "canary": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.CanaryWindow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "api.canaryResponse",
+        "type": "object"
+      },
       "api.dataCopyExtendRequest": {
         "properties": {
           "hours": {
@@ -3487,6 +3503,7 @@
               "verify_readiness",
               "verify_smoke",
               "replay_traffic",
+              "canary",
               "activate",
               "retire_previous",
               "record_release",
@@ -3832,6 +3849,150 @@
           }
         },
         "title": "deploy.BuildSecretConfig",
+        "type": "object"
+      },
+      "deploy.CanaryTerms": {
+        "properties": {
+          "autoPromote": {
+            "type": "boolean"
+          },
+          "durationSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "percent": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "deploy.CanaryTerms",
+        "type": "object"
+      },
+      "deploy.CanaryWindow": {
+        "properties": {
+          "autoPromote": {
+            "type": "boolean"
+          },
+          "candidate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.RollbackReading"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checkedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "decidedBy": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "durationSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "endMessage": {
+            "type": "string"
+          },
+          "endReason": {
+            "type": "string"
+          },
+          "endedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "endsAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "environmentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "live": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.RollbackReading"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "liveReleaseId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "liveReleaseNumber": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "percent": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "policy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/deploy.RollbackPolicy"
+              }
+            ]
+          },
+          "projectId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "releaseId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "releaseNumber": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "runId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "verdict": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.RollbackVerdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "deploy.CanaryWindow",
         "type": "object"
       },
       "deploy.CauseFix": {
@@ -4350,6 +4511,7 @@
               "verify_readiness",
               "verify_smoke",
               "replay_traffic",
+              "canary",
               "activate",
               "retire_previous",
               "record_release",
@@ -4847,7 +5009,8 @@
           "strategy": {
             "enum": [
               "blue_green",
-              "stop_first"
+              "stop_first",
+              "canary"
             ],
             "type": "string"
           },
@@ -7803,7 +7966,8 @@
           "slotClass": {
             "enum": [
               "light",
-              "heavy"
+              "heavy",
+              "canary"
             ],
             "type": "string"
           },
@@ -9953,7 +10117,8 @@
           "strategy": {
             "enum": [
               "blue_green",
-              "stop_first"
+              "stop_first",
+              "canary"
             ],
             "type": "string"
           },
@@ -11129,6 +11294,7 @@
               "verify_readiness",
               "verify_smoke",
               "replay_traffic",
+              "canary",
               "activate",
               "retire_previous",
               "record_release",
@@ -11260,6 +11426,16 @@
           },
           "bindAddress": {
             "type": "string"
+          },
+          "canary": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.CanaryTerms"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "capabilities": {
             "items": {
@@ -11427,7 +11603,8 @@
           "strategy": {
             "enum": [
               "blue_green",
-              "stop_first"
+              "stop_first",
+              "canary"
             ],
             "type": "string"
           }
@@ -17221,6 +17398,180 @@
           }
         }
       ]
+    },
+    "/deploy/{id}/environments/{env}/canary": {
+      "get": {
+        "operationId": "deploymentCanary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.canaryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Read the environment's canary: the open trial, or the latest ended one, with both releases' readings and the verdict.",
+        "tags": [
+          "releases"
+        ],
+        "x-deploy-key": "allowed"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ]
+    },
+    "/deploy/{id}/environments/{env}/canary/abort": {
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "deploymentCanaryAbort",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/deploy.CanaryWindow"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Abort the canary now; the live release keeps every request and the candidate is removed.",
+        "tags": [
+          "releases"
+        ],
+        "x-deploy-key": "allowed"
+      }
+    },
+    "/deploy/{id}/environments/{env}/canary/promote": {
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "deploymentCanaryPromote",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/deploy.CanaryWindow"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Promote the canary now; the run holding the trial carries it out.",
+        "tags": [
+          "releases"
+        ],
+        "x-deploy-key": "allowed"
+      }
     },
     "/deploy/{id}/environments/{env}/configuration": {
       "get": {
