@@ -327,13 +327,23 @@ A preview's container publishes on loopback exactly as production's does, and wh
 invariant 7 is written down in [invariants](../security/invariants.md). `deploy_preview_addresses` holds
 one row per preview environment (`kind`, `port`, `upstream_port`, `url`, `published`, `updated_at`,
 `UNIQUE(kind, port)`); `AllocatePreviewAddress` takes the lowest free port in **21000–21999** that
-tailscaled is not already serving (`ServedTailnetPorts` is passed in as the exclusion) and answers
+tailscaled is not already serving (`ServedTailnetPorts` is passed in as the exclusion) and that nothing
+on the host holds on `127.0.0.1`, where the address's front answers, and answers
 `ErrPreviewAddressExhausted` (`409 preview_address_exhausted`) when the range is full. A non-preview
 environment is refused with `ErrPreviewIsolation`. An environment that is not a preview gets a row of
 the same table, from the same range, only when its plan is tailnet-only (`AllocateTailnetAddress`,
 [tailnet-only deployments](tailnet-apps.md)); everything below — the publish, the restore, the
-withdrawals and the startup sweep — treats its row as it treats a preview's, and when its plan names
-who may open it the mapping points at its tailnet gate on loopback rather than at the container.
+withdrawals and the startup sweep — treats its row as it treats a preview's.
+
+The mapping never points at the container itself. The address is a port of the node's MagicDNS name,
+which is the name a Tailscale install's dashboard is reached by, and a browser sends a cookie to every
+port of its name: a browser signed in to the dashboard would hand the dashboard's session to the pull
+request's code. So `upstream_port` is the address's own port number, where its **front** answers on
+`127.0.0.1` — the host's nginx or the dashboard's loopback Caddy — and the front forwards to the
+container with the dashboard's cookies taken out of the request and every other cookie kept
+([the dashboard's session cookie](tailnet-apps.md#the-dashboards-session-cookie)). When the plan names
+who may open it, the front is its tailnet gate as well. An address an earlier release mapped straight to
+its container is moved behind its front when the dashboard starts (`FrontTailnetAddresses`).
 
 Publishing is a step of activation (`activation_executor.go`): after the route is verified and before
 `ActivateCandidate` moves the release pointer, so a mapping that cannot be made never leaves a live
@@ -351,7 +361,8 @@ node's certificate is minted on the first request. A mapping whose row could not
 before the failure is reported, under `context.WithoutCancel`: left standing, it would refuse every
 later publish of the preview as somebody else's. A refused or failed publish stops the candidate and
 puts the port back the way it was (`restoreTailnet`; recovery evidence `tailnetRestored`): pointed at
-the predecessor while the predecessor runs, and otherwise — no predecessor, or a stop-first predecessor
+what reached the predecessor while the predecessor runs — its front, which the recovery has just put
+back, or its container when it was published before every address had a front — and otherwise — no predecessor, or a stop-first predecessor
 that could not be restarted — withdrawn and the row marked unpublished, so the preview reads "Not
 reachable" rather than offering a dead link. Step codes are `tailnet_unavailable`,
 `preview_port_missing`, `tailnet_publish_failed` and, on removal, `tailnet_withdraw_failed` (retryable:
@@ -379,7 +390,9 @@ offering a dead link. Ports outside the range are never touched. A serve configu
 read is an error only while some row is a published tailnet address; otherwise the sweep answers
 nothing, and the adapter answers an empty configuration on a host without the `tailscale` binary, so a
 host without Tailscale is not warned at every boot. The server logs `withdrawnPorts` and
-`unpublishedEnvironments` when there were any, and a warning when the sweep erred.
+`unpublishedEnvironments` when there were any, and a warning when the sweep erred. Then, still before
+the engine, `FrontTailnetAddresses` moves every published address whose row still points at a container
+behind its front ([tailnet-only deployments](tailnet-apps.md#the-gate)).
 
 ## Reconciliation with GitHub
 

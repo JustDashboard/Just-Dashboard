@@ -15,11 +15,11 @@ also provisions missing Certbot dependencies for the existing host nginx/standal
 The dashboard's own private Caddy, network allowlist, authentication and private backend/frontend
 publications are unchanged. The new public ingress serves deployment hostnames only.
 
-A tailnet-only deployment that names who may open it is never served here: this container's network
-is its own, where neither tailscaled's loopback forward nor the dashboard's loopback API reaches. Its
-gate is a second Caddy the dashboard starts for that alone, `just-dashboard-tailnet`, on the host's
-network with every site bound to `127.0.0.1` and nothing published
-([tailnet-only deployments](tailnet-apps.md#the-gate)). It shares this file's route machinery — the
+No tailnet address is served here: this container's network is its own, where neither tailscaled's
+loopback forward nor the dashboard's loopback API reaches. The front of every preview's and tailnet-only
+deployment's address — its gate, when it names who may open it — is a second Caddy the dashboard starts
+for that alone, `just-dashboard-tailnet`, on the host's network with every site bound to `127.0.0.1` and
+nothing published ([tailnet-only deployments](tailnet-apps.md#the-gate)). It shares this file's route machinery — the
 snapshot and restore (driver `tailnet-caddy`), the write, validate and reload, the request record — but
 not discovery, provisioning or the reconcile pass, and its admin API is a socket in its own volume.
 
@@ -234,6 +234,15 @@ generations and the imports against the copy — so an upgrade turns refreshing 
 route within a tick. A copy no route names any more is removed once it is older than an activation
 could still be holding a snapshot of (an hour). A rollback does not depend on any of this: a retained
 release's route is rendered again from the lineage's current files at activation.
+
+A route serving the name the dashboard itself is reached by (`JD_SITE`, or a wildcard one label above
+it) is sent the dashboard's session cookie by every browser signed in to the dashboard, whatever port
+the dashboard is on. Its `reverse_proxy` — and its `forward_auth`, for a route that signs in — carries
+two `header_up Cookie` replacements that take the dashboard's cookies out and leave every other cookie;
+a route on any other name is written as it always was
+([the dashboard's session cookie](tailnet-apps.md#the-dashboards-session-cookie)).
+`JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyRouteOnTheDashboardsNameDropsItsSession -count=1 -v`
+checks it on a real Caddy in front of `traefik/whoami`, beside a route on another name.
 
 The application remains published on loopback. Proxy resolves that publication to a running Docker
 container and an internal network address, then connects Caddy to that network. Managed route comments

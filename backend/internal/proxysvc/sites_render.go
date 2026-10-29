@@ -199,6 +199,16 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		l.add("}")
 		wrote = true
 	}
+	if spec.dropsCookies() {
+		if wrote {
+			l.blank()
+		}
+		l.add("# The dashboard is reached by this name too, on another port, and a")
+		l.add("# browser sends a cookie to every port of its name: these take the")
+		l.add("# dashboard's session out of what the application is sent.")
+		nginxDropCookieMaps(l, spec.varIdent(), spec.dropCookies)
+		wrote = true
+	}
 	if spec.Kind == "proxy" && spec.Pool != nil {
 		if wrote {
 			l.blank()
@@ -690,6 +700,9 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	if loc.WebSockets {
 		l.add("        proxy_set_header Upgrade    $http_upgrade;")
 		l.add("        proxy_set_header Connection $%s;", spec.connectionVar())
+	}
+	if spec.dropsCookies() {
+		l.add("        proxy_set_header Cookie     $%s;", spec.cookieVar())
 	}
 	renderRequestHeaders(l, spec)
 	renderClientCertHeaders(l, spec)

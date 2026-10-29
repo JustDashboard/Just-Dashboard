@@ -101,7 +101,9 @@ def start_backend():
 
 # The session cookie is marked Secure because the dashboard is normally served
 # over TLS; a cookie jar would drop it over loopback HTTP, so it is carried by
-# hand exactly as the browser would carry it.
+# hand exactly as the browser would carry it. Its name is __Host-jd_session over
+# HTTPS and jd_session on plain loopback HTTP, so the one the dashboard set is
+# the one sent back.
 session_cookie = {"value": ""}
 opener = urllib.request.build_opener()
 
@@ -111,7 +113,7 @@ def call(method, path, body=None, expect=(200, 201, 202)):
     req = urllib.request.Request(API + path, data=data, method=method)
     req.add_header("X-JD-CSRF", "1")
     if session_cookie["value"]:
-        req.add_header("Cookie", "vpsd_session=" + session_cookie["value"])
+        req.add_header("Cookie", session_cookie["value"])
     if data is not None:
         req.add_header("Content-Type", "application/json")
     try:
@@ -119,7 +121,7 @@ def call(method, path, body=None, expect=(200, 201, 202)):
             raw = res.read()
             status = res.status
             for header in res.headers.get_all("Set-Cookie") or []:
-                match = re.match(r"vpsd_session=([^;]+)", header)
+                match = re.match(r"((?:__Host-)?jd_session=[^;]+)", header)
                 if match:
                     session_cookie["value"] = match.group(1)
     except urllib.error.HTTPError as err:
