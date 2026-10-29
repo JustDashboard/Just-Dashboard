@@ -618,10 +618,23 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run '^TestLiveCutover(TrafficContinuity|SurvivesProxyLoss)$' -count=1 -v`
   and `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRuntimeLossKeepsExactlyOneReleaseLive -count=1 -v`.
   The first drives sustained fast, long-streamed and WebSocket traffic through 100 real nginx
-  activations and fails on a single lost request; set `JD_CUTOVER_TRANSITIONS` lower only for local
-  iteration, never for an acceptance run, and `JD_CUTOVER_EVIDENCE` to retain the measured counts.
+  activations, for a release of one container and again for one of two replicas, and fails on a single
+  lost request; the replicated run also requires both replicas to answer and a replica killed under
+  steady traffic to cost no request. Set `JD_CUTOVER_TRANSITIONS` lower only for local iteration, never
+  for an acceptance run, and `JD_CUTOVER_EVIDENCE` to retain the measured counts (the replicated run's
+  beside them, `-2-replicas.json`).
   The second kills real containers in the blue/green window and at a live release, and requires that
-  exactly one release is running afterwards.
+  exactly one release is running afterwards — for a release of three replicas, that one replica of the
+  candidate dying removes the whole candidate and one of the live release dying brings it back whole.
+  Changes to replicas — how they are started, named, labelled, stopped or kept warm, or how a route
+  shares requests between them (`deploy/runtime_replicas.go`, the pool in `proxysvc`) — also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyBalancesReplicas -count=1 -v`
+  and `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveReplicatedReleaseServesAndRollsBackAsOne -count=1 -v`
+  (as root, through `go test -c` and `sudo`). The first puts three replicas behind a real Caddy and kills
+  one under traffic; the second deploys a release of two replicas through the routes and its own Caddy
+  ingress (`JD_INGRESS_CONTAINER`, on a loopback port), cuts over to a broken release of two only after
+  both pass readiness, and requires the automatic rollback to resume both of the first release's paused
+  containers and remove both of the second's ([replicas](docs/internal/deployments/canary-and-replicas.md)).
 - Changes to the warm-release window, instant rollback or the rollback watcher (`deploy/rollback_*.go`,
   `api/handlers_deploy_rollback_watch.go`) also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveMetricGatedRollbackSwitchesBackToTheWarmRelease -count=1 -v`.

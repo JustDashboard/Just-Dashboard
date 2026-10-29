@@ -107,6 +107,7 @@ free.
 - Database branches for previews: a preview's own copy of a linked PostgreSQL, MySQL or MariaDB,
   restored from its newest backup with chosen columns masked, removed with the preview, never for a fork
 - Immutable releases, one-click rollback and health-gated cutover
+- Up to eight replicas of a stateless release behind one route, cut over and rolled back together
 - Right-sizing from what each app actually used: the memory and CPU limits it should have, applied in one click
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild

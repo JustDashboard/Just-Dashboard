@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"strings"
 	"time"
 
@@ -126,7 +125,8 @@ func (e *NormalizedStepExecutor) CleanupCancelledRun(
 	if snapshot.Compose == nil {
 		orphan := ReleaseRuntime{
 			ReleaseID: release.Release.ID, EnvironmentID: release.Release.EnvironmentID,
-			Kind: "container", RuntimeID: fmt.Sprintf("jd-e%d-r%d", release.Release.EnvironmentID, release.Release.Number),
+			Kind: "container", RuntimeID: replicaContainerName(release.Release.EnvironmentID, release.Release.Number, 1),
+			Metadata: orphanReplicas(release.Release.EnvironmentID, release.Release.Number, snapshot.Plan.EffectiveReplicas()),
 		}
 		variables, _ := e.variablesForScope(cleanupCtx, run.ID, run.EnvironmentID, "runtime")
 		_, stopErr := e.runtime.Stop(cleanupCtx, orphan, snapshot.Plan, variables, true, nil)
@@ -387,6 +387,14 @@ func (e *NormalizedStepExecutor) startCandidate(
 	if leaseToken != "" {
 		defer e.store.ReleasePortLease(context.WithoutCancel(ctx), execution.Run.ID, leaseToken)
 	}
+	replicaPorts, replicaTokens, err := e.replicaAddresses(ctx, execution, snapshot.Plan, host, port)
+	for _, token := range replicaTokens {
+		defer e.store.ReleasePortLease(context.WithoutCancel(ctx), execution.Run.ID, token)
+	}
+	if err != nil {
+		recovery := e.restorePrevious(ctx, execution, release.Release, snapshot.Plan)
+		return runtimeStepFailure(err, "port_unavailable", "a port for each replica could not be reserved", recovery)
+	}
 	variables, err := e.variablesForScope(ctx, execution.Run.ID, execution.Run.EnvironmentID, "runtime")
 	if err != nil {
 		recovery := e.restorePrevious(ctx, execution, release.Release, snapshot.Plan)
@@ -403,7 +411,7 @@ func (e *NormalizedStepExecutor) startCandidate(
 	}
 	started, err := e.runtime.StartCandidate(ctx, CandidateRuntimeRequest{
 		Run: execution.Run, Release: release.Release, Snapshot: snapshot, SourceRoot: sourceRoot,
-		RuntimeVariables: variables, Host: host, Port: port, PortLeaseToken: leaseToken,
+		RuntimeVariables: variables, Host: host, Port: port, PortLeaseToken: leaseToken, ReplicaPorts: replicaPorts,
 	}, func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) })
 	if err != nil {
 		recovery := e.restorePrevious(ctx, execution, release.Release, snapshot.Plan)
@@ -419,7 +427,11 @@ func (e *NormalizedStepExecutor) startCandidate(
 		recovery := e.restorePrevious(ctx, execution, release.Release, snapshot.Plan)
 		return runtimeStepFailure(err, "runtime_record_failed", "the candidate started but its identity could not be recorded", recovery)
 	}
-	_ = stepLog(execution, "status", fmt.Sprintf("Started immutable candidate release #%d", release.Release.Number))
+	if replicas := snapshot.Plan.EffectiveReplicas(); replicas > 1 {
+		_ = stepLog(execution, "status", fmt.Sprintf("Started immutable candidate release #%d as %d replicas", release.Release.Number, replicas))
+	} else {
+		_ = stepLog(execution, "status", fmt.Sprintf("Started immutable candidate release #%d", release.Release.Number))
+	}
 	for _, variable := range webConcurrencyEnvironment(snapshot, variables) {
 		_ = stepLog(execution, "status", "WEB_CONCURRENCY="+variable.Value+": "+webConcurrencyReason(snapshot.Plan))
 	}
@@ -475,6 +487,74 @@ func (e *NormalizedStepExecutor) candidateAddress(
 	return lease.Address, lease.Port, lease.Token, nil
 }
 
+// replicaAddresses leases a loopback port for each replica after the first,
+// whose port candidateAddress already holds. A plan with nothing to publish
+// needs none. The tokens are handed back even on failure, so the leases
+// already taken are released with the rest.
+func (e *NormalizedStepExecutor) replicaAddresses(
+	ctx context.Context,
+	execution StepExecution,
+	plan RuntimePlanConfig,
+	host string,
+	port int,
+) ([]int, []string, error) {
+	count := plan.EffectiveReplicas()
+	if count <= 1 || port == 0 || plan.InternalPort == 0 {
+		return nil, nil, nil
+	}
+	ports, tokens := make([]int, 0, count-1), make([]string, 0, count-1)
+	for index := 2; index <= count; index++ {
+		lease, err := e.store.AcquirePortLease(ctx, execution.Run.ID, execution.Run.EnvironmentID,
+			execution.ClaimToken, host, 0, 30*time.Minute)
+		if err != nil {
+			return nil, tokens, err
+		}
+		ports, tokens = append(ports, lease.Port), append(tokens, lease.Token)
+	}
+	return ports, tokens, nil
+}
+
+// runReplicaChecks runs the phase's checks against every replica in turn,
+// stopping at the first replica a required one fails on: the route shares
+// traffic between all of them once it moves, so one replica that does not
+// answer is a release that does not. The evidence says which replica each
+// result is for when there are several.
+func (e *NormalizedStepExecutor) runReplicaChecks(
+	ctx context.Context,
+	execution StepExecution,
+	runtime ReleaseRuntime,
+	snapshot runtimeReleaseSnapshot,
+	selected []PlannedCheck,
+	describe func(PlannedCheck, int, int) string,
+) []CheckEvidence {
+	targets := replicaTargets(runtime, snapshot)
+	checks := make([]CheckEvidence, 0, len(selected)*len(targets))
+	for index, target := range targets {
+		replica := 0
+		if len(targets) > 1 {
+			replica = index + 1
+		}
+		for _, check := range selected {
+			_ = stepLog(execution, "status", describe(check, replica, len(targets)))
+			evidence := e.checks.Run(ctx, check, target)
+			evidence.Replica = replica
+			checks = append(checks, evidence)
+		}
+		if ctx.Err() != nil || requiredCheckFailed(checks) {
+			break
+		}
+	}
+	return checks
+}
+
+// replicaSuffix is how a transcript line names the replica it is about.
+func replicaSuffix(replica, replicas int) string {
+	if replica == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" against replica %d of %d", replica, replicas)
+}
+
 func (e *NormalizedStepExecutor) verifyChecks(
 	ctx context.Context,
 	execution StepExecution,
@@ -513,12 +593,9 @@ func (e *NormalizedStepExecutor) verifyChecks(
 	if e.checks == nil {
 		return StepResult{State: StepUnavailable, ErrorCode: "checks_unavailable", ErrorMessage: "runtime health checks are unavailable"}
 	}
-	target := targetForRuntime(*runtime, snapshot)
-	checks := make([]CheckEvidence, 0, len(selected))
-	for _, check := range selected {
-		_ = stepLog(execution, "status", fmt.Sprintf("Running %s check %q (%s)", phase, check.Name, check.Kind))
-		checks = append(checks, e.checks.Run(ctx, check, target))
-	}
+	checks := e.runReplicaChecks(ctx, execution, *runtime, snapshot, selected, func(check PlannedCheck, replica, replicas int) string {
+		return fmt.Sprintf("Running %s check %q (%s)%s", phase, check.Name, check.Kind, replicaSuffix(replica, replicas))
+	})
 	outcome := summarizeChecks(checks)
 	evidence := checkStepEvidence{Phase: phase, Outcome: outcome, Checks: checks}
 	if ctx.Err() != nil || requiredCheckFailed(checks) {
@@ -609,7 +686,7 @@ func (e *NormalizedStepExecutor) activate(
 			evidence.Recovery = &recovery
 			return StepResult{State: StepUnavailable, ErrorCode: "proxy_unavailable", ErrorMessage: "a managed domain requires an available HTTP proxy", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
-		routeValue := publicRoute(release.Release.EnvironmentID, snapshot, runtime.Host, runtime.Port)
+		routeValue := publicRoute(release.Release.EnvironmentID, snapshot, *runtime)
 		if routeValue.TLS {
 			resolver, ok := e.proxy.(interface {
 				ResolveDeploymentCertificate(context.Context, []string) (string, string, error)
@@ -796,8 +873,8 @@ func publicRouteActivationEvidence(result proxysvc.DeploymentRouteResult) routeA
 
 // publicRoute is the route a release's snapshot asks the proxy for: its
 // names, and the rules its plan sets on them.
-func publicRoute(environmentID int64, snapshot runtimeReleaseSnapshot, host string, port int) proxysvc.DeploymentRoute {
-	route := deploymentRoute(environmentID, snapshot.Domains, host, port)
+func publicRoute(environmentID int64, snapshot runtimeReleaseSnapshot, runtime ReleaseRuntime) proxysvc.DeploymentRoute {
+	route := deploymentRoute(environmentID, snapshot.Domains, runtimeUpstreams(runtime))
 	route.MaxBodyMB = snapshot.Plan.MaxRequestBodyMB
 	route.AllowFrom = snapshot.Plan.AllowFrom
 	for _, header := range snapshot.Plan.ResponseHeaders {
@@ -823,7 +900,9 @@ func publicRoute(environmentID int64, snapshot runtimeReleaseSnapshot, host stri
 	return route
 }
 
-func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, port int) proxysvc.DeploymentRoute {
+// deploymentRoute is the route for domains, sharing requests between
+// upstreams: the release's replicas, or its one container.
+func deploymentRoute(environmentID int64, domains []PlannedDomain, upstreams []string) proxysvc.DeploymentRoute {
 	names := make([]string, 0, len(domains))
 	tls := false
 	// Each domain is served on the scheme it chose: the route is TLS as
@@ -855,8 +934,7 @@ func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, 
 	}
 	route := proxysvc.DeploymentRoute{
 		Name: deploymentRouteName(environmentID), Domains: names,
-		Upstream: "http://" + net.JoinHostPort(runtimeCheckHost(host), fmt.Sprintf("%d", port)),
-		TLS:      tls, ForceHTTPS: tls, BasicAuth: users, Redirects: redirects,
+		TLS: tls, ForceHTTPS: tls, BasicAuth: users, Redirects: redirects,
 		// The request record is what the project's Logs page reads. nginx has
 		// always written one for these routes; asking Caddy for it too is what
 		// makes the two drivers answer the same question.
@@ -868,6 +946,13 @@ func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, 
 	}
 	if tls {
 		route.PlainHostnames = plain
+	}
+	// A release of one container is the route's one upstream, exactly the
+	// route it was before replicas; several are its pool.
+	if len(upstreams) == 1 {
+		route.Upstream = upstreams[0]
+	} else {
+		route.Upstreams = upstreams
 	}
 	return route
 }

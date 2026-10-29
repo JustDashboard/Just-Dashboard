@@ -37,6 +37,7 @@ func TestSleepPlanValidation(t *testing.T) {
 		"a Compose stack":          func(c *PlanConfiguration) { c.Build.Method = BuildCompose },
 		"host networking":          func(c *PlanConfiguration) { c.Runtime.HostNetwork = true },
 		"tailnet only":             func(c *PlanConfiguration) { c.Runtime.Tailnet = &RouteTailnet{} },
+		"replicas":                 func(c *PlanConfiguration) { c.Runtime.Replicas = 2 },
 		"no served domain": func(c *PlanConfiguration) {
 			c.Domains = []PlannedDomain{{Hostname: "www.example.test", RedirectTo: "example.test"}}
 		},

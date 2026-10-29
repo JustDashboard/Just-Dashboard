@@ -1036,6 +1036,9 @@ func preflightFindings(
 				"", "deploy", "runtime.strategy"))
 		}
 	}
+	if item, ok := replicasFinding(configuration.Build.Method, configuration.Runtime); ok {
+		findings = append(findings, item)
+	}
 	resolvedVariables, _, variableErr := ResolveVariableGraphWithModes(draft.variableValues(configuration), draft.variableModes(configuration), nil)
 	if variableErr != nil {
 		findings = append(findings, finding("variable_graph_invalid", PreflightBlocked,

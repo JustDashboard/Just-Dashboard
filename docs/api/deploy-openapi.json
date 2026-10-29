@@ -12391,6 +12391,10 @@
               }
             ]
           },
+          "replicas": {
+            "format": "int64",
+            "type": "integer"
+          },
           "responseHeaders": {
             "items": {
               "$ref": "#/components/schemas/deploy.RouteHeader"
@@ -12509,6 +12513,14 @@
             "type": "boolean"
           },
           "releaseId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "replica": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "replicas": {
             "format": "int64",
             "type": "integer"
           },

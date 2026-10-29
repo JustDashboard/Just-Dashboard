@@ -137,7 +137,7 @@ func TestDeploymentRouteSeparatesRedirectsFromServedNames(t *testing.T) {
 	t.Parallel()
 	domains := routingPlan().Domains
 	domains[1].RedirectCode = 301
-	route := deploymentRoute(7, domains, "127.0.0.1", 3000)
+	route := deploymentRoute(7, domains, []string{"http://127.0.0.1:3000"})
 	if strings.Join(route.Domains, ",") != "example.test" {
 		t.Fatalf("served = %v", route.Domains)
 	}
@@ -204,7 +204,7 @@ func TestDeploymentRouteServesEachDomainOnItsOwnScheme(t *testing.T) {
 		{Hostname: "www.app.example.test", HTTPS: true, Ownership: OwnershipManaged, RedirectTo: "app.example.test"},
 		{Hostname: "www.old.example.test", Ownership: OwnershipManaged, RedirectTo: "old.example.test"},
 	}
-	route := deploymentRoute(7, domains, "127.0.0.1", 3000)
+	route := deploymentRoute(7, domains, []string{"http://127.0.0.1:3000"})
 	if !route.TLS || !route.ForceHTTPS || strings.Join(route.Domains, ",") != "app.example.test,old.example.test" {
 		t.Fatalf("route = %+v", route)
 	}
@@ -217,7 +217,7 @@ func TestDeploymentRouteServesEachDomainOnItsOwnScheme(t *testing.T) {
 	if urls := publicRouteURLs(domains); strings.Join(urls, ",") != "https://app.example.test/,http://old.example.test/" {
 		t.Fatalf("public checks ask %v", urls)
 	}
-	plain := deploymentRoute(7, domains[1:2], "127.0.0.1", 3000)
+	plain := deploymentRoute(7, domains[1:2], []string{"http://127.0.0.1:3000"})
 	if plain.TLS || plain.PlainHostnames != nil {
 		t.Fatalf("a plain route singles out names: %+v", plain)
 	}

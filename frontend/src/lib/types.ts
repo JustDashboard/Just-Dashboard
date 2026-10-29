@@ -3242,6 +3242,10 @@ export type DeploymentRuntimeService = {
   exitCode?: number
   /** The kernel killed it for exceeding its memory. */
   oomKilled?: boolean
+  /** Which of its release's replicas it is, from 1; absent for a release of one container. */
+  replica?: number
+  /** How many replicas its release runs; absent for a release of one container. */
+  replicas?: number
 }
 
 export type DeploymentRuntimeServices = {
@@ -5473,6 +5477,8 @@ export type DeploymentConfiguration = {
     cpus?: number
     pidsLimit?: number
     restartPolicy?: DeploymentRestartPolicy
+    /** Containers of each release side by side behind the route, 2 to 8; empty is one. */
+    replicas?: number
     /** The signal that asks the container to stop; empty is the image's own, SIGTERM. */
     stopSignal?: string
     /** Seconds the container has to exit after that signal before it is killed; empty is 10. */

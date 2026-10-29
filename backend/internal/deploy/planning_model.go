@@ -635,6 +635,11 @@ type RuntimePlanConfig struct {
 	CPUs          float64 `json:"cpus,omitempty"`
 	PidsLimit     int64   `json:"pidsLimit,omitempty"`
 	RestartPolicy string  `json:"restartPolicy,omitempty"`
+	// Replicas is how many containers of each release run side by side
+	// behind the route, 1 to MaxRuntimeReplicas; zero is one. Only a
+	// stateless release has more than one (replicaRefusal), and the limits
+	// above are each container's own.
+	Replicas int `json:"replicas,omitempty"`
 	// MaxRequestBodyMB is the largest request body the managed route lets
 	// through, in megabytes. Zero is DefaultMaxRequestBodyMB.
 	MaxRequestBodyMB int `json:"maxRequestBodyMb,omitempty"`
@@ -1603,6 +1608,9 @@ func (c PlanConfiguration) Validate() error {
 	}
 	if !validRestartPolicy(c.Runtime.RestartPolicy) {
 		return fmt.Errorf("runtime restart policy must be one of %s", strings.Join(RestartPolicies, ", "))
+	}
+	if err := validateReplicas(c.Build.Method, c.Runtime); err != nil {
+		return err
 	}
 	if err := validateReplayPlan(c.Runtime.Replay); err != nil {
 		return err

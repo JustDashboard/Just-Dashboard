@@ -20,13 +20,21 @@ import (
 var ErrRouteRecovery = errors.New("deployment route recovery failed")
 
 type DeploymentRoute struct {
-	Name       string   `json:"name"`
-	Domains    []string `json:"domains"`
-	Upstream   string   `json:"upstream"`
-	TLS        bool     `json:"tls,omitempty"`
-	CertPath   string   `json:"certPath,omitempty"`
-	KeyPath    string   `json:"keyPath,omitempty"`
-	ForceHTTPS bool     `json:"forceHttps,omitempty"`
+	Name    string   `json:"name"`
+	Domains []string `json:"domains"`
+	// Upstreams are the servers the route shares its requests between: one
+	// per replica of the release it serves. A release of one container is
+	// one server and renders exactly as a route did before replicas.
+	Upstreams []string `json:"upstreams,omitempty"`
+	// Upstream is the single server a route named before it could name
+	// several. It is kept so a route built or decoded with it means what it
+	// did; Servers is what the renderers read, and a route sets one or the
+	// other.
+	Upstream   string `json:"upstream"`
+	TLS        bool   `json:"tls,omitempty"`
+	CertPath   string `json:"certPath,omitempty"`
+	KeyPath    string `json:"keyPath,omitempty"`
+	ForceHTTPS bool   `json:"forceHttps,omitempty"`
 	// BasicAuth puts a password in front of the route. Each entry is a user
 	// and a bcrypt hash, which is what both proxies read.
 	BasicAuth []BasicAuthUser `json:"basicAuth,omitempty"`
@@ -97,6 +105,53 @@ type DeploymentRoute struct {
 	// dashboard is reached by, since a browser sends the dashboard's session
 	// there whatever the port (onDashboardName); nothing else sets it.
 	DropCookies []string `json:"dropCookies,omitempty"`
+}
+
+// MaxDeploymentUpstreams is the most servers a route shares requests
+// between: a release's replicas are at most eight.
+const MaxDeploymentUpstreams = 8
+
+// Servers are the addresses the route forwards to, in order: Upstreams, or
+// the one Upstream of a route built before replicas.
+func (route DeploymentRoute) Servers() []string {
+	if len(route.Upstreams) > 0 {
+		return append([]string(nil), route.Upstreams...)
+	}
+	if route.Upstream != "" {
+		return []string{route.Upstream}
+	}
+	return nil
+}
+
+// PrimaryUpstream is the first server, which is what a single-server reader
+// asked of Upstream: the release's first replica.
+func (route DeploymentRoute) PrimaryUpstream() string {
+	if servers := route.Servers(); len(servers) > 0 {
+		return servers[0]
+	}
+	return ""
+}
+
+// validateDeploymentServers refuses a pool a renderer would write wrong: both
+// spellings at once, too many servers, or one server twice.
+func validateDeploymentServers(route DeploymentRoute) error {
+	if len(route.Upstreams) > 0 && route.Upstream != "" {
+		return errors.New("a route names its servers as upstreams or as its one upstream, not both")
+	}
+	if len(route.Upstreams) > MaxDeploymentUpstreams {
+		return fmt.Errorf("a route shares its requests between at most %d servers", MaxDeploymentUpstreams)
+	}
+	seen := map[string]bool{}
+	for _, upstream := range route.Upstreams {
+		if upstream == "" {
+			return errors.New("a route's server address is empty")
+		}
+		if seen[upstream] {
+			return fmt.Errorf("%s is named twice among the route's servers", upstream)
+		}
+		seen[upstream] = true
+	}
+	return nil
 }
 
 // DeploymentHSTS is a route's Strict-Transport-Security policy, held to the
@@ -219,6 +274,9 @@ func NormalizeAccessEntry(raw string) (string, error) {
 // validateDeploymentRules checks what both proxies render from a route
 // beyond its names: the redirects, the headers and the allowed addresses.
 func validateDeploymentRules(route DeploymentRoute) error {
+	if err := validateDeploymentServers(route); err != nil {
+		return err
+	}
 	if err := validateHostRedirects(route.Domains, route.Redirects); err != nil {
 		return err
 	}
@@ -753,7 +811,7 @@ func (s *Service) deploymentSpec(route DeploymentRoute) *SiteSpec {
 
 func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 	spec := &SiteSpec{
-		Name: route.Name, Domains: append([]string(nil), route.Domains...), Kind: "proxy", Upstream: route.Upstream,
+		Name: route.Name, Domains: append([]string(nil), route.Domains...), Kind: "proxy", Upstream: route.PrimaryUpstream(),
 		TLS: route.TLS, CertPath: route.CertPath, KeyPath: route.KeyPath, ForceHTTPS: route.ForceHTTPS,
 		ManagedACME: true,
 		HTTP2:       route.TLS,
@@ -763,6 +821,9 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 		HostRedirects: append([]HostRedirect(nil), route.Redirects...),
 		deployment:    true,
 		dropCookies:   append([]string(nil), route.DropCookies...),
+	}
+	if pool := deploymentPool(route.Servers()); pool != nil {
+		spec.Upstream, spec.Pool = "", pool
 	}
 	if route.TLS {
 		// Each name on the scheme its domain chose: the plain ones get a
@@ -822,6 +883,36 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 		}
 	}
 	return spec
+}
+
+// deploymentPool is a replicated release's servers as an nginx upstream
+// block, or nil for a release of one container, which keeps the route it
+// always had: proxy_pass to the one address, with no upstream block.
+//
+// Least connections rather than round robin, because a route carries
+// WebSockets and long streamed answers: a replica holding them is not the
+// one a new request should wait behind. Health is nginx's passive kind, the
+// only one it has, written out rather than left to the defaults so the file
+// says it: a replica whose request fails to connect or times out is set
+// aside for ten seconds and the request is passed to the next one — nginx
+// passes only an idempotent request, so a POST that reached a dying replica
+// is answered with its error rather than carried out twice. A replica gets
+// two seconds to accept a connection, as on Caddy, not nginx's sixty: the
+// kernel completes the handshake whatever the application is doing, so a
+// replica that takes longer is not there, and the visitor's request is
+// better passed on than held. No keepalive, as before: each request is a
+// fresh upstream connection.
+func deploymentPool(servers []string) *SitePool {
+	if len(servers) < 2 {
+		return nil
+	}
+	pool := &SitePool{Method: "least_conn", ConnectTimeout: 2, Servers: make([]PoolServer, 0, len(servers))}
+	for _, server := range servers {
+		pool.Servers = append(pool.Servers, PoolServer{
+			Address: strings.TrimPrefix(server, "http://"), MaxFails: 1, FailTimeout: 10,
+		})
+	}
+	return pool
 }
 
 // deploymentBodyLimit is the route's nginx client_max_body_size.

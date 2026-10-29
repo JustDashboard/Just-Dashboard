@@ -449,6 +449,92 @@ test.describe("Runtime settings", () => {
     await page.screenshot({ path: test.info().outputPath("runtime-390.png"), fullPage: true })
   })
 
+  test("replicas are offered only to a stateless plan, and save as a count", async ({ page }) => {
+    const writes: Array<Record<string, unknown>> = []
+    await mockProject(page)
+    const runtimeCard = page.getByRole("form", { name: "Runtime" })
+    const replicas = runtimeCard.getByRole("radiogroup", { name: "Replicas" })
+
+    // The fixture's writable /data mount is what only one container can
+    // hold: one replica is all that is offered, and the reason is beside it.
+    await page.goto("/deploy/7/settings/runtime")
+    await expect(
+      runtimeCard.getByText(
+        "One replica only: /data is writable, and replicas would write to it at the same time.",
+      ),
+    ).toBeVisible()
+    await expect(replicas.getByRole("radio", { name: "1", exact: true })).toBeEnabled()
+    await expect(replicas.getByRole("radio", { name: "2", exact: true })).toBeDisabled()
+    await expect(replicas.getByRole("radio", { name: "8", exact: true })).toBeDisabled()
+
+    // Without the mount the plan is stateless, and a count is a count.
+    await mockProject(page, { runtimePlan: { mounts: [] } })
+    await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+      if (route.request().method() === "PUT")
+        writes.push(route.request().postDataJSON() as Record<string, unknown>)
+      await route.fallback()
+    })
+    await page.goto("/deploy/7/settings/runtime")
+    await expect(runtimeCard.getByText(/^One replica only/)).toHaveCount(0)
+    await runtimeCard.getByLabel("Memory limit").fill("256")
+    await replicas.getByRole("radio", { name: "3", exact: true }).click()
+    await expect(runtimeCard.getByText("3 replicas of each release")).toBeVisible()
+    await expect(
+      runtimeCard.getByText("3 × 256 MB = 768 MB for the release", { exact: false }),
+    ).toBeVisible()
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await runtimeCard
+      .locator("#releases")
+      .screenshot({ path: test.info().outputPath("replicas-1280.png") })
+    await saveSettings(page)
+    await expectSaved(page)
+    const saved = writes.at(-1) as { runtime: Record<string, unknown> }
+    expect(saved.runtime.replicas).toBe(3)
+
+    // One again is the field left out, as the server writes it back.
+    await replicas.getByRole("radio", { name: "1", exact: true }).click()
+    await saveSettings(page)
+    await expectSaved(page)
+    expect("replicas" in (writes.at(-1) as { runtime: Record<string, unknown> }).runtime).toBe(
+      false,
+    )
+    await page.setViewportSize({ width: 390, height: 844 })
+    expect(await overflow(page)).toBeLessThanOrEqual(1)
+  })
+
+  test("a replicas refusal from the server lands on the replicas field", async ({ page }) => {
+    await mockProject(page, { runtimePlan: { mounts: [] } })
+    await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+      if (route.request().method() === "PUT")
+        return route.fulfill({
+          status: 422,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "invalid_plan",
+              message:
+                "2 replicas need a stateless release: host port 8080 can be held by one container at a time",
+              field: "runtime.replicas",
+            },
+          }),
+        })
+      await route.fallback()
+    })
+    await page.goto("/deploy/7/settings/runtime")
+    const runtimeCard = page.getByRole("form", { name: "Runtime" })
+    await runtimeCard
+      .getByRole("radiogroup", { name: "Replicas" })
+      .getByRole("radio", { name: "2", exact: true })
+      .click()
+    await saveSettings(page)
+    await expect(
+      runtimeCard.getByText(
+        "2 replicas need a stateless release: host port 8080 can be held by one container at a time",
+      ),
+    ).toBeVisible()
+    await expect(runtimeCard.getByText("Not saved", { exact: true })).toBeVisible()
+  })
+
   test("adds and saves a health check", async ({ page }) => {
     const writes: Array<Record<string, unknown>> = []
     await mockProject(page)

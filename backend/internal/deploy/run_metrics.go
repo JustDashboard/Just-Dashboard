@@ -47,7 +47,12 @@ type RunMetricComparison struct {
 
 func runtimeMetricIDs(runtime ReleaseRuntime) []string {
 	if runtime.Kind == "container" && runtime.RuntimeID != "" {
-		return []string{runtime.RuntimeID}
+		// Every replica's series is the release's.
+		ids := []string{}
+		for _, replica := range runtimeReplicas(runtime) {
+			ids = append(ids, replica.ContainerID)
+		}
+		return ids
 	}
 	if runtime.Kind != "compose" {
 		return nil
@@ -72,7 +77,11 @@ func runtimeMetricSources(runtime ReleaseRuntime) []RunMetricSource {
 	}
 	var metadata dockerReleaseRuntimeMetadata
 	_ = json.Unmarshal(runtime.Metadata, &metadata)
-	return []RunMetricSource{{ContainerID: runtime.RuntimeID, Name: runtime.Name, Image: metadata.Image}}
+	sources := []RunMetricSource{}
+	for _, replica := range runtimeReplicas(runtime) {
+		sources = append(sources, RunMetricSource{ContainerID: replica.ContainerID, Name: replica.Name, Image: metadata.Image})
+	}
+	return sources
 }
 
 // RunMetrics joins persisted runtime identities through the Metrics owner. It
