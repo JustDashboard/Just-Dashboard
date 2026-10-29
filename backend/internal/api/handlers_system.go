@@ -19,6 +19,8 @@ func (s *Server) mountSystemRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/metrics", s.handle(s.handleSystemMetrics))
 		r.Method(http.MethodGet, "/metrics/history", s.handle(s.handleMetricsHistory))
 		r.Method(http.MethodGet, "/metrics/storage", s.handle(s.handleStorageHistory))
+		// When each filesystem fills, and whose volumes grow fastest.
+		r.Method(http.MethodGet, "/metrics/capacity", s.handle(s.handleCapacityForecast))
 		r.Method(http.MethodGet, "/metrics/events", s.handle(s.handleMetricsEvents))
 		r.Method(http.MethodGet, "/disk-usage", s.handle(s.handleDiskBreakdown))
 		r.Method(http.MethodGet, "/stream", s.handle(s.handleSystemStream))
