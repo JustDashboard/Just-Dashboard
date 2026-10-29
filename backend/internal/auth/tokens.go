@@ -38,8 +38,9 @@ type APIToken struct {
 	// Deployments is what an MCP key may do with the deployments: nothing,
 	// read them, or also deploy and roll them back. Every other key has none.
 	Deployments DeployAccess `json:"deployments,omitempty"`
-	// DeploymentIDs are the deployments a deploy key was narrowed to; empty
-	// is every deployment. Every other key has none.
+	// DeploymentIDs are the deployments a deploy key, or an MCP key's
+	// deployment grant, was narrowed to; empty is every deployment. Every
+	// other key has none.
 	DeploymentIDs []int64 `json:"deploymentIds,omitempty"`
 }
 
@@ -212,9 +213,10 @@ func (s *Service) ResolveAPIToken(ctx context.Context, presented string) (*APITo
 	if !roleAtMost(effective, u.Role) {
 		effective = u.Role
 	}
-	// A deploy key's deployments are part of what it is, read with it on
-	// every request: one taken off its list is refused the next call.
-	if t.Scope == ScopeDeploy {
+	// A deploy key's deployments are part of what it is, and an MCP key's,
+	// read with it on every request: one taken off its list is refused the
+	// next call.
+	if narrowable(t.Scope) {
 		if t.DeploymentIDs, err = s.TokenDeployments(ctx, t.ID); err != nil {
 			return nil, nil, "", err
 		}

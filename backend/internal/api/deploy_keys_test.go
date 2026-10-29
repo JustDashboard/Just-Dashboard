@@ -114,7 +114,7 @@ func newKeyBench(t *testing.T) *keyBench {
 	if _, b.ordinary, err = s.Auth.CreateAPIToken(t.Context(), admin, "scripts", auth.RoleAdmin, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if _, b.mcp, err = s.Auth.CreateMCPToken(t.Context(), admin, "claude-code", "", time.Hour, nil, auth.DeployRun); err != nil {
+	if _, b.mcp, err = s.Auth.CreateMCPToken(t.Context(), admin, "claude-code", "", time.Hour, nil, auth.DeployRun, nil); err != nil {
 		t.Fatal(err)
 	}
 	tok, secret, err := s.Auth.CreateDeployToken(t.Context(), admin, "github-actions", time.Hour, nil)

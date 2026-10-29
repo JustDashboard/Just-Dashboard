@@ -70,7 +70,7 @@ func (s *Service) CreateDeployToken(ctx context.Context, owner *User, name strin
 // that cannot be a deployment, one named twice, more than a key may hold.
 func cleanDeployments(ids []int64) ([]int64, error) {
 	if len(ids) > maxTokenDeployments {
-		return nil, fmt.Errorf("a deploy key reaches at most %d chosen deployments; leave the list empty to reach every one", maxTokenDeployments)
+		return nil, fmt.Errorf("a key reaches at most %d chosen deployments; leave the list empty to reach every one", maxTokenDeployments)
 	}
 	seen := map[int64]bool{}
 	out := make([]int64, 0, len(ids))
@@ -88,7 +88,7 @@ func cleanDeployments(ids []int64) ([]int64, error) {
 	return out, nil
 }
 
-// TokenDeployments is the deployments a deploy key was narrowed to, read with
+// TokenDeployments is the deployments a deploy key or an MCP key was narrowed to, read with
 // the key on every request so a key is never trusted for more than its rows
 // say. Empty is every deployment.
 func (s *Service) TokenDeployments(ctx context.Context, tokenID int64) ([]int64, error) {
@@ -109,12 +109,16 @@ func (s *Service) TokenDeployments(ctx context.Context, tokenID int64) ([]int64,
 	return out, rows.Err()
 }
 
-// fillTokenDeployments lays each deploy key's deployments on it, in one read
-// for the whole list.
+// narrowable reports whether a key of this scope may be narrowed to chosen
+// deployments: a deploy key, and an MCP key's deployment grant.
+func narrowable(scope string) bool { return scope == ScopeDeploy || scope == ScopeMCP }
+
+// fillTokenDeployments lays each deploy key's and MCP key's deployments on
+// it, in one read for the whole list.
 func (s *Service) fillTokenDeployments(ctx context.Context, tokens []*APIToken) error {
 	byID := map[int64]*APIToken{}
 	for _, t := range tokens {
-		if t.Scope == ScopeDeploy {
+		if narrowable(t.Scope) {
 			t.DeploymentIDs = []int64{}
 			byID[t.ID] = t
 		}
@@ -140,10 +144,11 @@ func (s *Service) fillTokenDeployments(ctx context.Context, tokens []*APIToken) 
 	return rows.Err()
 }
 
-// ReachesDeployment reports whether a deploy key's list lets it reach a
-// deployment: every one when the list is empty, else only those it names.
+// ReachesDeployment reports whether a deploy key's list, or an MCP key's,
+// lets it reach a deployment: every one when the list is empty, else only
+// those it names. An MCP key's grant (none, read, deploy) is asked apart.
 func (t *APIToken) ReachesDeployment(projectID int64) bool {
-	if t == nil || t.Scope != ScopeDeploy {
+	if t == nil || !narrowable(t.Scope) {
 		return false
 	}
 	if len(t.DeploymentIDs) == 0 {
@@ -157,8 +162,9 @@ func (t *APIToken) ReachesDeployment(projectID int64) bool {
 	return false
 }
 
-// EveryDeployment reports whether a deploy key reaches every deployment, which
-// is what creating one, or touching what every deployment shares, asks of it.
+// EveryDeployment reports whether a deploy key, or an MCP key, reaches every
+// deployment, which is what creating one, or touching what every deployment
+// shares, asks of it.
 func (t *APIToken) EveryDeployment() bool {
-	return t != nil && t.Scope == ScopeDeploy && len(t.DeploymentIDs) == 0
+	return t != nil && narrowable(t.Scope) && len(t.DeploymentIDs) == 0
 }

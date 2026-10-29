@@ -105,7 +105,7 @@ func (b *mcpBench) key(owner *auth.User, grants ...auth.TokenConnection) string 
 // named.
 func (b *mcpBench) deployKey(owner *auth.User, access auth.DeployAccess, grants ...auth.TokenConnection) string {
 	b.t.Helper()
-	_, secret, err := b.s.Auth.CreateMCPToken(b.t.Context(), owner, "claude-desktop", "", 0, grants, access)
+	_, secret, err := b.s.Auth.CreateMCPToken(b.t.Context(), owner, "claude-desktop", "", 0, grants, access, nil)
 	if err != nil {
 		b.t.Fatal(err)
 	}

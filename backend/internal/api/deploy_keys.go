@@ -582,6 +582,28 @@ type deployTokenRequest struct {
 	DeploymentIDs []int64 `json:"deploymentIds"`
 }
 
+// keyDeploymentNames reads the deployments a key is to be narrowed to — a
+// deploy key, or an MCP key's deployment grant — refusing one that does not
+// exist or is archived, and names them, sorted, for the audit entry.
+func (s *Server) keyDeploymentNames(ctx context.Context, ids []int64) ([]string, error) {
+	names := make([]string, 0, len(ids))
+	for _, id := range ids {
+		project, err := s.modules.deployStore.Get(ctx, id)
+		if errors.Is(err, deploy.ErrNotFound) {
+			return nil, httpx.BadRequest("deployment %d does not exist", id)
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if project.ArchivedAt != nil {
+			return nil, httpx.Err(http.StatusConflict, "project_archived", project.Name+" is archived")
+		}
+		names = append(names, project.Name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
 // handleCreateDeployToken mints a deploy key. It sits behind RequireSession
 // and system.admin: a key is made by a person, and a deploy key holds the
 // administrator role its writes ask for.
@@ -590,21 +612,10 @@ func (s *Server) handleCreateDeployToken(w http.ResponseWriter, r *http.Request)
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	names := make([]string, 0, len(req.DeploymentIDs))
-	for _, id := range req.DeploymentIDs {
-		project, err := s.modules.deployStore.Get(r.Context(), id)
-		if errors.Is(err, deploy.ErrNotFound) {
-			return httpx.BadRequest("deployment %d does not exist", id)
-		}
-		if err != nil {
-			return httpx.Internal(err)
-		}
-		if project.ArchivedAt != nil {
-			return httpx.Err(http.StatusConflict, "project_archived", project.Name+" is archived")
-		}
-		names = append(names, project.Name)
+	names, err := s.keyDeploymentNames(r.Context(), req.DeploymentIDs)
+	if err != nil {
+		return err
 	}
-	sort.Strings(names)
 	var ttl time.Duration
 	if req.TTLDays > 0 {
 		ttl = time.Duration(req.TTLDays) * 24 * time.Hour

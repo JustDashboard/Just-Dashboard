@@ -44,10 +44,14 @@ func mcpDeployAccess(p *httpx.Principal) auth.DeployAccess {
 	return p.Token.Deployments
 }
 
-// mcpDeployment is one deployment as list_deployments states it.
+// mcpDeployment is one deployment as list_deployments states it. Its id and
+// its production environment's are what the generated tools take as id and
+// env.
 type mcpDeployment struct {
 	Deployment     string  `json:"deployment"`
+	ID             int64   `json:"id"`
 	Environment    string  `json:"environment"`
+	EnvironmentID  int64   `json:"environmentId"`
 	Source         string  `json:"source"`
 	Repository     string  `json:"repository,omitempty"`
 	Ref            string  `json:"ref,omitempty"`
@@ -66,7 +70,9 @@ type mcpDeployment struct {
 // mcpRun is a run as the tools state it: its number is how the run page and
 // a notification name it.
 type mcpRun struct {
-	Run         int64      `json:"run"`
+	Run int64 `json:"run"`
+	// ID is the run's id, which the generated tools take as run.
+	ID          int64      `json:"id"`
 	Operation   string     `json:"operation"`
 	Trigger     string     `json:"trigger"`
 	Actor       string     `json:"actor,omitempty"`
@@ -85,7 +91,7 @@ func mcpRunOf(run *deploy.EngineRun) *mcpRun {
 		return nil
 	}
 	out := &mcpRun{
-		Run: run.RunNumber, Operation: string(run.Operation), Trigger: string(run.Trigger), Actor: run.Actor,
+		Run: run.RunNumber, ID: run.ID, Operation: string(run.Operation), Trigger: string(run.Trigger), Actor: run.Actor,
 		State: string(run.State), RequestedAt: run.RequestedAt, EndedAt: run.EndedAt, Commit: run.SourceRevision,
 		Release: run.ReleaseID, Code: run.TerminalCode, Reason: clipText(run.TerminalReason, mcp.LineBytes),
 	}
@@ -133,6 +139,11 @@ func (c *mcpCall) deployment(name string) (*deploy.DeploymentSummary, map[string
 	var folded []*deploy.DeploymentSummary
 	for i := range fleet.Deployments {
 		one := &fleet.Deployments[i]
+		// A key narrowed to chosen deployments finds those alone, as a
+		// deploy key narrowed so does.
+		if !c.p.Token.ReachesDeployment(one.ID) {
+			continue
+		}
 		if one.Name == name {
 			c.target = one.Name
 			return one, nil
@@ -181,8 +192,11 @@ func (c *mcpCall) listDeployments() map[string]any {
 	}
 	out := make([]mcpDeployment, 0, len(fleet.Deployments))
 	for _, d := range fleet.Deployments {
+		if !c.p.Token.ReachesDeployment(d.ID) {
+			continue
+		}
 		out = append(out, mcpDeployment{
-			Deployment: d.Name, Environment: d.EnvironmentName, Source: string(d.SourceKind),
+			Deployment: d.Name, ID: d.ID, Environment: d.EnvironmentName, EnvironmentID: d.EnvironmentID, Source: string(d.SourceKind),
 			Repository: d.SourceRepository, Ref: d.SourceRef, Commit: d.SourceRevision,
 			Build: string(d.BuildMethod), Framework: d.Framework, Address: d.Endpoint,
 			Health: d.Health, Stopped: d.Stopped, LiveRelease: d.LiveReleaseID, PendingChanges: d.PendingChanges,

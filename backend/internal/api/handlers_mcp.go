@@ -177,9 +177,12 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) error {
 		return writeMCP(w, http.StatusOK, mcp.Response(req.ID, call.Complete(map[string]any{})))
 	case req.Method == "tools/list":
 		httpx.SkipAudit(r)
-		return writeMCP(w, http.StatusOK, mcp.Response(req.ID, call.Cached(map[string]any{"tools": mcp.Tools(offer)}, 60_000)))
+		// The hand-written tools first, in their fixed order, then the ones
+		// generated from the deployment API, in the order of their routes.
+		tools := append(mcp.Tools(offer), mcp.OperationTools(offer, s.mcpOperations())...)
+		return writeMCP(w, http.StatusOK, mcp.Response(req.ID, call.Cached(map[string]any{"tools": tools}, 60_000)))
 	case req.Method == "tools/call":
-		if !mcp.Known(req.Name) {
+		if _, generated := s.mcpOperation(req.Name); !mcp.Known(req.Name) && !generated {
 			httpx.SkipAudit(r)
 			return mcpRefusal(w, req.ID, &mcp.Error{Code: mcp.CodeInvalidParams, Message: "Unknown tool: " + req.Name})
 		}

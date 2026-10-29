@@ -54,7 +54,7 @@ func (s *Server) callMCPTool(r *http.Request, p *httpx.Principal, req *mcp.Reque
 		httpx.AuditFailed(r)
 	}
 	area := "database"
-	if mcp.IsDeployTool(req.Name) {
+	if _, generated := s.mcpOperation(req.Name); mcp.IsDeployTool(req.Name) || generated {
 		area = "deploy"
 	}
 	httpx.SetAudit(r, area+".mcp."+req.Name, c.target, c.detail)
@@ -66,6 +66,9 @@ func (c *mcpCall) run(tool string, raw []byte) map[string]any {
 		return c.refuse("busy", fmt.Sprintf("This key already has %d calls running; wait for one to finish.", mcpCallsPerKey))
 	}
 	defer c.s.mcp.leave(c.p.TokenID)
+	if op, generated := c.s.mcpOperation(tool); generated {
+		return c.operation(op, raw)
+	}
 	grants, err := c.s.Auth.TokenConnections(c.r.Context(), c.p.TokenID)
 	if err != nil {
 		return c.fail("the key's databases could not be read", nil)

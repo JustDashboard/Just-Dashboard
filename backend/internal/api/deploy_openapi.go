@@ -851,6 +851,9 @@ type deployOpenAPISource struct {
 	root chi.Routes
 	once sync.Once
 	doc  *openapiDocument
+	// tools is the MCP tools generated from the same router and description
+	// (handlers_mcp_operations.go), read off them once somebody asks.
+	tools mcpCatalogueSource
 }
 
 func (src *deployOpenAPISource) document() *openapiDocument {
