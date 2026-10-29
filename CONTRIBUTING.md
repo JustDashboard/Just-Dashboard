@@ -73,6 +73,10 @@ to the contribution terms above, including the additional licence grant to the p
   an explicitly managed frontend on another port when worktrees run alongside one another.
   Set `JD_BROWSER_WORKERS=1` to limit the selected browser run on a memory-constrained host; omit
   it to use the existing Playwright worker setting.
+- A change to a deployment route, to a type a deployment handler decodes or encodes, or to the
+  tables in `api/deploy_openapi.go` also regenerates the committed OpenAPI description, which a test
+  holds to the build: `cd backend && JD_UPDATE_OPENAPI=1 go test ./internal/api -run TestTheCommittedDeployOpenAPIDescriptionIsCurrent`,
+  then commit `docs/api/deploy-openapi.json` ([how it is generated](docs/internal/backend/deploy-api.md)).
 - Docker remedy changes run the live resource/policy acceptance: first make `alpine:3.20` available
   locally, then run from `backend/`:
   `JD_ADVISOR_DOCKER_LIVE=1 go test ./internal/dockerx -run '^TestLiveAdvisor' -count=1 -v`.
@@ -346,8 +350,16 @@ to the contribution terms above, including the additional licence grant to the p
   real routes and engine it builds a local Git checkout in staging, promotes the staging release and
   checks production runs the very image id staging built with no build step in its run, serves with
   production's variable and runs production's release task with production's value, then promotes a
-  second staging build and rolls production back to the first promoted release. Its environment and
-  run ids start far from 1, and it removes only the containers and tags its own store recorded.
+  second staging build and rolls production back to the first promoted release. It ends with a pull
+  request: a second project whose remote Git source's release mirror is pointed at a local origin by
+  `insteadOf` (a preview fetches `refs/pull/N/head`; the URL's host is under `.invalid` and commit
+  statuses are off, so nothing leaves the host), PR #41 built as a preview through a signed delivery and
+  the approval route, refused into production with `422 preview_promotion_target`, and promoted into
+  staging, which must run the very image id the preview built, serve and run its release task with
+  staging's variable and none of the preview's, and record PR #41, its commit and its approver; staging
+  keeps serving from its own tag once the preview's container and tag are gone. Changes to promoting a
+  preview run it, and the preview fixtures below. Its environment and
+  run ids start far from 1, and it removes only the containers, networks and tags its own store recorded.
 - Object-storage backups against a real S3 API (MinIO in a container: target test, upload, retention,
   restore): `JD_DEPLOY_LIVE=1 go test ./internal/backups -run TestLiveObjectStorageBackupUploadsPrunesAndRestores -count=1 -v`.
   Encrypted archives in a bucket take an S3-compatible service you started yourself, named by

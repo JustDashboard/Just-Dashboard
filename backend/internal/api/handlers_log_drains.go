@@ -238,9 +238,7 @@ func (s *Server) handleLogDrainEnabled(w http.ResponseWriter, r *http.Request) e
 	if err != nil {
 		return err
 	}
-	var req struct {
-		Enabled bool `json:"enabled"`
-	}
+	var req enabledRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}

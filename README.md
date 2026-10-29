@@ -473,6 +473,7 @@ jd rollback shop                                  # to the release before the li
 jd rollback shop --instant                        # straight back to the release kept warm after the last deploy
 jd keep shop                                      # keep the new release now; the warm one is retired
 jd promote shop --wait                            # staging's live release into production, as the same image
+jd promote shop --from-preview 42 --wait          # PR #42's approved preview into staging, as the same image
 jd maintenance shop on --bypass 10.0.0.0/8        # the switch acts at once; the bypass list with the next deploy
 jd status shop                                    # environments, live release, rollback watch, maintenance, rehearsal
 jd vars ls shop                                   # names, scopes and digests: never values
@@ -484,13 +485,18 @@ jd create --name blog --image nginx:1.27-alpine --port 80   # a new deployment, 
 ```
 
 Every read takes `--json`. In CI, set `JD_URL` and `JD_KEY` instead of logging in; nothing is written.
+For a client in another language, the dashboard describes the whole deployment API as OpenAPI 3.1 at
+`GET /api/v1/deploy/openapi.json` (or `.yaml`; `jd openapi` prints it), generated from its own router
+and types; **Account → API keys** links it beside the `jd` download when a deploy key is made, and the
+repository carries a copy at `docs/api/deploy-openapi.json`.
 `--env` picks an environment other than production, `--ca-file` trusts the internal Caddy certificate
 authority, and plain `http://` is refused except to loopback (an SSH tunnel). Exit codes: 0 done (the
 run succeeded), 1 refused or the run failed, 2 usage, 3 not logged in or the key is no longer valid.
 
 **What a deploy key can do.** Everything an ordinary key could on the deployments — list, read, deploy,
-cancel, retry, roll back, promote staging, switch back to the warm release or keep the new one, switch
-maintenance, runs and logs — plus what used to need a browser session: create deployments from drafts
+cancel, retry, roll back, promote staging (and a pull request's approved preview into staging), switch
+back to the warm release or keep the new one, switch maintenance, runs and logs — plus what used to need
+a browser session: create deployments from drafts
 and duplicates (a key's drafts are its own, and a key narrowed to some deployments reaches the
 deployments it commits), change configuration, source, Git policy and triggers, and set, import,
 generate, rotate and delete variables and shared variables. Variables are write-only to it: it sees

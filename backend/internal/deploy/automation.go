@@ -1128,6 +1128,9 @@ type PreviewRef struct {
 	LiveReleaseID           int64           `json:"liveReleaseId,omitempty"`
 	Address                 *PreviewAddress `json:"address,omitempty"`
 	LastRun                 *RecentRun      `json:"lastRun,omitempty"`
+	// Promotion is the newest promotion of the preview's image into staging,
+	// however it ended.
+	Promotion *PreviewPromotion `json:"promotion,omitempty"`
 }
 
 func (s *AutomationStore) ListPreviews(ctx context.Context, projectID int64) ([]PreviewRef, error) {
