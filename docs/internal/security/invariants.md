@@ -83,9 +83,24 @@ A change that weakens any of these has to say so explicitly.
    every key made before it): a deploy or a rollback goes through the same enqueue functions the
    deployment routes call and asks the key's role, narrowed to its owner's now, for the capability
    the route asks — `service.control` to deploy, `destructive` and the destructive budget to roll
-   back. A walk of
+   back. The grant reaches every deployment or, like a deploy key, only those chosen for it
+   (`api_token_deployments`, read with the key on every request). **It deliberately reaches more than
+   those two verbs:** every deployment route a deploy key may call (`keyOpen`, `keyEvery` in
+   `deployKeyRoutes`) is also a tool generated from the API's description, so `read` reads what a
+   deploy key reads and `deploy` changes what a deploy key changes — configuration, source, Git
+   policy, triggers, variables, drafts — held to the key's owner's role (not the administrator role a
+   deploy key carries), with the routes behind `s.destructive` only for a role holding `destructive`.
+   A key granted the deployments before the generated tools gains them with the upgrade. Such a call
+   never leaves the process: the MCP handler makes it through the dashboard's router as a request whose
+   context carries the MCP key's principal (`httpx.WithMCPDelegate`); `AuthenticateFeatures` admits it
+   only through the deploy key gate — the table's line, the key's chosen deployments, the
+   environment's — and marks it `Principal.ViaMCP`, which `DeployKey` reads as a deploy key, so every
+   handler's deploy key rule (write-only variables, `keyReferenceGuard`, `keySourceGuard`,
+   `hostAuthority`) holds; every other group refuses a delegated request, and no request from the
+   network can carry a context value. A walk of
    every route with an MCP key (`TestAnMCPKeyOpensNoOtherRoute`) holds the first half; the grants
-   are re-checked by the handler rather than trusted from the key.
+   are re-checked by the handler rather than trusted from the key, and
+   `TestEveryDeployKeyRouteIsAnMCPTool` holds that no session-only or deploy-key-refused route is a tool.
 
    A deploy key (`scope = 'deploy'`, made by `CreateDeployToken` on `POST /tokens/deploy`, which an
    administrator reaches only in a session) **deliberately changes the session-only rule** for part of

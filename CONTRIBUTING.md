@@ -65,7 +65,8 @@ to the contribution terms above, including the additional licence grant to the p
 
 - Run the checks with `scripts/test-changed.sh`. It runs only what your diff can reach: Prettier and
   ESLint on the changed frontend files, `tsc --noEmit`, `bun test src`, `go build`/`go vet` and the
-  Go tests beside each changed file, and the browser specs that open a page the change renders. Do not
+  Go tests beside each changed file, the clients' own checks for a change under `sdk/`, and the
+  browser specs that open a page the change renders. Do not
   run the whole browser suite or `go test ./...` locally. Install the required Chromium build once
   with `bun run test:browser:install`.
   Browser tests reuse a running production frontend on loopback port 43117 locally. Start one from
@@ -77,6 +78,17 @@ to the contribution terms above, including the additional licence grant to the p
   tables in `api/deploy_openapi.go` also regenerates the committed OpenAPI description, which a test
   holds to the build: `cd backend && JD_UPDATE_OPENAPI=1 go test ./internal/api -run TestTheCommittedDeployOpenAPIDescriptionIsCurrent`,
   then commit `docs/api/deploy-openapi.json` ([how it is generated](docs/internal/backend/deploy-api.md)).
+  The typed clients in `sdk/` are generated from that description (`backend/internal/openapigen`) and
+  held to it by `TestTheCommittedSDKsAreCurrent`, so regenerate them after it and commit `sdk/` with
+  the change: `cd backend && JD_UPDATE_SDK=1 go test ./internal/api -run TestTheCommittedSDKsAreCurrent`.
+  A change to the generator itself also rewrites its golden files, `JD_UPDATE_SDK=1 go test ./internal/openapigen`.
+  `scripts/test-changed.sh` runs `tsc` and `bun test` in `sdk/typescript` and `go vet` and `go test` in
+  `sdk/go` for any change under `sdk/`; the API tests compile and test the Go client as well
+  ([the clients](docs/internal/backend/deploy-api.md#the-clients-generated-from-it)). A deploy key
+  route added or removed also adds or removes an MCP tool generated from it:
+  `TestEveryDeployKeyRouteIsAnMCPTool` fails until `api.MCPGeneratedTools` and the counts quoted in
+  the MCP server's documentation, the README and the deployment implementation notes follow
+  ([the generated tools](docs/internal/backend/databases-proxy-platform.md#the-mcp-server)).
 - Docker remedy changes run the live resource/policy acceptance: first make `alpine:3.20` available
   locally, then run from `backend/`:
   `JD_ADVISOR_DOCKER_LIVE=1 go test ./internal/dockerx -run '^TestLiveAdvisor' -count=1 -v`.
