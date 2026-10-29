@@ -101,8 +101,22 @@ func (s *OrchestrationStore) PreviewAddressFor(ctx context.Context, environmentI
 // one transaction under the store's write lock; UNIQUE(kind, port) is the
 // cross-process authority, and a conflict there simply picks again.
 func (s *OrchestrationStore) AllocatePreviewAddress(ctx context.Context, environmentID int64, exclude map[int]int) (*PreviewAddress, error) {
+	return s.allocateTailnetPort(ctx, environmentID, exclude, func(kind EnvironmentKind) bool { return kind == EnvironmentPreview })
+}
+
+// AllocateTailnetAddress is the same port for an environment that is not a
+// preview and whose plan publishes it on the tailnet alone (tailnet-apps.md):
+// one row of the same table, from the same range, under the same rules, so
+// the startup sweep, the withdrawals and a preview's allocation treat it as
+// they treat a preview's. The caller has read the plan; a preview is refused
+// here, since its address is made with its approval.
+func (s *OrchestrationStore) AllocateTailnetAddress(ctx context.Context, environmentID int64, exclude map[int]int) (*PreviewAddress, error) {
+	return s.allocateTailnetPort(ctx, environmentID, exclude, func(kind EnvironmentKind) bool { return kind != EnvironmentPreview })
+}
+
+func (s *OrchestrationStore) allocateTailnetPort(ctx context.Context, environmentID int64, exclude map[int]int, admits func(EnvironmentKind) bool) (*PreviewAddress, error) {
 	for attempt := 0; attempt < 8; attempt++ {
-		address, err := s.allocatePreviewAddressOnce(ctx, environmentID, exclude)
+		address, err := s.allocatePreviewAddressOnce(ctx, environmentID, exclude, admits)
 		if err == nil || !isUniqueConstraint(err) {
 			return address, err
 		}
@@ -110,7 +124,7 @@ func (s *OrchestrationStore) AllocatePreviewAddress(ctx context.Context, environ
 	return nil, ErrPreviewAddressExhausted
 }
 
-func (s *OrchestrationStore) allocatePreviewAddressOnce(ctx context.Context, environmentID int64, exclude map[int]int) (*PreviewAddress, error) {
+func (s *OrchestrationStore) allocatePreviewAddressOnce(ctx context.Context, environmentID int64, exclude map[int]int, admits func(EnvironmentKind) bool) (*PreviewAddress, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -133,9 +147,10 @@ func (s *OrchestrationStore) allocatePreviewAddressOnce(ctx context.Context, env
 		}
 		return nil, err
 	}
-	// Only a preview may answer on the tailnet: production keeps its own
-	// ingress, and a port here would publish it past that.
-	if kind != EnvironmentPreview {
+	// A preview answers on the tailnet by its approval, and any other
+	// environment only because its plan says it is tailnet-only; the caller
+	// says which it is allocating for, and the other is refused.
+	if !admits(kind) {
 		return nil, ErrPreviewIsolation
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT port FROM deploy_preview_addresses WHERE kind = ?`, previewAddressTailnet)
@@ -238,16 +253,17 @@ func (e *NormalizedStepExecutor) publishPreviewAddress(
 	execution StepExecution,
 	environmentID int64,
 	address PreviewAddress,
-	runtime ReleaseRuntime,
+	upstream int,
 ) (*tailnetActivationEvidence, *StepResult) {
 	if e.tailnet == nil {
 		return nil, &StepResult{State: StepUnavailable, ErrorCode: "tailnet_unavailable",
-			ErrorMessage: "this preview answers on the tailnet, but Tailscale Serve is unavailable on this host"}
+			ErrorMessage: "this environment answers on the tailnet, but Tailscale Serve is unavailable on this host"}
 	}
-	if runtime.Port == 0 {
+	if upstream == 0 {
 		return nil, &StepResult{State: StepFailed, ErrorCode: "preview_port_missing",
 			ErrorMessage: "the runtime plan has no internal port to publish"}
 	}
+	runtime := ReleaseRuntime{Port: upstream}
 	url, err := e.tailnet.PublishTailnet(ctx, address.Port, runtime.Port, address.UpstreamPort)
 	if err != nil {
 		failure := runtimeStepFailure(err, "tailnet_publish_failed",
@@ -330,12 +346,19 @@ func (e *NormalizedStepExecutor) restoreTailnet(ctx context.Context, execution S
 	if release.PredecessorReleaseID != 0 && predecessorRunning {
 		predecessor, err := e.store.RuntimeForRelease(ctx, release.PredecessorReleaseID)
 		if err == nil && predecessor.Port != 0 {
-			url, err := e.tailnet.PublishTailnet(ctx, address.Port, predecessor.Port, address.UpstreamPort)
+			// A predecessor that named its visitors was reached through its
+			// gate, whose route the recovery has already put back; one that
+			// did not was reached directly.
+			upstream := predecessor.Port
+			if _, previous, err := e.releaseSnapshot(ctx, release.PredecessorReleaseID); err == nil && previous.Plan.Tailnet.IdentityAware() {
+				upstream = address.Port
+			}
+			url, err := e.tailnet.PublishTailnet(ctx, address.Port, upstream, address.UpstreamPort)
 			if err != nil {
 				_ = stepLog(execution, "stderr", "The tailnet address could not be pointed back at the previous release: "+err.Error())
 				return false
 			}
-			if err := e.store.MarkPreviewAddressPublished(ctx, release.EnvironmentID, url, predecessor.Port, true); err != nil {
+			if err := e.store.MarkPreviewAddressPublished(ctx, release.EnvironmentID, url, upstream, true); err != nil {
 				return false
 			}
 			_ = stepLog(execution, "status", "Pointed the tailnet address back at the previous release")

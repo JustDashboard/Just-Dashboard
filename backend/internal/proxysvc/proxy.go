@@ -61,6 +61,11 @@ type Service struct {
 	ingressContainer string
 	nginxDir         string
 	caddyFile        string
+	// tailnetGateName and tailnetGateSource name the gate Caddy and its
+	// Caddyfile when they are not the dashboard's (tailnet_gate.go), which
+	// is how a test keeps its own gate apart from a real one.
+	tailnetGateName   string
+	tailnetGateSource string
 
 	// nginx has no way to test a config fragment in isolation, so validation
 	// has to put the candidate where nginx expects it and take it away again.

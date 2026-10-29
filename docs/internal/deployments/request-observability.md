@@ -108,6 +108,14 @@ keeps one release's requests, which is what the canary's side-by-side reading is
 ([canary releases](canary-and-replicas.md#canary-releases)). A route serving one release records
 none.
 
+A tailnet-only environment that names who may open it is recorded by its tailnet gate
+([tailnet-only deployments](tailnet-apps.md#the-gate)): on host nginx in the same file, in the timed
+format with `tl=<login>` after it and the tailnet address as `$remote_addr`; on the dashboard's own
+loopback Caddy in the same JSON, with the login as the `tailnet_login` field its `log_append` adds and
+the tailnet address as `client_ip`. `AccessLogReader` reads the gate Caddy's record when that
+container holds the route, and `accesslog.Entry.User` carries the login, which the Logs page shows in
+the client column (the address in its title) and as **Tailnet login** in the request's detail.
+
 `RemoveDeploymentRoute` deletes the Caddy record and its rolled generations with the route. It holds
 client addresses, and leaving it behind after the deployment it described is gone would keep personal
 data on the host with nothing left to read it. nginx's file is left alone — it is in the host's log

@@ -20,9 +20,10 @@ import type {
   DeploymentRelease,
   DeploymentRuntimeServices,
   DeploymentSummary,
+  DeploymentTailnetAddress,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { StatusDot, type DotTone } from "@/components/status-dot"
+import { Status, StatusDot, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
@@ -85,6 +86,7 @@ export function ProjectWiring({
   runs,
   runtime,
   domains,
+  tailnet,
   url,
   watch,
 }: {
@@ -110,6 +112,8 @@ export function ProjectWiring({
   runtime?: DeploymentRuntimeServices
   /** The routes the operations owner reports, when it could read them. */
   domains?: DeploymentDomainRoute[]
+  /** The tailnet address and who may open it, for a live release that is tailnet-only. */
+  tailnet?: DeploymentTailnetAddress
   url?: string
   watch?: DeploymentGitWatch
 }) {
@@ -355,9 +359,16 @@ export function ProjectWiring({
           />
         </li>
 
-        <li>
+        {tailnet && (
+          <li>
+            <TailnetNode nodeRef={domainNode} tailnet={tailnet} />
+          </li>
+        )}
+        {/* A tailnet-only release has no public names: its address is drawn
+            in this node's place, above. */}
+        <li hidden={Boolean(tailnet)}>
           <WireNode
-            nodeRef={domainNode}
+            nodeRef={tailnet ? undefined : domainNode}
             mark={
               host ? (
                 <WireMark tone="logo" size="md">
@@ -423,6 +434,80 @@ export function ProjectWiring({
         </li>
       </ol>
     </div>
+  )
+}
+
+/**
+ * Where a tailnet-only release answers, in the Domains node's place: its
+ * address on the tailnet as Tailscale's mark, and who may open it — the
+ * logins and tags the release admits, or the whole tailnet — with the proxy
+ * that asks who each visitor is.
+ */
+function TailnetNode({
+  nodeRef,
+  tailnet,
+}: {
+  nodeRef: React.RefObject<HTMLDivElement | null>
+  tailnet: DeploymentTailnetAddress
+}) {
+  const address = tailnet.url && hostOf(tailnet.url)
+  const gate =
+    tailnet.gate === "caddy"
+      ? "checked by the dashboard's Caddy"
+      : tailnet.gate === "nginx"
+        ? "checked by nginx"
+        : undefined
+  return (
+    <WireNode
+      nodeRef={nodeRef}
+      mark={
+        address && tailnet.published ? (
+          <WireMark tone="logo" size="md">
+            <ProductGlyph id="tailscale" />
+          </WireMark>
+        ) : (
+          <WirePlaceholder size="md" product="tailscale" />
+        )
+      }
+      eyebrow="Tailnet only"
+      title={
+        address ? (
+          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
+            <a
+              href={tailnet.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-w-0 items-center gap-1 rounded-sm focus-ring hover:underline"
+            >
+              <span className="truncate font-mono">{address}</span>
+              <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+            </a>
+            {!tailnet.published && (
+              <Status tone="warning" label="Not reachable · redeploy" className="font-normal" />
+            )}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">Gets its address on the next deployment</span>
+        )
+      }
+      hint={
+        <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          {tailnet.allow.length === 0 ? (
+            <span>Everyone on the tailnet</span>
+          ) : (
+            <>
+              <span>Only</span>
+              {tailnet.allow.map((entry) => (
+                <Tag key={entry} mono>
+                  {entry}
+                </Tag>
+              ))}
+            </>
+          )}
+          {gate && <span>· {gate}</span>}
+        </span>
+      }
+    />
   )
 }
 

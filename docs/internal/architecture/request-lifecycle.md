@@ -94,9 +94,13 @@ password and revokes existing sessions; the sign-in page then signs straight bac
 password, through any required second factor. Password change has its own
 authentication middleware so it cannot bypass an outstanding second factor.
 
-Two deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname) and
+Three deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname),
 `/api/v1/hooks/deploy/{hookID}` (HMAC over the raw body, still allowlisted, still audited so
-enumerating hook ids is not silent).
+enumerating hook ids is not silent), and `GET /api/v1/tailnet/whois`, which a tailnet-only
+deployment's gate asks about every request: still behind the allowlist, outside the API rate limit,
+and answering only a loopback caller that no other proxy forwarded — the dashboard's own Caddy says it
+did in `X-Forwarded-For` — with every refusal audited as `deploy.tailnet.refused`
+([tailnet-only deployments](../deployments/tailnet-apps.md#the-whois-route)).
 
 ## Handler conventions
 
