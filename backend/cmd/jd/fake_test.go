@@ -191,6 +191,12 @@ func (f *fakeDashboard) serve(w http.ResponseWriter, r *http.Request) {
 	case route == "POST "+env+"/rollback-watch/keep":
 		f.write(w, 200, map[string]any{"state": "closed", "endReason": "kept", "releaseNumber": 3, "warmReleaseNumber": 2,
 			"endMessage": "ion kept release #3"})
+	case route == "GET "+env+"/canary":
+		f.write(w, 200, map[string]any{"canary": f.canaryWindow()})
+	case route == "POST "+env+"/canary/promote", route == "POST "+env+"/canary/abort":
+		window := f.canaryWindow()
+		window["decision"] = strings.TrimPrefix(route, "POST "+env+"/canary/")
+		f.write(w, 202, window)
 	case route == "GET "+env+"/rollback-watch":
 		f.write(w, 200, map[string]any{"policy": map[string]any{"keepWarm": true, "windowSeconds": 600, "automatic": true},
 			"watch":   map[string]any{"state": "watching", "releaseNumber": 3, "warmReleaseNumber": 2, "expiresAt": "2026-10-27T10:10:00Z"},
@@ -294,4 +300,15 @@ func TestMain(m *testing.M) {
 
 func configFile(env map[string]string) string {
 	return filepath.Join(env["XDG_CONFIG_HOME"], "jd", "config.json")
+}
+
+// canaryWindow is the environment's canary as the dashboard reads it: release
+// #4 on a tenth of the requests beside release #3.
+func (f *fakeDashboard) canaryWindow() map[string]any {
+	p95 := 91.0
+	return map[string]any{"id": 5, "runId": 501, "state": "running", "percent": 10, "autoPromote": true,
+		"startedAt": "2026-10-27T10:00:00Z", "endsAt": "2026-10-27T10:10:00Z", "releaseNumber": 4, "liveReleaseNumber": 3,
+		"live":      map[string]any{"requests": 1840, "failures": 3, "errorRate": 3.0 / 1840, "p95": 84.0},
+		"candidate": map[string]any{"requests": 203, "failures": 1, "errorRate": 1.0 / 203, "p95": p95},
+		"verdict":   map[string]any{"reason": "Within the live release's figures over 203 requests."}}
 }

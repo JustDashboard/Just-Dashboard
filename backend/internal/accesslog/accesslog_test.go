@@ -581,3 +581,23 @@ func TestPagesOnlyFilterKeepsTheReadingsHonest(t *testing.T) {
 		t.Fatalf("pages-only: total %d scanned %d rows %d", result.Summary.Total, result.Summary.Scanned, len(result.Entries))
 	}
 }
+
+// A canary route records which release answered each request, on either
+// proxy, and a window can be read for one release alone.
+func TestCanaryEntriesSayWhichReleaseAnswered(t *testing.T) {
+	caddy, ok := Parse(`{"level":"info","ts":1758260877.5,"logger":"http.log.access.log0","msg":"handled request","request":{"remote_ip":"203.0.113.9","proto":"HTTP/1.1","method":"GET","host":"app.example.test","uri":"/","headers":{}},"duration":0.004,"size":5,"status":500,"release":"42"}`)
+	if !ok || caddy.Release != "42" {
+		t.Fatalf("caddy entry = %+v, %v", caddy, ok)
+	}
+	nginx, ok := Parse(`203.0.113.9 - - [19/Sep/2026:05:47:57 +0000] "GET / HTTP/1.1" 200 5 "-" "curl/8" rt=0.003 urt="0.003" host=app.example.test cs=- rel=41`)
+	if !ok || nginx.Release != "41" || nginx.Status != 200 {
+		t.Fatalf("nginx entry = %+v, %v", nginx, ok)
+	}
+	plain, _ := Parse(`203.0.113.9 - - [19/Sep/2026:05:47:57 +0000] "GET / HTTP/1.1" 200 5 "-" "curl/8" rt=0.003`)
+	if plain.Release != "" {
+		t.Fatalf("a route of one release recorded %q", plain.Release)
+	}
+	if !(Filter{Release: "42"}).Match(caddy) || (Filter{Release: "42"}).Match(nginx) || !(Filter{}).Match(nginx) {
+		t.Fatal("the release filter does not keep one release's requests")
+	}
+}

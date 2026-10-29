@@ -78,8 +78,12 @@ func (spec *SiteSpec) poolUpstream() string {
 	return scheme + "://" + spec.poolName()
 }
 
-// mainUpstream is what the site's catch-all forwards to.
+// mainUpstream is what the site's catch-all forwards to: with a split, the
+// variable naming whichever of the two pools this request was given.
 func (spec *SiteSpec) mainUpstream() string {
+	if spec.Pool != nil && spec.Split != nil {
+		return "http://$" + spec.splitUpstreamVar()
+	}
 	if spec.Pool != nil {
 		return spec.poolUpstream()
 	}
@@ -216,28 +220,33 @@ func renderPool(l *lines, spec *SiteSpec) {
 		l.add("    %s", poolMethods[pool.Method])
 	}
 	for _, server := range pool.Servers {
-		line := "    server " + server.Address
-		if server.Weight > 0 {
-			line += " weight=" + strconv.Itoa(server.Weight)
-		}
-		if server.MaxFails > 0 {
-			line += " max_fails=" + strconv.Itoa(server.MaxFails)
-		}
-		if server.FailTimeout > 0 {
-			line += " fail_timeout=" + strconv.Itoa(server.FailTimeout) + "s"
-		}
-		if server.Backup {
-			line += " backup"
-		}
-		if server.Down {
-			line += " down"
-		}
-		l.add("%s;", line)
+		l.add("%s;", poolServerLine(server))
 	}
 	if pool.Keepalive > 0 {
 		l.add("    keepalive %d;", pool.Keepalive)
 	}
 	l.add("}")
+}
+
+// poolServerLine is one server of an upstream block, without its semicolon.
+func poolServerLine(server PoolServer) string {
+	line := "    server " + server.Address
+	if server.Weight > 0 {
+		line += " weight=" + strconv.Itoa(server.Weight)
+	}
+	if server.MaxFails > 0 {
+		line += " max_fails=" + strconv.Itoa(server.MaxFails)
+	}
+	if server.FailTimeout > 0 {
+		line += " fail_timeout=" + strconv.Itoa(server.FailTimeout) + "s"
+	}
+	if server.Backup {
+		line += " backup"
+	}
+	if server.Down {
+		line += " down"
+	}
+	return line
 }
 
 // renderPoolLocation writes what a location forwarding to the pool needs

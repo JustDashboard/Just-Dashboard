@@ -241,3 +241,40 @@ func TestConfigGetSaysHowManyReplicas(t *testing.T) {
 		t.Errorf("runtime line does not name the replicas:\n%s", stdout)
 	}
 }
+
+// jd canary reads the trial side by side, and an operator's word on it is a
+// POST to the trial's own route.
+func TestCanaryStatusPromoteAndAbort(t *testing.T) {
+	f := newFake(t)
+	code, stdout, stderr := jd(t, invocation{env: f.env(t)}, "canary", "status", "web")
+	if code != exitOK {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	for _, want := range []string{"release #4 on 10% beside release #3", "release #4 (canary)  203", "0.5%", "91 ms", "release #3 (live)    1840", "Within the live release's figures"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("status lacks %q:\n%s", want, stdout)
+		}
+	}
+	code, stdout, _ = jd(t, invocation{env: f.env(t)}, "canary", "promote", "web")
+	if code != exitOK || !strings.Contains(stdout, "release #4 of web (Production) is being promoted") {
+		t.Errorf("promote: exit %d %s", code, stdout)
+	}
+	code, stdout, _ = jd(t, invocation{env: f.env(t)}, "canary", "abort", "web")
+	if code != exitOK || !strings.Contains(stdout, "aborted: it is removed and release #3 keeps every request") {
+		t.Errorf("abort: exit %d %s", code, stdout)
+	}
+	f.mu.Lock()
+	posted := 0
+	for _, request := range f.requests {
+		if strings.HasPrefix(request, "POST /api/v1/deploy/7/environments/70/canary/") {
+			posted++
+		}
+	}
+	f.mu.Unlock()
+	if posted != 2 {
+		t.Errorf("decisions posted = %d", posted)
+	}
+	if code, _, _ := jd(t, invocation{env: f.env(t)}, "canary", "wait", "web"); code != exitUsage {
+		t.Errorf("an unknown canary verb: exit %d", code)
+	}
+}

@@ -14,8 +14,10 @@ only renderer/executor/validation authority for their feature.
   The engine looks for work every 250 ms and on every `Notify`; `ClaimNext` first asks with a plain read
   whether anything is queued, so an idle queue never takes the IMMEDIATE write transaction the claim
   needs.
-- The only activation strategies are `blue_green` for an eligible proxy-owned stateless HTTP service and
-  `stop_first` for Compose, fixed-port, game and exclusive-storage workloads. A failed candidate cannot
+- The only activation strategies are `blue_green` for an eligible proxy-owned stateless HTTP service,
+  `canary` — blue/green with a trial between the checks and the cutover, the candidate on a share of the
+  live route's requests beside the live release ([canary releases](canary-and-replicas.md#canary-releases))
+  — and `stop_first` for Compose, fixed-port, game and exclusive-storage workloads. A failed candidate cannot
   replace the live release; ambiguous cutover evidence restores or stops for operator recovery. Either
   strategy can run a stateless release as `runtime.replicas` containers (1–8) behind one route
   ([replicas](canary-and-replicas.md)); everything below that speaks of a release's container means
@@ -935,8 +937,9 @@ only renderer/executor/validation authority for their feature.
   redirecting to the old public release or to a page that returns 500. `acceptAnyAnswer` checks accept
   the first answer below 500 other than 400 and 421 (what host allowlists answer); explicit
   expected-status lists retain exact-status, no-redirect behavior, and a check cannot set both.
-- Blue/green is limited to stateless proxy-owned HTTP candidates without fixed ports, host networking or
-  writable mounts; dynamic candidate ports are loopback-leased, one per replica. Fixed-port, Compose,
+- Blue/green, and a canary, which is blue/green with a trial, are limited to stateless proxy-owned HTTP
+  candidates without fixed ports, host networking or writable mounts; dynamic candidate ports are
+  loopback-leased, one per replica. Fixed-port, Compose,
   game and exclusive writable-storage plans are honest `stop_first` deployments, advertise expected
   downtime and run one container per release (`replicaRefusal`). A route moves only after the plan's
   required readiness/smoke checks pass on every replica of the candidate (one that fails removes the
@@ -980,7 +983,7 @@ only renderer/executor/validation authority for their feature.
   it (`deploy/rollback_watch.go`, `rollback_executor.go`, `rollback_watcher.go`). `retire_previous`
   drains it as before, then — when the environment's terms allow, the environment is not a preview,
   both releases are the runtime owner's own containers rather than Compose stacks and the host still has
-  `max(256 MB, a tenth of its memory)` available — records a window (`deploy_rollback_watches`, state
+  `max(256 MB, a tenth of its memory)` available (a canary's promotion is that cutover too) — records a window (`deploy_rollback_watches`, state
   `watching`) and the predecessor's runtime `warm` in one leased transaction and only then `docker
   pause`s it, every replica of it. A replicated warm release is one state (`warmStateOf`): any replica
   gone is the release gone (`warm_lost`), one a Docker restart brought back running is paused again, and

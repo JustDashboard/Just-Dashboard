@@ -97,6 +97,36 @@ puts three replicas behind a real Caddy and checks the requests are shared, the 
 upstreams, a replica killed under steady traffic costs no request, and a Caddy taken off the replicas'
 network is repaired by one maintenance pass while a replica is dead.
 
+## Canary releases
+
+While a candidate release is tried beside the live one ([canary releases](canary-and-replicas.md#canary-releases)),
+the route's handling ends in two `handle` blocks instead of one `reverse_proxy`:
+
+```
+@jd_canary vars_regexp {http.request.uuid} ^(?:[0][0-9a-f]|1[0123456789])
+handle @jd_canary {
+  log_append release 42
+  reverse_proxy "http://172.18.0.8:3000"
+}
+handle {
+  log_append release 41
+  reverse_proxy "http://172.18.0.5:3000" "http://172.18.0.6:3000" { … }
+}
+```
+
+Caddy draws a version-4 UUID for every request, so its first two hex digits are 256 equal buckets; the
+matcher names the candidate's run of them (`canaryUUIDPattern`: 26 for 10%), and each release keeps its
+own replicas, balancing and passive health in its handle. `log_append` (Caddy 2.8 and later; the ingress
+image is 2.11.7) puts the release in each access entry. The candidate's containers are recorded on the
+same target lines as the live release's, after them, so the maintenance pass repairs either. Caddy's
+`weighted_round_robin` exists in 2.11.7 too, but over both releases' containers as one pool it would lose
+least connections between a release's own replicas, and its record would name a container address
+rather than a release. The block is written by activation's canary step and written away again before
+the cutover or the abort; nothing else writes it.
+
+`JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveCanaryAbortsAFailingReleaseAndPromotesAHealthyOne -count=1 -v`
+runs both outcomes through a real Caddy.
+
 ## Request body limit
 
 A managed route carries the plan's `runtime.maxRequestBodyMb` as `request_body { max_size <N>MB }` when

@@ -358,29 +358,18 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 		return "", errors.New("a route's pages are kept under its name")
 	}
 	directive := `respond "Deployment is preparing" 503`
-	servers := make([]string, 0, len(upstreams))
-	for _, upstream := range upstreams {
-		if upstream == "" {
-			continue
-		}
-		parsed, err := url.Parse(upstream)
-		if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
-			return "", errors.New("invalid Caddy deployment upstream")
-		}
-		if slices.Contains(servers, upstream) {
-			return "", errors.New("a Caddy deployment upstream is named twice")
-		}
-		servers = append(servers, upstream)
+	servers, err := caddyUpstreams(upstreams)
+	if err != nil {
+		return "", err
 	}
-	if len(servers) > MaxDeploymentUpstreams {
-		return "", fmt.Errorf("a route shares its requests between at most %d servers", MaxDeploymentUpstreams)
-	}
-	if len(servers) > 0 {
+	// The proxy to one release's servers, written at the handling's own
+	// depth: further lines are indented two spaces more than the first.
+	proxy := func(servers []string) string {
 		quoted := make([]string, 0, len(servers))
 		for _, server := range servers {
 			quoted = append(quoted, strconv.Quote(server))
 		}
-		directive = "reverse_proxy " + strings.Join(quoted, " ")
+		out := "reverse_proxy " + strings.Join(quoted, " ")
 		var options []string
 		if len(servers) > 1 {
 			options = append(options, caddyReplicaBalancing...)
@@ -389,8 +378,19 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 			options = append(options, caddyInterceptErrors(route.ErrorPages)...)
 		}
 		if len(options) > 0 {
-			directive += " {\n" + strings.Join(options, "\n") + "\n  }"
+			out += " {\n" + strings.Join(options, "\n") + "\n  }"
 		}
+		return out
+	}
+	if len(servers) > 0 {
+		directive = proxy(servers)
+	}
+	if canary := route.Canary; canary != nil && len(servers) > 0 {
+		candidate, err := caddyUpstreams(canary.Upstreams)
+		if err != nil || len(candidate) == 0 {
+			return "", errors.New("invalid Caddy canary upstream")
+		}
+		directive = renderCaddyCanary(*canary, proxy(candidate), proxy(servers), route.AccessLog)
 	}
 	tlsDirective := ""
 	if servesExplicitCertificate(route) {
@@ -480,7 +480,7 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 		maintenance, errorPages = renderCaddyMaintenance(route.Maintenance, pages), renderCaddyErrorPages(route.ErrorPages, pages)
 	}
 	handling := fence + maintenance + authDirective + gateDirective + bodyDirective + "  " + directive + "\n"
-	if fence != "" || maintenance != "" || route.ForwardAuth != nil {
+	if fence != "" || maintenance != "" || route.ForwardAuth != nil || route.Canary != nil {
 		handling = "  route {\n" + indentCaddy(handling) + "  }\n"
 	}
 	// The names served over HTTPS are one site block and the names served
@@ -651,6 +651,74 @@ func renderCaddyErrorPages(codes []int, pages string) string {
 		"      file_server\n" +
 		"    }\n" +
 		"  }\n"
+}
+
+// caddyUpstreams checks the addresses a route proxies to: plain http to a
+// host and port, each once, at most MaxDeploymentUpstreams.
+func caddyUpstreams(upstreams []string) ([]string, error) {
+	servers := make([]string, 0, len(upstreams))
+	for _, upstream := range upstreams {
+		if upstream == "" {
+			continue
+		}
+		parsed, err := url.Parse(upstream)
+		if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return nil, errors.New("invalid Caddy deployment upstream")
+		}
+		if slices.Contains(servers, upstream) {
+			return nil, errors.New("a Caddy deployment upstream is named twice")
+		}
+		servers = append(servers, upstream)
+	}
+	if len(servers) > MaxDeploymentUpstreams {
+		return nil, fmt.Errorf("a route shares its requests between at most %d servers", MaxDeploymentUpstreams)
+	}
+	return servers, nil
+}
+
+// renderCaddyCanary splits a route between two releases. Each request is
+// given one at random from its own {http.request.uuid} — Caddy draws a
+// version-4 UUID per request, so its first two hex digits are 256 equal
+// buckets and the candidate's share is the run of buckets the matcher names
+// (canaryUUIDPattern) — and each release keeps its own replicas, balancing
+// and passive health in a handle of its own. A route whose answers are
+// recorded says which release gave each one (log_append), which is what the
+// canary's side-by-side reading is read from.
+//
+// Caddy 2.11's weighted_round_robin would share the requests too, but over
+// the two releases' containers as one pool, losing least connections between
+// a release's own replicas, and its record would name a container address
+// rather than a release.
+func renderCaddyCanary(canary DeploymentCanary, candidate, live string, recorded bool) string {
+	branch := func(release, proxy string) string {
+		out := ""
+		if recorded {
+			out += "    log_append release " + release + "\n"
+		}
+		// The proxy was written for the handling's depth; inside a handle
+		// every line of it is two spaces further in.
+		return out + "    " + strings.ReplaceAll(proxy, "\n", "\n  ") + "\n"
+	}
+	return "@jd_canary vars_regexp {http.request.uuid} " + canaryUUIDPattern(canary.Percent) + "\n" +
+		"  handle @jd_canary {\n" + branch(canary.Candidate, candidate) + "  }\n" +
+		"  handle {\n" + branch(canary.Live, live) + "  }"
+}
+
+// canaryUUIDPattern matches the share of UUIDs whose first two hex digits
+// fall in the lowest percent of their 256 values, rounded to the nearest
+// bucket and never none or all.
+func canaryUUIDPattern(percent int) string {
+	buckets := (percent*256 + 50) / 100
+	buckets = max(1, min(buckets, 255))
+	const hex = "0123456789abcdef"
+	parts := []string{}
+	if whole := buckets / 16; whole > 0 {
+		parts = append(parts, "["+hex[:whole]+"][0-9a-f]")
+	}
+	if rest := buckets % 16; rest > 0 {
+		parts = append(parts, string(hex[buckets/16])+"["+hex[:rest]+"]")
+	}
+	return "^(?:" + strings.Join(parts, "|") + ")"
 }
 
 // caddyReplicaBalancing is how a replicated release's route shares its
@@ -879,6 +947,22 @@ func (c *dockerCaddy) routeContent(ctx context.Context, route DeploymentRoute) (
 	rendered, auth, err := c.resolveForwardAuth(ctx, route)
 	if err != nil {
 		return "", nil, err
+	}
+	// A canary's servers are found the same way and recorded on the same
+	// lines, after the live release's: the maintenance pass repairs a
+	// container whichever release it serves.
+	if canary := route.Canary; canary != nil {
+		resolved := *canary
+		resolved.Upstreams = nil
+		for _, server := range canary.Upstreams {
+			target, err := c.target(ctx, server)
+			if err != nil {
+				return "", nil, err
+			}
+			targets = append(targets, target)
+			resolved.Upstreams = append(resolved.Upstreams, target.upstream())
+		}
+		rendered.Canary = &resolved
 	}
 	content, err := renderDockerCaddyRoute(rendered, upstreams...)
 	if err != nil {

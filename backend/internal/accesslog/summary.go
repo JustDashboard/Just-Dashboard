@@ -27,6 +27,9 @@ type Filter struct {
 	// press on one of their rows narrows to.
 	Agent   string
 	Referer string
+	// Release keeps the requests one release answered, on a route that
+	// records which did (Entry.Release).
+	Release string
 	MinMs   float64
 	MaxMs   float64
 	// PagesOnly keeps the requests a person would call a page view and drops
@@ -137,6 +140,9 @@ func (f Filter) Match(e Entry) bool {
 		return false
 	}
 	if f.Host != "" && !strings.EqualFold(f.Host, e.Host) {
+		return false
+	}
+	if f.Release != "" && f.Release != e.Release {
 		return false
 	}
 	if f.Client != "" && !strings.HasPrefix(e.RemoteIP, f.Client) {

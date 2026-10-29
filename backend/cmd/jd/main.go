@@ -47,6 +47,8 @@ Deployments
   rollback APP [--to ID] [--wait]  Go back to a release (default: the one before the live one)
   rollback APP --instant [--wait]  Switch traffic back to the release kept warm after the last deploy
   keep APP                      Keep the new release now and retire the warm one
+  canary promote|abort APP      Promote a canary release now, or abort it (the live release keeps everything)
+  canary status APP             The canary's window and the two releases' requests, 5xx share and p95
   promote APP [--wait]          Promote staging's live release to production (--release ID for another)
   maintenance APP on|off        Switch the maintenance page at once (--bypass CIDR,... for who is let past)
   status APP                    Environments, live release, rollback watch, maintenance and rehearsal
@@ -204,6 +206,10 @@ func (a *app) dispatch(command string, pre, rest, words []string) error {
 		return a.promote(words)
 	case "keep":
 		return a.keep(words)
+	case "canary":
+		return a.nested("canary", pre, rest, map[string]func([]string) error{
+			"promote": a.canaryPromote, "abort": a.canaryAbort, "status": a.canaryStatus,
+		})
 	case "maintenance":
 		return a.maintenance(words)
 	case "status":
@@ -249,7 +255,7 @@ func (a *app) nested(name string, pre, rest []string, verbs map[string]func([]st
 }
 
 func verbList(verbs map[string]func([]string) error) string {
-	order := []string{"ls", "create", "show", "get", "set", "save", "import", "detect", "preflight", "commit", "rm"}
+	order := []string{"ls", "create", "show", "get", "set", "save", "import", "detect", "preflight", "commit", "rm", "status", "promote", "abort"}
 	var out []string
 	for _, v := range order {
 		if _, ok := verbs[v]; ok {

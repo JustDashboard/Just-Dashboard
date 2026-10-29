@@ -191,8 +191,10 @@ func createIsolatedPreviewPlansTx(ctx context.Context, tx *sql.Tx, sourceID int6
 	if len(runtime.Mounts) > 0 {
 		runtime.Strategy = StrategyStopFirst
 	}
-	if runtime.Strategy == "" {
-		runtime.Strategy = StrategyBlueGreen
+	// A preview has no live release of its own traffic to try a canary
+	// against; it is replaced blue/green.
+	if runtime.Strategy == "" || runtime.Strategy == StrategyCanary {
+		runtime.Strategy, runtime.Canary = StrategyBlueGreen, nil
 	}
 	buildJSON, runtimeJSON := mustJSON(build), mustJSON(runtime)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO deploy_build_plans(environment_id,revision,method,config_json,evidence_json,preview,digest,created_at) VALUES(?,?,?,?,?,?,?,?)`, environmentID, revision, method, string(buildJSON), evidence, renderBuildPreview(build), buildPlanDigest(build), now); err != nil {

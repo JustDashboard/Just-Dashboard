@@ -114,6 +114,7 @@ var stepLabels = map[StepKey]string{
 	StepStartCandidate:       "Start new release",
 	StepVerifyReadiness:      "Readiness checks",
 	StepVerifySmoke:          "Smoke checks",
+	StepCanary:               "Canary",
 	StepActivate:             "Switch traffic",
 	StepRetirePrevious:       "Retire previous release",
 	StepRecordRelease:        "Record release",

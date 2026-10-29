@@ -420,7 +420,7 @@ test.describe("Runtime settings", () => {
     // next deployment finds out, and the choice cannot be taken again.
     await expect(
       runtimeCard.getByText(
-        "Blue / green is unavailable: /data is writable — two releases cannot share it.",
+        "Blue / green and canary are unavailable: /data is writable — two releases cannot share it.",
       ),
     ).toBeVisible()
     await expect(runtimeCard.getByText("Will fail on the next deployment")).toBeVisible()
@@ -612,7 +612,7 @@ test.describe("Runtime settings, drafts and refusals", () => {
     // Why blue/green fails is said beside the choice, at full ink.
     await expect(
       runtimeCard.getByText(
-        "Blue / green is unavailable: /data is writable — two releases cannot share it.",
+        "Blue / green and canary are unavailable: /data is writable — two releases cannot share it.",
       ),
     ).toBeVisible()
 

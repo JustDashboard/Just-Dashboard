@@ -217,7 +217,7 @@ func (e *NormalizedStepExecutor) keepWarm(
 	if kind == EnvironmentPreview {
 		return nil, "a preview is never kept warm"
 	}
-	if snapshot.Plan.Strategy != StrategyBlueGreen || previous.Kind != "container" {
+	if !snapshot.Plan.Strategy.startsBeside() || previous.Kind != "container" {
 		return nil, "only a blue/green release's own containers are kept warm, never a Compose stack's"
 	}
 	if previous.State != "draining" {

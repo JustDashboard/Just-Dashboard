@@ -964,7 +964,7 @@ func preflightFindings(
 			"Runtime has host-equivalent options", "", "The container can affect more of the server than an ordinary workload.",
 			"Review privileged, network, capability, device, and mount settings.", "security", "runtime"))
 	}
-	if configuration.Runtime.Strategy == StrategyBlueGreen {
+	if configuration.Runtime.Strategy.startsBeside() {
 		eligibleProfile := draft.Data.Intent.Profile == ProfileWeb || draft.Data.Intent.Profile == ProfileStatic
 		exclusiveStorage := false
 		for _, mount := range configuration.Runtime.Mounts {
@@ -979,9 +979,12 @@ func preflightFindings(
 				"Use stop-first or remove the exclusive requirement.", "deploy", "runtime.strategy"))
 		} else {
 			findings = append(findings, finding("strategy_blue_green", PreflightPass,
-				"Candidate-first activation is eligible", "blue_green", "The old release can remain live through verification.",
+				"Candidate-first activation is eligible", string(configuration.Runtime.Strategy), "The old release can remain live through verification.",
 				"", "deploy", "runtime.strategy"))
 		}
+	}
+	if item, ok := canaryFinding(configuration); ok {
+		findings = append(findings, item)
 	}
 	if item, ok := replicasFinding(configuration.Build.Method, configuration.Runtime); ok {
 		findings = append(findings, item)
@@ -1361,6 +1364,11 @@ func exactPlan(draft *Draft, configuration PlanConfiguration) ExactPlan {
 			action.Action = "run readiness checks"
 		case StepVerifySmoke:
 			action.Action = "run smoke and public-route checks"
+		case StepCanary:
+			action.Action = "try the candidate on a share of the live route's requests when the strategy is canary"
+			if terms := configuration.Runtime.Canary; configuration.Runtime.Strategy == StrategyCanary && terms != nil {
+				action.Arguments = []string{fmt.Sprintf("%d%%", terms.Percent), fmt.Sprintf("%ds", terms.DurationSeconds)}
+			}
 		case StepActivate:
 			action.Action = "activate candidate using " + string(configuration.Runtime.Strategy)
 		case StepRetirePrevious:
@@ -1411,7 +1419,7 @@ func stepOwner(step StepKey) string {
 		return "builder"
 	case StepStartCandidate, StepRetirePrevious:
 		return "docker"
-	case StepActivate:
+	case StepActivate, StepCanary:
 		return "proxy/docker"
 	case StepProvisionCertificate:
 		return "certificates"
@@ -1427,7 +1435,7 @@ func stepOwner(step StepKey) string {
 func stepChangesState(step StepKey) bool {
 	switch step {
 	case StepAcquireSource, StepPrepareContext, StepBuildArtifact, StepReleaseTask,
-		StepProvisionCertificate, StepStartCandidate, StepActivate, StepRetirePrevious,
+		StepProvisionCertificate, StepStartCandidate, StepCanary, StepActivate, StepRetirePrevious,
 		StepRecordRelease, StepNotify:
 		return true
 	default:

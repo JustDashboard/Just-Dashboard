@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowLeftRight, Box, Globe, Pause, Servers } from "@/components/icons"
+import { ArrowLeftRight, Box, Gauge, Globe, Pause, Servers } from "@/components/icons"
 import { ApiError, refusedIndex } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -75,6 +75,13 @@ import {
   replicaRefusal,
   withReplicas,
 } from "@/components/deploy/replicas-model"
+import {
+  CANARY_PERCENT,
+  CANARY_SECONDS,
+  DEFAULT_CANARY_TERMS,
+  windowWords,
+  withStrategy,
+} from "@/components/deploy/canary-model"
 
 /**
  * How the release runs once it exists: the image and command, where it
@@ -180,6 +187,9 @@ const RUNTIME_FIELD_IDS: Record<string, string> = {
   "runtime.hostPort": "runtime-host-port",
   "runtime.bindAddress": "runtime-bind",
   "runtime.strategy": "runtime-strategy",
+  "runtime.canary": "runtime-strategy",
+  "runtime.canary.percent": "runtime-canary-percent",
+  "runtime.canary.durationSeconds": "runtime-canary-window",
   "runtime.replicas": "runtime-replicas",
   "runtime.memoryMb": "runtime-memory",
   "runtime.cpus": "runtime-cpus",
@@ -205,6 +215,8 @@ const FIELD_SECTION: Record<string, string> = {
   "runtime-cpus": "resources",
   "runtime-pids": "resources",
   "runtime-strategy": "releases",
+  "runtime-canary-percent": "releases",
+  "runtime-canary-window": "releases",
   "runtime-replicas": "releases",
   "runtime-restart": "releases",
   "runtime-stop-signal": "shutdown",
@@ -282,7 +294,10 @@ export function RuntimeSettings({
           <RollbackWatchForm
             projectId={projectId}
             environmentId={environmentId}
-            blueGreen={configuration.runtime.strategy === "blue_green"}
+            blueGreen={
+              configuration.runtime.strategy === "blue_green" ||
+              configuration.runtime.strategy === "canary"
+            }
           />
           <HealthChecksForm projectId={projectId} configuration={configuration} save={state.save} />
         </>
@@ -353,7 +368,17 @@ function RuntimeForm({
   const pids = runtime.pidsLimit ?? 0
   const refusal = blueGreenRefusal(runtime, deployment.profile, method)
   const blueGreen = runtime.strategy === "blue_green"
-  const failsNext = blueGreen && Boolean(refusal)
+  const canary = runtime.strategy === "canary"
+  // A canary runs the candidate beside the live release as blue/green does,
+  // and shares the public route's requests, so it needs a domain as well.
+  const servesDomain = configuration.domains.some((domain) => !domain.redirectTo)
+  const canaryRefusal =
+    refusal ??
+    (servesDomain
+      ? undefined
+      : "a canary shares the public route's requests, and this plan has no domain")
+  const failsNext = (blueGreen && Boolean(refusal)) || (canary && Boolean(canaryRefusal))
+  const terms = runtime.canary ?? DEFAULT_CANARY_TERMS
   const replicas = effectiveReplicas(runtime)
   const replicasRefused = replicaRefusal(runtime, method)
   // Saved with replicas, then given something only one container can hold:
@@ -733,20 +758,28 @@ function RuntimeForm({
             />
           ),
           settingStatus({
-            dirty: draft.changed(["strategy", "replicas", "restartPolicy"]),
+            dirty: draft.changed(["strategy", "canary", "replicas", "restartPolicy"]),
             refused: refusedIn("releases"),
           }),
         )}
         state={
-          replicas > 1 ? (
-            <span key={replicas} className="numeric block animate-rise">
-              {replicas} replicas of each release
+          canary || replicas > 1 ? (
+            <span
+              key={`${canary}-${terms.percent}-${terms.durationSeconds}-${replicas}`}
+              className="numeric block animate-rise"
+            >
+              {[
+                canary && `Canary on ${terms.percent}% for ${windowWords(terms.durationSeconds)}`,
+                replicas > 1 && `${replicas} replicas of each release`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
           ) : undefined
         }
       >
         <Field label="Release strategy" error={errorFor("runtime-strategy")}>
-          <ChoiceGrid id="runtime-strategy" columns={2} role="group" aria-label="Release strategy">
+          <ChoiceGrid id="runtime-strategy" columns={3} role="group" aria-label="Release strategy">
             <ChoiceCard
               verb="Release blue / green"
               title="Blue / green"
@@ -763,17 +796,35 @@ function RuntimeForm({
               }
               selected={blueGreen}
               disabled={!canEdit || Boolean(refusal)}
-              onClick={() => patch({ strategy: "blue_green" })}
+              onClick={() => draft.set((prev) => withStrategy(prev, "blue_green"))}
+            />
+            <ChoiceCard
+              verb="Release as a canary"
+              title="Canary"
+              mark={Gauge}
+              index={1}
+              description={
+                <>
+                  {canary && failsNext && (
+                    <span className="sr-only">Current strategy, unavailable. </span>
+                  )}
+                  Gives the new release a share of the requests beside the live one first, and
+                  removes it if it does worse.
+                </>
+              }
+              selected={canary}
+              disabled={!canEdit || Boolean(canaryRefusal)}
+              onClick={() => draft.set((prev) => withStrategy(prev, "canary"))}
             />
             <ChoiceCard
               verb="Release stop first"
               title="Stop first"
               mark={Pause}
-              index={1}
+              index={2}
               description="Stops the live release, then starts the new one — a moment of downtime."
               selected={runtime.strategy === "stop_first"}
               disabled={!canEdit}
-              onClick={() => patch({ strategy: "stop_first" })}
+              onClick={() => draft.set((prev) => withStrategy(prev, "stop_first"))}
             />
           </ChoiceGrid>
           {/* Said beside the choice it blocks, at full ink: on the card it was
@@ -781,10 +832,87 @@ function RuntimeForm({
               operator needed and the hardest to read. */}
           {refusal && (
             <FormNote tone={failsNext ? "warning" : "default"} className="animate-rise">
-              Blue / green is unavailable: {refusal}.
+              Blue / green and canary are unavailable: {refusal}.
+            </FormNote>
+          )}
+          {!refusal && canaryRefusal && (
+            <FormNote tone={canary ? "warning" : "default"} className="animate-rise">
+              Canary is unavailable: {canaryRefusal}.
             </FormNote>
           )}
         </Field>
+        {canary && (
+          <div className="animate-rise space-y-4">
+            <FieldRow columns={2}>
+              <Field
+                label="Share of requests"
+                htmlFor="runtime-canary-percent"
+                info="Each request picks a release at random, so the new release's share holds per request. Its 5xx share and p95 are compared with the live release's over the same minutes, on the rollback terms below."
+                error={errorFor("runtime-canary-percent")}
+              >
+                <InputGroup>
+                  <InputGroupInput
+                    id="runtime-canary-percent"
+                    type="number"
+                    min={CANARY_PERCENT.min}
+                    max={CANARY_PERCENT.max}
+                    value={terms.percent}
+                    readOnly={!canEdit}
+                    aria-invalid={Boolean(errorFor("runtime-canary-percent"))}
+                    className="font-mono"
+                    onChange={(event) =>
+                      patch({ canary: { ...terms, percent: Number(event.target.value) || 0 } })
+                    }
+                  />
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupText>%</InputGroupText>
+                  </InputGroupAddon>
+                </InputGroup>
+              </Field>
+              <Field
+                label="Window"
+                htmlFor="runtime-canary-window"
+                info="How long the new release keeps its share before it is promoted or waits for you. A failing comparison aborts it at once, without waiting for the end."
+                error={errorFor("runtime-canary-window")}
+              >
+                <InputGroup>
+                  <InputGroupInput
+                    id="runtime-canary-window"
+                    type="number"
+                    min={CANARY_SECONDS.min / 60}
+                    max={CANARY_SECONDS.max / 60}
+                    value={Math.round(terms.durationSeconds / 60)}
+                    readOnly={!canEdit}
+                    aria-invalid={Boolean(errorFor("runtime-canary-window"))}
+                    className="font-mono"
+                    onChange={(event) =>
+                      patch({
+                        canary: {
+                          ...terms,
+                          durationSeconds: (Number(event.target.value) || 0) * 60,
+                        },
+                      })
+                    }
+                  />
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupText>minutes</InputGroupText>
+                  </InputGroupAddon>
+                </InputGroup>
+              </Field>
+            </FieldRow>
+            <OptionList>
+              <OptionRow
+                title="Promote on its own"
+                hint="At the end of a window it got through without doing worse, the new release goes live. Off, it keeps its share until you promote or abort it from the run."
+                checked={terms.autoPromote ?? false}
+                onCheckedChange={(autoPromote) =>
+                  patch({ canary: { ...terms, autoPromote: autoPromote || undefined } })
+                }
+                disabled={!canEdit}
+              />
+            </OptionList>
+          </div>
+        )}
         <Field
           label="Replicas"
           info="Containers of each release that run side by side on this server, sharing the route's requests: the one with the fewest open connections gets the next. A cutover waits until every replica passes the readiness check, and a replica that stops answering is passed over for ten seconds. Each has the limits above of its own."

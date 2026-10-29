@@ -3719,7 +3719,7 @@ export type DeploymentSummary = {
   desiredRevision: number
   liveReleaseId?: number
   livePlanRevision?: number
-  strategy: "blue_green" | "stop_first"
+  strategy: DeploymentStrategy
   expectedDowntime: boolean
   sourceKind: DeploymentSourceKind
   buildMethod: DeploymentBuildMethod
@@ -4062,7 +4062,7 @@ export type DeploymentRelease = {
   imageDigest?: string
   configDigest: string
   variablesDigest: string
-  strategy: "blue_green" | "stop_first"
+  strategy: DeploymentStrategy
   expectedDowntime: boolean
   createdAt: string
   activatedAt?: string
@@ -4114,6 +4114,50 @@ export type RollbackVerdict = {
 }
 
 export type RollbackWatchState = "watching" | "rolling_back" | "rolled_back" | "closing" | "closed"
+
+/** How one release replaces the next: candidate first, stopping first, or tried as a canary between. */
+export type DeploymentStrategy = "blue_green" | "stop_first" | "canary"
+
+/** A canary plan's trial (`deploy.CanaryTerms`). */
+export type DeploymentCanaryTerms = {
+  /** The candidate's share of the requests, 1–50. */
+  percent: number
+  /** How long the trial lasts, 60–3600. */
+  durationSeconds: number
+  /** Cut over at the end of a trial that compared well, rather than waiting for an operator. */
+  autoPromote?: boolean
+}
+
+/** One canary trial, as GET …/canary reads it (`deploy.CanaryWindow`). */
+export type DeploymentCanary = {
+  id: number
+  projectId: number
+  environmentId: number
+  runId: number
+  releaseId: number
+  liveReleaseId: number
+  percent: number
+  durationSeconds: number
+  autoPromote: boolean
+  policy: RollbackPolicy
+  state: "running" | "holding" | "promoted" | "aborted"
+  /** An operator's promote or abort, asked for and not yet carried out. */
+  decision?: "promote" | "abort"
+  decidedBy?: string
+  startedAt: string
+  endsAt: string
+  live?: RollbackReading
+  candidate?: RollbackReading
+  verdict?: RollbackVerdict
+  checkedAt?: string
+  endReason?: string
+  endMessage?: string
+  endedAt?: string
+  releaseNumber: number
+  liveReleaseNumber: number
+}
+
+export type DeploymentCanaryResponse = { canary: DeploymentCanary | null }
 
 export type RollbackWatch = {
   id: number
@@ -5222,7 +5266,9 @@ export type DeploymentConfiguration = {
     hostPort?: number
     ports?: DeploymentPublishedPort[]
     bindAddress?: string
-    strategy: "blue_green" | "stop_first"
+    strategy: DeploymentStrategy
+    /** A canary plan's trial: its share of the requests, its window, and whether it promotes itself. */
+    canary?: DeploymentCanaryTerms
     privileged?: boolean
     hostNetwork?: boolean
     capabilities?: string[]

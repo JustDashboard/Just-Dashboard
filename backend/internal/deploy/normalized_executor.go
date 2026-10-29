@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -74,6 +75,14 @@ type NormalizedStepExecutor struct {
 	// rehearser makes the throwaway database copies release tasks are
 	// rehearsed against (rehearsal.go); nil reports a rehearsal unavailable.
 	rehearser MigrationRehearser
+
+	// requests is the held request record a canary's two releases are read
+	// from (canary.go); nil leaves a canary unjudged, decided by its window
+	// and the operator. canaryPoll and canaryRead are how often a canary
+	// looks for a decision and reads the record; zero is the default.
+	requests   RequestRecord
+	canaryPoll time.Duration
+	canaryRead time.Duration
 }
 
 func (e *NormalizedStepExecutor) WithNotifications(store *AutomationStore) *NormalizedStepExecutor {
@@ -240,6 +249,8 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 		return e.verifyChecks(ctx, execution, plan, "readiness")
 	case StepVerifySmoke:
 		return e.verifyChecks(ctx, execution, plan, "smoke")
+	case StepCanary:
+		return e.runCanary(ctx, execution)
 	case StepActivate:
 		return e.activate(ctx, execution, plan)
 	case StepRetirePrevious:
@@ -1108,6 +1119,12 @@ func (r *NormalizedStepReconciler) Reconcile(ctx context.Context, request Reconc
 		// A rehearsal changes nothing but a copy and a network of its own,
 		// which the step removes before it starts again: running it twice
 		// cannot touch production.
+		return ReconcileResult{Action: ReconcileResume}
+	case StepCanary:
+		// The trial is rows and a route: the step finds the window it opened
+		// for this run and carries on to the same end, the route written
+		// again with the same bytes. A window that ended is the step's
+		// result as it was.
 		return ReconcileResult{Action: ReconcileResume}
 	case StepReleaseTask:
 		return ReconcileResult{

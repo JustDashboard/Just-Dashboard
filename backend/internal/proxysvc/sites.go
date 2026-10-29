@@ -35,6 +35,10 @@ type SiteSpec struct {
 	Upstream string `json:"upstream,omitempty"`
 	// Pool, when set, replaces Upstream with several servers.
 	Pool *SitePool `json:"pool,omitempty"`
+	// Split, beside a Pool, sends a share of the requests to a second set
+	// of servers: a deployment route in a canary. Only a deployment route
+	// sets it; the form never offers it.
+	Split *SiteSplit `json:"split,omitempty"`
 	Root string    `json:"root,omitempty"`
 	// SPA answers a path with no file of its own with index.html, for a
 	// single-page app whose router runs in the browser. Static sites only:
@@ -532,6 +536,9 @@ func ValidateSpec(spec *SiteSpec) error {
 		return err
 	}
 	if err := validatePool(spec); err != nil {
+		return err
+	}
+	if err := validateSplit(spec); err != nil {
 		return err
 	}
 	if err := validTLSOptions(spec); err != nil {

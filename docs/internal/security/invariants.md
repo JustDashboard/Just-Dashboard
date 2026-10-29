@@ -94,8 +94,9 @@ A change that weakens any of these has to say so explicitly.
    with `403 session_required`. A deploy key reaches those writes; nothing else changed for any other
    key. The operating verbs beside a deploy that an ordinary key already had — promoting staging
    (`POST …/promote`), the warm release's instant rollback and keep (`POST …/rollback-watch/rollback`,
-   `…/keep`) and the maintenance switch (`PUT …/maintenance`) — are the deploy key's as well, with
-   their reads (`GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/maintenance`,
+   `…/keep`), a canary's promote and abort (`POST …/canary/promote`, `…/canary/abort`) and the
+   maintenance switch (`PUT …/maintenance`) — are the deploy key's as well, with their reads
+   (`GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/canary`, `…/maintenance`,
    `…/pages/{page}`, which is what every visitor is shown, and `…/rehearsal`, the terms alone). It
    holds the administrator role (narrowed to its owner's now, like every key), and where it
    goes is decided once, before any other middleware of the route runs: `Authenticate`,

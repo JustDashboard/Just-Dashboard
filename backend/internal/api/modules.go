@@ -395,7 +395,10 @@ func (s *Server) initModules() {
 		WithTailnetPublisher(s.modules.tailnet).
 		// Release tasks are rehearsed against copies the Databases owner
 		// makes from its own backups, when an environment asks for it.
-		WithMigrationRehearser(s.modules.rehearser)
+		WithMigrationRehearser(s.modules.rehearser).
+		// A canary's two releases are read from the record the Logs page
+		// and the rollback watch read.
+		WithRequestRecord(s.modules.requests)
 	s.modules.deployExecutor = normalizedExecutor
 	s.modules.deployEngine = deploy.NewEngine(
 		s.modules.deployRuns,

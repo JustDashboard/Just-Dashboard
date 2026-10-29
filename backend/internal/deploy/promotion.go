@@ -379,7 +379,7 @@ func promotionStepFailure(err error) StepResult {
 // data ran it on production's unrehearsed.
 var PromotionStepKeys = []StepKey{
 	StepRenderRuntime, StepBackupGate, StepRehearseMigration, StepReleaseTask, StepProvisionCertificate,
-	StepStartCandidate, StepVerifyReadiness, StepVerifySmoke, StepActivate,
+	StepStartCandidate, StepVerifyReadiness, StepVerifySmoke, StepCanary, StepActivate,
 	StepRetirePrevious, StepRecordRelease, StepNotify,
 }
 

@@ -101,6 +101,8 @@ free.
 - Push to deploy, plus pull-request previews only your tailnet can reach
 - Immutable releases, one-click rollback and health-gated cutover
 - Up to eight replicas of a stateless release behind one route, cut over and rolled back together
+- Canary releases: a new release takes a share of the requests beside the live one, read side by side,
+  and is removed if it does worse or promoted when it does not
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Migrations rehearsed on a throwaway copy of the database, restored from its backup, before production
@@ -470,6 +472,8 @@ jd runs shop / jd releases shop
 jd rollback shop                                  # to the release before the live one, or --to <id>
 jd rollback shop --instant                        # straight back to the release kept warm after the last deploy
 jd keep shop                                      # keep the new release now; the warm one is retired
+jd canary status shop                             # a canary's window and both releases' requests, 5xx and p95
+jd canary promote shop / jd canary abort shop     # decide a canary now; abort leaves the live release untouched
 jd promote shop --wait                            # staging's live release into production, as the same image
 jd maintenance shop on --bypass 10.0.0.0/8        # the switch acts at once; the bypass list with the next deploy
 jd status shop                                    # environments, live release, rollback watch, maintenance, rehearsal
@@ -487,8 +491,8 @@ authority, and plain `http://` is refused except to loopback (an SSH tunnel). Ex
 run succeeded), 1 refused or the run failed, 2 usage, 3 not logged in or the key is no longer valid.
 
 **What a deploy key can do.** Everything an ordinary key could on the deployments — list, read, deploy,
-cancel, retry, roll back, promote staging, switch back to the warm release or keep the new one, switch
-maintenance, runs and logs — plus what used to need a browser session: create deployments from drafts
+cancel, retry, roll back, promote staging, switch back to the warm release or keep the new one, promote
+or abort a canary, switch maintenance, runs and logs — plus what used to need a browser session: create deployments from drafts
 and duplicates (a key's drafts are its own, and a key narrowed to some deployments reaches the
 deployments it commits), change configuration, source, Git policy and triggers, and set, import,
 generate, rotate and delete variables and shared variables. Variables are write-only to it: it sees

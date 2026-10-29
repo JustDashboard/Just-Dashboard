@@ -233,6 +233,8 @@ func TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects(t *testing.
 	pure := map[StepKey]bool{
 		StepResolveSource: true, StepAnalyzePlan: true, StepRenderRuntime: true,
 		StepVerifyReadiness: true, StepVerifySmoke: true,
+		// A canary's window is rows and a route: the step is resumed, once.
+		StepCanary: true,
 	}
 	for _, list := range crashMatrixStepLists {
 		for _, interrupted := range list.steps {

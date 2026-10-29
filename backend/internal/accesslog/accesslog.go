@@ -55,6 +55,11 @@ type Entry struct {
 	UserAgent string `json:"userAgent,omitempty"`
 	Referer   string `json:"referer,omitempty"`
 	TLS       bool   `json:"tls,omitempty"`
+	// Release is which of a deployment's releases answered, where the route
+	// shares its requests between two — a canary beside the live release —
+	// and records it: Caddy's `log_append release`, nginx's `rel=`. Empty
+	// for a route serving one release, which needs no saying.
+	Release string `json:"release,omitempty"`
 
 	// at is unix nanoseconds, kept unexported so every consumer sorts and
 	// buckets on the same value rather than re-parsing a string.
@@ -162,6 +167,8 @@ type caddyLine struct {
 	Duration *float64 `json:"duration"`
 	Size     int64    `json:"size"`
 	Status   int      `json:"status"`
+	// Release is the field a canary route appends to each entry.
+	Release string `json:"release"`
 }
 
 func parseCaddy(line string) (Entry, bool) {
@@ -182,7 +189,7 @@ func parseCaddy(line string) (Entry, bool) {
 	entry := Entry{
 		at: at.UnixNano(), Method: raw.Request.Method, Host: raw.Request.Host,
 		Proto: raw.Request.Proto, Status: raw.Status, Size: raw.Size,
-		RemoteIP: raw.Request.ClientIP, TLS: raw.Request.TLS != nil,
+		RemoteIP: raw.Request.ClientIP, TLS: raw.Request.TLS != nil, Release: raw.Release,
 	}
 	if entry.RemoteIP == "" {
 		entry.RemoteIP = raw.Request.RemoteIP
@@ -326,6 +333,8 @@ func readTrailing(entry *Entry, rest string) {
 		}
 		value = strings.Trim(value, `"`)
 		switch key {
+		case "rel":
+			entry.Release = value
 		case "rt":
 			if seconds, err := strconv.ParseFloat(value, 64); err == nil && seconds >= 0 {
 				entry.duration, entry.timed = seconds*1000, true

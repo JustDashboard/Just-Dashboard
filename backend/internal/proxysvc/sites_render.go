@@ -206,13 +206,22 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		renderPool(l, spec)
 		wrote = true
 	}
+	if spec.Kind == "proxy" && spec.Pool != nil && spec.Split != nil {
+		l.blank()
+		renderSplit(l, spec)
+	}
 	if spec.AccessLog && spec.timedLog() {
 		if wrote {
 			l.blank()
 		}
 		l.add("# nginx's combined format with the time taken added, which is what")
 		l.add("# the dashboard's traffic pages read latency from.")
-		l.add("log_format %s %s;", spec.logFormatName(), timedLogFormat)
+		if spec.Pool != nil && spec.Split != nil {
+			l.add("# rel= is the release that answered, while the route is split.")
+			l.add("log_format %s %s;", spec.logFormatName(), splitLogFormat(spec))
+		} else {
+			l.add("log_format %s %s;", spec.logFormatName(), timedLogFormat)
+		}
 		wrote = true
 	}
 	if spec.Maintenance != nil {
@@ -675,7 +684,7 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	// location's own prefix, and trimming its slash turned /app/ into /app,
 	// which sent /page to the application as /apppage.
 	l.add("        proxy_pass %s;", proxyPassTarget(loc.renderedPath(), loc.renderedUpstream()))
-	if spec.Pool != nil && loc.Upstream == spec.poolUpstream() {
+	if spec.Pool != nil && loc.Upstream == spec.mainUpstream() {
 		renderPoolLocation(l, loc, spec)
 	}
 	l.add("        proxy_http_version 1.1;")
