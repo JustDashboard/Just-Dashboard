@@ -36,6 +36,7 @@ func TestSleepPlanValidation(t *testing.T) {
 		"wake bound above ten min": func(c *PlanConfiguration) { c.Runtime.Sleep.WakeTimeoutSeconds = 601 },
 		"a Compose stack":          func(c *PlanConfiguration) { c.Build.Method = BuildCompose },
 		"host networking":          func(c *PlanConfiguration) { c.Runtime.HostNetwork = true },
+		"tailnet only":             func(c *PlanConfiguration) { c.Runtime.Tailnet = &RouteTailnet{} },
 		"no served domain": func(c *PlanConfiguration) {
 			c.Domains = []PlannedDomain{{Hostname: "www.example.test", RedirectTo: "example.test"}}
 		},
@@ -227,6 +228,9 @@ func (f *sleepFixture) wake(t *testing.T) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(http.MethodGet, "/wake/"+deploymentRouteName(f.envID), nil)
 	request.Header.Set("X-Forwarded-Host", "app.example.test")
 	f.sleeper.ServeHTTP(recorder, request)
+	// The proxy is answered as soon as the application is up, and the
+	// stretch is closed and audited just after; a test reads both.
+	f.sleeper.Settle(context.Background(), f.envID)
 	return recorder
 }
 

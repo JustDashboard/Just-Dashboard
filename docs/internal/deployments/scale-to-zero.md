@@ -39,6 +39,8 @@ container would break something a request cannot bring back:
 - **A Compose stack** — several containers that start in an order of their own; sleep stops one container.
 - **Host networking** — the application is reached at the host's own port, not through the route, so no
   request could wake it.
+- **A tailnet-only environment** (`runtime.tailnet`) — it is reached through `tailscale serve`, not
+  through the proxy's route, so no request could wake it.
 - **No served domain** — only a request through the proxy's route wakes it.
 - **A required readiness check that would fail a stopped application.** `docker_health` reads Docker's
   health verdict, which a started container is given only after its image's `HEALTHCHECK` interval (30 s

@@ -116,6 +116,8 @@ func sleepRefusal(c PlanConfiguration) string {
 		return "a Compose stack is several containers that start in an order of their own; sleeping stops one container, so it is offered for a single-container release"
 	case c.Runtime.HostNetwork:
 		return "a host-network application is reached at the host's own port, not through the proxy's route, so no request could wake it"
+	case c.Runtime.Tailnet != nil:
+		return "a tailnet-only environment is reached through tailscale serve, not through the proxy's route, so no request could wake it"
 	case len(servedDomains(c.Domains)) == 0:
 		return "only a request through the proxy's route wakes a sleeping application, and no domain serves this one; add a domain it serves"
 	}
@@ -1122,6 +1124,8 @@ func (e *NormalizedStepExecutor) endSleep(ctx context.Context, execution StepExe
 	_ = stepLog(execution, "status", "The environment is asleep; waking it before this run")
 	plan := e.sleeper.cachedPlan(ctx, span.ReleaseID)
 	outcome := e.sleeper.Wake(ctx, execution.Run.EnvironmentID, WakeRequest{Trigger: WakeByRun, Detail: detail}, plan.wakeTimeout()+30*time.Second)
+	// The run starts on a closed stretch, not one the wake is still closing.
+	e.sleeper.Settle(ctx, execution.Run.EnvironmentID)
 	_ = stepLog(execution, "status", outcome.Reason)
 }
 
