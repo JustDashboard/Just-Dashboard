@@ -390,7 +390,10 @@ func TestCanaryWaitsForTheOperatorWithoutAutoPromote(t *testing.T) {
 	if err != nil || decided.Decision != CanaryPromote {
 		t.Fatalf("decision = %+v, %v", decided, err)
 	}
-	if _, err := f.runs.RequestCanaryDecision(context.Background(), f.projectID, f.envID, CanaryAbort, "bob"); !errors.Is(err, ErrCanaryDecided) {
+	// A second decision is refused: as already decided while the step has
+	// yet to act on the first, or as no canary at all once it has — the
+	// step polls every two milliseconds here, so either can be the answer.
+	if _, err := f.runs.RequestCanaryDecision(context.Background(), f.projectID, f.envID, CanaryAbort, "bob"); !errors.Is(err, ErrCanaryDecided) && !errors.Is(err, ErrNoCanary) {
 		t.Fatalf("a second decision = %v", err)
 	}
 	result := waitStep(t, done)
