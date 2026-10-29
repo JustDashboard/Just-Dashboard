@@ -304,7 +304,14 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks -count=1 -v -timeout 2h`.
   Each sweep uses unique volume names. Startup/readiness is separate from first-use account setup;
   the [template matrix](docs/audits/2026-09-22-deploy-new/template-matrix.md) records which templates
-  generate credentials, require setup, have no application login, or remain unavailable.
+  generate credentials, require setup, have no application login, or remain unavailable. The two
+  Minecraft templates start with their seeded `server.properties` and answer their protocol checks
+  (`JD_BLUEPRINT_ONLY=minecraft-java,minecraft-bedrock`); the Java server downloads its build and
+  generates a world on the first start, so give it several minutes. Changes to install-time files,
+  pinned artifacts or the helper that writes them (`deploy/runtime_seeds.go`, `dockerx/volumeseed.go`)
+  also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveReleaseSeedsAreWrittenIntoTheVolumeBeforeStart -count=1 -v`,
+  which needs the local `postgres:17-alpine` image and network access to GitHub's raw file host, and
+  removes its volume and helpers ([game servers](docs/internal/deployments/game-servers.md#tests)).
 - Multi-service (Compose) templates have a sweep of their own. It saves each template's source the way
   the new-project page does (the server's render of the definition), resolves and pulls every service
   image through the Compose build step, starts the stack through the runtime owner with generated

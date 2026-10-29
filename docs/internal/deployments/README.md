@@ -3,6 +3,7 @@
 - [`Deployment creation audit`](../../audits/2026-09-22-deploy-new/README.md) — wizard state, template
   usability, encrypted draft inputs, database connections and local acceptance evidence.
 - [`implementation.md`](implementation.md) — current implementation, invariants, feature joins, automation, and topology.
+- [`game-servers.md`](game-servers.md) — the Minecraft templates as releases: install-time files and pinned artifacts written into a managed volume by a helper container before start, UDP published on the plan's bind address (loopback until the operator opens it), the `game_handshake` and `udp_probe` readiness checks, the reach readout and the Console, Players and Server settings pages.
 - [`preview-isolation.md`](preview-isolation.md) — exact-revision approval, previews tested from the dashboard, copied production variables, tailnet-only addresses, reconciliation with GitHub, storage, network and cleanup.
 - [`backup-coverage.md`](backup-coverage.md) — immutable archive manifests and persistent-data coverage limitations.
 - [`restore-verification.md`](restore-verification.md) — native SQLite snapshots and artifact-bound isolated application recovery checks.

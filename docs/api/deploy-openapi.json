@@ -1526,6 +1526,9 @@
           "console": {
             "type": "boolean"
           },
+          "consoleReason": {
+            "type": "string"
+          },
           "containerId": {
             "type": "string"
           },
@@ -1545,6 +1548,16 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/gameserver.Players"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reach": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.GameReach"
               },
               {
                 "type": "null"
@@ -2470,13 +2483,17 @@
               "null"
             ]
           },
+          "expect": {
+            "type": "string"
+          },
           "kind": {
             "enum": [
               "http",
               "tcp",
               "docker_health",
               "command",
-              "game_handshake"
+              "game_handshake",
+              "udp_probe"
             ],
             "type": "string"
           },
@@ -2484,6 +2501,9 @@
             "type": "string"
           },
           "path": {
+            "type": "string"
+          },
+          "payload": {
             "type": "string"
           },
           "phase": {
@@ -2902,6 +2922,15 @@
           "image": {
             "type": "string"
           },
+          "installFiles": {
+            "items": {
+              "$ref": "#/components/schemas/blueprint.RenderedFile"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "memoryMb": {
             "format": "int64",
             "type": "integer"
@@ -3085,6 +3114,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "path": {
+            "type": "string"
+          },
+          "timeoutSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
           "url": {
             "type": "string"
           },
@@ -3106,13 +3142,17 @@
               "null"
             ]
           },
+          "expect": {
+            "type": "string"
+          },
           "kind": {
             "enum": [
               "http",
               "tcp",
               "docker_health",
               "command",
-              "game_handshake"
+              "game_handshake",
+              "udp_probe"
             ],
             "type": "string"
           },
@@ -3120,6 +3160,9 @@
             "type": "string"
           },
           "path": {
+            "type": "string"
+          },
+          "payload": {
             "type": "string"
           },
           "phase": {
@@ -3138,6 +3181,21 @@
           }
         },
         "title": "blueprint.RenderedCheck",
+        "type": "object"
+      },
+      "blueprint.RenderedFile": {
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "title": "blueprint.RenderedFile",
         "type": "object"
       },
       "blueprint.RenderedPort": {
@@ -8352,6 +8410,34 @@
         "title": "deploy.ForgeReport",
         "type": "object"
       },
+      "deploy.GameReach": {
+        "properties": {
+          "bind": {
+            "type": "string"
+          },
+          "editable": {
+            "type": "boolean"
+          },
+          "firewall": {
+            "type": "string"
+          },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.GameReach",
+        "type": "object"
+      },
       "deploy.GitDeploymentPolicy": {
         "properties": {
           "automatic": {
@@ -11555,6 +11641,15 @@
           "restartPolicy": {
             "type": "string"
           },
+          "seeds": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.RuntimeSeed"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "stopSignal": {
             "type": "string"
           },
@@ -11567,6 +11662,38 @@
           }
         },
         "title": "deploy.RuntimePlanConfig",
+        "type": "object"
+      },
+      "deploy.RuntimeSeed": {
+        "properties": {
+          "checksum": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "maxBytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "mount": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "timeoutSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.RuntimeSeed",
         "type": "object"
       },
       "deploy.RuntimeService": {

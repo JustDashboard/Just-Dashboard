@@ -15,6 +15,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gameserver"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -115,15 +116,70 @@ func (s *Server) gameConsole() *gameserver.Console {
 }
 
 type gameOverview struct {
-	Status      string                 `json:"status"`
-	Reason      string                 `json:"reason,omitempty"`
-	BlueprintID string                 `json:"blueprintId,omitempty"`
-	Edition     string                 `json:"edition,omitempty"`
-	ContainerID string                 `json:"containerId,omitempty"`
-	Address     string                 `json:"address,omitempty"`
-	Players     *gameserver.Players    `json:"players,omitempty"`
-	Console     bool                   `json:"console"`
-	Files       []blueprint.ConfigFile `json:"files"`
+	Status      string              `json:"status"`
+	Reason      string              `json:"reason,omitempty"`
+	BlueprintID string              `json:"blueprintId,omitempty"`
+	Edition     string              `json:"edition,omitempty"`
+	ContainerID string              `json:"containerId,omitempty"`
+	Address     string              `json:"address,omitempty"`
+	Players     *gameserver.Players `json:"players,omitempty"`
+	Console     bool                `json:"console"`
+	// ConsoleReason is why there is no console when the game has none of
+	// its own, rather than because nothing is running.
+	ConsoleReason string `json:"consoleReason,omitempty"`
+	// Reach is where players connect and whether the bind and the firewall
+	// let them, read from the live release.
+	Reach *deploy.GameReach      `json:"reach,omitempty"`
+	Files []blueprint.ConfigFile `json:"files"`
+}
+
+// gameConsoleUnsupported says why a game has no remote console, or "" when
+// it has one. The console is RCON, which a definition declares as its rcon
+// port; Bedrock has no RCON at all, and its server reads commands only from
+// its own input, which this dashboard does not attach to.
+func gameConsoleUnsupported(definition *blueprint.Blueprint) string {
+	if definition == nil {
+		return ""
+	}
+	for _, port := range definition.Ports {
+		if port.Name == "rcon" {
+			return ""
+		}
+	}
+	return definition.Name + " has no remote console: its server reads commands only from its own input, which this dashboard does not attach to. Its log is on the Logs page."
+}
+
+// gameReach describes the live release's published port and what the host
+// firewall does with it. It is evidence for the page, not a change: opening
+// the port is the firewall's own audited rule route.
+func (s *Server) gameReach(ctx context.Context, summary deploy.DeploymentSummary) *deploy.GameReach {
+	if summary.LiveReleaseID <= 0 {
+		return nil
+	}
+	release, err := s.modules.deployRuns.Release(ctx, summary.LiveReleaseID)
+	if err != nil {
+		return nil
+	}
+	plan, err := deploy.ReleaseRuntimePlan(release)
+	if err != nil {
+		return nil
+	}
+	var status *netsec.FirewallStatus
+	statusErr := errors.New("the firewall module is unavailable")
+	if !deploy.PublicRuntimeBind(plan) {
+		// Nothing outside reaches a loopback port, so the firewall is not
+		// read on every poll of a page that would not show it.
+		statusErr = errors.New("the firewall is not read while the server is published on loopback")
+	} else if s.modules.netsec != nil {
+		readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		status, statusErr = s.modules.netsec.Status(readCtx)
+		cancel()
+	}
+	reach, ok := deploy.DescribeGameReach(plan, status, statusErr)
+	if !ok {
+		return nil
+	}
+	return &reach
 }
 
 func (s *Server) handleGameOverview(w http.ResponseWriter, r *http.Request) error {
@@ -137,16 +193,23 @@ func (s *Server) handleGameOverview(w http.ResponseWriter, r *http.Request) erro
 		overview.Files = game.Definition.Files
 		overview.Edition = strings.TrimPrefix(game.Definition.ID, "minecraft-")
 	}
+	overview.Reach = s.gameReach(r.Context(), game.Summary)
 	if game.ContainerID == "" {
 		overview.Status, overview.Reason = "unavailable", game.Reason
 		httpx.JSON(w, http.StatusOK, overview)
 		return nil
 	}
-	overview.ContainerID, overview.Console = game.ContainerID, true
-	if game.Summary.HostPort > 0 {
-		overview.Address = fmt.Sprintf("%s:%d", r.Host, game.Summary.HostPort)
+	overview.ContainerID = game.ContainerID
+	overview.ConsoleReason = gameConsoleUnsupported(game.Definition)
+	overview.Console = overview.ConsoleReason == ""
+	port := game.Summary.HostPort
+	if overview.Reach != nil {
+		port = overview.Reach.Port
+	}
+	if port > 0 {
+		overview.Address = fmt.Sprintf("%s:%d", r.Host, port)
 		if host, _, found := strings.Cut(r.Host, ":"); found {
-			overview.Address = fmt.Sprintf("%s:%d", host, game.Summary.HostPort)
+			overview.Address = fmt.Sprintf("%s:%d", host, port)
 		}
 	}
 	if players := s.observePlayers(r.Context(), game); players != nil {
@@ -160,6 +223,9 @@ func (s *Server) handleGameOverview(w http.ResponseWriter, r *http.Request) erro
 // cannot parse reports "not supported" rather than an empty player list, so the
 // UI hides player controls instead of showing controls that do nothing.
 func (s *Server) observePlayers(ctx context.Context, game *gameContext) *gameserver.Players {
+	if reason := gameConsoleUnsupported(game.Definition); reason != "" {
+		return &gameserver.Players{Supported: false, Status: "unsupported", Names: []string{}, Reason: reason}
+	}
 	console := s.gameConsole()
 	if console == nil || game.ContainerID == "" {
 		return &gameserver.Players{
@@ -208,6 +274,14 @@ func (s *Server) handleGameConsole(w http.ResponseWriter, r *http.Request) error
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
+	// The command is judged first, as Console.Run judges it, so a shell
+	// string is refused as one whatever the game is.
+	if _, err := gameserver.ValidateCommand(request.Command); err != nil {
+		return mapBlueprintError(err)
+	}
+	if reason := gameConsoleUnsupported(game.Definition); reason != "" {
+		return httpx.Err(http.StatusConflict, "console_unsupported", reason)
+	}
 	console := s.gameConsole()
 	if console == nil {
 		return httpx.Err(http.StatusServiceUnavailable, "console_unavailable",
@@ -242,6 +316,9 @@ func (s *Server) handleGamePlayerAction(w http.ResponseWriter, r *http.Request) 
 		gameserver.PlayerAction(chi.URLParam(r, "action")), request.Name)
 	if err != nil {
 		return mapBlueprintError(err)
+	}
+	if reason := gameConsoleUnsupported(game.Definition); reason != "" {
+		return httpx.Err(http.StatusConflict, "console_unsupported", reason)
 	}
 	console := s.gameConsole()
 	if console == nil {
