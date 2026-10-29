@@ -176,7 +176,7 @@ export function useProjectVerbs(
 ): Verb[] {
   const router = useRouter()
   const { can } = useAuth()
-  const [working, setWorking] = useState<"cancel" | "retry">()
+  const [working, setWorking] = useState<"cancel" | "retry" | "wake">()
   const base = `/deploy/${summary.id}`
   const url = deploymentURL(summary.endpoint)
   const state = projectState(summary, runtime, archived)
@@ -204,6 +204,21 @@ export function useProjectVerbs(
       refresh()
     } catch (error) {
       notify.error("Could not cancel deployment", error)
+    } finally {
+      setWorking(undefined)
+    }
+  }
+
+  // Waking is what the next visitor's request would do; it waits for the
+  // application to pass its readiness checks, so the press reads the outcome.
+  const wake = async () => {
+    setWorking("wake")
+    try {
+      await post(`${base}/environments/${summary.environmentId}/sleep/wake`, {})
+      notify.success(`${summary.name} is awake`)
+      refresh()
+    } catch (error) {
+      notify.error("Could not wake the deployment", error)
     } finally {
       setWorking(undefined)
     }
@@ -287,6 +302,16 @@ export function useProjectVerbs(
   } else if (control) {
     if (state === "stopped") {
       verbs.push(runVerb("start", "Start", Play, "Starting…"))
+    } else if (state === "asleep") {
+      verbs.push({
+        key: "wake",
+        label: "Wake now",
+        icon: Play,
+        group: "Running",
+        progressive: "Waking…",
+        disabled: busy,
+        run: () => void wake(),
+      })
     } else if (!builds) {
       if (onPromote) {
         verbs.push({

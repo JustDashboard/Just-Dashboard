@@ -548,6 +548,7 @@ const deployCorrelationWindow = 15 * time.Minute
 // is not there.
 func (s *Server) correlateDeploymentEvents(r *http.Request, events []dockerx.Event, project string) {
 	s.correlateEvents(r, events)
+	s.correlateSleepEvents(r, events, project)
 	project = strings.TrimSpace(project)
 	if project == "" {
 		return

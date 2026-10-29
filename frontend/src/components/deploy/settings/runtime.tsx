@@ -65,6 +65,18 @@ import {
   replayRefusal,
   type ReplayDraft,
 } from "@/components/deploy/replay-model"
+import {
+  SLEEP_DRAFT_FIELD_IDS,
+  SLEEP_FIELD_IDS,
+  SleepSection,
+  sleepBlocker,
+} from "@/components/deploy/settings/sleep"
+import {
+  sleepDraftOf,
+  sleepPlanOf,
+  sleepRefusal,
+  type SleepDraft,
+} from "@/components/deploy/sleep-model"
 import { Segments } from "@/components/deploy/settings/segments"
 import {
   DEFAULT_GRACE_SECONDS,
@@ -122,6 +134,7 @@ type RuntimeDraft = RuntimePlan & {
   capabilitiesText: string
   devicesText: string
   replayDraft: ReplayDraft
+  sleepDraft: SleepDraft
 }
 
 function linesOf(text: string) {
@@ -146,12 +159,14 @@ function runtimeDraftOf(saved: RuntimePlan): RuntimeDraft {
   delete runtime.errorPages
   delete runtime.interceptErrors
   delete runtime.replay
+  delete runtime.sleep
   return {
     ...runtime,
     commandText: (runtime.command ?? []).join("\n"),
     capabilitiesText: (runtime.capabilities ?? []).join("\n"),
     devicesText: (runtime.devices ?? []).join("\n"),
     replayDraft: replayDraftOf(saved.replay),
+    sleepDraft: sleepDraftOf(saved.sleep),
   }
 }
 
@@ -162,11 +177,13 @@ function runtimePlanOf(draft: RuntimeDraft): RuntimePlan {
     capabilities: linesOf(draft.capabilitiesText),
     devices: linesOf(draft.devicesText),
     replay: replayPlanOf(draft.replayDraft),
+    sleep: sleepPlanOf(draft.sleepDraft),
   }
   delete plan.commandText
   delete plan.capabilitiesText
   delete plan.devicesText
   delete plan.replayDraft
+  delete plan.sleepDraft
   return plan
 }
 
@@ -208,6 +225,7 @@ const RUNTIME_FIELD_IDS: Record<string, string> = {
   "runtime.capabilities": "runtime-capabilities",
   "runtime.devices": "runtime-devices",
   ...REPLAY_FIELD_IDS,
+  ...SLEEP_FIELD_IDS,
 }
 
 /** Which section head a refused field belongs to, so that head says "Not saved". */
@@ -230,6 +248,7 @@ const FIELD_SECTION: Record<string, string> = {
   "runtime-capabilities": "access",
   "runtime-devices": "access",
   ...Object.fromEntries(Object.values(REPLAY_FIELD_IDS).map((id) => [id, "replay"])),
+  ...Object.fromEntries(Object.values(SLEEP_FIELD_IDS).map((id) => [id, "sleep"])),
 }
 
 function clampPort(value: string) {
@@ -396,6 +415,14 @@ function RuntimeForm({
       })
       return false
     }
+    const sleepRefused = sleepRefusal(runtime.sleepDraft)
+    if (sleepRefused) {
+      setFieldError({
+        id: SLEEP_DRAFT_FIELD_IDS[sleepRefused.field],
+        message: sleepRefused.message,
+      })
+      return false
+    }
     setSaving(true)
     try {
       await save({
@@ -418,6 +445,7 @@ function RuntimeForm({
         capabilitiesText: linesOf(prev.capabilitiesText).join("\n"),
         devicesText: linesOf(prev.devicesText).join("\n"),
         replayDraft: replayDraftOf(replayPlanOf(prev.replayDraft)),
+        sleepDraft: sleepDraftOf(sleepPlanOf(prev.sleepDraft)),
       }))
       return true
     } catch (caught) {
@@ -897,6 +925,34 @@ function RuntimeForm({
           status={settingStatus({
             dirty: draft.changed(["replayDraft"]),
             refused: refusedIn("replay"),
+          })}
+        />
+      )}
+
+      {/* What the release does while nobody visits: drawn where there are
+          visitors to wait for, or where a plan already turned it on. */}
+      {(web || runtime.sleepDraft.enabled) && (
+        <SleepSection
+          draft={runtime.sleepDraft}
+          onChange={(fields) =>
+            draft.set((prev) => ({ ...prev, sleepDraft: { ...prev.sleepDraft, ...fields } }))
+          }
+          canEdit={canEdit}
+          errorFor={errorFor}
+          blocker={sleepBlocker({
+            servesDomain: configuration.domains.some((domain) => !domain.redirectTo),
+            compose: method === "compose" || method === "legacy_compose",
+            hostNetwork: Boolean(runtime.hostNetwork),
+            blockingCheck: configuration.checks.find(
+              (check) =>
+                check.phase === "readiness" &&
+                check.required &&
+                (check.kind === "docker_health" || check.kind === "public_route"),
+            ),
+          })}
+          status={settingStatus({
+            dirty: draft.changed(["sleepDraft"]),
+            refused: refusedIn("sleep"),
           })}
         />
       )}

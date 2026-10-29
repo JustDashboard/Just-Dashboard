@@ -193,10 +193,11 @@ only renderer/executor/validation authority for their feature.
   link in a README points at. `?template=<blueprint id>` (only an identifier's shape is taken) and
   `?image=<reference>` arrive on those tabs with the blueprint chosen or the reference filled in, which
   is where the project step sends the upstream repository of an application the catalogue packages.
-  Reviewed blueprints deploy as image releases (below); game-server blueprints and blueprints that
-  install configuration files or downloaded artifacts stay preview-only, the catalogue names the
-  reason per blueprint, and direct API calls are refused with the same reason before deployment work
-  is persisted. The screens share `deployment-defaults.ts` and `deployment-findings.tsx` so a default
+  Reviewed blueprints deploy as image releases (below), the two Minecraft game servers included
+  ([game servers](game-servers.md)); a definition the release path cannot run — today only one that
+  downloads an artifact through a version source, with no pinned checksum — stays preview-only, the
+  catalogue names the reason per blueprint, and direct API calls are refused with the same reason
+  before deployment work is persisted. The screens share `deployment-defaults.ts` and `deployment-findings.tsx` so a default
   one flow relies on cannot be missing from the other, and a refused plan reads identically in both.
   Detected web and static plans carry a required HTTP readiness check: preflight raises
   `readiness_missing` as a *decision* for those profiles, so an empty check list made the most
@@ -927,10 +928,12 @@ only renderer/executor/validation authority for their feature.
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime
   variable values. Disabled, unavailable, warning, passed and failed remain distinct outcomes.
-  The closed kind list also names `dns`, `tls`, `backup_freshness` and `game_handshake`, which no runner
+  `game_handshake` (the Minecraft Java status handshake over TCP) and `udp_probe` (a datagram sent,
+  an answer beginning with an expected prefix received) run too; see [game servers](game-servers.md#readiness).
+  The closed kind list also names `dns`, `tls` and `backup_freshness`, which no runner
   executes. Saving one (Settings or a draft's configuration) is refused with the reason and what to use
-  instead (`refuseUnrunnableChecks`): a `public_route` check on the https address, a storage
-  dependency's backup requirement, or the game-server integration. `Validate` still accepts them, so a
+  instead (`refuseUnrunnableChecks`): a `public_route` check on the https address, or a storage
+  dependency's backup requirement. `Validate` still accepts them, so a
   plan stored with one keeps deploying; its check reports `check_owner_unavailable`, a warning unless
   it is required.
   An HTTP check against the candidate introduces itself as the proxy does when the release has a
@@ -1096,6 +1099,25 @@ only renderer/executor/validation authority for their feature.
   keep are a deploy key's too (`jd status`, `jd rollback --instant`, `jd keep`); the terms stay a
   session's. The live proof is
   `TestLiveMetricGatedRollbackSwitchesBackToTheWarmRelease` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
+- **Scale to zero** ([sleep when idle](scale-to-zero.md), `deploy/sleep.go`): a plan's `runtime.sleep
+  {enabled, idleMinutes 5–1440 (15), wakeTimeoutSeconds 5–600 (60)}`, off by default and refused for a
+  Compose stack, host networking, a plan without a served domain, and a required `docker_health` or
+  `public_route` readiness check; the API also refuses it beside an enabled schedule that runs a
+  command in the container, and that schedule beside it. The `Sleeper` (after the engine, every minute)
+  stops the live container — not removed — once the route has served no request for the idle minutes,
+  read from the held request record, never while a run is queued or running, a warm release is watched,
+  the runtime was stopped by hand, or the wake is not listening; the stretch is a row of
+  `deploy_sleep_spans`, written before the route's `sleeping.on` switch and the stop. A release that
+  sleeps has a route that wakes it (`DeploymentRoute.Sleep`): a request meeting the switch, or the
+  application not answering, is held by the proxy while the dashboard — asked over a Unix socket only the
+  proxy reaches, answering only a peer that is nginx or Caddy — starts the container, waits for its own
+  readiness checks and answers with its address; the proxy then sends the request on as it came, or
+  serves the waking page past the hold (`min(wakeTimeoutSeconds, 30)`). Every run wakes a sleeping
+  environment at its first step (`endSleep`), a stop only ends the stretch. The idle decision, the sleep
+  and the wake are audited (`deploy.environment.idle`, `.sleep`, `.wake`) and are what the lifecycle
+  feed attributes the stop and the start to; the summary's `asleepSince` makes the project read Asleep
+  with Wake now (`POST …/sleep/wake`), the host's container alert reads it as fine and the availability
+  figure leaves it out. `GET …/environments/{env}/sleep` is the reading.
 - A failed build names its cause instead of `internal_error` and exec's `exit status 1`. `dockerx`
   reads buildx's plain progress as it streams (over `os.Pipe`s read to EOF, because a `StdoutPipe` is
   closed by `Wait` and dropped BuildKit's closing lines; once buildx has exited a read waits at most
@@ -1690,8 +1712,9 @@ only renderer/executor/validation authority for their feature.
   unfiltered default response stays byte-identical to before these were added, apart from
   `currentStep` on a run that has not ended, which every read of the list now carries.
 - A blueprint deploys as an image release with reviewed defaults. `blueprint.DeploymentSupport`
-  decides per definition: game profiles, blueprints that ship configuration files, blueprints that
-  download an install-time artifact and UDP ports stay preview-only with a specific reason, exposed as
+  decides per definition: game profiles, install-time files (`write_file`), artifacts pinned by
+  checksum and UDP ports all deploy ([game servers](game-servers.md)); an artifact found through a
+  version source with no checksum stays preview-only with a specific reason, exposed as
   `deploymentSupported`/`unavailableReason` on the catalogue and detail responses and enforced by
   `DraftSourceConfig.ValidateForDeployment` at source save, preflight, commit, materialization, Git
   watching and queue admission (the stored source is re-validated, so a stale draft cannot enter the
@@ -1731,7 +1754,12 @@ only renderer/executor/validation authority for their feature.
   the operator links a job under Settings → Automation instead of a nightly `invalid_plan` failure. Preview
   volume names include a hash of the unnormalized name and blueprint id, Docker-socket mounts are linked
   and read-only, startup budgets use bounded retries, and Bedrock does not receive Java save commands.
-  UDP remains an explicit unsupported runtime protocol, never silently converted to TCP.
+  UDP is a runtime protocol only for a fixed, unrouted publication (`runtime.protocol: udp`, or
+  `tcp+udp` for one number on both, needs `hostPort` and refuses a domain), never silently converted
+  to TCP; a definition's direct primary
+  port is published on loopback until the operator chooses every interface, and its install files
+  and pinned artifacts become `runtime.seeds[]`, written into the managed volume by a helper before
+  the container starts (`runtime_seeds.go`, [game servers](game-servers.md)).
   HTTP tool templates use the web profile so their default candidate-first strategy is eligible.
   Retired definitions cannot create new projects; existing release operations retain their compatibility
   contract. The template chooser keeps its detail column during loading, displays retryable failures,
@@ -1862,7 +1890,9 @@ only renderer/executor/validation authority for their feature.
   operation now).
 - Published ports. `runtime.ports[]` (`hostPort`, `containerPort`, `protocol` tcp/udp, optional
   `bindAddress`, every interface when empty) publishes container ports beside the routed one for
-  protocols a reverse proxy cannot carry. Validation bounds each, refuses a repeated host port per
+  protocols a reverse proxy cannot carry. The fixed primary itself may be UDP, or TCP and UDP on
+  one number (`runtime.protocol` `udp` or `tcp+udp`), published once per protocol on
+  `runtime.bindAddress`, and a published port clashes with it only within the same protocol. Validation bounds each, refuses a repeated host port per
   protocol (including the fixed `hostPort`) and refuses them with host networking; preflight observes
   each as a port conflict; a plan with any is stop-first only (`validateRuntimeActivationStrategy` and the
   preflight strategy finding); previews drop them; the release comparison lists them; the runtime owner
@@ -2030,6 +2060,9 @@ only renderer/executor/validation authority for their feature.
   NUL *before* it looks at whether a container is running. Player identities come from the server's own
   reply; a server whose reply cannot be parsed reports "not supported" rather than an empty list. The
   settings editor writes only keys the blueprint declares and retains unrelated raw lines and comments.
+  The console is RCON, which a definition declares as its `rcon` port: Bedrock has none, so its
+  console and player list say so (`consoleReason`, `409 console_unsupported`) instead of failing.
+  `JavaStatusHandshake` is the bounded Server List Ping the `game_handshake` check runs.
   Public reads include only declared editable properties, excluding RCON and plugin credentials. Parsing
   understands escaped separators, Unicode escapes and continued lines; duplicate declarations use the
   last value and edits update every duplicate. Changed values escape backslashes and numeric bounds
