@@ -72,6 +72,10 @@ type HostObservation struct {
 	// EmulationObserved says /proc could be read at all (preflight_image.go).
 	Emulators         []string `json:"emulators,omitempty"`
 	EmulationObserved bool     `json:"emulationObserved,omitempty"`
+
+	// Tunnel is the Cloudflare Tunnel connection, observed when a domain is
+	// to be served through one (tunnel.go).
+	Tunnel *TunnelObservation `json:"tunnel,omitempty"`
 }
 
 type DomainObservation struct {
@@ -196,6 +200,7 @@ type HostPreflightObserver struct {
 	resources  PlanningDependencies
 	tailnet    PreflightTailnet
 	volumeRoot string
+	tunnel     TunnelObserver
 }
 
 func (o *HostPreflightObserver) WithTailnet(tailnet PreflightTailnet) *HostPreflightObserver {
@@ -391,6 +396,13 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 		}
 		wait.Wait()
 		observation.Domains = append(observation.Domains, domains...)
+		for _, planned := range request.Domains {
+			if planned.Tunnel && o.tunnel != nil {
+				name, connected := o.tunnel(ctx)
+				observation.Tunnel = &TunnelObservation{Name: name, Connected: connected}
+				break
+			}
+		}
 	}
 	for _, requested := range uniqueSorted(request.Paths) {
 		pathObservation := PathObservation{Path: requested}
@@ -852,6 +864,12 @@ func preflightFindings(
 	for _, planned := range configuration.Domains {
 		observed, ok := domainEvidence[planned.Hostname]
 		field := "domains." + planned.Hostname
+		if planned.Tunnel {
+			// This server's public address, and a certificate for it, say
+			// nothing about a name Cloudflare serves through the tunnel.
+			findings = append(findings, tunnelFindings(planned, observation, field)...)
+			continue
+		}
 		if !ok {
 			item := finding("dns_unverified", PreflightUnavailable,
 				"Domain evidence is unavailable", planned.Hostname,

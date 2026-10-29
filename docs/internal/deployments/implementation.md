@@ -2184,6 +2184,16 @@ network; the certificate is issued, verified against Pebble's freshly minted roo
 request, and served on a route whose chain verifies the same way — everything Let's Encrypt would do
 differently is the validation Pebble skipped and the roots browsers trust.
 
+A domain can instead be served through **Cloudflare Tunnel** (`domains[i].tunnel`): a host with no public
+address or open port runs Cloudflare's connector, cloudflared, as the managed container
+`just-dashboard-cloudflared`, connected from Proxy › Tunnel with a pasted token (sealed) or a tunnel
+created with the Cloudflare API token saved for DNS-01. Such a name skips the public-IP DNS precheck and
+the certificate step — Cloudflare terminates TLS — and the route serves it over plain HTTP on the
+private network the connector shares with the ingress; activation sets the tunnel's ingress rules and
+the name's proxied CNAME to `<tunnel>.cfargotunnel.com` before the public-route checks. The tunnel's
+health is cloudflared's own (its `/ready` and its log), and the host alert kind **Tunnel down** tells the
+channels when the connector loses the edge. See [Cloudflare Tunnel](cloudflare-tunnel.md).
+
 ## Deployment topology
 
 ```

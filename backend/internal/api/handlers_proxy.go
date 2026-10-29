@@ -37,6 +37,7 @@ func (s *Server) mountProxyRoutes(r chi.Router) {
 		r.Route("/proxy/modules", s.mountModuleRoutes)
 		r.Route("/proxy/auth-files", s.mountAuthFileRoutes)
 		r.Route("/proxy/tools", s.mountProxyToolRoutes)
+		r.Route("/proxy/tunnel", s.mountTunnelRoutes)
 		r.Route("/certificates", func(r chi.Router) {
 			s.mountCertificateRoutes(r)
 			s.mountTLSRoutes(r)

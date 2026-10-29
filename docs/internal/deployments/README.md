@@ -14,6 +14,10 @@
 - [`staging-promotion.md`](staging-promotion.md) — the staging environment (what it copies from production and why), promoting a staging release's exact image into production with no build — and a pull request preview's approved image into staging — promotion-only production, retention of a promotion's image, removal, routes, UI and the decision record.
 - [`database-networks.md`](database-networks.md) — logical database URLs, owned networks, replacement reconciliation and cleanup.
 - [`data-aware-rollback.md`](data-aware-rollback.md) — where each linked database stood when a release went live, a side copy of it restored on the deployment's network for a bounded time, the comparison with the live database, the restore-in-place hand-off and the sweeps.
+- [`cloudflare-tunnel.md`](cloudflare-tunnel.md) — Cloudflare Tunnel as an ingress: a pasted token or a
+  tunnel created with the saved Cloudflare API token, the cloudflared connector as a managed container,
+  a domain served through it (no certificate here, no public-address check), its routes and CNAME
+  records, health in cloudflared's own words and the Tunnel down alert.
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
   logs, the request readings, container lifecycle events, and the three container-output fixes.
 - [`image-vulnerabilities.md`](image-vulnerabilities.md) — each release's image and the bases it was
