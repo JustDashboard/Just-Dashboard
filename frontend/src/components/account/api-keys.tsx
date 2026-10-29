@@ -130,9 +130,10 @@ export function scopeWords(token: ApiToken) {
 
 /**
  * What an MCP key's replacement reaches: the databases the key reaches that a
- * key can still be given, and the deployments as the key had them. A database
- * protected since, or forgotten, is refused every call already, and the server
- * would refuse the whole list for it.
+ * key can still be given, and the deployments as the key had them — the
+ * grant, and the deployments it was narrowed to, so a replacement is never a
+ * key that reaches more. A database protected since, or forgotten, is refused
+ * every call already, and the server would refuse the whole list for it.
  */
 async function replacementGrants(token: ApiToken | undefined, role: Role) {
   const saved = await get<DbConnection[]>("/databases/")
@@ -144,7 +145,11 @@ async function replacementGrants(token: ApiToken | undefined, role: Role) {
   if (connections.length === 0 && deployments === "") {
     throw new Error("None of the databases this key reaches can be given to a key any more.")
   }
-  return { connections, deployments }
+  return {
+    connections,
+    deployments,
+    deploymentIds: deployments === "" ? [] : [...(token?.deploymentIds ?? [])],
+  }
 }
 
 /** The one line a key's state comes down to. */
@@ -987,22 +992,26 @@ function KindChoice({ value, onChange }: { value: KeyKind; onChange: (kind: KeyK
 }
 
 /**
- * Which deployments a deploy key reaches: all of them, the ones made later
- * included, or the ones ticked — a key for one repository's pipeline that
- * leaks then reaches that one application, not the server's every one. The
- * list is the fleet the deployment pages read, drawn as each project draws
- * itself there.
+ * Which deployments a deploy key reaches, or an MCP key's deployment grant:
+ * all of them, the ones made later included, or the ones ticked — a key for
+ * one repository's pipeline that leaks then reaches that one application, not
+ * the server's every one. The list is the fleet the deployment pages read,
+ * drawn as each project draws itself there.
  */
-function DeploymentChoice({
+export function DeploymentChoice({
   every,
   onEvery,
   chosen,
   onChosen,
+  label = "Deployments",
+  idPrefix = "deploy-key",
 }: {
   every: boolean
   onEvery: (every: boolean) => void
   chosen: ReadonlySet<number>
   onChosen: (chosen: ReadonlySet<number>) => void
+  label?: string
+  idPrefix?: string
 }) {
   const projects = useProjects()
   const [query, setQuery] = useState("")
@@ -1017,7 +1026,7 @@ function DeploymentChoice({
   }
   return (
     <Field
-      label="Deployments"
+      label={label}
       hint={
         every
           ? "Every deployment on this server, including the ones made after the key."
@@ -1055,7 +1064,7 @@ function DeploymentChoice({
                 className="max-h-64 divide-y divide-hairline overflow-y-auto rounded-lg border"
               >
                 {shown.map((deployment) => {
-                  const id = `deploy-key-${deployment.id}`
+                  const id = `${idPrefix}-${deployment.id}`
                   return (
                     <li key={deployment.id} className="flex min-w-0 items-center gap-3 px-3 py-2.5">
                       <Checkbox
