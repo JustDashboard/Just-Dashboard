@@ -122,6 +122,7 @@ test("a domain's menu opens its DNS record, which is created in its zone and the
     ),
   ).toBeVisible()
 
+  await page.screenshot({ path: test.info().outputPath("dns-record-dry-run.png") })
   await sheet.getByRole("button", { name: "Create the record" }).click()
   await expect(sheet.getByText("Points here", { exact: true })).toBeVisible()
   await expect(sheet.getByText("Record managed here · created just now by tester")).toBeVisible()
@@ -129,7 +130,7 @@ test("a domain's menu opens its DNS record, which is created in its zone and the
   await expect(sheet.getByRole("button", { name: "Create the record" })).toHaveCount(0)
   // Nothing was this dashboard's to replace, so nothing said it may.
   expect(posts).toEqual([null])
-  await page.screenshot({ path: test.info().outputPath("dns-record.png"), fullPage: true })
+  await page.screenshot({ path: test.info().outputPath("dns-record-written.png") })
 })
 
 test("a record not written here is replaced only by saying so, and a finding's link opens the sheet", async ({
@@ -141,6 +142,8 @@ test("a record not written here is replaced only by saying so, and a finding's l
     page,
     plan({
       foreign: true,
+      summary:
+        "Writes into example.test at Cloudflare with the Cloudflare credentials saved under Certificates: Change A api.example.test from 198.51.100.9 to 203.0.113.7. It replaces a record this dashboard did not write.",
       changes: [
         {
           type: "A",
@@ -164,6 +167,7 @@ test("a record not written here is replaced only by saying so, and a finding's l
   await expect(sheet.getByText("Now 198.51.100.9")).toBeVisible()
   await expect(sheet.getByText("To replace")).toBeVisible()
   await expect(page).toHaveURL(/\/deploy\/7\/settings\/domains$/)
+  await page.screenshot({ path: test.info().outputPath("dns-record-replace.png") })
   await sheet.getByRole("button", { name: "Replace the record" }).click()
   await expect(sheet.getByText("Points here", { exact: true })).toBeVisible()
   expect(posts).toEqual([{ replace: true }])
