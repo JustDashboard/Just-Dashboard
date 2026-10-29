@@ -48,11 +48,11 @@ func TestTunnelDomainIsPlainOnTheRouteAndNeedsNoCertificate(t *testing.T) {
 		t.Fatalf("allowed addresses on a tunnel's route = %v", err)
 	}
 
-	route := deploymentRoute(7, canonical.Domains, "127.0.0.1", 32000)
+	route := deploymentRoute(7, canonical.Domains, []string{"http://127.0.0.1:32000"})
 	if !route.TLS || strings.Join(route.PlainHostnames, ",") != "shop.example.com" {
 		t.Fatalf("route = TLS %t, plain %v", route.TLS, route.PlainHostnames)
 	}
-	only := deploymentRoute(7, []PlannedDomain{{Hostname: "shop.example.com", HTTPS: true, Tunnel: true}}, "127.0.0.1", 32000)
+	only := deploymentRoute(7, []PlannedDomain{{Hostname: "shop.example.com", HTTPS: true, Tunnel: true}}, []string{"http://127.0.0.1:32000"})
 	if only.TLS {
 		t.Fatal("a route whose only name is the tunnel's asks for TLS")
 	}
