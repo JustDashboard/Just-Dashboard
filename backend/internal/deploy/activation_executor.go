@@ -795,6 +795,7 @@ func publicRoute(environmentID int64, snapshot runtimeReleaseSnapshot, host stri
 	route := deploymentRoute(environmentID, snapshot.Domains, host, port)
 	route.MaxBodyMB = snapshot.Plan.MaxRequestBodyMB
 	route.AllowFrom = snapshot.Plan.AllowFrom
+	route.EdgeRules, route.RateLimit, route.CrowdSec = snapshot.Plan.EdgeRules, snapshot.Plan.RateLimit, snapshot.Plan.CrowdSec
 	for _, header := range snapshot.Plan.ResponseHeaders {
 		route.ResponseHeaders = append(route.ResponseHeaders, proxysvc.HeaderValue{Name: header.Name, Value: header.Value})
 	}

@@ -127,9 +127,11 @@ func renderServer(l *lines, spec *SiteSpec, names string) {
 	renderServerOptions(l, spec)
 	renderUpstreamTLS(l, spec)
 	renderErrorRouting(l, spec)
+	renderEdgeChecks(l, spec)
 	renderAccess(l, spec)
 	renderForwardAuth(l, spec)
 	renderServerLimits(l, spec)
+	renderRateLimitAnswer(l, spec)
 	renderServerCache(l, spec)
 	renderServerHeaders(l, spec)
 	renderACMEChallenge(l, spec)
@@ -153,6 +155,7 @@ func renderServer(l *lines, spec *SiteSpec, names string) {
 		l.blank()
 		renderPageLocations(l, spec)
 	}
+	renderRateLimitLocation(l, spec)
 	if spec.ForwardAuth != nil {
 		l.blank()
 		renderForwardAuthLocation(l, spec)
@@ -212,7 +215,7 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		}
 		l.add("# nginx's combined format with the time taken added, which is what")
 		l.add("# the dashboard's traffic pages read latency from.")
-		l.add("log_format %s %s;", spec.logFormatName(), timedLogFormat)
+		l.add("log_format %s %s;", spec.logFormatName(), strings.TrimSuffix(timedLogFormat, "'")+spec.edgeLogField()+"'")
 		wrote = true
 	}
 	if spec.Maintenance != nil {
@@ -227,6 +230,13 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 			l.blank()
 		}
 		renderLimitZones(l, spec)
+		wrote = true
+	}
+	if spec.hasEdge() {
+		if wrote {
+			l.blank()
+		}
+		renderEdgeObjects(l, spec)
 		wrote = true
 	}
 	if spec.cachesStatic() || spec.cachesProxy() {

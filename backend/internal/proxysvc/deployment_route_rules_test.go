@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
@@ -340,4 +341,82 @@ func TestLiveDockerCaddyServesRouteRules(t *testing.T) {
 		t.Fatalf("the HTTPS redirecting name over plain HTTP = %v %v", res, err)
 	}
 	listed("rules.example.test,tls.rules.example.test,www.rules.example.test,www.tls.rules.example.test")
+
+	// Edge rules: a blocked path refused 403, a user agent answered with
+	// the rule's status, an allow rule letting its path through ahead of a
+	// broader block, and the request record naming the rule that decided.
+	// Then CrowdSec's list, banning every address the bridge can give the
+	// test, refused at the route, and lifted by a refresh with no release.
+	route = DeploymentRoute{
+		Name: route.Name, Domains: []string{"rules.example.test"}, AccessLog: true, CrowdSec: true,
+		Upstream:  "http://127.0.0.1:" + published(app, "80"),
+		AllowFrom: []string{"0.0.0.0/0"},
+		EdgeRules: CanonicalEdgeRules([]EdgeRule{
+			{Name: "health", Match: EdgeMatch{PathPrefix: "/admin/health"}, Action: EdgeAction{Kind: "allow"}},
+			{Name: "admin", Match: EdgeMatch{PathPrefix: "/admin"}, Action: EdgeAction{Kind: "block"}},
+			{Name: "bots", Match: EdgeMatch{UserAgent: "evilbot", Methods: []string{"GET"}}, Action: EdgeAction{Kind: "status", Status: 418}},
+		}),
+	}
+	if result, err := service.applyDockerCaddyRoute(ctx, edge, route); err != nil || !result.Verified {
+		t.Fatalf("edge apply=%+v error=%v; fixture log: %s", result, err, docker("logs", id))
+	}
+	asked := func(path, agent string) int {
+		t.Helper()
+		req, _ := http.NewRequestWithContext(ctx, "GET", endpoint+path, nil)
+		req.Host = "rules.example.test"
+		if agent != "" {
+			req.Header.Set("User-Agent", agent)
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	for _, testCase := range []struct {
+		path, agent string
+		status      int
+	}{
+		{"/", "", 200},
+		{"/admin/users", "", 403},
+		{"/ADMIN/users", "", 200},
+		{"/admin/health", "", 200},
+		{"/", "Mozilla/5.0 EvilBot/2", 418},
+	} {
+		if got := asked(testCase.path, testCase.agent); got != testCase.status {
+			t.Fatalf("GET %s (%q) = %d, want %d", testCase.path, testCase.agent, got, testCase.status)
+		}
+	}
+	if refreshed, err := service.refreshDockerCaddyCrowdSec(ctx, edge, []string{"0.0.0.0/0"}); err != nil || !refreshed.Reloaded {
+		t.Fatalf("ban refresh = %+v, %v", refreshed, err)
+	}
+	if got := asked("/", ""); got != 403 {
+		t.Fatalf("a banned address = %d", got)
+	}
+	if refreshed, err := service.refreshDockerCaddyCrowdSec(ctx, edge, nil); err != nil || !refreshed.Reloaded {
+		t.Fatalf("lifting refresh = %+v, %v", refreshed, err)
+	}
+	if got := asked("/", ""); got != 200 {
+		t.Fatalf("a lifted ban = %d", got)
+	}
+	logPath, _ := dockerCaddyAccessLogPath(route.Name)
+	decided := map[string]int{}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(200 * time.Millisecond) {
+		raw, _ := hostexec.Command(ctx, "docker", "exec", id, "cat", logPath).Output()
+		decided = map[string]int{}
+		for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			if entry, ok := accesslog.Parse(line); ok && entry.EdgeRule != "" {
+				decided[entry.EdgeRule]++
+			}
+		}
+		if decided["admin"] > 0 && decided["bots"] > 0 && decided["health"] > 0 && decided["crowdsec"] > 0 || time.Now().After(deadline) {
+			break
+		}
+	}
+	for _, name := range []string{"admin", "bots", "health", "crowdsec"} {
+		if decided[name] == 0 {
+			t.Fatalf("the record does not name %s: %v", name, decided)
+		}
+	}
 }

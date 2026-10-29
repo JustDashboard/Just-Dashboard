@@ -283,6 +283,9 @@ func (s *Server) Start(ctx context.Context) error {
 	s.modules.network.StartRouteHistory(ctx)
 	s.startDatabaseMetrics(ctx)
 	s.startDatabaseTLS(ctx)
+	// CrowdSec's bans are refused at every deployment route that asks, from
+	// a list kept current whether or not anybody has a page open.
+	s.startCrowdSecRefresh(ctx)
 	s.startStrandedRepair(ctx)
 	// Two things, both of which have to happen at boot rather than on request.
 	// An upgrade that was in flight when this process started is settled here,

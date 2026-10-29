@@ -146,6 +146,9 @@ func compareRuntimeSnapshots(fromSnapshot, toSnapshot runtimeReleaseSnapshot, fr
 	field("traffic replay", replayLabel(fromSnapshot.Plan.Replay), replayLabel(toSnapshot.Plan.Replay))
 	field("allowed addresses", allowFromLabel(fromSnapshot.Plan.AllowFrom), allowFromLabel(toSnapshot.Plan.AllowFrom))
 	field("response headers", responseHeadersLabel(fromSnapshot.Plan.ResponseHeaders), responseHeadersLabel(toSnapshot.Plan.ResponseHeaders))
+	field("edge rules", edgeRulesLabel(fromSnapshot.Plan.EdgeRules), edgeRulesLabel(toSnapshot.Plan.EdgeRules))
+	field("rate limit", rateLimitLabel(fromSnapshot.Plan.RateLimit), rateLimitLabel(toSnapshot.Plan.RateLimit))
+	field("crowdsec", onOffLabel(fromSnapshot.Plan.CrowdSec), onOffLabel(toSnapshot.Plan.CrowdSec))
 	field("sign-in", signInLabel(fromSnapshot.Plan.ForwardAuth), signInLabel(toSnapshot.Plan.ForwardAuth))
 	field("tailnet", tailnetLabel(fromSnapshot.Plan.Tailnet), tailnetLabel(toSnapshot.Plan.Tailnet))
 	field("hsts", hstsLabel(fromSnapshot.Plan.HSTS), hstsLabel(toSnapshot.Plan.HSTS))
@@ -256,6 +259,37 @@ func domainPairs(domains []PlannedDomain) map[string]string {
 		}
 	}
 	return pairs
+}
+
+// edgeRulesLabel names the rules in the order they decide, with what each
+// does, so a reordering reads as the change it is.
+func edgeRulesLabel(rules []RouteEdgeRule) string {
+	if len(rules) == 0 {
+		return "none"
+	}
+	labels := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		labels = append(labels, rule.Name+" ("+rule.Action.Kind+")")
+	}
+	return strings.Join(labels, ", ")
+}
+
+func rateLimitLabel(limit *RouteRateLimit) string {
+	if limit == nil {
+		return "off"
+	}
+	label := fmt.Sprintf("%d per %s", limit.Requests, limit.Per)
+	if limit.Burst > 0 {
+		label += fmt.Sprintf(", burst %d", limit.Burst)
+	}
+	return label
+}
+
+func onOffLabel(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
 }
 
 func allowFromLabel(entries []string) string {

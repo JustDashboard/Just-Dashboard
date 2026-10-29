@@ -158,6 +158,26 @@ func (s *Service) CrowdSec(ctx context.Context) (*CrowdSecView, error) {
 	return v, nil
 }
 
+// CrowdSecBans reads only the engine's decisions, up to limit, for the
+// deployment routes' ban list: one cscli call, where the page's view also
+// reads the alerts, the bouncers and the kernel. Installed is false where
+// there is no cscli, and an error is a read that failed rather than an
+// engine with nothing banned.
+func (s *Service) CrowdSecBans(ctx context.Context, limit int) (installed bool, decisions []CrowdSecDecision, err error) {
+	if !hasTool("cscli") {
+		return false, nil, nil
+	}
+	if limit <= 0 || limit > 10000 {
+		limit = 10000
+	}
+	out, err := run(ctx, "cscli", "decisions", "list", "-o", "json", "--limit", strconv.Itoa(limit))
+	if err != nil {
+		return true, nil, err
+	}
+	decisions, err = parseCrowdSecDecisionsUncapped(out, crowdsecNow())
+	return true, decisions, err
+}
+
 // jsonFrom drops what cscli printed before its JSON. The command's standard
 // error is read with its output, and a warning about a deprecated option or
 // an unreachable hub is a line of text in front of the array.
@@ -226,6 +246,16 @@ type cscliAlert struct {
 // parseCrowdSecDecisions flattens `cscli decisions list -o json`: an array of
 // alerts, each holding the decisions it caused, or null when there are none.
 func parseCrowdSecDecisions(out string, now time.Time) ([]CrowdSecDecision, error) {
+	decisions, err := parseCrowdSecDecisionsUncapped(out, now)
+	if len(decisions) > maxDecisions {
+		decisions = decisions[:maxDecisions]
+	}
+	return decisions, err
+}
+
+// parseCrowdSecDecisionsUncapped is the flattening without the page's cap,
+// newest decision first.
+func parseCrowdSecDecisionsUncapped(out string, now time.Time) ([]CrowdSecDecision, error) {
 	decisions := []CrowdSecDecision{}
 	body, err := cscliBody(out)
 	if err != nil || body == "" {
@@ -252,9 +282,6 @@ func parseCrowdSecDecisions(out string, now time.Time) ([]CrowdSecDecision, erro
 	}
 	// Newest decision first: ids only grow.
 	sort.Slice(decisions, func(i, j int) bool { return decisions[i].ID > decisions[j].ID })
-	if len(decisions) > maxDecisions {
-		decisions = decisions[:maxDecisions]
-	}
 	return decisions, nil
 }
 

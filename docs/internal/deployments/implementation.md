@@ -1849,6 +1849,16 @@ only renderer/executor/validation authority for their feature.
   each as a port conflict; a plan with any is stop-first only (`validateRuntimeActivationStrategy` and the
   preflight strategy finding); previews drop them; the release comparison lists them; the runtime owner
   maps each in addition to the leased routed port. The Domains settings show them as **Also published**.
+- Edge rules, rate limit and CrowdSec. `runtime.edgeRules[]` (ordered `{name, match, action}`;
+  the first rule a request meets decides), `runtime.rateLimit` (`{requests, per, burst}` per client
+  address) and `runtime.crowdSec` are the public route's, kept canonical by `canonicalConfiguration`
+  and validated by `validateRouteRules` with the other route rules (`runtime.edgeRules`,
+  `runtime.rateLimit` in a refusal); a tailnet-only environment refuses them. nginx renders maps and
+  first-match returns, `limit_req` with 429 and Retry-After, and a CrowdSec `geo` list; Caddy renders
+  named matchers each excluding the rules before it and the imported CrowdSec list, and has no
+  rate-limit module, so its limit is the host's gateway limit the Domains page offers. The request
+  record names the deciding rule (`er=` / `edge_rule`) and the requests summary counts each. See
+  [edge rules](edge-rules.md).
 - Password protection. `domains[].protection` (`username`, `password` on write, `hash` at rest) puts
   HTTP basic authentication in front of a deployment's public route without the application knowing.
   `sealDomainProtection` bcrypts the password once at the API boundary (configuration save and the draft

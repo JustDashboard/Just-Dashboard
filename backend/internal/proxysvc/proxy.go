@@ -77,6 +77,11 @@ type Service struct {
 	effective effectiveCache
 	pending   pendingTracker
 	tested    testMemory
+
+	// trustedProxies are the dashboard's JD_TRUSTED_PROXIES, which a
+	// deployment route's limits and edge rules believe (deployment_crowdsec.go).
+	trustedMu      sync.RWMutex
+	trustedProxies []string
 }
 
 func New(nginxDir, caddyFile string) *Service {

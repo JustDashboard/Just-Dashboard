@@ -5280,6 +5280,37 @@ export type DeploymentBuildMethod =
 export type DeploymentOwnership = "managed" | "linked" | "observed"
 
 /** A container port published on the host next to the routed one: Gitea's SSH, Syncthing's sync protocol. */
+/** A route's request rate per client address, with the burst let through at once. */
+export type DeploymentRateLimit = { requests: number; per: "second" | "minute"; burst?: number }
+
+export type DeploymentEdgeMethod = "DELETE" | "GET" | "HEAD" | "OPTIONS" | "PATCH" | "POST" | "PUT"
+
+/** What a request has to meet, every condition at once. */
+export type DeploymentEdgeMatch = {
+  pathPrefix?: string
+  pathRegex?: string
+  methods?: DeploymentEdgeMethod[]
+  /** Matched ignoring case. */
+  userAgent?: string
+  clientFrom?: string[]
+}
+
+/**
+ * What a matching request gets: refused 403, answered with a status and
+ * nothing else, let through without asking the rules after it, or redirected.
+ */
+export type DeploymentEdgeAction =
+  | { kind: "block"; status?: 403 }
+  | { kind: "status"; status: number }
+  | { kind: "allow" }
+  | { kind: "redirect"; location: string; code: 301 | 302 | 307 | 308 }
+
+export type DeploymentEdgeRule = {
+  name: string
+  match: DeploymentEdgeMatch
+  action: DeploymentEdgeAction
+}
+
 export type DeploymentPublishedPort = {
   hostPort: number
   containerPort: number
@@ -5469,6 +5500,12 @@ export type DeploymentConfiguration = {
     interceptErrors?: boolean
     /** Strict-Transport-Security on every HTTPS answer; absent sends none. */
     hsts?: DeploymentRouteHSTS
+    /** Requests one client address may make; past it the route answers 429. */
+    rateLimit?: DeploymentRateLimit
+    /** Decided in order at the proxy; the first rule a request meets decides it. */
+    edgeRules?: DeploymentEdgeRule[]
+    /** Refuses the addresses CrowdSec's local engine has banned. */
+    crowdSec?: boolean
     /**
      * Published on this host's tailnet and nowhere else, as a preview is: no
      * public domain and no public certificate. Absent is an ordinary
@@ -8134,6 +8171,8 @@ export type RequestSummary = {
   /** Refused paths that look like scanning, and the clients that asked for several. */
   probes: RequestFacet[]
   scanners: RequestFacet[]
+  /** How many requests each edge rule decided in the window; absent from older servers. */
+  edgeRules?: RequestFacet[]
   audience?: RequestAudience
   buckets: RequestBucket[]
   bucketSeconds: number

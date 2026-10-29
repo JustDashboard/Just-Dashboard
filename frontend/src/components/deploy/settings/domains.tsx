@@ -76,6 +76,7 @@ import {
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import { OwnershipSelect } from "@/components/deploy/settings/mounts"
 import { useProject } from "@/components/deploy/project-context"
+import { EdgeRulesForm } from "@/components/deploy/settings/edge-rules"
 import {
   HSTS_DEFAULT_MAX_AGE,
   HSTS_MAX_AGES,
@@ -178,6 +179,12 @@ export function DomainsSettings({
             Boolean(configuration.runtime.forwardAuth) ||
             Boolean(configuration.runtime.hsts)) && (
             <RouteRulesForm configuration={configuration} save={state.save} />
+          )}
+          {(configuration.domains.length > 0 ||
+            Boolean(configuration.runtime.edgeRules?.length) ||
+            Boolean(configuration.runtime.rateLimit) ||
+            Boolean(configuration.runtime.crowdSec)) && (
+            <EdgeRulesForm configuration={configuration} save={state.save} />
           )}
           {(configuration.domains.length > 0 ||
             Boolean(configuration.runtime.maintenance) ||

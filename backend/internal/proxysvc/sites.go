@@ -205,6 +205,13 @@ type SiteSpec struct {
 	// set on its Domains settings rather than the Proxy page's form, so a
 	// refusal points at the control the reader has.
 	deployment bool
+	// edgeRules, crowdSecList and limitRetryAfter are a deployment route's
+	// edge rules, the CrowdSec list it includes, and the Retry-After its
+	// rate limit answers 429 with (deployment_edge.go). They are set from a
+	// validated route and never read back from a file.
+	edgeRules       []EdgeRule
+	crowdSecList    string
+	limitRetryAfter int
 	// Custom is appended verbatim inside the server block. It is the escape
 	// hatch, and it is the one field not validated beyond refusing an
 	// unbalanced brace — a form that cannot express everything needs

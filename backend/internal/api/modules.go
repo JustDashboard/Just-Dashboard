@@ -300,6 +300,13 @@ func (s *Server) initModules() {
 	if s.Cfg.IngressContainer != "" {
 		s.modules.proxy = proxysvc.NewWithIngressContainer(s.Cfg.NginxDir, s.Cfg.CaddyFile, s.Cfg.IngressContainer)
 	}
+	// A deployment route's rate limit and edge rules count the visitor, so
+	// behind a proxy this dashboard trusts they read the address it forwards.
+	trusted := make([]string, 0, len(s.Cfg.TrustedProxies))
+	for _, network := range s.Cfg.TrustedProxies {
+		trusted = append(trusted, network.String())
+	}
+	s.modules.proxy.SetTrustedProxies(trusted)
 	s.modules.requests = accesslog.NewStore(s.openRequestRecord)
 	s.modules.logDrains = logdrain.NewStore(s.Store, s.Sealer)
 	s.modules.dbs = dbx.NewManager()
