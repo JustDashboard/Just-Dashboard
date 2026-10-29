@@ -18,6 +18,7 @@ import (
 	"github.com/distribution/reference"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/tailnetgate"
 )
 
 type DraftStep string
@@ -660,7 +661,30 @@ type RuntimePlanConfig struct {
 	// for as long as it says. A domain served over plain HTTP is never sent
 	// it, so the control only means something once a served domain is HTTPS.
 	HSTS *RouteHSTS `json:"hsts,omitempty"`
+	// Tailnet publishes the environment on this host's tailnet and nowhere
+	// else, the way a pull request preview is published: tailscale serve
+	// maps one port of the tailnet address to it, and it has no public
+	// domain and no public certificate. Nil is an ordinary environment.
+	Tailnet *RouteTailnet `json:"tailnet,omitempty"`
 }
+
+// RouteTailnet is a tailnet-only publication (tailnet-apps.md). Allow, when
+// it names anybody, is who may open it — Tailscale logins (alice@example.com,
+// compared without case) and ACL tags (tag:ci, compared exactly) — and the
+// proxy then asks the dashboard about every request, which asks tailscaled
+// who holds the address it came from. An empty Allow lets everyone on the
+// tailnet in, as a preview's address does: the tailnet is its fence.
+//
+// A preview's plan is a copy of this one, so a preview of an environment
+// that names its visitors names the same ones.
+type RouteTailnet struct {
+	Allow []string `json:"allow,omitempty"`
+}
+
+// IdentityAware says the publication decides who may open it by their
+// tailnet identity, which is what puts the proxy between the tailnet and
+// the application.
+func (t *RouteTailnet) IdentityAware() bool { return t != nil && len(t.Allow) > 0 }
 
 // RouteHSTS is the public route's Strict-Transport-Security policy: MaxAge
 // seconds (zero is six months; at least five minutes, at most two years),
@@ -1738,7 +1762,69 @@ func (c PlanConfiguration) Validate() error {
 	if err := validateRouteRules(c.Runtime); err != nil {
 		return err
 	}
-	return validateRouteSignIn(c)
+	if err := validateRouteSignIn(c); err != nil {
+		return err
+	}
+	return validateRouteTailnet(c)
+}
+
+// validateRouteTailnet checks a tailnet-only publication. It has no public
+// route, so nothing that only a public route carries may come with it, and
+// nothing may publish the container anywhere but loopback: an address on
+// every interface, a fixed or extra host port or the host's network would
+// each put the application where the tailnet does not fence it.
+func validateRouteTailnet(c PlanConfiguration) error {
+	tailnet := c.Runtime.Tailnet
+	if tailnet == nil {
+		return nil
+	}
+	if len(tailnet.Allow) > tailnetgate.MaxAllow {
+		return invalidField("runtime.tailnet.allow", "at most %d logins and tags", tailnetgate.MaxAllow)
+	}
+	seen := map[string]bool{}
+	for index, entry := range tailnet.Allow {
+		field := fmt.Sprintf("runtime.tailnet.allow[%d]", index)
+		canonical, _, err := tailnetgate.Canonical(entry)
+		if err != nil {
+			return invalidField(field, "%v", err)
+		}
+		if seen[canonical] {
+			return invalidField(field, "%s is listed twice", canonical)
+		}
+		seen[canonical] = true
+	}
+	if len(c.Domains) > 0 {
+		return invalidField("runtime.tailnet", "a tailnet-only environment has no public domain; remove %s first", c.Domains[0].Hostname)
+	}
+	public := ""
+	switch {
+	case c.Runtime.ForwardAuth != nil:
+		public = "a sign-in"
+	case len(c.Runtime.AllowFrom) > 0:
+		public = "allowed addresses"
+	case len(c.Runtime.ResponseHeaders) > 0:
+		public = "response headers"
+	case c.Runtime.HSTS != nil:
+		public = "HSTS"
+	case c.Runtime.Maintenance != nil:
+		public = "a maintenance page"
+	case len(c.Runtime.ErrorPages) > 0 || c.Runtime.InterceptErrors:
+		public = "error pages"
+	}
+	if public != "" {
+		return invalidField("runtime.tailnet", "%s belongs to the public route, which a tailnet-only environment does not have; remove it first", public)
+	}
+	switch {
+	case c.Runtime.HostNetwork:
+		return invalidField("runtime.tailnet", "on the host's network the application answers on every address, not on the tailnet alone")
+	case c.Runtime.HostPort != 0 || len(c.Runtime.Ports) > 0:
+		return invalidField("runtime.tailnet", "a fixed or extra host port would publish the application past the tailnet; remove it")
+	case c.Runtime.BindAddress != "" && c.Runtime.BindAddress != "127.0.0.1":
+		return invalidField("runtime.tailnet", "a tailnet-only environment publishes its container on loopback alone; bind it to 127.0.0.1")
+	case c.Runtime.InternalPort == 0 && c.Build.Method != BuildCompose:
+		return invalidField("runtime.tailnet", "the tailnet address forwards to the port the application listens on; set it under Runtime")
+	}
+	return nil
 }
 
 // validateRouteSignIn checks the sign-in in front of the public route: an
@@ -2612,6 +2698,22 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 		c.Runtime.ForwardAuth = &trimmed
 	}
 	c.Runtime.Maintenance = canonicalRouteMaintenance(c.Runtime.Maintenance)
+	if t := c.Runtime.Tailnet; t != nil {
+		// A copy, so canonicalising never writes through to the caller's
+		// plan; an entry that does not read is kept as written for
+		// validation to name.
+		allow := make([]string, 0, len(t.Allow))
+		for _, entry := range t.Allow {
+			if canonical, _, err := tailnetgate.Canonical(entry); err == nil {
+				entry = canonical
+			}
+			allow = append(allow, entry)
+		}
+		if len(allow) == 0 {
+			allow = nil
+		}
+		c.Runtime.Tailnet = &RouteTailnet{Allow: allow}
+	}
 	if h := c.Runtime.HSTS; h != nil {
 		// A copy, so canonicalising never writes through to the caller's plan.
 		policy := *h

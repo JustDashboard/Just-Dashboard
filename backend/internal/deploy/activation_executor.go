@@ -43,6 +43,7 @@ type activationStepEvidence struct {
 	ReleaseID    int64                      `json:"releaseId"`
 	Route        *routeActivationEvidence   `json:"route,omitempty"`
 	Tailnet      *tailnetActivationEvidence `json:"tailnet,omitempty"`
+	TailnetGate  *tailnetGateEvidence       `json:"tailnetGate,omitempty"`
 	PublicChecks []CheckEvidence            `json:"publicChecks"`
 	Recovery     *recoveryEvidence          `json:"recovery,omitempty"`
 	// ReadinessGated says whether a required readiness check stood between
@@ -592,6 +593,16 @@ func (e *NormalizedStepExecutor) activate(
 	}
 	var route *proxysvc.DeploymentRoute
 	var appliedRoute *proxysvc.DeploymentRouteResult
+	if snapshot.Plan.Tailnet != nil && len(snapshot.Domains) > 0 {
+		// Only a preview's plan can arrive here like this: a trigger's
+		// domain pattern under a tailnet-only environment. Publishing it
+		// would put on a public name what the environment keeps off one.
+		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
+		evidence.Recovery = &recovery
+		return StepResult{State: StepFailed, ErrorCode: "tailnet_only_has_domains",
+			ErrorMessage: "this environment is tailnet-only, so it is not published on " + snapshot.Domains[0].Hostname + "; remove the trigger's preview domain",
+			Evidence:     mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
+	}
 	if len(snapshot.Domains) > 0 {
 		if runtime.Port == 0 || e.proxy == nil {
 			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
@@ -673,19 +684,41 @@ func (e *NormalizedStepExecutor) activate(
 			return StepResult{State: StepFailed, ErrorCode: "activation_verification_failed", ErrorMessage: "the proxy cutover could not be verified", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
 	}
-	address, err := e.store.PreviewAddressFor(ctx, release.Release.EnvironmentID)
-	if err != nil {
+	address, failure := e.tailnetAddressFor(ctx, release.Release.EnvironmentID, snapshot.Plan)
+	if failure != nil {
 		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
 		evidence.Recovery = &recovery
-		failure := normalizedStepFailure(err)
 		failure.Evidence, failure.Recovered = mustJSON(evidence), recoveryComplete(recovery, snapshot.Plan, release.Release)
-		return failure
+		return *failure
 	}
-	if address != nil && address.Kind == previewAddressTailnet {
+	gated := snapshot.Plan.Tailnet.IdentityAware()
+	// A release that is no longer tailnet-only, replacing one that was, is
+	// not published there: its address is withdrawn once it is live.
+	leaving := address != nil && address.Kind == previewAddressTailnet && snapshot.Plan.Tailnet == nil &&
+		!snapshot.Plan.PreviewIsolation && e.leftTheTailnet(ctx, release.Release)
+	if address != nil && address.Kind == previewAddressTailnet && !leaving {
+		upstream := runtime.Port
+		if gated {
+			// The gate goes in front of the candidate first and the mapping
+			// moves to the gate after, so the tailnet never reaches the
+			// candidate without the check.
+			gate, applied, failure := e.applyTailnetGate(ctx, execution, release.Release.EnvironmentID, *address, *runtime, snapshot.Plan)
+			if applied != nil {
+				appliedRoute = applied
+			}
+			evidence.TailnetGate = gate
+			if failure != nil {
+				recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
+				evidence.Recovery = &recovery
+				failure.Evidence, failure.Recovered = mustJSON(evidence), recoveryComplete(recovery, snapshot.Plan, release.Release)
+				return *failure
+			}
+			upstream = address.Port
+		}
 		// The tailnet mapping moves to the candidate before the release
 		// pointer does, so a mapping that cannot be made never leaves a
 		// live release nobody can reach.
-		published, failure := e.publishPreviewAddress(ctx, execution, release.Release.EnvironmentID, *address, *runtime)
+		published, failure := e.publishPreviewAddress(ctx, execution, release.Release.EnvironmentID, *address, upstream)
 		if failure != nil {
 			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
 			evidence.Recovery = &recovery
@@ -700,6 +733,18 @@ func (e *NormalizedStepExecutor) activate(
 		return StepResult{State: StepFailed, ErrorCode: "activation_commit_failed", ErrorMessage: "the release pointer could not be committed", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 	}
 	_ = stepLog(execution, "status", fmt.Sprintf("Activated immutable release #%d", release.Release.Number))
+	switch {
+	case address == nil || address.Kind != previewAddressTailnet:
+	case leaving:
+		// The environment left the tailnet, and what replaced it is live
+		// now: its address goes.
+		e.leaveTailnet(ctx, execution, release.Release.EnvironmentID)
+	case !gated:
+		// It does not name its visitors (or no longer does): the mapping
+		// reaches the container directly, and a gate left in front of an
+		// older release answers nobody.
+		e.dropTailnetGate(ctx, execution, release.Release.EnvironmentID)
+	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(evidence)}
 }
 

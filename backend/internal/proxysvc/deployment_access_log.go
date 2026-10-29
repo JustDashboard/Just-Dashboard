@@ -43,6 +43,20 @@ const (
 // AccessLogReader resolves which ingress serves the route and returns a reader
 // over its record, with the facts the page needs about that record.
 func (s *Service) AccessLogReader(ctx context.Context, name string) (accesslog.Reader, accesslog.Facts, error) {
+	// A tailnet-only environment that names its visitors is served by the
+	// tailnet gate, whose Caddy keeps its record the way the ingress does.
+	if gate, err := s.gateContainer(ctx); err == nil && gate != nil && tailnetGateNameRe.MatchString(name) {
+		if path, err := dockerCaddyRoutePath(name); err == nil {
+			if _, exists, err := gate.read(ctx, path); err == nil && exists {
+				logPath, err := dockerCaddyAccessLogPath(name)
+				if err != nil {
+					return nil, accesslog.Facts{}, err
+				}
+				facts := accesslog.Facts{Driver: accessDriverCaddy, Format: accesslog.FormatCaddyJSON, Latency: true, Path: logPath, Container: gate.ID}
+				return &caddyAccessLog{edge: *gate, path: logPath}, facts, nil
+			}
+		}
+	}
 	edge, err := s.dockerCaddy(ctx)
 	if err != nil {
 		return nil, accesslog.Facts{}, err

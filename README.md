@@ -106,6 +106,8 @@ free.
 - Variables per environment, plus shared ones defined once for the server or a project
 - Variables read from HashiCorp Vault, OpenBao, Infisical or Doppler, fresh for each run
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
+- Apps that exist only on your tailnet, opened only by the Tailscale logins and tags you list, with
+  no public domain, no sign-in server and no certificate to order
 - A maintenance page switched on at once, without a deploy, and the app's own error pages
 - Build logs, runtime, console, request logs and traffic alerts per project
 - A failed run named from its own output, and on request explained by your own model, secrets masked

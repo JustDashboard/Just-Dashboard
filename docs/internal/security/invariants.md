@@ -189,7 +189,12 @@ A change that weakens any of these has to say so explicitly.
    port no preview owns, or an owned port serving an upstream other than the recorded one. A directory,
    a funnel or any other target of the operator's is never touched, at start, on a failed activation or
    on removal, since restore and withdrawal act only on a mapping whose upstream the row recorded. See
-   [preview isolation](../deployments/preview-isolation.md#tailnet-only-addresses).
+   [preview isolation](../deployments/preview-isolation.md#tailnet-only-addresses). An environment whose
+   plan is tailnet-only is published the same way, from the same range and table; when it names who may
+   open it, the mapping goes to its tailnet gate instead of the container, a route bound to `127.0.0.1`
+   alone — on host nginx, or on the dashboard's own Caddy on the host's network, which publishes nothing
+   and binds every site to loopback — so this exception gains no listener on a routable address
+   ([tailnet-only deployments](../deployments/tailnet-apps.md)).
    The second exception is Remote Desktop's stream bridge: on a server on a tailnet it publishes a
    block of 20 UDP ports from 40000 on the **tailnet address only**, for WebRTC
    ([Stream mode](../backend/remote-desktop.md#stream-mode)). Nothing is sent on them without a

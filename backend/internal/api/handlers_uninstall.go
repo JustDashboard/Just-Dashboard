@@ -42,6 +42,9 @@ func (s *Server) initUninstall() {
 		RemovePath:       func(path string) error { return deployFiles.Delete(path, true) },
 		WithdrawPreviews: s.modules.deployExecutor.WithdrawPreviewAddresses,
 		RemoveIngressDir: func() error { return os.RemoveAll(proxysvc.IngressDir) },
+		RemoveTailnetGateDir: func() error {
+			return os.RemoveAll(proxysvc.TailnetGateDir)
+		},
 	}
 	// An interface holding a nil client is not nil, and the teardown asks.
 	if s.modules.docker != nil {

@@ -43,6 +43,31 @@ type OperationsSummary struct {
 	Storage      StorageSummary    `json:"storage"`
 	Backups      BackupSummary     `json:"backups"`
 	Dependencies DependencySummary `json:"dependencies"`
+	// Tailnet is the environment's tailnet address and who may open it,
+	// for a live release that is tailnet-only or a preview's that has one.
+	Tailnet *TailnetSummary `json:"tailnet,omitempty"`
+}
+
+// TailnetSummary is a tailnet-only environment as its live release and its
+// address record have it (tailnet-apps.md).
+type TailnetSummary struct {
+	URL       string `json:"url,omitempty"`
+	Port      int    `json:"port,omitempty"`
+	Published bool   `json:"published"`
+	// Allow is who may open it; empty is everyone on the tailnet, whom the
+	// tailnet itself fences.
+	Allow []string `json:"allow"`
+	// Gate is the proxy that asks who every visitor is — nginx, or caddy for
+	// the dashboard's own loopback Caddy — for a release that names its
+	// visitors; GateRunning says that Caddy is up.
+	Gate        string `json:"gate,omitempty"`
+	GateRunning bool   `json:"gateRunning,omitempty"`
+}
+
+// tailnetGateHost is the optional half of the proxy owner that says which
+// proxy gates this host's tailnet-only deployments.
+type tailnetGateHost interface {
+	TailnetGateHost(context.Context) (string, bool, error)
 }
 
 type DomainSummary struct {
@@ -165,7 +190,28 @@ func (s *OrchestrationStore) Operations(
 	result.Storage = storageSummary(snapshot, observed)
 	result.Backups = backupSummary(snapshot, observed)
 	result.Dependencies = otherDependencySummary(snapshot, observed)
+	result.Tailnet = s.tailnetSummary(ctx, owners, snapshot, summary.EnvironmentID)
 	return result, nil
+}
+
+func (s *OrchestrationStore) tailnetSummary(ctx context.Context, owners OperationsOwners, snapshot runtimeReleaseSnapshot, environmentID int64) *TailnetSummary {
+	address, err := s.PreviewAddressFor(ctx, environmentID)
+	if err != nil || (snapshot.Plan.Tailnet == nil && (address == nil || address.Kind != previewAddressTailnet)) {
+		return nil
+	}
+	out := &TailnetSummary{Allow: []string{}}
+	if address != nil {
+		out.URL, out.Port, out.Published = address.URL, address.Port, address.Published
+	}
+	if snapshot.Plan.Tailnet.IdentityAware() {
+		out.Allow = append(out.Allow, snapshot.Plan.Tailnet.Allow...)
+		if host, ok := owners.Proxy.(tailnetGateHost); ok {
+			if gate, running, err := host.TailnetGateHost(ctx); err == nil {
+				out.Gate, out.GateRunning = gate, running
+			}
+		}
+	}
+	return out
 }
 
 type dependencyObservations struct {

@@ -229,10 +229,14 @@ func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, p
 		       COALESCE(build.method, 'none'), COALESCE(build.config_json, '{}'),
 		       COALESCE(runtime.config_json, '{}'), COALESCE(live_runtime.port, 0),
 		       COALESCE(live_runtime.state, ''),
-		       COALESCE((
+		       COALESCE(NULLIF((
 		         SELECT d.resource_id FROM deploy_dependencies d
 		          WHERE d.environment_id = e.id AND d.kind = 'domain'
 		          ORDER BY d.id LIMIT 1
+		       ), ''), (
+		         -- A tailnet-only environment's address is the one it has.
+		         SELECT x.url FROM deploy_preview_addresses x
+		          WHERE x.environment_id = e.id AND x.url != ''
 		       ), '')
 		  FROM deploy_projects p
 		  JOIN deploy_environments e ON e.project_id = p.id
