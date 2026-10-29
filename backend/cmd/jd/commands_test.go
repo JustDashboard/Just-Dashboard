@@ -237,7 +237,7 @@ func TestConfigGetSaysHowManyReplicas(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit %d %s", code, stderr)
 	}
-	if !strings.Contains(stdout, "nginx:1.27-alpine · port 80 · stop first · 2 replicas") {
+	if !strings.Contains(stdout, "nginx:1.27-alpine · port 80 · stop first · 2 replicas · skew protection") {
 		t.Errorf("runtime line does not name the replicas:\n%s", stdout)
 	}
 }

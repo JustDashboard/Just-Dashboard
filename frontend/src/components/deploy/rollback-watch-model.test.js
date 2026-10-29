@@ -5,6 +5,8 @@ import {
   latencyTone,
   policyLine,
   shareTone,
+  skewLine,
+  warmLine,
   watchShown,
   watchTitle,
   windowRemaining,
@@ -130,6 +132,29 @@ describe("words", () => {
     )
     expect(policyLine({ ...DEFAULT_ROLLBACK_POLICY, keepWarm: false })).toBe(
       "The previous release is removed as soon as a new one is live.",
+    )
+  })
+  test("the warm release is paused, or answers its own visitors", () => {
+    expect(warmLine(watch())).toBe("release #41 paused")
+    expect(
+      warmLine(
+        watch({
+          warmRunning: true,
+          warmServed: { requests: 1240, failures: 0, errorRate: 0, from: "", until: "" },
+        }),
+      ),
+    ).toBe("release #41 answered 1,240 of its visitors' requests")
+    expect(warmLine(watch({ warmRunning: true }))).toBe(
+      "release #41 answered 0 of its visitors' requests",
+    )
+  })
+  test("skew protection says how long a visitor is kept", () => {
+    expect(skewLine(false, DEFAULT_ROLLBACK_POLICY)).toBeUndefined()
+    expect(skewLine(true, DEFAULT_ROLLBACK_POLICY)).toBe(
+      "A visitor stays on the release that answered them for up to 10 minutes after a cutover.",
+    )
+    expect(skewLine(true, { ...DEFAULT_ROLLBACK_POLICY, keepWarm: false })).toMatch(
+      /only while it drains/,
     )
   })
 })

@@ -558,7 +558,7 @@ func renderTLS(l *lines, spec *SiteSpec) {
 // writesHeaders says whether the server sets any response header, each of
 // which a location with an add_header of its own has to repeat.
 func (spec *SiteSpec) writesHeaders() bool {
-	return spec.SecurityHeaders || spec.HSTS ||
+	return spec.SecurityHeaders || spec.HSTS || (spec.Pool != nil && spec.Split != nil && spec.Split.CookieMaxAge > 0) ||
 		(spec.cachesStatic() && spec.StaticCache.Immutable) || spec.cachesProxy() ||
 		spec.headersWritten()
 }
@@ -576,6 +576,7 @@ func renderHeaders(l *lines, spec *SiteSpec) {
 	}
 	cacheHeaders(l, spec)
 	renderSiteHeaders(l, spec)
+	renderReleaseCookie(l, spec)
 }
 
 func renderServerOptions(l *lines, spec *SiteSpec) {

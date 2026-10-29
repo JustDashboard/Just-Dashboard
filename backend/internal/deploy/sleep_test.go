@@ -38,6 +38,7 @@ func TestSleepPlanValidation(t *testing.T) {
 		"host networking":          func(c *PlanConfiguration) { c.Runtime.HostNetwork = true },
 		"tailnet only":             func(c *PlanConfiguration) { c.Runtime.Tailnet = &RouteTailnet{} },
 		"replicas":                 func(c *PlanConfiguration) { c.Runtime.Replicas = 2 },
+		"skew protection":          func(c *PlanConfiguration) { c.Runtime.SkewProtection = true },
 		"a canary": func(c *PlanConfiguration) {
 			c.Runtime.Strategy, c.Runtime.Canary = StrategyCanary, &CanaryTerms{Percent: 10, DurationSeconds: 300}
 		},

@@ -118,6 +118,13 @@ func (w *RollbackWatcher) watch(ctx context.Context, watch RollbackWatch) {
 		switch {
 		case err != nil:
 			w.warn("a warm container could not be inspected", err)
+		case watch.WarmRunning && state == "paused":
+			// Kept running for skew protection, the route still sends it
+			// the visitors it answered first.
+			if err := warmer.ResumeRuntime(ctx, *runtime); err != nil {
+				w.warn("a warm container kept for its visitors could not be resumed", err)
+			}
+		case watch.WarmRunning && state == "running":
 		case state == "running":
 			// A Docker restart brings a paused container back running; it
 			// is frozen again before it does any work nobody routes to it.
@@ -178,7 +185,19 @@ func (w *RollbackWatcher) read(ctx context.Context, watch RollbackWatch, now tim
 			watch.Baseline = baseline
 		}
 	}
-	after, err := w.record.Window(ctx, route, accesslog.Filter{Since: watch.CutoverAt, Until: now, Limit: 1})
+	// With the warm release still answering its own visitors, the watched
+	// release is judged on the requests it answered, and what the warm one
+	// answered is kept beside it.
+	since := accesslog.Filter{Since: watch.CutoverAt, Until: now, Limit: 1}
+	if watch.WarmRunning {
+		since.Release = releaseLabel(watch.ReleaseID)
+		warm := since
+		warm.Release = releaseLabel(watch.WarmReleaseID)
+		if served, err := w.record.Window(ctx, route, warm); err == nil {
+			_ = store.recordWarmServed(ctx, watch.ID, rollbackReading(served, watch.CutoverAt, now))
+		}
+	}
+	after, err := w.record.Window(ctx, route, since)
 	if err != nil {
 		return baseline, nil, RollbackVerdict{Code: RollbackVerdictNoRecord,
 			Reason: "The request record could not be read, so nothing is judged until it can be."}

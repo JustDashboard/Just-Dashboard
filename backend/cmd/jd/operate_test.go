@@ -173,7 +173,7 @@ func TestStatusReadsEveryPieceAndJSONIsOneObject(t *testing.T) {
 		"last run        #4 succeeded",
 		"environments    production (live release 102), staging (live release 150)",
 		"live release    #3 (id 102)",
-		"rollback watch  watching release #3, warm #2, until",
+		"rollback watch  watching release #3, warm #2 running for its visitors (41 requests), until",
 		"(keep warm 600s, automatic)",
 		"maintenance     off (caddy)",
 		"rehearsal       off",

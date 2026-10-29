@@ -293,29 +293,35 @@ func baselineShare(baseline *RollbackReading, trusted bool) string {
 // RollbackWatch is one window. ReleaseID is the release being judged and
 // WarmReleaseID the one kept warm to switch back to.
 type RollbackWatch struct {
-	ID              int64            `json:"id"`
-	ProjectID       int64            `json:"projectId"`
-	EnvironmentID   int64            `json:"environmentId"`
-	RunID           int64            `json:"runId"`
-	ReleaseID       int64            `json:"releaseId"`
-	WarmReleaseID   int64            `json:"warmReleaseId"`
-	WarmRuntimeID   string           `json:"warmRuntimeId"`
-	State           string           `json:"state"`
-	Policy          RollbackPolicy   `json:"policy"`
-	CutoverAt       time.Time        `json:"cutoverAt"`
-	ExpiresAt       time.Time        `json:"expiresAt"`
-	Baseline        *RollbackReading `json:"baseline,omitempty"`
-	Observed        *RollbackReading `json:"observed,omitempty"`
-	Verdict         *RollbackVerdict `json:"verdict,omitempty"`
-	CheckedAt       *time.Time       `json:"checkedAt,omitempty"`
-	RollbackRunID   int64            `json:"rollbackRunId,omitempty"`
-	Attempts        int              `json:"attempts"`
-	EndReason       string           `json:"endReason,omitempty"`
-	EndMessage      string           `json:"endMessage,omitempty"`
-	EndedAt         *time.Time       `json:"endedAt,omitempty"`
-	CreatedAt       time.Time        `json:"createdAt"`
-	ReleaseNumber   int64            `json:"releaseNumber"`
-	WarmReleaseNum  int64            `json:"warmReleaseNumber"`
+	ID             int64            `json:"id"`
+	ProjectID      int64            `json:"projectId"`
+	EnvironmentID  int64            `json:"environmentId"`
+	RunID          int64            `json:"runId"`
+	ReleaseID      int64            `json:"releaseId"`
+	WarmReleaseID  int64            `json:"warmReleaseId"`
+	WarmRuntimeID  string           `json:"warmRuntimeId"`
+	State          string           `json:"state"`
+	Policy         RollbackPolicy   `json:"policy"`
+	CutoverAt      time.Time        `json:"cutoverAt"`
+	ExpiresAt      time.Time        `json:"expiresAt"`
+	Baseline       *RollbackReading `json:"baseline,omitempty"`
+	Observed       *RollbackReading `json:"observed,omitempty"`
+	Verdict        *RollbackVerdict `json:"verdict,omitempty"`
+	CheckedAt      *time.Time       `json:"checkedAt,omitempty"`
+	RollbackRunID  int64            `json:"rollbackRunId,omitempty"`
+	Attempts       int              `json:"attempts"`
+	EndReason      string           `json:"endReason,omitempty"`
+	EndMessage     string           `json:"endMessage,omitempty"`
+	EndedAt        *time.Time       `json:"endedAt,omitempty"`
+	CreatedAt      time.Time        `json:"createdAt"`
+	ReleaseNumber  int64            `json:"releaseNumber"`
+	WarmReleaseNum int64            `json:"warmReleaseNumber"`
+	// WarmRunning is a window whose warm release is kept running rather
+	// than paused, because skew protection still sends it the visitors it
+	// answered first (skew.go). WarmServed is what it answered since the
+	// cutover, as the watcher last read it.
+	WarmRunning     bool             `json:"warmRunning,omitempty"`
+	WarmServed      *RollbackReading `json:"warmServed,omitempty"`
 	baselineMissing bool
 }
 
@@ -324,17 +330,27 @@ w.id, w.project_id, w.environment_id, w.run_id, w.release_id, w.warm_release_id,
 w.state, w.policy_json, w.cutover_at, w.expires_at, w.baseline_json, w.observed_json, w.verdict_json,
 w.checked_at, w.rollback_run_id, w.attempts, w.end_reason, w.end_message, w.ended_at, w.created_at,
 COALESCE((SELECT release_number FROM deploy_releases WHERE id = w.release_id), 0),
-COALESCE((SELECT release_number FROM deploy_releases WHERE id = w.warm_release_id), 0)`
+COALESCE((SELECT release_number FROM deploy_releases WHERE id = w.warm_release_id), 0),
+w.warm_running, w.warm_served_json`
 
 func scanRollbackWatch(row scanner) (*RollbackWatch, error) {
 	var watch RollbackWatch
-	var policy, baseline, observed, verdict string
+	var policy, baseline, observed, verdict, served string
 	var cutover, expires, checked, ended, created int64
+	var running int
 	if err := row.Scan(&watch.ID, &watch.ProjectID, &watch.EnvironmentID, &watch.RunID, &watch.ReleaseID,
 		&watch.WarmReleaseID, &watch.WarmRuntimeID, &watch.State, &policy, &cutover, &expires, &baseline,
 		&observed, &verdict, &checked, &watch.RollbackRunID, &watch.Attempts, &watch.EndReason,
-		&watch.EndMessage, &ended, &created, &watch.ReleaseNumber, &watch.WarmReleaseNum); err != nil {
+		&watch.EndMessage, &ended, &created, &watch.ReleaseNumber, &watch.WarmReleaseNum,
+		&running, &served); err != nil {
 		return nil, err
+	}
+	watch.WarmRunning = running != 0
+	if served != "null" && served != "" {
+		var reading RollbackReading
+		if json.Unmarshal([]byte(served), &reading) == nil {
+			watch.WarmServed = &reading
+		}
 	}
 	watch.Policy = DefaultRollbackPolicy()
 	_ = json.Unmarshal([]byte(policy), &watch.Policy)
@@ -417,6 +433,8 @@ type warmReleaseInput struct {
 	WarmRuntimeID string
 	Policy        RollbackPolicy
 	CutoverAt     time.Time
+	// Running keeps the warm release running for skew protection.
+	Running bool
 }
 
 // recordWarmRelease opens a window in the same transaction that names the
@@ -456,10 +474,10 @@ func (s *OrchestrationStore) recordWarmRelease(ctx context.Context, run EngineRu
 		expires := input.CutoverAt.Add(time.Duration(input.Policy.WindowSeconds) * time.Second)
 		inserted, err := tx.ExecContext(ctx, `
 			INSERT INTO deploy_rollback_watches(project_id, environment_id, run_id, release_id, warm_release_id,
-			  warm_runtime_id, state, policy_json, cutover_at, expires_at, created_at, updated_at)
-			VALUES(?, ?, ?, ?, ?, ?, 'watching', ?, ?, ?, ?, ?)`,
+			  warm_runtime_id, state, policy_json, cutover_at, expires_at, created_at, updated_at, warm_running)
+			VALUES(?, ?, ?, ?, ?, ?, 'watching', ?, ?, ?, ?, ?, ?)`,
 			run.ProjectID, run.EnvironmentID, run.ID, input.ReleaseID, input.WarmReleaseID, input.WarmRuntimeID,
-			string(mustJSON(input.Policy)), input.CutoverAt.Unix(), expires.Unix(), now.Unix(), now.Unix())
+			string(mustJSON(input.Policy)), input.CutoverAt.Unix(), expires.Unix(), now.Unix(), now.Unix(), boolToInt(input.Running))
 		if err != nil {
 			return 0, err
 		}
@@ -492,6 +510,15 @@ func (s *OrchestrationStore) recordRollbackReading(ctx context.Context, id int64
 		args = append([]any{string(mustJSON(baseline))}, args...)
 	}
 	_, err := s.db.ExecContext(context.WithoutCancel(ctx), query, args...)
+	return err
+}
+
+// recordWarmServed stores what a running warm release answered since the
+// cutover.
+func (s *OrchestrationStore) recordWarmServed(ctx context.Context, id int64, served RollbackReading) error {
+	_, err := s.db.ExecContext(context.WithoutCancel(ctx),
+		`UPDATE deploy_rollback_watches SET warm_served_json = ? WHERE id = ? AND state = 'watching'`,
+		string(mustJSON(served)), id)
 	return err
 }
 

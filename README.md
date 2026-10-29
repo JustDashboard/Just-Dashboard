@@ -110,6 +110,8 @@ free.
 - Up to eight replicas of a stateless release behind one route, cut over and rolled back together
 - Canary releases: a new release takes a share of the requests beside the live one, read side by side,
   and is removed if it does worse or promoted when it does not
+- Skew protection: a visitor stays on the release that first answered them for the warm window after a
+  cutover, so a page loaded before it never asks the new release for scripts it does not have
 - Right-sizing from what each app actually used: the memory and CPU limits it should have, applied in one click
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
 - Domains served through Cloudflare Tunnel from a server with no public address or open port: the

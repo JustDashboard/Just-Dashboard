@@ -22,6 +22,7 @@ import {
   shareOf,
   shareTone,
   trustedBaseline,
+  warmLine,
   watchShown,
   watchTitle,
   windowRemaining,
@@ -32,7 +33,9 @@ import {
  * kept warm (`deploy/rollback_watch.go`): the new release's 5xx share and
  * p95 since it went live beside the old one's, how many requests the reading
  * stands on, and how long the window has left — four readings, read as the
- * project's other figures are. Its two verbs are the window's: switch back to
+ * project's other figures are. With skew protection the warm release still
+ * answers the visitors it answered first; the readings are the new release's
+ * own requests, and the countdown says how many the warm one answered. Its two verbs are the window's: switch back to
  * the warm release now, or keep the new one and give the warm one's memory
  * back. A window that rolled back stays for an hour with the reading that
  * decided it; one that closed clean is the expected answer and is not drawn.
@@ -59,9 +62,12 @@ export function ReleaseWatch({
       description: (
         <>
           Traffic goes back to release #{watch.warmReleaseNumber}&apos;s warm container, which has
-          been paused since the cutover, with release #{watch.warmReleaseNumber}&apos;s own
-          configuration. Release #{watch.releaseNumber} is removed. Nothing is built or started
-          anew.
+          {watch.warmRunning
+            ? " kept running since the cutover for the visitors it answered first,"
+            : " been paused since the cutover,"}{" "}
+          with release #{watch.warmReleaseNumber}&apos;s own configuration. Release #
+          {watch.releaseNumber} is removed, and its visitors are answered by release #
+          {watch.warmReleaseNumber}. Nothing is built or started anew.
         </>
       ),
       confirmLabel: "Roll back",
@@ -207,7 +213,7 @@ function WatchReadings({ watch, remaining }: { watch: RollbackWatch; remaining: 
         <StatTile
           label="Window"
           value={watch.state === "watching" ? clock(remaining) : "—"}
-          hint={`release #${watch.warmReleaseNumber} paused`}
+          hint={warmLine(watch)}
         />
       </StatGrid>
       {verdict && (

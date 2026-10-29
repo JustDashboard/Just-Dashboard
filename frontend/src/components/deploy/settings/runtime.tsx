@@ -167,6 +167,8 @@ function runtimeDraftOf(saved: RuntimePlan): RuntimeDraft {
   delete runtime.interceptErrors
   delete runtime.replay
   delete runtime.sleep
+  // Skew protection is set beside the rollback terms, which save it.
+  delete runtime.skewProtection
   return {
     ...runtime,
     commandText: (runtime.command ?? []).join("\n"),
@@ -335,6 +337,14 @@ export function RuntimeSettings({
               configuration.runtime.strategy === "blue_green" ||
               configuration.runtime.strategy === "canary"
             }
+            skew={{
+              saved: Boolean(configuration.runtime.skewProtection),
+              refusal: skewRefusal(configuration),
+              save: (on) =>
+                state.save({
+                  runtime: (latest) => ({ ...latest.runtime, skewProtection: on || undefined }),
+                }),
+            }}
           />
           <HealthChecksForm projectId={projectId} configuration={configuration} save={state.save} />
         </>
@@ -344,6 +354,18 @@ export function RuntimeSettings({
 }
 
 type Save = ReturnType<typeof useConfiguration>["save"]
+
+/** Why the saved plan cannot keep visitors on their release (`validateSkewProtection`). */
+function skewRefusal(configuration: DeploymentEnvironmentConfiguration) {
+  if (configuration.runtime.strategy === "stop_first")
+    return "a stop-first release stops the previous one before the next starts"
+  const method = configuration.build.method
+  if (method === "compose" || method === "legacy_compose")
+    return "a Compose stack is never kept warm"
+  if (!configuration.domains.some((domain) => !domain.redirectTo))
+    return "it is a cookie the public route sets, and this plan has no domain"
+  return undefined
+}
 
 /**
  * One or two states for a section head, side by side, or nothing when there
@@ -459,6 +481,7 @@ function RuntimeForm({
           maintenance: latest.runtime.maintenance,
           errorPages: latest.runtime.errorPages,
           interceptErrors: latest.runtime.interceptErrors,
+          skewProtection: latest.runtime.skewProtection,
         }),
       })
       // The lists go to the server one entry per line, trimmed; the draft
@@ -1073,6 +1096,7 @@ function RuntimeForm({
             hostNetwork: Boolean(runtime.hostNetwork),
             replicas,
             canary,
+            skewProtection: Boolean(configuration.runtime.skewProtection),
             blockingCheck: configuration.checks.find(
               (check) =>
                 check.phase === "readiness" &&

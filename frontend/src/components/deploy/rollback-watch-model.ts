@@ -127,6 +127,26 @@ function trim(value: number) {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)))
 }
 
+/**
+ * What the warm release is doing, under the window's countdown: paused, or —
+ * kept running for skew protection — how many of its own visitors' requests
+ * it answered since the cutover.
+ */
+export function warmLine(watch: RollbackWatch) {
+  if (!watch.warmRunning) return `release #${watch.warmReleaseNumber} paused`
+  const served = watch.warmServed?.requests ?? 0
+  return `release #${watch.warmReleaseNumber} answered ${served.toLocaleString()} of its visitors' ${served === 1 ? "request" : "requests"}`
+}
+
+/** Skew protection in one sentence, as the settings say it back. */
+export function skewLine(on: boolean, policy: RollbackPolicy) {
+  if (!on) return undefined
+  if (!policy.keepWarm)
+    return "A visitor stays on the release that answered them only while it drains, since it is not kept warm."
+  const minutes = Math.round(policy.windowSeconds / 60)
+  return `A visitor stays on the release that answered them for up to ${minutes} ${minutes === 1 ? "minute" : "minutes"} after a cutover.`
+}
+
 /** Why a closed window closed, in the words of its end reason. */
 export function endLabel(reason: string | undefined) {
   switch (reason) {

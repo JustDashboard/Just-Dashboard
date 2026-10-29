@@ -142,7 +142,7 @@ func (f *fakeDashboard) serve(w http.ResponseWriter, r *http.Request) {
 		w.Write(fakeOpenAPIYAML)
 	case route == "GET "+env+"/configuration":
 		f.write(w, 200, map[string]any{"revision": f.revision, "build": map[string]any{"method": "image"},
-			"runtime":   map[string]any{"image": "nginx:1.27-alpine", "internalPort": 80, "strategy": "stop_first", "replicas": 2},
+			"runtime":   map[string]any{"image": "nginx:1.27-alpine", "internalPort": 80, "strategy": "stop_first", "replicas": 2, "skewProtection": true},
 			"variables": f.variableList(), "domains": []any{}, "checks": []any{}, "dependencies": []any{},
 			"source": map[string]any{"kind": "image", "image": "nginx:1.27-alpine"}, "pending": map[string]any{"pending": true}})
 	case route == "PUT "+env+"/configuration":
@@ -225,7 +225,8 @@ func (f *fakeDashboard) serve(w http.ResponseWriter, r *http.Request) {
 		f.write(w, 202, window)
 	case route == "GET "+env+"/rollback-watch":
 		f.write(w, 200, map[string]any{"policy": map[string]any{"keepWarm": true, "windowSeconds": 600, "automatic": true},
-			"watch":   map[string]any{"state": "watching", "releaseNumber": 3, "warmReleaseNumber": 2, "expiresAt": "2026-10-27T10:10:00Z"},
+			"watch": map[string]any{"state": "watching", "releaseNumber": 3, "warmReleaseNumber": 2, "expiresAt": "2026-10-27T10:10:00Z",
+				"warmRunning": true, "warmServed": map[string]any{"requests": 41}},
 			"preview": false})
 	case route == "GET "+env+"/maintenance":
 		f.write(w, 200, map[string]any{"driver": "caddy", "route": true, "ready": true, "on": f.maintenanceOn})

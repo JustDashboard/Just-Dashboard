@@ -142,6 +142,42 @@ the cutover or the abort; nothing else writes it.
 `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveCanaryAbortsAFailingReleaseAndPromotesAHealthyOne -count=1 -v`
 runs both outcomes through a real Caddy.
 
+## Skew protection
+
+With skew protection ([skew protection](canary-and-replicas.md#skew-protection)) the route keeps each
+visitor on the release that first answered them. After the cutover from release 41 to 42, with 41 kept
+warm for its visitors, the handling is (`caddyReleases`):
+
+```
+@jd_release_41 header_regexp Cookie `(?:^|;\s*)jd_release=41(?:;|$)`
+handle @jd_release_41 {
+  log_append release 41
+  reverse_proxy "http://172.18.0.5:3000"
+}
+@jd_release_42 header_regexp Cookie `(?:^|;\s*)jd_release=42(?:;|$)`
+handle @jd_release_42 {
+  log_append release 42
+  reverse_proxy "http://172.18.0.8:3000"
+}
+handle {
+  log_append release 42
+  header {
+    +Set-Cookie "jd_release=42; Path=/; Max-Age=600; HttpOnly; SameSite=Lax; Secure"
+    defer
+  }
+  reverse_proxy "http://172.18.0.8:3000"
+}
+```
+
+A cookie naming a release the route serves is answered by that release and sets nothing; every other
+request — no cookie, or one naming a release that is gone — falls to the last branches, which add the
+cookie to the answer. A canary's draw sits between them as its own `handle`, setting its own cookie. The
+plain-HTTP server block writes the cookie without `Secure`. The pinned release's containers are recorded
+on the target lines after the live release's, so the maintenance pass repairs them as well.
+
+`JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveSkewProtectionKeepsAVisitorOnTheirRelease -count=1 -v`
+runs a cutover, a kept visitor, a fresh one and the window's end through a real Caddy.
+
 ## Request body limit
 
 A managed route carries the plan's `runtime.maxRequestBodyMb` as `request_body { max_size <N>MB }` when
