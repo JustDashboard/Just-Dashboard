@@ -3368,7 +3368,10 @@ loopback-only publication, network ownership and cleanup, then removes its own
 containers/volumes/networks. Each image is pulled, and the pull timed in the log, before anything is
 created; the engine then has two minutes (MongoDB five) from its container starting to accept a
 sign-in, and a failure reports the adopt route's last reply with the container's state and last log
-lines.
+lines. MongoDB 8 refuses to start on Linux 6.19 and newer (MongoDB SERVER-121912). Provisioning checks
+the CPU (`deploy.MongoCPUUnsupported`) but not the kernel, so on such a host it starts a server that
+the `unless-stopped` policy restarts for ever; the fixture's MongoDB subtest skips at once with the
+engine's own line when it sees that, instead of waiting.
 
 ## Proxy
 

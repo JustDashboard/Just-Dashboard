@@ -78,6 +78,15 @@ func TestLiveDeploymentDatabaseConnection(t *testing.T) {
 					problem = fmt.Sprintf("adopted as connection %d, but its ping answered HTTP %d: %s", conn.ID, ping.Code, clip(ping.Body.String(), 400))
 				} else {
 					problem = fmt.Sprintf("the last adopt answered HTTP %d: %s", adopted.Code, clip(adopted.Body.String(), 400))
+					if engine == "mongodb" {
+						// Not a slow start: the server refuses to run here and the
+						// container restarts for ever, so waiting out the budget would
+						// only fail later with the same words in its log.
+						tail, _ := fixtureLogTail(s.modules.docker, name, 5)
+						if refusal := mongoKernelRefusal(tail); refusal != "" {
+							t.Skipf("mongodb: this host's kernel (%s) is one the MongoDB image refuses to start on, so there is no server to connect to: %s", hostKernelRelease(), clip(refusal, 300))
+						}
+					}
 				}
 				if time.Now().After(deadline) {
 					t.Fatalf("%s did not accept connections within %s; %s\n%s", engine, budget, problem, describeFixtureContainer(s.modules.docker, name))
@@ -378,14 +387,71 @@ func describeFixtureContainer(docker *dockerx.Client, name string) string {
 	}
 	out := fmt.Sprintf("container %s: state %q, exit code %d, restarts %d, oom-killed %t, engine error %q",
 		name, observed.State, observed.ExitCode, observed.RestartNum, observed.OOMKilled, observed.Error)
-	lines, closer, err := docker.Logs(ctx, name, dockerx.LogOptions{Tail: "20"})
+	tail, err := fixtureLogTail(docker, name, 20)
 	if err != nil {
 		return out + fmt.Sprintf("; logs unavailable: %v", err)
+	}
+	for i := range tail {
+		tail[i] = clip(tail[i], 300)
+	}
+	return out + "\nlast log lines:\n" + strings.Join(tail, "\n")
+}
+
+// fixtureLogTail is the last n log lines of a fixture container.
+func fixtureLogTail(docker *dockerx.Client, name string, n int) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	lines, closer, err := docker.Logs(ctx, name, dockerx.LogOptions{Tail: strconv.Itoa(n)})
+	if err != nil {
+		return nil, err
 	}
 	defer closer.Close()
 	var tail []string
 	for line := range lines {
-		tail = append(tail, clip(line.Text, 300))
+		tail = append(tail, line.Text)
 	}
-	return out + "\nlast log lines:\n" + strings.Join(tail, "\n")
+	return tail, nil
+}
+
+// mongoKernelRefusal returns the log line in which MongoDB 8 says it will not
+// start on this host's kernel, or "" when none of the lines does. Linux 6.19
+// and newer crash its allocator on startup (MongoDB SERVER-121912), which a
+// runner image that moves to such a kernel turns into a container that
+// restarts for ever. Only that stated refusal is matched, so any other reason
+// the server does not come up still fails the subtest.
+func mongoKernelRefusal(lines []string) string {
+	for _, line := range lines {
+		if strings.Contains(line, "MongoDB cannot start") && strings.Contains(line, "Linux kernel") &&
+			strings.Contains(line, "incompatibility with this version of MongoDB") {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
+}
+
+func hostKernelRelease() string {
+	release, err := os.ReadFile("/proc/sys/kernel/osrelease")
+	if err != nil {
+		return "unknown"
+	}
+	return strings.TrimSpace(string(release))
+}
+
+// TestMongoKernelRefusal pins the line a MongoDB 8.0 container logged on a GitHub
+// runner image whose kernel is 6.19 or newer, before exiting 1 and being
+// restarted fourteen times, and that nothing else is taken for it.
+func TestMongoKernelRefusal(t *testing.T) {
+	refusal := `{"t":{"$date":"2026-10-29T04:18:06.566Z"},"s":"F",  "c":"CONTROL",  "id":12257600,"ctx":"main","msg":"MongoDB cannot start: Linux kernel versions 6.19 and newer has a known incompatibility with this version of MongoDB. See https://jira.mongodb.org/browse/SERVER-121912 for more information."}`
+	if got := mongoKernelRefusal([]string{`{"msg":"Waiting for connections"}`, refusal}); got != refusal {
+		t.Fatalf("the refusal was not recognised: %q", got)
+	}
+	for _, line := range []string{
+		`{"msg":"Waiting for connections"}`,
+		`{"s":"F","msg":"MongoDB cannot start: the data directory is not writable"}`,
+		`{"s":"F","msg":"Illegal instruction"}`,
+	} {
+		if got := mongoKernelRefusal([]string{line}); got != "" {
+			t.Fatalf("%s was taken for a kernel refusal", line)
+		}
+	}
 }
