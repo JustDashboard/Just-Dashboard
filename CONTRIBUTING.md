@@ -310,7 +310,11 @@ to the contribution terms above, including the additional licence grant to the p
   it, and so are images it pulled):
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks -count=1 -v -timeout 2h`.
   A template's schema rules run at build time: every definition is parsed and validated when the
-  catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship.
+  catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship. The
+  same package checks the catalogue's size: `catalogue_counts.go` declares how many definitions
+  ship, how many deploy and how many are Compose templates, because the competitive report and the
+  README quote those numbers, and `TestCatalogueCountsMatchTheShippedDefinitions` fails until a
+  change that adds or retires a template bumps them.
 - Changes to shared variables or to how a run opens its variables also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSharedVariableReachesTheContainer -count=1 -v`,
   which starts a real container with the values a run opens for references to a server, a secret and a
@@ -322,8 +326,20 @@ to the contribution terms above, including the additional licence grant to the p
   `infisical/infisical:v0.167.4`, `postgres:17-alpine`, `redis:7-alpine`, pulled beforehand), reads a
   secret from each through AppRole and a Universal Auth machine identity into a real container's
   environment, a pinned version included, then stops OpenBao and checks the next run's first step fails in
-  the store's own words. It removes everything it made. Doppler has no self-hosted server and is covered
-  by an httptest server that follows its documented API (`secretstore_test.go`).
+  the store's own words. It removes everything it made. Changes to the AWS Secrets Manager client or the
+  SigV4 signer (`secretstore/aws.go`, `sigv4.go`) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSecretsManagerReferenceReachesTheContainer -count=1 -v`,
+  which starts a real LocalStack (`localstack/localstack:2026.10.3`, pulled beforehand, Secrets Manager
+  only) on loopback, reads a JSON secret's field, its `AWSPREVIOUS` staging label and a whole plain secret
+  into a real container through the dashboard's own signed client, then stops LocalStack and checks the
+  next run fails in the store's words; it removes what it made. LocalStack accepts any signature, so the
+  signing itself is proved by the unit tests: AWS's documented SigV4 example and a Secrets Manager request
+  checked against the AWS SDK's signature (`sigv4_test` in `secretstore_test.go`). Doppler, Secrets Manager
+  and Azure Key Vault have no self-hosted server and are covered by httptest servers that follow their
+  documented APIs — Doppler's in `secretstore_test.go`, the other two in `secretstore/secretstoretest`
+  (the Secrets Manager fake verifies every request's signature with an implementation of its own) — through
+  the unit tests, `deploy/secret_store_cloud_test.go` (the live fixture's shape without Docker) and the API
+  tests. The real AWS and Azure services are not exercised by any test.
 - Changes to staging environments, promotion or how a release is cloned also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveStagingReleaseIsPromotedAsTheSameImageAndRolledBack -count=1 -v`
   on a Docker and Buildx host (as root, through `go test -c` and `sudo`, like the others). Through the

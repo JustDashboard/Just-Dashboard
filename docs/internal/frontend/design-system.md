@@ -1736,7 +1736,11 @@ multi-service templates brought thirteen more from the same set: WordPress, Ghos
 rasterised to 96px like Compose's), Plausible, Matomo, listmonk, Paperless-ngx (its leaf lifted to the
 L 0.72 rung), Miniflux (its light variant), Wiki.js, authentik, Keycloak, Docmost (rasterised), Firefly
 III and Planka; a template that pairs an application already drawn with its database
-(`nextcloud-mariadb`, `n8n-postgres`, …) is keyed to that application's file.
+(`nextcloud-mariadb`, `n8n-postgres`, …) is keyed to that application's file. The second batch of
+templates brought thirteen more: Activepieces, Flowise, LibreChat, LobeChat, Chroma, Budibase, Grist,
+Documenso, Rallly, Wakapi, Duplicati, AnythingLLM (its light variant) and GlitchTip (its purple lifted
+to the L 0.72 rung); Langflow, LiteLLM, Appsmith, GoatCounter, SFTPGo and Apprise have no vector mark
+in the collection and keep their category glyph.
 
 The Databases section brought sixteen more, from the same three collections under the same rules:
 dashboard-icons' etcd, CouchDB, Cassandra, OpenSearch, FerretDB and Kafka (its white variant);
