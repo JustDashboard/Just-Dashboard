@@ -161,6 +161,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/{id}/environments/{env}/promotion":                     keyOpen,
 	"GET /deploy/{id}/environments/{env}/rollback-watch":                keyOpen,
 	"GET /deploy/{id}/environments/{env}/maintenance":                   keyOpen,
+	"GET /deploy/{id}/environments/{env}/sleep":                         keyOpen,
 	"GET /deploy/{id}/environments/{env}/pages/{page}":                  keyOpen, // what every visitor is shown
 	"GET /deploy/{id}/environments/{env}/rehearsal":                     keyOpen, // the terms; the last report is the run's
 	"GET /deploy/{id}/environments/{env}/releases":                      keyOpen,
@@ -204,6 +205,9 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	// configuration's (runtime.maintenance.bypassFrom), which the key writes
 	// as any configuration, and reaches the route with the next release.
 	"PUT /deploy/{id}/environments/{env}/maintenance": keyOpen,
+	// Waking a sleeping environment starts its live container, which any
+	// visitor's request does and Start does.
+	"POST /deploy/{id}/environments/{env}/sleep/wake": keyOpen,
 
 	// Creating a deployment: session-only until a deploy key. A key's drafts
 	// are its own — the draft records the key, and the handlers hold a key to

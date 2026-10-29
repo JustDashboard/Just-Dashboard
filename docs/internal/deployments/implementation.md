@@ -1089,6 +1089,25 @@ only renderer/executor/validation authority for their feature.
   keep are a deploy key's too (`jd status`, `jd rollback --instant`, `jd keep`); the terms stay a
   session's. The live proof is
   `TestLiveMetricGatedRollbackSwitchesBackToTheWarmRelease` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
+- **Scale to zero** ([sleep when idle](scale-to-zero.md), `deploy/sleep.go`): a plan's `runtime.sleep
+  {enabled, idleMinutes 5–1440 (15), wakeTimeoutSeconds 5–600 (60)}`, off by default and refused for a
+  Compose stack, host networking, a plan without a served domain, and a required `docker_health` or
+  `public_route` readiness check; the API also refuses it beside an enabled schedule that runs a
+  command in the container, and that schedule beside it. The `Sleeper` (after the engine, every minute)
+  stops the live container — not removed — once the route has served no request for the idle minutes,
+  read from the held request record, never while a run is queued or running, a warm release is watched,
+  the runtime was stopped by hand, or the wake is not listening; the stretch is a row of
+  `deploy_sleep_spans`, written before the route's `sleeping.on` switch and the stop. A release that
+  sleeps has a route that wakes it (`DeploymentRoute.Sleep`): a request meeting the switch, or the
+  application not answering, is held by the proxy while the dashboard — asked over a Unix socket only the
+  proxy reaches, answering only a peer that is nginx or Caddy — starts the container, waits for its own
+  readiness checks and answers with its address; the proxy then sends the request on as it came, or
+  serves the waking page past the hold (`min(wakeTimeoutSeconds, 30)`). Every run wakes a sleeping
+  environment at its first step (`endSleep`), a stop only ends the stretch. The idle decision, the sleep
+  and the wake are audited (`deploy.environment.idle`, `.sleep`, `.wake`) and are what the lifecycle
+  feed attributes the stop and the start to; the summary's `asleepSince` makes the project read Asleep
+  with Wake now (`POST …/sleep/wake`), the host's container alert reads it as fine and the availability
+  figure leaves it out. `GET …/environments/{env}/sleep` is the reading.
 - A failed build names its cause instead of `internal_error` and exec's `exit status 1`. `dockerx`
   reads buildx's plain progress as it streams (over `os.Pipe`s read to EOF, because a `StdoutPipe` is
   closed by `Wait` and dropped BuildKit's closing lines; once buildx has exited a read waits at most

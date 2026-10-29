@@ -382,3 +382,33 @@ func TestMergedLifecycleEventsCountAnEventHeldByBothOnce(t *testing.T) {
 		t.Fatalf("limit 2 keeps the two newest: %+v", capped)
 	}
 }
+
+// A sleeping environment's stop is the idle decision's, written just before
+// it, and its start is the wake's, written just after it — not the sleep's
+// entry before the start, which the release pass would otherwise offer.
+func TestASleepsStopAndStartAreItsIdleDecisionAndItsWake(t *testing.T) {
+	s := testServer(t)
+	now := time.Now().UTC()
+	record := func(at time.Time, action string) {
+		s.Audit.Record(t.Context(), audit.Entry{TS: at, Action: action, Target: "lampino", Actor: "system", Success: true})
+	}
+	record(now.Add(-10*time.Minute), "deploy.environment.idle")
+	record(now.Add(-10*time.Minute+5*time.Second), "deploy.environment.sleep")
+	record(now.Add(2*time.Second), "deploy.environment.wake")
+	events := correlated(t, s, "lampino", []dockerx.Event{
+		event(now, "container", "start", "jd-e6-r2", owner("6")),
+		event(now.Add(-10*time.Minute+3*time.Second), "container", "die", "jd-e6-r2", owner("6")),
+		event(now.Add(-10*time.Minute+2*time.Second), "container", "kill", "jd-e6-r2", owner("6")),
+		event(now.Add(-20*time.Minute), "container", "create", "jd-e6-r2", owner("6")),
+	})
+	want := []string{"deploy.environment.wake", "deploy.environment.idle", "deploy.environment.idle", ""}
+	for index, ev := range events {
+		got := ""
+		if ev.Trigger != nil {
+			got = ev.Trigger.Action
+		}
+		if got != want[index] {
+			t.Errorf("%s = %q, want %q", ev.Action, got, want[index])
+		}
+	}
+}

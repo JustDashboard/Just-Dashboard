@@ -23,6 +23,9 @@
   from its retained container samples (percentiles, headroom, throttling and OOM kills, verdicts, the
   apply through the configuration PUT), and the capacity forecast: days until each disk is full and the
   fastest-growing deployment volumes.
+- [`scale-to-zero.md`](scale-to-zero.md) — sleep when idle: the terms and what refuses them, the idle
+  decision, stopping without removing, the route's wake on nginx and Caddy, the wake socket only the proxy
+  reaches, waking on the first request, runs and repair, and what reads asleep as not down.
 - [`log-drains.md`](log-drains.md) — copying deployments' container output and requests to OpenTelemetry
   (OTLP), Loki or a JSON-lines endpoint, and the requests as OTLP trace spans: formats, severity,
   traces, sealed headers, delivery, retries and status.

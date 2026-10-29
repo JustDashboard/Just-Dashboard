@@ -819,6 +819,10 @@ func publicRoute(environmentID int64, snapshot runtimeReleaseSnapshot, host stri
 		policy := h.proxy()
 		route.HSTS = &policy
 	}
+	// A release that sleeps has a route that wakes it (sleep.go).
+	if sleep := snapshot.Plan.Sleep; sleep.on() {
+		route.Sleep = &proxysvc.DeploymentSleep{HoldSeconds: sleep.holdSeconds()}
+	}
 	return route
 }
 

@@ -141,7 +141,9 @@ type interval struct {
 
 // ComputeAvailability is the figure from the releases' live spans and the
 // environment's container events, oldest first, with the record's reach.
-func ComputeAvailability(now, recordSince time.Time, spans []LiveSpan, events []dockerx.Event) Availability {
+// asleep are the stretches it spent asleep by design (sleep.go), which are
+// not downtime: a visitor then got the page after a pause, not an error.
+func ComputeAvailability(now, recordSince time.Time, spans []LiveSpan, events []dockerx.Event, asleep ...SleepSpan) Availability {
 	out := Availability{Status: "available", ObservedAt: now.UTC(), Windows: []AvailabilityWindow{}}
 	if !recordSince.IsZero() {
 		since := recordSince.UTC()
@@ -156,6 +158,21 @@ func ComputeAvailability(now, recordSince time.Time, spans []LiveSpan, events []
 		}
 	}
 	downs, downNow := downIntervals(now, byRelease, events)
+	if len(asleep) > 0 {
+		var sleeping []interval
+		for _, span := range asleep {
+			to := now
+			if span.WokeAt != nil {
+				to = *span.WokeAt
+			} else {
+				downNow = false
+			}
+			if to.After(span.SleptAt) {
+				sleeping = append(sleeping, interval{span.SleptAt, to})
+			}
+		}
+		downs = subtractIntervals(downs, mergeIntervals(sleeping))
+	}
 	out.Down = downNow
 	for _, window := range AvailabilityWindows {
 		out.Windows = append(out.Windows, availabilityOver(now, recordSince, window, spans, downs))
@@ -252,6 +269,33 @@ func downIntervals(now time.Time, spans map[int64]LiveSpan, events []dockerx.Eve
 		}
 	}
 	return mergeIntervals(intervals), downNow
+}
+
+// subtractIntervals is what of in is not covered by cut, both merged and
+// sorted.
+func subtractIntervals(in, cut []interval) []interval {
+	var out []interval
+	for _, down := range in {
+		pieces := []interval{down}
+		for _, c := range cut {
+			var next []interval
+			for _, piece := range pieces {
+				if !c.to.After(piece.from) || !c.from.Before(piece.to) {
+					next = append(next, piece)
+					continue
+				}
+				if c.from.After(piece.from) {
+					next = append(next, interval{piece.from, c.from})
+				}
+				if c.to.Before(piece.to) {
+					next = append(next, interval{c.to, piece.to})
+				}
+			}
+			pieces = next
+		}
+		out = append(out, pieces...)
+	}
+	return out
 }
 
 // mergeIntervals unions overlapping stretches: two containers of one release

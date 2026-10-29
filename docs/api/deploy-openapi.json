@@ -5051,6 +5051,13 @@
               }
             ]
           },
+          "asleepSince": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "buildMethod": {
             "enum": [
               "recipe",
@@ -12022,6 +12029,16 @@
               "null"
             ]
           },
+          "sleep": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.SleepPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "stopSignal": {
             "type": "string"
           },
@@ -12421,6 +12438,152 @@
           }
         },
         "title": "deploy.SharedVariableWrite",
+        "type": "object"
+      },
+      "deploy.SleepPlan": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "idleMinutes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "wakeTimeoutSeconds": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "deploy.SleepPlan",
+        "type": "object"
+      },
+      "deploy.SleepSpan": {
+        "properties": {
+          "containerId": {
+            "type": "string"
+          },
+          "environmentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "idleMinutes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "lastRequestAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "releaseId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sleptAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "wakeDetail": {
+            "type": "string"
+          },
+          "wakeError": {
+            "type": "string"
+          },
+          "wakeSeconds": {
+            "type": "number"
+          },
+          "wakeTrigger": {
+            "type": "string"
+          },
+          "wokeAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "deploy.SleepSpan",
+        "type": "object"
+      },
+      "deploy.SleepStatus": {
+        "properties": {
+          "asleepSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "holdSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "idleMinutes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "lastRequestAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.SleepSpan"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "since": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sleepsAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string"
+          },
+          "switch": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/proxysvc.SleepSwitch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "wakeTimeoutSeconds": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "deploy.SleepStatus",
         "type": "object"
       },
       "deploy.SourceIdentity": {
@@ -13165,6 +13328,25 @@
           }
         },
         "title": "deploy.VariableWriteRequest",
+        "type": "object"
+      },
+      "deploy.WakeOutcome": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "seconds": {
+            "type": "number"
+          },
+          "status": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "upstream": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.WakeOutcome",
         "type": "object"
       },
       "dockerx.Event": {
@@ -14448,6 +14630,28 @@
           }
         },
         "title": "proxysvc.SitePage",
+        "type": "object"
+      },
+      "proxysvc.SleepSwitch": {
+        "properties": {
+          "driver": {
+            "type": "string"
+          },
+          "on": {
+            "type": "boolean"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "since": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "proxysvc.SleepSwitch",
         "type": "object"
       },
       "secretstore.Outcome": {
@@ -20568,6 +20772,133 @@
           }
         }
       ]
+    },
+    "/deploy/{id}/environments/{env}/sleep": {
+      "get": {
+        "description": "The terms are runtime.sleep in the configuration; a change goes live with the next release.",
+        "operationId": "deploymentSleep",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/deploy.SleepStatus"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Read an environment's sleep: whether its live release sleeps when idle, whether it is asleep now, since when and why, and the last seven days of it.",
+        "tags": [
+          "releases"
+        ],
+        "x-deploy-key": "allowed"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ]
+    },
+    "/deploy/{id}/environments/{env}/sleep/wake": {
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ],
+      "post": {
+        "description": "Answers 409 not_asleep when there is nothing asleep to wake.",
+        "operationId": "deploymentWake",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Assembled by the handler; these are its properties.",
+                  "properties": {
+                    "outcome": {
+                      "$ref": "#/components/schemas/deploy.WakeOutcome"
+                    },
+                    "sleep": {
+                      "$ref": "#/components/schemas/deploy.SleepStatus"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Wake a sleeping environment now: start its live release's container and wait for its readiness checks.",
+        "tags": [
+          "releases"
+        ],
+        "x-deploy-key": "allowed"
+      }
     },
     "/deploy/{id}/environments/{env}/source": {
       "parameters": [

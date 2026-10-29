@@ -312,6 +312,10 @@ type hostContainer struct {
 	// Kernel says why, for a MongoDB 8 container on a kernel it refuses to
 	// start on (mongoKernelAlertLine); empty for every other.
 	Kernel string
+	// Asleep is why a deployment's container was stopped by design, while
+	// its environment sleeps (deploy/sleep.go): not down, and the next
+	// request starts it.
+	Asleep string
 }
 
 type hostContainerExit struct {
@@ -377,12 +381,21 @@ func (s *Server) observeHostContainers(ctx context.Context, a *hostAlerts, now t
 		return nil, false
 	}
 	kernel := s.hostKernel(read)
+	asleep := map[string]deploy.SleepSpan{}
+	if s.modules.deployRuns != nil {
+		if spans, err := s.modules.deployRuns.SleepingContainers(read); err == nil {
+			asleep = spans
+		}
+	}
 	seen := map[string]bool{}
 	out := make([]hostContainer, 0, len(list))
 	for _, ct := range list {
 		seen[ct.ID] = true
 		item := hostContainer{ID: ct.ID, Name: ct.Name, State: ct.State, Health: ct.Health, Labels: ct.Labels,
 			Kernel: mongoKernelAlertLine(kernel, ct)}
+		if span, ok := asleep[ct.ID]; ok && ct.State != "running" {
+			item.Asleep = span.Reason
+		}
 		switch ct.State {
 		case "running":
 			delete(a.exits, ct.ID)
@@ -505,6 +518,10 @@ func containerAlertReading(rule hostAlertRule, list []hostContainer, listed bool
 			// A backup freezes a container while it archives its volumes.
 			fine("It is paused, not stopped.")
 		case "exited", "dead":
+			if ct.Asleep != "" {
+				fine("It is asleep by design, and the next request to its domain starts it. " + ct.Asleep)
+				continue
+			}
 			if ct.Exit == nil {
 				reading.Unknown[subject] = true
 				continue
