@@ -1766,6 +1766,141 @@
         "title": "api.hostnameSuggestion",
         "type": "object"
       },
+      "api.imageScanDatabase": {
+        "properties": {
+          "ageHours": {
+            "type": "number"
+          },
+          "installed": {
+            "type": "boolean"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "nextUpdate": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "api.imageScanDatabase",
+        "type": "object"
+      },
+      "api.imageScanReading": {
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "database": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/api.imageScanDatabase"
+              }
+            ]
+          },
+          "policy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/deploy.ImageScanPolicy"
+              }
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "rebuild": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/api.imageScanRebuild"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rebuildReason": {
+            "type": "string"
+          },
+          "releaseId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "releases": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.ImageScanBadge"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "scan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.ImageScan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scanner": {
+            "type": "string"
+          }
+        },
+        "title": "api.imageScanReading",
+        "type": "object"
+      },
+      "api.imageScanRebuild": {
+        "properties": {
+          "operation": {
+            "enum": [
+              "deploy",
+              "redeploy",
+              "restart",
+              "stop",
+              "start",
+              "force_build",
+              "rollback",
+              "promote",
+              "preview_create",
+              "preview_update",
+              "preview_remove",
+              "scheduled_action",
+              "import_adopt",
+              "remove_managed"
+            ],
+            "type": "string"
+          },
+          "sourceRevision": {
+            "type": "string"
+          }
+        },
+        "title": "api.imageScanRebuild",
+        "type": "object"
+      },
+      "api.imageScanRequest": {
+        "properties": {
+          "releaseId": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "api.imageScanRequest",
+        "type": "object"
+      },
       "api.importAdoptRequest": {
         "properties": {
           "acknowledgedUnsupported": {
@@ -8964,6 +9099,208 @@
         "title": "deploy.ImageBuildIssue",
         "type": "object"
       },
+      "deploy.ImageScan": {
+        "properties": {
+          "baseUpdates": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.ReleaseBaseUpdate"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "databaseAgeHours": {
+            "type": "number"
+          },
+          "databaseUpdatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "environmentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "finishedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "floor": {
+            "type": "string"
+          },
+          "newerBase": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "rebuildable": {
+            "type": "boolean"
+          },
+          "releaseId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "releaseNumber": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "requestedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scanner": {
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string"
+          },
+          "summary": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/imagescan.Summary"
+              }
+            ]
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.ImageScanTarget"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "trigger": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.ImageScan",
+        "type": "object"
+      },
+      "deploy.ImageScanBadge": {
+        "properties": {
+          "atFloor": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "counts": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/imagescan.Counts"
+              }
+            ]
+          },
+          "fixable": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "floor": {
+            "type": "string"
+          },
+          "newerBase": {
+            "type": "boolean"
+          },
+          "releaseId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "scannedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.ImageScanBadge",
+        "type": "object"
+      },
+      "deploy.ImageScanPolicy": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "severityFloor": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedBy": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.ImageScanPolicy",
+        "type": "object"
+      },
+      "deploy.ImageScanTarget": {
+        "properties": {
+          "counts": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/imagescan.Counts"
+              }
+            ]
+          },
+          "digest": {
+            "type": "string"
+          },
+          "endOfLife": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "os": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "scannedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.ImageScanTarget",
+        "type": "object"
+      },
       "deploy.ImportCaseMismatch": {
         "properties": {
           "actual": {
@@ -10771,6 +11108,34 @@
           }
         },
         "title": "deploy.ReleaseArtifactStatus",
+        "type": "object"
+      },
+      "deploy.ReleaseBaseUpdate": {
+        "properties": {
+          "checkedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "current": {
+            "type": "string"
+          },
+          "pinned": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.ReleaseBaseUpdate",
         "type": "object"
       },
       "deploy.ReleaseComparison": {
@@ -14122,6 +14487,109 @@
           }
         },
         "title": "githubapp.Status",
+        "type": "object"
+      },
+      "imagescan.Counts": {
+        "properties": {
+          "critical": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "high": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "low": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "medium": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "unknown": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "imagescan.Counts",
+        "type": "object"
+      },
+      "imagescan.Finding": {
+        "properties": {
+          "class": {
+            "type": "string"
+          },
+          "fixed": {
+            "type": "string"
+          },
+          "fromBase": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "installed": {
+            "type": "string"
+          },
+          "package": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "title": "imagescan.Finding",
+        "type": "object"
+      },
+      "imagescan.Summary": {
+        "properties": {
+          "counts": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/imagescan.Counts"
+              }
+            ]
+          },
+          "fixable": {
+            "items": {
+              "$ref": "#/components/schemas/imagescan.Finding"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "fixableCounts": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/imagescan.Counts"
+              }
+            ]
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "unfixed": {
+            "items": {
+              "$ref": "#/components/schemas/imagescan.Finding"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "imagescan.Summary",
         "type": "object"
       },
       "logdrain.Drain": {
@@ -22312,6 +22780,183 @@
         "summary": "Rotate a generated secret; a session is shown the new value once, a key never.",
         "tags": [
           "variables"
+        ],
+        "x-deploy-key": "allowed"
+      }
+    },
+    "/deploy/{id}/environments/{env}/vulnerabilities": {
+      "get": {
+        "operationId": "deploymentImageScans",
+        "parameters": [
+          {
+            "description": "A release's id, to read that release's scan in place of the live one's.",
+            "in": "query",
+            "name": "release",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.imageScanReading"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Read the latest image scan of an environment's live release: counts by severity, the findings with a fix, the vulnerability database's age, whether its base tag names a newer image, the rebuild that would pin it again, and the scanning terms.",
+        "tags": [
+          "environments"
+        ],
+        "x-deploy-key": "allowed"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ],
+      "put": {
+        "description": "Turning scanning on queues a scan of the live release.",
+        "operationId": "deploymentImageScanPolicyPut",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/deploy.ImageScanPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/deploy.ImageScanPolicy"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Set an environment's scanning terms: whether its images are scanned, and the severity findings are counted from.",
+        "tags": [
+          "environments"
+        ],
+        "x-deploy-key": "refused (session_required): whether an environment's images are scanned, and from which severity up, is set in the dashboard"
+      }
+    },
+    "/deploy/{id}/environments/{env}/vulnerabilities/scan": {
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ],
+      "post": {
+        "description": "Answers 409 scanner_unavailable without Docker, no_release before the first release, and scanning_off when the terms turn it off or the environment is a preview.",
+        "operationId": "deploymentImageScanRequest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/api.imageScanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/deploy.ImageScan"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Queue a scan of the live release's images (or the release named) and the bases it was pinned on, now rather than at the day's scan.",
+        "tags": [
+          "environments"
         ],
         "x-deploy-key": "allowed"
       }

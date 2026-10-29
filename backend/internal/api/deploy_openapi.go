@@ -251,6 +251,12 @@ var deployOperations = map[string]deployOperation{
 	"POST /deploy/{id}/environments/{env}/watch-paths/simulate": {Tag: "triggers", Summary: "Try the environment's watch-path filter against a list of changed paths.", Request: watchSimulationRequest{}, Response: shape{"matched": false}},
 	"GET /deploy/{id}/environments/{env}/rehearsal":             {Tag: "environments", Summary: "Read an environment's migration rehearsal terms: whether it is on, which database's backup is restored, and the limits.", Response: deploy.RehearsalPolicy{}},
 	"PUT /deploy/{id}/environments/{env}/rehearsal":             {Tag: "environments", Summary: "Set an environment's migration rehearsal terms.", Request: deploy.RehearsalPolicy{}, Response: deploy.RehearsalPolicy{}},
+	"GET /deploy/{id}/environments/{env}/vulnerabilities": {Tag: "environments", Summary: "Read the latest image scan of an environment's live release: counts by severity, the findings with a fix, the vulnerability database's age, whether its base tag names a newer image, the rebuild that would pin it again, and the scanning terms.",
+		Query: []openapiQuery{{"release", "integer", "A release's id, to read that release's scan in place of the live one's."}}, Response: imageScanReading{}},
+	"PUT /deploy/{id}/environments/{env}/vulnerabilities": {Tag: "environments", Summary: "Set an environment's scanning terms: whether its images are scanned, and the severity findings are counted from.", Request: deploy.ImageScanPolicy{}, Response: deploy.ImageScanPolicy{},
+		Note: "Turning scanning on queues a scan of the live release."},
+	"POST /deploy/{id}/environments/{env}/vulnerabilities/scan": {Tag: "environments", Summary: "Queue a scan of the live release's images (or the release named) and the bases it was pinned on, now rather than at the day's scan.", Request: imageScanRequest{}, Response: (*deploy.ImageScan)(nil), Status: http.StatusAccepted,
+		Note: "Answers 409 scanner_unavailable without Docker, no_release before the first release, and scanning_off when the terms turn it off or the environment is a preview."},
 
 	// Domains: what the public route serves.
 	"GET /deploy/hostname":                             {Tag: "domains", Summary: "Suggest a public hostname under this server's domain for a deployment name, and say whether the name is taken and how a certificate would cover it.", Query: []openapiQuery{{"name", "string", "The deployment's name to derive a hostname from."}, {"hostname", "string", "A hostname to check instead of deriving one."}}, Response: hostnameSuggestion{}},

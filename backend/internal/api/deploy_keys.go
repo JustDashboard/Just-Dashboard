@@ -98,6 +98,7 @@ const (
 	whyOperator        = "the operator reads with a person's leave a call at a time and proposes actions only a person's press runs, in the dashboard"
 	whyDataCopy        = "a copy of a release's data is a second copy of production's data, and its address carries a password: it is asked for, read and removed in the dashboard"
 	whyPreviewBranch   = "what a database gives previews is a second copy of production's data next to a pull request's code: it is decided in the dashboard"
+	whyScanTerms       = "whether an environment's images are scanned, and from which severity up, is set in the dashboard"
 )
 
 // deployKeyRoutes is the decision table: every route a deploy key may make,
@@ -166,6 +167,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/{id}/environments/{env}/sleep":                         keyOpen,
 	"GET /deploy/{id}/environments/{env}/pages/{page}":                  keyOpen, // what every visitor is shown
 	"GET /deploy/{id}/environments/{env}/rehearsal":                     keyOpen, // the terms; the last report is the run's
+	"GET /deploy/{id}/environments/{env}/vulnerabilities":               keyOpen, // the latest scan and the terms
 	"GET /deploy/{id}/environments/{env}/releases":                      keyOpen,
 	"GET /deploy/{id}/environments/{env}/releases/{release}/comparison": keyOpen,
 	"GET /deploy/{id}/environments/{env}/variables":                     keyOpen, // names and digests, never values
@@ -214,6 +216,8 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	// Waking a sleeping environment starts its live container, which any
 	// visitor's request does and Start does.
 	"POST /deploy/{id}/environments/{env}/sleep/wake": keyOpen,
+	// A scan reads what is already deployed and changes none of it.
+	"POST /deploy/{id}/environments/{env}/vulnerabilities/scan": keyOpen,
 
 	// Creating a deployment: session-only until a deploy key. A key's drafts
 	// are its own — the draft records the key, and the handlers hold a key to
@@ -315,6 +319,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"PUT /deploy/{id}/environments/{env}/pages/{page}":                               keySession(whyPages),
 	"PUT /deploy/{id}/environments/{env}/rollback-policy":                            keySession(whyRollbackTerms),
 	"PUT /deploy/{id}/environments/{env}/rehearsal":                                  keySession(whyRehearsalTerms),
+	"PUT /deploy/{id}/environments/{env}/vulnerabilities":                            keySession(whyScanTerms),
 	"POST /deploy/blueprints/{id}/render":                                            keySession("a template's plan is previewed in the dashboard; a draft from it is a deploy key's to make"),
 	"POST /deploy/import/preview":                                                    keySession(whyHost),
 	"POST /deploy/import/adopt":                                                      keySession(whyHost),

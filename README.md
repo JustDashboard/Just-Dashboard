@@ -84,7 +84,8 @@ free.
   projects, containers, databases, domains, backups, shells, accounts — wired together where the
   server knows they are, arranged however you like and remembered
 - Metrics with seven days of history the backend records itself, and CSV export
-- Alerts when the CPU or memory stays high, a disk fills, a container goes down or a backup fails
+- Alerts when the CPU or memory stays high, a disk fills, a container goes down, a backup fails or a
+  deployment's image has a fixable vulnerability a newer base would bring
 - A capacity forecast: when each disk fills at the rate it has been growing, and whose volumes grow fastest
 - Notable moments, top processes and the day's activity at a glance
 - Processes, PM2 apps, systemd services and scheduled jobs, each with its verbs
@@ -127,6 +128,8 @@ free.
 - Diagnose: ask your own model what is wrong with a deployment; it reads runs, logs, usage, events,
   alerts, firewall rules and pending updates only as you allow each read, and proposes a restart,
   rollback or maintenance that runs only when you press it
+- Each release's image and the base images it was built on scanned for known vulnerabilities
+  after the build and daily, offline; told when a fixable one meets a newer base, rebuilt in one click
 - Request insights that count real visitors apart from bots, with their devices and pages
 - Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,
   e-mail and webhooks

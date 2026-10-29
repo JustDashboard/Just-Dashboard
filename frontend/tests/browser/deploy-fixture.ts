@@ -33,6 +33,8 @@ import type {
   GitHubAppStatus,
   GitHubRepoSummary,
   GitPullRequest,
+  ImageScanPolicy,
+  ImageScanReading,
   NotificationChannel,
   NotificationDelivery,
   ProjectPullRequests,
@@ -2171,6 +2173,143 @@ export async function expectSaved(page: Page) {
   await expect(saveBar(page).getByText("Saved", { exact: true })).toBeVisible()
 }
 
+/**
+ * The live release (20, #2) read for known vulnerabilities: zlib's
+ * CVE-2022-37434 and openssl's with a fix, carried by the base, and the base's
+ * tag naming a newer image than the one the release was pinned on — the
+ * alert's condition — plus a high nobody has fixed yet.
+ */
+export function vulnerableScanReading(
+  policy: ImageScanPolicy = { enabled: true, severityFloor: "HIGH" },
+): ImageScanReading {
+  const finding = (
+    id: string,
+    pkg: string,
+    installed: string,
+    fixed: string | undefined,
+    severity: "CRITICAL" | "HIGH" | "MEDIUM",
+  ) => ({
+    id,
+    package: pkg,
+    installed,
+    fixed,
+    severity,
+    title: `${pkg}: a flaw in ${pkg}`,
+    url: `https://avd.aquasec.com/nvd/${id.toLowerCase()}`,
+    target: "alpine 3.19.1",
+    class: "os-pkgs",
+    fromBase: true,
+  })
+  return {
+    policy,
+    available: true,
+    scanner: "Trivy 0.76.1",
+    database: {
+      installed: true,
+      updatedAt: now,
+      ageHours: 6,
+      source: "mirror.gcr.io/aquasec/trivy-db:2",
+    },
+    releaseId: 20,
+    scan: {
+      releaseId: 20,
+      releaseNumber: 2,
+      environmentId: 12,
+      state: "scanned",
+      trigger: "schedule",
+      scanner: "0.76.1",
+      databaseUpdatedAt: now,
+      databaseAgeHours: 6,
+      floor: policy.severityFloor,
+      summary: {
+        counts: { critical: 1, high: 2, medium: 4, low: 9, unknown: 0 },
+        fixableCounts: { critical: 1, high: 1, medium: 3, low: 2, unknown: 0 },
+        fixable: [
+          finding("CVE-2022-37434", "zlib", "1.2.13-r0", "1.2.13-r1", "CRITICAL"),
+          finding("CVE-2024-5535", "openssl", "3.1.4-r5", "3.1.6-r0", "HIGH"),
+        ],
+        unfixed: [finding("CVE-2023-1234", "busybox", "1.36.1-r15", undefined, "HIGH")],
+      },
+      targets: [
+        {
+          kind: "release",
+          reference: "jd-release-e12-r84",
+          state: "scanned",
+          os: "alpine 3.19.1",
+          counts: { critical: 1, high: 2, medium: 4, low: 9, unknown: 0 },
+          scannedAt: now,
+        },
+        {
+          kind: "base",
+          reference: "node:22-alpine",
+          digest: `sha256:${"d".repeat(64)}`,
+          state: "scanned",
+          os: "alpine 3.19.1",
+          counts: { critical: 1, high: 2, medium: 2, low: 4, unknown: 0 },
+          scannedAt: now,
+        },
+      ],
+      baseUpdates: [
+        {
+          reference: "node:22-alpine",
+          pinned: `sha256:${"d".repeat(64)}`,
+          current: `sha256:${"e".repeat(64)}`,
+          state: "outdated",
+          checkedAt: now,
+        },
+      ],
+      newerBase: true,
+      rebuildable: true,
+      requestedAt: now,
+      startedAt: now,
+      finishedAt: now,
+    },
+    rebuild: { operation: "force_build", sourceRevision: "a12bc34d56ef7890" },
+    releases: [
+      {
+        releaseId: 20,
+        state: "scanned",
+        floor: policy.severityFloor,
+        counts: { critical: 1, high: 2, medium: 4, low: 9, unknown: 0 },
+        atFloor: 3,
+        fixable: 2,
+        newerBase: true,
+        scannedAt: now,
+      },
+    ],
+  }
+}
+
+/** The live release scanned clean at its floor. */
+export function cleanScanReading(
+  policy: ImageScanPolicy = { enabled: true, severityFloor: "HIGH" },
+): ImageScanReading {
+  const reading = vulnerableScanReading(policy)
+  return {
+    ...reading,
+    rebuild: { operation: "force_build", sourceRevision: "a12bc34d56ef7890" },
+    scan: {
+      ...reading.scan!,
+      summary: {
+        counts: { critical: 0, high: 0, medium: 1, low: 3, unknown: 0 },
+        fixableCounts: { critical: 0, high: 0, medium: 1, low: 0, unknown: 0 },
+        fixable: [],
+        unfixed: [],
+      },
+      baseUpdates: [
+        {
+          reference: "node:22-alpine",
+          state: "current",
+          pinned: `sha256:${"d".repeat(64)}`,
+          current: `sha256:${"d".repeat(64)}`,
+        },
+      ],
+      newerBase: false,
+    },
+    releases: [],
+  }
+}
+
 export async function mockProject(
   page: Page,
   options: {
@@ -2192,11 +2331,15 @@ export async function mockProject(
     rollbackWatch?: RollbackWatch | null
     /** The environment's migration rehearsal terms; off unless given. */
     rehearsal?: RehearsalPolicy
+    /** The live release's vulnerability scan; clean unless given (vulnerable in the showcase). */
+    vulnerabilities?: ImageScanReading
     /** Fields laid over the saved runtime plan, such as no mounts for a stateless one. */
     runtimePlan?: Partial<DeploymentConfiguration["runtime"]>
   } = {},
 ) {
   const showcase = Boolean(options.showcase)
+  let scanReading: ImageScanReading =
+    options.vulnerabilities ?? (showcase ? vulnerableScanReading() : cleanScanReading())
   let rehearsalPolicy: RehearsalPolicy = options.rehearsal ?? {
     enabled: false,
     connectionId: 0,
@@ -2718,6 +2861,25 @@ export async function mockProject(
         intervalSeconds: 5,
         policy: gitPolicy,
       }
+    } else if (path === "/deploy/7/environments/12/vulnerabilities" && method === "GET") {
+      body = scanReading
+    } else if (path === "/deploy/7/environments/12/vulnerabilities" && method === "PUT") {
+      const policy = request.postDataJSON() as ImageScanPolicy
+      actions.push(`vulnerabilities:${policy.enabled ? policy.severityFloor : "off"}`)
+      scanReading = { ...scanReading, policy: { ...policy, updatedBy: "admin", updatedAt: now } }
+      body = scanReading.policy
+    } else if (path === "/deploy/7/environments/12/vulnerabilities/scan" && method === "POST") {
+      actions.push("scan")
+      scanReading = scanReading.scan
+        ? { ...scanReading, scan: { ...scanReading.scan, state: "queued" } }
+        : scanReading
+      body = scanReading.scan
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      })
+      return
     } else if (path === "/deploy/7/environments/12/rehearsal" && method === "GET") {
       body = rehearsalPolicy
     } else if (path === "/deploy/7/environments/12/rehearsal" && method === "PUT") {
