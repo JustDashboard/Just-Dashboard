@@ -43,7 +43,8 @@ approval; it cannot reuse an earlier generation's run. New environment slugs inc
 the same PR number from different triggers cannot select the same environment.
 
 Preview configuration deliberately inherits no variables or database/dependency links. Every top-level
-mount, including read-only mounts, is rewritten to a distinct, managed named volume. Production release
+mount, including read-only mounts, is rewritten to a distinct, managed named volume (a Compose stack's
+mounts are rewritten service by service at start: [Compose previews](#compose-previews)). Production release
 tasks and explicit build-secret mappings are removed. Preview-specific values can then be configured
 through the normal scoped-variable API. Existing previews without provenance lose copied variable/link
 state when approved configuration is regenerated. Production resource contents are never copied or deleted.
@@ -58,7 +59,8 @@ Container previews use a dedicated Docker bridge with owner labels and loopback 
 existing ingress owner. Docker does not publish ports on containers attached only to an internal network;
 the dedicated bridge permits outbound traffic and is not a hostile-code sandbox. Administrator code
 review remains required. Host network, privileged mode, devices, added capabilities, any release task,
-fixed host ports, production mounts and Compose preview plans are refused at admission and execution.
+fixed host ports, production mounts and compatibility (`legacy_compose`) plans are refused at admission and
+execution; a Compose stack is admitted and isolated service by service, below.
 Dockerfile instructions run only after approval; an approved Dockerfile is trusted executable code.
 
 Checks target the preview's own endpoint rather than inherited production URLs. A configured domain
@@ -116,7 +118,9 @@ and never from a checkout: the GitHub App's installation where the App is instal
 else the dashboard's own gh login (`dir ""`). A host account owning a checkout under `JD_GIT_ROOTS` would
 otherwise be supplying the commit this server builds and runs. The refusals, in order: `400 bad_request`
 (not a full sha), `404 not_github`, `409 not_remote_git` (a local checkout has nothing to fetch the ref
-from), `409 preview_compose`, `409 preview_no_port` (no internal port to publish), the identity
+from), `409 preview_compose` (a compatibility Compose deployment, which has no release engine), `409
+preview_compose_host_access` (a Compose service needs the server itself, or production's plan carries no
+Compose analysis to isolate), `409 preview_no_port` (no internal port to publish), the identity
 (`409 sign_in_required | app_not_installed | not_installed`, `404 pull_request_not_found`,
 `429 github_rate_limited`), `409 pull_request_closed`, `409 pull_request_head_changed` (the message
 ends with the head GitHub reports now, so the operator reviews the new commits before testing them),
@@ -140,6 +144,73 @@ ended short of success, cancelled and superseded included, which the server's li
 (`listedPreviews`) keeps and the UI reads as "Cleanup failed" — and is audited
 `deploy.preview.close` with reason `closed`. The reconciler below closes through the same helper with
 actor `reconciler` and reason `merged` or `closed`.
+
+## Compose previews
+
+A preview of a Compose release isolates every service of the stack the way one preview container is
+isolated, and the public service — the one the release routes to (`build.primaryService`, else the
+analysis's) — is the only one anything outside the stack reaches. `createIsolatedPreviewPlansTx` keeps the
+`compose` build, strips its release tasks and build secrets as for any preview, sets the runtime plan's
+`previewIsolation`, no host port, `bindAddress` `127.0.0.1`, and `stop_first`, since one Compose project
+per environment (`jd-e<preview environment>`) holds one release at a time. It refuses, before an
+environment exists, a stack whose saved analysis says a service needs the server itself — the Docker
+socket, privilege, devices, added capabilities or the host's network (`composePreviewFacts`) — and a plan
+with no Compose analysis to read. `validatePreviewPlan` admits `compose` and still refuses
+`legacy_compose`.
+
+The start is the authority. `DockerRuntimeOwner.startCompose` hands a preview's release to
+`composePreviewRelease`, which reads the stack as Compose resolves it — the source files alone, merged and
+interpolated with the preview's own frozen variables (`dockerx.ComposePreviewOverride`, the same `compose
+config` the storage coverage reads) — and writes the release override that isolates it, every field in it
+a Compose `!override` or `!reset` so nothing of the source files' own value survives the merge:
+
+- **Networks.** Every service joins `jd-preview-e<env>` (created and owned as for a container preview) and
+  the preview's own database-link networks, and nothing else; the aliases the file gave it on its own
+  networks are kept on the preview's bridge, and Compose adds the service name there, so the services
+  still find each other. A `network_mode` of any kind is refused. The top-level networks are replaced, so
+  Compose creates none of the file's (no `jd-e<env>_default`) and joins none of production's.
+- **Ports.** Every service publishes nothing, the public one only `127.0.0.1:<leased port>:<internal
+  port>`, the loopback port the preview's route and tailnet address reach. The override names that port,
+  so it is a file of its own, `.just-dashboard/preview-<port>.yml`: a retried start on another lease must
+  not meet the immutable bytes of the first.
+- **Storage.** A named volume becomes `jd-preview-e<env>-<hash>` keyed by the volume's name in the file (two
+  services that share one in production share one here), an anonymous volume one keyed by its service
+  and target, and a writable bind one keyed by its source; each is created with the preview's labels
+  before Compose runs and adopted only with them (`ensurePreviewVolume`), and the top-level volumes are
+  replaced so production's, external or not, are never named. A read-only bind of a file of the commit
+  itself — inside the release's checkout, with no symbolic link anywhere on the way
+  (`filepath.EvalSymlinks` must answer the path itself) — is kept read-only: those are the bytes the
+  build already read, and a volume over a file would not start. Any other read-only bind, a path of this
+  server or a link out of the checkout, is left out, and the run's transcript says which (`Left out
+  /etc/localtime of service web: a preview reads no path of this server`). `tmpfs` stays.
+- **Everything else production's.** Compose secrets are reset on every service and at the top level,
+  `container_name` (production's container's name) and `external_links` are reset, and every service is
+  labelled `io.just-dashboard.preview=true` beside the release's labels, which is what removal finds.
+
+The same read refuses, as `ErrPreviewIsolation` naming the service, what no preview may have however the
+file reaches it: `network_mode`, privilege, added capabilities, devices, GPUs or device reservations, a
+`host` or `container:` pid, ipc or uts namespace, a `host` user or cgroup namespace, a cgroup parent, a
+runtime other than `runc` or `runsc`, a provider service, `volumes_from`, the Docker socket, an `image`
+or other mount type, a security option that turns confinement off (`seccomp`/`apparmor` unconfined,
+`label:disable`; `no-new-privileges` is fine), a privileged lifecycle hook, and an `io.just-dashboard.*`
+label of the file's own (it could hide a container from cleanup or hand it to another owner's sweep).
+Only structure leaves the resolved document — targets, the preview's own names, aliases and the
+checkout's own paths, never an interpolated value.
+
+Removal is the container preview's: `RemovePreviewResources` removes every container carrying the
+preview's labels (all of the stack's services, with their anonymous volumes), then the
+`jd-preview-e<env>-` volumes carrying them, then the bridge, so nothing is left with the preview's
+labels and production's volumes, binds and network are never named. Variables are copied only on the
+existing opt-in and never for a fork; database links are never copied.
+
+`GET /deploy/{id}/pull-requests` answers `composePreview {public, services[{name, public, ports, volumes,
+checkout, leftOut}], refusals}` for a Compose project, read from the saved analysis
+(`PlanningStore.ComposePreviewFacts`), and each live Compose preview's `services` as Docker reports them
+(`ObserveRuntimeServices` of the preview environment's live release). The test dialog lists what each
+service will and will not get under **Every service is isolated** and says a refusal in place of
+building (`previewBlocker`, `composeServiceLines` in `lib/pull-requests.ts`); the preview's row on the
+Overview lists its services, the public one first, each with its health or state
+(`previewServices`, `previewServiceReading`).
 
 ## Copying production variables
 
@@ -267,16 +338,29 @@ controls. Stopped legacy containers and their storage remain available for delib
 After isolation, redeliver the PR event and approve its exact revision. Reconfiguration clears inherited
 variable/dependency links and creates isolated plans before enabling a fresh deployment. Already exposed
 external credentials cannot be revoked by stopping a container; rotate any credentials shared with an
-older preview. Compose previews remain unsupported and need a supported container plan.
+older preview. A Compose preview made before Compose previews were isolated has no `previewIsolation`
+plan, so it is quarantined like any other; reconfiguring it builds the isolated stack above.
 
 ## Verification
 
 `TestPreviewWebhookRequiresSessionApprovalAndCloseRemainsRetryable` verifies the API trust boundary and
 retry semantics. `TestLivePreviewStorageCredentialsNetworkAndCleanup` serves distinct canary contents,
 checks that production credentials are absent and the production bridge endpoint is unreachable, then
-removes preview resources while production continues serving. Browser coverage verifies revision review,
-empty preview variables and separate deployment. These tests do not certify arbitrary Dockerfile code,
-Compose previews, public provider delivery, or public DNS/TLS.
+removes preview resources while production continues serving (its `container` subtest); its `compose`
+subtest previews a two-service stack whose file asks for production's container name, published ports,
+named volume, a host directory it writes, a host file, a secret and production's network, beside a
+production container holding them: both services are on the preview's bridge alone, only the public one
+publishes, on the loopback port the route reaches, the private one answers nothing on the port its file
+publishes, the commit's own file is mounted read-only, the host file, the secret and production's
+credentials are absent, the services reach each other by name and alias and neither reaches production,
+and removal leaves no container, volume or network of the preview's (nor any of its Compose project)
+while production's volume, host directory and answer are unchanged. `TestComposePreviewOverride…`
+(`dockerx/compose_preview_test.go`) pins the override — deterministic bytes, the rewritten mounts, a
+checkout link left out, every refusal — and `TestComposePreview…` (`deploy/compose_preview_test.go`) and
+`TestTestPullRequestPreviewOfAComposeStack` the plan, the facts and the route. Browser coverage verifies
+revision review, empty preview variables and separate deployment, and (`deploy-project.spec.ts`) a Compose
+preview's services under its row and the dialog's account of each service and its refusal. These tests do
+not certify arbitrary Dockerfile code, public provider delivery, or public DNS/TLS.
 `TestLiveLegacyPreviewQuarantinePreservesProduction` stops a real legacy container with a production
 mount/credential, refuses a production container identity, preserves production's HTTP canary and volume,
 and verifies approved reconfiguration. Its route adapter is a fixture; proxy removal has separate owner

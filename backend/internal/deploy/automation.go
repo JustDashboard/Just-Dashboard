@@ -1128,6 +1128,9 @@ type PreviewRef struct {
 	LiveReleaseID           int64           `json:"liveReleaseId,omitempty"`
 	Address                 *PreviewAddress `json:"address,omitempty"`
 	LastRun                 *RecentRun      `json:"lastRun,omitempty"`
+	// Services are a Compose preview's services as Docker reports them, read
+	// by the pull-request listing; the store never fills them.
+	Services *RuntimeServices `json:"services,omitempty"`
 }
 
 func (s *AutomationStore) ListPreviews(ctx context.Context, projectID int64) ([]PreviewRef, error) {

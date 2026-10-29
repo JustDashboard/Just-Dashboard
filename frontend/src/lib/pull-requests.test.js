@@ -2,9 +2,13 @@ import { describe, expect, test } from "bun:test"
 import {
   canTest,
   cleanupFailed,
+  composeServiceLines,
   heldReason,
+  previewBlocker,
   previewHeld,
   previewOutOfDate,
+  previewServiceReading,
+  previewServices,
   previewStatus,
   previewURL,
   pullChecksTone,
@@ -257,5 +261,123 @@ describe("a preview's pull request as the row draws one", () => {
       pullOfPreview(preview(), { available: true, host: "github.com", repository: "acme/app" })
         .title,
     ).toBe("Pull request #7")
+  })
+})
+
+describe("Compose previews", () => {
+  const running = { running: true, detail: "" }
+  const facts = (over = {}) => ({
+    compose: false,
+    localCheckout: false,
+    internalPort: 3000,
+    tailnet: running,
+    ...over,
+  })
+  const stack = { public: "web", services: [], refusals: [] }
+
+  test("a Compose stack is previewed unless it needs what no preview gets", () => {
+    expect(previewBlocker(facts({ compose: true, composePreview: stack }))).toBeUndefined()
+    expect(
+      previewBlocker(
+        facts({
+          compose: true,
+          composePreview: { ...stack, refusals: ["service web mounts the Docker socket"] },
+        }),
+      ),
+    ).toBe(
+      "A preview isolates every service of the stack, and service web mounts the Docker socket, which no preview gets.",
+    )
+    // A compatibility deployment carries no facts: it has no release engine.
+    expect(previewBlocker(facts({ compose: true }))).toContain("compatibility Compose")
+  })
+  test("the blockers keep the route's order", () => {
+    expect(previewBlocker(undefined)).toBeUndefined()
+    expect(previewBlocker(facts({ localCheckout: true, internalPort: 0 }))).toContain(
+      "local checkout",
+    )
+    expect(previewBlocker(facts({ internalPort: 0 }))).toBe(
+      "The runtime plan has no port to publish.",
+    )
+    expect(previewBlocker(facts({ tailnet: { running: false, detail: "" } }))).toBe(
+      "Tailscale is not running on this host.",
+    )
+  })
+  test("each service says where it answers and what it does not get", () => {
+    expect(
+      composeServiceLines({
+        name: "web",
+        public: true,
+        ports: ["80:3000"],
+        volumes: ["/uploads"],
+        checkout: ["/etc/nginx.conf"],
+        leftOut: ["/etc/localtime"],
+      }),
+    ).toEqual([
+      "Answers the preview's route and tailnet address, on loopback only",
+      "Publishes none of production's ports (80:3000)",
+      "/uploads starts empty, on a volume of its own",
+      "/etc/nginx.conf read from this commit, read-only",
+      "/etc/localtime from this server left out",
+    ])
+    expect(
+      composeServiceLines({
+        name: "db",
+        public: false,
+        ports: [],
+        volumes: ["/a", "/b"],
+        checkout: [],
+        leftOut: [],
+      }),
+    ).toEqual([
+      "Reached only by the stack's own services",
+      "/a, /b start empty, on a volume of its own",
+    ])
+  })
+  test("a service reads its health where it has a check, else whether it runs", () => {
+    expect(previewServiceReading({ state: "running", health: "healthy" })).toEqual({
+      tone: "running",
+      label: "Healthy",
+    })
+    expect(previewServiceReading({ state: "running", health: "unavailable" }).label).toBe("Running")
+    expect(previewServiceReading({ state: "running", health: "starting" }).tone).toBe("warning")
+    expect(previewServiceReading({ state: "running", health: "unhealthy" }).tone).toBe("danger")
+    expect(previewServiceReading({ state: "exited", health: "", exitCode: 1 }).label).toBe(
+      "Exited 1",
+    )
+    expect(previewServiceReading({ state: "exited", health: "", oomKilled: true }).label).toBe(
+      "Out of memory",
+    )
+    expect(previewServiceReading({ state: "created", health: "" })).toEqual({
+      tone: "stopped",
+      label: "Created",
+    })
+  })
+  test("the row lists the live release's services, the public one first", () => {
+    const service = (name, over = {}) => ({
+      containerId: name,
+      name: `jd-e9-${name}-1`,
+      service: name,
+      releaseId: 4,
+      liveRelease: true,
+      state: "running",
+      health: "unavailable",
+      imageId: "sha256:x",
+      ...over,
+    })
+    const built = preview({
+      services: {
+        status: "available",
+        observedAt: "2026-10-29T10:00:00Z",
+        services: [service("db"), service("web"), service("old", { liveRelease: false })],
+      },
+    })
+    expect(previewServices(built, "web").map((item) => [item.name, item.public])).toEqual([
+      ["web", true],
+      ["db", false],
+    ])
+    expect(previewServices(preview(), "web")).toEqual([])
+    expect(
+      previewServices(preview({ services: { status: "unavailable", services: [] } }), "web"),
+    ).toEqual([])
   })
 })

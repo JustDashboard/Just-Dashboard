@@ -46,6 +46,7 @@ export function PullRequestRow({
   compact,
   index,
   className,
+  children,
 }: {
   pull: GitPullRequest
   /** The preview built from it, where the caller holds one apart from `pull.preview`. */
@@ -63,6 +64,8 @@ export function PullRequestRow({
   compact?: boolean
   index?: number
   className?: string
+  /** What the row carries under its line: a Compose preview's services. */
+  children?: React.ReactNode
 }) {
   const built = preview ?? pull.preview
   const status = previewStatus(built)
@@ -139,6 +142,8 @@ export function PullRequestRow({
         ) : undefined
       }
       onSelect={onOpen ?? (() => window.open(pull.url, "_blank", "noopener"))}
-    />
+    >
+      {children}
+    </ChoiceRow>
   )
 }

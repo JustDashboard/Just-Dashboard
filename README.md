@@ -98,7 +98,8 @@ free.
 - Deploy from a repository, an image, a Compose stack or **97 reviewed templates**, 29 of them
   multi-service stacks — an application with its own database, cache or worker
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
-- Push to deploy, plus pull-request previews only your tailnet can reach
+- Push to deploy, plus pull-request previews only your tailnet can reach — Compose stacks too, every
+  service isolated on the preview's own network and storage
 - Immutable releases, one-click rollback and health-gated cutover
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild

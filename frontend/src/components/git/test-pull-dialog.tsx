@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Play, Warning } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { plural, shortSha } from "@/lib/format"
-import { heldReason } from "@/lib/pull-requests"
+import { composeServiceLines, heldReason, previewBlocker } from "@/lib/pull-requests"
 import { notify } from "@/lib/toast"
 import type {
   DeploymentPreview,
@@ -16,6 +16,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { FormFact, FormFacts, FormNote } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { LoadingRows, Notice } from "@/components/state"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 
@@ -115,17 +116,8 @@ export function TestPullDialog({
     onOpenChange(next)
   }
 
-  const blocker = !info
-    ? undefined
-    : info.compose
-      ? "Previews are not available for Compose projects: a stack cannot be isolated from the one it copies."
-      : info.localCheckout
-        ? "This project deploys a local checkout; previews need a remote Git source."
-        : info.internalPort === 0
-          ? "The runtime plan has no port to publish."
-          : !info.tailnet.running
-            ? info.tailnet.detail || "Tailscale is not running on this host."
-            : undefined
+  const blocker = previewBlocker(info)
+  const stack = info?.composePreview
   // Nothing to build while the preview is ready at this commit, building,
   // closing or waiting on a failed cleanup. The rows hold their verb for the
   // same readings; the header's picker, which lists every open pull request,
@@ -244,6 +236,28 @@ export function TestPullDialog({
         {info && info.releaseTasks > 0 && (
           <Notice title="Release tasks don't run in previews">
             {plural(info.releaseTasks, "release task")} configured for production will be skipped.
+          </Notice>
+        )}
+        {stack && !blocker && stack.services.length > 0 && (
+          <Notice title="Every service is isolated">
+            <span className="block">
+              Each of the stack&apos;s {plural(stack.services.length, "service")} runs on this
+              preview&apos;s own network, with storage of its own. Compose secrets and
+              production&apos;s database links stay out.
+            </span>
+            <ul aria-label="What each service gets" className="mt-2 space-y-1.5">
+              {stack.services.map((service) => (
+                <li key={service.name} className="min-w-0">
+                  <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                    <span className="font-mono">{service.name}</span>
+                    {service.public && <Tag>public</Tag>}
+                  </span>
+                  <span className="block text-hint text-muted-foreground">
+                    {composeServiceLines(service).join(". ")}.
+                  </span>
+                </li>
+              ))}
+            </ul>
           </Notice>
         )}
 

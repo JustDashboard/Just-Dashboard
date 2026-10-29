@@ -5,7 +5,7 @@ import Link from "next/link"
 import { ArrowRight } from "@/components/icons"
 import { get } from "@/lib/api"
 import { percent } from "@/lib/format"
-import { pullOfPreview, unavailableReason } from "@/lib/pull-requests"
+import { previewServices, pullOfPreview, unavailableReason } from "@/lib/pull-requests"
 import { perMinute } from "@/lib/requests"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -20,6 +20,8 @@ import type {
 } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
 import { ChoiceList } from "@/components/flow"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { buildMethodProduct, imageProduct } from "@/components/product-logo"
@@ -420,18 +422,53 @@ function PullRequestList({
       )}
       {rows.length > 0 && (
         <ChoiceList aria-label="Pull requests">
-          {rows.map(({ pull, preview }) => (
-            <PullRequestRow
-              key={pull.number}
-              pull={pull}
-              preview={preview}
-              verbs={verbsFor(pull)}
-              compact={!roomy}
-            />
-          ))}
+          {rows.map(({ pull, preview }) => {
+            const services = previewServices(preview, info.composePreview?.public)
+            return (
+              <PullRequestRow
+                key={pull.number}
+                pull={pull}
+                preview={preview}
+                verbs={verbsFor(pull)}
+                compact={!roomy}
+              >
+                {services.length > 0 && (
+                  <PreviewServices number={pull.number} services={services} />
+                )}
+              </PullRequestRow>
+            )
+          })}
         </ChoiceList>
       )}
     </div>
+  )
+}
+
+/**
+ * A Compose preview's services under its row, each as its name and one
+ * reading — the public one, which the preview's address reaches, first — so
+ * a stack whose database never came up says so where the preview is.
+ */
+function PreviewServices({
+  number,
+  services,
+}: {
+  number: number
+  services: ReturnType<typeof previewServices>
+}) {
+  return (
+    <ul
+      aria-label={`Services of the preview of #${number}`}
+      className="flex min-w-0 flex-wrap gap-x-4 gap-y-1"
+    >
+      {services.map((service) => (
+        <li key={service.name} className="inline-flex min-w-0 items-center gap-1.5 text-hint">
+          <span className="truncate font-mono">{service.name}</span>
+          {service.public && <Tag>public</Tag>}
+          <Status tone={service.reading.tone} label={service.reading.label} />
+        </li>
+      ))}
+    </ul>
   )
 }
 

@@ -470,7 +470,10 @@ to the contribution terms above, including the additional licence grant to the p
   variables, domains, storage, dependencies, automation and lifecycle.
 - Preview changes also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run 'TestLive(PreviewStorageCredentialsNetworkAndCleanup|LegacyPreviewQuarantinePreservesProduction)$' -count=1 -v`.
-  These fixtures cover new-preview isolation and production-preserving quarantine of older previews.
+  These fixtures cover new-preview isolation and production-preserving quarantine of older previews;
+  the first has `container` and `compose` subtests, the latter previewing a two-service Compose stack
+  through `docker compose` (both services on the preview's bridge alone, only the public one
+  publishing, on loopback, production's volume, host directory and network untouched, removal exact).
   Compose backup coverage changes run
   `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveDeploymentComposeStorage -count=1 -v`.
 - Changes to the connection pooler (`dbx/pooler.go`, `api/database_pooler.go`, its routes, or how a

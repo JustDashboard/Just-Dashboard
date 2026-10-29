@@ -1417,7 +1417,11 @@ only renderer/executor/validation authority for their feature.
   refuses it afterward without any extra check, and the trigger's next delivery for that pull request
   inserts an independent new `pending` row at its own revision — a rejection does not follow it. They start without
   inherited variables, linked databases or release tasks; container mounts become fresh preview volumes on
-  a dedicated bridge. Compose and host-access plans currently fail closed. PR close retires only owned
+  a dedicated bridge. A Compose stack is isolated service by service — every service on the preview's
+  bridge alone, its mounts on preview volumes (a read-only file of the commit itself excepted), no secret,
+  fixed name or published port but the public service's loopback one — and a stack whose service needs the
+  server itself, a compatibility Compose plan and other host-access plans fail closed ([Compose
+  previews](preview-isolation.md#compose-previews)). PR close retires only owned
   resources and archives after successful cleanup. Reopening waits for cleanup and a new approval
   generation; closing cancels queued/build work. Startup quarantines older unsafe previews, stops owned
   containers without deleting data, withdraws routes, and blocks old releases from activation. Failed
@@ -1439,7 +1443,9 @@ only renderer/executor/validation authority for their feature.
   identity cached two minutes, listings 30 s, four gh subprocesses at a time). `GET /deploy/{id}/pull-requests`
   answers `{repository, host, available, reason?, identity?, checkoutPath?, pulls[] (each with its
   preview), previews[], production {environmentId, automatic, intervalSeconds, awaitingFirstDeployment},
-  tailnet, compose, localCheckout, internalPort, releaseTasks}` — `reason` is one of `not_github`,
+  tailnet, compose, composePreview?, localCheckout, internalPort, releaseTasks}` — `composePreview` is a
+  Compose project's `{public, services[], refusals[]}` and a live Compose preview carries its `services`
+  as Docker reports them — `reason` is one of `not_github`,
   `sign_in_required`, `app_not_installed`, `not_installed`; `previews` lists the open ones and a closed
   one only while its newest `preview_remove` run has not succeeded; a read GitHub refuses answers an
   error (`429 github_rate_limited` for a quota refusal — a 429, or a 403 or gh's text saying rate limit,
@@ -1715,8 +1721,8 @@ only renderer/executor/validation authority for their feature.
   states before the press what the stack does by itself: only the public service is reachable, the
   rest publish nothing on a network with no route out, each deploy stops the stack first, shared
   passwords are generated here, and a backup is a file copy of a running database rather than a dump.
-  Compose previews stay refused (`preview_isolation.go`); a template is not a Git source, so it is
-  never offered one. `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
+  A template is not a Git source, so it is never offered a pull-request preview, though a Compose
+  stack from a Git source is ([Compose previews](preview-isolation.md#compose-previews)). `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
   through the real build step and runtime owner and requires every check to pass, every service's
   healthcheck to report healthy, and only the public port to be published, on loopback.
 - **How the first sign-in works**, declared rather than described. Every definition carries an

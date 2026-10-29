@@ -1286,6 +1286,138 @@ test("Test this pull request posts the head, the variables choice and the fork a
   await expect(page).toHaveURL(/\/deploy\/7\/runs\/530$/)
 })
 
+test("a Compose stack's preview lists its services, and the dialog says what each one gets", async ({
+  page,
+}, testInfo) => {
+  await mockProject(page)
+  const service = (name: string, health: string) => ({
+    containerId: `c-${name}`,
+    name: `jd-e52-${name}-1`,
+    service: name,
+    stack: "jd-e52",
+    releaseId: 520,
+    liveRelease: true,
+    state: "running",
+    health,
+    imageId: "sha256:aa",
+  })
+  const composePreview = {
+    public: "web",
+    services: [
+      {
+        name: "web",
+        public: true,
+        ports: ["80:3000"],
+        volumes: ["/uploads"],
+        checkout: ["/etc/nginx/conf.d/default.conf"],
+        leftOut: ["/etc/localtime"],
+      },
+      {
+        name: "db",
+        public: false,
+        ports: ["5432:5432"],
+        volumes: ["/var/lib/postgresql/data"],
+        checkout: [],
+        leftOut: [],
+      },
+    ],
+    refusals: [] as string[],
+  }
+  const listing = () => {
+    const base = projectPullRequests(true)
+    const preview = {
+      ...previewEnvironment,
+      services: {
+        status: "available" as const,
+        observedAt: now,
+        services: [service("db", "unavailable"), service("web", "healthy")],
+      },
+    }
+    return {
+      ...base,
+      compose: true,
+      composePreview,
+      previews: [preview],
+      pulls: base.pulls.map((pull) => (pull.number === 42 ? { ...pull, preview } : pull)),
+    }
+  }
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) => json(route, listing()))
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/deploy/7")
+    const row = page
+      .getByRole("list", { name: "Pull requests" })
+      .getByRole("listitem")
+      .filter({ hasText: "Add checkout retries" })
+    const services = row.getByRole("list", { name: "Services of the preview of #42" })
+    await expect(services.getByRole("listitem")).toHaveCount(2)
+    // The public service, which the preview's address reaches, comes first.
+    await expect(services.getByRole("listitem").first()).toContainText("web")
+    await expect(services.getByRole("listitem").first()).toContainText("public")
+    await expect(services.getByRole("listitem").first()).toContainText("Healthy")
+    await expect(services.getByRole("listitem").last()).toContainText("db")
+    await expect(services.getByRole("listitem").last()).toContainText("Running")
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `horizontal viewport overflow at ${width}px`,
+    ).toBe(true)
+    await row.scrollIntoViewIfNeeded()
+    await testInfo.attach(`overview-compose-preview-${width}`, {
+      body: await page.screenshot({
+        path: testInfo.outputPath(`overview-compose-preview-${width}.png`),
+      }),
+      contentType: "image/png",
+    })
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page
+    .getByRole("list", { name: "Pull requests" })
+    .getByRole("listitem")
+    .filter({ hasText: "Translate the checkout" })
+    .getByRole("button", { name: "More actions for #45" })
+    .click()
+  await page.getByRole("menuitem", { name: /Test this pull request/ }).click()
+  const dialog = page.getByRole("dialog", { name: "Test #45" })
+  await expect(dialog.getByText("Every service is isolated")).toBeVisible()
+  const gets = dialog.getByRole("list", { name: "What each service gets" })
+  await expect(gets.getByRole("listitem").first()).toContainText(
+    "Answers the preview's route and tailnet address, on loopback only",
+  )
+  await expect(gets.getByRole("listitem").first()).toContainText(
+    "/etc/localtime from this server left out",
+  )
+  await expect(gets.getByRole("listitem").last()).toContainText(
+    "Reached only by the stack's own services. Publishes none of production's ports (5432:5432)",
+  )
+  await expect(dialog.getByText("This project cannot have a preview yet")).toHaveCount(0)
+  await testInfo.attach("compose-preview-dialog", {
+    body: await dialog.screenshot({ path: testInfo.outputPath("compose-preview-dialog.png") }),
+    contentType: "image/png",
+  })
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+
+  // A stack that needs the server itself is refused before anything is built.
+  composePreview.refusals = ["service web mounts the Docker socket"]
+  await page.reload()
+  await page
+    .getByRole("list", { name: "Pull requests" })
+    .getByRole("listitem")
+    .filter({ hasText: "Translate the checkout" })
+    .getByRole("button", { name: "More actions for #45" })
+    .click()
+  await page.getByRole("menuitem", { name: /Test this pull request/ }).click()
+  await expect(dialog.getByText("This project cannot have a preview yet")).toBeVisible()
+  await expect(dialog).toContainText(
+    "A preview isolates every service of the stack, and service web mounts the Docker socket, which no preview gets.",
+  )
+  await expect(dialog.getByRole("button", { name: "Build preview" })).toBeDisabled()
+  await testInfo.attach("compose-preview-refused", {
+    body: await dialog.screenshot({ path: testInfo.outputPath("compose-preview-refused.png") }),
+    contentType: "image/png",
+  })
+})
+
 test("merging from the overview posts to the project's route, pins the head and re-reads the listing", async ({
   page,
 }) => {
