@@ -78,6 +78,9 @@ var sessionOnlyBefore = []string{
 	// branch again from the newest backup, decided in a session.
 	"PUT /deploy/{id}/environments/{env}/database-links/{connection}/previews",
 	"POST /deploy/{id}/pull-requests/{number}/preview/branches/{connection}/refresh",
+	// A domain's DNS record: read and written in a zone outside this server
+	// with the saved DNS credentials, in a session.
+	"GET /deploy/{id}/domains/{domain}/dns-record", "POST /deploy/{id}/domains/{domain}/dns-record",
 }
 
 // keyBench is a server with an administrator, a session, and the three kinds

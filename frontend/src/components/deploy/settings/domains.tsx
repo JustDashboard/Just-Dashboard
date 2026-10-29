@@ -1,8 +1,8 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import {
   ArrowUpRight,
@@ -15,6 +15,7 @@ import {
   LockOpen,
   Plus,
   RefreshClockwise,
+  Servers,
   Trash,
   Warning,
 } from "@/components/icons"
@@ -77,6 +78,7 @@ import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/
 import { OwnershipSelect } from "@/components/deploy/settings/mounts"
 import { useProject } from "@/components/deploy/project-context"
 import { EdgeRulesForm } from "@/components/deploy/settings/edge-rules"
+import { DNSRecordPanel } from "@/components/deploy/settings/dns-record-panel"
 import {
   HSTS_DEFAULT_MAX_AGE,
   HSTS_MAX_AGES,
@@ -515,6 +517,20 @@ function DomainsForm({
     false,
   )
   const [rowError, setRowError] = useState<{ index: number; message: string }>()
+  // The name whose DNS record sheet is open. A preflight finding's Create the
+  // record opens the page on it (`?record=`), and the address is then dropped
+  // so a reload does not open it again.
+  const search = useSearchParams()
+  const asked = canAdmin ? search.get("record") : null
+  const [recordFor, setRecordFor] = useState<string | undefined>(asked ?? undefined)
+  const [answered, setAnswered] = useState(asked)
+  if (asked !== answered) {
+    setAnswered(asked)
+    if (asked) setRecordFor(asked)
+  }
+  useEffect(() => {
+    if (asked) router.replace(window.location.pathname, { scroll: false })
+  }, [asked, router])
   const observed =
     project.operations?.domains.status === "available" ? project.operations.domains : undefined
   const routes = observed?.domains
@@ -585,6 +601,15 @@ function DomainsForm({
         label: "Open the certificate",
         icon: LockClosed,
         run: () => router.push(route.certificateLink!),
+      })
+    // A saved name's record, read and written with the DNS credentials saved
+    // under Certificates; an unsaved one has nothing on the server to ask.
+    if (canAdmin && saved.has(domain.hostname.toLowerCase()))
+      verbs.push({
+        key: "dns-record",
+        label: "Open the DNS record",
+        icon: Servers,
+        run: () => setRecordFor(domain.hostname),
       })
     const target = servedNames(domains).find((name) => name !== domain.hostname)
     if (canAdmin && !domain.redirectTo && target)
@@ -723,6 +748,12 @@ function DomainsForm({
           )}
         </SettingSection>
       </SettingForm>
+
+      <DNSRecordPanel
+        projectId={project.projectId}
+        hostname={recordFor}
+        onOpenChange={(open) => !open && setRecordFor(undefined)}
+      />
 
       <AddDomainPanel
         open={adding}

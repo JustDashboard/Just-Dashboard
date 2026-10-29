@@ -126,6 +126,10 @@ dashboard's; …`). A name's answer is kept for 30 minutes, an error is asked ag
 each change and each new error is audited as `proxy.tunnel.dns`. Without credentials every name reads
 `manual`, with the record to create. Records are never deleted: a name leaving the tunnel keeps its
 record until its owner removes it, and the tunnel's catch-all answers 404 for it meanwhile.
+The Domains settings' DNS record sheet writes the same record on demand — before a release, or after
+the pass was refused — through `POST /deploy/{id}/domains/{domain}/dns-record`, with the same comment, so
+the pass and the sheet each know it as theirs ([DNS records](dns-records.md)); a tunnel's name whose zone
+another provider holds is refused there rather than written where it would answer nothing.
 
 Cloudflare's refusals are carried in its own words: the v4 envelope's `errors[].message` and `code`,
 as `Cloudflare refused to <what was asked>: <message> (code N)` (`cftunnel.Error`), which the routes

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/blueprint"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dnsrecords"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gameserver"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/ghx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/githubapp"
@@ -105,7 +106,7 @@ var openapiTags = []struct{ Name, Description string }{
 	{"releases", "Retained releases, their comparison, pinning, rollback, the warm release kept after a deploy, and promotion from staging."},
 	{"runs", "Runs and their steps, logs, transcript, metrics, settings drift, traffic and diagnosis."},
 	{"previews", "Pull requests, their previews and the approvals a preview's revision needs."},
-	{"domains", "What a deployment's public route serves: the maintenance switch and pages, hostname suggestions, the requests and traffic it saw."},
+	{"domains", "What a deployment's public route serves: the maintenance switch and pages, hostname suggestions, a domain's DNS record, the requests and traffic it saw."},
 	{"database links", "The databases an environment's variables read and the addresses it reaches them at."},
 	{"log drains", "Where a deployment's output and requests are copied to."},
 	{"notifications", "Notification channels, their deliveries, and a deployment's traffic alerts."},
@@ -152,6 +153,8 @@ var openapiEnums = map[reflect.Type][]string{
 	reflect.TypeOf(blueprint.ServiceRole("")):      {"app", "worker", "database", "cache"},
 	reflect.TypeOf(blueprint.StartCondition("")):   {"healthy", "started", "completed"},
 	reflect.TypeOf(gameserver.PlayerAction("")):    {"kick", "ban", "pardon", "op", "deop", "whitelist_add", "whitelist_remove"},
+	reflect.TypeOf(dnsrecords.Type("")):            {"A", "AAAA", "CNAME"},
+	reflect.TypeOf(dnsrecords.Action("")):          {"create", "update", "keep", "conflict", "stale"},
 }
 
 // openapiWriteOnly is every field that carries a secret in: a value, a token,
@@ -269,6 +272,13 @@ var deployOperations = map[string]deployOperation{
 	"GET /deploy/{id}/requests/export":                 {Tag: "domains", Summary: "Export the filtered requests as CSV.", Query: requestFilterQuery, Content: "text/csv"},
 	"GET /deploy/traffic":                              {Tag: "domains", Summary: "Read the traffic pulse of every deployment's public route, by deployment id.", Response: map[string]deploy.TrafficPulse(nil)},
 	"GET /deploy/{id}/runs/{run}/traffic":              {Tag: "runs", Summary: "Read the request readings around a run's cutover.", Response: deploy.RunTraffic{}},
+	// A domain's DNS record, in its zone (handlers_deploy_dns_record.go).
+	"GET /deploy/{id}/domains/{domain}/dns-record": {Tag: "domains", Summary: "Dry-run a domain's DNS record: what its zone holds, what would be written (A and AAAA to this server, or a proxied CNAME to the tunnel for a name served through Cloudflare Tunnel), and through which saved DNS credential and zone.",
+		Query: []openapiQuery{{"ttl", "integer", "The TTL to plan with, in seconds; the provider's floor and a day's cap apply, and 300 when absent."}}, Response: dnsRecordPlan{},
+		Note: "Nothing is written. A plan that cannot be written says why in refusal and refusalCode rather than failing."},
+	"POST /deploy/{id}/domains/{domain}/dns-record": {Tag: "domains", Summary: "Write a domain's DNS record into its zone with the DNS credentials saved under Certificates: create or change A and AAAA, or the tunnel's CNAME; a record is never deleted.",
+		Request: dnsRecordWriteRequest{}, Optional: true, Response: dnsRecordPlan{},
+		Note: "Answers 409 dns_record_unwritable (no saved credential reaches the zone), dns_record_tunnel_zone, dns_record_conflict (a record stands in the way and would have to be deleted), dns_record_foreign (a record this dashboard did not write, changed only with replace), no_public_address or tunnel_not_connected, and 502 dns_provider_error in the provider's words. Audited as deploy.domain.record."},
 
 	// Releases.
 	"GET /deploy/{id}/environments/{env}/releases":                        {Tag: "releases", Summary: "List an environment's retained releases, newest first.", Query: []openapiQuery{queryLimit}, Response: []deploy.Release(nil)},
@@ -487,6 +497,8 @@ func openapiPathParam(pattern, name string) map[string]any {
 		schema, description = map[string]any{"type": "string"}, "The legacy variable's key."
 	case "page":
 		schema, description = map[string]any{"type": "string"}, "Which of the route's pages: maintenance, or an error status such as 502."
+	case "domain":
+		schema, description = map[string]any{"type": "string"}, "The domain, as the environment's saved configuration lists it."
 	case "action":
 		values := make([]any, 0)
 		for _, v := range openapiEnums[reflect.TypeOf(gameserver.PlayerAction(""))] {
