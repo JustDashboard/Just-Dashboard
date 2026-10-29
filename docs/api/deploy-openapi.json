@@ -9141,6 +9141,16 @@
                 "$ref": "#/components/schemas/deploy.StorageSummary"
               }
             ]
+          },
+          "tailnet": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.TailnetSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "title": "deploy.OperationsSummary",
@@ -11340,6 +11350,21 @@
         "title": "deploy.RouteMaintenance",
         "type": "object"
       },
+      "deploy.RouteTailnet": {
+        "properties": {
+          "allow": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "deploy.RouteTailnet",
+        "type": "object"
+      },
       "deploy.Run": {
         "properties": {
           "actor": {
@@ -11925,6 +11950,16 @@
               "stop_first"
             ],
             "type": "string"
+          },
+          "tailnet": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.RouteTailnet"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "title": "deploy.RuntimePlanConfig",
@@ -12620,6 +12655,37 @@
           }
         },
         "title": "deploy.StorageSummary",
+        "type": "object"
+      },
+      "deploy.TailnetSummary": {
+        "properties": {
+          "allow": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "gate": {
+            "type": "string"
+          },
+          "gateRunning": {
+            "type": "boolean"
+          },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "published": {
+            "type": "boolean"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.TailnetSummary",
         "type": "object"
       },
       "deploy.TrafficAlert": {

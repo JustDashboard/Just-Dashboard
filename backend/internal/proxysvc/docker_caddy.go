@@ -39,7 +39,21 @@ type dockerCaddy struct {
 	// StartedAt is when the container last started, as Docker reports it,
 	// so the overview can say how long the ingress has been up.
 	StartedAt string
+	// Driver names the Caddy in a route's snapshot: the public ingress, or
+	// the loopback-only Caddy that gates tailnet-only deployments
+	// (tailnet_gate.go). A snapshot is only ever restored into the Caddy
+	// that took it.
+	Driver string
 }
+
+// driver is the snapshot's name for this Caddy.
+func (c *dockerCaddy) driver() string {
+	if c.Driver != "" {
+		return c.Driver
+	}
+	return accessDriverCaddy
+}
+
 type ingressContainer struct {
 	ID    string
 	Name  string
@@ -715,12 +729,12 @@ func (c *dockerCaddy) snapshot(ctx context.Context, name string) (DeploymentRout
 	if err != nil {
 		return DeploymentRouteSnapshot{}, err
 	}
-	return DeploymentRouteSnapshot{Version: 1, Driver: "docker-caddy", ContainerID: c.ID, IngressIdentity: c.Identity, Name: name, Path: path, Existed: exists, Content: content, ContentDigest: routeDigest(content), Mode: 0600}, nil
+	return DeploymentRouteSnapshot{Version: 1, Driver: c.driver(), ContainerID: c.ID, IngressIdentity: c.Identity, Name: name, Path: path, Existed: exists, Content: content, ContentDigest: routeDigest(content), Mode: 0600}, nil
 }
 
 func (c *dockerCaddy) restore(ctx context.Context, snapshot DeploymentRouteSnapshot) error {
 	path, err := dockerCaddyRoutePath(snapshot.Name)
-	if err != nil || snapshot.Version != 1 || snapshot.Driver != "docker-caddy" || path != snapshot.Path || snapshot.ContentDigest != routeDigest(snapshot.Content) || (snapshot.ContainerID != c.ID && (snapshot.IngressIdentity == "" || snapshot.IngressIdentity != c.Identity)) {
+	if err != nil || snapshot.Version != 1 || snapshot.Driver != c.driver() || path != snapshot.Path || snapshot.ContentDigest != routeDigest(snapshot.Content) || (snapshot.ContainerID != c.ID && (snapshot.IngressIdentity == "" || snapshot.IngressIdentity != c.Identity)) {
 		return ErrRouteRecovery
 	}
 	if snapshot.Existed {

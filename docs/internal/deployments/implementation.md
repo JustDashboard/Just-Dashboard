@@ -1954,6 +1954,12 @@ only renderer/executor/validation authority for their feature.
   **Require sign-in** offers the Proxy page's four presets (`lib/sso-providers.ts`), **Here and on
   previews** or **Previews only**, and names a password or plain-HTTP name the server would refuse before
   the save (`settings/route-access.ts`).
+- Tailnet-only environments. `runtime.tailnet` publishes an environment on this host's tailnet and
+  nowhere else, from the previews' own address range and table, with no public domain and no public
+  certificate; `runtime.tailnet.allow` (Tailscale logins and tags) puts a gate in front of it — nginx's
+  `auth_request` or the dashboard's own loopback Caddy's `forward_auth` — that asks
+  `GET /api/v1/tailnet/whois` about every request, which asks tailscaled who holds the address it came
+  from. Previews and staging inherit the list. See [tailnet-only deployments](tailnet-apps.md).
 - Maintenance and error pages. Maintenance is a switch beside the live route, not a plan field, so it
   applies at once and no release turns it on or off. Every route a release writes carries the check
   (`DeploymentRoute.Maintenance`, rendered on nginx as a Proxy site's maintenance behind

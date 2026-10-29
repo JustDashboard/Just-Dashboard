@@ -335,6 +335,7 @@ export function RequestConsole({
                       <ClientCell
                         ip={entry.remoteIp}
                         userAgent={entry.userAgent}
+                        user={entry.user}
                         plain={plain}
                         className="hidden w-44 shrink-0 xl:flex"
                       />
@@ -374,6 +375,7 @@ export function RequestConsole({
                           <ClientCell
                             ip={entry.remoteIp}
                             userAgent={entry.userAgent}
+                            user={entry.user}
                             plain={plain}
                             className="min-w-0"
                           />
@@ -568,6 +570,17 @@ function RequestDetail({
       </span>,
     ],
     ["Sent", entry.size ? bytes(entry.size) : "nothing"],
+    ...(entry.user
+      ? ([
+          [
+            "Tailnet login",
+            <span key="u" className="truncate">
+              {entry.user}
+            </span>,
+            entry.user,
+          ],
+        ] as [string, React.ReactNode, string?][])
+      : []),
     ["Host", entry.host ?? "—"],
     [
       "Protocol",
