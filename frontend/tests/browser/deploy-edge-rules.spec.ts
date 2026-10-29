@@ -126,22 +126,20 @@ test("on the Caddy ingress the limit is offered as the host's, and a refused rul
   await form.getByRole("switch", { name: "Limit requests per address" }).click()
   await expect(form.getByText(/ingress is Caddy, which has no rate-limit module/)).toBeVisible()
   await form.getByRole("button", { name: "Apply on the host" }).click()
-  await expect
-    .poll(() => limits)
-    .toEqual([
-      {
-        name: `Ingress rate limit: ${deployment.name}`.slice(0, 64),
-        protocol: "tcp",
-        ports: "80,443",
-        rate: 10,
-        per: "second",
-        burst: 20,
-        perSource: true,
-        maxConnections: 0,
-        globalConnections: 0,
-        action: "reject",
-      },
-    ])
+  // A gateway limit is one port or one range, so the page adds one per web port.
+  const limit = (port: string) => ({
+    name: `Ingress rate limit ${port}: ${deployment.name}`.slice(0, 64),
+    protocol: "tcp",
+    ports: port,
+    rate: 10,
+    per: "second",
+    burst: 20,
+    perSource: true,
+    maxConnections: 0,
+    globalConnections: 0,
+    action: "reject",
+  })
+  await expect.poll(() => limits).toEqual([limit("443"), limit("80")])
 
   await form.getByRole("button", { name: "Add rule" }).click()
   const rule = form.getByRole("listitem", { name: /^Rule 1:/ })

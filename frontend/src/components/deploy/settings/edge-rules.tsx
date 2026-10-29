@@ -46,7 +46,7 @@ import {
   edgeRuleSummary,
   edgeRulesState,
   hitsOf,
-  ingressLimitRequest,
+  ingressLimitRequests,
   moveRule,
   newEdgeRule,
   refusedRuleIndex,
@@ -152,13 +152,12 @@ export function EdgeRulesForm({
   const applyOnHost = async () => {
     if (!value.rateLimit) return
     try {
-      await post(
-        "/network/protection/limits",
-        ingressLimitRequest(value.rateLimit, project.detail.deployment.name),
-      )
-      notify.success("The host now limits new connections per address on 80 and 443")
+      for (const request of ingressLimitRequests(value.rateLimit, project.detail.deployment.name)) {
+        await post("/network/protection/limits", request)
+      }
+      notify.success("The host now limits new connections per address on 443 and 80")
     } catch (error) {
-      notify.error("Could not add the host-level limit", error)
+      notify.error("Could not add the host-level limits", error)
     }
   }
 
@@ -233,7 +232,7 @@ export function EdgeRulesForm({
             <FormNote tone="warning">
               This server&apos;s ingress is Caddy, which has no rate-limit module, so the route
               itself limits nothing. The limit can be the host&apos;s instead: new connections per
-              address on ports 80 and 443, for every domain the ingress serves.
+              address on each of ports 443 and 80, for every domain the ingress serves.
             </FormNote>
             {canAdmin ? (
               <Button type="button" size="xs" variant="outline" onClick={() => void applyOnHost()}>
@@ -432,7 +431,7 @@ function EdgeRuleRow({
                   })
                 }
               >
-                <SelectTrigger aria-label="Path match" className="w-32 shrink-0">
+                <SelectTrigger aria-label="Path match" className="w-40 shrink-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

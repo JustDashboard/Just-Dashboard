@@ -5,7 +5,7 @@ import {
   edgeRuleSummary,
   edgeRulesState,
   hitsOf,
-  ingressLimitRequest,
+  ingressLimitRequests,
   moveRule,
   newEdgeRule,
   refusedRuleIndex,
@@ -95,13 +95,15 @@ test("a refusal is read back to the rule it names", () => {
 })
 
 // Caddy has no rate-limit module, so the Docker Caddy ingress is given the
-// route's limit as the network gateway's: new connections per address on 80
-// and 443, refused at once.
-test("the host-level limit carries the route's rate and burst per source", () => {
-  expect(ingressLimitRequest({ requests: 20, per: "second", burst: 40 }, "shop")).toEqual({
-    name: "Ingress rate limit: shop",
+// route's limit as the network gateway's: new connections per address, one
+// limit on each web port (a gateway limit is one port or one range), refused
+// at once. netx's TestTheIngressRateLimitIsMeteredPerSourceOnPublishedWebPorts
+// posts these same bodies to the gateway.
+test("the host-level limits carry the route's rate and burst per source, one per web port", () => {
+  const limit = (port) => ({
+    name: `Ingress rate limit ${port}: shop`,
     protocol: "tcp",
-    ports: "80,443",
+    ports: port,
     rate: 20,
     per: "second",
     burst: 40,
@@ -110,7 +112,11 @@ test("the host-level limit carries the route's rate and burst per source", () =>
     globalConnections: 0,
     action: "reject",
   })
-  const long = ingressLimitRequest({ requests: 1, per: "minute" }, "x".repeat(80))
-  expect(long.name.length).toBe(64)
-  expect(long.burst).toBe(0)
+  expect(ingressLimitRequests({ requests: 20, per: "second", burst: 40 }, "shop")).toEqual([
+    limit("443"),
+    limit("80"),
+  ])
+  const long = ingressLimitRequests({ requests: 1, per: "minute" }, "x".repeat(80))
+  expect(long.map((request) => request.name.length)).toEqual([64, 64])
+  expect(long[0].burst).toBe(0)
 })

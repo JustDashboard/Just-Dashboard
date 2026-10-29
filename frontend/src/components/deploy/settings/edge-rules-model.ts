@@ -142,19 +142,20 @@ export function moveRule(rules: DeploymentEdgeRule[], index: number, by: -1 | 1)
 }
 
 /**
- * The host-level limit the Docker Caddy ingress is given in place of the
- * route's: Caddy has no rate-limit module, so the network gateway counts
- * new connections per source address on ports 80 and 443 — for every
- * domain the ingress serves, and connections rather than requests, which
- * the page says beside the button. Reject, so a client past it is refused
- * at once rather than left waiting for a dropped packet.
+ * The host-level limits the Docker Caddy ingress is given in place of the
+ * route's: Caddy has no rate-limit module, so the network gateway counts new
+ * connections per source address — for every domain the ingress serves, and
+ * connections rather than requests, which the page says beside the button.
+ * One per web port, since a gateway limit is one port or one range (80-443
+ * would meter every port between), so each port has its own allowance.
+ * Reject, so a client past it is refused at once rather than left waiting
+ * for a dropped packet.
  */
-export function ingressLimitRequest(limit: DeploymentRateLimit, deployment: string) {
-  const name = `Ingress rate limit: ${deployment}`.slice(0, 64)
-  return {
-    name,
+export function ingressLimitRequests(limit: DeploymentRateLimit, deployment: string) {
+  return ["443", "80"].map((port) => ({
+    name: `Ingress rate limit ${port}: ${deployment}`.slice(0, 64),
     protocol: "tcp",
-    ports: "80,443",
+    ports: port,
     rate: limit.requests,
     per: limit.per,
     burst: limit.burst ?? 0,
@@ -162,7 +163,7 @@ export function ingressLimitRequest(limit: DeploymentRateLimit, deployment: stri
     maxConnections: 0,
     globalConnections: 0,
     action: "reject",
-  }
+  }))
 }
 
 /** The section's state line: how many rules, and the limit. */

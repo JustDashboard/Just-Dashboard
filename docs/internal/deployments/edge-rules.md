@@ -73,10 +73,12 @@ CrowdSec list refused.
   among its standard ones, and none of them can express one. The limit is enforced on the host
   instead, through the network gateway's existing per-source limits (`netx` limits, the audited
   `POST /network/protection/limits`, `network.limit.add`): the Domains page says so and offers
-  **Apply on the host**, which adds a limit of the route's rate and burst on TCP ports 80 and 443,
-  per source address, refused with a reset. That limit is **host-level, not per domain** — it
-  counts every domain the ingress serves together — and it counts **new connections, not
-  requests**: a client holding one keep-alive or HTTP/2 connection is limited only as it reconnects.
+  **Apply on the host**, which adds two limits of the route's rate and burst per source address,
+  one on TCP 443 and one on TCP 80 (a gateway limit is one port or one range, and 80-443 would
+  meter every port between), each refused with a reset; each port has its own allowance. Those
+  limits are **host-level, not per domain** — they count every domain the ingress serves together
+  — and they count **new connections, not requests**: a client holding one keep-alive or HTTP/2
+  connection is limited only as it reconnects.
   The gateway's rules run in the forward chain on Docker-published ports (`ct status dnat`), before
   Caddy sees the connection.
 
@@ -126,6 +128,10 @@ since emptying it would let every banned address back in.
   its lifting, and reads the rule names back from the record.
 - `tests/browser/deploy-edge-rules.spec.ts` — the editor (mocked).
 
-The gateway limit itself is the network module's and is tested there; nothing here measures it
-against a real Caddy, and no CrowdSec engine runs in these tests (the list is written as the refresh
-writes it).
+- `go test ./internal/netx -run TestTheIngressRateLimitIsMeteredPerSourceOnPublishedWebPorts` —
+  the two bodies the page posts, as it spells them, saved through the gateway and rendered as
+  per-source meters in the forward chain on translated (Docker-published) connections to 443 and 80;
+  both ports in one limit are refused.
+
+The gateway's rules are not loaded into a real nftables here, nothing measures them against a real
+Caddy, and no CrowdSec engine runs in these tests (the list is written as the refresh writes it).
