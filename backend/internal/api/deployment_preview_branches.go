@@ -268,6 +268,22 @@ func (o *previewBranchOwner) restore(ctx context.Context, branch deploy.PreviewB
 		fail(reason)
 		return
 	}
+	// Masked before any account the preview knows opens the copy: until the
+	// application's account is given its password below, only production's
+	// passwords sign in to it, and the preview holds neither. A refreshed
+	// branch's preview already holds its address and password, so the
+	// order is what keeps it from reading a column before it is masked.
+	var maskedRows int64
+	if len(branch.MaskedColumns) > 0 {
+		port, err := applicationPort(ctx, s, made)
+		if err == nil {
+			maskedRows, err = o.mask(restoreCtx, branch, made, network.Name, port)
+		}
+		if err != nil {
+			fail("the branch's columns could not be masked, so it was not kept: " + err.Error())
+			return
+		}
+	}
 	// A refresh carries the sign-in over, so the preview's address — its
 	// host and its password — is what it was before.
 	password := ""
@@ -293,14 +309,6 @@ func (o *previewBranchOwner) restore(ctx context.Context, branch deploy.PreviewB
 	if err != nil {
 		fail("the branch's address could not be written: " + err.Error())
 		return
-	}
-	var maskedRows int64
-	if len(branch.MaskedColumns) > 0 {
-		maskedRows, err = o.mask(restoreCtx, branch, made, network.Name, port, password)
-		if err != nil {
-			fail("the branch's columns could not be masked, so it was not kept: " + err.Error())
-			return
-		}
 	}
 	// The copy runs production's server configuration, so its superuser
 	// signs in with production's password over the network unless that is
@@ -493,4 +501,11 @@ func (m *migrationRehearser) lockSuperuser(ctx context.Context, made *madeCopy) 
 		return nil
 	}
 	return err
+}
+
+// applicationPort is the port the database's application URL names, which
+// the copy listens on as production does.
+func applicationPort(ctx context.Context, s *Server, made *madeCopy) (int, error) {
+	_, port, err := dataCopyURL(ctx, s, made, "localhost", "unused")
+	return port, err
 }

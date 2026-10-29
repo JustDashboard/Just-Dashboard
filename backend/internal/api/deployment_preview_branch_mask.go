@@ -38,17 +38,14 @@ const previewBranchMaskRows = 200_000
 
 // mask overwrites the branch's masked columns and answers how many values
 // it wrote.
-func (o *previewBranchOwner) mask(ctx context.Context, branch deploy.PreviewBranch, made *madeCopy, network string, port int, password string) (int64, error) {
+func (o *previewBranchOwner) mask(ctx context.Context, branch deploy.PreviewBranch, made *madeCopy, network string, port int) (int64, error) {
 	address, err := o.server.modules.dataCopies.copyAddress(ctx, deploy.DataCopy{Container: made.copy.Container, Network: network})
 	if err != nil {
 		return 0, err
 	}
-	// The superuser's own password, unless the application signs in as the
-	// superuser, whose password the branch has just been given.
+	// The copy's superuser still signs in with production's password: the
+	// branch's own passwords are given after the masking.
 	superuser := dataCopySecret{User: made.engine.user, Password: made.engine.password}
-	if made.engine.user == made.info.User {
-		superuser.Password = password
-	}
 	target, err := copyDSN(made.conn.Driver, made.dsn, made.info, address, port, superuser)
 	if err != nil {
 		return 0, err

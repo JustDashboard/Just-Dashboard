@@ -273,10 +273,12 @@ from its point-in-time archive to the archive's end where it has one, else from 
 backup job took, within the previewed environment's [rehearsal limits](implementation.md) (restore time,
 largest backup). The copy, `jd-preview-e<env>-branch<id>-db`, joins the **preview's own database network**
 (`jd-e<preview>-db-…`, created for it) under a name of its own, `db-<connection>-branch.jd.internal` —
-production's `db-<connection>.jd.internal` is never on that network — and the application's account is
-given a password made for it (`setCopyPassword`), so the preview's address carries no password production
-accepts. On a masked branch every named column is then overwritten before the branch is marked ready, so
-nothing but the restore has read it (`deployment_preview_branch_mask.go`): through the readers and writers
+production's `db-<connection>.jd.internal` is never on that network. On a masked branch every named
+column is overwritten first, while only production's passwords open the copy and the preview holds neither
+(a refreshed branch's preview already holds its address, so the order matters), then the application's
+account is given a password made for it (`setCopyPassword`) and the superuser's network password is
+replaced too (`lockSuperuser`), so no password production accepts opens the branch. The masking
+(`deployment_preview_branch_mask.go`) goes through the readers and writers
 the Databases pages use (`dbx.BrowseTablePage`, `dbx.ApplyChanges`), a thousand rows at a time by primary
 key, as the server's superuser on the copy, each value replaced in its shape — every letter by a letter of
 the same case, every digit by a digit, everything else (an `@`, a dot, a dash, a space) kept, a number's
