@@ -1,0 +1,325 @@
+{
+  "id": "activepieces",
+  "version": "1.0.0",
+  "name": "Activepieces",
+  "category": "automation",
+  "profile": "compose",
+  "description": "An open-source automation platform: flows built from triggers and actions across hundreds of integrations, with the PostgreSQL database and the Valkey queue it needs on a private network beside it.",
+  "iconId": "bolt",
+  "docsUrl": "https://www.activepieces.com/docs/install/options/docker-compose",
+  "access": {
+    "kind": "setup",
+    "path": "/sign-up",
+    "note": "Activepieces starts with no account: the first visitor to https://<domain>/ is sent to the sign-up form, and the account created there owns the platform. Open the address yourself as soon as the deployment is ready. Later sign-ups are governed by the platform settings inside Activepieces."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/activepieces/activepieces",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Activepieces builds every webhook address, OAuth redirect and e-mail link from this."
+    }
+  ],
+  "secrets": [
+    {
+      "name": "encryption-key",
+      "variable": "AP_ENCRYPTION_KEY",
+      "label": "Encryption key",
+      "length": 32,
+      "alphabet": "hex",
+      "description": "Encrypts stored connections; Activepieces requires exactly 32 hexadecimal characters. Changing it makes every saved connection unreadable."
+    },
+    {
+      "name": "jwt-secret",
+      "variable": "AP_JWT_SECRET",
+      "label": "JWT secret",
+      "length": 48,
+      "description": "Signs sessions and the worker token; changing it signs everybody out."
+    },
+    {
+      "name": "db-password",
+      "variable": "AP_POSTGRES_PASSWORD",
+      "label": "Database password",
+      "length": 40,
+      "description": "Generated here and given only to the services that sign in to the database."
+    }
+  ],
+  "services": [
+    {
+      "name": "app",
+      "role": "app",
+      "purpose": "The editor, the API, the webhook receiver and the flow worker, behind the domain",
+      "image": {
+        "reference": "ghcr.io/activepieces/activepieces:0.92.3",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "AP_ENVIRONMENT",
+          "value": "prod"
+        },
+        {
+          "name": "AP_FRONTEND_URL",
+          "value": "{{variable.AP_FRONTEND_URL}}"
+        },
+        {
+          "name": "AP_ENCRYPTION_KEY",
+          "value": "{{secret.encryption-key}}"
+        },
+        {
+          "name": "AP_JWT_SECRET",
+          "value": "{{secret.jwt-secret}}"
+        },
+        {
+          "name": "AP_POSTGRES_DATABASE",
+          "value": "activepieces"
+        },
+        {
+          "name": "AP_POSTGRES_HOST",
+          "value": "db"
+        },
+        {
+          "name": "AP_POSTGRES_PORT",
+          "value": "5432"
+        },
+        {
+          "name": "AP_POSTGRES_USERNAME",
+          "value": "activepieces"
+        },
+        {
+          "name": "AP_POSTGRES_PASSWORD",
+          "value": "{{secret.db-password}}"
+        },
+        {
+          "name": "AP_REDIS_HOST",
+          "value": "cache"
+        },
+        {
+          "name": "AP_REDIS_PORT",
+          "value": "6379"
+        },
+        {
+          "name": "AP_EXECUTION_MODE",
+          "value": "UNSANDBOXED"
+        },
+        {
+          "name": "AP_TELEMETRY_ENABLED",
+          "value": "false"
+        },
+        {
+          "name": "AP_WEBHOOK_TIMEOUT_SECONDS",
+          "value": "30"
+        },
+        {
+          "name": "AP_TRIGGER_DEFAULT_POLL_INTERVAL",
+          "value": "5"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 80,
+          "protocol": "tcp",
+          "purpose": "The editor, the API and incoming webhooks",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "cache",
+          "target": "/usr/src/app/cache",
+          "purpose": "Downloaded pieces and their dependencies, so a redeploy does not fetch them again",
+          "data": true,
+          "backup": false
+        }
+      ],
+      "resources": {
+        "memoryMb": 1536,
+        "minMemoryMb": 768
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fsS",
+          "-o",
+          "/dev/null",
+          "http://127.0.0.1:80/api/v1/health"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 18,
+        "startPeriodSeconds": 60
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        },
+        {
+          "service": "cache",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "PostgreSQL with pgvector, holding every flow, run and connection",
+      "image": {
+        "reference": "pgvector/pgvector:0.8.1-pg17",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "POSTGRES_DB",
+          "value": "activepieces"
+        },
+        {
+          "name": "POSTGRES_USER",
+          "value": "activepieces"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "value": "{{secret.db-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "postgres",
+          "internal": 5432,
+          "protocol": "tcp",
+          "purpose": "SQL connections from Activepieces",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/var/lib/postgresql/data",
+          "purpose": "Every table Activepieces keeps",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "pg_isready",
+          "-h",
+          "127.0.0.1",
+          "-U",
+          "activepieces",
+          "-d",
+          "activepieces"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 20
+      }
+    },
+    {
+      "name": "cache",
+      "role": "cache",
+      "purpose": "Valkey, the queue flow runs and polling triggers are scheduled through",
+      "image": {
+        "reference": "valkey/valkey:9.0.6-alpine",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "ports": [
+        {
+          "name": "redis",
+          "internal": 6379,
+          "protocol": "tcp",
+          "purpose": "Redis protocol from Activepieces",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "queue",
+          "target": "/data",
+          "purpose": "Queued and scheduled runs, so a restart does not drop them",
+          "data": true,
+          "backup": false
+        }
+      ],
+      "resources": {
+        "memoryMb": 256,
+        "minMemoryMb": 64
+      },
+      "healthcheck": {
+        "test": [
+          "valkey-cli",
+          "ping"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 5
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/v1/health",
+      "port": "http",
+      "timeoutSeconds": 300
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "AP_FRONTEND_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "Activepieces migrates its database on start and is still before 1.0, so read its release notes and take a backup before moving to a newer image."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "flows.example.test"
+      },
+      "digest": "sha256:6cf2b7f3193e34e2542c068d6eb0bfa6056634dbbf270429087257295942715c"
+    }
+  ]
+}

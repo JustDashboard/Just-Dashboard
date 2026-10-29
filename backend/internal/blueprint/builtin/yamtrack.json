@@ -1,0 +1,191 @@
+{
+  "id": "yamtrack",
+  "version": "1.0.0",
+  "name": "Yamtrack",
+  "category": "http",
+  "profile": "compose",
+  "description": "A media tracker: the films, series, anime, manga, games and books you have watched, read or played and what is next, with metadata fetched from public databases. The application keeps its own SQLite database and uses the Valkey beside it for caching and background work.",
+  "iconId": "globe",
+  "docsUrl": "https://github.com/FuzzyGrim/Yamtrack#readme",
+  "access": {
+    "kind": "setup",
+    "note": "Yamtrack starts with no accounts and registration open: the address opens on a sign-in page with a register link, and the first account made there is yours. Register right after deploying, then set REGISTRATION to false from the Variables tab and redeploy, because until then anyone who reaches the address can make an account too."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/FuzzyGrim/Yamtrack",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Yamtrack trusts form submissions only from this address."
+    }
+  ],
+  "secrets": [
+    {
+      "name": "django-secret",
+      "variable": "SECRET",
+      "label": "Application secret",
+      "length": 48,
+      "description": "Signs sessions and forms; changing it signs everybody out."
+    }
+  ],
+  "services": [
+    {
+      "name": "yamtrack",
+      "role": "app",
+      "purpose": "The web application and its background workers, behind the domain",
+      "image": {
+        "reference": "ghcr.io/fuzzygrim/yamtrack:0.26.3",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "SECRET",
+          "value": "{{secret.django-secret}}"
+        },
+        {
+          "name": "REDIS_URL",
+          "value": "redis://cache:6379"
+        },
+        {
+          "name": "URLS",
+          "value": "{{variable.URLS}}"
+        },
+        {
+          "name": "TZ",
+          "value": "UTC"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 8000,
+          "protocol": "tcp",
+          "purpose": "The web application",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/yamtrack/db",
+          "purpose": "The SQLite database of everything tracked",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:8000/health/"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 10,
+        "retries": 12,
+        "startPeriodSeconds": 60
+      },
+      "dependsOn": [
+        {
+          "service": "cache",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "cache",
+      "role": "cache",
+      "purpose": "Valkey, Yamtrack's cache and task queue",
+      "image": {
+        "reference": "valkey/valkey:9.0.6-alpine",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "ports": [
+        {
+          "name": "redis",
+          "internal": 6379,
+          "protocol": "tcp",
+          "purpose": "Redis protocol from Yamtrack",
+          "exposure": "internal"
+        }
+      ],
+      "resources": {
+        "memoryMb": 128,
+        "minMemoryMb": 64
+      },
+      "healthcheck": {
+        "test": [
+          "valkey-cli",
+          "ping"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 5
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health/",
+      "port": "http",
+      "timeoutSeconds": 240
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "URLS",
+        "value": "https://{{input.domain}}"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "Yamtrack migrates its database on start and does not migrate back; it is still before 1.0, so read the release notes."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "media.example.test"
+      },
+      "digest": "sha256:567c1f63c3e40c9bb29f1acf170b2d0a29f9d9f35d5b8fa4f3ca71ed190c1330"
+    }
+  ]
+}

@@ -397,9 +397,13 @@ function FoundRow({
   // thing is, so every row is the same two lines; a failure just now is the
   // exception, and is said in full under the row until it is tried again.
   const wantsPassword = action.kind === "connect" && Boolean(refusal?.includes("connect it with"))
+  // A MongoDB this kernel keeps from starting is said as that, not as the
+  // dial it refuses.
   const why =
-    asSentence(refusal) ??
-    (instance.connectable ? whyWaiting(instance) : asSentence(instance.reason))
+    action.kind === "kernel-mitigation"
+      ? action.problem.message
+      : (asSentence(refusal) ??
+        (instance.connectable ? whyWaiting(instance) : asSentence(instance.reason)))
   const file = instance.file && instance.kind !== "embedded" ? instance.file : undefined
 
   return (

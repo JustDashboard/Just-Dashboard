@@ -3686,6 +3686,8 @@ export type ReleaseComparison = {
     domains: ReleaseListChange[]
   }
   artifacts: ReleaseArtifactStatus[]
+  /** Each release's recorded data point, per linked database. */
+  dataPoints?: { from: ReleaseDataPoint[]; to: ReleaseDataPoint[] }
 }
 
 export type ReleaseUpdateStatus = {
@@ -3858,9 +3860,12 @@ export type LogDrain = {
  * A connection to an external secret manager that deployment variables read
  * as `${{store.NAME/path#KEY}}`. Vault and OpenBao share the KV version 2
  * API; Infisical signs in with a Universal Auth machine identity; Doppler
- * with a service token.
+ * with a service token; AWS Secrets Manager with an access key pair (SigV4);
+ * Azure Key Vault with an application's client credentials. The last two
+ * keep whole secrets, read as `${{store.NAME/secret-name}}` or, for a field
+ * of a JSON value, `${{store.NAME/secret-name#KEY}}`.
  */
-export type SecretStoreKind = "vault" | "openbao" | "infisical" | "doppler"
+export type SecretStoreKind = "vault" | "openbao" | "infisical" | "doppler" | "aws" | "azure"
 
 export type SecretStoreSettings = {
   /** Vault and OpenBao: where the KV version 2 engine is mounted ("secret"). */
@@ -3871,6 +3876,14 @@ export type SecretStoreSettings = {
   /** Infisical: the project id and environment slug a reference reads in. */
   project?: string
   environment?: string
+  /** AWS: the region the Secrets Manager endpoint is derived from. */
+  region?: string
+  /** Azure: the vault's name (its host), the tenant signed in to, the cloud. */
+  vaultName?: string
+  tenantId?: string
+  cloud?: "public" | "usgov" | "china"
+  /** Azure: a sign-in authority other than the cloud's own. */
+  authority?: string
   /** A PEM certificate authority for a self-hosted store's TLS. */
   caCert?: string
 }
@@ -3895,6 +3908,8 @@ export type SecretStore = {
   name: string
   kind: SecretStoreKind
   address: string
+  /** Where the store is reached: the address, or what the region or vault name derives. */
+  endpoint: string
   settings: SecretStoreSettings
   /** The credentials that are set, by name; their values are sealed and never read back. */
   credentialNames: string[]
@@ -3970,8 +3985,9 @@ export type DeploymentInsights = {
 }
 
 /**
- * Where a promoted release's image came from: the staging release it was
- * promoted from, and the local image id the container is created from.
+ * Where a promoted release's image came from: the release it was promoted
+ * from — staging's, or for staging a pull request preview's — and the local
+ * image id the container is created from.
  */
 export type DeploymentPromotion = {
   environmentId: number
@@ -3982,6 +3998,30 @@ export type DeploymentPromotion = {
   imageId: string
   imageDigest: string
   sourceRevision?: string
+  /** Absent on a record from before previews could be promoted, which is staging's. */
+  sourceKind?: "staging" | "preview"
+  /** The pull request a preview's image was built from, and who approved its commit. */
+  preview?: DeploymentPromotedPreview
+}
+
+export type DeploymentPromotedPreview = {
+  number: number
+  url?: string
+  repository?: string
+  headRepository?: string
+  approvedBy: string
+}
+
+/** The newest promotion of a preview's image into staging, as the preview's row reads it. */
+export type DeploymentPreviewPromotion = {
+  runId: number
+  runNumber: number
+  state: DeploymentRunState
+  environmentId: number
+  releaseNumber: number
+  sourceRevision?: string
+  requestedAt: string
+  endedAt?: string
 }
 
 /** One of a deployment's long-lived environments, for the environment switcher. */
@@ -4005,9 +4045,11 @@ export type DeploymentStagingCopy = {
   adjusted: string[]
 }
 
-/** The Promote confirmation's read: the exact image and how production differs. */
+/** The Promote confirmation's read: the exact image and how the target differs. */
 export type DeploymentPromotionPreview = {
   source: {
+    /** "staging" into production, or "preview" into staging. */
+    kind: "staging" | "preview"
     environmentId: number
     environmentName: string
     release: DeploymentRelease
@@ -4015,6 +4057,17 @@ export type DeploymentPromotionPreview = {
     imageDigest: string
     imageSizeBytes: number
     imagePresent: boolean
+    /** The pull request behind a preview source. */
+    preview?: {
+      number: number
+      title?: string
+      url?: string
+      author?: string
+      headRepository?: string
+      fork: boolean
+      approvedBy?: string
+      approvalState?: string
+    }
   }
   target: {
     environmentId: number
@@ -4054,8 +4107,103 @@ export type DeploymentRelease = {
   /** Set on a release an instant rollback took traffic away from. */
   rolledBackAt?: string
   rollbackReason?: string
-  /** Set when the image was promoted from staging rather than built here. */
+  /** Set when the image was promoted — from staging, or into staging from a preview — rather than built here. */
   promotion?: DeploymentPromotion
+  /**
+   * Where each linked database stood when this release went live
+   * (`deploy/data_rollback.go`): the moment its point-in-time archive recovers
+   * to, or the newest dump that covered it. Absent on a release that went
+   * live before this was recorded, or with no linked database.
+   */
+  dataPoints?: ReleaseDataPoint[]
+  /** Whether "Restore data as of this release" is offered, and why not. */
+  dataCopy?: { eligible: boolean; reason?: string }
+}
+
+/** One linked database's state at the moment a release went live. */
+export type ReleaseDataPoint = {
+  connectionId: number
+  /** The connection's name when the point was recorded. */
+  name: string
+  engine: string
+  kind: "pitr" | "dump" | "none"
+  /** pitr: the moment the archive recovers to; dump: when its backup run started. */
+  at?: string
+  backupRunId?: number
+  backupJobId?: number
+  archiveId?: number
+  /** kind none: why there is nothing to restore a copy from. */
+  reason?: string
+  recordedAt: string
+}
+
+export type DataCopyState = "waiting" | "restoring" | "ready" | "failed" | "skipped" | "removed"
+
+/**
+ * A linked database restored from a release's data point into a throwaway
+ * container beside production, on the deployment's network. Its credentials
+ * are read by a session alone (`…/data-copies/{copy}/url`) and never ride here.
+ */
+export type DataCopy = {
+  id: number
+  projectId: number
+  environmentId: number
+  releaseId: number
+  releaseNumber: number
+  connectionId: number
+  name: string
+  engine: string
+  database: string
+  state: DataCopyState
+  source: {
+    kind: "pitr" | "dump"
+    at?: string
+    backupRunId?: number
+    backupJobId?: number
+    archiveId?: number
+  }
+  /** pitr: the moment the copy actually reached. */
+  recoveredTo?: string
+  /** The rollback run it waits for before restoring. */
+  afterRunId?: number
+  /** The copy's name on the deployment's network, e.g. db-5-copy-3.jd.internal. */
+  host?: string
+  port?: number
+  network?: string
+  expiresAt?: string
+  createdBy: string
+  createdAt: string
+  readyAt?: string
+  endedAt?: string
+  reason?: string
+  restoreMs?: number
+}
+
+export type DataCopyConnection = {
+  url: string
+  host: string
+  port: number
+  user: string
+  database: string
+}
+
+/** The copy's tables beside the live database's, with their row counts. */
+export type DataCopyComparison = {
+  copyId: number
+  database: string
+  tables: {
+    schema: string
+    name: string
+    copyRows: number | null
+    liveRows: number | null
+    estimated?: boolean
+    only?: "copy" | "live"
+  }[]
+  /** More tables than the server compares. */
+  truncated: boolean
+  copyError?: string
+  liveError?: string
+  readAt: string
 }
 
 /**
@@ -4287,6 +4435,8 @@ export type DeploymentPreview = {
   liveReleaseId?: number
   address?: DeploymentPreviewAddress
   lastRun?: DeploymentRecentRun
+  /** The newest promotion of this preview's image into staging, however it ended. */
+  promotion?: DeploymentPreviewPromotion
 }
 
 /** A deploy project's pull requests on GitHub, joined to the previews built from them. */
@@ -5236,6 +5386,8 @@ export type DeploymentConfiguration = {
     interceptErrors?: boolean
     /** Strict-Transport-Security on every HTTPS answer; absent sends none. */
     hsts?: DeploymentRouteHSTS
+    /** Recorded requests replayed against the candidate before the cutover; absent is off. */
+    replay?: ReplayPlan
     mounts?: {
       source: string
       target: string
@@ -5506,6 +5658,76 @@ export type RehearsalReport = {
   isolation?: { network: string; internal: boolean; published: boolean; volumesMounted: boolean }
   cleanedUp: boolean
   totalMs: number
+}
+
+/**
+ * A plan's traffic replay terms (`deploy/replay.go`): before the cutover, the
+ * last distinct GET and HEAD requests the access log recorded for the
+ * environment's domains are sent to the candidate and its answers compared
+ * with the live release's. An absent number is the server's default.
+ */
+export type ReplayPlan = {
+  enabled: boolean
+  /** Distinct requests replayed, newest first; absent is 50, at most 500. */
+  requests?: number
+  /** Only recorded paths under one of these prefixes; absent replays every path. */
+  paths?: string[]
+  /** The percent of replayed requests whose status class may differ; absent is 2. */
+  maxStatusDrift?: number
+  /** What the candidate's p95 may be of the recorded p95; absent is 2. */
+  latencyFactor?: number
+  /** The whole replay's time limit; absent is 60 seconds. */
+  timeoutSeconds?: number
+}
+
+/** One replayed request the candidate answered in another status class, or not at all. */
+export type ReplayDrift = {
+  method: string
+  path: string
+  query?: string
+  recordedStatus: number
+  /** 0 is no answer, with `error` saying why. */
+  candidateStatus: number
+  error?: string
+  recordedMs?: number
+  candidateMs?: number
+}
+
+/** The replay_traffic step's evidence. */
+export type ReplayReport = {
+  replayed: boolean
+  /** Why it was not replayed. */
+  reason?: string
+  domains?: string[]
+  /** The candidate's own address the requests were sent to. */
+  target?: string
+  read: number
+  eligible: number
+  requests: number
+  answered: number
+  drifted: number
+  driftPercent: number
+  maxStatusDrift: number
+  latencyFactor: number
+  latencyRecorded: boolean
+  latencyJudged: boolean
+  recordedP95?: number
+  candidateP95?: number
+  verdict: {
+    code: "within_drift" | "status_drift" | "latency" | "unanswered" | ""
+    tripped: boolean
+    reason: string
+  }
+  drifts: ReplayDrift[]
+  concurrency: number
+  timeoutSeconds: number
+  timedOut: boolean
+  durationMs: number
+  recovery?: {
+    candidateStopped: boolean
+    runtimeRestored: boolean
+    routeRestored: boolean
+  }
 }
 
 /** A saved database a variable names by its address rather than a link. */
@@ -7007,6 +7229,23 @@ export type DbFleetEntry = DbConnection & {
    * backup job run that dumped it, whichever is later. Absent for never.
    */
   lastBackup?: string
+  /** A MongoDB 8 server that cannot start on this kernel as it is. Absent otherwise. */
+  kernelProblem?: DbKernelProblem
+}
+
+/**
+ * MongoDB 8 on Linux 6.19 to 7.0.13, which it refuses to start on without
+ * `GLIBC_TUNABLES=glibc.pthread.rseq=1` (MongoDB SERVER-121912).
+ */
+export type DbKernelProblem = {
+  /** The alert, in a few words. */
+  message: string
+  /** What applying it does, or where the compose file has to say it. */
+  detail: string
+  kernel: string
+  release: string
+  /** `POST /databases/{id}/kernel-mitigation` applies it. */
+  fixable: boolean
 }
 
 export type DbFleet = {
@@ -7910,8 +8149,46 @@ export type DeploymentLifecycle = {
   reason?: string
   /** Whether the event stream is connected, so an empty feed can explain itself. */
   watching: boolean
+  /** When this process connected to the stream; the record itself reaches back to `recordSince`. */
   since?: string
+  /**
+   * The oldest event the dashboard keeps for any deployment: how far back the
+   * feed can see. The record survives a restart of the dashboard; absent until
+   * the first event has been kept.
+   */
+  recordSince?: string
+  /** How long an event is kept. */
+  retentionDays: number
   events: DockerEvent[]
+}
+
+/** The figure over one span of time ending now (`deploy/availability.go`). */
+export type AvailabilityWindow = {
+  /** "24h", "7d" or "30d". */
+  window: string
+  seconds: number
+  /** Live-release time inside the window the record covers: what `ratio` is over. 0 means no figure. */
+  observedSeconds: number
+  downSeconds: number
+  incidents: number
+  /** 1 - down/observed, 0..1; absent while nothing was observed. */
+  ratio?: number
+  /** How much of the window the event record reaches back over. */
+  coverageSeconds: number
+}
+
+/** How much of the last day, week and month a deployment's live release was up. */
+export type DeploymentAvailability = {
+  status: "available" | "unavailable"
+  reason?: string
+  observedAt: string
+  /** When the event record began, for any deployment. */
+  recordSince?: string
+  /** The number of the release live now. */
+  liveRelease?: number
+  /** Whether the record says the live release is down at this moment. */
+  down: boolean
+  windows: AvailabilityWindow[]
 }
 
 /*

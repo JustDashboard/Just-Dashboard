@@ -1,0 +1,80 @@
+{
+  "id": "excalidraw",
+  "version": "1.0.0",
+  "name": "Excalidraw",
+  "category": "http",
+  "profile": "web",
+  "description": "The hand-drawn-style whiteboard, served from one static container. Drawings live in the visitor's browser until exported; live collaboration rooms need the separate room server this template does not include.",
+  "iconId": "globe",
+  "docsUrl": "https://docs.excalidraw.com/docs/introduction/development",
+  "access": {
+    "kind": "open",
+    "note": "Excalidraw has no accounts and no login: anyone who reaches this address gets the editor. Nothing is saved on the server — a drawing stays in that visitor's own browser storage until they export it — so the risk of an open address is strangers using your copy, not reading your drawings. Put the domain behind the dashboard's password protection if that matters."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/excalidraw/excalidraw",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "excalidraw/excalidraw:latest@sha256:f7ee194addd607bf831d2af0f0a34463dd4225e426cf35199ef0b12a803398e9",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 80,
+      "protocol": "tcp",
+      "purpose": "The editor, served by nginx",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [],
+  "resources": {
+    "memoryMb": 128,
+    "minMemoryMb": 64
+  },
+  "checks": [
+    {
+      "name": "Editor answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 30
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Stateless. Docker Hub publishes this image only as a moving latest tag, so the definition pins the content digest of the build it was reviewed with; a newer build is a new digest in this definition, not a tag."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:dbf34dae765551acbb1a37814ba886f4c811fcd8226b1d0c5b40f238d7530f46"
+    }
+  ]
+}

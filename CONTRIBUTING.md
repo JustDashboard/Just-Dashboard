@@ -314,7 +314,11 @@ to the contribution terms above, including the additional licence grant to the p
   it, and so are images it pulled):
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks -count=1 -v -timeout 2h`.
   A template's schema rules run at build time: every definition is parsed and validated when the
-  catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship.
+  catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship. The
+  same package checks the catalogue's size: `catalogue_counts.go` declares how many definitions
+  ship, how many deploy and how many are Compose templates, because the competitive report and the
+  README quote those numbers, and `TestCatalogueCountsMatchTheShippedDefinitions` fails until a
+  change that adds or retires a template bumps them.
 - Changes to shared variables or to how a run opens its variables also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSharedVariableReachesTheContainer -count=1 -v`,
   which starts a real container with the values a run opens for references to a server, a secret and a
@@ -326,16 +330,36 @@ to the contribution terms above, including the additional licence grant to the p
   `infisical/infisical:v0.167.4`, `postgres:17-alpine`, `redis:7-alpine`, pulled beforehand), reads a
   secret from each through AppRole and a Universal Auth machine identity into a real container's
   environment, a pinned version included, then stops OpenBao and checks the next run's first step fails in
-  the store's own words. It removes everything it made. Doppler has no self-hosted server and is covered
-  by an httptest server that follows its documented API (`secretstore_test.go`).
+  the store's own words. It removes everything it made. Changes to the AWS Secrets Manager client or the
+  SigV4 signer (`secretstore/aws.go`, `sigv4.go`) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSecretsManagerReferenceReachesTheContainer -count=1 -v`,
+  which starts a real LocalStack (`localstack/localstack:2026.10.3`, pulled beforehand, Secrets Manager
+  only) on loopback, reads a JSON secret's field, its `AWSPREVIOUS` staging label and a whole plain secret
+  into a real container through the dashboard's own signed client, then stops LocalStack and checks the
+  next run fails in the store's words; it removes what it made. LocalStack accepts any signature, so the
+  signing itself is proved by the unit tests: AWS's documented SigV4 example and a Secrets Manager request
+  checked against the AWS SDK's signature (`sigv4_test` in `secretstore_test.go`). Doppler, Secrets Manager
+  and Azure Key Vault have no self-hosted server and are covered by httptest servers that follow their
+  documented APIs — Doppler's in `secretstore_test.go`, the other two in `secretstore/secretstoretest`
+  (the Secrets Manager fake verifies every request's signature with an implementation of its own) — through
+  the unit tests, `deploy/secret_store_cloud_test.go` (the live fixture's shape without Docker) and the API
+  tests. The real AWS and Azure services are not exercised by any test.
 - Changes to staging environments, promotion or how a release is cloned also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveStagingReleaseIsPromotedAsTheSameImageAndRolledBack -count=1 -v`
   on a Docker and Buildx host (as root, through `go test -c` and `sudo`, like the others). Through the
   real routes and engine it builds a local Git checkout in staging, promotes the staging release and
   checks production runs the very image id staging built with no build step in its run, serves with
   production's variable and runs production's release task with production's value, then promotes a
-  second staging build and rolls production back to the first promoted release. Its environment and
-  run ids start far from 1, and it removes only the containers and tags its own store recorded.
+  second staging build and rolls production back to the first promoted release. It ends with a pull
+  request: a second project whose remote Git source's release mirror is pointed at a local origin by
+  `insteadOf` (a preview fetches `refs/pull/N/head`; the URL's host is under `.invalid` and commit
+  statuses are off, so nothing leaves the host), PR #41 built as a preview through a signed delivery and
+  the approval route, refused into production with `422 preview_promotion_target`, and promoted into
+  staging, which must run the very image id the preview built, serve and run its release task with
+  staging's variable and none of the preview's, and record PR #41, its commit and its approver; staging
+  keeps serving from its own tag once the preview's container and tag are gone. Changes to promoting a
+  preview run it, and the preview fixtures below. Its environment and
+  run ids start far from 1, and it removes only the containers, networks and tags its own store recorded.
 - Object-storage backups against a real S3 API (MinIO in a container: target test, upload, retention,
   restore): `JD_DEPLOY_LIVE=1 go test ./internal/backups -run TestLiveObjectStorageBackupUploadsPrunesAndRestores -count=1 -v`.
   Encrypted archives in a bucket take an S3-compatible service you started yourself, named by
@@ -432,6 +456,24 @@ to the contribution terms above, including the additional licence grant to the p
   `TestLiveMigrationRehearsalRecoversFromThePointInTimeArchive` runs as well: a PostgreSQL 17
   archiving into a directory, the copy recovered from the archive. They remove their own
   `jd-rehearsal-…` servers, volumes, networks and release containers.
+- Changes to data-aware rollback — the data point a release records when it goes live, the copies of
+  a release's data, their restore, lifetime or sweep (`deploy/data_rollback.go`,
+  `api/deployment_data_rollback.go`), the restore path they share with the migration rehearsal, or
+  how the environment's network reconciler treats labelled containers — also run, from
+  `backend/internal/api` as root on a Docker host,
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDataCopy -count=1 -v`: it provisions a
+  PostgreSQL through the routes, dumps it with a backup job, activates two releases around a change to
+  its rows and restores a copy as of the first. The copy must be on the deployment's network alone
+  under its own name, answer an application container there with its own password and hold the rows
+  the first release went live with while production holds more — read there and through the
+  comparison route — and a rehearsal-labelled container must stay off that network across a
+  reconcile. The sweep at start keeps the copy while its lifetime runs; once it ends its owner removes
+  it, leaving nothing with its label. A rollback to the first release that asks for the copy too finds
+  it restored after the rollback succeeded. `TestLiveDataCopyRestoresAMariaDBDump` does the same
+  against MariaDB (`mariadb:11.8`, pulled once). With `JD_TEST_WALG`,
+  `TestLiveDataCopyRecoversTheMomentAReleaseWentLive` does the same from a point-in-time archive, the
+  copy recovered to the moment the first release went live. Changes to the shared restore path also
+  run the migration rehearsal family above, both ways.
 - `python3 scripts/e2e-deployments.py` is the real-backend acceptance lane for deployments: it builds the
   backend, starts it on loopback with a fresh data directory, and drives the public API through a signed
   webhook channel, an nginx image deployment with resource limits, a busybox image that exits before it
@@ -473,8 +515,18 @@ to the contribution terms above, including the additional licence grant to the p
   on a Docker host. It provisions five of the templates (PostgreSQL, MySQL, MariaDB, Redis and
   MongoDB), reaches each from separate application containers,
   replaces databases at a different IP, reconnects the same clients using their original URLs,
-  verifies ownership/removal, and cleans up its own containers, volumes and networks. Compose network
-  integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
+  verifies ownership/removal, and cleans up its own containers, volumes and networks. It pulls each
+  engine's image before creating anything and logs how long that took, so a slow registry reads as a
+  pull rather than as a database that never answers; each engine then has two minutes from its
+  container starting to accept a sign-in, and a failure reports the adopt route's last reply with the
+  container's state and last log lines. MongoDB 8 does not start on Linux 6.19 to 7.0.13 (MongoDB
+  SERVER-121912, which a runner image can move to) without `GLIBC_TUNABLES=glibc.pthread.rseq=1`: the
+  MongoDB subtest checks that provisioning gave it that on such a kernel and nothing on any other, and
+  fails at once, naming the kernel and MongoDB's line, if it still refuses; `mongodb-kernel-mitigation`
+  applies the mitigation from the Databases page to a server made without it, on the runner's real
+  kernel when it is one of those, and otherwise on a server that is made to log MongoDB's refusal and
+  killed, with the kernel read as 7.0.0.
+  Compose network integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
 - Changes to server TLS for the databases the dashboard starts (`api/database_tls*.go`, `internal/dbtls`,
   `dbx/servertls.go`) also run
   `JD_DB_TLS_LIVE=1 go test ./internal/api -run TestLiveDatabaseServerTLS -count=1 -v` on a Docker host
@@ -490,14 +542,20 @@ to the contribution terms above, including the additional licence grant to the p
   drives the container-side script against `caddy:2-alpine`: a roll under the reader, the rolled
   generation found by inode with its tail recovered, the new live file, a vanished inode reading as
   absent. It starts one idle container and removes it.
-- Changes to the deployment lifecycle feed — the owner filter, the audit correlation, the kinds, or
-  either endpoint in `handlers_deploy_requests.go` — also run
+- Changes to the deployment lifecycle feed — the owner filter, the audit correlation, the kinds,
+  either endpoint in `handlers_deploy_requests.go`, or the persisted record in
+  `dockerx/events_store.go` — also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentEventsAreReadFromDockerAndNamedWithTheirCause -count=1 -v`.
   It labels a real container and a real network the way the runtime owner labels what it creates,
   lets the container exit 137, and reads both back through the real routes and the real socket. The
   feed rests on Docker putting an object's labels in an event's actor attributes, and nothing in this
   code would notice if that stopped being true — it is already false for networks, which is what the
-  fixture exists to pin. It creates two containers and one network and removes them.
+  fixture exists to pin. It then replaces the event ring with one that has never connected — a restart
+  of the dashboard, as far as the feed can tell — and requires the exit to still be in the feed, read
+  back from the store with its code, its labels and its cause. It creates two containers and one
+  network and removes them. Changes to the deployments' Prometheus exposition
+  (`api/deployment_metrics_export.go`) or the availability maths (`deploy/availability.go`) run their
+  unit tests; a real Prometheus scraping the endpoint is not part of the checks.
 - Changes to deployment routes, activation cutover or runtime ownership also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run '^TestLiveCutover(TrafficContinuity|SurvivesProxyLoss)$' -count=1 -v`
   and `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRuntimeLossKeepsExactlyOneReleaseLive -count=1 -v`.
@@ -517,6 +575,17 @@ to the contribution terms above, including the additional licence grant to the p
   container, the `release.rolled_back` delivery and its audit; then deploys a healthy third release and
   requires the warm container removed when its one-minute window passes. It numbers its environment
   far from any other and removes its containers.
+- Changes to the traffic replay (`deploy/replay.go`, the `replay_traffic` step, `runtime.replay`, or the
+  request record it reads) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveTrafficReplayStopsACandidateThatBreaksARecordedRoute -count=1 -v`
+  as root on a Docker host. Like the rollback acceptance it starts a Caddy ingress of its own on a
+  loopback port (`JD_INGRESS_CONTAINER`) and deploys `caddy:2-alpine` releases through the real routes
+  and engine: a first release whose replay skips for want of a record; thirty pages, a HEAD and a
+  write sent through the ingress; a release that answers 404 for one of those pages, which must end
+  `replay_status_drift` in `replay_traffic` with nothing cut over, the first release still answering
+  every page, its own container gone and the record holding only the test's requests (the replay never
+  passes through the ingress); then a release that answers like the first and goes live. It numbers
+  its environment far from any other and removes its containers.
 - Changes to the engine, its reconciler or run persistence also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun -count=1 -v`.
   It builds `internal/deploy/testdata/engine-host`, SIGKILLs that real second process inside every

@@ -24,9 +24,10 @@ import (
 // Engine API's own shape, and the files written into it before it started,
 // by their path.
 type provisionCreated struct {
-	Image      string   `json:"Image"`
-	Env        []string `json:"Env"`
-	Cmd        []string `json:"Cmd"`
+	Image      string            `json:"Image"`
+	Env        []string          `json:"Env"`
+	Cmd        []string          `json:"Cmd"`
+	Labels     map[string]string `json:"Labels"`
 	HostConfig struct {
 		PortBindings map[string][]struct {
 			HostIP   string `json:"HostIp"`

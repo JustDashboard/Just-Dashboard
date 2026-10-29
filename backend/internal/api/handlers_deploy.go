@@ -72,6 +72,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/runs/{run}/traffic", s.handle(s.handleDeploymentRunTraffic))
 		r.Method(http.MethodGet, "/{id}/lifecycle", s.handle(s.handleDeploymentLifecycle))
 		r.Method(http.MethodGet, "/{id}/lifecycle/stream", s.handle(s.handleDeploymentLifecycleStream))
+		r.Method(http.MethodGet, "/{id}/availability", s.handle(s.handleDeploymentAvailability))
 		r.Method(http.MethodGet, "/{id}/alerts", s.handle(s.handleTrafficAlertList))
 		r.Method(http.MethodGet, "/traffic", s.handle(s.handleDeploymentTrafficPulse))
 		r.Method(http.MethodGet, "/{id}/commits", s.handle(s.handleDeployCommits))
@@ -92,6 +93,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/environments/{env}/rollback-watch", s.handle(s.handleDeploymentRollbackWatch))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/rehearsal", s.handle(s.handleDeploymentRehearsal))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/database-links", s.handle(s.handleDeploymentDatabaseLinks))
+		// The copies of a release's data an environment holds: what they are
+		// of and how long they are kept, never how to sign in to one.
+		r.Method(http.MethodGet, "/{id}/environments/{env}/data-copies", s.handle(s.handleDeploymentDataCopies))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/database-addresses", s.handle(s.handleDeploymentDatabaseAddresses))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/schedules", s.handle(s.handleDeploymentSchedules))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/schedules/{schedule}/runs", s.handle(s.handleDeploymentScheduleRuns))
@@ -165,6 +169,15 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				// so it is an administrator's, in a session, like saving them.
 				r.Method(http.MethodPost, "/{id}/environments", s.handle(s.handleDeploymentStagingCreate))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/rehearsal", s.handle(s.handleDeploymentRehearsalPut))
+				// A copy of a release's data beside production: a second copy
+				// of production's data, whose address carries a password, so
+				// an administrator's in a session. Nothing production holds is
+				// written, so none of it is destructive.
+				r.Method(http.MethodPost, "/{id}/environments/{env}/releases/{release}/data-copies", s.handle(s.handleDeploymentDataCopyCreate))
+				r.Method(http.MethodGet, "/{id}/environments/{env}/data-copies/{copy}/url", s.handle(s.handleDeploymentDataCopyURL))
+				r.Method(http.MethodPost, "/{id}/environments/{env}/data-copies/{copy}/extend", s.handle(s.handleDeploymentDataCopyExtend))
+				r.Method(http.MethodDelete, "/{id}/environments/{env}/data-copies/{copy}", s.handle(s.handleDeploymentDataCopyRemove))
+				r.Method(http.MethodGet, "/{id}/environments/{env}/data-copies/{copy}/comparison", s.handle(s.handleDeploymentDataCopyComparison))
 				r.Method(http.MethodPost, "/{id}/previews/approvals/{approval}/approve", s.handle(s.handleDeploymentPreviewApprove))
 				// Testing a pull request is the approval of that head, so it
 				// sits with the approval route it stands in for.
@@ -241,6 +254,12 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 }
 
 func mapDeployError(err error) error {
+	// A preview's promotion is refused in words that name the rule: the
+	// request was understood, and this preview may not go where it asked.
+	var previewRefusal *deploy.PreviewPromotionRefusal
+	if errors.As(err, &previewRefusal) {
+		return httpx.Err(http.StatusUnprocessableEntity, previewRefusal.Code, previewRefusal.Message)
+	}
 	switch {
 	case errors.Is(err, deploy.ErrPreviewApproval), errors.Is(err, deploy.ErrPreviewIsolation), errors.Is(err, deploy.ErrPreviewCleanupPending), errors.Is(err, deploy.ErrGitManualOnly), errors.Is(err, deploy.ErrGitPolicyConflict), errors.Is(err, deploy.ErrPromotionOnly), errors.Is(err, deploy.ErrStagingIsolation):
 		return mapAutomationError(err)

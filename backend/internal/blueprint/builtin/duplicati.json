@@ -1,0 +1,127 @@
+{
+  "id": "duplicati",
+  "version": "1.0.0",
+  "name": "Duplicati",
+  "category": "tool",
+  "profile": "web",
+  "description": "A backup client with a web interface: encrypted, deduplicated, scheduled backups to S3, B2, SFTP, WebDAV, OneDrive, Google Drive and many other destinations. It can only back up what is inside its own container — this template mounts no host directories — so it is for data on volumes attached to it, with a local destination volume as a second copy.",
+  "iconId": "shield",
+  "docsUrl": "https://docs.duplicati.com/getting-started/installation/docker",
+  "access": {
+    "kind": "token",
+    "secretVariable": "DUPLICATI__WEBSERVICE_PASSWORD",
+    "note": "Duplicati's web interface has one password and no account name: the generated value from the Variables tab is the whole credential. It is applied on every start, so rotating it here changes the sign-in. The interface only answers to this deployment's domain and to IP addresses; another hostname needs adding to DUPLICATI__WEBSERVICE_ALLOWED_HOSTNAMES."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/duplicati/duplicati",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "duplicati/duplicati:2.4.0.1",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Duplicati refuses requests for hostnames it was not told about, so the address it is opened at has to be named here."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8200,
+      "protocol": "tcp",
+      "purpose": "The web interface and its API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "config",
+      "target": "/data",
+      "purpose": "Duplicati's settings database: backup definitions, schedules, credentials and local block databases",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "backups",
+      "target": "/backups",
+      "purpose": "A local destination for backup sets, when a remote one is not the only copy wanted",
+      "data": true,
+      "backup": false
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Web interface answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "DUPLICATI__WEBSERVICE_ALLOWED_HOSTNAMES",
+        "value": "{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "DUPLICATI__DISABLE_DB_ENCRYPTION",
+        "value": "false"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Duplicati upgrades its settings database on start. Keep the settings encryption key with the backup of the config volume: the stored destination credentials cannot be read without it.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "backup.example.test"
+      },
+      "digest": "sha256:19b24a8308f5c32c0bd6f2f8586ed402998853ffd928257537af705349ef21ae"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "web-password",
+      "variable": "DUPLICATI__WEBSERVICE_PASSWORD",
+      "label": "Web interface password",
+      "length": 24,
+      "description": "Reveal it from the Variables tab; it is the whole sign-in."
+    },
+    {
+      "name": "settings-encryption-key",
+      "variable": "SETTINGS_ENCRYPTION_KEY",
+      "label": "Settings encryption key",
+      "length": 48,
+      "description": "Encrypts the destination credentials stored in the settings database."
+    }
+  ]
+}
