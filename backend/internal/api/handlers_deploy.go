@@ -47,6 +47,8 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		// is: chi prefers the literal segment, so the fleet's counts never
 		// read as a project called "pull-requests".
 		r.Method(http.MethodGet, "/pull-requests", s.handle(s.handleDeploymentPullRequestSummary))
+		// Every environment's right-sizing verdict, the furthest off first.
+		r.Method(http.MethodGet, "/sizing", s.handle(s.handleDeploymentFleetSizing))
 		// Masked like an environment's variable list, and read by whoever
 		// may read that; a value leaves only through the audited reveal.
 		r.Method(http.MethodGet, "/shared-variables", s.handle(s.handleSharedVariables))
@@ -86,6 +88,8 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/environments/{env}/variables", s.handle(s.handleDeploymentVariables))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/pending", s.handle(s.handleDeploymentPending))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfiguration))
+		// A read: applying it is the configuration PUT above, with its audit.
+		r.Method(http.MethodGet, "/{id}/environments/{env}/sizing", s.handle(s.handleDeploymentSizing))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/maintenance", s.handle(s.handleDeploymentMaintenance))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/pages/{page}", s.handle(s.handleDeploymentPageGet))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/triggers", s.handle(s.handleDeploymentTriggers))
@@ -176,6 +180,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				// so it is an administrator's, in a session, like saving them.
 				r.Method(http.MethodPost, "/{id}/environments", s.handle(s.handleDeploymentStagingCreate))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/rehearsal", s.handle(s.handleDeploymentRehearsalPut))
+				// What a linked database gives the environment's previews: a
+				// second copy of production's data on a preview's network, so
+				// an administrator's in a session, like the rehearsal's terms.
+				r.Method(http.MethodPut, "/{id}/environments/{env}/database-links/{connection}/previews", s.handle(s.handleDeploymentPreviewBranchPolicyPut))
 				// A copy of a release's data beside production: a second copy
 				// of production's data, whose address carries a password, so
 				// an administrator's in a session. Nothing production holds is
@@ -189,6 +197,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				// Testing a pull request is the approval of that head, so it
 				// sits with the approval route it stands in for.
 				r.Method(http.MethodPost, "/{id}/pull-requests/{number}/preview", s.handle(s.handleDeploymentPullRequestPreview))
+				r.Method(http.MethodPost, "/{id}/pull-requests/{number}/preview/branches/{connection}/refresh", s.handle(s.handleDeploymentPreviewBranchRefresh))
 				r.Method(http.MethodPost, "/{id}/duplicate", s.handle(s.handleDeploymentDuplicate))
 				r.Method(http.MethodPost, "/{id}/removal-plan", s.handle(s.handleDeploymentRemovalPlan))
 				r.Method(http.MethodGet, "/credentials", s.handle(s.handleDeploymentCredentials))

@@ -18,6 +18,11 @@ func TestLivePreviewStorageCredentialsNetworkAndCleanup(t *testing.T) {
 	if os.Getenv("JD_DEPLOY_LIVE") != "1" {
 		t.Skip("set JD_DEPLOY_LIVE=1 to exercise isolated Docker preview resources")
 	}
+	t.Run("container", livePreviewContainerIsolation)
+	t.Run("compose", livePreviewComposeIsolation)
+}
+
+func livePreviewContainerIsolation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	client := liveC4Docker(t)

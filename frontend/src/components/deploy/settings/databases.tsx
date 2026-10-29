@@ -68,6 +68,7 @@ import {
   settingStatus,
 } from "@/components/deploy/settings/setting-card"
 import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { PreviewBranchesForm } from "@/components/deploy/settings/preview-branches"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import {
   DATABASE_ENGINE_LABELS,
@@ -833,6 +834,17 @@ function DatabasesBody({
           )}
         </div>
       </SettingSection>
+
+      {/* What the linked databases give pull request previews: saved apart,
+          on the page's save bar, for the next preview built. */}
+      {observedLinks.length > 0 && (
+        <PreviewBranchesForm
+          projectId={projectId}
+          environmentId={environmentId}
+          links={observedLinks}
+          onSaved={() => links.refresh()}
+        />
+      )}
 
       <SettingForm
         name="Backups & volumes"
