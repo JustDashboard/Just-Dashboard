@@ -552,13 +552,29 @@ type headersParse struct {
 	allowHeader []string
 	hide        []string
 	vary        bool
+	// The cookie maps of a route that drops cookies, read back as the
+	// names they drop, in the order the maps are chained.
+	inCookieMap bool
+	dropCookies []string
 }
 
 var corsMapRe = regexp.MustCompile(`^\$http_origin\s+\$jd_\w+_cors\s*\{$`)
 
+// dropCookieVarRe is the variable a route that drops cookies forwards as
+// its Cookie header; cookieMapRe one of the maps that make it, and
+// cookieEntryRe the entry of one that names the cookie it drops.
+var (
+	dropCookieVarRe = regexp.MustCompile(`^\$jd_\w+_cookie$`)
+	cookieMapRe     = regexp.MustCompile(`^\$(?:http_cookie|jd_\w+_ck\d+)\s+\$jd_\w+_(?:ck\d+|cookie)\s*\{$`)
+	cookieEntryRe   = regexp.MustCompile(`^"~\^([A-Za-z0-9_-]+)=\[\^;\]\*\(\?:; \*\)\?\(\?<jd_ckr\d+>\.\*\)\$"\s+\$jd_ckr\d+;$`)
+)
+
 func (p *headersParse) object(name, value string) {
 	if name == "map" && corsMapRe.MatchString(value) {
 		p.inCORS = true
+	}
+	if name == "map" && cookieMapRe.MatchString(value) {
+		p.inCookieMap = true
 	}
 }
 
@@ -567,9 +583,14 @@ func (p *headersParse) entry(raw string) {
 	if p.inCORS && len(fields) == 2 && fields[0] != "default" {
 		p.origins = append(p.origins, strings.Trim(fields[0], `"`))
 	}
+	if p.inCookieMap {
+		if match := cookieEntryRe.FindStringSubmatch(raw); match != nil {
+			p.dropCookies = append(p.dropCookies, match[1])
+		}
+	}
 }
 
-func (p *headersParse) closed() { p.inCORS = false }
+func (p *headersParse) closed() { p.inCORS, p.inCookieMap = false, false }
 
 // unquoteHeader reads a value the way nginx does when it is one quoted or
 // bare word.
@@ -589,6 +610,11 @@ func (p *headersParse) directive(name, value string, serverLevel, rootLocation b
 		header, v, _ := strings.Cut(value, " ")
 		if containsFold(renderedRequestHeaders, header) {
 			return false
+		}
+		// A deployment route's own: the Cookie header with the dashboard's
+		// session taken out, which its route writes and no form sets.
+		if strings.EqualFold(header, "Cookie") && dropCookieVarRe.MatchString(strings.TrimSpace(v)) {
+			return true
 		}
 		p.h.Request = append(p.h.Request, HeaderValue{Name: header, Value: unquoteHeader(strings.TrimSpace(v))})
 		return true
@@ -689,6 +715,7 @@ func parsePermissions(value string) []PermissionRule {
 // settle fills the spec's headers from what was read, leaving out what the
 // other switches write and what the form could not save back.
 func (p *headersParse) settle(spec *SiteSpec) {
+	spec.dropCookies = p.dropCookies
 	h := p.h
 	if p.corsHeader && (p.anyOrigin || len(p.origins) > 0) {
 		methods := slices.DeleteFunc(p.methods, func(m string) bool { return !slices.Contains(corsMethods, m) })

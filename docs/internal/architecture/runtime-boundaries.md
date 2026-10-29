@@ -143,9 +143,20 @@ metadata is never trusted as the quota. `internal/sysinfo` reads the host throug
 
 ## Auth, secrets, state
 
-`internal/auth` owns users, sessions, TOTP, recovery codes, passkeys, API tokens. Cookie `vpsd_session` (HttpOnly,
-SameSite=Strict, Secure unless `JD_DEV` or loopback-only `JD_TLS=off`). The WebSocket upgrader uses that
-same browser-facing scheme for its same-origin check, so HTTP tunnel installs can open live streams. A
+`internal/auth` owns users, sessions, TOTP, recovery codes, passkeys, API tokens. The session cookie is
+`__Host-jd_session` (HttpOnly, SameSite=Strict, Secure, `Path=/`, no `Domain`), or `jd_session` without
+Secure where the dashboard is served over plain loopback HTTP (`JD_DEV`, `JD_TLS=off`), since a browser
+refuses a `__Host-` cookie that cannot be Secure; `internal/sessioncookie` names both, and
+`httpx.Authenticator` sets and reads them. The prefix is the browser's guarantee that the cookie is
+sent to this one name and cannot be planted by a sibling. A browser still holding the name releases
+before 0.8.2 set, `vpsd_session`, is answered on its first request, given the current name for what is
+left of the session's lifetime and the old cookie cleared (`settle`); sign-out and a password change
+clear both names. A browser still sends the cookie to every *port* of the dashboard's name, so every
+proxy the dashboard writes in front of an application on that name — a tailnet address's front, a
+deployment route on `JD_SITE` — takes it out of the request
+([the dashboard's session cookie](../deployments/tailnet-apps.md#the-dashboards-session-cookie)). The
+CSRF header and `SameSite=Strict` are unchanged. The WebSocket upgrader uses the same browser-facing
+scheme for its same-origin check, so HTTP tunnel installs can open live streams. A
 session that still owes a second factor is accepted only by
 the 2FA routes (`AuthenticatePartial`); everything else answers `totp_required` /
 `totp_enrollment_required`. Who owes one is decided per account: an enrolled account is always challenged,

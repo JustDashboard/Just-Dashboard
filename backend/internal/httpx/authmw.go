@@ -4,35 +4,92 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/sessioncookie"
 )
 
-const SessionCookie = "vpsd_session"
+// SessionCookie is the session cookie of a dashboard served over HTTPS, which
+// is every installation but plain loopback HTTP; CookieName is the one this
+// dashboard issues.
+const SessionCookie = sessioncookie.Name
 
 type Authenticator struct {
 	Svc    *auth.Service
 	Secure bool
 }
 
+// CookieName is the name this dashboard's session cookie has: the __Host-
+// one wherever the cookie is Secure, and the plain one on loopback HTTP,
+// where a browser would refuse the prefix.
+func (a *Authenticator) CookieName() string { return sessioncookie.For(a.Secure) }
+
 // SetSessionCookie issues the session credential. HttpOnly keeps it away from
 // page scripts, SameSite=Strict blunts cross-site request forgery, and Secure
 // is set whenever the dashboard is not being served over plain loopback HTTP.
+// Path=/ and no Domain are what the __Host- prefix requires, and what keeps
+// the cookie on this one name.
 func (a *Authenticator) SetSessionCookie(w http.ResponseWriter, token string, maxAge int) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     SessionCookie,
-		Value:    token,
+	http.SetCookie(w, a.cookie(a.CookieName(), token, maxAge))
+}
+
+// ClearSessionCookie signs the browser out under both names: the one this
+// dashboard issues and the one releases before it did, which a browser that
+// has not been back since the upgrade still holds.
+func (a *Authenticator) ClearSessionCookie(w http.ResponseWriter) {
+	a.SetSessionCookie(w, "", -1)
+	http.SetCookie(w, a.cookie(sessioncookie.LegacyName, "", -1))
+}
+
+func (a *Authenticator) cookie(name, value string, maxAge int) *http.Cookie {
+	return &http.Cookie{
+		Name:     name,
+		Value:    value,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   a.Secure,
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   maxAge,
-	})
+	}
 }
 
-func (a *Authenticator) ClearSessionCookie(w http.ResponseWriter) {
-	a.SetSessionCookie(w, "", -1)
+// sessionCookie is the session the request carries. The current name wins
+// when both are sent; legacy says the token came under the old name, and
+// stale that the old name was sent at all.
+type sessionCookie struct {
+	token  string
+	legacy bool
+	stale  bool
+}
+
+func (a *Authenticator) sessionToken(r *http.Request) sessionCookie {
+	var found sessionCookie
+	old, err := r.Cookie(sessioncookie.LegacyName)
+	found.stale = err == nil
+	if c, err := r.Cookie(a.CookieName()); err == nil && c.Value != "" {
+		found.token = c.Value
+	} else if found.stale && old.Value != "" {
+		found.token, found.legacy = old.Value, true
+	}
+	return found
+}
+
+// settle finishes an upgrade for a session that resolved: one that arrived
+// under the legacy name is given the current one for what is left of its
+// lifetime, and the old cookie is cleared wherever it was sent. The first
+// request after an upgrade signs nobody out, and the old name is never sent
+// again. Nothing about the session changes, so there is nothing to audit.
+func (a *Authenticator) settle(w http.ResponseWriter, found sessionCookie, expires time.Time) {
+	if found.legacy {
+		if maxAge := int(time.Until(expires).Seconds()); maxAge > 0 {
+			a.SetSessionCookie(w, found.token, maxAge)
+		}
+	}
+	if found.stale {
+		http.SetCookie(w, a.cookie(sessioncookie.LegacyName, "", -1))
+	}
 }
 
 // Authenticate resolves a session cookie or Bearer token into a Principal.
@@ -81,7 +138,7 @@ func (a *Authenticator) authenticate(next http.Handler, allowPasswordChange, all
 
 func (a *Authenticator) authenticateWith(next http.Handler, allowPasswordChange, allowScoped bool, gate DeployKeyGate, log *audit.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, err := a.resolveWithPasswordChange(r, allowPasswordChange)
+		p, err := a.resolveWithPasswordChange(w, r, allowPasswordChange)
 		if err != nil {
 			WriteError(w, r, err)
 			return
@@ -124,16 +181,17 @@ func (a *Authenticator) authenticateWith(next http.Handler, allowPasswordChange,
 // outstanding. Authentication status, logout and the 2FA routes use it.
 func (a *Authenticator) AuthenticatePartial(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := sessionToken(r)
-		if token == "" {
+		found := a.sessionToken(r)
+		if found.token == "" {
 			WriteError(w, r, ErrUnauthorized)
 			return
 		}
-		sess, user, err := a.Svc.ResolveSession(r.Context(), token)
+		sess, user, err := a.Svc.ResolveSession(r.Context(), found.token)
 		if err != nil {
 			WriteError(w, r, Err(http.StatusUnauthorized, "unauthorized", "session invalid or expired"))
 			return
 		}
+		a.settle(w, found, sess.ExpiresAt)
 		p := &Principal{
 			User: user, Role: user.Role, SessionID: sess.ID, Kind: "session",
 			IP: ClientIP(r), UserAgent: r.UserAgent(), Elevated: sess.TwoFAPassed,
@@ -142,11 +200,12 @@ func (a *Authenticator) AuthenticatePartial(next http.Handler) http.Handler {
 	})
 }
 
-func (a *Authenticator) resolve(r *http.Request) (*Principal, error) {
-	return a.resolveWithPasswordChange(r, false)
-}
-
-func (a *Authenticator) resolveWithPasswordChange(r *http.Request, allowPasswordChange bool) (*Principal, error) {
+// resolveWithPasswordChange is the request's principal. A session found under
+// the legacy name is renamed on w as soon as it resolves, whether or not the
+// route then admits it: a session owing a second factor is still one to keep.
+// A bearer token is read first, so a script's request never has its cookies
+// rewritten.
+func (a *Authenticator) resolveWithPasswordChange(w http.ResponseWriter, r *http.Request, allowPasswordChange bool) (*Principal, error) {
 	if bearer := bearerToken(r); bearer != "" {
 		tok, user, role, err := a.Svc.ResolveAPIToken(r.Context(), bearer)
 		if err != nil {
@@ -157,17 +216,18 @@ func (a *Authenticator) resolveWithPasswordChange(r *http.Request, allowPassword
 		}
 		return tokenPrincipal(r, tok, user, role), nil
 	}
-	token := sessionToken(r)
-	if token == "" {
+	found := a.sessionToken(r)
+	if found.token == "" {
 		return nil, ErrUnauthorized
 	}
-	sess, user, err := a.Svc.ResolveSession(r.Context(), token)
+	sess, user, err := a.Svc.ResolveSession(r.Context(), found.token)
 	if err != nil {
 		if errors.Is(err, auth.ErrAccountDisabled) {
 			return nil, Err(http.StatusForbidden, "account_disabled", "account disabled")
 		}
 		return nil, Err(http.StatusUnauthorized, "unauthorized", "session invalid or expired")
 	}
+	a.settle(w, found, sess.ExpiresAt)
 	// A password alone is never enough: an un-elevated session is refused
 	// everywhere except the second-factor routes.
 	if !sess.TwoFAPassed {
@@ -234,14 +294,6 @@ func tokenPrincipal(r *http.Request, tok *auth.APIToken, user *auth.User, role a
 
 func passwordChangeRequired() error {
 	return Err(http.StatusForbidden, "password_change_required", "change your temporary password before continuing")
-}
-
-func sessionToken(r *http.Request) string {
-	c, err := r.Cookie(SessionCookie)
-	if err != nil {
-		return ""
-	}
-	return c.Value
 }
 
 func bearerToken(r *http.Request) string {

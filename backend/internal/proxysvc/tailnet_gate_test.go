@@ -116,3 +116,66 @@ func TestValidateTailnetGateHoldsEveryAddressToLoopback(t *testing.T) {
 		}
 	}
 }
+
+// A tailnet address is a port of the name the dashboard is reached by, so
+// both proxies take the dashboard's session cookie out of what the
+// application is sent — a gate and a front alike — and leave every other
+// cookie alone.
+func TestTailnetFrontDropsTheDashboardsCookie(t *testing.T) {
+	front := gateRoute()
+	front.Check = ""
+	if err := ValidateTailnetGate(front); err != nil {
+		t.Fatalf("a front without a check was refused: %v", err)
+	}
+	for _, route := range []TailnetGateRoute{gateRoute(), front} {
+		nginx, err := renderNginxTailnetGate(route, "/var/log/nginx/a.log", "/var/log/nginx/e.log")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{
+			"map $http_cookie $jd_tailnet_e7_ck1 {\n    default $http_cookie;\n" +
+				"    \"~^__Host-jd_session=[^;]*(?:; *)?(?<jd_ckr1>.*)$\" $jd_ckr1;\n" +
+				"    \"~^(?<jd_ckh1>.*?); *__Host-jd_session=[^;]*(?<jd_ckt1>.*)$\" \"$jd_ckh1$jd_ckt1\";\n}\n",
+			"map $jd_tailnet_e7_ck1 $jd_tailnet_e7_ck2 {\n",
+			"map $jd_tailnet_e7_ck2 $jd_tailnet_e7_cookie {\n    default $jd_tailnet_e7_ck2;\n    \"~^vpsd_session=",
+			"        proxy_set_header Cookie            $jd_tailnet_e7_cookie;\n",
+		} {
+			if !strings.Contains(nginx, want) {
+				t.Fatalf("the nginx %s is missing %q:\n%s", map[bool]string{true: "gate", false: "front"}[route.Check != ""], want, nginx)
+			}
+		}
+		caddy, err := renderCaddyTailnetGate(route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "    reverse_proxy \"127.0.0.1:41000\" {\n      header_up X-Forwarded-For {client_ip}\n      header_up X-Real-IP {client_ip}\n" +
+			"      header_up Cookie \"(^|; *)(__Host-jd_session|jd_session|vpsd_session)=[^;]*\" \"\"\n" +
+			"      header_up Cookie \"^; *\" \"\"\n    }\n"
+		if !strings.Contains(caddy, want) {
+			t.Fatalf("the Caddy route is missing %q:\n%s", want, caddy)
+		}
+	}
+
+	// A front asks nobody and names nobody: no check, no login from the
+	// dashboard, and the visitor's own claim dropped as a gate drops it.
+	nginx, _ := renderNginxTailnetGate(front, "/var/log/nginx/a.log", "/var/log/nginx/e.log")
+	for _, never := range []string{"auth_request", "/__jd/tailnet", "error_page", "_login"} {
+		if strings.Contains(nginx, never) {
+			t.Fatalf("the nginx front carries %q:\n%s", never, nginx)
+		}
+	}
+	for _, want := range []string{"    listen 127.0.0.1:21003;\n", "        proxy_set_header X-Tailnet-Login   \"\";\n", "host=$host';\n"} {
+		if !strings.Contains(nginx, want) {
+			t.Fatalf("the nginx front is missing %q:\n%s", want, nginx)
+		}
+	}
+	caddy, _ := renderCaddyTailnetGate(front)
+	for _, never := range []string{"forward_auth", "jd_tailnet_checked", "handle_errors", "log_append"} {
+		if strings.Contains(caddy, never) {
+			t.Fatalf("the Caddy front carries %q:\n%s", never, caddy)
+		}
+	}
+	if !strings.Contains(caddy, "http://:21003 {\n  bind 127.0.0.1\n") || !strings.Contains(caddy, "    request_header -X-Tailnet-Login\n") {
+		t.Fatalf("the Caddy front:\n%s", caddy)
+	}
+}
