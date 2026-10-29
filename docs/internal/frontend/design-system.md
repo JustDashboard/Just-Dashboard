@@ -1741,6 +1741,12 @@ templates brought thirteen more: Activepieces, Flowise, LibreChat, LobeChat, Chr
 Documenso, Rallly, Wakapi, Duplicati, AnythingLLM (its light variant) and GlitchTip (its purple lifted
 to the L 0.72 rung); Langflow, LiteLLM, Appsmith, GoatCounter, SFTPGo and Apprise have no vector mark
 in the collection and keep their category glyph.
+The third batch of one-click templates brought eighteen more from the same set — Homarr, Karakeep, Kimai,
+Mailpit, MeTube, PrivateBin, Yamtrack and BentoPDF unchanged, LibreSpeed's light variant,
+changedetection.io's blue and Homebox's black outlines lifted to the L 0.72 rung, LibreTranslate's
+black glyph drawn white, and Dashy, Gotenberg, Linkwarden, PairDrop and ConvertX rasterised to
+96px like Compose's — and reuses Excalidraw's; Onetime Secret has no mark in any collection and
+Zipline's is a wordmark, so both keep the plain glyph.
 
 The Databases section brought sixteen more, from the same three collections under the same rules:
 dashboard-icons' etcd, CouchDB, Cassandra, OpenSearch, FerretDB and Kafka (its white variant);
