@@ -351,9 +351,11 @@ func TestLiveDockerCaddyServesRouteRules(t *testing.T) {
 	// Then CrowdSec's list, banning every address the bridge can give the
 	// test, refused at the route, and lifted by a refresh with no release.
 	route = DeploymentRoute{
-		// Traced, as activation renders every route, so the rules are read
-		// beside the trace's directives.
+		// Traced, as activation renders every route, and sleeping as
+		// scale-to-zero renders a route (awake throughout: the switch is
+		// never written), so the rules are read beside both.
 		Name: route.Name, Domains: []string{"rules.example.test"}, AccessLog: true, Trace: true, CrowdSec: true,
+		Sleep:     &DeploymentSleep{HoldSeconds: 5},
 		Upstream:  "http://127.0.0.1:" + published(app, "80"),
 		AllowFrom: []string{"0.0.0.0/0"},
 		EdgeRules: CanonicalEdgeRules([]EdgeRule{

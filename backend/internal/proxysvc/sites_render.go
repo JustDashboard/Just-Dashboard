@@ -127,7 +127,10 @@ func renderServer(l *lines, spec *SiteSpec, names string) {
 	renderServerOptions(l, spec)
 	renderUpstreamTLS(l, spec)
 	renderErrorRouting(l, spec)
+	// The edge rules' refusals before the sleep switch, so a request they
+	// refuse never wakes a sleeping application.
 	renderEdgeChecks(l, spec)
+	renderSleepSwitch(l, spec)
 	renderAccess(l, spec)
 	renderForwardAuth(l, spec)
 	renderServerLimits(l, spec)
@@ -148,7 +151,19 @@ func renderServer(l *lines, spec *SiteSpec, names string) {
 			renderLocation(l, loc, spec)
 			l.blank()
 		}
-		renderLocation(l, SiteLocation{Path: "/", Upstream: spec.mainUpstream(), WebSockets: spec.WebSockets}, spec)
+		main := SiteLocation{Path: "/", Upstream: spec.mainUpstream(), WebSockets: spec.WebSockets}
+		if spec.sleep != nil {
+			main.wake = wakeMain
+		}
+		renderLocation(l, main, spec)
+		if spec.sleep != nil {
+			l.blank()
+			retry := main
+			retry.wake = wakeRetry
+			renderLocation(l, retry, spec)
+			l.blank()
+			renderWakeLocations(l, spec)
+		}
 	}
 
 	if spec.usesPages() {
@@ -442,6 +457,9 @@ func renderPageLocations(l *lines, spec *SiteSpec) {
 			page(strconv.Itoa(code), nil)
 		}
 	}
+	if spec.sleep != nil {
+		page("waking", func() { renderWakingPageExtra(l, spec) })
+	}
 	renderWellKnown(l, spec, dir)
 }
 
@@ -676,9 +694,12 @@ func renderUpstreamTLS(l *lines, spec *SiteSpec) {
 const stripMarker = "# Strips the path before forwarding"
 
 func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
-	if loc.Match != "" {
+	switch {
+	case loc.wake == wakeRetry:
+		renderWakeOpening(l, spec)
+	case loc.Match != "":
 		l.add("    location %s %s {", loc.Match, loc.renderedPath())
-	} else {
+	default:
 		l.add("    location %s {", loc.renderedPath())
 	}
 	renderLocationLimit(l, loc, spec)
@@ -707,7 +728,11 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	// As typed: a path on the upstream is how nginx is told to replace the
 	// location's own prefix, and trimming its slash turned /app/ into /app,
 	// which sent /page to the application as /apppage.
-	l.add("        proxy_pass %s;", proxyPassTarget(loc.renderedPath(), loc.renderedUpstream()))
+	if loc.wake == wakeMain {
+		l.add("        proxy_pass http://$%s;", spec.sleepUpstreamVar())
+	} else {
+		l.add("        proxy_pass %s;", proxyPassTarget(loc.renderedPath(), loc.renderedUpstream()))
+	}
 	if spec.Pool != nil && loc.Upstream == spec.poolUpstream() {
 		renderPoolLocation(l, loc, spec)
 	}
@@ -770,6 +795,7 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 			l.add("        proxy_request_buffering %s;", requestBuffering)
 		}
 	}
+	renderWakeErrors(l, loc, spec)
 	l.add("    }")
 }
 

@@ -472,12 +472,24 @@ func renderEdgeChecks(l *lines, spec *SiteSpec) {
 // to come back: nginx answers limit_req with a bare 429, so the refusal goes
 // to a location that adds Retry-After.
 func renderRateLimitAnswer(l *lines, spec *SiteSpec) {
-	if spec.limitRetryAfter <= 0 || spec.Limits == nil || spec.Limits.Request == nil {
+	line := rateLimitErrorPage(spec)
+	if line == "" {
 		return
 	}
 	l.add("    # Past the rate limit: 429, with how long the allowance takes to come back.")
-	l.add("    error_page 429 = @%s_limited;", spec.varIdent())
+	l.add("    %s", line)
 	l.blank()
+}
+
+// rateLimitErrorPage is the error_page that sends the rate limit's 429 to the
+// location saying when to come back, or "" for a route without a limit. A
+// location that names error pages of its own says it again
+// (serverErrorPages), since nginx then inherits none of the server's.
+func rateLimitErrorPage(spec *SiteSpec) string {
+	if spec.limitRetryAfter <= 0 || spec.Limits == nil || spec.Limits.Request == nil {
+		return ""
+	}
+	return "error_page 429 = @" + spec.varIdent() + "_limited;"
 }
 
 func renderRateLimitLocation(l *lines, spec *SiteSpec) {

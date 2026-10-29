@@ -272,3 +272,52 @@ func TestCrowdSecListIsRefreshedForNginxOnlyWhenItChanges(t *testing.T) {
 		t.Fatal("a non-canonical entry reached the list")
 	}
 }
+
+// A route that sleeps keeps the edge rules' refusals ahead of the sleeping
+// switch, so a request they refuse never wakes the application, and keeps
+// its rate limit's 429 with Retry-After in the locations that name error
+// pages of their own, where nginx inherits none of the server's.
+func TestASleepingRouteKeepsItsEdgeRulesAndItsRateLimitsAnswer(t *testing.T) {
+	route := sleepingRoute()
+	route.RateLimit = &DeploymentRateLimit{Requests: 5, Per: "second", Burst: 10}
+	route.EdgeRules = CanonicalEdgeRules([]EdgeRule{
+		{Name: "admin", Match: EdgeMatch{PathPrefix: "/admin"}, Action: EdgeAction{Kind: "block"}},
+	})
+	if err := validateDeploymentRules(route); err != nil {
+		t.Fatal(err)
+	}
+	nginx := mustRender(t, deploymentSiteSpec(route, ""))
+	refusal, sleeping := strings.Index(nginx, "_rules = admin) {"), strings.Index(nginx, "sleeping.on")
+	if refusal < 0 || sleeping < 0 || refusal > sleeping {
+		t.Fatalf("the edge rules are decided after the sleeping switch:\n%s", nginx)
+	}
+	answer := regexp.MustCompile(`error_page 429 = @\w+_limited;`).FindString(nginx)
+	if answer == "" {
+		t.Fatalf("no 429 answer:\n%s", nginx)
+	}
+	for _, opening := range []string{"    location / {\n", "    location @jd_wake {\n"} {
+		at := strings.Index(nginx, opening)
+		if at < 0 {
+			t.Fatalf("no %q:\n%s", opening, nginx)
+		}
+		block := nginx[at:]
+		block = block[:strings.Index(block, "\n    }\n")+1]
+		if !strings.Contains(block, "        "+answer+"\n") {
+			t.Fatalf("%q answers nginx's bare 429:\n%s", strings.TrimSpace(opening), block)
+		}
+	}
+	// Without a limit there is nothing to say again.
+	route.RateLimit = nil
+	if plain := mustRender(t, deploymentSiteSpec(route, "")); strings.Contains(plain, "error_page 429") {
+		t.Fatalf("a route without a limit routes a 429:\n%s", plain)
+	}
+
+	caddy, err := renderDockerCaddyRoute(route, "http://172.18.0.5:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused, asleep := strings.Index(caddy, "respond @jd_edge_1"), strings.Index(caddy, "@jd_asleep file")
+	if refused < 0 || asleep < 0 || refused > asleep {
+		t.Fatalf("Caddy asks whether the application sleeps before the edge rules:\n%s", caddy)
+	}
+}

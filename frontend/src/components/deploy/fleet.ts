@@ -92,6 +92,7 @@ const RANK: Record<ProjectState, number> = {
   unhealthy: 1,
   deploying: 2,
   ready: 4,
+  asleep: 4,
   stopped: 5,
   not_deployed: 6,
   archived: 7,

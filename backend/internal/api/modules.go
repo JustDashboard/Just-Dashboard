@@ -123,6 +123,9 @@ type moduleSet struct {
 	// rollbackWatcher reads every open warm-release window and rolls a
 	// release back, or removes the warm one, when the window says so.
 	rollbackWatcher *deploy.RollbackWatcher
+	// sleeper stops environments that sleep once nobody visits and wakes
+	// them on the next request (deploy/sleep.go).
+	sleeper *deploy.Sleeper
 	dbAlerts        *dbAlerts
 	hostAlerts      *hostAlerts
 	dbs             *dbx.Manager
@@ -487,6 +490,9 @@ func (s *Server) initModules() {
 	// a rollback through the same enqueue an operator's press takes.
 	s.modules.rollbackWatcher = deploy.NewRollbackWatcher(normalizedExecutor, s.modules.requests,
 		s.enqueueAutomaticRollback, s.auditRollbackWatch, s.Log)
+	// Idle minutes are counted from the same record, and the wake listens
+	// where this host's proxy reaches it.
+	s.modules.sleeper = deploy.NewSleeper(normalizedExecutor, s.modules.requests, s.auditSleep, s.Log)
 	s.modules.dbAlerts = s.newDBAlerts()
 	s.modules.hostAlerts = s.newHostAlerts()
 	s.modules.deployGit = deploy.NewGitWatcher(s.modules.deployRuns, s.modules.deploySources, s.dispatchGitDeployment)

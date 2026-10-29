@@ -683,6 +683,11 @@ type RuntimePlanConfig struct {
 	// and compared with the live release's answers. Nil is off, which is
 	// where a plan starts: it costs a deployment the requests it replays.
 	Replay *ReplayPlan `json:"replay,omitempty"`
+	// Sleep stops the live release's container after this many idle
+	// minutes and has the next request start it again (sleep.go). Nil is
+	// off, which is where a plan starts: a sleeping application's first
+	// visitor waits for it.
+	Sleep *SleepPlan `json:"sleep,omitempty"`
 	// Tailnet publishes the environment on this host's tailnet and nowhere
 	// else, the way a pull request preview is published: tailscale serve
 	// maps one port of the tailnet address to it, and it has no public
@@ -1620,6 +1625,9 @@ func (c PlanConfiguration) Validate() error {
 		return fmt.Errorf("runtime restart policy must be one of %s", strings.Join(RestartPolicies, ", "))
 	}
 	if err := validateReplayPlan(c.Runtime.Replay); err != nil {
+		return err
+	}
+	if err := validateSleepPlan(c); err != nil {
 		return err
 	}
 	seenMountTargets := map[string]bool{}
@@ -2814,6 +2822,7 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 		c.Runtime.HSTS = &policy
 	}
 	c.Runtime.Replay = canonicalReplayPlan(c.Runtime.Replay)
+	c.Runtime.Sleep = canonicalSleepPlan(c.Runtime.Sleep)
 	// A copy, so canonicalising never writes through to the caller's plan.
 	c.Runtime.EdgeRules = proxysvc.CanonicalEdgeRules(c.Runtime.EdgeRules)
 	if limit := c.Runtime.RateLimit; limit != nil {

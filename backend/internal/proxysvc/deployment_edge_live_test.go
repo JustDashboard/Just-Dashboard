@@ -25,7 +25,21 @@ import (
 // by a refresh with no release, and an address past its rate answered 429
 // with Retry-After while one within it is served — and the request record
 // names each deciding rule.
+//
+// Twice: served as a route always is, and as a route that sleeps renders
+// it, where every location names error pages of its own and so must say the
+// limit's 429 again (serverErrorPages).
 func TestLiveDeploymentRouteEdgeRulesOnNginx(t *testing.T) {
+	for _, sleeps := range []bool{false, true} {
+		name := "served"
+		if sleeps {
+			name = "sleeping"
+		}
+		t.Run(name, func(t *testing.T) { liveEdgeRulesOnNginx(t, sleeps) })
+	}
+}
+
+func liveEdgeRulesOnNginx(t *testing.T, sleeps bool) {
 	root := liveNginx(t)
 	ctx := context.Background()
 	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +58,11 @@ func TestLiveDeploymentRouteEdgeRulesOnNginx(t *testing.T) {
 			{Name: "bots", Match: EdgeMatch{UserAgent: "evilbot"}, Action: EdgeAction{Kind: "status", Status: 418}},
 			{Name: "old", Match: EdgeMatch{PathRegex: `^/old/[0-9]+$`}, Action: EdgeAction{Kind: "redirect", Location: "/new", Code: 301}},
 		}),
+	}
+	if sleeps {
+		// Awake throughout: the switch is never written, so every request is
+		// sent to the application through the sleeping route's locations.
+		route.Sleep = &DeploymentSleep{HoldSeconds: 5}
 	}
 	if err := validateDeploymentRules(route); err != nil {
 		t.Fatal(err)
@@ -66,6 +85,9 @@ func TestLiveDeploymentRouteEdgeRulesOnNginx(t *testing.T) {
 	}
 	if result := runValidator(ctx, "nginx", "-t"); !result.Valid {
 		t.Fatalf("nginx refused the route: %s\n%s", result.Output, installed)
+	}
+	if sleeps != strings.Contains(installed, "sleeping.on") {
+		t.Fatalf("sleeps=%v, but the route reads:\n%s", sleeps, installed)
 	}
 	startNginx(t, root)
 
