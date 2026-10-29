@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
@@ -205,18 +206,32 @@ func proxySiteMissing(err error, name string) bool {
 }
 
 // handleDeploymentPromotionPreview is the Promote confirmation's read: the
-// staging release's exact image, whether this server still holds it, and how
-// production's configuration differs from the one staging ran it with.
+// source release's exact image, whether this server still holds it, and how
+// the target's configuration differs from the one the source ran it with —
+// a staging release's into production (?releaseId=N), or a pull request
+// preview's into staging (?source=preview&preview=N).
 func (s *Server) handleDeploymentPromotionPreview(w http.ResponseWriter, r *http.Request) error {
 	projectID, environmentID, err := deploymentEnvironmentIDs(r)
 	if err != nil {
 		return err
 	}
-	releaseID, err := strconv.ParseInt(r.URL.Query().Get("releaseId"), 10, 64)
-	if err != nil || releaseID <= 0 {
-		return httpx.BadRequest("releaseId must be a positive integer")
+	query := r.URL.Query()
+	request := promotionRequest{Source: query.Get("source")}
+	if raw := query.Get("releaseId"); raw != "" {
+		if request.ReleaseID, err = strconv.ParseInt(raw, 10, 64); err != nil || request.ReleaseID <= 0 {
+			return httpx.BadRequest("releaseId must be a positive integer")
+		}
 	}
-	preview, err := s.modules.deployRuns.PromotionPreview(r.Context(), projectID, environmentID, releaseID, s.promotionImages())
+	if raw := query.Get("preview"); raw != "" {
+		if request.Preview, err = strconv.Atoi(raw); err != nil || request.Preview <= 0 {
+			return httpx.BadRequest("preview must be a pull request number")
+		}
+	}
+	named, err := request.validated()
+	if err != nil {
+		return err
+	}
+	preview, err := s.modules.deployRuns.PromotionPreviewFor(r.Context(), projectID, environmentID, named, s.promotionImages())
 	if err != nil {
 		return mapDeployError(err)
 	}
@@ -234,14 +249,46 @@ func (s *Server) promotionImages() deploy.LocalImageReader {
 	return s.modules.deployArtifacts
 }
 
+// promotionRequest names the promotion's source: a staging release by id
+// (source omitted or "staging"), or a pull request's preview by its number
+// (source "preview"; releaseId then may name the preview's live release).
 type promotionRequest struct {
-	ReleaseID int64 `json:"releaseId"`
+	ReleaseID int64  `json:"releaseId"`
+	Source    string `json:"source"`
+	Preview   int    `json:"preview"`
 }
 
-// handleDeploymentPromote queues a production run that activates a staging
-// release's exact image. It needs exactly what deploying production needs,
-// service.control, because that is what it does: production changes to new
-// code, through the same checks, cutover and automatic restore.
+func (req promotionRequest) validated() (deploy.PromotionRequest, error) {
+	switch req.Source {
+	case "", deploy.PromotionFromStaging:
+		if req.ReleaseID <= 0 {
+			return deploy.PromotionRequest{}, httpx.BadRequest("releaseId must be a positive integer")
+		}
+		if req.Preview != 0 {
+			return deploy.PromotionRequest{}, httpx.BadRequest(`preview names a pull request only with source "preview"`)
+		}
+		return deploy.PromotionRequest{Source: deploy.PromotionFromStaging, ReleaseID: req.ReleaseID}, nil
+	case deploy.PromotionFromPreview:
+		if req.Preview <= 0 {
+			return deploy.PromotionRequest{}, httpx.BadRequest("preview must be the pull request's number")
+		}
+		if req.ReleaseID < 0 {
+			return deploy.PromotionRequest{}, httpx.BadRequest("releaseId must be a positive integer")
+		}
+		return deploy.PromotionRequest{Source: deploy.PromotionFromPreview, PreviewNumber: req.Preview, ReleaseID: req.ReleaseID}, nil
+	default:
+		return deploy.PromotionRequest{}, httpx.BadRequest(`source must be "staging" or "preview"`)
+	}
+}
+
+// handleDeploymentPromote queues a run that activates a staging release's
+// exact image in production, or a pull request preview's in staging. It
+// needs exactly what deploying the target needs, service.control, because
+// that is what it does: the target changes to new code, through the same
+// checks, cutover and automatic restore. A preview's image is code from a
+// pull request, so promoting it takes what approving its commit took — an
+// administrator, in a session or with a deploy key, which carries the
+// administrator's role.
 func (s *Server) handleDeploymentPromote(w http.ResponseWriter, r *http.Request) error {
 	projectID, environmentID, err := deploymentEnvironmentIDs(r)
 	if err != nil {
@@ -251,79 +298,99 @@ func (s *Server) handleDeploymentPromote(w http.ResponseWriter, r *http.Request)
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	if req.ReleaseID <= 0 {
-		return httpx.BadRequest("releaseId must be a positive integer")
+	named, err := req.validated()
+	if err != nil {
+		return err
+	}
+	// Recorded before anything can refuse it, so a refusal is audited under
+	// the same action with what was asked for; a success replaces it below.
+	asked := map[string]any{"deploymentId": projectID, "environmentId": environmentID, "sourceKind": named.Source}
+	target := fmt.Sprint(named.ReleaseID)
+	if named.FromPreview() {
+		asked["previewNumber"], target = named.PreviewNumber, fmt.Sprintf("PR #%d", named.PreviewNumber)
+	}
+	httpx.SetAudit(r, "deploy.release.promote", target, asked)
+	principal := httpx.MustPrincipal(r)
+	if named.FromPreview() && !principal.Can(auth.CapSystemAdmin) {
+		return httpx.Err(http.StatusForbidden, "forbidden",
+			"promoting a pull request's preview takes an administrator, as approving its commit does ("+string(auth.CapSystemAdmin)+")")
 	}
 	project, err := s.modules.deployStore.Get(r.Context(), projectID)
 	if err != nil {
 		return mapDeployError(err)
 	}
-	run, source, err := s.enqueuePromotion(r.Context(), project, environmentID, req.ReleaseID,
-		httpx.MustPrincipal(r).Username(), strings.TrimSpace(r.Header.Get("Idempotency-Key")))
+	run, source, err := s.enqueuePromotion(r.Context(), project, environmentID, named,
+		principal.Username(), strings.TrimSpace(r.Header.Get("Idempotency-Key")))
 	if err != nil {
 		return mapDeployError(err)
 	}
-	httpx.SetAudit(r, "deploy.release.promote", fmt.Sprint(req.ReleaseID), map[string]any{
+	detail := map[string]any{
 		"deploymentId": projectID, "environmentId": environmentID, "runId": run.ID,
+		"sourceKind":        source.Promotion.SourceKind,
 		"fromEnvironmentId": source.Promotion.EnvironmentID, "fromReleaseNumber": source.Promotion.ReleaseNumber,
 		"imageId": source.Promotion.ImageID, "imageDigest": source.Promotion.ImageDigest,
 		"sourceRevision": source.Promotion.SourceRevision,
-	})
+	}
+	if preview := source.Promotion.Preview; preview != nil {
+		detail["previewNumber"], detail["pullRequestUrl"], detail["approvedBy"] = preview.Number, preview.URL, preview.ApprovedBy
+	}
+	httpx.SetAudit(r, "deploy.release.promote", fmt.Sprint(source.Promotion.ReleaseID), detail)
 	httpx.JSON(w, http.StatusAccepted, run)
 	return nil
 }
 
-// enqueuePromotion builds the promotion run: production's current plan
-// revision and, at enqueue, production's current variables, with the staging
+// enqueuePromotion builds the promotion run: the target's current plan
+// revision and, at enqueue, the target's current variables, with the source
 // release named in the run's metadata as the only artifact it may use.
+// Production takes a staging release; staging takes a pull request preview's.
 func (s *Server) enqueuePromotion(
 	ctx context.Context,
 	project *deploy.Project,
-	environmentID, releaseID int64,
+	environmentID int64,
+	request deploy.PromotionRequest,
 	actor, idempotencyKey string,
 ) (*deploy.EngineRun, *deploy.PromotionSource, error) {
 	target, err := s.modules.deployRuns.EnvironmentExecutionTarget(ctx, project.ID, environmentID)
 	if err != nil {
 		return nil, nil, err
 	}
-	if target.Kind != deploy.EnvironmentProduction {
+	switch {
+	case request.FromPreview() && target.Kind != deploy.EnvironmentStaging:
+		return nil, nil, deploy.RefusePreviewPromotionTarget(request.PreviewNumber)
+	case !request.FromPreview() && target.Kind != deploy.EnvironmentProduction:
 		return nil, nil, deploy.ErrPromotionTarget
 	}
 	if target.BuildMethod == deploy.BuildLegacyCompose {
 		return nil, nil, fmt.Errorf("%w: a compatibility deployment cannot take a promotion", deploy.ErrPromotionIncompatible)
 	}
-	source, err := s.modules.deployRuns.PromotionSource(ctx, project.ID, releaseID)
+	source, err := s.modules.deployRuns.PromotionSourceFor(ctx, project.ID, request)
 	if err != nil {
 		return nil, nil, err
 	}
-	images := s.promotionImages()
-	if images == nil {
-		return nil, nil, deploy.ErrBuilderUnavailable
+	if err := deploy.RequirePromotionImage(ctx, s.promotionImages(), source); err != nil {
+		return nil, nil, err
 	}
-	if present, err := images.LocalImage(ctx, source.Promotion.ImageID); err != nil || present.ConfigDigest != source.Promotion.ImageID {
-		return nil, nil, deploy.ErrPromotionImageMissing
-	}
-	productionSource, err := s.modules.deployRuns.SourceConfiguration(ctx, environmentID, target.DesiredRevision)
+	targetSource, err := s.modules.deployRuns.SourceConfiguration(ctx, environmentID, target.DesiredRevision)
 	if err != nil {
 		return nil, nil, err
 	}
 	sourceRevision := ""
-	if deploy.IsRemoteGitSource(productionSource) && deploy.ValidateSHA(source.Promotion.SourceRevision) == nil {
+	if deploy.IsRemoteGitSource(targetSource) && deploy.ValidateSHA(source.Promotion.SourceRevision) == nil {
 		// The run names the promoted commit, as a deploy of that commit
-		// would; the source identity itself comes from the staging release.
+		// would; the source identity itself comes from the source release.
 		sourceRevision = source.Promotion.SourceRevision
 	}
 	values := map[string]any{
 		"compatibility": false, "targetReleaseId": 0, "changedPaths": []string{},
 		"promotion": source.Promotion,
 	}
-	// The commit the staging run read is the one production now runs; a
+	// The commit the source run read is the one the target now runs; a
 	// promotion fetches no source of its own, so it carries that reading.
-	if stagingRun, err := s.modules.deployRuns.Run(ctx, source.Promotion.RunID); err == nil {
+	if sourceRun, err := s.modules.deployRuns.Run(ctx, source.Promotion.RunID); err == nil {
 		var recorded struct {
 			Commit json.RawMessage `json:"commit"`
 		}
-		if json.Unmarshal(stagingRun.Metadata, &recorded) == nil && len(recorded.Commit) > 0 {
+		if json.Unmarshal(sourceRun.Metadata, &recorded) == nil && len(recorded.Commit) > 0 {
 			values["commit"] = recorded.Commit
 		}
 	}
@@ -331,6 +398,7 @@ func (s *Server) enqueuePromotion(
 	if err != nil {
 		return nil, nil, err
 	}
+	releaseID := source.Promotion.ReleaseID
 	digest := sha256.Sum256([]byte(fmt.Sprintf("normalized:%d:%d:%s:%d:%d:%s", project.ID, environmentID,
 		deploy.OperationPromote, target.DesiredRevision, releaseID, source.Promotion.ImageID)))
 	run, _, err := s.modules.deployRuns.Enqueue(ctx, deploy.RunRequest{

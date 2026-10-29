@@ -22,7 +22,8 @@ import (
 // CI pipeline use. It deliberately changes one boundary: several deployment
 // writes that were a session's alone — drafts, configuration, source, Git
 // policy, triggers, variables and shared variables — answer it too, and so do
-// the operating verbs beside a deploy: promoting staging, switching back to
+// the operating verbs beside a deploy: promoting staging (or a pull request's
+// approved preview into staging), switching back to
 // the warm release or keeping the new one, and the maintenance switch.
 // Everything else holds:
 //
@@ -94,6 +95,7 @@ const (
 	whyPages           = "a route's maintenance and error pages are files on the server beside the proxy's route, and are edited in the dashboard"
 	whyRollbackTerms   = "the terms a release is kept warm and rolled back on are set in the dashboard"
 	whyRehearsalTerms  = "a migration rehearsal restores a database's backup, and which database and on what terms is chosen in the dashboard"
+	whyDataCopy        = "a copy of a release's data is a second copy of production's data, and its address carries a password: it is asked for, read and removed in the dashboard"
 )
 
 // deployKeyRoutes is the decision table: every route a deploy key may make,
@@ -105,6 +107,8 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	// The fleet and the catalogue.
 	"GET /deploy/":                                   keyOpen, // narrowed to the key's deployments by the handler
 	"GET /deploy/hostname":                           keyOpen,
+	"GET /deploy/openapi.json":                       keyOpen, // the description of this API, static
+	"GET /deploy/openapi.yaml":                       keyOpen,
 	"GET /deploy/blueprints/":                        keyOpen,
 	"GET /deploy/blueprints/{id}":                    keyOpen,
 	"GET /deploy/blueprints/{id}/versions":           keyOpen,
@@ -115,6 +119,10 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/notifications/options":              keyEvery,
 	"GET /deploy/notifications/{channel}/deliveries": keyEvery,
 	"GET /deploy/log-drains":                         keyEvery,
+	// Right-sizing is a read of the deployments' own container history;
+	// the list is narrowed to the key's deployments by the handler, and
+	// applying a suggestion is the configuration PUT below.
+	"GET /deploy/sizing": keyOpen,
 
 	// One deployment, read: what an ordinary key reads, less the legacy list
 	// that prints part of each value.
@@ -137,6 +145,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/{id}/requests/export":                                  keyOpen,
 	"GET /deploy/{id}/lifecycle":                                        keyOpen,
 	"GET /deploy/{id}/lifecycle/stream":                                 keyOpen,
+	"GET /deploy/{id}/availability":                                     keyOpen,
 	"GET /deploy/{id}/alerts":                                           keyOpen,
 	"GET /deploy/{id}/commits":                                          keyOpen,
 	"GET /deploy/{id}/operations":                                       keyOpen,
@@ -158,9 +167,11 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/{id}/environments/{env}/variables":                     keyOpen, // names and digests, never values
 	"GET /deploy/{id}/environments/{env}/pending":                       keyOpen,
 	"GET /deploy/{id}/environments/{env}/configuration":                 keyOpen,
+	"GET /deploy/{id}/environments/{env}/sizing":                        keyOpen,
 	"GET /deploy/{id}/environments/{env}/triggers":                      keyOpen,
 	"GET /deploy/{id}/environments/{env}/git-watch":                     keyOpen,
 	"GET /deploy/{id}/environments/{env}/database-links":                keyOpen,
+	"GET /deploy/{id}/environments/{env}/data-copies":                   keyOpen, // what each copy is of and until when, never its sign-in
 	"GET /deploy/{id}/environments/{env}/database-addresses":            keyOpen,
 	"GET /deploy/{id}/environments/{env}/schedules":                     keyOpen,
 	"GET /deploy/{id}/environments/{env}/schedules/{schedule}/runs":     keyOpen,
@@ -174,8 +185,12 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"POST /deploy/{id}/runs/{run}/diagnosis":        keyOpen,
 	"POST /deploy/{id}/rollback":                    keyOpen,
 	"POST /deploy/{id}/environments/{env}/rollback": keyOpen,
-	// Promoting is deploying production with staging's image: the same
-	// capability, queue, checks and cutover as a deploy.
+	// Promoting is deploying production with staging's image, or staging
+	// with a pull request preview's: the same capability, queue, checks and
+	// cutover as a deploy. A preview's takes the administrator's role, which
+	// a deploy key carries; approving the commit it was built from stays a
+	// person's in the dashboard (whyPreview), and promotion takes only an
+	// approved one.
 	"POST /deploy/{id}/environments/{env}/promote": keyOpen,
 	// The warm release's window. Switching traffic back to it is a rollback,
 	// destructive as the one from the release list is, and the key spends
@@ -249,49 +264,54 @@ var deployKeyRoutes = map[string]deployKeyRule{
 
 	// Session-only, and kept so: none of these is shipping or configuring a
 	// deployment, and each opens with a line here if it ever should be.
-	"POST /deploy/{id}/previews/approvals/{approval}/approve":     keySession(whyPreview),
-	"POST /deploy/{id}/previews/approvals/{approval}/reject":      keySession(whyPreview),
-	"POST /deploy/{id}/pull-requests/{number}/preview":            keySession(whyPreview),
-	"POST /deploy/{id}/pull-requests/{number}/preview/close":      keySession(whyPreview),
-	"PUT /deploy/{id}/environments/{env}/releases/{release}/pin":  keySession("pinning a release is done in the dashboard"),
-	"POST /deploy/{id}/unarchive":                                 keySession("restoring an archived deployment is done in the dashboard"),
-	"POST /deploy/{id}/environments/{env}/schedules":              keySession(whyAutomations),
-	"POST /deploy/{id}/environments/{env}/schedules/test":         keySession(whyAutomations),
-	"PUT /deploy/{id}/environments/{env}/schedules/{schedule}":    keySession(whyAutomations),
-	"DELETE /deploy/{id}/environments/{env}/schedules/{schedule}": keySession(whyAutomations),
-	"POST /deploy/{id}/alerts":                                    keySession(whyAutomations),
-	"PUT /deploy/{id}/alerts/{alert}":                             keySession(whyAutomations),
-	"DELETE /deploy/{id}/alerts/{alert}":                          keySession(whyAutomations),
-	"POST /deploy/{id}/alerts/{alert}/test":                       keySession(whyAutomations),
-	"POST /deploy/notifications":                                  keySession(whyChannels),
-	"PUT /deploy/notifications/{channel}":                         keySession(whyChannels),
-	"POST /deploy/notifications/{channel}/test":                   keySession(whyChannels),
-	"PUT /deploy/notifications/{channel}/enabled":                 keySession(whyChannels),
-	"DELETE /deploy/notifications/{channel}":                      keySession(whyChannels),
-	"POST /deploy/log-drains":                                     keySession(whyChannels),
-	"PUT /deploy/log-drains/{drain}":                              keySession(whyChannels),
-	"PUT /deploy/log-drains/{drain}/enabled":                      keySession(whyChannels),
-	"POST /deploy/log-drains/{drain}/test":                        keySession(whyChannels),
-	"DELETE /deploy/log-drains/{drain}":                           keySession(whyChannels),
-	"POST /deploy/secret-stores":                                  keySession(whySecretStore),
-	"PUT /deploy/secret-stores/{store}":                           keySession(whySecretStore),
-	"POST /deploy/secret-stores/{store}/test":                     keySession(whySecretStore),
-	"DELETE /deploy/secret-stores/{store}":                        keySession(whySecretStore),
-	"POST /deploy/{id}/environments":                              keySession(whyEnvironment),
-	"DELETE /deploy/{id}/environments/{env}":                      keySession(whyEnvironment),
-	"PUT /deploy/{id}/environments/{env}/pages/{page}":            keySession(whyPages),
-	"PUT /deploy/{id}/environments/{env}/rollback-policy":         keySession(whyRollbackTerms),
-	"PUT /deploy/{id}/environments/{env}/rehearsal":               keySession(whyRehearsalTerms),
-	"POST /deploy/blueprints/{id}/render":                         keySession("a template's plan is previewed in the dashboard; a draft from it is a deploy key's to make"),
-	"POST /deploy/import/preview":                                 keySession(whyHost),
-	"POST /deploy/import/adopt":                                   keySession(whyHost),
-	"POST /deploy/game/import/preview":                            keySession(whyHost),
-	"PUT /deploy/{id}/game/properties":                            keySession(whyGame),
-	"GET /deploy/github-app/":                                     keySession(whyGitHubApp),
-	"GET /deploy/github-app/repositories":                         keySession(whyGitHubApp),
-	"POST /deploy/github-app/manifest":                            keySession(whyGitHubApp),
-	"POST /deploy/github-app/callback":                            keySession(whyGitHubApp),
-	"DELETE /deploy/github-app/":                                  keySession(whyGitHubApp),
+	"POST /deploy/{id}/previews/approvals/{approval}/approve":             keySession(whyPreview),
+	"POST /deploy/{id}/previews/approvals/{approval}/reject":              keySession(whyPreview),
+	"POST /deploy/{id}/pull-requests/{number}/preview":                    keySession(whyPreview),
+	"POST /deploy/{id}/pull-requests/{number}/preview/close":              keySession(whyPreview),
+	"PUT /deploy/{id}/environments/{env}/releases/{release}/pin":          keySession("pinning a release is done in the dashboard"),
+	"POST /deploy/{id}/unarchive":                                         keySession("restoring an archived deployment is done in the dashboard"),
+	"POST /deploy/{id}/environments/{env}/schedules":                      keySession(whyAutomations),
+	"POST /deploy/{id}/environments/{env}/schedules/test":                 keySession(whyAutomations),
+	"PUT /deploy/{id}/environments/{env}/schedules/{schedule}":            keySession(whyAutomations),
+	"DELETE /deploy/{id}/environments/{env}/schedules/{schedule}":         keySession(whyAutomations),
+	"POST /deploy/{id}/alerts":                                            keySession(whyAutomations),
+	"PUT /deploy/{id}/alerts/{alert}":                                     keySession(whyAutomations),
+	"DELETE /deploy/{id}/alerts/{alert}":                                  keySession(whyAutomations),
+	"POST /deploy/{id}/alerts/{alert}/test":                               keySession(whyAutomations),
+	"POST /deploy/notifications":                                          keySession(whyChannels),
+	"PUT /deploy/notifications/{channel}":                                 keySession(whyChannels),
+	"POST /deploy/notifications/{channel}/test":                           keySession(whyChannels),
+	"PUT /deploy/notifications/{channel}/enabled":                         keySession(whyChannels),
+	"DELETE /deploy/notifications/{channel}":                              keySession(whyChannels),
+	"POST /deploy/log-drains":                                             keySession(whyChannels),
+	"PUT /deploy/log-drains/{drain}":                                      keySession(whyChannels),
+	"PUT /deploy/log-drains/{drain}/enabled":                              keySession(whyChannels),
+	"POST /deploy/log-drains/{drain}/test":                                keySession(whyChannels),
+	"DELETE /deploy/log-drains/{drain}":                                   keySession(whyChannels),
+	"POST /deploy/secret-stores":                                          keySession(whySecretStore),
+	"PUT /deploy/secret-stores/{store}":                                   keySession(whySecretStore),
+	"POST /deploy/secret-stores/{store}/test":                             keySession(whySecretStore),
+	"DELETE /deploy/secret-stores/{store}":                                keySession(whySecretStore),
+	"POST /deploy/{id}/environments":                                      keySession(whyEnvironment),
+	"POST /deploy/{id}/environments/{env}/releases/{release}/data-copies": keySession(whyDataCopy),
+	"GET /deploy/{id}/environments/{env}/data-copies/{copy}/url":          keySession(whyDataCopy),
+	"POST /deploy/{id}/environments/{env}/data-copies/{copy}/extend":      keySession(whyDataCopy),
+	"DELETE /deploy/{id}/environments/{env}/data-copies/{copy}":           keySession(whyDataCopy),
+	"GET /deploy/{id}/environments/{env}/data-copies/{copy}/comparison":   keySession(whyDataCopy),
+	"DELETE /deploy/{id}/environments/{env}":                              keySession(whyEnvironment),
+	"PUT /deploy/{id}/environments/{env}/pages/{page}":                    keySession(whyPages),
+	"PUT /deploy/{id}/environments/{env}/rollback-policy":                 keySession(whyRollbackTerms),
+	"PUT /deploy/{id}/environments/{env}/rehearsal":                       keySession(whyRehearsalTerms),
+	"POST /deploy/blueprints/{id}/render":                                 keySession("a template's plan is previewed in the dashboard; a draft from it is a deploy key's to make"),
+	"POST /deploy/import/preview":                                         keySession(whyHost),
+	"POST /deploy/import/adopt":                                           keySession(whyHost),
+	"POST /deploy/game/import/preview":                                    keySession(whyHost),
+	"PUT /deploy/{id}/game/properties":                                    keySession(whyGame),
+	"GET /deploy/github-app/":                                             keySession(whyGitHubApp),
+	"GET /deploy/github-app/repositories":                                 keySession(whyGitHubApp),
+	"POST /deploy/github-app/manifest":                                    keySession(whyGitHubApp),
+	"POST /deploy/github-app/callback":                                    keySession(whyGitHubApp),
+	"DELETE /deploy/github-app/":                                          keySession(whyGitHubApp),
 
 	// What an ordinary key reaches and a deploy key does not.
 	"GET /deploy/secret-stores":               keyDeny(whySecretStoreList),

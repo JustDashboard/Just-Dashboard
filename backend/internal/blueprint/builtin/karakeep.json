@@ -1,0 +1,276 @@
+{
+  "id": "karakeep",
+  "version": "1.0.0",
+  "name": "Karakeep",
+  "category": "http",
+  "profile": "compose",
+  "description": "A bookmark-everything app: links, notes and images, each link crawled and archived by the headless Chrome in the stack and indexed for full-text search by Meilisearch. Automatic tagging needs an AI provider you add later.",
+  "iconId": "book",
+  "docsUrl": "https://docs.karakeep.app/",
+  "access": {
+    "kind": "setup",
+    "note": "Karakeep starts with no accounts and sign-ups open: the address opens on a sign-in page whose sign-up link creates an account. Make yours right after deploying, then set DISABLE_SIGNUPS to true from the Variables tab and redeploy, because until then anyone who reaches the address can register. Crawling runs in the Chrome service, which is the one private service allowed out to the internet."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/karakeep-app/karakeep",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Sign-in callbacks and every link Karakeep builds use this address."
+    }
+  ],
+  "secrets": [
+    {
+      "name": "nextauth-secret",
+      "variable": "NEXTAUTH_SECRET",
+      "label": "Session secret",
+      "length": 48,
+      "description": "Signs sessions and tokens; changing it signs everybody out."
+    },
+    {
+      "name": "meili-master-key",
+      "variable": "MEILI_MASTER_KEY",
+      "label": "Search index master key",
+      "length": 32,
+      "description": "Generated here and shared only between Karakeep and its Meilisearch."
+    }
+  ],
+  "services": [
+    {
+      "name": "web",
+      "role": "app",
+      "purpose": "The web application, its API and the crawling and indexing workers, behind the domain",
+      "image": {
+        "reference": "ghcr.io/karakeep-app/karakeep:0.34.1",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "NEXTAUTH_URL",
+          "value": "{{variable.NEXTAUTH_URL}}"
+        },
+        {
+          "name": "NEXTAUTH_SECRET",
+          "value": "{{secret.nextauth-secret}}"
+        },
+        {
+          "name": "DATA_DIR",
+          "value": "/data"
+        },
+        {
+          "name": "MEILI_ADDR",
+          "value": "http://meilisearch:7700"
+        },
+        {
+          "name": "MEILI_MASTER_KEY",
+          "value": "{{secret.meili-master-key}}"
+        },
+        {
+          "name": "BROWSER_WEB_URL",
+          "value": "http://chrome:9222"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 3000,
+          "protocol": "tcp",
+          "purpose": "The web application and its API",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "data",
+          "target": "/data",
+          "purpose": "The SQLite database and every archived page, screenshot and uploaded image",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 1024,
+        "minMemoryMb": 512
+      },
+      "healthcheck": {
+        "test": [
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:3000/api/health"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 10,
+        "retries": 18,
+        "startPeriodSeconds": 60
+      },
+      "dependsOn": [
+        {
+          "service": "meilisearch",
+          "condition": "healthy"
+        },
+        {
+          "service": "chrome",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "chrome",
+      "role": "worker",
+      "purpose": "Headless Chrome that fetches and renders the pages Karakeep archives",
+      "image": {
+        "reference": "ghcr.io/karakeep-app/karakeep-chrome:156.0.8078.47-r1",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing",
+        "command": [
+          "--disable-gpu",
+          "--disable-dev-shm-usage",
+          "--hide-scrollbars",
+          "--disable-blink-features=AutomationControlled",
+          "--window-size=1440,900"
+        ]
+      },
+      "ports": [
+        {
+          "name": "devtools",
+          "internal": 9222,
+          "protocol": "tcp",
+          "purpose": "The DevTools endpoint Karakeep drives the browser through",
+          "exposure": "internal"
+        }
+      ],
+      "resources": {
+        "memoryMb": 1024,
+        "minMemoryMb": 512
+      },
+      "healthcheck": {
+        "test": [
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:9222/json/version"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 12,
+        "startPeriodSeconds": 20
+      },
+      "egress": true
+    },
+    {
+      "name": "meilisearch",
+      "role": "database",
+      "purpose": "Meilisearch, the full-text index of every bookmark",
+      "image": {
+        "reference": "getmeili/meilisearch:v1.53.2",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "MEILI_MASTER_KEY",
+          "value": "{{secret.meili-master-key}}"
+        },
+        {
+          "name": "MEILI_NO_ANALYTICS",
+          "value": "true"
+        }
+      ],
+      "ports": [
+        {
+          "name": "meili",
+          "internal": 7700,
+          "protocol": "tcp",
+          "purpose": "The search API Karakeep indexes into",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "index",
+          "target": "/meili_data",
+          "purpose": "The search index; rebuilt from the bookmarks by Karakeep's admin page if lost",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fsS",
+          "-o",
+          "/dev/null",
+          "http://127.0.0.1:7700/health"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 10
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/health",
+      "port": "http",
+      "timeoutSeconds": 300
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "NEXTAUTH_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "Karakeep migrates its database on start and does not migrate back; it is still before 1.0, so read the release notes. A Meilisearch major version may need the index rebuilt from Karakeep's admin page."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "keep.example.test"
+      },
+      "digest": "sha256:6b4460c6d450e98de9e499e93a6469fef26aad40a9593c7993e939f5a581f4ce"
+    }
+  ]
+}

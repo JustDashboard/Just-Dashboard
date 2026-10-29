@@ -36,12 +36,7 @@ func (s *Server) handleDeploymentGitPolicyPut(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return err
 	}
-	// promotionOnly is optional: a client that predates it keeps whatever
-	// the environment has rather than switching it off by omission.
-	var request struct {
-		deploy.GitDeploymentPolicy
-		PromotionOnly *bool `json:"promotionOnly"`
-	}
+	var request gitPolicyWrite
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
@@ -81,4 +76,12 @@ func (s *Server) dispatchGitDeployment(ctx context.Context, target deploy.GitWat
 	encoded, _ := json.Marshal(detail)
 	s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.git.change", Target: fmt.Sprint(target.ProjectID), Success: err == nil, Detail: string(encoded)})
 	return run, err
+}
+
+// gitPolicyWrite is the body of PUT …/git-policy. promotionOnly is optional:
+// a client that predates it keeps whatever the environment has rather than
+// switching it off by omission.
+type gitPolicyWrite struct {
+	deploy.GitDeploymentPolicy
+	PromotionOnly *bool `json:"promotionOnly"`
 }

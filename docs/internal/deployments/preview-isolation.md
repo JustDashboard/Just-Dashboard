@@ -251,6 +251,29 @@ because the merge just proved the credential. Provider webhooks keep closing pre
 `ProviderEvent` now carries `Merged` and `BaseRef` for GitHub, Gitea, GitLab and Bitbucket. Production
 redeploys through the existing git watcher or App push delivery.
 
+## Promoting a preview into staging
+
+A preview's image can go on to the project's staging environment, never straight into production
+([staging and promotion](staging-promotion.md#promoting-a-pull-requests-preview-into-staging)). What
+crosses is the image alone — the exact local image id the preview built — and only while the preview is
+open, isolated, serving that release, and the release's commit carries the pull request's current
+administrator approval (a fork's preview is refused in words that say it is a fork's and why). Staging
+runs it with staging's frozen plan and variables; none of the preview's own variables, and none of the
+production values a dashboard preview copied in, reach staging, and no staging release task that runs
+in the dashboard's shell is allowed to run against the pull request's checkout. Promoting takes an
+administrator (`system.admin`, a deploy key included) on top of the route's `service.control`, because
+it is the second place the approved code meets real configuration; approving the commit stays a
+person's in the dashboard.
+
+Promotion changes nothing about the preview: it keeps running, keeps its address and its variables, and
+is closed exactly as before. Its row in the listings carries `promotion` (the newest promotion run that
+took its image, however it ended), which the Overview's Pull requests panel draws as a `Promoted to
+staging` tag. Retention holds the preview's image while a promotion of it is unfinished ("source of an
+unfinished promotion to staging"), so merging the pull request — which closes the preview — right after
+promoting does not take the image from under the queued run; once promoted, staging's release holds
+its own tag of it. A queued promotion whose approval an administrator rejected meanwhile stops at its
+render step.
+
 ## Existing previews on upgrade
 
 Before the deployment engine starts, `PreviewQuarantineController` finds previews without a reviewed,

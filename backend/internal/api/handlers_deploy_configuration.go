@@ -232,10 +232,7 @@ func (s *Server) handleDeploymentVariableGenerate(w http.ResponseWriter, r *http
 	if err != nil {
 		return err
 	}
-	var request struct {
-		Revision int      `json:"revision"`
-		Scopes   []string `json:"scopes"`
-	}
+	var request variableGenerateRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
@@ -261,9 +258,7 @@ func (s *Server) handleDeploymentVariableRotate(w http.ResponseWriter, r *http.R
 	if err != nil {
 		return err
 	}
-	var request struct {
-		Revision int `json:"revision"`
-	}
+	var request variableRevisionRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
@@ -334,9 +329,7 @@ func (s *Server) handleDeploymentVariableDelete(w http.ResponseWriter, r *http.R
 	if err != nil {
 		return err
 	}
-	var request struct {
-		Revision int `json:"revision"`
-	}
+	var request variableRevisionRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
@@ -432,6 +425,18 @@ func withholdGeneratedValue(p *httpx.Principal, result *deploy.VariableMutationR
 	if p.DeployKey() {
 		result.GeneratedValue = ""
 	}
+}
+
+// variableRevisionRequest names the environment revision a variable write
+// was read at, so a write over a change somebody else made is refused.
+type variableRevisionRequest struct {
+	Revision int `json:"revision"`
+}
+
+// variableGenerateRequest asks for a generated secret in the given scopes.
+type variableGenerateRequest struct {
+	Revision int      `json:"revision"`
+	Scopes   []string `json:"scopes"`
 }
 
 // sameTailnetPublication says two plans publish on the tailnet alike: both

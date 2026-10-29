@@ -46,8 +46,10 @@ import { SitePreview } from "@/components/deploy/site-preview"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
 import { ProjectWiring } from "@/components/deploy/project-wiring"
 import { Insights } from "@/components/deploy/insights"
+import { Availability } from "@/components/deploy/availability"
 import { RunRow } from "@/components/deploy/run-row"
 import { UsageTiles } from "@/components/deploy/usage-tiles"
+import { RightSizeCard } from "@/components/deploy/right-size"
 import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
 import { ReleaseWatch, useReleaseWatch } from "@/components/deploy/release-watch"
 
@@ -68,7 +70,10 @@ import { ReleaseWatch, useReleaseWatch } from "@/components/deploy/release-watch
  * which sat alone on its own row at every desktop width.
  *
  * Findings live here rather than on Runtime — Runtime is evidence, this is
- * the verdict — and the identity line's "needs attention" links to them. The
+ * the verdict — and the identity line's "needs attention" links to them. How
+ * much of the last day, week and month the live release was up sits over the
+ * delivery figures, read from the releases and the container events the
+ * dashboard keeps. The
  * recent deployments are runs you open, drawn as the runs list draws them,
  * beside the repository's pull requests, each with the preview built from it
  * and the verbs that test, merge or close one. Each block arrives on its own
@@ -113,6 +118,7 @@ export function ProjectOverview() {
     projectName: record.name,
     info: pullRequests.data,
     refresh: pullRequests.refresh,
+    stagingId: project.archived ? undefined : project.staging?.id,
   })
   const runs = project.runs.filter((run) => run.environmentId === project.environmentId)
   // The run in flight is the page's first block; it is not listed a second
@@ -250,6 +256,20 @@ export function ProjectOverview() {
     </Panel>,
   ])
 
+  // What its limits should be, from the history of what it used: under the
+  // readings it is drawn from, and above what shipped. The card draws nothing
+  // for a Compose stack, whose file keeps its limits, or a legacy project.
+  if (project.normalized && !project.archived)
+    blocks.push([
+      "right-size",
+      <RightSizeCard
+        key="right-size"
+        projectId={project.projectId}
+        environmentId={project.environmentId}
+        onApplied={project.refresh}
+      />,
+    ])
+
   if (access)
     blocks.push([
       "sign-in",
@@ -341,18 +361,26 @@ export function ProjectOverview() {
     </div>
   )
 
-  // The recent runs answer what shipped before the trend asks how often.
-  // Legacy projects have no delivery figures, but still have their run list.
+  // How much of the time it was up comes before how often it shipped: the
+  // first is the reading a visitor asks after "is it up", the second is the
+  // team's. The recent runs answer what shipped before the trend asks how
+  // often. Legacy projects have no releases to read either from, but still
+  // have their run list.
   if (project.normalized)
     blocks.push([
       "delivery",
-      <Insights
-        key="delivery"
-        projectId={project.projectId}
-        environmentId={project.environmentQuery?.environment}
-      >
-        {history}
-      </Insights>,
+      <div key="delivery" className="space-y-8">
+        <Availability
+          projectId={project.projectId}
+          environmentId={project.environmentQuery?.environment}
+        />
+        <Insights
+          projectId={project.projectId}
+          environmentId={project.environmentQuery?.environment}
+        >
+          {history}
+        </Insights>
+      </div>,
     ])
   else blocks.push(["history", history])
 

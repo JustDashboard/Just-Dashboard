@@ -1,0 +1,98 @@
+{
+  "id": "changedetection",
+  "version": "1.0.0",
+  "name": "changedetection.io",
+  "category": "automation",
+  "profile": "web",
+  "description": "Watches web pages for changes — prices, availability, a line of text, a JSON value — on a schedule, and sends a notification through any of the services it supports when one is found.",
+  "iconId": "monitoring",
+  "docsUrl": "https://github.com/dgtlmoon/changedetection.io/wiki",
+  "access": {
+    "kind": "open",
+    "note": "changedetection.io starts without a password: anyone who reaches the address can see and edit every watch and the notification settings. Set one under Settings → Password protection the moment the deployment is ready, or keep the domain behind the dashboard's own password protection. Fetching with a real browser (for pages built by JavaScript) needs the separate Playwright container this template does not include; plain fetches work as deployed."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://github.com/dgtlmoon/changedetection.io",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "dgtlmoon/changedetection.io:0.60.10",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Notifications link back to the watch at this address."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 5000,
+      "protocol": "tcp",
+      "purpose": "The watch list, its settings and the API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "datastore",
+      "target": "/datastore",
+      "purpose": "Every watch, its history of snapshots and the settings",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Watch list answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 90
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "BASE_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "The datastore is upgraded in place on start and is not readable by an older version afterwards."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "watch.example.test"
+      },
+      "digest": "sha256:6b6938e61ce3a6d6674fb8b702c80988d4c41adc1d97541ddaba8e1a36f44cd3"
+    }
+  ]
+}

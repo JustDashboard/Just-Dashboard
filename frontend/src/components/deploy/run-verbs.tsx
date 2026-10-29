@@ -4,6 +4,7 @@ import {
   ArrowCircleUp,
   ArrowLeftRight,
   ArrowRight,
+  Database,
   External,
   Notes,
   Pin,
@@ -37,6 +38,11 @@ export type ReleaseVerbHandlers = {
   pin: (release: DeploymentRelease) => void
   /** Offered for a staging release: into production, as the same image. */
   promote?: (release: DeploymentRelease) => void
+  /**
+   * Each linked database as it was when the release went live, into a side
+   * copy. Offered where the server says the release has a point to restore.
+   */
+  restoreData?: (release: DeploymentRelease) => void
 }
 
 /**
@@ -195,6 +201,18 @@ export function releaseVerbs({
       run: () => on.rollback(release),
     })
   }
+  // A copy beside production changes nothing there, but it holds
+  // production's data and its credentials are an administrator's to read.
+  if (on.restoreData && release.dataCopy?.eligible && can("system.admin")) {
+    const restoreData = on.restoreData
+    verbs.push({
+      key: "restore-data",
+      label: "Restore data as of this release…",
+      icon: Database,
+      group,
+      run: () => restoreData(release),
+    })
+  }
   if (can("system.admin")) {
     verbs.push({
       key: "pin",
@@ -220,4 +238,5 @@ export type RunVerbKey =
   | "compare"
   | "rollback"
   | "promote"
+  | "restore-data"
   | "pin"

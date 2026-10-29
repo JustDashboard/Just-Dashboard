@@ -1,12 +1,17 @@
 package api
 
 import (
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 )
 
@@ -284,5 +289,96 @@ func TestARefusedActionIsNotOfferedAsACause(t *testing.T) {
 	})
 	if events[0].Trigger != nil {
 		t.Fatalf("a deploy that failed did not start this container: %+v", events[0].Trigger)
+	}
+}
+
+// The feed reads the store beside the ring, so an exit written down before
+// this process started is still in the list after it: the ring here has never
+// connected and holds nothing, and the rows are the whole answer.
+func TestLifecycleFeedReadsPersistedEventsPastARestart(t *testing.T) {
+	s := testServer(t)
+	c := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "lifecycle-store", auth.RoleAdmin)}
+	projectID, environmentID := seedDeployment(t, s, "persisted-project")
+	_, otherEnvironment := seedDeployment(t, s, "other-project")
+	now := time.Now().UTC()
+	recordDeploymentEvent(t, s, now.Add(-4*time.Hour), "start", "persisted-r3", "c0ffee", environmentID, 21, "")
+	recordDeploymentEvent(t, s, now.Add(-3*time.Hour), "die", "persisted-r3", "c0ffee", environmentID, 21, "137")
+	recordDeploymentEvent(t, s, now.Add(-2*time.Hour), "die", "other-r1", "beef", otherEnvironment, 22, "1")
+	if _, err := s.modules.deployEvents.Record(t.Context(), dockerx.Event{Time: now.Add(-time.Hour), Type: "network", Action: "destroy",
+		Name: "jd-e" + strconv.FormatInt(environmentID, 10) + "-db-9f2c1a4b7e05", Level: "notice", Message: "deleted network"}); err != nil {
+		t.Fatal(err)
+	}
+
+	feed := readLifecycle(t, c, projectID, "")
+	if feed.Status != "available" || feed.Watching {
+		t.Fatalf("the feed is available from the store alone, with the stream not connected: %+v", feed)
+	}
+	if feed.RetentionDays != 30 || feed.RecordSince == nil || !feed.RecordSince.Equal(now.Add(-4*time.Hour).Truncate(time.Nanosecond)) {
+		t.Fatalf("the record says how far back it reaches and how long it is kept: retention %d, since %v", feed.RetentionDays, feed.RecordSince)
+	}
+	if !hasAction(feed.Events, "die") || !hasAction(feed.Events, "start") || !hasKind(feed.Events, "network") {
+		t.Fatalf("the persisted events are the feed: %+v", feed.Events)
+	}
+	for _, event := range feed.Events {
+		if event.Name == "other-r1" {
+			t.Fatal("another environment's exit is not this deployment's news")
+		}
+	}
+	died := find(t, feed.Events, "die")
+	if died.ExitCode != "137" || died.Owner["release-id"] != "21" || !died.Time.Equal(now.Add(-3*time.Hour)) {
+		t.Fatalf("the exit came back changed: %+v", died)
+	}
+	// The filters the ring answers, answered by the store too.
+	if narrowed := readLifecycle(t, c, projectID, "kinds=network"); len(narrowed.Events) != 1 || narrowed.Events[0].Type != "network" {
+		t.Fatalf("kinds=network: %+v", narrowed.Events)
+	}
+	if narrowed := readLifecycle(t, c, projectID, "search=die"); len(narrowed.Events) != 1 || narrowed.Events[0].Action != "die" {
+		t.Fatalf("search=die: %+v", narrowed.Events)
+	}
+	if since := readLifecycle(t, c, projectID, "since="+now.Add(-90*time.Minute).Format(time.RFC3339)); len(since.Events) != 1 || since.Events[0].Type != "network" {
+		t.Fatalf("since ninety minutes ago: %+v", since.Events)
+	}
+	capped := c.do(http.MethodGet, "/api/v1/deploy/"+strconv.FormatInt(projectID, 10)+"/lifecycle?limit=1", "", nil)
+	var one deploymentLifecycle
+	if err := json.Unmarshal(capped.Body.Bytes(), &one); err != nil || capped.Code != http.StatusOK {
+		t.Fatalf("limit=1: %d %s", capped.Code, capped.Body.String())
+	}
+	if len(one.Events) != 1 || one.Events[0].Type != "network" {
+		t.Fatalf("limit=1 keeps the newest: %+v", one.Events)
+	}
+	// An environment with nothing kept is an empty list, never null, and the
+	// record's reach is the store's rather than the environment's.
+	w := c.do(http.MethodGet, "/api/v1/deploy/"+strconv.FormatInt(projectID, 10)+"/lifecycle?since="+url.QueryEscape(now.Add(time.Hour).Format(time.RFC3339)), "", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"events":[]`) {
+		t.Fatalf("a window with nothing in it: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// An event the ring still holds and the store has written down is one event,
+// and the list stays newest first and within its limit whichever half an
+// event came from.
+func TestMergedLifecycleEventsCountAnEventHeldByBothOnce(t *testing.T) {
+	now := time.Now().UTC()
+	shared := event(now.Add(-time.Minute), "container", "die", "web", owner("6"))
+	shared.ID = "c0ffee"
+	fromRing := []dockerx.Event{event(now, "container", "start", "web", owner("6")), shared}
+	stored := shared
+	stored.Requested = true // the store knows more about its copy
+	fromStore := []dockerx.Event{stored, event(now.Add(-time.Hour), "container", "start", "web", owner("6"))}
+
+	merged := mergeLifecycleEvents(fromRing, fromStore, 10)
+	if len(merged) != 3 {
+		t.Fatalf("want three distinct events, got %d: %+v", len(merged), merged)
+	}
+	if merged[0].Action != "start" || !merged[0].Time.Equal(now) || merged[2].Time.Equal(now) {
+		t.Fatalf("not newest first: %+v", merged)
+	}
+	// The ring's copy wins, as the browser's rule has the polled copy win:
+	// the first one seen stands.
+	if merged[1].Requested {
+		t.Fatal("the ring's copy of a shared event should stand")
+	}
+	if capped := mergeLifecycleEvents(fromRing, fromStore, 2); len(capped) != 2 || capped[1].Action != "die" {
+		t.Fatalf("limit 2 keeps the two newest: %+v", capped)
 	}
 }

@@ -76,9 +76,7 @@ func (s *Server) handleDeploymentRunDiagnose(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		return err
 	}
-	var req struct {
-		Again bool `json:"again"`
-	}
+	var req diagnoseRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
@@ -219,4 +217,9 @@ func diagnosisFailure(request, turn context.Context, err error) error {
 		apiErr.Raw, apiErr.Retryable = pe.Raw, pe.Retryable
 	}
 	return apiErr
+}
+
+// diagnoseRequest asks for a diagnosis, or for another one over a kept one.
+type diagnoseRequest struct {
+	Again bool `json:"again"`
 }

@@ -176,6 +176,12 @@ func (s *Server) Routes() http.Handler {
 			})
 		}
 	})
+	// The OpenAPI description of the deployment routes is read off this
+	// finished router (deploy_openapi.go), so it describes what was mounted.
+	// It is built when first asked for rather than here: it costs ten times
+	// what the rest of Routes does, and the tests build routes by the
+	// thousand.
+	s.deployOpenAPI.Store(&deployOpenAPISource{root: root})
 	return r
 }
 

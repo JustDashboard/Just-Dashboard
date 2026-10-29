@@ -661,6 +661,11 @@ type RuntimePlanConfig struct {
 	// for as long as it says. A domain served over plain HTTP is never sent
 	// it, so the control only means something once a served domain is HTTPS.
 	HSTS *RouteHSTS `json:"hsts,omitempty"`
+	// Replay is the traffic replay before the cutover (replay.go): the last
+	// real GET and HEAD requests the access log holds, sent to the candidate
+	// and compared with the live release's answers. Nil is off, which is
+	// where a plan starts: it costs a deployment the requests it replays.
+	Replay *ReplayPlan `json:"replay,omitempty"`
 	// Tailnet publishes the environment on this host's tailnet and nowhere
 	// else, the way a pull request preview is published: tailscale serve
 	// maps one port of the tailnet address to it, and it has no public
@@ -1544,6 +1549,9 @@ func (c PlanConfiguration) Validate() error {
 	}
 	if !validRestartPolicy(c.Runtime.RestartPolicy) {
 		return fmt.Errorf("runtime restart policy must be one of %s", strings.Join(RestartPolicies, ", "))
+	}
+	if err := validateReplayPlan(c.Runtime.Replay); err != nil {
+		return err
 	}
 	seenMountTargets := map[string]bool{}
 	for index, mount := range c.Runtime.Mounts {
@@ -2719,6 +2727,7 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 		policy := *h
 		c.Runtime.HSTS = &policy
 	}
+	c.Runtime.Replay = canonicalReplayPlan(c.Runtime.Replay)
 	// In the order the proxy writes them, and absent when there are none, so
 	// a plan that never chose a page keeps the bytes and the digest it had.
 	if len(c.Runtime.ErrorPages) == 0 {

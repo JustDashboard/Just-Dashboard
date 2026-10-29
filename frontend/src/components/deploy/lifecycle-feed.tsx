@@ -54,10 +54,11 @@ import { foldRestarts, loopSpan, type FeedItem } from "@/components/deploy/logs-
  *
  * The events are Docker's own, kept by the dashboard because the daemon keeps
  * none: `docker events` shows you what happens from the moment you run it, so
- * the answer to "why did this restart at 04:00" is otherwise a shrug. What is
- * kept is a bounded ring in this process's memory, which the footer names
- * rather than leaves the reader to infer: a restart of the dashboard empties
- * it, and the record starts again from there.
+ * the answer to "why did this restart at 04:00" is otherwise a shrug. A
+ * deployment's events are written to the dashboard's database as they arrive
+ * and kept for a month, so the record reaches past a restart of the dashboard
+ * — the footer says how far back it goes and how long it is kept, rather than
+ * leaving the reader to infer it.
  *
  * Each event is drawn as the thing it happened to — the container as the
  * product it runs (the deployment's own mark, or the image's when it names
@@ -86,9 +87,6 @@ const KINDS = [
   { id: "container", label: "Containers" },
   { id: "network", label: "Networks" },
 ] as const
-
-/** Below this, "watching since" is a restart rather than a quiet afternoon. */
-const RECENTLY_STARTED_MS = 60 * 60_000
 
 export function LifecycleFeed({
   projectId,
@@ -296,7 +294,14 @@ export function LifecycleFeed({
         {!data ? (
           <LoadingRows rows={6} />
         ) : shown.length === 0 ? (
-          <EmptyState {...emptyReading({ filtered, moment, since: data.since })} />
+          <EmptyState
+            {...emptyReading({
+              filtered,
+              moment,
+              since: data.recordSince,
+              retentionDays: data.retentionDays,
+            })}
+          />
         ) : (
           <section aria-label="Container events" className="flex flex-col gap-3">
             {groups.map((group) => (
@@ -352,23 +357,30 @@ export function LifecycleFeed({
           )}
           <WrapDot />
           <span className="numeric whitespace-nowrap">{plural(shown.length, "event")}</span>
-          {data.since && (
+          {data.recordSince && (
             <>
               <WrapDot />
-              <span className="whitespace-nowrap" title={timestamp(data.since)}>
-                watching since <span className="numeric">{clock(data.since)}</span>
+              <span className="whitespace-nowrap" title={timestamp(data.recordSince)}>
+                record since <span className="numeric">{recordStart(data.recordSince)}</span>
               </span>
             </>
           )}
-          <WrapDot />
-          <span className="flex items-center gap-1 whitespace-nowrap">
-            kept in memory
-            <InfoTip label="How long this record is kept">
-              Kept in this process&apos;s memory and bounded, so this is the recent past rather than
-              a permanent record — a restart of the dashboard starts it again. Everything the
-              dashboard itself did is in the audit log, which survives one.
-            </InfoTip>
-          </span>
+          {/* Known only from a backend that keeps the record; a reading without
+              it says nothing about retention rather than "kept NaN days". */}
+          {data.retentionDays > 0 && (
+            <>
+              <WrapDot />
+              <span className="flex items-center gap-1 whitespace-nowrap">
+                kept {plural(data.retentionDays, "day")}
+                <InfoTip label="How long this record is kept">
+                  A deployment&apos;s container events are written to the dashboard&apos;s database
+                  as they arrive and kept for {plural(data.retentionDays, "day")}, so the record
+                  survives a restart of the dashboard. Everything the dashboard itself did is in the
+                  audit log.
+                </InfoTip>
+              </span>
+            </>
+          )}
         </PaneFooter>
       )}
     </div>
@@ -417,26 +429,35 @@ function byHour(items: FeedItem[]) {
   return groups
 }
 
+/** The record's start: the clock when it began today, the date when it did not. */
+function recordStart(iso: string) {
+  const began = new Date(iso)
+  return began.toDateString() === new Date().toDateString()
+    ? clock(iso)
+    : began.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+}
+
 /**
- * Why there is nothing to show, which is four different pieces of news, each
- * with the mark that says it: a steady record, a record too young to be
- * evidence, a moment with nothing in it, and a filter that matched nothing.
+ * Why there is nothing to show, which is three different pieces of news, each
+ * with the mark that says it: a steady record, a moment with nothing in it,
+ * and a filter that matched nothing.
  *
- * The one worth separating out is a dashboard that restarted a few minutes ago.
- * The record is this process's, so "nothing has happened since 07:28" is not the
- * steadiness it reads as — it is the buffer having been emptied at 07:28, and a
- * container that died at 04:00 is simply gone. Saying "which for a running
- * deployment is the reading you want" in that state is a claim the page cannot
- * make.
+ * The steady reading names when the record began. It used to have to hedge —
+ * the record was this process's memory, so "nothing since 07:28" could be a
+ * restart at 07:28 with the night's exit gone — and no longer does: the record
+ * is kept in the database and reaches back to its oldest event whatever the
+ * dashboard did in between.
  */
 function emptyReading({
   filtered,
   moment,
   since,
+  retentionDays,
 }: {
   filtered: boolean
   moment?: string
   since?: string
+  retentionDays?: number
 }): { title: string; description: string; icon: Icon } {
   if (filtered) {
     return {
@@ -454,22 +475,15 @@ function emptyReading({
         "No exit, restart, OOM kill or health change within two minutes of that request. Whatever failed, it was not the container's life.",
     }
   }
-  const startedAt = since ? Date.parse(since) : NaN
-  if (Number.isFinite(startedAt) && Date.now() - startedAt < RECENTLY_STARTED_MS) {
-    return {
-      icon: ClockRewind,
-      title: "Nothing has happened since the dashboard started",
-      description: `This record lives in the dashboard's own memory and begins when it starts — which was ${relativeTime(
-        since!,
-      )}. Nothing from before then was kept, so this is not yet evidence that the deployment has been steady.`,
-    }
-  }
+  const kept = retentionDays
+    ? ` The record is kept for ${plural(retentionDays, "day")} and survives a restart of the dashboard.`
+    : ""
   return {
     icon: CheckCircle,
     title: "Nothing has happened to these containers",
     description: since
-      ? `Watching since ${timestamp(since)}. No start, stop, restart, exit or health change has been recorded for this deployment since then — which for a running deployment is the reading you want. Nothing survives a restart of the dashboard, so the record begins there rather than at the deployment's first release.`
-      : "No start, stop, restart, exit or health change has been recorded for this deployment.",
+      ? `No start, stop, restart, exit or health change has been recorded for this deployment since the record began on ${timestamp(since)} — which for a running deployment is the reading you want.${kept}`
+      : `No start, stop, restart, exit or health change has been recorded for this deployment yet.${kept}`,
   }
 }
 

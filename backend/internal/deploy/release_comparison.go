@@ -143,6 +143,7 @@ func compareRuntimeSnapshots(fromSnapshot, toSnapshot runtimeReleaseSnapshot, fr
 	field("cpu limit", cpuLimitLabel(fromSnapshot.Plan.CPUs), cpuLimitLabel(toSnapshot.Plan.CPUs))
 	field("pid limit", countLimitLabel(fromSnapshot.Plan.PidsLimit), countLimitLabel(toSnapshot.Plan.PidsLimit))
 	field("request body limit", fromSnapshot.Plan.requestBodyLimitLabel(), toSnapshot.Plan.requestBodyLimitLabel())
+	field("traffic replay", replayLabel(fromSnapshot.Plan.Replay), replayLabel(toSnapshot.Plan.Replay))
 	field("allowed addresses", allowFromLabel(fromSnapshot.Plan.AllowFrom), allowFromLabel(toSnapshot.Plan.AllowFrom))
 	field("response headers", responseHeadersLabel(fromSnapshot.Plan.ResponseHeaders), responseHeadersLabel(toSnapshot.Plan.ResponseHeaders))
 	field("sign-in", signInLabel(fromSnapshot.Plan.ForwardAuth), signInLabel(toSnapshot.Plan.ForwardAuth))

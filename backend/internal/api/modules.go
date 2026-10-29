@@ -61,6 +61,10 @@ type moduleSet struct {
 	docker       *dockerx.Client
 	dockerStats  *dockerx.StatsSampler
 	dockerEvents *dockerx.EventLog
+	// deployEvents is the part of the event stream a deployment owns, kept
+	// past this process: the ring empties on a restart, and "why did this
+	// restart at four" is asked at nine.
+	deployEvents *dockerx.EventStore
 	// What a compose stack was before it was changed. Docker keeps no
 	// history, so a rollback has no target and "what changed" has no answer
 	// unless the dashboard writes it down first.
@@ -93,6 +97,9 @@ type moduleSet struct {
 	// onHost is what moves hostFiles: hostexec.InHostMounts, warning once
 	// when the namespace cannot be entered.
 	onHost func(fn func())
+	// kernelRelease reads the running kernel's release; nil is
+	// sysinfo.KernelRelease, and a test hands it the kernel it is about.
+	kernelRelease func(context.Context) (string, error)
 	// proxyExtras is the proxy pages' own state; see modules_proxy.go.
 	proxyExtras proxyExtras
 	// requests holds what every deployment's ingress and every proxy site
@@ -175,6 +182,9 @@ type moduleSet struct {
 	// rehearser makes the throwaway database copies release tasks are
 	// rehearsed against, and removes what a stopped process left behind.
 	rehearser *migrationRehearser
+	// dataCopies restores a database as of a release into a side copy on
+	// the deployment's network and removes it when its time is up.
+	dataCopies *dataCopyOwner
 	// tailnet publishes preview environments on this host's Tailscale node
 	// through `tailscale serve`; the executor and the preview route share it.
 	tailnet deploy.TailnetPublisher
@@ -203,13 +213,17 @@ func (s *Server) initModules() {
 	// so a baseline older than this is dropped rather than averaged over.
 	s.modules.dockerStats = s.modules.docker.NewStatsSampler().WithMaxAge(statsMaxAge)
 	s.modules.dockerEvents = s.modules.docker.NewEventLog(s.Log)
+	s.modules.deployEvents = dockerx.NewEventStore(s.Store.DB, s.Log, s.Cfg.MetricsRetention)
 	s.modules.dockerDeploys = dockerx.NewDeploymentStore(s.Store.DB)
 	// The recorder gets a sampler of its own rather than the shared one: a
 	// series kept for a week is worth measuring over even intervals, and an
 	// operator refreshing the container table would otherwise keep shortening
 	// the window the next stored sample is differenced over.
 	s.modules.metrics = metrics.New(s.Store, s.Log, s.Cfg.MetricsInterval, s.Cfg.MetricsRetention).
-		WithContainers(s.modules.docker.NewStatsSampler())
+		WithContainers(s.modules.docker.NewStatsSampler()).
+		// The volumes deployments own, for the capacity forecast; read when
+		// the recorder samples, by which time the deploy modules exist.
+		WithVolumes(metrics.VolumeSamplerFunc(s.sampleDeploymentVolumes))
 	// Docker's disk accounting walks every layer and volume, which takes
 	// seconds on a busy host. Priming it here means the first operator to open
 	// the Volumes tab reads a warm cache instead of waiting for the walk.
@@ -379,6 +393,7 @@ func (s *Server) initModules() {
 		}, func(err error) { s.Log.Warn("preview isolation needs attention", "error", err) })
 	s.modules.tailnet = tailnetPublisher{serve: selfcfg.NewTailnetServe()}
 	s.modules.rehearser = &migrationRehearser{server: s}
+	s.modules.dataCopies = newDataCopyOwner(s, s.modules.rehearser)
 	normalizedExecutor := deploy.NewNormalizedStepExecutor(
 		s.modules.deployRuns,
 		s.modules.deployPlanning,
@@ -402,7 +417,15 @@ func (s *Server) initModules() {
 		WithTailnetGate(s.tailnetGateAPI()).
 		// Release tasks are rehearsed against copies the Databases owner
 		// makes from its own backups, when an environment asks for it.
-		WithMigrationRehearser(s.modules.rehearser)
+		WithMigrationRehearser(s.modules.rehearser).
+		// And where each linked database stands is recorded as a release
+		// goes live, for a copy of its data as of that release later.
+		WithDataPoints(releaseDataFacts{server: s})
+	if s.modules.requests != nil {
+		// The traffic replay reads the same held record the Logs page and
+		// the rollback watch read, so what it replays is what the page shows.
+		normalizedExecutor.WithRequestRecord(s.modules.requests)
+	}
 	s.modules.deployExecutor = normalizedExecutor
 	s.modules.deployEngine = deploy.NewEngine(
 		s.modules.deployRuns,

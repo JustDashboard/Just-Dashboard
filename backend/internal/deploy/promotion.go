@@ -34,9 +34,10 @@ var (
 )
 
 // ReleasePromotion is where a promoted release came from. It is written into
-// the production release's immutable provenance and the run's metadata, so
+// the promoted release's immutable provenance and the run's metadata, so
 // release history, the run page and the "what changed" comparison can say
-// "promoted from staging release #N" with the image's own id.
+// "promoted from staging release #N" — or, for staging, "promoted from PR #N
+// (sha)" — with the image's own id.
 type ReleasePromotion struct {
 	EnvironmentID   int64  `json:"environmentId"`
 	EnvironmentName string `json:"environmentName"`
@@ -49,6 +50,11 @@ type ReleasePromotion struct {
 	ImageID        string `json:"imageId"`
 	ImageDigest    string `json:"imageDigest"`
 	SourceRevision string `json:"sourceRevision,omitempty"`
+	// SourceKind is where the image was taken from: PromotionFromStaging, or
+	// PromotionFromPreview with Preview naming the pull request. A record
+	// written before previews could be promoted has none and is staging's.
+	SourceKind string           `json:"sourceKind,omitempty"`
+	Preview    *PromotedPreview `json:"preview,omitempty"`
 }
 
 // PromotionSource is a validated staging release ready to promote.
@@ -124,6 +130,46 @@ func promotionSourceTx(ctx context.Context, q promotionQuery, projectID, release
 	if kind != EnvironmentStaging || archived != 0 || (release.State != "live" && release.State != "retained") {
 		return nil, ErrPromotionSource
 	}
+	source, err := promotableReleaseTx(ctx, q, release)
+	if err != nil {
+		return nil, err
+	}
+	source.Promotion = ReleasePromotion{
+		EnvironmentID: release.EnvironmentID, EnvironmentName: name,
+		ReleaseID: release.ID, ReleaseNumber: release.Number, RunID: release.RunID,
+		ImageID: source.Snapshot.Image.ConfigDigest, ImageDigest: release.ImageDigest,
+		SourceRevision: release.SourceRevision, SourceKind: PromotionFromStaging,
+	}
+	// A staging release that was itself a pull request preview's image is
+	// still that pull request's code, and production's record says so.
+	if origin := release.Promotion; origin != nil && origin.Preview != nil {
+		carried := *origin.Preview
+		source.Promotion.Preview = &carried
+	}
+
+	var productionKind string
+	var productionConfig string
+	if err := q.QueryRowContext(ctx, `
+		SELECT s.kind, s.config_json FROM deploy_environments e
+		  JOIN deploy_sources s ON s.environment_id = e.id AND s.revision = e.desired_revision
+		 WHERE e.project_id = ? AND e.kind = 'production' AND e.archived_at = 0`, projectID).
+		Scan(&productionKind, &productionConfig); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrEnvironmentNotFound
+		}
+		return nil, err
+	}
+	if err := sameSourceAsTarget(productionKind, productionConfig, source.Identity, "staging", "production"); err != nil {
+		return nil, err
+	}
+	return source, nil
+}
+
+// promotableReleaseTx reads a release as an image another environment can
+// run: built as exactly one image whose artifact is still available, with a
+// recorded local image id and a readable source identity. Where the image
+// came from is the caller's to check.
+func promotableReleaseTx(ctx context.Context, q promotionQuery, release *Release) (*PromotionSource, error) {
 	artifacts, err := artifactsForReleaseTx(ctx, q, release.ID)
 	if err != nil {
 		return nil, err
@@ -156,44 +202,32 @@ func promotionSourceTx(ctx context.Context, q promotionQuery, projectID, release
 	if json.Unmarshal(release.SourceIdentity, &source.Identity) != nil {
 		return nil, fmt.Errorf("%w: the release's source identity is unreadable", ErrPromotionIncompatible)
 	}
-	source.Promotion = ReleasePromotion{
-		EnvironmentID: release.EnvironmentID, EnvironmentName: name,
-		ReleaseID: release.ID, ReleaseNumber: release.Number, RunID: release.RunID,
-		ImageID: snapshot.Image.ConfigDigest, ImageDigest: release.ImageDigest,
-		SourceRevision: release.SourceRevision,
-	}
-
-	var productionKind string
-	var productionConfig string
-	if err := q.QueryRowContext(ctx, `
-		SELECT s.kind, s.config_json FROM deploy_environments e
-		  JOIN deploy_sources s ON s.environment_id = e.id AND s.revision = e.desired_revision
-		 WHERE e.project_id = ? AND e.kind = 'production' AND e.archived_at = 0`, projectID).
-		Scan(&productionKind, &productionConfig); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrEnvironmentNotFound
-		}
-		return nil, err
-	}
-	if SourceKind(productionKind) != source.Identity.Kind {
-		return nil, fmt.Errorf("%w: staging built from a %s source and production deploys a %s source",
-			ErrPromotionIncompatible, source.Identity.Kind, productionKind)
-	}
-	var production DraftSourceConfig
-	if json.Unmarshal([]byte(productionConfig), &production) != nil {
-		return nil, ErrInvalidPlan
-	}
-	if IsRemoteGitSource(production) {
-		remote, _, err := remoteForSource(production)
-		if err != nil {
-			return nil, err
-		}
-		if !sameGitRemote(remote, source.Identity.Remote) {
-			return nil, fmt.Errorf("%w: staging built from %s and production deploys %s",
-				ErrPromotionIncompatible, scrubSourceRemote(source.Identity.Remote), scrubSourceRemote(remote))
-		}
-	}
 	return source, nil
+}
+
+// sameSourceAsTarget holds a promotion to a target that deploys the same kind
+// of source and, for remote Git, the same repository: the target's release
+// tasks run the promoted commit's code and its history is read there.
+func sameSourceAsTarget(targetKind, targetConfig string, identity SourceIdentity, from, to string) error {
+	if SourceKind(targetKind) != identity.Kind {
+		return fmt.Errorf("%w: %s built from a %s source and %s deploys a %s source",
+			ErrPromotionIncompatible, from, identity.Kind, to, targetKind)
+	}
+	var target DraftSourceConfig
+	if json.Unmarshal([]byte(targetConfig), &target) != nil {
+		return ErrInvalidPlan
+	}
+	if IsRemoteGitSource(target) {
+		remote, _, err := remoteForSource(target)
+		if err != nil {
+			return err
+		}
+		if !sameGitRemote(remote, identity.Remote) {
+			return fmt.Errorf("%w: %s built from %s and %s deploys %s",
+				ErrPromotionIncompatible, from, scrubSourceRemote(identity.Remote), to, scrubSourceRemote(remote))
+		}
+	}
+	return nil
 }
 
 // sameGitRemote compares two recorded remotes the way a forge would: case and
@@ -218,6 +252,9 @@ func validatePromotionAdmissionTx(ctx context.Context, tx *sql.Tx, req RunReques
 		}
 		return nil
 	}
+	if promotion.FromPreview() {
+		return validatePreviewPromotionAdmissionTx(ctx, tx, req, environmentKind, promotion)
+	}
 	if environmentKind != EnvironmentProduction {
 		return ErrPromotionTarget
 	}
@@ -231,7 +268,7 @@ func validatePromotionAdmissionTx(ctx context.Context, tx *sql.Tx, req RunReques
 	if source.Promotion.ImageID != promotion.ImageID || source.Promotion.ImageDigest != promotion.ImageDigest {
 		return fmt.Errorf("%w: the release's image changed since it was chosen", ErrPromotionSource)
 	}
-	return nil
+	return refuseShellTasksForPromotedPullRequestTx(ctx, tx, req.EnvironmentID, req.PlanRevision, source)
 }
 
 // promotedSourceIdentityTx is the source identity a promotion run executes
@@ -268,9 +305,10 @@ func promotionRetainedWhere(alias string) string {
 }
 
 // renderPromotedRuntime is render_runtime for a promotion. It builds the
-// candidate release from production's frozen plan and variables around the
-// staging release's image, and proves the image is the same one by its id
-// before and after tagging it under production's release name.
+// candidate release from the target's frozen plan and variables — production's
+// around a staging release's image, or staging's around a pull request
+// preview's — and proves the image is the same one by its id before and after
+// tagging it under the target release's name.
 func (e *NormalizedStepExecutor) renderPromotedRuntime(
 	ctx context.Context,
 	execution StepExecution,
@@ -280,7 +318,7 @@ func (e *NormalizedStepExecutor) renderPromotedRuntime(
 	if promotion == nil {
 		return normalizedStepFailure(fmt.Errorf("%w: promotion run has no source release", ErrInvalidPlan))
 	}
-	source, err := e.store.PromotionSource(ctx, execution.Run.ProjectID, promotion.ReleaseID)
+	source, err := e.store.promotionSourceForRun(ctx, execution.Run, promotion, plan)
 	if err != nil {
 		return promotionStepFailure(err)
 	}
@@ -290,16 +328,24 @@ func (e *NormalizedStepExecutor) renderPromotedRuntime(
 	if e.builder == nil || e.builder.backend == nil {
 		return builderUnavailableFailure(ErrBuilderUnavailable)
 	}
-	_ = stepLog(execution, "status", fmt.Sprintf("Promoting %s release #%d: image %s, no build",
-		strings.ToLower(source.Promotion.EnvironmentName), source.Promotion.ReleaseNumber, source.Promotion.ImageID))
+	_ = stepLog(execution, "status", fmt.Sprintf("Promoting %s: image %s, no build",
+		promotionSourceWords(source.Promotion), source.Promotion.ImageID))
+	if source.Promotion.FromPreview() && source.Promotion.Preview != nil {
+		_ = stepLog(execution, "status", fmt.Sprintf("Commit %s was approved by %s; the release runs with staging's plan and variables, never the preview's",
+			shortRevision(source.Promotion.SourceRevision), source.Promotion.Preview.ApprovedBy))
+	}
+	missing := ErrPromotionImageMissing
+	if source.Promotion.FromPreview() && source.Promotion.Preview != nil {
+		missing = refusePreviewImageMissing(source.Promotion.Preview.Number)
+	}
 	present, err := e.builder.backend.InspectImage(ctx, source.Promotion.ImageID)
 	if err != nil || present.ConfigDigest != source.Promotion.ImageID {
-		return promotionStepFailure(ErrPromotionImageMissing)
+		return promotionStepFailure(missing)
 	}
 	tag := releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID)
 	tagged, err := e.builder.backend.TagImage(ctx, source.Promotion.ImageID, tag)
 	if err != nil {
-		return promotionStepFailure(ErrPromotionImageMissing)
+		return promotionStepFailure(missing)
 	}
 	if tagged.ConfigDigest != source.Promotion.ImageID {
 		return promotionStepFailure(fmt.Errorf("%w: %s names image %s, not %s", ErrPromotionIncompatible, tag, tagged.ConfigDigest, source.Promotion.ImageID))
@@ -325,7 +371,7 @@ func (e *NormalizedStepExecutor) renderPromotedRuntime(
 		PlanInputsHash: plan.PlanInputsDigest,
 		SourceIdentity: source.Identity,
 		// Both describe the image's own server, which is the same server
-		// staging ran.
+		// the source environment ran.
 		ProxyTrust:     append([]string(nil), source.Snapshot.ProxyTrust...),
 		WebConcurrency: source.Snapshot.WebConcurrency,
 	}
@@ -350,8 +396,12 @@ func (e *NormalizedStepExecutor) renderPromotedRuntime(
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
-	_ = stepLog(execution, "status", fmt.Sprintf("Recorded immutable candidate release #%d from %s release #%d with production's configuration",
-		release.Release.Number, strings.ToLower(source.Promotion.EnvironmentName), source.Promotion.ReleaseNumber))
+	target := "production"
+	if source.Promotion.FromPreview() {
+		target = "staging"
+	}
+	_ = stepLog(execution, "status", fmt.Sprintf("Recorded immutable candidate release #%d from %s with %s's configuration",
+		release.Release.Number, promotionSourceWords(source.Promotion), target))
 	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{
 		"releaseId": release.Release.ID, "releaseNumber": release.Release.Number,
 		"configDigest": release.Release.ConfigDigest, "promotion": recorded, "tag": tag,
@@ -359,14 +409,29 @@ func (e *NormalizedStepExecutor) renderPromotedRuntime(
 }
 
 func promotionStepFailure(err error) StepResult {
+	var refusal *PreviewPromotionRefusal
 	switch {
 	case errors.Is(err, ErrPromotionImageMissing):
-		return StepResult{State: StepFailed, ErrorCode: "promotion_image_missing", ErrorMessage: ErrPromotionImageMissing.Error()}
-	case errors.Is(err, ErrPromotionSource), errors.Is(err, ErrPromotionIncompatible):
+		message := ErrPromotionImageMissing.Error()
+		if errors.As(err, &refusal) {
+			message = refusal.Message
+		}
+		return StepResult{State: StepFailed, ErrorCode: "promotion_image_missing", ErrorMessage: message}
+	case errors.Is(err, ErrPromotionSource), errors.Is(err, ErrPromotionIncompatible), errors.Is(err, ErrPromotionTarget):
 		return StepResult{State: StepFailed, ErrorCode: "promotion_refused", ErrorMessage: err.Error()}
 	default:
 		return normalizedStepFailure(err)
 	}
+}
+
+// promotionSourceWords names a promotion's source the way a transcript
+// reads it: "staging release #2", or "PR #12 (abc1234), preview release #3".
+func promotionSourceWords(promotion ReleasePromotion) string {
+	if promotion.FromPreview() && promotion.Preview != nil {
+		return fmt.Sprintf("PR #%d (%s), preview release #%d",
+			promotion.Preview.Number, shortRevision(promotion.SourceRevision), promotion.ReleaseNumber)
+	}
+	return fmt.Sprintf("%s release #%d", strings.ToLower(promotion.EnvironmentName), promotion.ReleaseNumber)
 }
 
 // PromotionStepKeys are a promotion's steps: a deploy's from render_runtime
@@ -379,18 +444,18 @@ func promotionStepFailure(err error) StepResult {
 // data ran it on production's unrehearsed.
 var PromotionStepKeys = []StepKey{
 	StepRenderRuntime, StepBackupGate, StepRehearseMigration, StepReleaseTask, StepProvisionCertificate,
-	StepStartCandidate, StepVerifyReadiness, StepVerifySmoke, StepActivate,
+	StepStartCandidate, StepVerifyReadiness, StepVerifySmoke, StepReplayTraffic, StepActivate,
 	StepRetirePrevious, StepRecordRelease, StepNotify,
 }
 
 // PromotionPreview is what the Promote confirmation shows before anything is
-// queued: the exact image, where it goes, and how production's configuration
-// differs from the one staging ran it with.
+// queued: the exact image, where it goes, and how the target's configuration
+// differs from the one the source ran it with.
 type PromotionPreview struct {
 	Source PromotionSourceView `json:"source"`
 	Target PromotionTargetView `json:"target"`
-	// Detail compares the staging release with what production will run:
-	// the same image under production's plan, variables (by digest only),
+	// Detail compares the source release with what the target will run:
+	// the same image under the target's plan, variables (by digest only),
 	// checks and domains.
 	Detail ReleaseDetailComparison `json:"detail"`
 	// Blockers are why Promote would be refused now; empty means it would
@@ -399,6 +464,8 @@ type PromotionPreview struct {
 }
 
 type PromotionSourceView struct {
+	// Kind is PromotionFromStaging or PromotionFromPreview.
+	Kind            string  `json:"kind"`
 	EnvironmentID   int64   `json:"environmentId"`
 	EnvironmentName string  `json:"environmentName"`
 	Release         Release `json:"release"`
@@ -406,6 +473,22 @@ type PromotionSourceView struct {
 	ImageDigest     string  `json:"imageDigest"`
 	ImageSizeBytes  int64   `json:"imageSizeBytes"`
 	ImagePresent    bool    `json:"imagePresent"`
+	// Preview is the pull request a preview source was built from.
+	Preview *PreviewPromotionView `json:"preview,omitempty"`
+}
+
+// PreviewPromotionView is the pull request behind a preview being promoted,
+// as the confirmation names it: whose code, from which repository, and who
+// approved the exact commit.
+type PreviewPromotionView struct {
+	Number         int    `json:"number"`
+	Title          string `json:"title,omitempty"`
+	URL            string `json:"url,omitempty"`
+	Author         string `json:"author,omitempty"`
+	HeadRepository string `json:"headRepository,omitempty"`
+	Fork           bool   `json:"fork"`
+	ApprovedBy     string `json:"approvedBy,omitempty"`
+	ApprovalState  string `json:"approvalState,omitempty"`
 }
 
 type PromotionTargetView struct {
@@ -433,49 +516,81 @@ type PromotionBlocker struct {
 	Message string `json:"message"`
 }
 
-// PromotionPreview reads everything the confirmation needs. images may be nil
-// where Docker is unavailable; the image is then reported as not found.
+// PromotionPreview reads everything the confirmation of promoting a staging
+// release into production needs.
 func (s *OrchestrationStore) PromotionPreview(
 	ctx context.Context,
 	projectID, environmentID, releaseID int64,
+	images LocalImageReader,
+) (*PromotionPreview, error) {
+	return s.PromotionPreviewFor(ctx, projectID, environmentID, PromotionRequest{Source: PromotionFromStaging, ReleaseID: releaseID}, images)
+}
+
+// PromotionPreviewFor reads everything the confirmation needs, for a staging
+// release promoted into production or a pull request's preview promoted into
+// staging. images may be nil where Docker is unavailable; the image is then
+// reported as not found.
+func (s *OrchestrationStore) PromotionPreviewFor(
+	ctx context.Context,
+	projectID, environmentID int64,
+	request PromotionRequest,
 	images LocalImageReader,
 ) (*PromotionPreview, error) {
 	kind, err := s.EnvironmentKind(ctx, projectID, environmentID)
 	if err != nil {
 		return nil, err
 	}
-	if kind != EnvironmentProduction {
+	switch {
+	case request.FromPreview() && kind != EnvironmentStaging:
+		return nil, RefusePreviewPromotionTarget(request.PreviewNumber)
+	case !request.FromPreview() && kind != EnvironmentProduction:
 		return nil, ErrPromotionTarget
 	}
 	preview := &PromotionPreview{Blockers: []PromotionBlocker{}}
-	source, sourceErr := s.PromotionSource(ctx, projectID, releaseID)
-	if sourceErr != nil {
-		if !errors.Is(sourceErr, ErrPromotionImageMissing) && !errors.Is(sourceErr, ErrPromotionIncompatible) {
-			return nil, sourceErr
-		}
-		preview.Blockers = append(preview.Blockers, promotionBlocker(sourceErr))
-		release, err := s.Release(ctx, releaseID)
-		if err != nil {
+	var source *PromotionSource
+	if request.FromPreview() {
+		if source, err = s.previewPromotionView(ctx, projectID, environmentID, request, preview); err != nil {
 			return nil, err
 		}
-		preview.Source.Release = release.Release
-		preview.Source.EnvironmentID = release.Release.EnvironmentID
-		preview.Source.ImageDigest = release.Release.ImageDigest
-		_ = s.db.QueryRowContext(ctx, `SELECT name FROM deploy_environments WHERE id = ?`, release.Release.EnvironmentID).
-			Scan(&preview.Source.EnvironmentName)
 	} else {
-		preview.Source = PromotionSourceView{
-			EnvironmentID: source.Promotion.EnvironmentID, EnvironmentName: source.Promotion.EnvironmentName,
-			Release: source.Release.Release, ImageID: source.Promotion.ImageID,
-			ImageDigest: source.Promotion.ImageDigest, ImageSizeBytes: source.Image.SizeBytes,
+		var sourceErr error
+		source, sourceErr = s.PromotionSource(ctx, projectID, request.ReleaseID)
+		if sourceErr != nil {
+			if !errors.Is(sourceErr, ErrPromotionImageMissing) && !errors.Is(sourceErr, ErrPromotionIncompatible) {
+				return nil, sourceErr
+			}
+			preview.Blockers = append(preview.Blockers, promotionBlocker(sourceErr))
+			release, err := s.Release(ctx, request.ReleaseID)
+			if err != nil {
+				return nil, err
+			}
+			preview.Source.Kind = PromotionFromStaging
+			preview.Source.Release = release.Release
+			preview.Source.EnvironmentID = release.Release.EnvironmentID
+			preview.Source.ImageDigest = release.Release.ImageDigest
+			_ = s.db.QueryRowContext(ctx, `SELECT name FROM deploy_environments WHERE id = ?`, release.Release.EnvironmentID).
+				Scan(&preview.Source.EnvironmentName)
+		} else {
+			preview.Source = PromotionSourceView{
+				Kind:          PromotionFromStaging,
+				EnvironmentID: source.Promotion.EnvironmentID, EnvironmentName: source.Promotion.EnvironmentName,
+				Release: source.Release.Release, ImageID: source.Promotion.ImageID,
+				ImageDigest: source.Promotion.ImageDigest, ImageSizeBytes: source.Image.SizeBytes,
+			}
 		}
+	}
+	if source != nil {
 		if images != nil {
 			if present, err := images.LocalImage(ctx, source.Promotion.ImageID); err == nil && present.ConfigDigest == source.Promotion.ImageID {
 				preview.Source.ImagePresent = true
 			}
 		}
 		if !preview.Source.ImagePresent {
-			preview.Blockers = append(preview.Blockers, promotionBlocker(ErrPromotionImageMissing))
+			missing := ErrPromotionImageMissing
+			if request.FromPreview() {
+				missing = refusePreviewImageMissing(request.PreviewNumber)
+			}
+			preview.Blockers = append(preview.Blockers, promotionBlocker(missing))
 		}
 	}
 
@@ -514,6 +629,11 @@ func (s *OrchestrationStore) PromotionPreview(
 			target.ReleaseTasks = append(target.ReleaseTasks, task.Name)
 		}
 	}
+	if number := pullRequestCodeIn(source); number > 0 {
+		if err := refuseShellTasksForPullRequestCode(build.ReleaseTasks, strings.ToLower(target.EnvironmentName), number); err != nil {
+			preview.Blockers = append(preview.Blockers, promotionBlocker(err))
+		}
+	}
 	terms, err := s.RehearsalPolicy(ctx, environmentID)
 	if err != nil {
 		return nil, err
@@ -523,7 +643,7 @@ func (s *OrchestrationStore) PromotionPreview(
 	preview.Detail = ReleaseDetailComparison{
 		Status: statusUnavailable, Fields: []ReleaseFieldChange{}, Variables: []ReleaseListChange{},
 		Dependencies: []ReleaseListChange{}, Checks: []ReleaseListChange{}, Domains: []ReleaseListChange{},
-		Reason: "The staging release has no readable runtime snapshot.",
+		Reason: "The source release has no readable runtime snapshot.",
 	}
 	if source != nil {
 		desired.Image, desired.SourceIdentity = source.Snapshot.Image, source.Identity
@@ -535,7 +655,10 @@ func (s *OrchestrationStore) PromotionPreview(
 }
 
 func promotionBlocker(err error) PromotionBlocker {
+	var refusal *PreviewPromotionRefusal
 	switch {
+	case errors.As(err, &refusal):
+		return PromotionBlocker{Code: refusal.Code, Message: refusal.Message}
 	case errors.Is(err, ErrPromotionImageMissing):
 		return PromotionBlocker{Code: "promotion_image_missing", Message: ErrPromotionImageMissing.Error()}
 	default:

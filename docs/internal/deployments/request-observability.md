@@ -235,8 +235,10 @@ addresses, so the reason shown is the operator's next move.
 | --- | --- |
 | `GET /deploy/{id}/requests` | The window: rows, readings, facets, chart columns |
 | `GET /deploy/{id}/requests/stream?after=<cursor>` | WebSocket: every 400ms, what the store holds past the cursor, batched — a deployment under load writes thousands of lines a second and one frame each would spend the budget on envelopes |
-| `GET /deploy/{id}/lifecycle` | Docker events for this environment's containers and networks, filtered by `kinds`, `search`, `since` and `limit`, each correlated against the audit log |
-| `GET /deploy/{id}/lifecycle/stream` | WebSocket: this environment's buffered past, then every arriving event that carries its label |
+| `GET /deploy/{id}/lifecycle` | Docker events for this environment's containers and networks — the ring's and the persisted record's as one list — filtered by `kinds`, `search`, `since` and `limit`, each correlated against the audit log; `recordSince` and `retentionDays` say how far back the record reaches and how long it is kept |
+| `GET /deploy/{id}/lifecycle/stream` | WebSocket: this environment's past from both records, then every arriving event that carries its label |
+| `GET /deploy/{id}/availability` | How much of the last 24 h, 7 d and 30 d the live release was running and healthy, from the releases' live spans and the persisted events (below) |
+| `GET /api/v1/metrics/deployments` | Every environment in the Prometheus text format, behind the `metrics.read` key the databases' exposition takes (below) |
 | `GET /deploy/{id}/requests/export?…` | The window as CSV, every matching request oldest first (up to 50k) — the page's own query, not the whole record |
 | `GET /deploy/{id}/runs/{run}/traffic` | Requests/min, 5xx share, p95 and page views over the half hour before and after the run's activation; the after-window is cut at now |
 | `GET /deploy/traffic` | Every project's last hour — rate, 5xx share, page views and one point per minute — read from the held record when it is under a minute old, so a fleet of forty cards is one answer rather than forty file reads |
@@ -307,6 +309,28 @@ form in it is Automation's own (`AlertForm`, drawn in `add-alert-sheet.tsx`), so
 form wherever it opens. Automation lists the rules as sentences with their state and a meter with a
 tick at the line; its form speaks the rule back before it is saved, and removing one asks first.
 
+## Traffic replay before the cutover
+
+The record is also what a release is tested against before it goes live. With a plan's
+`runtime.replay` on, the `replay_traffic` step ([implementation](implementation.md), `deploy/replay.go`)
+asks the same held record — `RequestRecord.Window` on the environment's route, the last 24 hours, GET
+and HEAD, the newest 5,000 rows, one refresh like any other reader — for the newest distinct requests
+the live release answered 2xx, 3xx or 4xx, and sends them to the candidate's own address before the
+route moves. It is the record's third reader beside the Logs page and the rollback watch, and the only
+one that acts on rows rather than readings, so it holds to what a row carries and no more: the
+method, the host, the path and the encoded query. The record keeps no header but the agent and the
+referer, so there is no cookie or credential to leave out; a query that names one (`token=`, `code=`,
+`state=`, `sig=`, …) is not replayed at all, since its value is in the row. A 401, 403 or 407 was decided
+by who asked and a scanner's probe (`IsProbe`) by nobody, so neither is replayed. The duration a row
+carries is the ingress's — Caddy's covers sending the answer to the visitor — so the step compares its
+own timing over the same requests only by a factor and a quarter-second floor, the rule the rollback
+watch reads p95 with (`latencyRegressed`), and over nginx's duration-less record it compares status
+classes alone. `accesslog.Percentile` is the collector's nearest-rank reading exported for this, so
+the replay's p95 is the one the page would show over the same rows. The replayed requests go to the
+candidate, never through the ingress, so they are never in the record: a replay cannot feed the next
+one, and the Requests view shows only what visitors sent. A candidate that wants to tell a replay from
+a visitor sees `X-JD-Replay: 1`.
+
 ## Security intel and blocking
 
 The Insights view opens on the scanners when there are any: a warning `Notice` titled with how many
@@ -355,7 +379,8 @@ row drawn with Tailscale's mark offered a firewall deny against a tailnet peer.
 `io.just-dashboard.` prefix stripped. Docker puts every label there; keeping this one namespace is
 what lets a project page show its own restarts and OOM kills without inspecting a container that is
 by then already gone. Only the dashboard's prefix is kept — an arbitrary image's label set is
-unbounded and none of it is ours to render.
+unbounded and none of it is ours to render. It also carries `signal` (what a kill sent) and, on a row
+read back from the store, `requested`.
 
 The buffer is host-wide and bounded (2000), so `handleDeploymentLifecycle` asks for a wide slice and
 narrows by `Owner["environment-id"]` in `ownedByEnvironment`: asking for only `limit` events would
@@ -364,6 +389,100 @@ served here rather than computed in the browser — a reading like "restarts in 
 out during render reads the clock on every re-render, so the figure would depend on when React
 happened to paint. `kinds` defaults to **containers and networks** rather than containers alone: a
 network disappearing under a running release is exactly what this feed is for.
+
+### Kept past the process
+
+The ring is this process's memory, and until 0.8.2 it was the whole record: a restart of the
+dashboard emptied it, and the exit at four in the morning was gone by the time anybody asked at nine.
+`dockerx.EventStore` (`events_store.go`) now writes a deployment's share of the stream to
+`deploy_container_events` (`store/schema_deploy_events.go`) as it arrives. It hears the ring through
+`EventLog.Keep`, synchronously and in order — a subscriber's channel drops frames under a burst, and a
+record kept for a month cannot afford to miss the one OOM kill in a burst of starts — and keeps an
+event when `Event.EnvironmentID` names a deployment: a container by its labels, a network by the name
+this dashboard gave it (`jd-e<id>-…`, `jd-preview-e<id>…`), which is the same rule `ownsEvent` applies
+at read time. Everything else the daemon says — an operator's own stack, image pulls — stays the
+ring's business. Each row keeps the daemon's nanosecond (`ts_nano`, so a row and the ring's copy are
+one event to the feed and to the browser's `eventKey`), the typed columns the counters read
+(environment, release id and number, run id, kind, action, name, container id, exit code, signal,
+`requested`, `source` — the cause as the feed names it: daemon, compose, docker) and the event whole in
+`event_json`, so a row is drawn exactly as it arrived. `Trigger` is deliberately not stored: who in the
+dashboard caused an event is read from the audit log when the row is shown, as it is for the ring.
+
+`requested` is what the stream can say about intent: a `stop` or a `kill` was asked of the daemon,
+and a `die` within thirty seconds of a kill of the same container is that kill taking effect rather
+than a crash. A container in a tight restart loop is sampled rather than kept whole — a token bucket
+of 30 events per container, refilled one every ten seconds, which is still every restart Docker's own
+backoff allows once it reaches its one-minute ceiling — so thirty days of one broken container is not
+ten million rows; the ring keeps every one for the hour.
+
+Retention is `max(30 days, JD_METRICS_RETENTION)` (`dockerx.DefaultEventRetention`): the thirty-day
+availability figure is read from these rows, so a week of samples must not shorten them, and a longer
+metrics history lengthens them with it; `JD_METRICS_RETENTION=0` turns the samples off and leaves the
+events at thirty days. Rows are pruned when the store starts following and then on the first event
+after each hour (`eventPruneEvery`), a DELETE by `ts_nano` over an index of its own.
+
+`deploymentLifecycleEvents` merges the two halves (`mergeLifecycleEvents`): the ring's owned slice
+first, the store's `Find` with the same kinds, search, window and limit second, deduped on the
+nanosecond, kind, action, id and name, newest first, cut at the limit. A store that cannot be read
+costs the history and not the feed. The response carries `recordSince` (the store's oldest row for
+any deployment — an environment with no events has been steady only as long as somebody was
+listening) and `retentionDays`; `since` is still the stream's own connection time, which the feed
+uses only for the not-connected notice.
+
+### Availability
+
+`GET /deploy/{id}/availability` (`handlers_deploy_availability.go`, `deploy/availability.go`) is the
+status-page figure: over the last 24 h, 7 d and 30 d, what share of the time the live release was
+running and healthy. Two records answer it. `OrchestrationStore.ReleaseSpans` reads each release's
+`activated_at` (its readiness checks passing and the route switched to it) to its `retired_at` or
+`rolled_back_at`, whichever came first, open while it is live — the time the environment was meant to
+be serving. `EventStore.Timeline` is the environment's container events oldest first, and
+`ComputeAvailability` walks them per container: `die`, `oom`, `kill`, `pause` and `health_status:
+unhealthy` open a down interval, `start`, `unpause` and `health_status: healthy` close it, a `destroy`
+while down keeps the release down until another of its containers starts, and an interval is clipped
+to its release's live span, so the old release's exit after a blue/green cutover is nobody's downtime
+and a candidate that failed its readiness checks never counts. Overlapping intervals of two containers
+are one stretch. An operator's stop counts as down, because it was: the figure is what a visitor would
+have found. Each window reports `observedSeconds` (live-release time inside the window the record
+covers — what the ratio is over), `downSeconds`, `incidents`, `ratio` and `coverageSeconds`; time
+before `recordSince` is not counted either way, so a thirty-day window read on the ninth day is a
+nine-day figure that says so, never a steady month. A release switched back to after a rollback has
+its activation overwritten, so it contributes its later span alone and the time between reads as
+unobserved. `Down` says whether an interval is open at this moment.
+
+### The Prometheus exposition
+
+`GET /api/v1/metrics/deployments` (`deployment_metrics_export.go`) is the databases' exposition's
+sibling: the same `promFamilies` writer with the `jd_deployment_` prefix, mounted in the same scoped
+group (`mountDatabaseMetricsExport`), so the same `metrics.read` key and the same `prometheus.yml`
+job read both, and a session is `403 token_required` as there. It speaks for every production and
+staging environment of an unarchived deployment (previews come and go with a pull request), reads the
+dashboard's own store and dials nothing but the local Docker socket, once, for which containers are
+up; a store that cannot be read fails the scrape rather than dropping series. Labels are
+`deployment_id`, `deployment` (the project's name), `environment` (the slug) and, on the series about
+one release, `release` (the live release's number — a new release is a new series that starts again
+from nothing, which is what a counter of its restarts means anything over); `container` names a
+container on the sample series. Never a variable, a domain's secret or a command. Each family has a
+`# HELP` line; the names:
+
+| Series | Kind | From |
+| --- | --- | --- |
+| `info{…,environment_id,kind,release}` | gauge 1 | the environment row |
+| `runs_total{result}` | counter | `deploy_runs` by terminal state: succeeded, failed, cancelled, rolled_back, superseded — all five always, so a rate over one that has not happened reads as zero |
+| `release_activated_timestamp_seconds`, `release_age_seconds` | gauge | the live release's `activated_at` |
+| `up`, `containers_running`, `containers` | gauge | one Docker listing filtered by `io.just-dashboard.managed`, partitioned by release; absent when Docker did not answer, so a scrape never guesses |
+| `container_last_sample_timestamp_seconds`, `container_cpu_seconds_total` (Docker's cumulative counter ÷ 1e9), `container_memory_bytes`, `container_memory_limit_bytes` (where a limit was set) | gauge / counter | the newest `metric_container_samples` row of each container the event record saw start for the release (`EventStore.ReleaseContainers`) or Docker lists now; a sample older than three metrics intervals exports its timestamp alone |
+| `container_restarts_total`, `container_oom_kills_total`, `container_exits_total{exit_code}` | counter | `EventStore.ReleaseCounts` over the live release's rows: starts after each container's first, `oom` events, `die` events by status — within the events' retention |
+| `requests_last_hour{class}`, `request_error_ratio_last_hour`, `request_latency_seconds{quantile}` (0.5, 0.95, 0.99, where the ingress records a duration) | gauge | the request record's cached last hour (`accesslog.Store.Cached`, a minute old at most), so a scrape is not a file read per environment |
+| `rollback_watch_state{state}` | gauge | the newest `deploy_rollback_watches` row: 1 on the series naming its state (watching, rolling_back, rolled_back, closing, closed) |
+| `maintenance_on` | gauge | the environment's maintenance switch, read through the proxy at most once a minute per environment (`scrapeCache`), since a Caddy ingress answers it by reading two files inside its container |
+| `availability_ratio{window}`, `availability_downtime_seconds{window}`, `availability_coverage_ratio{window}` | gauge | the availability figure above, for 24h, 7d and 30d; the ratio and downtime are absent while nothing was observed |
+
+The counters are counts over the retained rows, so one does decrease once a release has been live
+longer than the retention and its early restarts age out; a release that old with restarts in its
+first days is rare, and `rate()` reads the drop as a reset. The per-class p95 the page shows is not
+exported: the summary carries one latency distribution per window, and five reads of the record per
+environment per scrape would cost what the cache saves.
 
 A network is not recognised the way a container is. Docker puts an object's labels in the event's
 actor attributes for a container, which is what the owner filter reads; for a network it sends `name`
@@ -494,11 +613,21 @@ resume, close — for this view and the run page alike.
 and a Live chip over the socket — because it was the only view that could be neither searched nor
 followed. Filtering is applied in the browser rather than on the wire, for the reason
 the host feed gives: re-subscribing on every keystroke would drop the connection four times a word.
-Its empty state names the boundary instead of asserting steadiness. "Watching since 07:28" is the
-backend's own start, so a few minutes after a restart the old copy — "which for a running deployment
-is the reading you want" — was a claim the page could not make; under an hour it now says the record
-begins with the dashboard and nothing from before was kept. A row's release links to the run that put
-it there and a correlated trigger links to `/audit?action=…`, the same hand-off the host feed makes.
+Its footer names the record: "record since Sep 20" (`recordSince`, the clock when it began today) and
+"kept 30 days" with a tip saying the events are written to the database and survive a restart. The
+"since restart" boundary is gone with the reason for it: the empty state used to have to hedge — the
+record was this process's memory, so "nothing since 07:28" could be a restart at 07:28 with the
+night's exit gone — and now says when the record began and that it is kept. A row's release links to
+the run that put it there and a correlated trigger links to `/audit?action=…`, the same hand-off the
+host feed makes.
+
+The Overview gained **Availability** (`components/deploy/availability.tsx`) over the Delivery figures:
+three `StatTile`s, one per window, with the downtime and its incidents under each figure
+("6 min down · 2 incidents"), "down now" on the day's tile while the record says so, and "record
+covers 9 of 30 days" where the record is younger than the window, over one sentence saying what the
+figure is read from. The wording is `availability-model.ts` — two decimals, and "100%" only for no
+downtime at all, since 99.996% must never round up to a claim the record does not make; quiet under
+three nines, warning below, danger below two or while down now — so `bun test` holds it.
 Its rows are grouped under hour rules, each event drawn on its project's or image's tile with what
 happened as a toned glyph in the corner (`EventMark`, shared with the Docker page's Events through
 `components/docker/event-marks.tsx`), and the rows a poll or the socket brings rise as they
@@ -655,17 +784,39 @@ the framing of the container script's two reports, the host-file reader across a
 a truncation, and — live — the script against `caddy:2-alpine`. `internal/logsx` covers ANSI, carriage-return frames, structured levels on
 both numeric scales, and that a brace alone is not JSON. `internal/proxysvc` covers the rendered log
 block, its rotation, and that the reader and `sites_render` agree about nginx's path.
-`internal/deploy` covers the observer against a fake ingress. `internal/api` covers the lifecycle feed
+`internal/deploy` covers the observer against a fake ingress, and the traffic replay's selection from
+a real store's rows, its comparison and its step against a loopback candidate (`replay_test.go`);
+`TestLiveTrafficReplayStopsACandidateThatBreaksARecordedRoute` replays a real Caddy ingress's record. `internal/api` covers the lifecycle feed
 itself: that it shows one environment's events and not the host's, that the window and the limit are
 the caller's, that an environment with no events reads as an empty list rather than a null, that the
-default kinds are containers and networks and a junk `since` is ignored, and — for the correlation —
+default kinds are containers and networks and a junk `since` is ignored, that persisted rows are the
+feed when the ring has never connected (with the record's reach and retention, and every filter
+answered by the store), that an event held by the ring and the store is one event with the ring's
+copy standing, and — for the correlation —
 that a release names itself as the cause of its own containers, that it never explains what happened
 before it or outside its window, that an OOM kill and a health flip are never the dashboard's doing,
 that another project's release and a refused action explain nothing, and that an entry naming the
-container itself wins over the one naming its project. `TestLiveDeploymentEventsAreReadFromDockerAndNamedWithTheirCause`
+container itself wins over the one naming its project. `internal/dockerx` covers the store
+(`events_store_test.go`): a deployment's events kept and nobody else's, a network by its name with the
+separator, the row read back as it arrived with no trigger, the feed's filters, `requested` on a stop,
+a kill and the exit that followed one, the thirty-day floor and the prune, a crash loop sampled while
+a sibling's exit is kept, one release's counts, and a burst reaching the table whole through `Keep`.
+`internal/store` covers the table reaching fresh and 0.6.6 installs. `internal/deploy` covers the
+maths (`availability_test.go`): an exit until its start, down now, a cutover charged to nobody, two
+containers' overlap as one stretch and health flips, a removed container down until its release comes
+back, no figure without a record or a live release, a failed candidate ignored, and `ReleaseSpans`
+ending where traffic left a release. `internal/api` covers the exposition
+(`deployment_metrics_export_test.go`): a valid body with every family explained, the series values
+over seeded releases, runs, events and samples, a stale sample exporting its timestamp alone,
+archived and preview environments left out, and the callers — no credential 401, a session
+`token_required`, a deploy key and an MCP key `key_scope`, the metrics key and an ordinary key
+admitted; `TestAScopedKeyReachesNothingButTheMetrics` now excepts both scrapes.
+`TestLiveDeploymentEventsAreReadFromDockerAndNamedWithTheirCause`
 drives the whole path against a real daemon — a labelled container exiting 137 and a named network
 destroyed, read back through the real routes and the real socket — because the one thing the unit
-tests cannot hold is whether Docker still carries an object's labels on its events.
+tests cannot hold is whether Docker still carries an object's labels on its events. It then replaces
+the ring with one that has never connected, a restart as far as the feed can tell, and reads the exit
+back from the store with its code, its labels and its cause.
 `internal/accesslog` covers the audience (`audience_test.go`): one visitor per address and browser, a
 crawler, a script and an asset-only browser never one, a probe not a page, an agentless record keyed by
 its address, devices, browsers and systems counted per visitor, the journey's order and bound, the
@@ -677,14 +828,18 @@ file its site names, held to the roots, re-resolved when the file moves, streame
 (`TestParseSiteSpecReadsWhereTheSiteLogs`) and the site's route held to the roots; `internal/deploy` the
 alert link's moment. `components/deploy/logs-model.test.js` covers the default view, the window
 resolved at `now`, the address round trip, which container answered a moment, the picker's order and
-the restart folding. `tests/browser/deploy-requests.spec.ts`
+the restart folding. `components/deploy/availability-model.test.js` covers the percentage's decimals and its refusal to
+round up to 100%, the downtime wording, the tone, the short-record sentence and a tile's reading.
+`tests/browser/deploy-project.spec.ts` covers the Overview's Availability panel — the three figures,
+the downtime and incidents, the record's reach, its place over Delivery, and the unavailable
+reason in place of a figure. `tests/browser/deploy-requests.spec.ts`
 covers the five views, the readings, the inline lines and Proxy said for Caddy and nginx, a removed
 release, Output's picker (with the proxy that answers last) and `?service=`, Insights' visitors (the
 readings, a person's row drawn as its browser on its system with its trail, narrowing to its address), Builds, the crash loop and Last lines, the agent, referer and
 Took narrowings, the query surviving a reload, the alert's moment, chip narrowing, the opened row, the
 absent-record sentence,
 the Events toolbar (kind chips, search, the no-match sentence, the socket), the audit and run links
-on a correlated row, the restart-empty sentence, `?view=`/`?moment=` surviving a reload, which
+on a correlated row, the empty feed naming when the record began and how long it is kept, `?view=`/`?moment=` surviving a reload, which
 addresses are offered a Block, saved denies clearing only the action notice, saved state surviving
 reloads and view changes, per-address concurrency, duplicate verification, readable refusal messages
 and disabled/read-only firewall feedback. `components/deploy/request-blocks.test.js` covers the scope

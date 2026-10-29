@@ -1,5 +1,10 @@
 import type { DotTone } from "@/components/status-dot"
-import type { DeploymentPreview, GitPullRequest, ProjectPullRequests } from "@/lib/types"
+import type {
+  DeploymentPreview,
+  DeploymentPromotion,
+  GitPullRequest,
+  ProjectPullRequests,
+} from "@/lib/types"
 
 /**
  * What a pull request and the preview built from it say about themselves, as
@@ -203,5 +208,60 @@ export function pullOfPreview(
       preview.headRepository &&
       preview.headRepository.toLowerCase() !== repository.toLowerCase(),
     ),
+  }
+}
+
+/**
+ * Whether a preview is one "Promote to staging" can be offered for: open,
+ * isolated, serving a live release built from the head its approval is for,
+ * and not busy building or closing. The server decides — approval, image,
+ * staging's release tasks — and the dialog says what refused it; this only
+ * keeps the verb off rows it could never apply to.
+ */
+export function canPromotePreview(preview: DeploymentPreview | null | undefined): boolean {
+  if (!preview || preview.state !== "open" || !preview.liveReleaseId) return false
+  if (preview.isolationStatus && preview.isolationStatus !== "cleared") return false
+  if (preview.approvalState && preview.approvalState !== "approved") return false
+  const reading = previewStatus(preview)?.label
+  return reading !== "Building" && reading !== "Closing" && reading !== "Cleanup failed"
+}
+
+/**
+ * What a preview's row says of its newest promotion into staging: promoting
+ * while the run is in flight, promoted once it succeeded. A promotion that
+ * failed leaves the preview where it was, and the row says nothing of it.
+ */
+export function previewPromotionStatus(
+  preview: DeploymentPreview | null | undefined,
+): PreviewReading | undefined {
+  const promotion = preview?.promotion
+  if (!promotion) return undefined
+  if (RUN_IN_FLIGHT.has(promotion.state)) return { tone: "notice", label: "Promoting to staging" }
+  if (promotion.state === "succeeded") return { tone: "running", label: "Promoted to staging" }
+  return undefined
+}
+
+/**
+ * Where a promoted release's image came from, in the words the release list,
+ * the run header and the live release line share: a staging release, "staging
+ * release #2", or a pull request's preview, "PR #12" at commit "abc1234".
+ */
+export function promotionOrigin(promotion: DeploymentPromotion | undefined) {
+  if (!promotion) return undefined
+  if (promotion.sourceKind === "preview" && promotion.preview) {
+    return {
+      kind: "preview" as const,
+      from: `PR #${promotion.preview.number}`,
+      sha: promotion.sourceRevision ? promotion.sourceRevision.slice(0, 7) : "",
+      url: promotion.preview.url,
+      approvedBy: promotion.preview.approvedBy,
+    }
+  }
+  return {
+    kind: "staging" as const,
+    from: `${promotion.environmentName.toLowerCase()} release #${promotion.releaseNumber}`,
+    sha: "",
+    url: undefined,
+    approvedBy: undefined,
   }
 }

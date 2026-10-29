@@ -282,12 +282,16 @@ func TestAScopedKeyReachesNothingButTheMetrics(t *testing.T) {
 	if w := scrape(s, http.MethodGet, secret); w.Code != http.StatusOK {
 		t.Fatalf("scoped key on its own route = %d %s", w.Code, w.Body.String())
 	}
+	// The deployments' scrape is the same job, and the same key reads it.
+	if w := scrapePath(s, http.MethodGet, deploymentMetricsEndpoint, secret); w.Code != http.StatusOK {
+		t.Fatalf("scoped key on the deployments' route = %d %s", w.Code, w.Body.String())
+	}
 	h := s.Routes()
-	// Every route the walk finds, but the scrape itself, refuses the key:
+	// Every route the walk finds, but the two scrapes, refuses the key:
 	// reads, writes and the ones a readonly role may call.
 	checked := 0
 	for _, rt := range apiRoutes(t, h) {
-		if rt.pattern == "/api/v1"+databaseMetricsPath {
+		if rt.pattern == "/api/v1"+databaseMetricsPath || rt.pattern == deploymentMetricsEndpoint {
 			continue
 		}
 		req := httptest.NewRequest(rt.method, rt.path, nil)

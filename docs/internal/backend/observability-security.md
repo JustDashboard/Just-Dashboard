@@ -49,6 +49,17 @@ since a tab was opened, and charts that start empty every visit cannot show last
   Each point also carries `pidsPeak` (the bucket's maximum) beside the mean `pids`.
 - The recorder keeps its **own** `sysinfo.Collector` and `dockerx.StatsSampler`: rates are deltas, and
   sharing with request handlers would let a one-shot `GET /system/metrics` shorten the next interval.
+- Samples also keep Docker's cumulative CFS counters, `cpu_periods` and `cpu_throttled` (additive,
+  nullable): written only for a container with a CPU quota, so a NULL is "no limit or not yet kept",
+  never "never throttled". [Right-sizing](../deployments/right-sizing.md) differences them per
+  container into the share of periods a limit throttled.
+- **Volume sizes** of the volumes deployments own go to `metric_volume_samples` every quarter hour
+  (`metrics.VolumeInterval`, `Recorder.WithVolumes`), on a loop of their own so Docker's disk walk never
+  delays a host sample, and are pruned with the rest. The sampler (`api.sampleDeploymentVolumes`) reads
+  the cached walk the Docker pages share and skips a size the walk did not reach.
+- `GET /system/metrics/capacity` fits a least-squares line through hourly means of each filesystem's
+  used bytes and each deployment volume's size and says when each disk fills at that rate, with the
+  fit's R² and a confidence; see [right-sizing and the capacity forecast](../deployments/right-sizing.md).
 
 **Saturation series** answer "is work waiting", which utilisation cannot: CPU **by mode** including
 `steal` (on a VPS the one whose fix is outside the machine); PSI pressure (`Supported: false` renders as
@@ -85,6 +96,16 @@ They are recorded and charted; with Health removed, nothing judges them into fin
 carries its project's id, so the Overview's activity row draws the project's own icon. Reboots need no
 storage: a sample whose `uptime_seconds` dropped means the machine went down, which also catches
 restarts nobody initiated here. Works with `JD_METRICS_RETENTION=0`; only reboot markers go quiet.
+
+The deployments have a Prometheus exposition of their own, `GET /api/v1/metrics/deployments`
+(`api/deployment_metrics_export.go`), behind the same `metrics.read` key as the databases': per
+environment, the live release's age, its containers' CPU seconds and memory from the newest
+`metric_container_samples` row, restarts, OOM kills and exits from the persisted container events
+(`deploy_container_events`, kept at least thirty days whatever `JD_METRICS_RETENTION` says), run
+outcomes, the last hour's requests by status class and latency quantiles, the warm-release window's
+state, the maintenance switch and the availability figure over 24 h, 7 d and 30 d. The series and
+what each reads are tabled in
+[request observability](../deployments/request-observability.md#the-prometheus-exposition).
 
 ## Host alerts: told when the machine itself goes wrong
 
@@ -132,7 +153,11 @@ proxy's page in `components/alerts/alert-parts.tsx`.
   stop (`EventLog.Covers`) and saw no kill — otherwise it is read as a stop that outlasted its grace
   period, because a false page is worse than a late one; any other code is a crash. A deploy's release
   task and a `compose run` container are one-shot by design and never subjects, a `paused` container
-  (a backup freezing its volumes) is fine, and a removed container leaves.
+  (a backup freezing its volumes) is fine, and a removed container leaves. A down container whose image
+  is MongoDB 8 (by its tag), on a kernel MongoDB 8 refuses (Linux 6.19 to 7.0.13) and without the
+  dashboard's mitigation label, has why added to its detail: MongoDB SERVER-121912 and that the
+  Databases page applies the fix (`mongoKernelAlertLine`; *MongoDB 8 and the kernel* in
+  [Databases](databases-proxy-platform.md)). It is the same kind, not a new one.
 - **Every backup job** — files, volumes and database dumps alike — is a `backup_failed` subject
   (`job:<id>`), judged by its newest finished run in the database alerts' own words (`judgeBackupJob`
   over `readAlertBackupJobs`, the reader both share): it stays failed until a run succeeds. A job an

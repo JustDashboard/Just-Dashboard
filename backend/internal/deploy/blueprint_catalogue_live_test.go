@@ -62,7 +62,11 @@ func TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks(t *testing.T) {
 			for _, variable := range plan.Configuration.Variables {
 				switch {
 				case variable.Generate > 0:
-					value, err := generatedSecret(variable.Generate)
+					// The shape the commit path generates: Homarr validates its
+					// encryption key as 64 hexadecimal characters, so a
+					// letters-and-digits value here would fail an image the
+					// dashboard itself starts correctly.
+					value, err := generatedSecretValue(variable.Generate, variable.GenerateFormat)
 					if err != nil {
 						t.Fatal(err)
 					}
