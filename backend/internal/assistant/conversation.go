@@ -53,7 +53,17 @@ type Conversation struct {
 	// Pending is the tool calls the last answer ended on, waiting for the
 	// person to allow or decline them.
 	Pending []ToolCall
-	Turns   int
+	// Answered is the results of calls that answer ended on and that needed
+	// nobody's leave — a proposal, which runs nothing — held until the
+	// person answers the rest, because every call of an answer is answered
+	// in the one message that follows it.
+	Answered []Block
+	Turns    int
+	// Offer and Check are the tools a conversation other than the SQL
+	// editor's offers and the check its calls are read through. Empty is the
+	// editor's: describe_tables, when Tools says the provider takes tools.
+	Offer []Tool
+	Check func([]Block) ([]ToolCall, error)
 
 	busy    bool
 	touched time.Time
@@ -65,15 +75,16 @@ type Conversation struct {
 type Mark struct {
 	messages int
 	pending  []ToolCall
+	answered []Block
 	turns    int
 }
 
 func (c *Conversation) Mark() Mark {
-	return Mark{messages: len(c.Messages), pending: c.Pending, turns: c.Turns}
+	return Mark{messages: len(c.Messages), pending: c.Pending, answered: c.Answered, turns: c.Turns}
 }
 
 func (c *Conversation) Restore(m Mark) {
-	c.Messages, c.Pending, c.Turns = c.Messages[:m.messages], m.pending, m.turns
+	c.Messages, c.Pending, c.Answered, c.Turns = c.Messages[:m.messages], m.pending, m.answered, m.turns
 }
 
 func (c *Conversation) size() int {
@@ -92,17 +103,20 @@ func (c *Conversation) Ask(text string) error {
 	if c.Turns >= maxTurns || c.size() > maxHistory {
 		return ErrFull
 	}
-	blocks := ToolResults(c.Pending, func(ToolCall) (string, bool) { return Declined, false })
+	blocks := append([]Block(nil), c.Answered...)
+	blocks = append(blocks, ToolResults(c.Pending, func(ToolCall) (string, bool) { return Declined, false })...)
 	blocks = append(blocks, Block{Type: BlockText, Text: text})
 	c.Messages = append(c.Messages, Message{Role: "user", Blocks: blocks})
-	c.Pending = nil
+	c.Pending, c.Answered = nil, nil
 	return nil
 }
 
-// Answer appends the results of the calls that were waiting.
+// Answer appends the results of the calls that were waiting, after those
+// answered without anybody's leave.
 func (c *Conversation) Answer(results []Block) {
-	c.Messages = append(c.Messages, Message{Role: "user", Blocks: results})
-	c.Pending = nil
+	blocks := append(append([]Block(nil), c.Answered...), results...)
+	c.Messages = append(c.Messages, Message{Role: "user", Blocks: blocks})
+	c.Pending, c.Answered = nil, nil
 }
 
 // Outcome is how one exchange ended.
@@ -121,8 +135,15 @@ type Outcome struct {
 // Exchange sends the conversation as it stands and appends the answer.
 func Exchange(ctx context.Context, client Client, c *Conversation, emit func(Event)) (Outcome, error) {
 	req := Request{System: c.System, Messages: c.Messages}
-	if c.Tools {
+	switch {
+	case len(c.Offer) > 0 && c.Tools:
+		req.Tools = c.Offer
+	case c.Tools:
 		req.Tools = []Tool{DescribeTables}
+	}
+	check := Calls
+	if c.Check != nil {
+		check = c.Check
 	}
 	reply, err := client.Stream(ctx, req, emit)
 	if err != nil {
@@ -137,7 +158,7 @@ func Exchange(ctx context.Context, client Client, c *Conversation, emit func(Eve
 		return out, nil
 	}
 	if reply.Stop == StopTool {
-		calls, err := Calls(reply.Blocks)
+		calls, err := check(reply.Blocks)
 		if err != nil {
 			return out, err
 		}

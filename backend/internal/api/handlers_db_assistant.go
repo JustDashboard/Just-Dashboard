@@ -34,6 +34,9 @@ const assistantSettingKey = "databases.assistant"
 // assistantState is what the assistant's routes keep between requests.
 type assistantState struct {
 	conversations *assistant.Store
+	// operators holds the deployment operator's conversations, one per
+	// person and environment (handlers_deploy_operator.go).
+	operators *assistant.Store
 	// limit is the install's budget of model calls, one bucket however many
 	// people ask, because every call is billed to the same key.
 	limit *httpx.Limiter
@@ -48,6 +51,7 @@ type assistantState struct {
 func newAssistantState() *assistantState {
 	return &assistantState{
 		conversations: assistant.NewStore(),
+		operators:     assistant.NewStore(),
 		limit:         httpx.NewLimiter(20, 6),
 		slots:         make(chan struct{}, 4),
 		options:       assistant.Options{HTTP: assistant.NewHTTPClient()},

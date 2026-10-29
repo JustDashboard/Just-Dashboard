@@ -284,6 +284,14 @@ A change that weakens any of these has to say so explicitly.
     changing the scope and unlinking are session-only in the browser (an API key is refused) and root-only at
     the terminal, the heartbeat is a fixed field set that names nothing on the machine below `operate`, and
     the installer never handles a link credential. See [account link](../backend/account-link.md).
+13. The deployment operator reads only with the person's leave and runs nothing itself. Its reads are a
+    closed set of tools held to their own fields and bounds (`assistant.OperatorCalls`; a call to
+    anything else refuses the whole answer), each run only after the person allows that call, with the
+    person's own role and masked by the run diagnosis's masker. Its actions are proposals: the server
+    checks one and the page draws a card, and only the person's press runs it — as the request the
+    project's own button makes to that action's existing route, under that route's capability,
+    confirmation and audit. There is no shell, no command the model writes and no other path from an
+    answer to the host, and the route is a session's. See [the deployment operator](../deployments/operator.md).
 
 ## Invariant 2: what two-factor still guarantees
 
