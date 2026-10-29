@@ -51,6 +51,7 @@ import { RunRow } from "@/components/deploy/run-row"
 import { UsageTiles } from "@/components/deploy/usage-tiles"
 import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
 import { ReleaseWatch, useReleaseWatch } from "@/components/deploy/release-watch"
+import { Vulnerabilities } from "@/components/deploy/vulnerabilities"
 
 /**
  * The project's front page, in the order a visitor asks: is something
@@ -266,6 +267,19 @@ export function ProjectOverview() {
         product={product}
         service={liveService?.name}
         port={deployment.internalPort}
+      />,
+    ])
+
+  // What needs attention in the image itself comes after how the release
+  // is doing: the live release read for known vulnerabilities, and whether a
+  // rebuild on a newer base would fix them. A preview is not scanned.
+  if (project.normalized && !project.archived && deployment.liveReleaseId)
+    blocks.push([
+      "vulnerabilities",
+      <Vulnerabilities
+        key="vulnerabilities"
+        projectId={project.projectId}
+        environmentId={project.environmentId}
       />,
     ])
 

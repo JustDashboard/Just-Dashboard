@@ -94,6 +94,7 @@ const (
 	whyPages           = "a route's maintenance and error pages are files on the server beside the proxy's route, and are edited in the dashboard"
 	whyRollbackTerms   = "the terms a release is kept warm and rolled back on are set in the dashboard"
 	whyRehearsalTerms  = "a migration rehearsal restores a database's backup, and which database and on what terms is chosen in the dashboard"
+	whyScanTerms       = "whether an environment's images are scanned, and from which severity up, is set in the dashboard"
 )
 
 // deployKeyRoutes is the decision table: every route a deploy key may make,
@@ -154,6 +155,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/{id}/environments/{env}/maintenance":                   keyOpen,
 	"GET /deploy/{id}/environments/{env}/pages/{page}":                  keyOpen, // what every visitor is shown
 	"GET /deploy/{id}/environments/{env}/rehearsal":                     keyOpen, // the terms; the last report is the run's
+	"GET /deploy/{id}/environments/{env}/vulnerabilities":               keyOpen, // the latest scan and the terms
 	"GET /deploy/{id}/environments/{env}/releases":                      keyOpen,
 	"GET /deploy/{id}/environments/{env}/releases/{release}/comparison": keyOpen,
 	"GET /deploy/{id}/environments/{env}/variables":                     keyOpen, // names and digests, never values
@@ -189,6 +191,8 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	// configuration's (runtime.maintenance.bypassFrom), which the key writes
 	// as any configuration, and reaches the route with the next release.
 	"PUT /deploy/{id}/environments/{env}/maintenance": keyOpen,
+	// A scan reads what is already deployed and changes none of it.
+	"POST /deploy/{id}/environments/{env}/vulnerabilities/scan": keyOpen,
 
 	// Creating a deployment: session-only until a deploy key. A key's drafts
 	// are its own — the draft records the key, and the handlers hold a key to
@@ -283,6 +287,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"PUT /deploy/{id}/environments/{env}/pages/{page}":            keySession(whyPages),
 	"PUT /deploy/{id}/environments/{env}/rollback-policy":         keySession(whyRollbackTerms),
 	"PUT /deploy/{id}/environments/{env}/rehearsal":               keySession(whyRehearsalTerms),
+	"PUT /deploy/{id}/environments/{env}/vulnerabilities":         keySession(whyScanTerms),
 	"POST /deploy/blueprints/{id}/render":                         keySession("a template's plan is previewed in the dashboard; a draft from it is a deploy key's to make"),
 	"POST /deploy/import/preview":                                 keySession(whyHost),
 	"POST /deploy/import/adopt":                                   keySession(whyHost),

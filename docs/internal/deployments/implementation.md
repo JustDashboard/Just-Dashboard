@@ -1531,6 +1531,16 @@ only renderer/executor/validation authority for their feature.
   `logdrain.Manager`, started with the server: a follower per wanted container, a reader per wanted
   request record, and a bounded, retried, gzip-compressed queue per drain whose status the page shows.
   See [log drains](log-drains.md).
+- Each release's image, and the base images its recipe pinned, is read for known vulnerabilities by
+  Trivy in a container with no network, no capabilities and nobody's account
+  (`imagescan.ScanSpec`), after the build and daily while it is live (`deploy.ImageScanWatcher`, a run
+  observer that never holds a run up). The vulnerability database is fetched by the dashboard itself,
+  checked against its digest and copied into the `jd-image-scan-db` volume. One row per release keeps
+  the counts by severity, the fixable findings, the database's age and whether each pinned base's tag
+  now names a newer digest — `ReleaseUpdate`'s registry read, compared with the digest the release
+  pinned. A fixable finding at the environment's floor with a newer base is the `image_vulnerable`
+  host alert and the overview's Rebuild, which is the runs route's own `force_build` of the live
+  commit. See [image vulnerabilities](image-vulnerabilities.md).
 - An AI client reaches the deployments over the MCP endpoint when its key was given them
   (`api_tokens.deploy_access`: none, `read`, `deploy`): it lists deployments, runs and releases,
   reads a run's transcript tail (`OrchestrationStore.RunTranscriptTail`, the stored and already

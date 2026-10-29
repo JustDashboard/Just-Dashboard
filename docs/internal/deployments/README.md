@@ -12,6 +12,10 @@
 - [`database-networks.md`](database-networks.md) — logical database URLs, owned networks, replacement reconciliation and cleanup.
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
   logs, the request readings, container lifecycle events, and the three container-output fixes.
+- [`image-vulnerabilities.md`](image-vulnerabilities.md) — each release's image and the bases it was
+  pinned on, scanned by Trivy offline after the build and daily: the database fetched and checked by the
+  dashboard, what is kept per release, the newer-base check, the terms, the `image_vulnerable` alert and
+  the one-click rebuild through the runs route.
 - [`log-drains.md`](log-drains.md) — copying deployments' container output and requests to OpenTelemetry
   (OTLP), Loki or a JSON-lines endpoint: formats, severity, sealed headers, delivery, retries and status.
 - [`secret-stores.md`](secret-stores.md) — Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager and Azure

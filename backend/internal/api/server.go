@@ -325,6 +325,8 @@ func (s *Server) Start(ctx context.Context) error {
 	// After the engine, so a window a restart interrupted is settled by a
 	// watcher that can already ask the engine for its rollback.
 	s.modules.rollbackWatcher.Start(ctx)
+	// Scans run one at a time behind the engine, never inside a run.
+	s.startImageScans(ctx)
 	s.modules.deployGit.Start(ctx)
 	s.modules.previewReconciler.Start(ctx)
 	s.modules.deployDatabases.Start(ctx)

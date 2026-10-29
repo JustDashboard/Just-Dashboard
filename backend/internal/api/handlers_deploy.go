@@ -87,6 +87,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/environments/{env}/git-watch", s.handle(s.handleDeploymentGitWatch))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/rollback-watch", s.handle(s.handleDeploymentRollbackWatch))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/rehearsal", s.handle(s.handleDeploymentRehearsal))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/vulnerabilities", s.handle(s.handleDeploymentImageScans))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/database-links", s.handle(s.handleDeploymentDatabaseLinks))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/database-addresses", s.handle(s.handleDeploymentDatabaseAddresses))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/schedules", s.handle(s.handleDeploymentSchedules))
@@ -116,6 +117,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// Asking about a failure takes what asking the SQL editor's
 			// assistant takes: it spends the install's model budget.
 			r.Method(http.MethodPost, "/{id}/runs/{run}/diagnosis", s.handle(s.handleDeploymentRunDiagnose))
+			// A scan reads the release's images in a container with no
+			// network; it costs the host a few minutes of one CPU, as a
+			// build does, and changes nothing the release runs.
+			r.Method(http.MethodPost, "/{id}/environments/{env}/vulnerabilities/scan", s.handle(s.handleDeploymentImageScanRequest))
 			// Merging and commenting speak on GitHub as the dashboard's own
 			// account, which is why an API token may not: the same rule as
 			// the Git page's write routes, with the session requirement the
@@ -161,6 +166,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				// so it is an administrator's, in a session, like saving them.
 				r.Method(http.MethodPost, "/{id}/environments", s.handle(s.handleDeploymentStagingCreate))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/rehearsal", s.handle(s.handleDeploymentRehearsalPut))
+				r.Method(http.MethodPut, "/{id}/environments/{env}/vulnerabilities", s.handle(s.handleDeploymentImageScanPolicyPut))
 				r.Method(http.MethodPost, "/{id}/previews/approvals/{approval}/approve", s.handle(s.handleDeploymentPreviewApprove))
 				// Testing a pull request is the approval of that head, so it
 				// sits with the approval route it stands in for.

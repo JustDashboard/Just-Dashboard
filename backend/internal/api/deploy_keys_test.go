@@ -65,6 +65,7 @@ var sessionOnlyBefore = []string{
 	"POST /deploy/{id}/environments", "DELETE /deploy/{id}/environments/{env}",
 	"PUT /deploy/{id}/environments/{env}/pages/{page}", "PUT /deploy/{id}/environments/{env}/rollback-policy",
 	"PUT /deploy/{id}/environments/{env}/rehearsal",
+	"PUT /deploy/{id}/environments/{env}/vulnerabilities",
 }
 
 // keyBench is a server with an administrator, a session, and the three kinds
