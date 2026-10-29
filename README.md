@@ -95,7 +95,7 @@ free.
 
 ### 🚀 Deployments
 
-- Deploy from a repository, an image, a Compose stack or **77 reviewed templates**, 20 of them
+- Deploy from a repository, an image, a Compose stack or **97 reviewed templates**, 29 of them
   multi-service stacks — an application with its own database, cache or worker
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
 - Push to deploy, plus pull-request previews only your tailnet can reach
@@ -104,7 +104,7 @@ free.
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Migrations rehearsed on a throwaway copy of the database, restored from its backup, before production
 - Variables per environment, plus shared ones defined once for the server or a project
-- Variables read from HashiCorp Vault, OpenBao, Infisical or Doppler, fresh for each run
+- Variables read from HashiCorp Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager or Azure Key Vault, fresh for each run
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
 - Apps that exist only on your tailnet, opened only by the Tailscale logins and tags you list, with
   no public domain, no sign-in server and no certificate to order

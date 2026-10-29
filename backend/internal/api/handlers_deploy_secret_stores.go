@@ -13,8 +13,10 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/secretstore"
 )
 
-// Secret stores: the connections to Vault, OpenBao, Infisical and Doppler
-// that deployment variables reference as ${{store.NAME/path#KEY}}. The list
+// Secret stores: the connections to Vault, OpenBao, Infisical, Doppler, AWS
+// Secrets Manager and Azure Key Vault that deployment variables reference as
+// ${{store.NAME/path#KEY}} (a whole Secrets Manager or Key Vault secret as
+// ${{store.NAME/secret-name}}). The list
 // holds no credential and no value, so anybody who may read a project's
 // variables may read it; adding, changing and testing one handle a
 // credential, so they take an administrator in a session, as a notification
@@ -99,7 +101,7 @@ func (s *Server) handleSecretStores(w http.ResponseWriter, r *http.Request) erro
 // here is the names of what is set, which is the useful half of the record.
 func secretStoreAudit(item *secretstore.Store, extra map[string]any) map[string]any {
 	detail := map[string]any{
-		"kind": item.Kind, "address": item.Address, "allowPreviews": item.AllowPreviews,
+		"kind": item.Kind, "address": item.Endpoint, "allowPreviews": item.AllowPreviews,
 		"signInFields": item.CredentialNames,
 	}
 	if item.Settings.Auth != "" {
@@ -177,8 +179,12 @@ func (s *Server) handleSecretStoreTest(w http.ResponseWriter, r *http.Request) e
 		return mapSecretStoreError(err)
 	}
 	detail := map[string]any{"ok": result.OK, "message": result.Message}
-	if probe.Key != "" {
+	switch {
+	case probe.Key != "":
 		detail["probe"] = probe.Path + "#" + probe.Key
+	case probe.Path != "":
+		// A whole Secrets Manager or Key Vault secret has no key.
+		detail["probe"] = probe.Path
 	}
 	httpx.SetAudit(r, "deploy.secret_store.test", item.Name, detail)
 	if !result.OK {
@@ -197,7 +203,7 @@ func (s *Server) handleSecretStoreDelete(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return mapSecretStoreError(err)
 	}
-	httpx.SetAudit(r, "deploy.secret_store.delete", item.Name, map[string]any{"kind": item.Kind, "address": item.Address})
+	httpx.SetAudit(r, "deploy.secret_store.delete", item.Name, map[string]any{"kind": item.Kind, "address": item.Endpoint})
 	if err := s.modules.deployPlanning.SecretStoreInUse(r.Context(), item.Name); err != nil {
 		return mapSecretStoreError(err)
 	}
