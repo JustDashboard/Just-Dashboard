@@ -243,29 +243,31 @@ func (s *Session) Activity() Activity {
 	if busy || transition || (!s.lastOutput.IsZero() && now.Sub(s.lastOutput) <= quietAfter) {
 		s.armTickLocked(tickEvery)
 	}
-	var targets []chan Activity
 	if changed {
+		// Delivered under the lock, as broadcast delivers output: the sends
+		// never block, and the lock is what orders them against Close,
+		// Unsubscribe and broadcast closing a channel, which they do under
+		// it. Sent after it was released, a change could land on a channel
+		// that a window being closed had just closed — a panic in the read
+		// loop.
 		for _, ch := range s.events {
-			targets = append(targets, ch)
-		}
-	}
-	s.mu.Unlock()
-	for _, ch := range targets {
-		select {
-		case ch <- next:
-		default:
-			// Only the newest state is worth delivering: an older frame that is
-			// still queued describes a moment that has passed.
-			select {
-			case <-ch:
-			default:
-			}
 			select {
 			case ch <- next:
 			default:
+				// Only the newest state is worth delivering: an older frame
+				// that is still queued describes a moment that has passed.
+				select {
+				case <-ch:
+				default:
+				}
+				select {
+				case ch <- next:
+				default:
+				}
 			}
 		}
 	}
+	s.mu.Unlock()
 	return next
 }
 

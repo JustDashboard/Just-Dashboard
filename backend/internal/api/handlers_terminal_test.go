@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -100,7 +101,8 @@ func terminalServerWithShell(t *testing.T, tlsMode, shell string) (*Server, http
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(holders) })
-	s.modules.term.SetHolderLauncherForTest(holders, terminalHolderLauncherForTest)
+	launched := &terminalHolders{}
+	s.modules.term.SetHolderLauncherForTest(holders, launched.launch)
 	if _, err := s.modules.term.Account(); err != nil {
 		t.Skipf("no account to open a session as: %v", err)
 	}
@@ -112,20 +114,65 @@ func terminalServerWithShell(t *testing.T, tlsMode, shell string) (*Server, http
 			s.modules.term.Kill(context.Background(), sess.ID)
 		}
 		s.Shutdown()
+		launched.wait(t)
 	})
 
 	return s, terminalHandlerForTest(s)
 }
 
-func terminalHolderLauncherForTest(_ context.Context, _, socket string) error {
+// terminalHolders is the holders a fixture started, each this test binary
+// running as a real, independently running holder, kept so the fixture's
+// cleanup can wait for them.
+type terminalHolders struct {
+	mu      sync.Mutex
+	started []terminalHolderProcess
+}
+
+type terminalHolderProcess struct {
+	cmd  *exec.Cmd
+	done chan struct{}
+}
+
+func (h *terminalHolders) launch(_ context.Context, _, socket string) error {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestTerminalHolderProcess$")
 	cmd.Env = append(os.Environ(), "JD_TEST_API_HOLDER="+socket)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	go cmd.Wait()
+	done := make(chan struct{})
+	go func() {
+		cmd.Wait()
+		close(done)
+	}()
+	h.mu.Lock()
+	h.started = append(h.started, terminalHolderProcess{cmd: cmd, done: done})
+	h.mu.Unlock()
 	return nil
+}
+
+// wait returns once every holder has exited, which a holder does only after
+// it has reaped its shell. Kill hangs the shells up, and a hung-up bash writes
+// its history into $HOME on the way out — the wrapper's temporary directory,
+// which t.TempDir removes as soon as the cleanups return. Returning before the
+// shell had left let that write land between TempDir's listing of the
+// directory and its removal: "directory not empty", once in a while. A holder
+// still there after its own grace for the shell has passed is killed and
+// reported.
+func (h *terminalHolders) wait(t *testing.T) {
+	t.Helper()
+	h.mu.Lock()
+	started := h.started
+	h.mu.Unlock()
+	for _, holder := range started {
+		select {
+		case <-holder.done:
+		case <-time.After(10 * time.Second):
+			holder.cmd.Process.Kill()
+			<-holder.done
+			t.Error("a terminal holder did not exit after its shell was hung up")
+		}
+	}
 }
 
 func terminalHandlerForTest(s *Server) http.Handler {

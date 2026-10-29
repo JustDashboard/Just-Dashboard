@@ -269,6 +269,8 @@ func validHeaderName(name string) error {
 // through a control of its own, which would send it twice.
 func (spec *SiteSpec) reservedResponseHeader(name string) error {
 	switch {
+	case spec.deployment && strings.EqualFold(name, "Strict-Transport-Security"):
+		return fmt.Errorf("Strict-Transport-Security is sent by the HSTS control under Access and headers, on the HTTPS domains alone")
 	case containsFold(policyHeaders, name):
 		return fmt.Errorf("%s has a control of its own in the headers section", name)
 	case strings.HasPrefix(strings.ToLower(name), "access-control-"):

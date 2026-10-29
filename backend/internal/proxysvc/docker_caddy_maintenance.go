@@ -156,14 +156,16 @@ func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, b
 		if repairErr == nil && authRepair {
 			_, repairErr = c.connectTarget(ctx, nextAuth)
 		}
+		// Every occurrence: a route whose names are served over both
+		// schemes proxies to the application from two site blocks.
 		content, rewrite := snapshot.Content, false
 		if repairErr == nil && next != target {
-			content = strings.Replace(content, "reverse_proxy "+strconv.Quote(target.upstream()), "reverse_proxy "+strconv.Quote(next.upstream()), 1)
+			content = strings.ReplaceAll(content, "reverse_proxy "+strconv.Quote(target.upstream()), "reverse_proxy "+strconv.Quote(next.upstream()))
 			content = strings.Replace(content, target.metadata(), next.metadata(), 1)
 			rewrite = true
 		}
 		if repairErr == nil && authRepair && nextAuth != auth {
-			content = strings.Replace(content, "forward_auth "+strconv.Quote(auth.upstream()), "forward_auth "+strconv.Quote(nextAuth.upstream()), 1)
+			content = strings.ReplaceAll(content, "forward_auth "+strconv.Quote(auth.upstream()), "forward_auth "+strconv.Quote(nextAuth.upstream()))
 			content = strings.Replace(content, auth.authMetadata(), nextAuth.authMetadata(), 1)
 			rewrite = true
 		}

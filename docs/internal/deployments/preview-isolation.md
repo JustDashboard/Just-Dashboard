@@ -74,7 +74,7 @@ and network. Ordinary run submission cannot invoke preview removal against produ
 Closing a PR deletes its preview-owned volumes; this storage is disposable.
 
 A preview's runtime is a copy of production's taken when it is configured, so a preview domain's route
-carries production's allowed addresses, response headers and sign-in as they were then. A sign-in set to
+carries production's allowed addresses, response headers, HSTS and sign-in as they were then. A sign-in set to
 **Previews only** (`runtime.forwardAuth.previewsOnly`) is that copy's whole purpose: production's own
 route stays open and every preview's asks the auth server first, so work in progress is seen only by
 people who sign in. The auth server has to answer for the preview names too (Authelia's session cookie

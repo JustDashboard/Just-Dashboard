@@ -31,6 +31,12 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	rootLocationWS := false
 	sawTLSListen := false
 	sawPlainRedirect := false
+	// A redirecting name served over HTTPS on a site whose own server is
+	// plain: the site is TLS, and every served name is a plain-HTTP one.
+	sawTLSRedirect := false
+	// The names the plain-HTTP markers carry, which the skipped server
+	// answers and the site's own server does not.
+	plainNames := []string{}
 	sawAccessLog := false
 	sawGzip := false
 	sawBuffering := false
@@ -73,6 +79,20 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			} else if raw == "}" {
 				depth--
 				kinds.skipServer = depth > 0
+			} else {
+				// A certificate only a skipped server names is still the
+				// site's, and so is its HTTP/2: a redirecting name served
+				// over HTTPS on a site whose own server is plain has nowhere
+				// else to name them. The first named wins, as the site's own
+				// server names the same ones.
+				switch directive, value := cutDirective(raw); {
+				case directive == "ssl_certificate" && spec.CertPath == "":
+					spec.CertPath = value
+				case directive == "ssl_certificate_key" && spec.KeyPath == "":
+					spec.KeyPath = value
+				case directive == "http2" && value == "on":
+					spec.HTTP2 = true
+				}
 			}
 			return
 		}
@@ -473,7 +493,16 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		}
 		if m := hostRedirectMarkerRe.FindStringSubmatch(raw); m != nil && depth == 0 {
 			code, _ := strconv.Atoi(m[1])
-			spec.HostRedirects = append(spec.HostRedirects, HostRedirect{From: m[2], To: m[3], Code: code})
+			spec.HostRedirects = append(spec.HostRedirects, HostRedirect{From: m[2], To: m[3], Code: code, Plain: m[4] == " over plain HTTP"})
+			sawTLSRedirect = sawTLSRedirect || m[4] == " over HTTPS"
+			kinds.skipServer = true
+			continue
+		}
+		if m := plainMarkerRe.FindStringSubmatch(raw); m != nil && depth == 0 {
+			if !seenDomains[m[1]] {
+				seenDomains[m[1]] = true
+				plainNames = append(plainNames, m[1])
+			}
 			kinds.skipServer = true
 			continue
 		}
@@ -533,6 +562,17 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// its upstream whatever try_files a hand-written file put beside it.
 	spec.SPA = spec.SPA && spec.Kind == "static"
 	spec.ForceHTTPS = sawTLSListen && sawPlainRedirect
+	// The plain-HTTP names are the site's domains too, after the ones its
+	// own server answers; on a site whose own server is plain and whose
+	// redirecting names are HTTPS, every served name is a plain one.
+	if sawTLSRedirect && !sawTLSListen {
+		spec.TLS = true
+		spec.PlainDomains = append([]string(nil), spec.Domains...)
+	}
+	if len(plainNames) > 0 {
+		spec.Domains = append(spec.Domains, plainNames...)
+		spec.PlainDomains = append(spec.PlainDomains, plainNames...)
+	}
 	// A file with a plain-HTTP redirect block and nothing else is a redirect
 	// site; one that also serves something is a TLS site forcing HTTPS.
 	if spec.Kind == "proxy" && spec.Upstream == "" && spec.Pool == nil && spec.Root == "" && sawPlainRedirect {

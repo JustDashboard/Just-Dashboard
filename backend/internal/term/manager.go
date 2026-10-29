@@ -626,11 +626,9 @@ func (m *Manager) Kill(ctx context.Context, id string) error {
 	if sess.TmuxName != "" {
 		hostexec.CommandOnHost(ctx, "tmux", "kill-session", "-t", sess.TmuxName).Run()
 	}
-	if sess.holder != nil {
-		// Close, next, drops this process's copy of the master, which is the
-		// other half of the hangup the holder is being asked for.
-		sess.holder.Hangup()
-	}
+	// Close, next, drops this process's copy of the master, which is the
+	// other half of the hangup a holder is being asked for.
+	sess.hangup()
 	err := sess.Close()
 	if m.clipboard != nil {
 		m.clipboard.removeSession(id)
