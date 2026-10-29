@@ -101,11 +101,11 @@ operator already owned; adding a bind mount would mean recreating their running 
 on a log. Reads go through one `docker exec` per read (`caddyReadScript` in
 `deployment_access_log.go`), the same mechanism route files already use.
 
-A tailnet-only environment that names who may open it is recorded by its tailnet gate
-([tailnet-only deployments](tailnet-apps.md#the-gate)): on host nginx in the same file, in the timed
-format with `tl=<login>` after it and the tailnet address as `$remote_addr`; on the dashboard's own
-loopback Caddy in the same JSON, with the login as the `tailnet_login` field its `log_append` adds and
-the tailnet address as `client_ip`. `AccessLogReader` reads the gate Caddy's record when that
+A tailnet address — a preview's, or a tailnet-only environment's — is recorded by its front, and one
+that names who may open it by its tailnet gate ([tailnet-only deployments](tailnet-apps.md#the-gate)):
+on host nginx in the same file, in the timed format with the tailnet address as `$remote_addr` and, on
+a gate, `tl=<login>` after it; on the dashboard's own loopback Caddy in the same JSON, with the tailnet
+address as `client_ip` and, on a gate, the login as the `tailnet_login` field its `log_append` adds. `AccessLogReader` reads the gate Caddy's record when that
 container holds the route, and `accesslog.Entry.User` carries the login, which the Logs page shows in
 the client column (the address in its title) and as **Tailnet login** in the request's detail.
 

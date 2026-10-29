@@ -86,6 +86,12 @@ type DeploymentRoute struct {
 	// sends no header, which is where a route starts: the policy outlives
 	// a mistake for as long as it says.
 	HSTS *DeploymentHSTS `json:"hsts,omitempty"`
+	// DropCookies are cookies taken out of every request before the
+	// application is sent it, every other cookie kept. The service sets the
+	// dashboard's own (DashboardCookies) on a route serving the name the
+	// dashboard is reached by, since a browser sends the dashboard's session
+	// there whatever the port (onDashboardName); nothing else sets it.
+	DropCookies []string `json:"dropCookies,omitempty"`
 }
 
 // DeploymentHSTS is a route's Strict-Transport-Security policy, held to the
@@ -219,6 +225,9 @@ func validateDeploymentRules(route DeploymentRoute) error {
 	}
 	if len(route.AllowFrom) > MaxDeploymentAllow {
 		return fmt.Errorf("at most %d allowed addresses", MaxDeploymentAllow)
+	}
+	if err := validCookieNames(route.DropCookies); err != nil {
+		return err
 	}
 	for _, entry := range route.AllowFrom {
 		if normalized, err := NormalizeAccessEntry(entry); err != nil {
@@ -390,6 +399,7 @@ type DeploymentRouteResult struct {
 // a deployment-owned nginx route. If apply or reload fails, the exact prior
 // bytes/link are restored and reloaded before the failure is returned.
 func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRoute) (DeploymentRouteResult, error) {
+	route = s.onDashboardName(route)
 	if err := validateDeploymentRules(route); err != nil {
 		return DeploymentRouteResult{}, err
 	}
@@ -480,8 +490,9 @@ func (s *Service) RestoreDeploymentRoute(ctx context.Context, snapshot Deploymen
 // cutover. It is intentionally name-scoped so preview cleanup cannot select
 // or remove a route owned by another feature.
 func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error {
-	// A tailnet-only environment's gate goes with its route, from the gate
-	// Caddy that holds it; on nginx it is the file of the route's own name.
+	// A tailnet address's front — a preview's, a tailnet-only environment's
+	// gate — goes with its route, from the gate Caddy that holds it; on nginx
+	// it is the file of the route's own name.
 	if tailnetGateNameRe.MatchString(name) {
 		if err := s.removeGateContainerRoute(ctx, name); err != nil {
 			return err
@@ -555,6 +566,7 @@ func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error 
 }
 
 func (s *Service) VerifyDeploymentRoute(ctx context.Context, route DeploymentRoute) error {
+	route = s.onDashboardName(route)
 	if edge, err := s.dockerCaddy(ctx); err != nil {
 		return err
 	} else if edge != nil {
@@ -734,6 +746,7 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 		ClientMaxBody: deploymentBodyLimit(route),
 		HostRedirects: append([]HostRedirect(nil), route.Redirects...),
 		deployment:    true,
+		dropCookies:   append([]string(nil), route.DropCookies...),
 	}
 	if route.TLS {
 		// Each name on the scheme its domain chose: the plain ones get a
