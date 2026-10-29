@@ -1808,8 +1808,8 @@ only renderer/executor/validation authority for their feature.
   next to a routed primary (Gitea's SSH, Syncthing's sync protocol) becomes an additional
   `runtime.ports[]` publication on its own number (see published ports below) instead of silently
   replacing the routed port; the primary always stays the one the proxy and the checks reach. The
-  catalogue ships 102 reviewed definitions, 97 of them offered (see "how the first sign-in works"
-  below for the five that are retired; 35 are the multi-service templates of the next item). The
+  catalogue ships 142 reviewed definitions, 137 of them offered (see "how the first sign-in works"
+  below for the five that are retired; 43 are the multi-service templates of the next item). The
   three counts the competitive report quotes — built in, deployable, Compose — are constants in
   `blueprint/catalogue_counts.go`, and `catalogue_counts_test.go` fails when the shipped
   definitions disagree, so they are bumped deliberately in the change that adds a template. Every
@@ -1823,6 +1823,14 @@ only renderer/executor/validation authority for their feature.
   loopback port (Mongo Express with a catalogue MongoDB beside it) and removes what it pulled;
   `JD_BLUEPRINT_ONLY=a,b` narrows it. Applications that validate the `Host` header (Homepage) are
   configured to accept any, since the proxy in front only ever forwards the domain.
+  Install-time files are not only a game server's: Glance's `glance.yml`, Garage's `garage.toml`
+  and the CouchDB settings Obsidian LiveSync checks for are written into their volumes before the
+  first start, each generated secret in them as the variable reference the seed helper fills in
+  (`validateRuntimeSeeds` refuses a credential-shaped line holding anything else), so the value is
+  in the file from the first start and a later rotation of the variable does not reach it. The
+  runtime starts every single-image container with Docker's init as PID 1, so an image whose own
+  init must be PID 1 — s6-overlay, as in Emby's and every linuxserver.io image — exits at once
+  (`s6-overlay-suexec: fatal: can only run as pid 1`) and cannot be a single-image template.
 - **Multi-service templates** (`blueprint/compose_validate.go`, `compose_render.go`,
   `deploy/blueprint_source.go`). A definition that declares `services` (profile `compose`) is a
   Compose template: an application with the database, cache or worker it needs, deployed through the
