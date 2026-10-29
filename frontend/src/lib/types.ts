@@ -7020,6 +7020,23 @@ export type DbFleetEntry = DbConnection & {
    * backup job run that dumped it, whichever is later. Absent for never.
    */
   lastBackup?: string
+  /** A MongoDB 8 server that cannot start on this kernel as it is. Absent otherwise. */
+  kernelProblem?: DbKernelProblem
+}
+
+/**
+ * MongoDB 8 on Linux 6.19 to 7.0.13, which it refuses to start on without
+ * `GLIBC_TUNABLES=glibc.pthread.rseq=1` (MongoDB SERVER-121912).
+ */
+export type DbKernelProblem = {
+  /** The alert, in a few words. */
+  message: string
+  /** What applying it does, or where the compose file has to say it. */
+  detail: string
+  kernel: string
+  release: string
+  /** `POST /databases/{id}/kernel-mitigation` applies it. */
+  fixable: boolean
 }
 
 export type DbFleet = {

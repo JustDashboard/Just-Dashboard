@@ -485,8 +485,18 @@ to the contribution terms above, including the additional licence grant to the p
   on a Docker host. It provisions five of the templates (PostgreSQL, MySQL, MariaDB, Redis and
   MongoDB), reaches each from separate application containers,
   replaces databases at a different IP, reconnects the same clients using their original URLs,
-  verifies ownership/removal, and cleans up its own containers, volumes and networks. Compose network
-  integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
+  verifies ownership/removal, and cleans up its own containers, volumes and networks. It pulls each
+  engine's image before creating anything and logs how long that took, so a slow registry reads as a
+  pull rather than as a database that never answers; each engine then has two minutes from its
+  container starting to accept a sign-in, and a failure reports the adopt route's last reply with the
+  container's state and last log lines. MongoDB 8 does not start on Linux 6.19 to 7.0.13 (MongoDB
+  SERVER-121912, which a runner image can move to) without `GLIBC_TUNABLES=glibc.pthread.rseq=1`: the
+  MongoDB subtest checks that provisioning gave it that on such a kernel and nothing on any other, and
+  fails at once, naming the kernel and MongoDB's line, if it still refuses; `mongodb-kernel-mitigation`
+  applies the mitigation from the Databases page to a server made without it, on the runner's real
+  kernel when it is one of those, and otherwise on a server that is made to log MongoDB's refusal and
+  killed, with the kernel read as 7.0.0.
+  Compose network integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
 - Changes to server TLS for the databases the dashboard starts (`api/database_tls*.go`, `internal/dbtls`,
   `dbx/servertls.go`) also run
   `JD_DB_TLS_LIVE=1 go test ./internal/api -run TestLiveDatabaseServerTLS -count=1 -v` on a Docker host
