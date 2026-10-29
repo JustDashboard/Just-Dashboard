@@ -4399,6 +4399,45 @@ export type DeploymentPreview = {
   lastRun?: DeploymentRecentRun
   /** A live Compose preview's services as Docker reports them; absent for a single container. */
   services?: DeploymentRuntimeServices
+  /** The preview's own copies of databases production gives previews a branch of. */
+  branches?: PreviewDatabaseBranch[]
+}
+
+/** What a linked database gives an environment's previews (`deploy/preview_branches.go`). */
+export type PreviewBranchMode = "none" | "branch" | "masked"
+
+export type PreviewBranchPolicy = {
+  connectionId: number
+  mode: PreviewBranchMode
+  /** table.column or schema.table.column, overwritten in their shape on the copy. */
+  maskedColumns: string[]
+  updatedBy?: string
+  updatedAt?: string
+}
+
+/** A preview's own copy of a linked database, restored from its newest backup. */
+export type PreviewDatabaseBranch = {
+  id: number
+  environmentId: number
+  connectionId: number
+  name: string
+  engine?: string
+  database?: string
+  mode: PreviewBranchMode
+  maskedColumns: string[]
+  state: "waiting" | "restoring" | "ready" | "failed" | "removed"
+  /** "dump" for a backup job's native dump, "pitr" for a point-in-time recovery. */
+  source: { kind: string; backupRunId?: number; takenAt?: string; bytes?: number; method?: string }
+  recoveredTo?: string
+  host?: string
+  port?: number
+  maskedRows?: number
+  reason?: string
+  restoreMs?: number
+  requestedBy?: string
+  createdAt: string
+  readyAt?: string
+  endedAt?: string
 }
 
 /** One service of a Compose stack, and what its preview gets in place of production's. */
@@ -4447,6 +4486,8 @@ export type ProjectPullRequests = {
   compose: boolean
   /** Present for a Compose stack: each service's isolation, and what refuses a preview. */
   composePreview?: ComposePreviewFacts
+  /** The databases production gives its previews a branch of; a fork's preview gets none. */
+  databaseBranches?: (PreviewBranchPolicy & { name: string; driver?: string })[]
   /** The production source is a local checkout, which has no remote to fetch a pull request from. */
   localCheckout: boolean
   /** The runtime plan's internal port; 0 means nothing to publish. */
@@ -5590,6 +5631,8 @@ export type DeploymentDatabaseLink = {
   hostname: string
   /** The connection has a pooler, so `${{database.N.pooled}}` resolves. */
   pooler?: boolean
+  /** What the environment's previews get of it: nothing, a branch, or a masked branch. */
+  previews?: PreviewBranchPolicy
   status: "pending" | "connected" | "stale" | "unavailable"
   detail?: string
   checkedAt?: string

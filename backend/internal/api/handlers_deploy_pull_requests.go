@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -68,6 +69,37 @@ type projectPullRequests struct {
 	// ComposePreview is what a preview of a Compose stack gets, service by
 	// service, and what refuses one; absent for any other build.
 	ComposePreview *deploy.ComposePreviewFacts `json:"composePreview,omitempty"`
+	// DatabaseBranches are the databases production gives its previews a
+	// branch of, so the dialog can say what a preview of a branch — never of
+	// a fork — will get.
+	DatabaseBranches []previewBranchFact `json:"databaseBranches"`
+}
+
+// previewBranchFact is one database production gives its previews a branch
+// of, by name.
+type previewBranchFact struct {
+	deploy.PreviewBranchPolicy
+	Name   string `json:"name"`
+	Driver string `json:"driver,omitempty"`
+}
+
+// previewBranchFacts names the databases an environment gives its previews
+// a branch of.
+func (s *Server) previewBranchFacts(ctx context.Context, environmentID int64) []previewBranchFact {
+	out := []previewBranchFact{}
+	policies, err := s.modules.deployRuns.PreviewBranchPolicies(ctx, environmentID)
+	if err != nil {
+		return out
+	}
+	for _, policy := range policies {
+		fact := previewBranchFact{PreviewBranchPolicy: policy, Name: fmt.Sprintf("Database %d", policy.ConnectionID)}
+		if conn, _, err := s.dbConnRow(ctx, policy.ConnectionID); err == nil {
+			fact.Name, fact.Driver = conn.Name, string(conn.Driver)
+		}
+		out = append(out, fact)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // previewFacts are the reasons a project cannot preview a pull request at
@@ -227,11 +259,13 @@ func (s *Server) handleDeploymentPullRequests(w http.ResponseWriter, r *http.Req
 		Production: facts.production, Tailnet: s.modules.pullRequests.Tailnet(r.Context()),
 		Compose: facts.compose, LocalCheckout: facts.localCheckout,
 		InternalPort: facts.internalPort, ReleaseTasks: facts.releaseTasks,
-		ComposePreview: facts.composePreview,
+		ComposePreview:   facts.composePreview,
+		DatabaseBranches: s.previewBranchFacts(r.Context(), summary.EnvironmentID),
 	}
 	if facts.composePreview != nil {
 		s.observePreviewServices(r.Context(), response.Previews)
 	}
+	s.attachPreviewBranches(r.Context(), response.Previews)
 	if !ok {
 		response.Reason = "not_github"
 		httpx.JSON(w, http.StatusOK, response)
@@ -458,9 +492,22 @@ func (s *Server) handleDeploymentPullRequestPreview(w http.ResponseWriter, r *ht
 		}
 	}
 	s.modules.pullRequests.Invalidate(repository)
+	// The preview's database branches were asked for with its configuration;
+	// the owner starts restoring them now rather than on its next pass.
+	branchNames := []string{}
+	if branches, err := s.modules.deployRuns.PreviewBranches(ctx, preview.EnvironmentID); err == nil {
+		for _, branch := range branches {
+			if deploy.PreviewBranchActive(branch.State) {
+				branchNames = append(branchNames, branch.Name)
+			}
+		}
+	}
+	if len(branchNames) > 0 {
+		s.modules.previewBranches.Poke()
+	}
 	httpx.SetAudit(r, "deploy.preview.test", strconv.Itoa(number), map[string]any{
 		"deploymentId": projectID, "number": number, "revision": revision, "runId": run.ID,
-		"copiedVariables": copied, "skipped": skipped, "fork": pull.Fork,
+		"copiedVariables": copied, "skipped": skipped, "fork": pull.Fork, "databaseBranches": branchNames,
 	})
 	final, err := s.modules.deployAutomation.PreviewByNumber(ctx, projectID, number)
 	if err != nil {

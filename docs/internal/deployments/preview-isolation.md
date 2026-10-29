@@ -48,7 +48,8 @@ mounts are rewritten service by service at start: [Compose previews](#compose-pr
 tasks and explicit build-secret mappings are removed. Preview-specific values can then be configured
 through the normal scoped-variable API. Existing previews without provenance lose copied variable/link
 state when approved configuration is regenerated. Production resource contents are never copied or deleted.
-Database references are checked before build or runtime values are returned: known links/bindings to
+Database references are checked before build or runtime values are returned (a preview holding a
+[database branch](#database-branches) of the database reads the branch instead): known links/bindings to
 another environment cannot share a connection or saved endpoint when either environment is a preview
 (or a staging environment, for its own reason: [staging and promotion](staging-promotion.md)).
 This includes aliases with another saved connection ID. Runtime joins also compare observed container
@@ -232,7 +233,9 @@ deactivated first, then every active production variable — sensitive or not �
 `${{` reference and whose key the preview has not set for itself is written through
 `writeVariableRevisionTx` with `copied_from_environment` set to production's environment id. The rest
 are skipped and named in `skipped`: a database, credential, domain or service reference resolves to
-production's own resources, which a preview must never reach, a variable alias means nothing without
+production's own resources, which a preview must never reach — except a database reference, plain or
+shaped (`${{database.5.url}}`, `${{database.orders}}`, never `.pooled`), to a database the preview holds
+a [branch](#database-branches) of, which is copied because it resolves to the branch — a variable alias means nothing without
 its target, and a key with an active revision of the preview's own (`copied_from_environment` 0,
 `ownVariableKeysTx`, read once the earlier copies are deactivated) is the operator's word over
 production's — the copy never overwrites it, and neither `DeactivateCopiedVariables` nor the close drops it. The head the copies were made for is kept in
@@ -241,6 +244,76 @@ box unchecked deactivates the copies (`DeactivateCopiedVariables`) and clears th
 `CompletePreviewRemoval` does both when the preview closes, leaving whatever the operator typed into the
 preview's own editor untouched. A webhook preview still starts with none. The Automation page's previews
 tag such a preview `production variables`.
+
+## Database branches
+
+A preview reaches no database of production's, which keeps production safe and leaves most applications
+with nothing to show. An environment may instead give its previews a **branch** of a database it links:
+its own copy, restored from the newest backup, on the preview's own network, with a sign-in made for it,
+removed with the preview. It is off by default and set per link on Settings → Databases, under **Previews
+get**: *Nothing*, *A branch* (from the newest backup) or *A masked branch* (with named columns
+overwritten). `deploy_preview_branch_policies` holds one row per environment and connection that gives
+previews something (`mode` `branch` or `masked`, `masked_columns` a JSON list of `table.column` or
+`schema.table.column`, each a plain identifier: `NormalizePreviewBranchPolicy`); `PUT
+/deploy/{id}/environments/{env}/database-links/{connection}/previews` (`system.admin`, session, audited
+`deploy.preview_branch.policy`) saves one for a connection the environment links (a dependency or a
+binding), never on a preview, and `GET …/database-links` reports each link's `previews`. Only PostgreSQL,
+MySQL and MariaDB are restored.
+
+`EnsurePreview` asks for the branches (`requestPreviewBranchesTx`, in the transaction that configures the
+preview, for the dashboard's route and a webhook's approval alike): a `waiting` row in
+`deploy_preview_branches` for each policy the preview holds no active branch of. A head whose repository
+is another than the pull request's — **a fork's**, or one whose repository was not recorded — is asked for
+none, and loses any it holds: its code would read the data. A new head keeps the branch it has. The
+Databases owner (`api/deployment_preview_branches.go`, `previewBranchOwner`, a pass every ten seconds and
+on a poke) claims one waiting branch at a time and restores it through the migration rehearsal's own path
+(`prepareCopy`, shared with [data copies](data-aware-rollback.md)): the production server's container
+configuration on a fresh volume, archiving off, none of its ports, labels or writable mounts, recovered
+from its point-in-time archive to the archive's end where it has one, else from the newest native dump a
+backup job took, within the previewed environment's [rehearsal limits](implementation.md) (restore time,
+largest backup). The copy, `jd-preview-e<env>-branch<id>-db`, joins the **preview's own database network**
+(`jd-e<preview>-db-…`, created for it) under a name of its own, `db-<connection>-branch.jd.internal` —
+production's `db-<connection>.jd.internal` is never on that network — and the application's account is
+given a password made for it (`setCopyPassword`), so the preview's address carries no password production
+accepts. On a masked branch every named column is then overwritten before the branch is marked ready, so
+nothing but the restore has read it (`deployment_preview_branch_mask.go`): through the readers and writers
+the Databases pages use (`dbx.BrowseTablePage`, `dbx.ApplyChanges`), a thousand rows at a time by primary
+key, as the server's superuser on the copy, each value replaced in its shape — every letter by a letter of
+the same case, every digit by a digit, everything else (an `@`, a dot, a dash, a space) kept, a number's
+sign and point kept and no leading zero gained, a UUID still a UUID — drawn from HMAC-SHA256 of the value
+under a key made for the branch and forgotten after it, so equal values mask equally and a join on the
+column still joins, and a short value cannot be recovered by hashing guesses. NULL stays NULL. Text,
+integer, decimal and UUID columns are masked; an enum, set, XML, date, JSON, binary or other column, a
+column of the primary key, a table with no primary key or more than 200,000 rows refuses the branch, which
+ends `failed` with the reason rather than standing unmasked. The sign-in `{user, password, url}` is sealed
+in the row; the source (dump run and time, or the recovered moment), engine, database, masked rows and
+restore time are recorded.
+
+The preview's `${{database.N…}}` resolves to the branch (`ResolveVariable`: `previewBranchURL`), shaped as
+asked (`.jdbc`, `.url.<database>`); a branch still being restored is waited for within the restore limit,
+a failed one fails the resolution with its reason, and `.pooled` is refused (a branch has no pooler).
+`NetworksForRuntime` joins the preview to its database network for a variable naming a branch host
+(`previewBranchConnectionIDs`) — the branch must be ready and on that network — and binds nothing of
+production's; any other managed database name is checked against isolation as before. A preview without a
+branch of the database meets the isolation refusal it always did. The branch carries the preview's labels,
+the rehearsal label with `branch-<id>` and `io.just-dashboard.preview-branch=<id>`, so runtime observation
+and host alerts leave it out, the database network's reconciler leaves it where it is, the start-up sweep
+of rehearsals keeps a ready or waiting one (`livePreviewBranches`) and removes the rest, the owner's
+`sweepOrphans` removes what an ended branch left, and `SettleInterrupted` ends one a restart cut short
+(`failed`; refresh it). `RemovePreviewResources` takes it with the preview: its container and volume with
+the preview's, then `removeEnvironmentBranches` (from `removeRuntimeNetworks`, before the preview's database
+network goes) ends its row `removed` and removes anything else carrying its label.
+
+`POST /deploy/{id}/pull-requests/{number}/preview/branches/{connection}/refresh` (`system.admin`, session,
+audited `deploy.preview_branch.refresh`) restores a ready or failed branch again from the newest backup:
+the ready copy's container and volume go first, then `RefreshPreviewBranch` ends the row and asks for a new
+one carrying the sealed sign-in over, so the preview's host and password stay what they were and the
+application reconnects (`409 preview_branch_busy` while one is restoring, `preview_branch_fork`,
+`preview_branch_policy` once the environment gives previews nothing, `404 preview_branch_not_found`).
+The pull-request listing carries each preview's `branches` and production's `databaseBranches`; the
+preview's row on the Overview lists each branch (engine, state, source backup, age, masked columns) with
+**Refresh the branch** behind a confirmation, and the test dialog says what the preview will get — and that
+a fork's gets none.
 
 ## Tailnet-only addresses
 
@@ -426,7 +499,20 @@ pull request numbered 429 is not a rate limit), `TestPullRequestRateLimitIsAQuot
 `TestClosePullRequestPreviewIsDestructiveIdempotentAndAudited` and
 `TestMergePullRequestFromDeployPageReconcilesAndRequiresSession`;
 `TestOpenAddsPullRequestPreviewColumnsToAPreExistingDatabase` covers the added columns and table on a
-pre-feature database. Browser coverage (`deploy-project.spec.ts`, `git-features.spec.ts`, `git-ui.spec.ts`)
+pre-feature database. Database branches: `TestNormalizePreviewBranchPolicy`,
+`TestPreviewBranchesAreRequestedForAPreviewAndNeverForAFork` (once per preview, kept across heads, none
+for a fork or an unrecorded head, the branched reference copied and the pooled one skipped),
+`TestPreviewBranchLifecycleKeepsItsSignInAcrossARefresh`, `TestMaskShapeKeepsAValuesShapeAndNothingElse`,
+`TestPreviewBranchPolicyIsAnAdministratorsInASession` and `TestPreviewBranchFromTestToRefresh` (the
+listing, the resolution in every shape, `.pooled` refused, a fork's preview still isolated, the refresh
+carrying the sign-in); live, as root, `TestLivePreviewDatabaseBranchIsThePreviewsOwnAndGoesWithIt`
+(PostgreSQL from a dump), `TestLivePreviewDatabaseBranchOfAMariaDBDump` and, with `JD_TEST_WALG`,
+`TestLivePreviewDatabaseBranchRecoversFromThePointInTimeArchive`: the preview resolves the branch's own
+address and password and joins its own database network alone, the branch holds the backup's rows, a row
+written there is not in production and production's later row is not there, production's name does not
+resolve on the preview's network, the start-up sweep keeps the branch, a masked branch has the column
+overwritten in its shape with its NULL kept, a fork's preview gets none and still meets isolation, and
+removing the preview removes the branch with nothing left carrying its label and production's rows intact. Browser coverage (`deploy-project.spec.ts`, `git-features.spec.ts`, `git-ui.spec.ts`)
 posts the exact head with the variable choice and the fork acceptance, reads a fork before building it,
 refuses a held preview from the picker and re-reads a head that moved under the dialog, retries a failed
 cleanup from the Git page's row rather than testing again, holds the strip's verb on a Ready preview, and

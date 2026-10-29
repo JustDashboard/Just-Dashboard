@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import {
+  branchPlan,
+  branchReading,
+  branchSource,
   canTest,
   cleanupFailed,
   composeServiceLines,
   heldReason,
+  parseMaskedColumns,
   previewBlocker,
   previewHeld,
   previewOutOfDate,
@@ -13,6 +17,7 @@ import {
   previewURL,
   pullChecksTone,
   pullOfPreview,
+  shownBranches,
   unavailableReason,
 } from "./pull-requests"
 
@@ -379,5 +384,61 @@ describe("Compose previews", () => {
     expect(
       previewServices(preview({ services: { status: "unavailable", services: [] } }), "web"),
     ).toEqual([])
+  })
+})
+
+describe("database branches", () => {
+  const branch = (over = {}) => ({
+    id: 3,
+    environmentId: 9,
+    connectionId: 11,
+    name: "orders-db",
+    engine: "postgres",
+    mode: "branch",
+    maskedColumns: [],
+    state: "ready",
+    source: { kind: "dump", backupRunId: 42, takenAt: "2026-10-29T08:00:00Z" },
+    createdAt: "2026-10-29T08:01:00Z",
+    ...over,
+  })
+  test("a branch's state reads as one word", () => {
+    expect(branchReading(branch()).label).toBe("Ready")
+    expect(branchReading(branch({ state: "restoring" })).tone).toBe("notice")
+    expect(branchReading(branch({ state: "failed" })).tone).toBe("danger")
+    expect(branchReading(branch({ state: "removed" })).label).toBe("Removed")
+  })
+  test("where its data came from is said in words", () => {
+    const when = (iso) => `at ${iso}`
+    expect(branchSource(branch(), when)).toBe("from the backup of at 2026-10-29T08:00:00Z (run 42)")
+    expect(
+      branchSource(branch({ source: { kind: "pitr" }, recoveredTo: "2026-10-29T08:05:00Z" }), when),
+    ).toBe("recovered to at 2026-10-29T08:05:00Z from its archive")
+    expect(branchSource(branch({ source: { kind: "" } }), when)).toBeUndefined()
+  })
+  test("a removed branch is not shown under its preview", () => {
+    expect(
+      shownBranches(preview({ branches: [branch(), branch({ id: 4, state: "removed" })] })).map(
+        (item) => item.id,
+      ),
+    ).toEqual([3])
+    expect(shownBranches(undefined)).toEqual([])
+  })
+  test("the dialog says what a preview gets, and that a fork gets nothing", () => {
+    const policies = [
+      { connectionId: 11, name: "orders-db", mode: "masked", maskedColumns: ["users.email"] },
+      { connectionId: 12, name: "cache", mode: "none", maskedColumns: [] },
+    ]
+    expect(branchPlan(policies, false)).toBe(
+      "orders-db gets a branch restored from its newest backup, with users.email masked. A variable copied from production that references it reads the branch.",
+    )
+    expect(branchPlan(policies, true)).toContain("never gets a database branch")
+    expect(branchPlan([policies[1]], false)).toBeUndefined()
+    expect(branchPlan(undefined, false)).toBeUndefined()
+  })
+  test("masked columns are read one a line or between commas", () => {
+    expect(parseMaskedColumns(" users.email\nusers.phone, users.email,,\n")).toEqual([
+      "users.email",
+      "users.phone",
+    ])
   })
 })

@@ -115,7 +115,10 @@ A change that weakens any of these has to say so explicitly.
    plan), the terms of the warm-release window (`PUT …/rollback-policy`) and of migration rehearsal
    (`PUT …/rehearsal`, which chooses a database whose backup is restored), a copy of a release's data
    (asking for one, revealing its address, keeping it longer, removing it and comparing it: a second
-   copy of production's data whose address carries a password), and a route's maintenance
+   copy of production's data whose address carries a password), what a linked database gives
+   previews and a preview's database branch restored again (`PUT …/database-links/{connection}/previews`,
+   `POST …/pull-requests/{number}/preview/branches/{connection}/refresh`: a second copy of production's
+   data next to a pull request's code), and a route's maintenance
    and error pages (`PUT …/pages/{page}`, files on the server beside the proxy's route). The
    secret-store list (`GET /deploy/secret-stores`), which an ordinary key reads, answers a deploy key
    `key_scope`: it carries each connection's address and sign-in fields and every deployment's

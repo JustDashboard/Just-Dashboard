@@ -1418,6 +1418,109 @@ test("a Compose stack's preview lists its services, and the dialog says what eac
   })
 })
 
+test("a preview's database branch is listed under its row and refreshed from the newest backup", async ({
+  page,
+}, testInfo) => {
+  await mockProject(page)
+  const branch = {
+    id: 3,
+    environmentId: 52,
+    connectionId: 11,
+    name: "orders-db",
+    engine: "postgres",
+    database: "orders",
+    mode: "masked",
+    maskedColumns: ["users.email", "users.phone"],
+    state: "ready",
+    source: { kind: "dump", backupRunId: 77, takenAt: now },
+    host: "db-11-branch.jd.internal",
+    port: 5432,
+    maskedRows: 40,
+    createdAt: now,
+    readyAt: now,
+  }
+  const listing = () => {
+    const base = projectPullRequests(true)
+    const preview = { ...previewEnvironment, branches: [branch] }
+    return {
+      ...base,
+      databaseBranches: [
+        {
+          connectionId: 11,
+          name: "orders-db",
+          driver: "postgres",
+          mode: "masked",
+          maskedColumns: ["users.email", "users.phone"],
+        },
+      ],
+      previews: [preview],
+      pulls: base.pulls.map((pull) => (pull.number === 42 ? { ...pull, preview } : pull)),
+    }
+  }
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) => json(route, listing()))
+  let refreshed = ""
+  await page.route(
+    "**/api/v1/deploy/7/pull-requests/42/preview/branches/11/refresh",
+    async (route) => {
+      refreshed = route.request().method()
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({ branch: { ...branch, id: 4, state: "waiting" }, replaced: 3 }),
+      })
+    },
+  )
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/deploy/7")
+    const row = page
+      .getByRole("list", { name: "Pull requests" })
+      .getByRole("listitem")
+      .filter({ hasText: "Add checkout retries" })
+    const branches = row.getByRole("list", { name: "Database branches of the preview of #42" })
+    await expect(branches.getByRole("listitem")).toHaveCount(1)
+    await expect(branches).toContainText("orders-db")
+    await expect(branches).toContainText("Ready")
+    await expect(branches).toContainText("users.email, users.phone masked")
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `horizontal viewport overflow at ${width}px`,
+    ).toBe(true)
+    await row.scrollIntoViewIfNeeded()
+    await testInfo.attach(`overview-preview-branch-${width}`, {
+      body: await page.screenshot({
+        path: testInfo.outputPath(`overview-preview-branch-${width}.png`),
+      }),
+      contentType: "image/png",
+    })
+  }
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page
+    .getByRole("button", { name: "Refresh the branch of orders-db from the latest backup" })
+    .click()
+  const confirm = page.getByRole("dialog", { name: "Refresh the branch" })
+  await expect(confirm).toContainText("Everything the preview wrote to it is gone.")
+  await expect(confirm).toContainText("Its address and password stay the same.")
+  await testInfo.attach("preview-branch-refresh", {
+    body: await confirm.screenshot({ path: testInfo.outputPath("preview-branch-refresh.png") }),
+    contentType: "image/png",
+  })
+  await confirm.getByRole("button", { name: "Restore from the newest backup" }).click()
+  await expect.poll(() => refreshed).toBe("POST")
+
+  // A fork's preview is told it gets none.
+  await page
+    .getByRole("list", { name: "Pull requests" })
+    .getByRole("listitem")
+    .filter({ hasText: "Translate the checkout" })
+    .getByRole("button", { name: "More actions for #45" })
+    .click()
+  await page.getByRole("menuitem", { name: /Test this pull request/ }).click()
+  const dialog = page.getByRole("dialog", { name: "Test #45" })
+  await expect(dialog.getByText("No database branch")).toBeVisible()
+  await expect(dialog).toContainText("A preview of a fork never gets a database branch")
+})
+
 test("merging from the overview posts to the project's route, pins the head and re-reads the listing", async ({
   page,
 }) => {

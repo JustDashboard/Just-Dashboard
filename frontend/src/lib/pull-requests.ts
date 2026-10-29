@@ -4,6 +4,8 @@ import type {
   DeploymentPreview,
   DeploymentRuntimeService,
   GitPullRequest,
+  PreviewBranchPolicy,
+  PreviewDatabaseBranch,
   ProjectPullRequests,
 } from "@/lib/types"
 
@@ -309,4 +311,84 @@ export function pullOfPreview(
       preview.headRepository.toLowerCase() !== repository.toLowerCase(),
     ),
   }
+}
+
+/** A database branch's state as one dot and one word. */
+export function branchReading(branch: Pick<PreviewDatabaseBranch, "state">): PreviewReading {
+  switch (branch.state) {
+    case "waiting":
+      return { tone: "notice", label: "Waiting to restore" }
+    case "restoring":
+      return { tone: "notice", label: "Restoring" }
+    case "ready":
+      return { tone: "running", label: "Ready" }
+    case "failed":
+      return { tone: "danger", label: "Failed" }
+    default:
+      return { tone: "stopped", label: "Removed" }
+  }
+}
+
+/**
+ * Where a branch's data came from, in words: the backup run's dump and when
+ * it was taken, or the moment a point-in-time recovery reached.
+ */
+export function branchSource(
+  branch: Pick<PreviewDatabaseBranch, "source" | "recoveredTo">,
+  when: (iso: string) => string,
+): string | undefined {
+  if (branch.source.kind === "pitr")
+    return branch.recoveredTo
+      ? `recovered to ${when(branch.recoveredTo)} from its archive`
+      : "recovered from its point-in-time archive"
+  if (branch.source.kind === "dump") {
+    const run = branch.source.backupRunId ? ` (run ${branch.source.backupRunId})` : ""
+    return branch.source.takenAt
+      ? `from the backup of ${when(branch.source.takenAt)}${run}`
+      : `from a backup${run}`
+  }
+  return undefined
+}
+
+/** A preview's branches worth showing: active ones, and a failed one that says why. */
+export function shownBranches(preview: DeploymentPreview | null | undefined) {
+  return (preview?.branches ?? []).filter((branch) => branch.state !== "removed")
+}
+
+/**
+ * What a preview of this pull request will get of production's databases,
+ * as the sentence the dialog says: a fork's never a branch, a branch's every
+ * database production gives previews one of, masked where it says so.
+ */
+export function branchPlan(
+  policies: (PreviewBranchPolicy & { name: string })[] | undefined,
+  fork: boolean,
+): string | undefined {
+  const given = (policies ?? []).filter((policy) => policy.mode !== "none")
+  if (given.length === 0) return undefined
+  if (fork)
+    return "A preview of a fork never gets a database branch: its code would read production's data."
+  return given
+    .map((policy) =>
+      policy.mode === "masked" && policy.maskedColumns.length > 0
+        ? `${policy.name} gets a branch restored from its newest backup, with ${policy.maskedColumns.join(", ")} masked.`
+        : `${policy.name} gets a branch restored from its newest backup.`,
+    )
+    .concat("A variable copied from production that references it reads the branch.")
+    .join(" ")
+}
+
+/**
+ * The masked columns a person typed, as the list the server takes: one name
+ * a line or between commas, blanks dropped. The server checks each name.
+ */
+export function parseMaskedColumns(text: string): string[] {
+  return [
+    ...new Set(
+      text
+        .split(/[\n,]/)
+        .map((part) => part.trim())
+        .filter(Boolean),
+    ),
+  ]
 }

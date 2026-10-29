@@ -8,7 +8,8 @@ database, or to restore production from through the Databases' own routes. Produ
 against the copy. Code: `deploy/data_rollback.go` (points, eligibility, copies' records and
 lifetime), `api/deployment_data_rollback.go` (the Databases owner's side: facts, restore, sign-in,
 sweeps, comparison), `api/handlers_deploy_data_rollback.go` (routes), and the restore path shared with
-the [migration rehearsal](implementation.md) (`prepareCopy` in `api/deployment_rehearsal.go`).
+the [migration rehearsal](implementation.md) (`prepareCopy` in `api/deployment_rehearsal.go`), which a
+preview's [database branch](preview-isolation.md#database-branches) is restored through as well.
 
 ## The data point
 
