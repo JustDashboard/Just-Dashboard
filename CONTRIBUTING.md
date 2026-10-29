@@ -310,7 +310,11 @@ to the contribution terms above, including the additional licence grant to the p
   it, and so are images it pulled):
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks -count=1 -v -timeout 2h`.
   A template's schema rules run at build time: every definition is parsed and validated when the
-  catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship.
+  catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship. The
+  same package checks the catalogue's size: `catalogue_counts.go` declares how many definitions
+  ship, how many deploy and how many are Compose templates, because the competitive report and the
+  README quote those numbers, and `TestCatalogueCountsMatchTheShippedDefinitions` fails until a
+  change that adds or retires a template bumps them.
 - Changes to shared variables or to how a run opens its variables also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSharedVariableReachesTheContainer -count=1 -v`,
   which starts a real container with the values a run opens for references to a server, a secret and a
