@@ -5,6 +5,7 @@ import { useSessionState } from "@/lib/view-state"
 import { useRouter } from "next/navigation"
 import {
   ArrowCircleUp,
+  Database,
   GitPullRequest,
   Globe,
   Pin,
@@ -12,7 +13,7 @@ import {
 } from "@/components/icons"
 import { get, post, put } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
-import { previewURL } from "@/lib/pull-requests"
+import { previewURL, promotionOrigin } from "@/lib/pull-requests"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -20,6 +21,7 @@ import type {
   DeployCommit,
   DeploymentEngineRun,
   DeploymentPreview,
+  DeploymentPromotion,
   DeploymentRelease,
   DeploymentRunSettingsDrift,
   DeploymentRunState,
@@ -72,6 +74,8 @@ import { ProjectMark } from "@/components/deploy/project-mark"
 import { RunRow } from "@/components/deploy/run-row"
 import { RunStrip } from "@/components/deploy/run-marks"
 import { releaseVerbs, runVerbs, type RunVerbKey } from "@/components/deploy/run-verbs"
+import { DataCopiesPanel, RestoreDataDialog, useDataCopies } from "@/components/deploy/data-copies"
+import { dataPointTag } from "@/components/deploy/data-rollback-model"
 
 type StatusFilter = "all" | "ready" | "failed" | "cancelled"
 
@@ -211,6 +215,15 @@ export function ProjectDeployments() {
     ? releaseWatch.watch?.warmReleaseId
     : undefined
   const [promote, setPromote] = useState<{ open: boolean; releaseId?: number }>({ open: false })
+  const [restoreData, setRestoreData] = useState<{ open: boolean; releaseId?: number }>({
+    open: false,
+  })
+  // The side copies a release's data was restored into, while they last.
+  const dataCopies = useDataCopies({
+    projectId: project.projectId,
+    environmentId: project.environmentId,
+    enabled: project.normalized && !project.archived,
+  })
   const [compare, setCompare] = useState<{
     open: boolean
     releaseId?: number
@@ -484,6 +497,7 @@ export function ProjectDeployments() {
             }),
           rollback: (release) => setRollback({ open: true, releaseId: release.id }),
           pin: (release) => void togglePin(run, release),
+          restoreData: (release) => setRestoreData({ open: true, releaseId: release.id }),
           promote:
             project.environment === "staging" && project.production && !project.archived
               ? (release) => setPromote({ open: true, releaseId: release.id })
@@ -520,6 +534,13 @@ export function ProjectDeployments() {
           }}
         />
       )}
+
+      <DataCopiesPanel
+        projectId={project.projectId}
+        environmentId={project.environmentId}
+        copies={dataCopies.copies}
+        refresh={dataCopies.refresh}
+      />
 
       <div ref={list} className="scroll-mt-6">
         <Panel plain>
@@ -642,6 +663,7 @@ export function ProjectDeployments() {
                                     <TextShimmer className="text-hint">{pending.word}</TextShimmer>
                                   )}
                                   {release?.pinned && <Tag icon={Pin}>Pinned</Tag>}
+                                  <DataPointTag release={release} />
                                   {release?.rolledBackAt && (
                                     <Tag tone="danger" title={release.rollbackReason}>
                                       Rolled back
@@ -649,11 +671,10 @@ export function ProjectDeployments() {
                                   )}
                                   {release && release.id === warmReleaseId && <Tag>Warm</Tag>}
                                   {/* Provenance, fixed with the release: the
-                                      image was staging's, not built here. */}
+                                      image was staging's — or for staging, a
+                                      pull request preview's — not built here. */}
                                   {release?.promotion && (
-                                    <Tag icon={ArrowCircleUp}>
-                                      From staging #{release.promotion.releaseNumber}
-                                    </Tag>
+                                    <PromotionTag promotion={release.promotion} />
                                   )}
                                   {preview && <Tag>{preview}</Tag>}
                                 </>
@@ -724,6 +745,14 @@ export function ProjectDeployments() {
           initialReleaseId={promote.releaseId}
         />
       )}
+      <RestoreDataDialog
+        open={restoreData.open}
+        onOpenChange={(open) => setRestoreData((current) => ({ ...current, open }))}
+        projectId={project.projectId}
+        environmentId={project.environmentId}
+        release={project.releases.find((release) => release.id === restoreData.releaseId)}
+        onStarted={dataCopies.refresh}
+      />
       <ReleaseComparisonSheet
         open={compare.open}
         onOpenChange={(open) => setCompare((current) => ({ ...current, open }))}
@@ -734,6 +763,22 @@ export function ProjectDeployments() {
         releases={project.releases}
       />
     </div>
+  )
+}
+
+/**
+ * A release's data point, as a property of its row: that each linked
+ * database's state at the moment it went live was recorded, and — in the
+ * title, for the reader who asks — what it was. Kept to one word on purpose;
+ * the restore dialog and the comparison say the rest.
+ */
+function DataPointTag({ release }: { release?: DeploymentRelease }) {
+  const tag = release && dataPointTag(release)
+  if (!tag) return null
+  return (
+    <Tag icon={Database} title={tag.title} className={tag.restorable ? undefined : "opacity-60"}>
+      Data point
+    </Tag>
   )
 }
 
@@ -842,4 +887,21 @@ function LegacyRecovery({
       {dialog}
     </Panel>
   )
+}
+
+/** "From staging #2", or "Promoted from PR #12 (abc1234)" on a staging release. */
+function PromotionTag({ promotion }: { promotion: DeploymentPromotion }) {
+  const origin = promotionOrigin(promotion)
+  if (origin?.kind === "preview") {
+    return (
+      <Tag
+        icon={ArrowCircleUp}
+        title={origin.approvedBy ? `Approved by ${origin.approvedBy}` : undefined}
+      >
+        Promoted from {origin.from}
+        {origin.sha && <span className="font-mono normal-case"> ({origin.sha})</span>}
+      </Tag>
+    )
+  }
+  return <Tag icon={ArrowCircleUp}>From staging #{promotion.releaseNumber}</Tag>
 }

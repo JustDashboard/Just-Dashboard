@@ -181,6 +181,9 @@ type moduleSet struct {
 	// rehearser makes the throwaway database copies release tasks are
 	// rehearsed against, and removes what a stopped process left behind.
 	rehearser *migrationRehearser
+	// dataCopies restores a database as of a release into a side copy on
+	// the deployment's network and removes it when its time is up.
+	dataCopies *dataCopyOwner
 	// tailnet publishes preview environments on this host's Tailscale node
 	// through `tailscale serve`; the executor and the preview route share it.
 	tailnet deploy.TailnetPublisher
@@ -383,6 +386,7 @@ func (s *Server) initModules() {
 		}, func(err error) { s.Log.Warn("preview isolation needs attention", "error", err) })
 	s.modules.tailnet = tailnetPublisher{serve: selfcfg.NewTailnetServe()}
 	s.modules.rehearser = &migrationRehearser{server: s}
+	s.modules.dataCopies = newDataCopyOwner(s, s.modules.rehearser)
 	normalizedExecutor := deploy.NewNormalizedStepExecutor(
 		s.modules.deployRuns,
 		s.modules.deployPlanning,
@@ -403,7 +407,10 @@ func (s *Server) initModules() {
 		WithTailnetPublisher(s.modules.tailnet).
 		// Release tasks are rehearsed against copies the Databases owner
 		// makes from its own backups, when an environment asks for it.
-		WithMigrationRehearser(s.modules.rehearser)
+		WithMigrationRehearser(s.modules.rehearser).
+		// And where each linked database stands is recorded as a release
+		// goes live, for a copy of its data as of that release later.
+		WithDataPoints(releaseDataFacts{server: s})
 	if s.modules.requests != nil {
 		// The traffic replay reads the same held record the Logs page and
 		// the rollback watch read, so what it replays is what the page shows.

@@ -81,6 +81,13 @@ health. Observations older than 30 seconds are marked stale. The database name i
 DSN the way every other database route reads it; a connection whose DSN no longer resolves keeps its row
 without that name.
 
+Reconciliation joins the environment's application containers — those labelled with its id — and
+leaves every container carrying the rehearsal label where it is: a migration rehearsal's copy and task
+belong on their own internal network, and a [copy of a release's data](data-aware-rollback.md) joined
+this network when it was made, under `db-<connection>-copy-<copy>.jd.internal`, never the production
+database's name. A variable whose host is such a copy's is refused before a release starts: the copy is
+removed when it expires, and production never runs against it.
+
 A binding that reconciliation could not repair carries `detail`, the reason of the pass that failed —
 a replaced container that no longer matches the saved identity, an alias another container holds, a
 namespace that cannot join a bridge. It is bounded to 300 characters, holds no connection string, and
@@ -105,7 +112,8 @@ dashboard restarts. Bindings remain for retained releases and rollback until exp
 Removing a variable alone does not detach a database from existing releases.
 
 Configuration's removal preview includes the current managed network ID. Applications/Compose stacks
-are removed before their network. Cleanup refuses unknown endpoints, disconnects only bound database
+are removed before their network, and so are the environment's data copies, which are endpoints on it
+that are no application's. Cleanup refuses unknown endpoints, disconnects only bound database
 endpoints and leaves the database container and its data intact. Preview close uses the same cleanup.
 Removing a stale network ID cannot delete a newer replacement. Successful cleanup removes bindings and
 clears the Docker ID while preserving the logical network name for subsequent deployment.

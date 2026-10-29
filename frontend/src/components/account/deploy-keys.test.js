@@ -7,6 +7,7 @@ import {
   deployKeyReady,
   deployReach,
   jdLogin,
+  OPENAPI_DESCRIPTION,
 } from "./deploy-keys"
 import { matchesKey } from "./key-list"
 
@@ -32,6 +33,10 @@ test("a deploy key is used through jd login, with this dashboard's own address",
   // The other kinds keep their own example.
   expect(curlExample("https://d", "vpsd_x")).toContain("/api/v1/system/host")
   expect(curlExample("https://d", "vpsd_x", "metrics.read")).toContain("/api/v1/metrics/databases")
+})
+
+test("the OpenAPI description the dialog links is the route jd openapi prints", () => {
+  expect(OPENAPI_DESCRIPTION).toBe("/api/v1/deploy/openapi.json")
 })
 
 test("a deploy key's row names its job and which deployments it reaches", () => {

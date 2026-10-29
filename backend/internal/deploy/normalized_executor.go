@@ -83,6 +83,10 @@ type NormalizedStepExecutor struct {
 	requests     RequestRecord
 	replayClient replayClient
 	replayOnce   sync.Once
+
+	// dataPoints says where each linked database stands as a release goes
+	// live (data_rollback.go); nil records none.
+	dataPoints DataPointObserver
 }
 
 // WithRequestRecord attaches the request record the traffic replay reads
@@ -679,6 +683,9 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 	execution StepExecution,
 	plan *StoredExecutionPlan,
 ) StepResult {
+	if err := e.refuseShellTasksForReleaseOfPullRequest(ctx, execution.Run, plan.Build.ReleaseTasks); err != nil {
+		return promotionStepFailure(err)
+	}
 	if execution.Run.Operation == OperationPromote && !needsSourceTree(plan.Build.ReleaseTasks) {
 		// A promotion has no workspace of its own to clean up, and a task in
 		// the release image reads no checkout: the promoted commit is fetched

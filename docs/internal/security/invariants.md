@@ -93,10 +93,13 @@ A change that weakens any of these has to say so explicitly.
    configuration, source, Git policy, triggers, variables and shared variables — answered any API key
    with `403 session_required`. A deploy key reaches those writes; nothing else changed for any other
    key. The operating verbs beside a deploy that an ordinary key already had — promoting staging
-   (`POST …/promote`), the warm release's instant rollback and keep (`POST …/rollback-watch/rollback`,
+   (`POST …/promote`, which also takes a pull request preview's approved image into staging for an
+   administrator, the role the key carries; approving the commit stays a session's), the warm
+   release's instant rollback and keep (`POST …/rollback-watch/rollback`,
    `…/keep`) and the maintenance switch (`PUT …/maintenance`) — are the deploy key's as well, with
    their reads (`GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/maintenance`,
-   `…/pages/{page}`, which is what every visitor is shown, and `…/rehearsal`, the terms alone). It
+   `…/pages/{page}`, which is what every visitor is shown, `…/rehearsal`, the terms alone, and
+   `…/data-copies`, what each copy is of and until when, never its sign-in). It
    holds the administrator role (narrowed to its owner's now, like every key), and where it
    goes is decided once, before any other middleware of the route runs: `Authenticate`,
    `AuthenticateScoped` and `AuthenticateMCP` refuse it, and the feature group's
@@ -105,14 +108,20 @@ A change that weakens any of these has to say so explicitly.
    with and without its trailing slash, being one route; no two routes differ by the slash alone). A route without a line answers
    `key_scope`, so a route added later is refused until someone writes its line; a line marked
    session-only answers `session_required` with the reason. Admission is what lets the key past
-   `httpx.RequireSession` (`Principal.DeployRoute`), on that route and no other. What stays a
+   `httpx.RequireSession` (`Principal.DeployRoute`), on that route and no other. The API's own
+   description, `GET /deploy/openapi.json` and `.yaml`, is a static document any signed-in account
+   and any key read, a deploy key included; it derives each operation's security from this table and
+   from `RequireSession` in the route's chain, and a test walks both keys to check it
+   ([`../backend/deploy-api.md`](../backend/deploy-api.md)). What stays a
    session's whatever the key: every reveal (`…/variables/{name}/reveal`, shared variables, the legacy
    `…/env/reveal`), the saved registry and Git credentials (list, create, update, test and delete), the secret-store
    connections that hold credentials of their own (create, update, test and delete),
    the pull-request merge and comment that speak as the dashboard's GitHub account, preview approval,
    the removals that take a typed phrase (`DELETE /deploy/{id}/permanent`, `remove-managed` and its
    plan), the terms of the warm-release window (`PUT …/rollback-policy`) and of migration rehearsal
-   (`PUT …/rehearsal`, which chooses a database whose backup is restored), and a route's maintenance
+   (`PUT …/rehearsal`, which chooses a database whose backup is restored), a copy of a release's data
+   (asking for one, revealing its address, keeping it longer, removing it and comparing it: a second
+   copy of production's data whose address carries a password), and a route's maintenance
    and error pages (`PUT …/pages/{page}`, files on the server beside the proxy's route). The
    secret-store list (`GET /deploy/secret-stores`), which an ordinary key reads, answers a deploy key
    `key_scope`: it carries each connection's address and sign-in fields and every deployment's

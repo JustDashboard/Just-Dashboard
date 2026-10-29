@@ -403,6 +403,57 @@ test("a recovery is planned by the server, runs beside it, and ends with a way i
   expect(sent?.body).toEqual({ archiveId: 3, target: { kind: "time", time: moment.iso } })
 })
 
+// A deployment's data-aware rollback hands the reader here with the moment a
+// release went live (`?recover=`): the recovery opens on that moment, once,
+// and is asked for as any other; a role that may not recover is not asked.
+test("a release's data point opens the recovery on its moment", async ({ page }) => {
+  const server = await mockPitr(page, {
+    "GET /databases/1/pitr": archiving(),
+    "POST /databases/1/pitr/restore": (_call: number, body: unknown) =>
+      (body as { preview?: boolean }).preview
+        ? {
+            container: NEW_COPY,
+            port: 5434,
+            backup: "base_0000000100000000000000F2",
+            backupAt: ago(401),
+            settings: { archive_mode: "off", recovery_target_action: "promote" },
+          }
+        : job("r1", "restore", "running"),
+  })
+  const moment = await momentAgo(page, 90)
+  const listed = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/v1/databases/",
+    { timeout: 45_000 },
+  )
+  await page.goto(`/databases/1/backups?recover=${encodeURIComponent(moment.iso)}`)
+  await listed
+  await expect(dialog(page).getByLabel("Moment, in this browser's time")).toHaveValue(moment.local)
+  await dialog(page).getByRole("button", { name: "Recover into a new server" }).click()
+  await expect
+    .poll(() =>
+      server.sent.some(
+        (one) =>
+          one.request === "POST /databases/1/pitr/restore" &&
+          !(one.body as { preview?: boolean }).preview,
+      ),
+    )
+    .toBe(true)
+  const sent = server.sent.filter((one) => one.request === "POST /databases/1/pitr/restore").at(-1)
+  expect(sent?.body).toEqual({ archiveId: 3, target: { kind: "time", time: moment.iso } })
+})
+
+test("a role that may only read is not handed a recovery", async ({ page }) => {
+  await mockPitr(page, { "GET /databases/1/pitr": archiving() }, { viewer: true })
+  const listed = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/v1/databases/",
+    { timeout: 45_000 },
+  )
+  await page.goto(`/databases/1/backups?recover=${encodeURIComponent(new Date().toISOString())}`)
+  await listed
+  await expect(panel(page)).toContainText("Any moment from")
+  await expect(dialog(page)).toHaveCount(0)
+})
+
 test("a moment before the archive is refused before it is asked for", async ({ page }) => {
   const server = await mockPitr(page, {
     "GET /databases/1/pitr": archiving(),

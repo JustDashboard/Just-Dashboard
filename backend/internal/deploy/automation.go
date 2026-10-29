@@ -1131,6 +1131,9 @@ type PreviewRef struct {
 	// Services are a Compose preview's services as Docker reports them, read
 	// by the pull-request listing; the store never fills them.
 	Services *RuntimeServices `json:"services,omitempty"`
+	// Promotion is the newest promotion of the preview's image into staging,
+	// however it ended.
+	Promotion *PreviewPromotion `json:"promotion,omitempty"`
 }
 
 func (s *AutomationStore) ListPreviews(ctx context.Context, projectID int64) ([]PreviewRef, error) {
