@@ -635,6 +635,11 @@ type RuntimePlanConfig struct {
 	CPUs          float64 `json:"cpus,omitempty"`
 	PidsLimit     int64   `json:"pidsLimit,omitempty"`
 	RestartPolicy string  `json:"restartPolicy,omitempty"`
+	// Replicas is how many containers of each release run side by side
+	// behind the route, 1 to MaxRuntimeReplicas; zero is one. Only a
+	// stateless release has more than one (replicaRefusal), and the limits
+	// above are each container's own.
+	Replicas int `json:"replicas,omitempty"`
 	// MaxRequestBodyMB is the largest request body the managed route lets
 	// through, in megabytes. Zero is DefaultMaxRequestBodyMB.
 	MaxRequestBodyMB int `json:"maxRequestBodyMb,omitempty"`
@@ -928,6 +933,10 @@ type PlannedDomain struct {
 	// 302, 307 or 308; zero is 308.
 	RedirectTo   string `json:"redirectTo,omitempty"`
 	RedirectCode int    `json:"redirectCode,omitempty"`
+	// Tunnel serves the name through Cloudflare Tunnel (tunnel.go) rather
+	// than at this server's public address: Cloudflare terminates its HTTPS,
+	// and the route serves it over plain HTTP to the connector alone.
+	Tunnel bool `json:"tunnel,omitempty"`
 }
 
 // Redirects says whether the domain sends visitors to another rather than
@@ -947,6 +956,11 @@ func (d PlannedDomain) domainConfig() map[string]any {
 		if d.RedirectCode != 0 {
 			config["redirectCode"] = d.RedirectCode
 		}
+	}
+	// Written only when set, as the redirect is, so a domain saved before
+	// the tunnel existed keeps its bytes and its digest.
+	if d.Tunnel {
+		config["tunnel"] = true
 	}
 	return config
 }
@@ -1624,6 +1638,9 @@ func (c PlanConfiguration) Validate() error {
 	if !validRestartPolicy(c.Runtime.RestartPolicy) {
 		return fmt.Errorf("runtime restart policy must be one of %s", strings.Join(RestartPolicies, ", "))
 	}
+	if err := validateReplicas(c.Build.Method, c.Runtime); err != nil {
+		return err
+	}
 	if err := validateReplayPlan(c.Runtime.Replay); err != nil {
 		return err
 	}
@@ -1843,9 +1860,19 @@ func (c PlanConfiguration) Validate() error {
 		if err := domain.Protection.validate(fmt.Sprintf("domains[%d].protection", index)); err != nil {
 			return err
 		}
+		if domain.Tunnel && strings.HasPrefix(hostname, "*.") {
+			return invalidField(fmt.Sprintf("domains[%d].tunnel", index), "a wildcard is not routed through Cloudflare Tunnel here: it needs a wildcard record and certificate of its own at Cloudflare; route each name")
+		}
 	}
 	if err := validateDomainRedirects(c.Domains); err != nil {
 		return err
+	}
+	// Every request a tunnel brings reaches the route from its connector's
+	// address, not the visitor's, so a list of allowed addresses would refuse
+	// every visitor of the name or, with the connector listed, let all of
+	// them in. Cloudflare's own rules are where that name is fenced.
+	if len(c.Runtime.AllowFrom) > 0 && len(tunnelHostnames(c.Domains)) > 0 {
+		return invalidField("runtime.allowFrom", "allowed addresses cannot fence a name served through Cloudflare Tunnel: every request reaches this host from the tunnel's connector, not from the visitor's address; fence that name with Cloudflare Access or a WAF rule at Cloudflare instead")
 	}
 	if err := validateRouteRules(c.Runtime); err != nil {
 		return err
@@ -2772,6 +2799,11 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 		c.Domains[index].Hostname = strings.ToLower(strings.TrimSpace(c.Domains[index].Hostname))
 		c.Domains[index].Protection = canonicalDomainProtection(c.Domains[index].Protection)
 		c.Domains[index].RedirectTo = strings.ToLower(strings.TrimSpace(c.Domains[index].RedirectTo))
+		// Cloudflare's edge answers a tunnel's name over HTTPS whatever the
+		// origin speaks, so it is one.
+		if c.Domains[index].Tunnel {
+			c.Domains[index].HTTPS = true
+		}
 	}
 	// Spelled the way the proxy writes them, so 10.0.0.1/32 and 10.0.0.1 are
 	// one entry and an edit that changes nothing changes no digest. Empty

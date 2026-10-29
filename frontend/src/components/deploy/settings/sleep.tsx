@@ -40,15 +40,20 @@ export function sleepBlocker({
   servesDomain,
   compose,
   hostNetwork,
+  replicas = 1,
   blockingCheck,
 }: {
   servesDomain: boolean
   compose: boolean
   hostNetwork: boolean
+  /** The release's replicas: a wake starts and holds the request for one. */
+  replicas?: number
   blockingCheck?: { name: string; kind: string }
 }) {
   if (compose)
     return "A Compose stack is several containers that start in an order of their own; sleeping stops one container, so it is offered for a single-container release."
+  if (replicas > 1)
+    return `A wake starts one container and holds the request for it, and this release runs ${replicas} replicas; sleeping is offered for a single-container release.`
   if (hostNetwork)
     return "A host-network application is reached at the host's own port, not through the proxy's route, so no request could wake it."
   if (!servesDomain)

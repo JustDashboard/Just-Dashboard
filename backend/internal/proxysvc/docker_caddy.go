@@ -344,7 +344,10 @@ func dockerCaddyAccessLogPath(name string) (string, error) {
 	return dockerCaddyAccessRoot + "/" + strings.TrimSuffix(name, ".conf") + ".log", nil
 }
 
-func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, error) {
+// renderDockerCaddyRoute writes a route proxying to upstreams, the addresses
+// Caddy reaches the release's containers at; none answers "preparing", for
+// the nameless route a certificate is issued through.
+func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string, error) {
 	if len(route.Domains) == 0 {
 		return "", errors.New("a public route needs a domain")
 	}
@@ -373,13 +376,33 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		return "", errors.New("a route's pages are kept under its name")
 	}
 	directive := `respond "Deployment is preparing" 503`
-	if upstream != "" {
+	servers := make([]string, 0, len(upstreams))
+	for _, upstream := range upstreams {
+		if upstream == "" {
+			continue
+		}
 		parsed, err := url.Parse(upstream)
 		if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 			return "", errors.New("invalid Caddy deployment upstream")
 		}
-		directive = "reverse_proxy " + strconv.Quote(upstream)
+		if slices.Contains(servers, upstream) {
+			return "", errors.New("a Caddy deployment upstream is named twice")
+		}
+		servers = append(servers, upstream)
+	}
+	if len(servers) > MaxDeploymentUpstreams {
+		return "", fmt.Errorf("a route shares its requests between at most %d servers", MaxDeploymentUpstreams)
+	}
+	if len(servers) > 0 {
+		quoted := make([]string, 0, len(servers))
+		for _, server := range servers {
+			quoted = append(quoted, strconv.Quote(server))
+		}
+		directive = "reverse_proxy " + strings.Join(quoted, " ")
 		block := caddyDropCookies("    ", route.DropCookies)
+		if len(servers) > 1 {
+			block += strings.Join(caddyReplicaBalancing, "\n") + "\n"
+		}
 		if route.InterceptErrors {
 			block += renderCaddyInterceptErrors(route.ErrorPages)
 		}
@@ -479,7 +502,7 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 	maintenance, errorPages, sleep := "", "", ""
 	if pages != "" {
 		wake := ""
-		if route.Sleep != nil && upstream != "" {
+		if route.Sleep != nil && len(servers) > 0 {
 			// After every check, so only a request the route would hand to
 			// the application can wake it.
 			sleep, wake = renderCaddySleep(route, pages), renderCaddyWakeErrors(route, pages)
@@ -487,7 +510,7 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		maintenance, errorPages = renderCaddyMaintenance(route.Maintenance, pages), renderCaddyErrorPages(route.ErrorPages, pages, wake)
 	}
 	trace := ""
-	if route.Trace && route.Name != "" && upstream != "" {
+	if route.Trace && route.Name != "" && len(servers) > 0 {
 		trace = caddyTraceDirectives
 	}
 	// The edge rules come after the fence and before maintenance, the
@@ -680,6 +703,27 @@ func renderCaddyErrorPages(codes []int, pages, wake string) string {
 		"  }\n"
 }
 
+// caddyReplicaBalancing is how a replicated release's route shares its
+// requests, written inside its reverse_proxy. Least connections, as on
+// nginx, because a route carries WebSockets and long streamed answers.
+// Health is passive, as on nginx: a replica Caddy fails to reach is set
+// aside for ten seconds (fail_duration turns the counting on, one failure
+// is enough), and for five seconds a request is tried on another replica —
+// any request whose connection failed, since none of it reached the
+// application, and otherwise only a GET, Caddy's default, so a POST that
+// reached a dying replica is never carried out twice. Caddy reaches a
+// replica at its container address, where one that died answers nothing at
+// all rather than refusing, so it gets two seconds to connect, not three.
+var caddyReplicaBalancing = []string{
+	"    lb_policy least_conn",
+	"    lb_try_duration 5s",
+	"    fail_duration 10s",
+	"    max_fails 1",
+	"    transport http {",
+	"      dial_timeout 2s",
+	"    }",
+}
+
 // renderCaddyInterceptErrors turns the application's own answers with the
 // route's chosen codes into Caddy's errors, which its pages then answer, as
 // nginx's proxy_intercept_errors does. The status is the application's.
@@ -860,9 +904,25 @@ func (target dockerCaddyTarget) authMetadata() string {
 // Activation writes it and verification compares against it, so the two
 // cannot disagree about what a route with a sign-in looks like.
 func (c *dockerCaddy) routeContent(ctx context.Context, route DeploymentRoute) (string, []dockerCaddyTarget, error) {
-	target, err := c.target(ctx, route.Upstream)
-	if err != nil {
+	if err := validateDeploymentServers(route); err != nil {
 		return "", nil, err
+	}
+	servers := route.Servers()
+	if len(servers) == 0 {
+		return "", nil, errors.New("Caddy requires a private deployment upstream")
+	}
+	// One container per replica, each found by its own loopback publication
+	// and recorded on a line of its own, so the maintenance pass repairs
+	// every one of them.
+	targets := make([]dockerCaddyTarget, 0, len(servers)+1)
+	upstreams := make([]string, 0, len(servers))
+	for _, server := range servers {
+		target, err := c.target(ctx, server)
+		if err != nil {
+			return "", nil, err
+		}
+		targets = append(targets, target)
+		upstreams = append(upstreams, target.upstream())
 	}
 	rendered, auth, err := c.resolveForwardAuth(ctx, route)
 	if err != nil {
@@ -874,12 +934,13 @@ func (c *dockerCaddy) routeContent(ctx context.Context, route DeploymentRoute) (
 	if rendered.Trace && !c.recordsTraces(ctx) {
 		rendered.Trace = false
 	}
-	content, err := renderDockerCaddyRoute(rendered, target.upstream())
+	content, err := renderDockerCaddyRoute(rendered, upstreams...)
 	if err != nil {
 		return "", nil, err
 	}
-	content += target.metadata()
-	targets := []dockerCaddyTarget{target}
+	for _, target := range targets {
+		content += target.metadata()
+	}
 	if auth != nil {
 		content += auth.authMetadata()
 		targets = append(targets, *auth)

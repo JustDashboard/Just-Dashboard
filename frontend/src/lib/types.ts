@@ -3242,6 +3242,10 @@ export type DeploymentRuntimeService = {
   exitCode?: number
   /** The kernel killed it for exceeding its memory. */
   oomKilled?: boolean
+  /** Which of its release's replicas it is, from 1; absent for a release of one container. */
+  replica?: number
+  /** How many replicas its release runs; absent for a release of one container. */
+  replicas?: number
 }
 
 export type DeploymentRuntimeServices = {
@@ -4638,7 +4642,8 @@ export type DeploymentHostnameSuggestion = {
   certificateMethod?: "nginx" | "webroot" | "standalone" | "caddy" | "dns-01"
   certificateDnsProvider?: string
   certificateIssue?: string
-  method: "wildcard" | "sslip" | "custom" | "none"
+  /** `tunnel` answers a name asked about with `tunnel=1`: whether a tunnel can serve it. */
+  method: "wildcard" | "sslip" | "custom" | "none" | "tunnel"
   detail: string
   /** This server's public IPv4 — for a typed hostname, what its A record should name. */
   address?: string
@@ -5504,6 +5509,8 @@ export type DeploymentConfiguration = {
     cpus?: number
     pidsLimit?: number
     restartPolicy?: DeploymentRestartPolicy
+    /** Containers of each release side by side behind the route, 2 to 8; empty is one. */
+    replicas?: number
     /** The signal that asks the container to stop; empty is the image's own, SIGTERM. */
     stopSignal?: string
     /** Seconds the container has to exit after that signal before it is killed; empty is 10. */
@@ -5597,6 +5604,12 @@ export type DeploymentPlannedDomain = {
   redirectTo?: string
   /** Empty is 308, permanent and keeping the method. */
   redirectCode?: DeploymentRedirectCode
+  /**
+   * Served through the connected Cloudflare Tunnel rather than at this
+   * server's address: Cloudflare terminates HTTPS, nothing is issued here,
+   * and the name's route and CNAME are set as the release goes live.
+   */
+  tunnel?: boolean
 }
 
 export type DeploymentRedirectCode = 301 | 302 | 307 | 308

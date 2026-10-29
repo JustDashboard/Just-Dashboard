@@ -77,8 +77,10 @@ func (c *dockerCaddy) vhosts(ctx context.Context) ([]VHost, error) {
 			delete(hosts, name)
 		}
 		site := VHost{Name: strings.TrimSuffix(filepath.Base(path), ".caddy"), Kind: KindCaddy, Enabled: enabled, ServerNames: names, TLS: caddyRouteServesTLS(content), Listen: []string{"80", "443"}, Upstreams: []string{}}
-		if target, ok := parseDockerCaddyTarget(content); ok {
-			site.Upstreams = []string{target.upstream()}
+		if targets, ok := parseDockerCaddyTargets(content); ok {
+			for _, target := range targets {
+				site.Upstreams = append(site.Upstreams, target.upstream())
+			}
 		}
 		// A deployment's route is in maintenance while its switch file is
 		// there, as on nginx; the matcher every route carries says nothing.

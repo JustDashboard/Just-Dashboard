@@ -91,6 +91,9 @@ type NormalizedStepExecutor struct {
 	// live (data_rollback.go); nil records none.
 	dataPoints DataPointObserver
 
+	// tunnel routes a release's Cloudflare Tunnel domains as it goes live
+	// (tunnel.go); nil on a dashboard without the tunnel manager.
+	tunnel TunnelRouter
 	// sleeper stops idle environments and wakes them (sleep.go); a run that
 	// starts on one asleep wakes it first. Nil on a host that does not.
 	sleeper *Sleeper

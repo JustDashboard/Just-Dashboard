@@ -9832,6 +9832,9 @@
           },
           "redirectTo": {
             "type": "string"
+          },
+          "tunnel": {
+            "type": "boolean"
           }
         },
         "title": "deploy.PlannedDomain",
@@ -12422,6 +12425,10 @@
               }
             ]
           },
+          "replicas": {
+            "format": "int64",
+            "type": "integer"
+          },
           "responseHeaders": {
             "items": {
               "$ref": "#/components/schemas/deploy.RouteHeader"
@@ -12540,6 +12547,14 @@
             "type": "boolean"
           },
           "releaseId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "replica": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "replicas": {
             "format": "int64",
             "type": "integer"
           },
@@ -16620,6 +16635,15 @@
             "description": "A hostname to check instead of deriving one.",
             "in": "query",
             "name": "hostname",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "1 to ask about the hostname as one served through Cloudflare Tunnel: no public-IP DNS check and no certificate here.",
+            "in": "query",
+            "name": "tunnel",
             "required": false,
             "schema": {
               "type": "string"

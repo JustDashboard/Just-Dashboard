@@ -110,11 +110,11 @@ func TestDeploymentRouteCarriesProtectionToTheProxy(t *testing.T) {
 		{Hostname: "Staging.example.test", HTTPS: true, Ownership: OwnershipManaged, Protection: &DomainProtection{Username: "team", Hash: hash}},
 		{Hostname: "staging2.example.test", HTTPS: true, Ownership: OwnershipManaged, Protection: &DomainProtection{Username: "team", Hash: hash}},
 		{Hostname: "www.example.test", HTTPS: true, Ownership: OwnershipManaged},
-	}, "127.0.0.1", 3000)
+	}, []string{"http://127.0.0.1:3000"})
 	if len(route.BasicAuth) != 1 || route.BasicAuth[0].Username != "team" || route.BasicAuth[0].Hash != hash || len(route.Domains) != 3 {
 		t.Fatalf("route = %+v", route)
 	}
-	if open := deploymentRoute(7, []PlannedDomain{{Hostname: "a.example.test", Ownership: OwnershipManaged}}, "127.0.0.1", 3000); len(open.BasicAuth) != 0 {
+	if open := deploymentRoute(7, []PlannedDomain{{Hostname: "a.example.test", Ownership: OwnershipManaged}}, []string{"http://127.0.0.1:3000"}); len(open.BasicAuth) != 0 {
 		t.Fatalf("open route carries credentials: %+v", open)
 	}
 }

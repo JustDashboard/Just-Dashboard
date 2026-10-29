@@ -107,8 +107,11 @@ free.
 - Database branches for previews: a preview's own copy of a linked PostgreSQL, MySQL or MariaDB,
   restored from its newest backup with chosen columns masked, removed with the preview, never for a fork
 - Immutable releases, one-click rollback and health-gated cutover
+- Up to eight replicas of a stateless release behind one route, cut over and rolled back together
 - Right-sizing from what each app actually used: the memory and CPU limits it should have, applied in one click
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
+- Domains served through Cloudflare Tunnel from a server with no public address or open port: the
+  connector runs as a container, and its routes and DNS records are set as each release goes live
 - Edge rules per deployment: block, answer or redirect by path, method, user agent or address, a
   rate limit per visitor, and CrowdSec's bans refused at the route
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild

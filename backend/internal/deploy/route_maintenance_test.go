@@ -93,13 +93,13 @@ func TestCanonicalRoutePagesKeepTheDigest(t *testing.T) {
 func TestPublicRouteCarriesTheRoutePages(t *testing.T) {
 	t.Parallel()
 	plan := pagesPlan()
-	route := publicRoute(7, runtimeReleaseSnapshot{Plan: plan.Runtime, Domains: plan.Domains}, "127.0.0.1", 3000)
+	route := publicRoute(7, runtimeReleaseSnapshot{Plan: plan.Runtime, Domains: plan.Domains}, ReleaseRuntime{Kind: "container", Host: "127.0.0.1", Port: 3000})
 	if route.Maintenance.RetryAfter != 300 || strings.Join(route.Maintenance.BypassFrom, ",") != "203.0.113.7,10.0.0.0/8" ||
 		len(route.ErrorPages) != 2 || !route.InterceptErrors {
 		t.Fatalf("route = %+v", route)
 	}
 	bare := routingPlan()
-	route = publicRoute(7, runtimeReleaseSnapshot{Plan: bare.Runtime, Domains: bare.Domains}, "127.0.0.1", 3000)
+	route = publicRoute(7, runtimeReleaseSnapshot{Plan: bare.Runtime, Domains: bare.Domains}, ReleaseRuntime{Kind: "container", Host: "127.0.0.1", Port: 3000})
 	if route.Maintenance.RetryAfter != 0 || route.Maintenance.BypassFrom != nil || route.ErrorPages != nil || route.InterceptErrors {
 		t.Fatalf("a plan without pages = %+v", route)
 	}

@@ -340,6 +340,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// After the engine, so a window a restart interrupted is settled by a
 	// watcher that can already ask the engine for its rollback.
 	s.modules.rollbackWatcher.Start(ctx)
+	// The tunnel's connector and routes follow the deployments routed
+	// through it, so after the engine too.
+	s.modules.tunnel.Start(ctx)
 	// After the engine too: a run it resumes may wake an environment, and
 	// the pass leaves alone an environment with a run under way.
 	s.modules.sleeper.Start(ctx)

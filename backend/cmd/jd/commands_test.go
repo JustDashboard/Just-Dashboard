@@ -228,3 +228,16 @@ func TestCreateWalksTheDraft(t *testing.T) {
 		t.Errorf("commit acknowledged %v", commit)
 	}
 }
+
+// The human form of a configuration says how many containers each release
+// runs when it is more than one.
+func TestConfigGetSaysHowManyReplicas(t *testing.T) {
+	f := newFake(t)
+	code, stdout, stderr := jd(t, invocation{env: f.env(t)}, "config", "get", "web")
+	if code != exitOK {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "nginx:1.27-alpine · port 80 · stop first · 2 replicas") {
+		t.Errorf("runtime line does not name the replicas:\n%s", stdout)
+	}
+}

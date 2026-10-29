@@ -28,6 +28,9 @@ describe("host alerts", () => {
       "a live release's image has a fixable vulnerability and a newer base to rebuild on",
     )
     expect(hostAlertFields("image_vulnerable")).toEqual({ threshold: false, minutes: false })
+    expect(describeHostAlert("tunnel_down", {})).toBe(
+      "holds no connection to Cloudflare's edge for 2 min",
+    )
     for (const kind of HOST_ALERT_KINDS) expect(HOST_ALERT_DEFAULTS[kind]).toBeDefined()
   })
 

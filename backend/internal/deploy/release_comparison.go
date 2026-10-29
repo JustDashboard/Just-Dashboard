@@ -137,6 +137,7 @@ func compareRuntimeSnapshots(fromSnapshot, toSnapshot runtimeReleaseSnapshot, fr
 	field("host port", portLabel(fromSnapshot.Plan.HostPort), portLabel(toSnapshot.Plan.HostPort))
 	field("published ports", publishedPortsLabel(fromSnapshot.Plan.Ports), publishedPortsLabel(toSnapshot.Plan.Ports))
 	field("strategy", string(fromSnapshot.Plan.Strategy), string(toSnapshot.Plan.Strategy))
+	field("replicas", strconv.Itoa(fromSnapshot.Plan.EffectiveReplicas()), strconv.Itoa(toSnapshot.Plan.EffectiveReplicas()))
 	field("stop signal", fromSnapshot.Plan.StopSignal, toSnapshot.Plan.StopSignal)
 	field("grace period", secondsLabel(fromSnapshot.Plan.GracePeriodSeconds), secondsLabel(toSnapshot.Plan.GracePeriodSeconds))
 	field("memory limit", memoryLimitLabel(fromSnapshot.Plan.MemoryMB), memoryLimitLabel(toSnapshot.Plan.MemoryMB))

@@ -8,6 +8,7 @@ import {
   Archive,
   Bell,
   Box,
+  CloudUpload,
   Cpu,
   Database,
   Gauge,
@@ -98,6 +99,7 @@ const KIND_ICON: Record<HostAlertKind, Icon> = {
   container_down: StopCircle,
   backup_failed: Archive,
   image_vulnerable: ShieldOff,
+  tunnel_down: CloudUpload,
 }
 
 /** What a rule watches, as the picture's left column draws it. */
@@ -123,6 +125,13 @@ const AREAS: Area[] = [
   },
   { key: "backups", title: "Backups", fallback: Archive, kinds: ["backup_failed"] },
   { key: "deployments", title: "Deployments", fallback: ShieldOff, kinds: ["image_vulnerable"] },
+  {
+    key: "tunnel",
+    title: "Cloudflare Tunnel",
+    product: "cloudflare",
+    fallback: CloudUpload,
+    kinds: ["tunnel_down"],
+  },
 ]
 
 function areaOf(kind: HostAlertKind) {
@@ -461,8 +470,9 @@ export function HostAlertsPage() {
                     <div className="space-y-4">
                       <p className="max-w-prose text-body text-pretty text-muted-foreground">
                         Nobody is told when the CPU or memory stays high, a disk fills, a container
-                        goes down or a backup fails. A rule is checked {cadence} and tells your
-                        channels once on the way over and once on the way back.
+                        goes down, a backup fails or the Cloudflare Tunnel loses the edge. A rule is
+                        checked {cadence} and tells your channels once on the way over and once on
+                        the way back.
                       </p>
                       <ChoiceGrid columns={2} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2">
                         {HOST_ALERT_KINDS.map((kind) => (
@@ -934,10 +944,10 @@ function RuleForm({
 
   const minutesField = fields.minutes && (
     <Field
-      label={kind === "container_down" ? "Down for" : "Averaged over"}
+      label={kind === "container_down" || kind === "tunnel_down" ? "Down for" : "Averaged over"}
       htmlFor="host-alert-minutes"
       hint={
-        kind === "container_down"
+        kind === "container_down" || kind === "tunnel_down"
           ? "From a minute to a day before it is told."
           : "The recorded samples it averages, from a minute to a day."
       }

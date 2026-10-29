@@ -111,17 +111,17 @@ func TestPublicRouteCarriesTheSignIn(t *testing.T) {
 	t.Parallel()
 	plan := signInPlan()
 	snapshot := runtimeReleaseSnapshot{Plan: plan.Runtime, Domains: plan.Domains}
-	route := publicRoute(7, snapshot, "127.0.0.1", 3000)
+	route := publicRoute(7, snapshot, ReleaseRuntime{Kind: "container", Host: "127.0.0.1", Port: 3000})
 	want := proxysvc.SiteForwardAuth{Provider: "authelia", Verify: "http://127.0.0.1:9091/api/authz/auth-request", SignIn: "https://auth.example.test/"}
 	if route.ForwardAuth == nil || *route.ForwardAuth != want {
 		t.Fatalf("route sign-in = %+v", route.ForwardAuth)
 	}
 	snapshot.Plan.ForwardAuth.PreviewsOnly = true
-	if route := publicRoute(7, snapshot, "127.0.0.1", 3000); route.ForwardAuth != nil {
+	if route := publicRoute(7, snapshot, ReleaseRuntime{Kind: "container", Host: "127.0.0.1", Port: 3000}); route.ForwardAuth != nil {
 		t.Fatalf("production signed in for its previews: %+v", route.ForwardAuth)
 	}
 	snapshot.Plan.PreviewIsolation = true
-	if route := publicRoute(7, snapshot, "127.0.0.1", 3000); route.ForwardAuth == nil || *route.ForwardAuth != want {
+	if route := publicRoute(7, snapshot, ReleaseRuntime{Kind: "container", Host: "127.0.0.1", Port: 3000}); route.ForwardAuth == nil || *route.ForwardAuth != want {
 		t.Fatalf("preview route sign-in = %+v", route.ForwardAuth)
 	}
 }

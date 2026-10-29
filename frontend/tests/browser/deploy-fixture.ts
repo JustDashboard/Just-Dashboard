@@ -2333,6 +2333,8 @@ export async function mockProject(
     rehearsal?: RehearsalPolicy
     /** The live release's vulnerability scan; clean unless given (vulnerable in the showcase). */
     vulnerabilities?: ImageScanReading
+    /** Fields laid over the saved runtime plan, such as no mounts for a stateless one. */
+    runtimePlan?: Partial<DeploymentConfiguration["runtime"]>
   } = {},
 ) {
   const showcase = Boolean(options.showcase)
@@ -2455,6 +2457,8 @@ export async function mockProject(
         checks: [],
         domains: [{ hostname: "api.example.test", https: true, ownership: "managed" }],
       }
+  if (options.runtimePlan)
+    normalizedConfiguration.runtime = { ...normalizedConfiguration.runtime, ...options.runtimePlan }
   const configurationBody = () => ({
     ...normalizedConfiguration,
     revision: configurationRevision,

@@ -22,6 +22,7 @@ export function findingNavigation(href: string): { href: string; label: string }
     "/proxy/ports": "Inspect listening ports",
     "/proxy/config": "Inspect proxy configuration",
     "/proxy/traffic": "Inspect request errors",
+    "/proxy/tunnel": "Review Cloudflare Tunnel",
     "/docker/containers": "Inspect containers",
     "/docker/images": "Review Docker storage",
     "/docker/volumes": "Inspect volumes",
