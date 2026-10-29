@@ -109,6 +109,12 @@ address as `client_ip` and, on a gate, the login as the `tailnet_login` field it
 container holds the route, and `accesslog.Entry.User` carries the login, which the Logs page shows in
 the client column (the address in its title) and as **Tailnet login** in the request's detail.
 
+A route with [edge rules](edge-rules.md) or the CrowdSec switch also records which rule decided each
+request: `er=<name>` after nginx's timed format (empty when none did), and the `edge_rule` field
+Caddy's `log_append` adds when the record is written. `accesslog.Entry.EdgeRule` carries it
+(`crowdsec` for an address the ban list refused), and the requests summary counts each rule
+(`summary.edgeRules`), which is what the Domains page's edge rules show beside each rule.
+
 `RemoveDeploymentRoute` deletes the Caddy record and its rolled generations with the route. It holds
 client addresses, and leaving it behind after the deployment it described is gone would keep personal
 data on the host with nothing left to read it. nginx's file is left alone — it is in the host's log

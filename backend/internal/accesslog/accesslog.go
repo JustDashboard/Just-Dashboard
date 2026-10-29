@@ -68,6 +68,11 @@ type Entry struct {
 	// (tailnet-apps.md). Empty on every other route, and on a request the
 	// gate refused.
 	User string `json:"user,omitempty"`
+	// EdgeRule is the route's edge rule that decided the request — refused
+	// it, answered it, redirected it or let it through past the rules after
+	// it — or "crowdsec" for an address CrowdSec's list refused. Empty when
+	// no rule did (proxysvc/deployment_edge.go).
+	EdgeRule string `json:"edgeRule,omitempty"`
 
 	// at is unix nanoseconds, kept unexported so every consumer sorts and
 	// buckets on the same value rather than re-parsing a string.
@@ -181,6 +186,8 @@ type caddyLine struct {
 	ParentSpanID string `json:"parent_span_id"`
 	// TailnetLogin is the field the tailnet gate's log_append adds.
 	TailnetLogin string `json:"tailnet_login"`
+	// EdgeRule is the field a route with edge rules appends.
+	EdgeRule string `json:"edge_rule"`
 }
 
 func parseCaddy(line string) (Entry, bool) {
@@ -210,6 +217,7 @@ func parseCaddy(line string) (Entry, bool) {
 	entry.UserAgent = header(raw.Request.Headers, "User-Agent")
 	entry.Referer = header(raw.Request.Headers, "Referer")
 	entry.User = strings.TrimSpace(raw.TailnetLogin)
+	entry.EdgeRule = edgeRuleName(raw.EdgeRule)
 	if raw.Duration != nil {
 		entry.duration, entry.timed = *raw.Duration*1000, true
 	}
@@ -390,6 +398,8 @@ func readTrailing(entry *Entry, rest string) {
 			// The tailnet gate's login, which nginx writes escaped as
 			// \xHH where it is not printable ASCII.
 			entry.User = value
+		case "er":
+			entry.EdgeRule = edgeRuleName(value)
 		}
 	}
 }
@@ -437,4 +447,20 @@ func splitURI(uri string) (path, query string) {
 		path = "/"
 	}
 	return path, query
+}
+
+// edgeRuleName keeps a rule name as the proxies write it: a route's rule
+// names are lower-case letters, digits and dashes, so anything else in the
+// field is not one, and a line is not failed for it.
+func edgeRuleName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 40 {
+		return ""
+	}
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+			return ""
+		}
+	}
+	return value
 }

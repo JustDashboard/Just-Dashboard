@@ -650,6 +650,18 @@ type RuntimePlanConfig struct {
 	// ResponseHeaders are set on every answer the public route gives,
 	// replacing any header of the same name the application sent.
 	ResponseHeaders []RouteHeader `json:"responseHeaders,omitempty"`
+	// RateLimit is how many requests one client address may make to the
+	// public route; past it the route answers 429 with Retry-After. On the
+	// Docker Caddy ingress, which has no rate-limit module, it is enforced
+	// on the host instead (proxysvc/deployment_edge.go, edge-rules.md).
+	RateLimit *RouteRateLimit `json:"rateLimit,omitempty"`
+	// EdgeRules are decided in order at the proxy before the application
+	// is asked; the first a request meets decides it. Kept canonical
+	// (proxysvc.CanonicalEdgeRules).
+	EdgeRules []RouteEdgeRule `json:"edgeRules,omitempty"`
+	// CrowdSec refuses, at the route, the addresses CrowdSec's local engine
+	// has banned, from a list the dashboard refreshes from its decisions.
+	CrowdSec bool `json:"crowdSec,omitempty"`
 	// ForwardAuth has the public route ask an auth server about every
 	// request first, so only people who sign in reach the application.
 	ForwardAuth *RouteForwardAuth `json:"forwardAuth,omitempty"`
@@ -732,6 +744,14 @@ type RouteMaintenance struct {
 	// usual while it is in maintenance, kept in their canonical spelling.
 	BypassFrom []string `json:"bypassFrom,omitempty"`
 }
+
+// RouteEdgeRule and RouteRateLimit are the proxy's own shapes: both ingress
+// drivers render them, and a second copy here would be a second set of
+// bounds to keep in step.
+type (
+	RouteEdgeRule  = proxysvc.EdgeRule
+	RouteRateLimit = proxysvc.DeploymentRateLimit
+)
 
 // RouteHeader is one response header the public route sets.
 type RouteHeader struct {
@@ -1899,6 +1919,12 @@ func validateRouteTailnet(c PlanConfiguration) error {
 		public = "allowed addresses"
 	case len(c.Runtime.ResponseHeaders) > 0:
 		public = "response headers"
+	case len(c.Runtime.EdgeRules) > 0:
+		public = "edge rules"
+	case c.Runtime.RateLimit != nil:
+		public = "a rate limit"
+	case c.Runtime.CrowdSec:
+		public = "the CrowdSec list"
 	case c.Runtime.HSTS != nil:
 		public = "HSTS"
 	case c.Runtime.Maintenance != nil:
@@ -2031,6 +2057,14 @@ func validateRouteRules(runtime RuntimePlanConfig) error {
 	if h := runtime.HSTS; h != nil {
 		if err := proxysvc.ValidateDeploymentHSTS(h.proxy()); err != nil {
 			return invalidField("runtime.hsts", "%v", err)
+		}
+	}
+	if err := proxysvc.ValidateEdgeRules(runtime.EdgeRules); err != nil {
+		return invalidField("runtime.edgeRules", "%v", err)
+	}
+	if limit := runtime.RateLimit; limit != nil {
+		if err := proxysvc.ValidateRateLimit(*limit); err != nil {
+			return invalidField("runtime.rateLimit", "%v", err)
 		}
 	}
 	return validateRoutePages(runtime)
@@ -2821,6 +2855,13 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 	}
 	c.Runtime.Replay = canonicalReplayPlan(c.Runtime.Replay)
 	c.Runtime.Sleep = canonicalSleepPlan(c.Runtime.Sleep)
+	// A copy, so canonicalising never writes through to the caller's plan.
+	c.Runtime.EdgeRules = proxysvc.CanonicalEdgeRules(c.Runtime.EdgeRules)
+	if limit := c.Runtime.RateLimit; limit != nil {
+		canonical := *limit
+		canonical.Per = strings.ToLower(strings.TrimSpace(canonical.Per))
+		c.Runtime.RateLimit = &canonical
+	}
 	// In the order the proxy writes them, and absent when there are none, so
 	// a plan that never chose a page keeps the bytes and the digest it had.
 	if len(c.Runtime.ErrorPages) == 0 {

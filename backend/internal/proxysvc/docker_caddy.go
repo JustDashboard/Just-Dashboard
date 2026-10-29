@@ -513,8 +513,15 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 	if route.Trace && route.Name != "" && len(servers) > 0 {
 		trace = caddyTraceDirectives
 	}
-	handling := trace + fence + maintenance + authDirective + gateDirective + bodyDirective + sleep + "  " + directive + "\n"
-	if fence != "" || maintenance != "" || route.ForwardAuth != nil {
+	// The edge rules come after the fence and before maintenance, the
+	// order nginx decides them in (deployment_edge.go).
+	crowdSec := ""
+	if route.CrowdSec {
+		crowdSec = dockerCaddyCrowdSecFile
+	}
+	edge := renderCaddyEdgeRules(route, crowdSec)
+	handling := trace + fence + edge + maintenance + authDirective + gateDirective + bodyDirective + sleep + "  " + directive + "\n"
+	if fence != "" || edge != "" || maintenance != "" || route.ForwardAuth != nil {
 		handling = "  route {\n" + indentCaddy(handling) + "  }\n"
 	}
 	// The names served over HTTPS are one site block and the names served
@@ -1075,6 +1082,13 @@ func (s *Service) applyDockerCaddyRoute(ctx context.Context, c *dockerCaddy, rou
 	}
 	if err = c.attach(ctx); err != nil {
 		return result, err
+	}
+	if route.CrowdSec {
+		// The list the route imports is there before the route that imports
+		// it, empty until the first refresh.
+		if err := s.ensureDockerCaddyCrowdSecList(ctx, c); err != nil {
+			return result, fmt.Errorf("the CrowdSec list could not be written: %w", err)
+		}
 	}
 	if route.AccessLog {
 		if err := c.ensureAccessLogDir(ctx); err != nil {

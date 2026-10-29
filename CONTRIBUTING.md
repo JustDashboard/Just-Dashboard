@@ -402,11 +402,15 @@ to the contribution terms above, including the additional licence grant to the p
   (the wildcard served by a real `caddy:2-alpine`, then renewed and refreshed; needs the plugin above)
   and `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyRefreshesRenewedCertificateCopies -count=1 -v`
   (the renewal refresh on a real Caddy with no authority involved).
-  Changes to how a deployment route renders its redirects, response headers, allowed addresses, HSTS
-  or a domain's own scheme also
+  Changes to how a deployment route renders its redirects, response headers, allowed addresses, HSTS,
+  a domain's own scheme, edge rules or the CrowdSec list also
   run `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules -count=1 -v`,
   which asks a real Caddy what it answers for each, a route serving one name over HTTPS and another
-  over plain HTTP with HSTS included, and
+  over plain HTTP with HSTS included, a blocked path, a user agent's status, an allow ahead of a
+  block, a ban and its lifting, and the rule names in the request record; edge rules and rate limits
+  also run `go test ./internal/proxysvc -run TestLiveDeploymentRouteEdgeRulesOnNginx` on the host's
+  nginx alone (429 with Retry-After past the limit, 200 within it;
+  [edge rules](docs/internal/deployments/edge-rules.md#tests)); and
   `go test ./internal/proxysvc -run TestLiveDeploymentRouteMixedTLSOnNginx`, which asks the host's
   nginx the same. Changes to a route's sign-in, how Caddy reaches the
   auth server, or the maintenance pass that repairs that network also run

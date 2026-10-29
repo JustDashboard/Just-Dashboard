@@ -318,6 +318,13 @@ func (s *Server) initModules() {
 	// the dashboard's session cookie, whatever port either is on; the route
 	// takes it out of what the application is sent.
 	s.modules.proxy.WithDashboardHost(s.Cfg.Site)
+	// A deployment route's rate limit and edge rules count the visitor, so
+	// behind a proxy this dashboard trusts they read the address it forwards.
+	trusted := make([]string, 0, len(s.Cfg.TrustedProxies))
+	for _, network := range s.Cfg.TrustedProxies {
+		trusted = append(trusted, network.String())
+	}
+	s.modules.proxy.SetTrustedProxies(trusted)
 	s.modules.requests = accesslog.NewStore(s.openRequestRecord)
 	s.modules.logDrains = logdrain.NewStore(s.Store, s.Sealer)
 	s.modules.dbs = dbx.NewManager()
