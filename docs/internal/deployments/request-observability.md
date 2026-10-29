@@ -301,6 +301,28 @@ form in it is Automation's own (`AlertForm`, drawn in `add-alert-sheet.tsx`), so
 form wherever it opens. Automation lists the rules as sentences with their state and a meter with a
 tick at the line; its form speaks the rule back before it is saved, and removing one asks first.
 
+## Traffic replay before the cutover
+
+The record is also what a release is tested against before it goes live. With a plan's
+`runtime.replay` on, the `replay_traffic` step ([implementation](implementation.md), `deploy/replay.go`)
+asks the same held record — `RequestRecord.Window` on the environment's route, the last 24 hours, GET
+and HEAD, the newest 5,000 rows, one refresh like any other reader — for the newest distinct requests
+the live release answered 2xx, 3xx or 4xx, and sends them to the candidate's own address before the
+route moves. It is the record's third reader beside the Logs page and the rollback watch, and the only
+one that acts on rows rather than readings, so it holds to what a row carries and no more: the
+method, the host, the path and the encoded query. The record keeps no header but the agent and the
+referer, so there is no cookie or credential to leave out; a query that names one (`token=`, `code=`,
+`state=`, `sig=`, …) is not replayed at all, since its value is in the row. A 401, 403 or 407 was decided
+by who asked and a scanner's probe (`IsProbe`) by nobody, so neither is replayed. The duration a row
+carries is the ingress's — Caddy's covers sending the answer to the visitor — so the step compares its
+own timing over the same requests only by a factor and a quarter-second floor, the rule the rollback
+watch reads p95 with (`latencyRegressed`), and over nginx's duration-less record it compares status
+classes alone. `accesslog.Percentile` is the collector's nearest-rank reading exported for this, so
+the replay's p95 is the one the page would show over the same rows. The replayed requests go to the
+candidate, never through the ingress, so they are never in the record: a replay cannot feed the next
+one, and the Requests view shows only what visitors sent. A candidate that wants to tell a replay from
+a visitor sees `X-JD-Replay: 1`.
+
 ## Security intel and blocking
 
 The Insights view opens on the scanners when there are any: a warning `Notice` titled with how many
@@ -754,7 +776,9 @@ the framing of the container script's two reports, the host-file reader across a
 a truncation, and — live — the script against `caddy:2-alpine`. `internal/logsx` covers ANSI, carriage-return frames, structured levels on
 both numeric scales, and that a brace alone is not JSON. `internal/proxysvc` covers the rendered log
 block, its rotation, and that the reader and `sites_render` agree about nginx's path.
-`internal/deploy` covers the observer against a fake ingress. `internal/api` covers the lifecycle feed
+`internal/deploy` covers the observer against a fake ingress, and the traffic replay's selection from
+a real store's rows, its comparison and its step against a loopback candidate (`replay_test.go`);
+`TestLiveTrafficReplayStopsACandidateThatBreaksARecordedRoute` replays a real Caddy ingress's record. `internal/api` covers the lifecycle feed
 itself: that it shows one environment's events and not the host's, that the window and the limit are
 the caller's, that an environment with no events reads as an empty list rather than a null, that the
 default kinds are containers and networks and a junk `since` is ignored, that persisted rows are the

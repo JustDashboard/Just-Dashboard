@@ -545,6 +545,17 @@ to the contribution terms above, including the additional licence grant to the p
   container, the `release.rolled_back` delivery and its audit; then deploys a healthy third release and
   requires the warm container removed when its one-minute window passes. It numbers its environment
   far from any other and removes its containers.
+- Changes to the traffic replay (`deploy/replay.go`, the `replay_traffic` step, `runtime.replay`, or the
+  request record it reads) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveTrafficReplayStopsACandidateThatBreaksARecordedRoute -count=1 -v`
+  as root on a Docker host. Like the rollback acceptance it starts a Caddy ingress of its own on a
+  loopback port (`JD_INGRESS_CONTAINER`) and deploys `caddy:2-alpine` releases through the real routes
+  and engine: a first release whose replay skips for want of a record; thirty pages, a HEAD and a
+  write sent through the ingress; a release that answers 404 for one of those pages, which must end
+  `replay_status_drift` in `replay_traffic` with nothing cut over, the first release still answering
+  every page, its own container gone and the record holding only the test's requests (the replay never
+  passes through the ingress); then a release that answers like the first and goes live. It numbers
+  its environment far from any other and removes its containers.
 - Changes to the engine, its reconciler or run persistence also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun -count=1 -v`.
   It builds `internal/deploy/testdata/engine-host`, SIGKILLs that real second process inside every

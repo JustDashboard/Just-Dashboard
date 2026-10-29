@@ -103,6 +103,7 @@ free.
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Migrations rehearsed on a throwaway copy of the database, restored from its backup, before production
+- Real recent requests replayed against a new release before traffic moves, so a page it broke stops it
 - Variables per environment, plus shared ones defined once for the server or a project
 - Variables read from HashiCorp Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager or Azure Key Vault, fresh for each run
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy

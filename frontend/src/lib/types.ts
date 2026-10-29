@@ -5249,6 +5249,8 @@ export type DeploymentConfiguration = {
     interceptErrors?: boolean
     /** Strict-Transport-Security on every HTTPS answer; absent sends none. */
     hsts?: DeploymentRouteHSTS
+    /** Recorded requests replayed against the candidate before the cutover; absent is off. */
+    replay?: ReplayPlan
     mounts?: {
       source: string
       target: string
@@ -5519,6 +5521,76 @@ export type RehearsalReport = {
   isolation?: { network: string; internal: boolean; published: boolean; volumesMounted: boolean }
   cleanedUp: boolean
   totalMs: number
+}
+
+/**
+ * A plan's traffic replay terms (`deploy/replay.go`): before the cutover, the
+ * last distinct GET and HEAD requests the access log recorded for the
+ * environment's domains are sent to the candidate and its answers compared
+ * with the live release's. An absent number is the server's default.
+ */
+export type ReplayPlan = {
+  enabled: boolean
+  /** Distinct requests replayed, newest first; absent is 50, at most 500. */
+  requests?: number
+  /** Only recorded paths under one of these prefixes; absent replays every path. */
+  paths?: string[]
+  /** The percent of replayed requests whose status class may differ; absent is 2. */
+  maxStatusDrift?: number
+  /** What the candidate's p95 may be of the recorded p95; absent is 2. */
+  latencyFactor?: number
+  /** The whole replay's time limit; absent is 60 seconds. */
+  timeoutSeconds?: number
+}
+
+/** One replayed request the candidate answered in another status class, or not at all. */
+export type ReplayDrift = {
+  method: string
+  path: string
+  query?: string
+  recordedStatus: number
+  /** 0 is no answer, with `error` saying why. */
+  candidateStatus: number
+  error?: string
+  recordedMs?: number
+  candidateMs?: number
+}
+
+/** The replay_traffic step's evidence. */
+export type ReplayReport = {
+  replayed: boolean
+  /** Why it was not replayed. */
+  reason?: string
+  domains?: string[]
+  /** The candidate's own address the requests were sent to. */
+  target?: string
+  read: number
+  eligible: number
+  requests: number
+  answered: number
+  drifted: number
+  driftPercent: number
+  maxStatusDrift: number
+  latencyFactor: number
+  latencyRecorded: boolean
+  latencyJudged: boolean
+  recordedP95?: number
+  candidateP95?: number
+  verdict: {
+    code: "within_drift" | "status_drift" | "latency" | "unanswered" | ""
+    tripped: boolean
+    reason: string
+  }
+  drifts: ReplayDrift[]
+  concurrency: number
+  timeoutSeconds: number
+  timedOut: boolean
+  durationMs: number
+  recovery?: {
+    candidateStopped: boolean
+    runtimeRestored: boolean
+    routeRestored: boolean
+  }
 }
 
 /** A saved database a variable names by its address rather than a link. */
