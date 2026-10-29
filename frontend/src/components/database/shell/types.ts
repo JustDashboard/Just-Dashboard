@@ -19,6 +19,11 @@ export type DbContainerRef = {
   health?: string
   composeProject?: string
   composeService?: string
+  /**
+   * That the container was started with what MongoDB 8 needs to start on this
+   * server's kernel, and why, in a sentence; absent otherwise.
+   */
+  kernelMitigation?: string
 }
 
 export type DbUnitRef = { name: string; activeState: string; subState?: string }

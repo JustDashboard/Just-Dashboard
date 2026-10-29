@@ -16,6 +16,7 @@ import {
   Heart,
   Layers,
   LockClosed,
+  RefreshClockwise,
   Route,
   ShieldCheck,
   StopCircle,
@@ -50,6 +51,7 @@ import {
   type ReleaseNodeState,
 } from "@/components/deploy/vocabulary"
 import { rehearsalOf, rehearsalSummary } from "@/components/deploy/rehearsal-model"
+import { replayOf, replaySummary } from "@/components/deploy/replay-model"
 
 /**
  * What a run's steps recorded, drawn as what each thing is.
@@ -135,6 +137,7 @@ const STEP_GLYPH: Record<string, Icon> = {
   start_candidate: Box,
   verify_readiness: Heart,
   verify_smoke: Crosshair,
+  replay_traffic: RefreshClockwise,
   canary: Gauge,
   activate: Route,
   retire_previous: StopCircle,
@@ -293,6 +296,10 @@ export function stepSummary(step: DeploymentStep): string | undefined {
     case "rehearse_migration": {
       const report = rehearsalOf(evidence)
       return report ? rehearsalSummary(report) : undefined
+    }
+    case "replay_traffic": {
+      const report = replayOf(evidence)
+      return report ? replaySummary(report) : undefined
     }
     case "render_runtime":
     case "record_release":

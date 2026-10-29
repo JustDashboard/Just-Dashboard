@@ -8,10 +8,10 @@ package blueprint
 // shipped definitions agree.
 const (
 	// CatalogueBuiltIn is every definition in builtin/, retired ones included.
-	CatalogueBuiltIn = 102
+	CatalogueBuiltIn = 122
 	// CatalogueDeployable is how many of the offered definitions
 	// DeploymentSupport accepts: everything but the two game-server previews.
-	CatalogueDeployable = 95
+	CatalogueDeployable = 115
 	// CatalogueCompose is how many of those are multi-service Compose templates.
-	CatalogueCompose = 29
+	CatalogueCompose = 35
 )

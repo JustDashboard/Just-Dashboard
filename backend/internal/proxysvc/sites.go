@@ -39,7 +39,7 @@ type SiteSpec struct {
 	// of servers: a deployment route in a canary. Only a deployment route
 	// sets it; the form never offers it.
 	Split *SiteSplit `json:"split,omitempty"`
-	Root string    `json:"root,omitempty"`
+	Root  string     `json:"root,omitempty"`
 	// SPA answers a path with no file of its own with index.html, for a
 	// single-page app whose router runs in the browser. Static sites only:
 	// without it a deep link or a reload on /settings is nginx's 404.

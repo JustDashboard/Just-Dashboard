@@ -229,6 +229,7 @@ const (
 	StepStartCandidate       StepKey = "start_candidate"
 	StepVerifyReadiness      StepKey = "verify_readiness"
 	StepVerifySmoke          StepKey = "verify_smoke"
+	StepReplayTraffic        StepKey = "replay_traffic"
 	// StepCanary holds a canary plan's candidate on a share of the live
 	// route's requests for its window and decides from the comparison, or
 	// from the operator, whether the cutover that follows happens at all.
@@ -244,12 +245,16 @@ const (
 // The backup gate runs before release tasks: a migration must never change a
 // database whose required backup has not been verified. The rehearsal sits
 // between them: it restores from that backup, and what it proves is about
-// the tasks that run next.
+// the tasks that run next. The traffic replay (replay.go) sits after the
+// health checks and before the cutover: it sends the last real GET and HEAD
+// requests the access log holds to a candidate the checks already found
+// answering, so a route no health check asks for cannot go live broken, and
+// nothing is routed to the candidate until it passes or skips.
 var DefaultStepKeys = []StepKey{
 	StepResolveSource, StepAcquireSource, StepAnalyzePlan, StepPrepareContext,
 	StepBuildArtifact, StepRenderRuntime, StepBackupGate, StepRehearseMigration, StepReleaseTask,
 	StepProvisionCertificate, StepStartCandidate, StepVerifyReadiness, StepVerifySmoke,
-	StepCanary, StepActivate, StepRetirePrevious, StepRecordRelease, StepNotify,
+	StepReplayTraffic, StepCanary, StepActivate, StepRetirePrevious, StepRecordRelease, StepNotify,
 }
 
 type StepState string

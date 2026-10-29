@@ -276,7 +276,13 @@ func TestFailingCanaryIsAbortedWithTheLiveReleaseUntouched(t *testing.T) {
 	if window.ReleaseID != second.Release.ID || window.LiveReleaseID != first.Release.ID || window.Percent != 20 {
 		t.Fatalf("window = %+v", window)
 	}
+	// The window is recorded before the route is written.
+	deadline := time.Now().Add(5 * time.Second)
 	live, shared := f.lastRoute(t)
+	for shared == "" && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+		live, shared = f.lastRoute(t)
+	}
 	if live != "http://127.0.0.1:32001" || shared != "20%:http://127.0.0.1:32002" {
 		t.Fatalf("canary route = %s + %s", live, shared)
 	}

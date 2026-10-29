@@ -145,9 +145,11 @@ terms in words. A preview is replaced blue/green whatever production's plan says
 
 ### The step
 
-`canary` sits between `verify_smoke` and `activate` in a deploy's and a promotion's steps (and after
-`replay_traffic` where that step exists). Every plan that is not a canary skips it, as do a rollback,
-which goes back at once, and a first release, which has nothing to share the route with. For a canary
+`canary` sits after `replay_traffic` and right before `activate` in a deploy's and a promotion's steps:
+the replay sends recorded requests to a candidate nothing routes to yet, and the canary is the
+candidate's first real traffic. A redeploy, a rollback and an instant rollback do not take the
+step, as they do not take the replay: they go back to, or again to, a release already judged. Every plan
+that is not a canary skips it, and so does a first release, which has nothing to share the route with. For a canary
 plan the step (`runCanary`, `deploy/canary_executor.go`):
 
 1. opens a trial under the run's lease (`deploy_canaries`, one open per environment by a unique partial

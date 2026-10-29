@@ -11,14 +11,6 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
-// WithRequestRecord attaches the held request record a canary's two
-// releases are read from: the same record the Logs page and the rollback
-// watch read, so the figures the run shows are the page's.
-func (e *NormalizedStepExecutor) WithRequestRecord(record RequestRecord) *NormalizedStepExecutor {
-	e.requests = record
-	return e
-}
-
 // WithCanaryTiming sets how often a canary looks for an operator's decision
 // and how often it reads the two releases, for tests. The defaults are a
 // second and five seconds.

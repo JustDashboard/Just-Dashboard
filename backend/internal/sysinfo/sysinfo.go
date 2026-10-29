@@ -232,6 +232,14 @@ func (c *Collector) Host(ctx context.Context) (*HostInfo, error) {
 	return h, nil
 }
 
+// KernelRelease is the running kernel's release as uname -r prints it
+// ("7.0.0-1017-azure"). Every container on a machine shares its kernel, so
+// read from inside the dashboard's own container it is still the host's, and
+// the one each container Docker starts here runs on.
+func KernelRelease(ctx context.Context) (string, error) {
+	return host.KernelVersionWithContext(ctx)
+}
+
 // Collect samples every subsystem. CPU percentages come from the cumulative
 // counters with interval 0 — the delta is against the previous call, which
 // keeps the push loop non-blocking instead of sleeping for a sample window.

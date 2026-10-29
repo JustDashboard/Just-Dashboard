@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
@@ -76,13 +77,28 @@ type NormalizedStepExecutor struct {
 	// rehearsed against (rehearsal.go); nil reports a rehearsal unavailable.
 	rehearser MigrationRehearser
 
-	// requests is the held request record a canary's two releases are read
-	// from (canary.go); nil leaves a canary unjudged, decided by its window
-	// and the operator. canaryPoll and canaryRead are how often a canary
-	// looks for a decision and reads the record; zero is the default.
-	requests   RequestRecord
+	// requests is the held request record the traffic replay reads its
+	// requests from (replay.go) and a canary's two releases are read from
+	// (canary.go); nil skips the replay, since there is no record on this
+	// host to replay from, and leaves a canary unjudged, decided by its
+	// window and the operator. replayClient is what the replay sends with,
+	// built once, or set by a test.
+	requests     RequestRecord
+	replayClient replayClient
+	replayOnce   sync.Once
+	// canaryPoll and canaryRead are how often a canary looks for a
+	// decision and reads the record; zero is the default.
 	canaryPoll time.Duration
 	canaryRead time.Duration
+}
+
+// WithRequestRecord attaches the request record the traffic replay and a
+// canary read (replay.go, canary.go): the same held record the Logs page
+// and the rollback watch read, so the requests replayed and judged are the
+// ones the page shows.
+func (e *NormalizedStepExecutor) WithRequestRecord(record RequestRecord) *NormalizedStepExecutor {
+	e.requests = record
+	return e
 }
 
 func (e *NormalizedStepExecutor) WithNotifications(store *AutomationStore) *NormalizedStepExecutor {
@@ -249,6 +265,8 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 		return e.verifyChecks(ctx, execution, plan, "readiness")
 	case StepVerifySmoke:
 		return e.verifyChecks(ctx, execution, plan, "smoke")
+	case StepReplayTraffic:
+		return e.replayTraffic(ctx, execution, plan)
 	case StepCanary:
 		return e.runCanary(ctx, execution)
 	case StepActivate:
@@ -1119,6 +1137,11 @@ func (r *NormalizedStepReconciler) Reconcile(ctx context.Context, request Reconc
 		// A rehearsal changes nothing but a copy and a network of its own,
 		// which the step removes before it starts again: running it twice
 		// cannot touch production.
+		return ReconcileResult{Action: ReconcileResume}
+	case StepReplayTraffic:
+		// A replay sends reads to a candidate nothing routes to yet and
+		// changes nothing but its own evidence; running it twice costs the
+		// candidate the requests again and nobody anything.
 		return ReconcileResult{Action: ReconcileResume}
 	case StepCanary:
 		// The trial is rows and a route: the step finds the window it opened

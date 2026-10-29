@@ -1,0 +1,89 @@
+{
+  "id": "privatebin",
+  "version": "1.0.0",
+  "name": "PrivateBin",
+  "category": "tool",
+  "profile": "web",
+  "description": "A zero-knowledge pastebin: text and small files are encrypted in the browser before upload, the key stays in the link's fragment, and pastes can expire or burn after one read. The server stores only ciphertext.",
+  "iconId": "shield",
+  "docsUrl": "https://github.com/PrivateBin/PrivateBin/wiki",
+  "access": {
+    "kind": "open",
+    "note": "PrivateBin has no accounts: anyone who reaches the address can create a paste, and only someone holding a paste's full link can read it, because the key is in the part of the link the server never sees. Expiry, burn-after-reading and the size limit come from the image's default configuration; a custom conf.php needs a file this template does not install."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Zlib",
+    "upstreamUrl": "https://github.com/PrivateBin/PrivateBin",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "privatebin/nginx-fpm-alpine:2.1.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8080,
+      "protocol": "tcp",
+      "purpose": "The paste page and its API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/srv/data",
+      "purpose": "Encrypted pastes, the server salt and the traffic limiter",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 128,
+    "minMemoryMb": 64
+  },
+  "checks": [
+    {
+      "name": "Page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 30
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "PrivateBin reads the data directory of an older version as it is; the 2.0 release changed the paste format for new pastes and still serves old ones."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:e77511a05541b0eb43b5abd1b8857725a4f3cd1adc9d01f033abcc58ac01db8d"
+    }
+  ]
+}

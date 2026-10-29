@@ -85,6 +85,9 @@ var causeTitles = map[string]string{
 	"mount_invalid":                      "Mount cannot be created",
 	"rehearsal_failed":                   "Migration failed on a copy of the database",
 	"rehearsal_unavailable":              "Migration could not be rehearsed",
+	"replay_status_drift":                "Candidate answered recorded requests differently",
+	"replay_latency":                     "Candidate slower on recorded requests",
+	"replay_unanswered":                  "Candidate did not answer recorded requests",
 }
 
 // causeTitle is the short name of a cause code, or "" for a code that is not

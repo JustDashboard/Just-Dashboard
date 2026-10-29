@@ -1,4 +1,4 @@
-import type { DbCredentialServer, DbDriver, DbFleet } from "@/lib/types"
+import type { DbCredentialServer, DbDriver, DbFleet, DbKernelProblem } from "@/lib/types"
 import type { DbInstance, DbInventory, DbInventoryScan } from "@/components/database/fleet/types"
 
 /**
@@ -17,6 +17,11 @@ export type FoundAction =
   | { kind: "open" }
   /** A container that is down: starting it is what makes it connectable. */
   | { kind: "start-container"; id: string }
+  /**
+   * MongoDB 8 on a kernel it refuses to start on: recreating its container
+   * with the mitigation is what makes it start. Asked first.
+   */
+  | { kind: "kernel-mitigation"; container: string; problem: DbKernelProblem }
   /** A unit of the engine's own that is down. */
   | { kind: "start-unit"; unit: string }
   /** Nothing to press here; the place that owns it is one link away. */
@@ -70,10 +75,19 @@ const STARTABLE = new Set(["exited", "created", "dead", "inactive", "failed"])
  * The one thing to do with a found instance. `hostAccount` is whether the
  * engine lets the dashboard make its own account from this machine — the
  * second way in to a native server that authenticates local connections by
- * the operating-system user.
+ * the operating-system user. `kernel` is what the inventory said of it, where
+ * it is a MongoDB this kernel keeps from starting: Start would only start it
+ * failing again.
  */
-export function foundAction(instance: DbInstance, hostAccount = false): FoundAction {
+export function foundAction(
+  instance: DbInstance,
+  hostAccount = false,
+  kernel?: DbKernelProblem,
+): FoundAction {
   if (instance.self) return { kind: "none" }
+  if (kernel?.fixable && instance.container?.id) {
+    return { kind: "kernel-mitigation", container: instance.container.id, problem: kernel }
+  }
   if (instance.connectable && instance.driver !== "") {
     if (instance.kind === "file") return { kind: "open" }
     switch (instance.credentials) {
@@ -111,6 +125,8 @@ export function foundActionWords(
       return { verb: `Start ${name}`, word: "Start container" }
     case "start-unit":
       return { verb: `Start ${name}`, word: "Start service" }
+    case "kernel-mitigation":
+      return { verb: `Apply the kernel mitigation to ${name}`, word: "Apply mitigation" }
     case "look":
       return { verb: `${action.label} ${name}`, word: action.label }
     case "none":
@@ -196,6 +212,7 @@ const READINESS: Record<FoundAction["kind"], number> = {
   credentials: 1,
   "start-container": 2,
   "start-unit": 2,
+  "kernel-mitigation": 2,
   look: 3,
   none: 3,
 }
@@ -234,7 +251,9 @@ export function foundShelves(inventory: DbInventory | undefined): FoundShelves {
     else shelves.files.push(instance)
   }
   shelves.gone = inventory.ignored.filter((key) => !present.has(key))
-  shelves.servers.sort((a, b) => READINESS[foundAction(a).kind] - READINESS[foundAction(b).kind])
+  const readiness = (one: DbInstance) =>
+    READINESS[foundAction(one, false, inventory?.kernelProblems?.[one.key]).kind]
+  shelves.servers.sort((a, b) => readiness(a) - readiness(b))
   return shelves
 }
 

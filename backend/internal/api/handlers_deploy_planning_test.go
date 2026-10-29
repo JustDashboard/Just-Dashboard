@@ -109,7 +109,7 @@ func TestDeploymentPlanningSignedInJourneyPersistsWithoutDeploying(t *testing.T)
 	}
 	decodePlanningResponse(t, preflighted.Body.Bytes(), &preflightBody)
 	draft = preflightBody.Draft
-	if preflightBody.Preflight.Digest == "" || len(preflightBody.Preflight.Plan.Actions) != 17 || draft.PlanPreview == "" {
+	if preflightBody.Preflight.Digest == "" || len(preflightBody.Preflight.Plan.Actions) != len(deploy.DefaultStepKeys) || draft.PlanPreview == "" {
 		t.Fatalf("preflight response = %#v", preflightBody)
 	}
 	for _, finding := range preflightBody.Preflight.Findings {

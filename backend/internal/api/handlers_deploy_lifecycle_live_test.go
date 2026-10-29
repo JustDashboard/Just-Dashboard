@@ -28,6 +28,11 @@ import (
 // and every reading on this page depends on that being true. Nothing in the
 // dashboard's own code would notice if it stopped being.
 //
+// It also holds the half that outlives the process: once the exit is in the
+// feed, the ring is replaced by one that has never connected — a restart of
+// the dashboard, as far as the feed can tell — and the exit is still there,
+// read back from the store with its code and its labels.
+//
 // It creates only its own containers and its own network, and removes them.
 func TestLiveDeploymentEventsAreReadFromDockerAndNamedWithTheirCause(t *testing.T) {
 	if os.Getenv("JD_DEPLOY_LIVE") != "1" {
@@ -45,6 +50,7 @@ func TestLiveDeploymentEventsAreReadFromDockerAndNamedWithTheirCause(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	s.modules.dockerEvents.Start(ctx)
+	s.modules.deployEvents.Follow(ctx, s.modules.dockerEvents)
 	waitFor(t, "the event stream to connect", func() bool {
 		running, _, _ := s.modules.dockerEvents.Status()
 		return running
@@ -116,6 +122,31 @@ func TestLiveDeploymentEventsAreReadFromDockerAndNamedWithTheirCause(t *testing.
 		t.Errorf("an exit is not a release's doing: %+v", died.Trigger)
 	}
 
+	// The dashboard restarts: a ring that has never connected holds nothing,
+	// and the exit is still in the feed, from the store, as it was.
+	listening := s.modules.dockerEvents
+	s.modules.dockerEvents = s.modules.docker.NewEventLog(s.Log)
+	afterRestart := readLifecycle(t, c, projectID, "")
+	if afterRestart.Status != "available" || afterRestart.Watching {
+		t.Fatalf("after a restart the feed is the store's and says the stream is not connected: %+v", afterRestart)
+	}
+	kept := find(t, afterRestart.Events, "die")
+	if kept.ExitCode != "137" || kept.Owner["run-id"] != "42" || !kept.Time.Equal(died.Time) || kept.Message != died.Message {
+		t.Fatalf("the exit did not survive the restart as it was: before %+v, after %+v", died, kept)
+	}
+	if kept.Requested {
+		t.Errorf("an exit nobody asked for is not marked requested: %+v", kept)
+	}
+	if afterRestart.RecordSince == nil || afterRestart.RecordSince.After(died.Time) {
+		t.Errorf("the record reaches back past the restart: %v", afterRestart.RecordSince)
+	}
+	// Created by the release, and still said to be: the correlation is made
+	// when the row is read, so it survives the restart as the audit log does.
+	if keptCreated := find(t, afterRestart.Events, "create"); keptCreated.Trigger == nil || keptCreated.Trigger.Action != "deploy.run" {
+		t.Errorf("the persisted creation lost its cause: %+v", keptCreated.Trigger)
+	}
+	s.modules.dockerEvents = listening
+
 	// A deployment owns more than its containers, and a network disappearing
 	// under a running release is exactly this feed's business. It is also the
 	// one kind that arrives with no labels at all, so this is the assertion
@@ -138,7 +169,9 @@ func TestLiveDeploymentEventsAreReadFromDockerAndNamedWithTheirCause(t *testing.
 	if hasAction(narrowed.Events, "create") {
 		t.Error("the search should have dropped the creation")
 	}
-	if future := readLifecycle(t, c, projectID, "since="+time.Now().Add(time.Hour).Format(time.RFC3339)); len(future.Events) != 0 {
+	// In UTC, so the zone is a Z rather than a +01:00 whose plus the query
+	// string would read as a space and the handler as no window at all.
+	if future := readLifecycle(t, c, projectID, "since="+time.Now().Add(time.Hour).UTC().Format(time.RFC3339)); len(future.Events) != 0 {
 		t.Errorf("a window starting in an hour holds nothing, got %d", len(future.Events))
 	}
 
@@ -195,7 +228,7 @@ func seedDeployment(t *testing.T, s *Server, name string) (projectID, environmen
 	project, err := s.Store.DB.ExecContext(t.Context(),
 		`INSERT INTO deploy_projects(name, profile, repo_path, branch, compose_file, pre_command, post_command,
 		                            hook_secret, hook_id, enabled, created_at, updated_at)
-		 VALUES(?, 'web', '', 'main', '', '', '', '', '', 1, ?, ?)`, name, now, now)
+		 VALUES(?, 'web', '', 'main', '', '', '', '', ?, 1, ?, ?)`, name, name+"-hook", now, now)
 	if err != nil {
 		t.Fatal(err)
 	}

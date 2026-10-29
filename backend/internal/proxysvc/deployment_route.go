@@ -34,9 +34,9 @@ type DeploymentRoute struct {
 	// a share of the route's requests to the candidate's servers.
 	Canary     *DeploymentCanary `json:"canary,omitempty"`
 	TLS        bool              `json:"tls,omitempty"`
-	CertPath   string `json:"certPath,omitempty"`
-	KeyPath    string `json:"keyPath,omitempty"`
-	ForceHTTPS bool   `json:"forceHttps,omitempty"`
+	CertPath   string            `json:"certPath,omitempty"`
+	KeyPath    string            `json:"keyPath,omitempty"`
+	ForceHTTPS bool              `json:"forceHttps,omitempty"`
 	// BasicAuth puts a password in front of the route. Each entry is a user
 	// and a bcrypt hash, which is what both proxies read.
 	BasicAuth []BasicAuthUser `json:"basicAuth,omitempty"`

@@ -60,6 +60,10 @@ type moduleSet struct {
 	docker       *dockerx.Client
 	dockerStats  *dockerx.StatsSampler
 	dockerEvents *dockerx.EventLog
+	// deployEvents is the part of the event stream a deployment owns, kept
+	// past this process: the ring empties on a restart, and "why did this
+	// restart at four" is asked at nine.
+	deployEvents *dockerx.EventStore
 	// What a compose stack was before it was changed. Docker keeps no
 	// history, so a rollback has no target and "what changed" has no answer
 	// unless the dashboard writes it down first.
@@ -92,6 +96,9 @@ type moduleSet struct {
 	// onHost is what moves hostFiles: hostexec.InHostMounts, warning once
 	// when the namespace cannot be entered.
 	onHost func(fn func())
+	// kernelRelease reads the running kernel's release; nil is
+	// sysinfo.KernelRelease, and a test hands it the kernel it is about.
+	kernelRelease func(context.Context) (string, error)
 	// proxyExtras is the proxy pages' own state; see modules_proxy.go.
 	proxyExtras proxyExtras
 	// requests holds what every deployment's ingress and every proxy site
@@ -199,6 +206,7 @@ func (s *Server) initModules() {
 	// so a baseline older than this is dropped rather than averaged over.
 	s.modules.dockerStats = s.modules.docker.NewStatsSampler().WithMaxAge(statsMaxAge)
 	s.modules.dockerEvents = s.modules.docker.NewEventLog(s.Log)
+	s.modules.deployEvents = dockerx.NewEventStore(s.Store.DB, s.Log, s.Cfg.MetricsRetention)
 	s.modules.dockerDeploys = dockerx.NewDeploymentStore(s.Store.DB)
 	// The recorder gets a sampler of its own rather than the shared one: a
 	// series kept for a week is worth measuring over even intervals, and an
@@ -395,10 +403,13 @@ func (s *Server) initModules() {
 		WithTailnetPublisher(s.modules.tailnet).
 		// Release tasks are rehearsed against copies the Databases owner
 		// makes from its own backups, when an environment asks for it.
-		WithMigrationRehearser(s.modules.rehearser).
-		// A canary's two releases are read from the record the Logs page
-		// and the rollback watch read.
-		WithRequestRecord(s.modules.requests)
+		WithMigrationRehearser(s.modules.rehearser)
+	if s.modules.requests != nil {
+		// The traffic replay and a canary's two releases read the same held
+		// record the Logs page and the rollback watch read, so what they
+		// replay and judge is what the page shows.
+		normalizedExecutor.WithRequestRecord(s.modules.requests)
+	}
 	s.modules.deployExecutor = normalizedExecutor
 	s.modules.deployEngine = deploy.NewEngine(
 		s.modules.deployRuns,

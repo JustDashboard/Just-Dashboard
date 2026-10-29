@@ -229,6 +229,64 @@ test("runtime evidence distinguishes unavailable Docker from an empty managed in
   await expect(page.getByText("Runtime unavailable", { exact: true })).toHaveCount(0)
 })
 
+test("the overview says how much of the time the deployment was up, and over what record", async ({
+  page,
+}, testInfo) => {
+  await mockProject(page)
+  await page.goto("/deploy/7")
+  await expect(page.getByRole("heading", { name: "Availability" })).toBeVisible()
+  // The figure comes before the delivery figures: a visitor's reading before the team's.
+  const availability = page.getByRole("heading", { name: "Availability" })
+  const delivery = page.getByRole("heading", { name: "Delivery" })
+  await expect(delivery).toBeVisible()
+  expect((await availability.boundingBox())!.y).toBeLessThan((await delivery.boundingBox())!.y)
+  // A steady day, six minutes over the week, and a month the record only
+  // reaches nine days into — said rather than left to read as a steady month.
+  await expect(page.getByText("100%", { exact: true })).toBeVisible()
+  await expect(page.getByText("99.94%", { exact: true })).toBeVisible()
+  await expect(page.getByText("99.95%", { exact: true })).toBeVisible()
+  await expect(page.getByText("no downtime recorded", { exact: true })).toBeVisible()
+  await expect(page.getByText("6 min down · 2 incidents", { exact: true })).toBeVisible()
+  await expect(
+    page.getByText("6 min down · 2 incidents · record covers 9 of 30 days", { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByText(/record since/)).toBeVisible()
+  await expect(page.getByText(/counts as down until the container comes back/)).toBeVisible()
+
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 900 })
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+    await page
+      .getByRole("heading", { name: "Availability" })
+      .locator("..")
+      .locator("..")
+      .screenshot({ path: testInfo.outputPath(`availability-${width}.png`) })
+  }
+})
+
+test("an availability the server cannot read says why, in place of a figure", async ({ page }) => {
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7/availability**", (route) =>
+    json(route, {
+      status: "unavailable",
+      reason: "Docker is unavailable on this host, so container lifecycle cannot be observed.",
+      observedAt: now,
+      down: false,
+      windows: [],
+    }),
+  )
+  await page.goto("/deploy/7")
+  await expect(page.getByRole("heading", { name: "Availability" })).toBeVisible()
+  await expect(
+    page.getByText(
+      "Docker is unavailable on this host, so container lifecycle cannot be observed.",
+    ),
+  ).toBeVisible()
+  await expect(page.getByText("Last 7 days", { exact: true })).toHaveCount(0)
+})
+
 test("the deployments tab reports delivery figures with their basis and window", async ({
   page,
 }, testInfo) => {

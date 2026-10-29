@@ -1031,6 +1031,7 @@ func preflightFindings(
 		findings = append(findings, item)
 	}
 	findings = append(findings, readinessPreflightFindings(draft, configuration)...)
+	findings = append(findings, replayFindings(configuration, observation)...)
 	findings = withoutSupersededHostFindings(append(findings, networkFindings(draft, configuration)...))
 	persistentStorage := len(configuration.Runtime.Mounts)
 	if detection.Compose != nil {
@@ -1364,6 +1365,8 @@ func exactPlan(draft *Draft, configuration PlanConfiguration) ExactPlan {
 			action.Action = "run readiness checks"
 		case StepVerifySmoke:
 			action.Action = "run smoke and public-route checks"
+		case StepReplayTraffic:
+			action.Action = "replay recorded requests against the candidate when turned on"
 		case StepCanary:
 			action.Action = "try the candidate on a share of the live route's requests when the strategy is canary"
 			if terms := configuration.Runtime.Canary; configuration.Runtime.Strategy == StrategyCanary && terms != nil {

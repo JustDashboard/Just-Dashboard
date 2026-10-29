@@ -1,0 +1,231 @@
+{
+  "id": "linkwarden",
+  "version": "1.0.0",
+  "name": "Linkwarden",
+  "category": "http",
+  "profile": "compose",
+  "description": "A bookmark manager that archives every saved page as a screenshot, a PDF and readable text, with collections, tags and sharing, on the PostgreSQL database it requires on a private network beside it.",
+  "iconId": "book",
+  "docsUrl": "https://docs.linkwarden.app/self-hosting/installation",
+  "access": {
+    "kind": "setup",
+    "note": "Linkwarden starts with no accounts and registration open: the address opens on a sign-in page whose Sign up link creates an account. Make yours right after deploying, then set NEXT_PUBLIC_DISABLE_REGISTRATION to true from the Variables tab and redeploy, because until then anyone who reaches the address can register. Archiving pages runs a headless browser inside the image, which is why the limit is generous."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/linkwarden/linkwarden",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Sign-in callbacks and every link Linkwarden builds use this address."
+    }
+  ],
+  "secrets": [
+    {
+      "name": "nextauth-secret",
+      "variable": "NEXTAUTH_SECRET",
+      "label": "Session secret",
+      "length": 48,
+      "description": "Signs sessions and tokens; changing it signs everybody out."
+    },
+    {
+      "name": "db-password",
+      "variable": "LINKWARDEN_DB_PASSWORD",
+      "label": "Database password",
+      "length": 40,
+      "description": "Generated here and given only to the services that sign in to the database."
+    }
+  ],
+  "services": [
+    {
+      "name": "linkwarden",
+      "role": "app",
+      "purpose": "The web application, its API and the archiving worker, behind the domain",
+      "image": {
+        "reference": "ghcr.io/linkwarden/linkwarden:v2.16.3",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "NEXTAUTH_URL",
+          "value": "{{variable.NEXTAUTH_URL}}"
+        },
+        {
+          "name": "BASE_URL",
+          "value": "{{variable.BASE_URL}}"
+        },
+        {
+          "name": "NEXTAUTH_SECRET",
+          "value": "{{secret.nextauth-secret}}"
+        },
+        {
+          "name": "DATABASE_URL",
+          "value": "postgresql://linkwarden:{{secret.db-password}}@db:5432/linkwarden"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 3000,
+          "protocol": "tcp",
+          "purpose": "The web application and its API",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "archives",
+          "target": "/data/data",
+          "purpose": "Archived pages: screenshots, PDFs and readable text, plus uploaded files",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 2048,
+        "minMemoryMb": 1024
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fsS",
+          "-o",
+          "/dev/null",
+          "http://127.0.0.1:3000/"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 10,
+        "retries": 18,
+        "startPeriodSeconds": 90
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "PostgreSQL, holding every link, collection, tag and user",
+      "image": {
+        "reference": "postgres:17.11-alpine",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "POSTGRES_DB",
+          "value": "linkwarden"
+        },
+        {
+          "name": "POSTGRES_USER",
+          "value": "linkwarden"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "value": "{{secret.db-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "postgres",
+          "internal": 5432,
+          "protocol": "tcp",
+          "purpose": "SQL connections from Linkwarden",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/var/lib/postgresql/data",
+          "purpose": "Every table Linkwarden keeps",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "pg_isready",
+          "-h",
+          "127.0.0.1",
+          "-U",
+          "linkwarden",
+          "-d",
+          "linkwarden"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 20
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Sign-in page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/login",
+      "port": "http",
+      "timeoutSeconds": 300
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "NEXTAUTH_URL",
+        "value": "https://{{input.domain}}/api/v1/auth"
+      },
+      {
+        "kind": "set_variable",
+        "name": "BASE_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "Linkwarden runs its database migrations when the container starts and does not migrate back; take a backup before moving to a newer image."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "links.example.test"
+      },
+      "digest": "sha256:4fef3556b5c4805a0799aa67dedd68e58d18a0ae6052333ef969012b63a4d284"
+    }
+  ]
+}
