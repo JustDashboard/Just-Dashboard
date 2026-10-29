@@ -102,6 +102,11 @@ since emptying it would let every banned address back in.
 
 ## Where else they appear
 
+- A route that sleeps ([scale to zero](scale-to-zero.md)) decides its edge rules before the sleeping
+  switch, on both proxies, so a request they refuse — or the rate limit refuses, or the CrowdSec list —
+  never wakes the application. nginx's sleeping locations name error pages of their own, which stops
+  them inheriting the server's, so they say the limit's `error_page 429` again
+  (`serverErrorPages`); without it a sleeping route answered nginx's bare 429 with no `Retry-After`.
 - A tailnet-only environment has no public route, so it refuses all three (`runtime.tailnet`).
 - The release comparison lists them (`edge rules`, `rate limit`, `crowdsec`).
 - The Proxy page reads a deployment's route like any site; it cannot represent these maps, so a save
@@ -121,7 +126,8 @@ since emptying it would let every banned address back in.
   — a blocked path, an allow ahead of it, a user agent's status, a redirect, a CrowdSec ban reloaded
   in and lifted with no release, three requests served within one a second and a burst of two, the
   fourth answered 429 with `Retry-After: 1`, another address served on its own allowance, served
-  again after a second, and the record naming every deciding rule.
+  again after a second, and the record naming every deciding rule — once as a route is served and
+  once as a sleeping route renders it.
 - Live, Docker: `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules`
   now also asks a real Caddy for a blocked path (and the same path in capitals, which nginx and Caddy
   both serve), an allow ahead of a broader block, a user agent's status, a ban of every address and
