@@ -491,9 +491,16 @@ to the contribution terms above, including the additional licence grant to the p
   project, and the pull request must say which providers were exercised.
 - Log drains run against real services with
   `JD_DEPLOY_LIVE=1 go test ./internal/logdrain -run TestLiveDrainsDeliverToLokiTheCollectorAndVector -count=1 -v`:
-  Loki (push API and OTLP, read back with LogQL), an OpenTelemetry Collector and Vector, each in a
-  container on loopback. The package's concurrency is worth `-race` (it needs cgo; the `golang` image
-  has it).
+  Loki (push API and OTLP, read back with LogQL), an OpenTelemetry Collector — its logs pipeline and
+  its traces pipeline, which receives the spans — and Vector, each in a container on loopback. The
+  package's concurrency is worth `-race` (it needs cgo; the `golang` image has it).
+- Changes to the trace context a deployment route sends and records (`proxysvc/trace.go`, the
+  Caddy route's handling, the nginx location's headers or the timed log format) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddySendsAndRecordsATraceparent -count=1 -v`
+  as root — a real `caddy:2-alpine` ingress in front of `traefik/whoami`, which answers with the
+  `traceparent` it received, a new trace and a continued one each read back from the request record —
+  and, unprivileged, `go test ./internal/proxysvc -run TestLiveDeploymentRouteTracesOnNginx`, which
+  asks the host's nginx the same.
 - Changes to deployment variables, feature links, backup gates or managed-resource lifecycle also run
   `go test -race ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store -count=1`;
   the browser gate covers the project overview, build transcript and focused settings, including

@@ -807,6 +807,10 @@ func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, 
 		// always written one for these routes; asking Caddy for it too is what
 		// makes the two drivers answer the same question.
 		AccessLog: true,
+		// And each request it records is a span: the ingress sends the
+		// application a traceparent and writes the same ids beside the
+		// request, which a log drain's traces stream exports.
+		Trace: true,
 	}
 	if tls {
 		route.PlainHostnames = plain

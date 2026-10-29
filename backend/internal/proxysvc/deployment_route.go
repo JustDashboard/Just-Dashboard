@@ -33,6 +33,12 @@ type DeploymentRoute struct {
 	// always done it; the Docker Caddy driver did not, which is why a
 	// deployment behind Caddy could not answer "is anyone using it" at all.
 	AccessLog bool `json:"accessLog,omitempty"`
+	// Trace has the ingress send the application a W3C traceparent — the
+	// client's trace continued, or a new one — and record it beside the
+	// request, so the request is a span the application's own spans join
+	// (proxysvc/trace.go). A Caddy older than 2.8 cannot record it and is
+	// rendered without it.
+	Trace bool `json:"trace,omitempty"`
 	// MaxBodyMB is the largest request body the route lets through, in
 	// megabytes. Zero keeps each proxy's deployment default: nginx's own is
 	// 1 MB, which refused a phone photo before the application saw it, so
@@ -711,7 +717,7 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 		TLS: route.TLS, CertPath: route.CertPath, KeyPath: route.KeyPath, ForceHTTPS: route.ForceHTTPS,
 		ManagedACME: true,
 		HTTP2:       route.TLS,
-		WebSockets:  true, Gzip: true, SecurityHeaders: true, AccessLog: true,
+		WebSockets:  true, Gzip: true, SecurityHeaders: true, AccessLog: true, Trace: route.Trace,
 		AllowFrom: append([]string{}, route.AllowFrom...), DenyFrom: []string{}, Locations: []SiteLocation{},
 		ClientMaxBody: deploymentBodyLimit(route),
 		HostRedirects: append([]HostRedirect(nil), route.Redirects...),

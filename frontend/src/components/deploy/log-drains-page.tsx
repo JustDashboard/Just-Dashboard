@@ -44,6 +44,7 @@ import {
   drainEndpointProblem,
   drainHealth,
   drainReach,
+  traceLinkProblem,
   type DrainHeaderDraft,
 } from "@/components/deploy/log-drains"
 
@@ -101,7 +102,7 @@ function KindMark({ kind, className }: { kind: LogDrainKind; className?: string 
 }
 
 const ENDPOINT_HINT: Record<LogDrainKind, string> = {
-  otlp: "The OTLP base address, as an exporter takes it: /v1/logs is added unless it is already there.",
+  otlp: "The OTLP base address, as an exporter takes it: /v1/logs, and /v1/traces for traces, are added unless already there.",
   loki: "Loki's address: /loki/api/v1/push is added unless it is already there.",
   http: "Records are POSTed here as application/x-ndjson, gzip-compressed.",
 }
@@ -120,6 +121,9 @@ type Draft = {
   enabled: boolean
   output: boolean
   requests: boolean
+  /** Only an OpenTelemetry drain sends them. */
+  traces: boolean
+  traceUrl: string
   everyProject: boolean
   projects: number[]
   /** Undefined keeps the saved headers on an edit. */
@@ -134,6 +138,8 @@ function emptyDraft(kind: LogDrainKind): Draft {
     enabled: true,
     output: true,
     requests: true,
+    traces: false,
+    traceUrl: "",
     everyProject: true,
     projects: [],
     // No row until one is asked for: a collector on the local network often
@@ -151,6 +157,8 @@ function draftOf(drain: LogDrain): Draft {
     enabled: drain.enabled,
     output: drain.streams.includes("output"),
     requests: drain.streams.includes("requests"),
+    traces: drain.streams.includes("traces"),
+    traceUrl: drain.traceUrl ?? "",
     everyProject: drain.projects.length === 0,
     projects: drain.projects,
   }
@@ -199,12 +207,15 @@ export function LogDrainsPage() {
     const streams: LogDrainStream[] = []
     if (draft.output) streams.push("output")
     if (draft.requests) streams.push("requests")
+    const traces = draft.traces && draft.kind === "otlp"
+    if (traces) streams.push("traces")
     const body = {
       name: draft.name.trim(),
       kind: draft.kind,
       endpoint: draft.endpoint.trim(),
       enabled: draft.enabled,
       streams,
+      ...(traces ? { traceUrl: draft.traceUrl.trim() } : {}),
       projects: draft.everyProject ? [] : draft.projects,
       // Omitted on an edit that did not touch them, so the sealed ones stay.
       headers: draft.headers?.filter((header) => header.name.trim() || header.value),
@@ -385,7 +396,9 @@ export function LogDrainsPage() {
 
 function ready(draft: Draft) {
   if (!draft.name.trim() || !draft.endpoint.trim()) return false
-  if (!draft.output && !draft.requests) return false
+  const traces = draft.traces && draft.kind === "otlp"
+  if (!draft.output && !draft.requests && !traces) return false
+  if (traces && traceLinkProblem(draft.traceUrl)) return false
   if (!draft.everyProject && draft.projects.length === 0) return false
   const headers = draft.headers?.filter((header) => header.name.trim() || header.value) ?? []
   if (headers.some((header) => !header.name.trim() || !header.value)) return false
@@ -638,6 +651,29 @@ function DrainForm({
             checked={draft.requests}
             onCheckedChange={(requests) => patch({ requests })}
           />
+          {draft.kind === "otlp" && (
+            <OptionRow
+              title="Traces"
+              hint="Each request again as a span on /v1/traces — the deployment as its service, the method and route as its name, the status, client and release beside it — under the trace the ingress sends the application, so its own spans join it."
+              checked={draft.traces}
+              onCheckedChange={(traces) => patch({ traces })}
+            >
+              <Field
+                label="Trace link"
+                htmlFor="drain-trace-url"
+                info="Where your tracing service opens a trace, with {traceId} where the id goes. The request console draws it beside each request's trace."
+                error={traceLinkProblem(draft.traceUrl)}
+              >
+                <Input
+                  id="drain-trace-url"
+                  value={draft.traceUrl}
+                  placeholder="https://grafana.example.com/explore?traceId={traceId}"
+                  className="font-mono"
+                  onChange={(event) => patch({ traceUrl: event.target.value })}
+                />
+              </Field>
+            </OptionRow>
+          )}
           <OptionRow
             title="Every project"
             hint="Including the ones created after this drain."

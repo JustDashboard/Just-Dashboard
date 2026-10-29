@@ -14,7 +14,8 @@
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
   logs, the request readings, container lifecycle events, and the three container-output fixes.
 - [`log-drains.md`](log-drains.md) — copying deployments' container output and requests to OpenTelemetry
-  (OTLP), Loki or a JSON-lines endpoint: formats, severity, sealed headers, delivery, retries and status.
+  (OTLP), Loki or a JSON-lines endpoint, and the requests as OTLP trace spans: formats, severity,
+  traces, sealed headers, delivery, retries and status.
 - [`secret-stores.md`](secret-stores.md) — Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager and Azure
   Key Vault connections, the `${{store.NAME/path#KEY}}` reference and each kind's shape of it, when a run
   reads it, what a rollback reads, previews, routes and audit.

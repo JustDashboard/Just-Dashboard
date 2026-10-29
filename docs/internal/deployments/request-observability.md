@@ -106,6 +106,39 @@ client addresses, and leaving it behind after the deployment it described is gon
 data on the host with nothing left to read it. nginx's file is left alone — it is in the host's log
 tree under logrotate's management, which the existing code has never touched.
 
+### Trace context
+
+A deployment's route sends the application a W3C `traceparent` on every request and records the same
+ids beside the request (`DeploymentRoute.Trace`, set by `deploymentRoute` beside `AccessLog`;
+`proxysvc/trace.go`). A client that sent a valid one (`00-<32 hex>-<16 hex>-<2 hex>`) has its trace
+continued — the trace id is its, the span is the ingress's, and its span is recorded as the parent;
+anything else starts a trace. The application's own instrumentation (any OpenTelemetry SDK reads the
+header) makes its spans children of the ingress's, which a drain's `traces` stream exports
+([log drains](log-drains.md#traces)), so a request is one trace from the edge into the code.
+
+Neither proxy has a random-hex primitive of the right sizes, so each builds the ids from what it has:
+
+| Driver | New trace id | Span id | Sent by | Recorded as |
+| --- | --- | --- | --- | --- |
+| Docker Caddy | `{http.request.uuid}` with its dashes taken out by a `map` regex | its last 16 digits | `request_header Traceparent "00-{jd_trace}-{jd_span}-01"`, first in the route's handling | `log_append trace_id`, `span_id`, `parent_span_id` fields of the JSON entry |
+| Host nginx | `$request_id` (32 random hex) | its second half | `proxy_set_header traceparent` in every proxied location, from two `map`s on `$http_traceparent` | `trace=… span=… parent=…` after the timed log format's fields |
+
+On Caddy the header is set on the request itself rather than the upstream's copy, so a sign-in check
+through `forward_auth` carries the same trace, and first in the handling, so a request the fence
+refuses is recorded with its trace too. Caddy logs the request as it arrived and evaluates a `map`
+when its output is first read — `log_append` reads at the end of the request, after `request_header`
+replaced the client's header — so the client's `traceparent` is copied into a variable (`vars`, which
+stores the value it reads) before anything is replaced, and the map reads that. `log_append` is Caddy
+2.8's; an older ingress (an operator's own) is asked `caddy version` once per container
+(`dockerCaddy.recordsTraces`) and serves the route without the trace rather than refusing the whole
+Caddyfile. nginx has had `$request_id` since 1.11. The nginx parser reads the rendered header back as
+`SiteSpec.Trace`, and a `traceparent` header somebody set by hand on a Proxy site stays that site's.
+
+`accesslog` reads the ids into `Entry.TraceID`, `SpanID` and `ParentSpanID` from either spelling,
+keeping only 32 and 16 lowercase hex characters that are not all zeros, so a placeholder or another
+format's field is no context rather than a wrong one. A route rendered before this has none until its
+next deploy; nothing rewrites it in place.
+
 ### Reading
 
 An access log has no index. It is append-only and time-ordered, so the only way to answer "the last
@@ -563,6 +596,11 @@ the Metrics page's deploy colour), a container exit that was not clean or an OOM
 restart or a start (warning) — a clean exit is the other half of a release going live or of somebody
 stopping it, and is not marked. A spike of red with a deploy mark at its foot is a different
 afternoon from the same spike with none.
+An opened request names its **Trace** — the id the ingress sent the application — and, when a log
+drain exports this project's traces and names where its service opens one, a link to it there
+(`traceLinkFor` in `log-drains.ts`: the first enabled drain with the `traces` stream that reaches the
+project and has a trace link; the console reads the drains once). A request the ingress sent no
+trace with has none to name.
 A request opens in place on what was written while it was in flight (`request-lines.tsx`):
 **Lines from this request**, the container's lines from its arrival (the answer's time less its
 duration, less a second) to a second after it was answered, labelled *approximate* — the ingress
@@ -760,6 +798,16 @@ the verbs that change something step forward in weight.
 ```bash
 scripts/test-changed.sh
 ```
+
+The trace context: `proxysvc/trace_test.go` (both renderers, first in Caddy's handling, nothing for a
+route with no application, the nginx file read back as traced, the Caddy version gate),
+`accesslog_test.go` (both spellings read, the junk refused, the client class),
+`TestLiveDockerCaddySendsAndRecordsATraceparent` (`JD_DEPLOY_LIVE=1`, as root: a real
+`caddy:2-alpine` ingress in front of `traefik/whoami`, which answers with the headers it received —
+a new trace and a continued one, each recorded with the ids the application saw, the client's span
+as the parent), `TestLiveDeploymentRouteTracesOnNginx` (the host's nginx, unprivileged, the same two
+requests) and `TestLiveDockerCaddyServesRouteRules`, whose route is traced so the directives are
+checked inside the route block a fence puts the handling in.
 
 `internal/accesslog` covers both formats, the junk that is not either, the filter, nearest-rank
 percentiles, facet error counts, histogram coverage of the requested window, each column's bytes

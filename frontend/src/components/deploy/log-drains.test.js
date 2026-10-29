@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { drainEndpointProblem, drainHealth, drainReach } from "./log-drains"
+import {
+  drainEndpointProblem,
+  drainHealth,
+  drainReach,
+  streamsPhrase,
+  traceLinkFor,
+  traceLinkProblem,
+} from "./log-drains"
 
 describe("drainEndpointProblem", () => {
   test("a header never goes over plain http to another machine", () => {
@@ -77,5 +84,67 @@ describe("drainHealth", () => {
         status: { ...base, shipped: 9, dropped: 4, lastSuccessAt: "2026-10-26T10:00:00Z" },
       }).tone,
     ).toBe("warning")
+  })
+})
+
+describe("traces", () => {
+  test("the streams are named in one phrase", () => {
+    expect(streamsPhrase(["output", "requests", "traces"])).toBe("output, requests and traces")
+    expect(streamsPhrase(["requests", "traces"])).toBe("requests and traces")
+    expect(streamsPhrase(["traces"])).toBe("traces")
+    expect(streamsPhrase(["output"])).toBe("container output")
+    expect(drainReach({ streams: ["traces"], projects: [] }, [])).toBe("traces of every project")
+  })
+
+  test("a trace link is an address with the id's place in it", () => {
+    expect(traceLinkProblem("")).toBeUndefined()
+    expect(
+      traceLinkProblem("https://grafana.example.com/explore?traceId={traceId}"),
+    ).toBeUndefined()
+    expect(traceLinkProblem("https://grafana.example.com/explore")).toBe(
+      "Put {traceId} where the trace's id goes.",
+    )
+    expect(traceLinkProblem("javascript:alert('{traceId}')")).toBe(
+      "The link is an http or https address.",
+    )
+    expect(traceLinkProblem("https://x.example/{traceId} y")).toBe(
+      "The link is an http or https address.",
+    )
+  })
+
+  test("a request's trace opens where the first drain exporting the project's traces says", () => {
+    const trace = "4bf92f3577b34da6a3ce929d0e0e4736"
+    const drains = [
+      { name: "logs", enabled: true, streams: ["output"], projects: [], traceUrl: "" },
+      {
+        name: "Tempo",
+        enabled: false,
+        streams: ["traces"],
+        projects: [],
+        traceUrl: "https://off.example/{traceId}",
+      },
+      {
+        name: "Honeycomb",
+        enabled: true,
+        streams: ["traces"],
+        projects: [9],
+        traceUrl: "https://ui.honeycomb.io/t/{traceId}",
+      },
+      {
+        name: "Grafana",
+        enabled: true,
+        streams: ["requests", "traces"],
+        projects: [],
+        traceUrl: "https://grafana.example.com/explore?traceId={traceId}",
+      },
+    ]
+    expect(traceLinkFor(drains, 7, trace)).toEqual({
+      href: `https://grafana.example.com/explore?traceId=${trace}`,
+      label: "Open in Grafana",
+    })
+    expect(traceLinkFor(drains, 9, trace)?.label).toBe("Open in Honeycomb")
+    expect(traceLinkFor(drains, 7, undefined)).toBeUndefined()
+    expect(traceLinkFor(drains, 7, "not-a-trace")).toBeUndefined()
+    expect(traceLinkFor(undefined, 7, trace)).toBeUndefined()
   })
 })

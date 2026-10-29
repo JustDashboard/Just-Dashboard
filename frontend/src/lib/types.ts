@@ -3829,7 +3829,8 @@ export type DeploymentCommitStatus = {
 
 /** Where deployments' output and requests are copied to: an OTLP collector, a Loki, or a JSON-lines endpoint. */
 export type LogDrainKind = "otlp" | "loki" | "http"
-export type LogDrainStream = "output" | "requests"
+/** Traces are the requests again, as OpenTelemetry spans; only an `otlp` drain takes them. */
+export type LogDrainStream = "output" | "requests" | "traces"
 
 export type LogDrain = {
   id: number
@@ -3840,6 +3841,8 @@ export type LogDrain = {
   streams: LogDrainStream[]
   /** Empty sends every project, including ones created later. */
   projects: number[]
+  /** Where the drain's service shows a trace, with `{traceId}` for the id; the request console links to it. */
+  traceUrl?: string
   /** The headers the drain sends, by name; their values are sealed and never read back. */
   headerNames: string[]
   createdAt: string
@@ -7932,6 +7935,14 @@ export type RequestEntry = {
   /** Absent where the format carries no duration — nginx's stock `combined` does not. */
   durationMs?: number
   tls?: boolean
+  /**
+   * The W3C trace context the ingress sent the application with this request
+   * (`traceparent`), and the client's span it continued. Absent on a route
+   * rendered before the ingress sent one, and on every Proxy site.
+   */
+  traceId?: string
+  spanId?: string
+  parentSpanId?: string
 }
 
 export type RequestFacet = {

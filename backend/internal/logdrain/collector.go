@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -21,6 +22,9 @@ type Target struct {
 	// Route names the environment's request record, the ingress route
 	// deploy.RouteNameFor gives it; empty when it has no domain.
 	Route string
+	// Release is the number of the release live there now, which the spans
+	// read from its record carry.
+	Release int64
 }
 
 // Catalogue lists the environments that exist now.
@@ -83,6 +87,9 @@ type Manager struct {
 	shippers  map[int64]*shipper
 	followers map[string]*reader
 	tailers   map[int64]*reader
+	// targets is each environment as the last pass listed it, so a reader
+	// started before a release went live names the release live now.
+	targets   map[int64]Target
 	reconcile chan struct{}
 }
 
@@ -101,7 +108,7 @@ func NewManager(store *Store, catalogue Catalogue, containers ContainerSource, r
 		store: store, catalogue: catalogue, containers: containers, requests: requests, log: log,
 		client: newClient(), host: hostName(), started: time.Now(),
 		shippers: map[int64]*shipper{}, followers: map[string]*reader{}, tailers: map[int64]*reader{},
-		reconcile: make(chan struct{}, 1),
+		targets: map[int64]Target{}, reconcile: make(chan struct{}, 1),
 	}
 }
 
@@ -204,15 +211,32 @@ func (m *Manager) Test(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	record := Record{
-		At: time.Now().UTC(), Project: "just-dashboard", Environment: "test", Stream: StreamOutput, IOStream: "stdout",
-		Message: "Test record from Just Dashboard: the drain " + row.Name + " delivers here.",
+	now := time.Now().UTC()
+	// A drain that takes logs is sent a line, and one that takes traces a
+	// span, each through the path its records go to.
+	if slices.ContainsFunc(row.Streams, func(stream string) bool { return stream != StreamTraces }) {
+		record := Record{
+			At: now, Project: "just-dashboard", Environment: "test", Stream: StreamOutput, IOStream: "stdout",
+			Message: "Test record from Just Dashboard: the drain " + row.Name + " delivers here.",
+		}
+		if err := deliverBatch(ctx, m.client, row.Kind, row.Endpoint, row.headers, []Record{record}, m.host); err != nil {
+			return err
+		}
 	}
-	return deliverBatch(ctx, m.client, row.Kind, row.Endpoint, row.headers, []Record{record}, m.host)
+	if slices.Contains(row.Streams, StreamTraces) && row.Kind == KindOTLP {
+		span := Record{
+			At: now, Project: "just-dashboard", Environment: "test", Stream: StreamTraces,
+			Request: &Request{Method: "GET", Path: "/just-dashboard/test", Status: 200, DurationMs: 1, Timed: true,
+				TraceID: NewTraceID(), SpanID: NewSpanID(), ClientClass: "client"},
+		}
+		return deliverSpans(ctx, m.client, row.Endpoint, row.headers, []Record{span}, m.host)
+	}
+	return nil
 }
 
-// wanted is what the drains ask to be read: per stream, every project
-// (nil) or the projects named.
+// wanted is what the drains ask to be read: per source, every project (all)
+// or the projects named. The request record is read for the requests stream
+// and the traces stream alike — a span is a request read once.
 func (m *Manager) wanted() (output, requests map[int64]bool, allOutput, allRequests bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -230,7 +254,7 @@ func (m *Manager) wanted() (output, requests map[int64]bool, allOutput, allReque
 			if stream == StreamOutput && all {
 				allOutput = true
 			}
-			if stream == StreamRequests && all {
+			if stream != StreamOutput && all {
 				allRequests = true
 			}
 		}
@@ -281,6 +305,9 @@ func (m *Manager) reconcileSources(ctx context.Context) {
 	}
 
 	m.mu.Lock()
+	if len(targets) > 0 {
+		m.targets = targets
+	}
 	var stopping []*reader
 	for id, follower := range m.followers {
 		if _, ok := wantedContainers[id]; !ok {
@@ -378,11 +405,19 @@ func (m *Manager) tail(parent context.Context, target Target) *reader {
 			entries, next, err := m.requests.After(ctx, target.Route, cursor, 2000)
 			if err == nil {
 				cursor = next
+				release := m.liveRelease(target)
 				for _, entry := range entries {
-					m.route(Record{
+					request := requestOf(entry)
+					record := Record{
 						At: entry.At(), ProjectID: target.ProjectID, Project: target.Project, Environment: target.Environment,
-						Stream: StreamRequests, Request: requestOf(entry),
-					})
+						Release: release, Stream: StreamRequests, Request: request,
+					}
+					m.route(record)
+					// The same request as a span, sharing its ids with the
+					// line, so either opens the other.
+					span := *request
+					record.Stream, record.Request = StreamTraces, &span
+					m.route(record)
 				}
 			}
 			select {
@@ -395,15 +430,34 @@ func (m *Manager) tail(parent context.Context, target Target) *reader {
 	return r
 }
 
+// liveRelease is the release live in the target's environment as the last
+// pass listed it.
+func (m *Manager) liveRelease(target Target) int64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if current, ok := m.targets[target.EnvironmentID]; ok {
+		return current.Release
+	}
+	return target.Release
+}
+
 func requestOf(entry accesslog.Entry) *Request {
 	duration, timed := entry.Duration()
-	return &Request{
+	request := &Request{
 		Method: entry.Method, Path: entry.Path, Query: entry.Query, Host: entry.Host, Proto: entry.Proto,
 		// To the microsecond, which is what the ingress measures; the rest
 		// is a float's noise in every format that prints it.
 		Status: entry.Status, Size: entry.Size, DurationMs: math.Round(duration*1000) / 1000, Timed: timed,
-		RemoteIP: entry.RemoteIP, UserAgent: entry.UserAgent, Referer: entry.Referer,
+		RemoteIP: entry.RemoteIP, UserAgent: entry.UserAgent, Referer: entry.Referer, TLS: entry.TLS,
+		TraceID: entry.TraceID, SpanID: entry.SpanID, ParentSpanID: entry.ParentSpanID,
+		ClientClass: accesslog.ClientClass(entry),
 	}
+	// A route that sent the application no traceparent recorded none; the
+	// request is still a span, of a trace of its own.
+	if request.TraceID == "" || request.SpanID == "" {
+		request.TraceID, request.SpanID, request.ParentSpanID = NewTraceID(), NewSpanID(), ""
+	}
+	return request
 }
 
 func shortID(id string) string {

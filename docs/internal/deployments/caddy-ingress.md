@@ -57,6 +57,13 @@ client addresses. Host nginx routes have always written `/var/log/nginx/<route>.
 this driver was silent. See
 [`request-observability.md`](request-observability.md).
 
+A deployment's route also sends the application a W3C `traceparent` and records it: a `map` that
+makes a trace id of `{http.request.uuid}`, a `vars` copy of the client's header, a second `map` that
+continues a valid one, `request_header Traceparent` first in the handling, and three `log_append`
+fields. `log_append` is Caddy 2.8's, so an ingress older than that (`caddy version`, asked once per
+container) serves the route without the trace. See
+[trace context](request-observability.md#trace-context).
+
 ## Request body limit
 
 A managed route carries the plan's `runtime.maxRequestBodyMb` as `request_body { max_size <N>MB }` when

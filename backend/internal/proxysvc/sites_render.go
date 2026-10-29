@@ -206,13 +206,25 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		renderPool(l, spec)
 		wrote = true
 	}
+	if spec.Trace {
+		if wrote {
+			l.blank()
+		}
+		renderNginxTraceMaps(l, spec)
+		wrote = true
+	}
 	if spec.AccessLog && spec.timedLog() {
 		if wrote {
 			l.blank()
 		}
 		l.add("# nginx's combined format with the time taken added, which is what")
 		l.add("# the dashboard's traffic pages read latency from.")
-		l.add("log_format %s %s;", spec.logFormatName(), timedLogFormat)
+		format := timedLogFormat
+		if spec.Trace {
+			// The trace context the application was sent, after the rest.
+			format = strings.TrimSuffix(format, "'") + nginxTraceLogFields(spec) + "'"
+		}
+		l.add("log_format %s %s;", spec.logFormatName(), format)
 		wrote = true
 	}
 	if spec.Maintenance != nil {
@@ -690,6 +702,9 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	if loc.WebSockets {
 		l.add("        proxy_set_header Upgrade    $http_upgrade;")
 		l.add("        proxy_set_header Connection $%s;", spec.connectionVar())
+	}
+	if spec.Trace {
+		renderNginxTraceHeader(l, spec)
 	}
 	renderRequestHeaders(l, spec)
 	renderClientCertHeaders(l, spec)

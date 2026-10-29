@@ -13114,6 +13114,9 @@
               "null"
             ]
           },
+          "traceUrl": {
+            "type": "string"
+          },
           "updatedAt": {
             "format": "date-time",
             "type": "string"
@@ -13218,6 +13221,9 @@
               "array",
               "null"
             ]
+          },
+          "traceUrl": {
+            "type": "string"
           }
         },
         "title": "logdrain.Write",

@@ -1877,6 +1877,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	// before it name only the account, as they always did.
 	{"audit_log", "key_id", "INTEGER NOT NULL DEFAULT 0"},
 	{"audit_log", "key_name", "TEXT NOT NULL DEFAULT ''"},
+	// A drain that exports traces may name where its service shows one, a
+	// link the request console draws beside a request's trace id. Drains
+	// made before had no traces to link to.
+	{"deploy_log_drains", "trace_url", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on
