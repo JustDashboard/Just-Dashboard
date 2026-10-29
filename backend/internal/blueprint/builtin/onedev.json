@@ -1,0 +1,126 @@
+{
+  "id": "onedev",
+  "version": "1.0.0",
+  "name": "OneDev",
+  "category": "tool",
+  "profile": "web",
+  "description": "A Git server with CI/CD, kanban boards, a package registry and code search in one Java application. Its built-in database and every repository live on the data volume. No Docker socket is given to it, so CI jobs run on agents or a Kubernetes cluster you connect, not on this server's Docker.",
+  "iconId": "git",
+  "docsUrl": "https://docs.onedev.io/installation-guide/run-as-docker-container",
+  "access": {
+    "kind": "credentials",
+    "username": "admin",
+    "secretVariable": "initial_password",
+    "note": "OneDev creates its administrator from the environment on the first start: sign in as admin with the generated initial_password from the Variables tab. It is read only while no administrator exists, so change the password inside OneDev afterwards rather than rotating the variable. Git over SSH listens on port 6611 inside the container and is not published; clone over HTTPS, or publish 6611 under Storage and network settings."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/theonedev/onedev",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "1dev/server:17.0.1",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "OneDev builds clone URLs and links in mail from this address."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 6610,
+      "protocol": "tcp",
+      "purpose": "The web interface, the API and Git over HTTPS",
+      "exposure": "proxy",
+      "primary": true
+    },
+    {
+      "name": "ssh",
+      "internal": 6611,
+      "protocol": "tcp",
+      "purpose": "Git over SSH, not published by default",
+      "exposure": "internal"
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/opt/onedev",
+      "purpose": "The built-in database, every repository, build logs and artifacts",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 2048,
+    "minMemoryMb": 1024
+  },
+  "checks": [
+    {
+      "name": "Sign-in page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/~login",
+      "timeoutSeconds": 300
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "initial_user",
+        "value": "admin"
+      },
+      {
+        "kind": "set_variable",
+        "name": "initial_email",
+        "value": "admin@{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "initial_server_url",
+        "value": "https://{{input.domain}}"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "OneDev upgrades its database on the first start of a newer image and keeps a copy of the old one; take a backup first.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "git.example.test"
+      },
+      "digest": "sha256:87ceed062b591c36024034d7a2381351c9c33299074784a2fdff8edb5d36af4b"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "admin-password",
+      "variable": "initial_password",
+      "label": "Administrator password",
+      "length": 32,
+      "description": "The first password of the admin account, applied once when OneDev creates it."
+    }
+  ]
+}

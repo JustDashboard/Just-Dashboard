@@ -271,16 +271,8 @@ func TestBackupRunFromTheSiteStartsTheJobAndSaysItCameFromTheAccount(t *testing.
 	if err != nil || out != "started backup job nightly" {
 		t.Fatalf("run = %q, %v", out, err)
 	}
-	deadline := time.Now().Add(20 * time.Second)
-	var runs []*backups.Run
-	for time.Now().Before(deadline) {
-		runs, _ = s.modules.backupStore.Runs(t.Context(), job.ID, 5)
-		if len(runs) == 1 && runs[0].Status != backups.StatusRunning {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if len(runs) != 1 || runs[0].Status != backups.StatusSuccess || runs[0].Trigger != "account_link" {
+	runs := settledBackupRuns(t, s, job.ID, 1)
+	if runs[0].Status != backups.StatusSuccess || runs[0].Trigger != "account_link" {
 		t.Fatalf("runs = %+v", runs)
 	}
 	if _, err := newAccountHost(s).RunBackup(t.Context(), siteActor, 9999); err == nil {
@@ -292,14 +284,33 @@ func TestBackupRunFromTheSiteStartsTheJobAndSaysItCameFromTheAccount(t *testing.
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("run now = %d %s", w.Code, w.Body)
 	}
-	for time.Now().Before(deadline) {
-		if runs, _ = s.modules.backupStore.Runs(t.Context(), job.ID, 5); len(runs) == 2 && runs[0].Status != backups.StatusRunning {
-			break
+	if runs = settledBackupRuns(t, s, job.ID, 2); runs[0].Trigger != "manual" {
+		t.Fatalf("runs after the button = %+v", runs)
+	}
+}
+
+// settledBackupRuns waits for a job's runs to number want with the newest
+// finished, and for the runner to have let the job go. The run's row says
+// success before the runner has pruned and released the job, so a Run now
+// pressed on the row alone could be refused as already running, and a test
+// that ended there would close the store and remove the job's directories
+// under a run still working in them. Each wait has its own deadline: under
+// load a run's archive and prune take what they take, and the second wait is
+// not owed what the first one spent.
+func settledBackupRuns(t *testing.T, s *Server, jobID int64, want int) []*backups.Run {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		runs, err := s.modules.backupStore.Runs(t.Context(), jobID, 5)
+		if err == nil && len(runs) == want && runs[0].Status != backups.StatusRunning &&
+			!s.modules.backupRunner.IsRunning(jobID) {
+			return runs
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("waiting for %d finished runs: %+v (error %v, runner holds the job: %v)",
+				want, runs, err, s.modules.backupRunner.IsRunning(jobID))
 		}
 		time.Sleep(20 * time.Millisecond)
-	}
-	if len(runs) != 2 || runs[0].Trigger != "manual" {
-		t.Fatalf("runs after the button = %+v", runs)
 	}
 }
 

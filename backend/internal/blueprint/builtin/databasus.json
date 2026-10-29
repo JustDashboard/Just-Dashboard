@@ -1,0 +1,89 @@
+{
+  "id": "databasus",
+  "version": "1.0.0",
+  "name": "Databasus",
+  "category": "database",
+  "profile": "web",
+  "description": "Scheduled backups of PostgreSQL, MySQL, MariaDB and MongoDB databases to local storage, S3, Google Drive, SFTP and others, with retention, encryption, restore and notifications to Slack, Discord, Telegram or e-mail. It reaches each database over the network, so one on this host must be reachable from its container.",
+  "iconId": "database",
+  "docsUrl": "https://databasus.com/installation",
+  "access": {
+    "kind": "setup",
+    "note": "Databasus starts with no account: the first account signed up administers the instance. Open the address yourself right after deploying and create it before anyone else can."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://github.com/databasus/databasus",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "databasus/databasus:v3.64.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address the interface is opened at; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 4005,
+      "protocol": "tcp",
+      "purpose": "The web interface and its API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/databasus-data",
+      "purpose": "Its own database, settings and the backups kept on local storage",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 1024,
+    "minMemoryMb": 512
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/v1/system/health",
+      "timeoutSeconds": 180
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Databasus migrates its own database on start; back up the data volume, which also holds local backups, before updating.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:16c4ef81969b9fb038aa7211033488bdbec272f1d2d43bb433416dcc53c60ad4"
+    }
+  ]
+}

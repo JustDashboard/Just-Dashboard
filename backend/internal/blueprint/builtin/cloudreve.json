@@ -1,0 +1,89 @@
+{
+  "id": "cloudreve",
+  "version": "1.0.0",
+  "name": "Cloudreve",
+  "category": "http",
+  "profile": "web",
+  "description": "A cloud drive: upload, share and preview files in the browser or over WebDAV, with per-user quotas, share links, offline downloads and thumbnails for images, video and documents. One container with its SQLite database and the stored files on its data volume.",
+  "iconId": "file",
+  "docsUrl": "https://docs.cloudreve.org/en/overview/deploy/docker",
+  "access": {
+    "kind": "setup",
+    "note": "Cloudreve starts with no account and sign-up open: the first account registered becomes the administrator. Open the address yourself right after deploying and register before anyone else can; afterwards the administrator can close registration in the dashboard's settings."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "GPL-3.0",
+    "upstreamUrl": "https://github.com/cloudreve/cloudreve",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "cloudreve/cloudreve:4.19.1",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address share links are built from; it can be changed in Cloudreve's settings."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 5212,
+      "protocol": "tcp",
+      "purpose": "The web interface, the API and WebDAV",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/cloudreve/data",
+      "purpose": "The SQLite database, the configuration file and every stored file",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 1024,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Ping endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/v4/site/ping",
+      "timeoutSeconds": 180
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Cloudreve migrates its database on start and does not migrate back; take a backup before moving to a newer image.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:80886201b2fd25a3262e539380dbb14885371f3556d232097bae12445b1beab4"
+    }
+  ]
+}
