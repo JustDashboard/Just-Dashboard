@@ -101,6 +101,8 @@ free.
 - Push to deploy, plus pull-request previews only your tailnet can reach
 - Immutable releases, one-click rollback and health-gated cutover
 - Up to eight replicas of a stateless release behind one route, cut over and rolled back together
+- Canary releases: a new release takes a share of the requests beside the live one, read side by side,
+  and is removed if it does worse or promoted when it does not
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Migrations rehearsed on a throwaway copy of the database, restored from its backup, before production
@@ -472,6 +474,8 @@ jd runs shop / jd releases shop
 jd rollback shop                                  # to the release before the live one, or --to <id>
 jd rollback shop --instant                        # straight back to the release kept warm after the last deploy
 jd keep shop                                      # keep the new release now; the warm one is retired
+jd canary status shop                             # a canary's window and both releases' requests, 5xx and p95
+jd canary promote shop / jd canary abort shop     # decide a canary now; abort leaves the live release untouched
 jd promote shop --wait                            # staging's live release into production, as the same image
 jd promote shop --from-preview 42 --wait          # PR #42's approved preview into staging, as the same image
 jd maintenance shop on --bypass 10.0.0.0/8        # the switch acts at once; the bypass list with the next deploy
