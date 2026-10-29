@@ -260,3 +260,25 @@ func TestSleepingRouteKeepsDroppingTheDashboardsCookies(t *testing.T) {
 		t.Fatalf("nginx's retry keeps the dashboard's cookie:\n%s", nginx)
 	}
 }
+
+// A traced route keeps the trace on a request held for a wake: Caddy sets
+// the header on the request before the asleep matcher, and nginx's @jd_wake
+// is a location of the route, which sends it like every other.
+func TestSleepingRouteKeepsItsTrace(t *testing.T) {
+	route := sleepingRoute()
+	route.Trace = true
+	content, err := renderDockerCaddyRoute(route, "http://172.18.0.5:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	header, asleep := strings.Index(content, "request_header Traceparent"), strings.Index(content, "@jd_asleep file")
+	if header < 0 || asleep < 0 || header > asleep {
+		t.Fatalf("the trace is set after the wake, or not at all:\n%s", content)
+	}
+	nginx := mustRender(t, deploymentSiteSpec(route, ""))
+	wake := nginx[strings.Index(nginx, "location @jd_wake {"):]
+	wake = wake[:strings.Index(wake, "\n    }\n")]
+	if !strings.Contains(wake, "proxy_set_header traceparent") {
+		t.Fatalf("nginx's retry drops the trace:\n%s", nginx)
+	}
+}
