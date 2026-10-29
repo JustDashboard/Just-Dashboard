@@ -102,8 +102,8 @@ var OperatorTools = []Tool{
 	},
 	{
 		Name: ToolReleaseMetrics,
-		Description: "Read the live release's containers' CPU and memory now, their limits, restarts and state, and the right-sizing verdict over the recorded history: " +
-			"whether the limits are too tight or too loose and what they should be." + approved,
+		Description: "Read the live release's containers' state, health, start time and memory limit, and the right-sizing verdict over the recorded history: " +
+			"CPU and memory at p95 and peak against the limits, OOM kills and throttling, whether the limits are too tight or too loose, and what they should be." + approved,
 		Schema: operatorSchema(nil, map[string]any{}),
 	},
 	{
