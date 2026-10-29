@@ -556,6 +556,11 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 }
 
 func (s *Service) RestoreDeploymentRoute(ctx context.Context, snapshot DeploymentRouteSnapshot) error {
+	if snapshot.Driver == TailnetGateDriver {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.restoreGateSnapshot(ctx, snapshot)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if snapshot.Driver == "docker-caddy" {
@@ -578,6 +583,13 @@ func (s *Service) RestoreDeploymentRoute(ctx context.Context, snapshot Deploymen
 // cutover. It is intentionally name-scoped so preview cleanup cannot select
 // or remove a route owned by another feature.
 func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error {
+	// A tailnet-only environment's gate goes with its route, from the gate
+	// Caddy that holds it; on nginx it is the file of the route's own name.
+	if tailnetGateNameRe.MatchString(name) {
+		if err := s.removeGateContainerRoute(ctx, name); err != nil {
+			return err
+		}
+	}
 	if edge, err := s.dockerCaddy(ctx); err != nil {
 		return err
 	} else if edge != nil {
