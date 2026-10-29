@@ -4,7 +4,9 @@ An environment can exist only on the tailnet: published on this host's tailnet a
 request preview is ([preview isolation](preview-isolation.md#tailnet-only-addresses)), with no public
 domain and no public certificate. It can also name who may open it — Tailscale logins and ACL tags —
 and then every request is checked against tailscaled's own answer about who sent it before the
-application sees it.
+application sees it. Either way, and for every preview's address too, the request passes through the
+dashboard's own front on loopback first, which keeps the dashboard's session cookie from the
+application ([below](#the-dashboards-session-cookie)).
 
 ## The plan
 
@@ -39,9 +41,8 @@ is audited as `deploy.configuration.update` with the list in its detail.
 The address is a row of `deploy_preview_addresses`, from the previews' own range, 21000–21999, under
 their rules: `AllocateTailnetAddress` is `AllocatePreviewAddress` for an environment that is not a
 preview, called by activation the first time a tailnet-only release is published, and the row is kept
-from release to release. Every served port is stepped around, and for an environment that names its
-visitors so is every port something on the host already listens on at `127.0.0.1`, since its gate
-answers there. The startup sweep, the withdrawals that act only on a mapping the row vouches for, and
+from release to release. Every served port is stepped around, and so is every port something on the host
+already listens on at `127.0.0.1`, since the address's front answers there. The startup sweep, the withdrawals that act only on a mapping the row vouches for, and
 the uninstall's withdrawal treat it exactly as a preview's (`preview_tailnet.go`).
 
 `tailscale serve` decides the scheme: `https://<node>.<tailnet>.ts.net:<port>` with the tailnet's own
@@ -55,46 +56,98 @@ release to try again.
 
 ## The gate
 
-Without a list, tailscale serve maps the port straight to the container's loopback publication, as for
-a preview. With one it maps to the environment's **tailnet gate**, a route that answers on
-`127.0.0.1:<the same port number>` and nowhere else, and that asks the dashboard about every request
-before forwarding it to the container (`proxysvc/tailnet_gate.go`):
+tailscale serve never maps a tailnet address straight to the container. It maps the port to the
+environment's **front**, a route that answers on `127.0.0.1:<the same port number>` and nowhere else
+and forwards to the container's loopback publication, taking the dashboard's session cookie out of the
+request on the way ([below](#the-dashboards-session-cookie)). Without a list that is all the front does,
+and the tailnet is the fence, as for a preview. With one the front is the environment's **tailnet
+gate**, and asks the dashboard about every request before forwarding it (`proxysvc/tailnet_gate.go`,
+`TailnetGateRoute.Check`):
 
 - **nginx**, where this host's deployment routes are host nginx's (no Docker Caddy ingress found,
   named or about to be started, and nginx installed): a server `listen 127.0.0.1:<port>`, with
   `set_real_ip_from 127.0.0.1; real_ip_header X-Forwarded-For` so `$remote_addr` is the tailnet address
   tailscaled forwarded (tailscaled's serve drops whatever the visitor sent in that header and sets its
-  own), `auth_request` to an internal location that asks the whois route below, `auth_request_set`
-  for the answer, and `error_page 403`/`500` to short plain answers — an `auth_request` that is neither
-  2xx, 401 nor 403 is nginx's 500, which the gate answers as 503. The file is the environment's own
-  route name, `just-dashboard-env-<id>.conf`, marked `# Tailnet gate:`, and its request record is the
-  same `/var/log/nginx/<route>.access.log` in the timed format with `tl=<login>` after it.
+  own), the cookie maps, and `proxy_set_header Cookie` with what they leave. A gate adds
+  `auth_request` to an internal location that asks the whois route below, `auth_request_set` for the
+  answer, and `error_page 403`/`500` to short plain answers — an `auth_request` that is neither 2xx,
+  401 nor 403 is nginx's 500, which the gate answers as 503; a front sends `X-Tailnet-Login` and
+  `X-Tailnet-User` empty, whatever the visitor claimed. The file is the environment's own route name,
+  `just-dashboard-env-<id>.conf`, marked `# Tailnet gate:`, and its request record is the same
+  `/var/log/nginx/<route>.access.log` in the timed format, with `tl=<login>` after it on a gate.
 - **The dashboard's own loopback Caddy** everywhere else, `just-dashboard-tailnet`: `caddy:2-alpine` on
   the host's network (label `com.just-dashboard.tailnet-gate=true`), its Caddyfile at
   `/etc/just-dashboard/tailnet/Caddyfile` importing `/config/just-dashboard/routes/*.caddy`, its admin
   API a unix socket inside its own volume, automatic HTTPS off, and tailscaled's `X-Forwarded-For`
   trusted from loopback so `{client_ip}` is the tailnet address. Each route is `http://:<port>` with
-  `bind 127.0.0.1`, `forward_auth` to the whois route, `copy_headers` of the answer, a `vars` mark set
-  once the check let the request through so that `handle_errors` answers 503 only for a check that
-  could not be made (the application being down keeps its own 502), and `log_append tailnet_login`
-  for the request record, which the Logs page reads from this container. It is started the first time
-  a deployment needs it — `ensureGateContainer`, from its stopped container when there is one — and
-  never asked of the operator.
+  `bind 127.0.0.1`, the visitor's `X-Tailnet-Login`/`X-Tailnet-User` removed, and a `reverse_proxy`
+  whose two `header_up Cookie` replacements take the dashboard's cookies out. A gate adds
+  `forward_auth` to the whois route, `copy_headers` of the answer, a `vars` mark set once the check let
+  the request through so that `handle_errors` answers 503 only for a check that could not be made (the
+  application being down keeps its own 502), and `log_append tailnet_login` for the request record,
+  which the Logs page reads from this container — a front's record too. It is started the first time a
+  deployment or a preview needs it — `ensureGateContainer`, from its stopped container when there is
+  one — and never asked of the operator.
 
 The Docker Caddy ingress cannot be the gate: it runs in a network of its own, where neither tailscaled's
 loopback forward nor the dashboard's loopback API reaches, and it publishes only 80 and 443. Serving the
 gate on its public listener, fenced by address, would put a tailnet-only application on a routable
 address, which is what invariant 7 forbids.
 
-Activation writes the gate before the mapping moves to it (`applyTailnetGate`), verifies it, and records
-`tailnetGate {name, listen, allowed, applied, verified}` in the activation evidence. A host whose proxy
-cannot gate, or a backend that does not answer on `127.0.0.1` (`tailnetGateAPI`), fails the step as
-`tailnet_gate_unavailable`; a gate that cannot be written or verified, or whose port is taken, as
-`tailnet_gate_failed`. Either way the candidate stops, nothing is published, and a gate that was half
-written is put back from its snapshot (driver `tailnet-caddy` for the gate Caddy). A failed release's
-mapping is pointed back at the gate when the predecessor was gated, at its container when it was not.
-A release without the list removes a gate left in front of an older one (`dropTailnetGate`), and route
-removal (`RemoveDeploymentRoute`, a preview's cleanup) takes the gate with it.
+Activation writes the front before the mapping moves to it (`applyTailnetGate`), verifies it, and
+records `tailnetGate {name, listen, allowed, applied, verified}` in the activation evidence (`allowed` 0
+for a front). A host whose proxy cannot gate, or a backend that does not answer on `127.0.0.1`
+(`tailnetGateAPI`), fails a gated step as `tailnet_gate_unavailable`; a front or gate that cannot be
+written or verified, or whose port is taken, fails it as `tailnet_gate_failed`. Either way the candidate
+stops, nothing is published, and a front that was half written is put back from its snapshot (driver
+`tailnet-caddy` for the gate Caddy). A failed release's mapping is pointed back at what reached the
+predecessor (`predecessorFronted`): the front, which the recovery has just restored, when its snapshot
+says one stood there, and the predecessor's container when that release was published before every
+address had a front. A release without the list replaces the gate with a front; the front goes only
+with the address — a release that leaves the tailnet (`leaveTailnet`), route removal
+(`RemoveDeploymentRoute`, a preview's cleanup). Only an executor built without the proxy's half of a
+front (`TailnetGateProxy`; unit tests build one) publishes an ungated address straight to its container.
+
+An address an earlier release published straight to its container is moved behind its front when the
+dashboard starts, after the sweep and before the engine (`FrontTailnetAddresses`, from
+`Server.startDeployEngine`): the front is written for the container the row's mapping reaches, verified,
+the mapping moved to it and recorded, audited as `deploy.tailnet.fronted` (actor `system`). One whose
+front cannot be written, verified, published or recorded keeps its mapping, its front taken away again,
+and is audited as a failure with the reason; its next release puts the front there.
+
+## The dashboard's session cookie
+
+A browser scopes a cookie to a host name and never to a port. A dashboard served on the node's MagicDNS
+name (`JD_SITE=<node>.<tailnet>.ts.net`, the Tailscale install) therefore has its session cookie sent to
+every tailnet address — every pull request preview and tailnet-only deployment, served on that name's
+ports 21000–21999 — and a dashboard on any other name has it sent to a deployment route serving that
+name. The application cannot act as the dashboard with it in a browser (the API wants `X-JD-CSRF` and a
+JSON body, and the cookie is `SameSite=Strict`), but its server would hold a bearer credential for the
+dashboard, and a preview runs a pull request's code. Two measures keep the cookie to the dashboard:
+
+| Where the application is served | What keeps the cookie from it |
+| --- | --- |
+| Any other name: a preview domain (`pr-{number}.preview.example.com`), a deployment's own domain, a sibling of the dashboard's name | The cookie is `__Host-jd_session` (`internal/sessioncookie`): `Secure`, `Path=/`, no `Domain`. A browser sends it to no other name and refuses one a sibling name sets, so another name can neither read it nor plant one. |
+| A tailnet address, on the dashboard's own MagicDNS name | The address's front ([above](#the-gate)) takes the dashboard's cookies out of the request, gated or not, on nginx and on the gate Caddy. |
+| A deployment route on the name the dashboard is reached by (`JD_SITE`, or a wildcard one label above it) | The route drops them (`DeploymentRoute.DropCookies`, set by `Service.WithDashboardHost` from `JD_SITE` in `onDashboardName`), on nginx and on the Caddy ingress, from the request to the application and to its sign-in check. A route on any other name, and a name that only redirects, are written as before. |
+
+What is dropped is every name the dashboard has issued (`proxysvc.DashboardCookies`): `__Host-jd_session`,
+`jd_session` (the name on plain loopback HTTP, where a browser refuses the prefix) and `vpsd_session`
+(before 0.8.2); every other cookie is forwarded untouched, and a name inside another (`my_jd_session`)
+is not matched. On Caddy two `header_up Cookie` replacements take out every occurrence on every Cookie
+field. On nginx a chain of maps, one a name, takes out the first occurrence of each from `$http_cookie`
+(nginx joins the fields) and the location sends what is left, nothing when nothing is; the browser
+keeps a `__Host-` cookie once per name, so that is all of the current one, and a second copy under one
+of the other names, with a longer path, is one the application set itself. The maps' captures share
+the names `jd_ckr<n>`/`jd_ckh<n>`/`jd_ckt<n>`, because PCRE2 refuses a capture name longer than 32
+characters and a site's own ident can be longer; a map's value is made the moment its own expression
+matched, so the sharing is safe, and nginx accepts a capture defined by more than one expression.
+
+Not covered: a browser lets an application on the same name *set* a cookie under the dashboard's name
+(it keys cookies by name and host, not port), so it can sign the browser out of the dashboard or into a
+session of its own — never read the dashboard's; a site the operator writes by hand on the Proxy page
+for the dashboard's own name, which is theirs; and a tailnet without HTTPS certificates, where the
+addresses are plain HTTP and a `Secure` cookie is never sent to them anyway.
 
 ## The whois route
 
@@ -157,11 +210,17 @@ the decision (`TestAdmitsComparesLoginsWithoutCaseAndTagsExactly`, `TestCanonica
 and the route (an allowed login, a denied one, a tag, an unknown address, tailscaled down answering 503,
 callers that are not the proxy, the cache, the audit fold); `proxysvc` — both renderers
 (`TestNginxTailnetGateAsksTheWhoisRouteWithTheClientAddress`,
-`TestCaddyTailnetGateAsksTheWhoisRouteWithTheClientAddress`, `TestValidateTailnetGateHoldsEveryAddressToLoopback`);
-`deploy` — plan validation and canonical form, allocation from the previews' range, activation with and
-without a list, never live without its gate, a failed gated publish pointed back at the gate, leaving the
-tailnet, preview inheritance, a preview domain refused, the operations section and preflight
-(`tailnet_apps_test.go`); `api` — the mounted route behind the allowlist and its audit
+`TestCaddyTailnetGateAsksTheWhoisRouteWithTheClientAddress`, `TestValidateTailnetGateHoldsEveryAddressToLoopback`),
+the cookie on a gate and a front (`TestTailnetFrontDropsTheDashboardsCookie`) and on a route serving the
+dashboard's name (`TestOnlyARouteOnTheDashboardsNameDropsItsCookies`,
+`TestNginxRouteOnTheDashboardsNameForwardsCookiesWithoutItsSession`,
+`TestCaddyRouteOnTheDashboardsNameForwardsCookiesWithoutItsSession`); `api` — the cookie's name and
+attributes, the legacy name renamed on its first request and both cleared at sign-out
+(`session_cookie_test.go`); `deploy` — plan validation and canonical form, allocation from the previews' range, activation with and
+without a list (a front either way, and straight to the container only without the proxy's half), never
+live without its gate, a failed gated publish pointed back at the gate and a failed fronted one at what
+reached the predecessor, an address moved behind its front at start, leaving the tailnet, preview
+inheritance, a preview domain refused, the operations section and preflight (`tailnet_apps_test.go`); `api` — the mounted route behind the allowlist and its audit
 (`TestTailnetWhoisRouteAnswersOnlyTheProxyAndAuditsRefusals`) and the deploy key's refusal
 (`TestADeployKeyCannotChangeWhoMayOpenATailnetOnlyDeployment`); `accesslog` — the login in both
 formats; `uninstall` — the gate Caddy, its volumes and its Caddyfile go with the deployments.
@@ -173,12 +232,21 @@ puts the real whois handler over the real local API client against a fake tailsc
 tailscaled's serve sends, and checks that an allowed login passes with the headers forwarded and the
 visitor's own claims dropped, a tag passes, a login not listed and an unknown address get 403,
 tailscaled down and the dashboard down get 503, the gate listens on loopback alone, and the request
-record names the login.
+record names the login. Both also put a front beside the gate and send every request with the
+dashboard's session under its current and legacy names between two cookies of the application's: the
+application is sent the application's two and nothing else, through the gate and through the front.
+`go test ./internal/proxysvc -run TestLiveNginxRouteOnTheDashboardsNameDropsItsSession` (the host's
+nginx) and `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyRouteOnTheDashboardsNameDropsItsSession`
+(as root: a real `caddy:2-alpine` ingress in front of `traefik/whoami`) do the same for a deployment
+route on the dashboard's own name, and its sign-in check on nginx, beside a route on another name that
+forwards the cookies untouched.
 
 Browser (`deploy-settings-b.spec.ts`, "Tailnet only"; `deploy-requests.spec.ts`): the switch, what it
 takes away, login validation, the saved plan, the address and the list on the overview, and the login
 in the request log.
 
-Not verified here: a real tailnet. No tailnet is available on the development host, and the host's own
-tailscaled is never asked; `tailscale serve` is exercised through its recorded status shapes as for
-previews, and tailscaled's whois through its documented answer shape.
+Not verified here: a real tailnet, and a real browser's cookie jar. No tailnet is available on the
+development host, and the host's own tailscaled is never asked; `tailscale serve` is exercised through
+its recorded status shapes as for previews, and tailscaled's whois through its documented answer shape.
+The cookie a browser sends is written by hand in the live tests, as a browser signed in on the same
+name would send it.

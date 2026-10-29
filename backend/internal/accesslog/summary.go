@@ -840,3 +840,22 @@ func rankStatuses(from map[int]*Facet) []Facet {
 	}
 	return out
 }
+
+// ClientClass is what kind of client a request came from, in one word the
+// request pages and a trace both use: "scanner" for a probe of a path no
+// application serves, "bot" for a program that says it is one, "browser" for
+// a person's browser and "client" for anything else that sent an agent — an
+// SDK, a mobile app's HTTP stack. An absent agent is "unknown".
+func ClientClass(e Entry) string {
+	switch {
+	case IsProbe(e):
+		return "scanner"
+	case IsBot(e.UserAgent):
+		return "bot"
+	case deviceOf(e.UserAgent) != "":
+		return "browser"
+	case e.UserAgent != "":
+		return "client"
+	}
+	return "unknown"
+}

@@ -137,7 +137,9 @@ is defined. Checked by `deploy-shared-variables.spec.ts`; the Automatic
 deployment section on General carries the GitHub commit-status switch. `/deploy/drains`
 (`components/deploy/log-drains-page.tsx`, its sentences in `log-drains.ts`) lists the log drains with
 each one's reach and delivery health, and adds or edits one in a side panel: format, endpoint, sealed
-headers, streams and projects. `/deploy/secret-stores` (`components/deploy/secret-stores-page.tsx`, its
+headers, streams — container output, requests and, for an OpenTelemetry drain, traces with the link
+its service opens one at — and projects. A request opened in a project's Logs names its trace and
+links to it through the first drain that exports the project's traces with a link (`traceLinkFor`). `/deploy/secret-stores` (`components/deploy/secret-stores-page.tsx`, its
 sentences and the reference grammar in `secret-stores.ts`) lists the Vault, OpenBao, Infisical, Doppler, AWS
 Secrets Manager and Azure Key Vault connections: each card the product's mark, the name, the endpoint (derived
 from the region or the vault name for the last two) with the mount, namespace and sign-in (or the Infisical

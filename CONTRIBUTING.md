@@ -406,16 +406,24 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyGatesRouteBehindForwardAuth -count=1 -v`,
   which signs in at a real Authelia (`authelia/authelia:4.39`, pulled on first run) in front of
   `traefik/whoami`, and `go test ./internal/proxysvc -run TestLiveDeploymentRouteSignsInOnNginx`, which
-  needs only the host's nginx. Changes to a tailnet-only environment's gate (`proxysvc/tailnet_gate.go`),
-  the whois route (`internal/tailnetgate`) or how activation publishes on the tailnet also run
+  needs only the host's nginx. Changes to a tailnet address's front or a tailnet-only environment's
+  gate (`proxysvc/tailnet_gate.go`), the whois route (`internal/tailnetgate`) or how activation
+  publishes on the tailnet also run
   `go test ./internal/proxysvc -run TestLiveTailnetGateOnNginx`, which needs only the host's nginx, and
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveTailnetGateOnCaddy -count=1 -v` (as root:
   build the test binary and run it under `sudo`), which starts a real `caddy:2-alpine` the way the
   dashboard starts its loopback gate and removes it with its volumes. Both put the real whois handler
-  over the real local API client in front of a fake tailscaled, never the host's
+  over the real local API client in front of a fake tailscaled, never the host's, and check a front
+  beside the gate and that neither sends the application the dashboard's session cookie
   ([tailnet-only deployments](docs/internal/deployments/tailnet-apps.md#verification)), and the
-  preview tailnet tests in `internal/deploy` (`go test ./internal/deploy -run 'Tailnet|Preview'`) are
-  their regressions. Changes to a route's maintenance switch or error pages also run
+  preview tailnet tests in `internal/deploy` (`go test ./internal/deploy -run 'Tailnet|Preview|Front'`)
+  are their regressions. Changes to the session cookie (`internal/sessioncookie`, `httpx/authmw.go`) or
+  to how a proxy takes it out of a request (`proxysvc/dashboard_cookie.go`) also run the `api` tests in
+  `session_cookie_test.go`, both of those, and
+  `go test ./internal/proxysvc -run TestLiveNginxRouteOnTheDashboardsNameDropsItsSession` and
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyRouteOnTheDashboardsNameDropsItsSession -count=1 -v`
+  (as root), a deployment route on the dashboard's own name on the host's nginx and on a real Caddy
+  ([the dashboard's session cookie](docs/internal/deployments/tailnet-apps.md#the-dashboards-session-cookie)). Changes to a route's maintenance switch or error pages also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesMaintenanceAndErrorPages -count=1 -v`
   and `go test ./internal/proxysvc -run TestLiveDeploymentRouteMaintenanceOnNginx`, which switch a real
   Caddy's and the host nginx's route by its file and ask each what a visitor, an address let past and a
@@ -507,9 +515,16 @@ to the contribution terms above, including the additional licence grant to the p
   project, and the pull request must say which providers were exercised.
 - Log drains run against real services with
   `JD_DEPLOY_LIVE=1 go test ./internal/logdrain -run TestLiveDrainsDeliverToLokiTheCollectorAndVector -count=1 -v`:
-  Loki (push API and OTLP, read back with LogQL), an OpenTelemetry Collector and Vector, each in a
-  container on loopback. The package's concurrency is worth `-race` (it needs cgo; the `golang` image
-  has it).
+  Loki (push API and OTLP, read back with LogQL), an OpenTelemetry Collector — its logs pipeline and
+  its traces pipeline, which receives the spans — and Vector, each in a container on loopback. The
+  package's concurrency is worth `-race` (it needs cgo; the `golang` image has it).
+- Changes to the trace context a deployment route sends and records (`proxysvc/trace.go`, the
+  Caddy route's handling, the nginx location's headers or the timed log format) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddySendsAndRecordsATraceparent -count=1 -v`
+  as root — a real `caddy:2-alpine` ingress in front of `traefik/whoami`, which answers with the
+  `traceparent` it received, a new trace and a continued one each read back from the request record —
+  and, unprivileged, `go test ./internal/proxysvc -run TestLiveDeploymentRouteTracesOnNginx`, which
+  asks the host's nginx the same.
 - Changes to the volume-size sampling behind the capacity forecast (`sampleDeploymentVolumes`,
   `metrics.WithVolumes`) or to the throttling counters right-sizing reads also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run 'TestLive(DeploymentVolumeSizesAreSampled|ThrottlingIsRecordedForACPULimitedContainer)' -count=1 -v`

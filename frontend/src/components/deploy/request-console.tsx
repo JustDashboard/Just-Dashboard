@@ -114,6 +114,7 @@ export function RequestConsole({
   blockUnavailable,
   onEventsAround,
   outputFor,
+  traceLink,
   renderInline,
 }: {
   entries: RequestEntry[]
@@ -144,6 +145,11 @@ export function RequestConsole({
    * for a request whose container is still there to read.
    */
   outputFor?: (entry: RequestEntry) => (() => void) | undefined
+  /**
+   * Where a request's trace opens in the service a log drain exports it
+   * to, when one names a link.
+   */
+  traceLink?: (traceId: string | undefined) => { href: string; label: string } | undefined
   /**
    * What the page knows about one request that the record does not — the
    * lines written while it was in flight, a site's error log beside a failed
@@ -396,6 +402,7 @@ export function RequestConsole({
                       blockUnavailable={blockUnavailable}
                       onEventsAround={onEventsAround}
                       onOutput={outputFor?.(entry)}
+                      trace={traceLink?.(entry.traceId)}
                       inline={renderInline?.(entry)}
                     />
                   )}
@@ -506,6 +513,7 @@ function RequestDetail({
   blockUnavailable,
   onEventsAround,
   onOutput,
+  trace,
   inline,
 }: {
   entry: RequestEntry
@@ -518,6 +526,8 @@ function RequestDetail({
   blockUnavailable?: string
   onEventsAround?: (entry: RequestEntry) => void
   onOutput?: () => void
+  /** The request's trace in the drain's own service. */
+  trace?: { href: string; label: string }
   inline?: React.ReactNode
 }) {
   const ip = entry.remoteIp
@@ -612,6 +622,26 @@ function RequestDetail({
       entry.referer,
     ],
   ]
+  // The trace the ingress sent the application: what its own spans are
+  // under, and a link to it where a drain exports it somewhere with one.
+  if (entry.traceId)
+    facts.push([
+      "Trace",
+      <span key="trace" className="flex min-w-0 items-baseline gap-2">
+        <span className="truncate font-mono">{entry.traceId}</span>
+        {trace && (
+          <a
+            href={trace.href}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="shrink-0 rounded-sm font-sans font-medium text-foreground focus-ring hover:underline"
+          >
+            {trace.label}
+          </a>
+        )}
+      </span>,
+      entry.traceId,
+    ])
 
   const verbs: Verb[] = [
     ...(ip && onFilterClient
