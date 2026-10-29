@@ -217,6 +217,11 @@ A change that weakens any of these has to say so explicitly.
    ([Stream mode](../backend/remote-desktop.md#stream-mode)). Nothing is sent on them without a
    stream negotiated over the bridge's WebSocket, which is behind the dashboard's session, and no
    block is published on a server off a tailnet.
+   A game server's port is published on loopback like every other deployment publication; publishing
+   it on every interface, so players can join, is the operator's explicit choice of bind address under
+   the deployment's Runtime settings, warned about in preflight (`game_loopback_only`, `public_bind`)
+   and held to the firewall review, and admitting it through the firewall is the Firewall page's own
+   audited rule route ([game servers](../deployments/game-servers.md#ports-and-binds)).
    A database's port published from its Network page — on one of the host's own addresses, on every
    interface kept to a list, or to anywhere — is not the dashboard's socket either: it is the operator's
    explicit choice, in the destructive group and audited as `database.access.change`. A list is kept by
@@ -239,7 +244,12 @@ A change that weakens any of these has to say so explicitly.
    no "run this string" kind, and adding one would be adding a second request-defined shell by another
    name. No blueprint may ship a default credential, publish a database port, declare a stateful workload
    without persistence, download without https plus a size limit and a checksum or declared version
-   source, name an uncontained path, or take privilege without a written reason. A multi-service
+   source, name an uncontained path, or take privilege without a written reason. An install-time file
+   is written only inside a volume the definition declares, with generated secrets as references the
+   helper fills, and a download is deployable only when a checksum pins it: both are written by a
+   short-lived helper container that mounts that one volume (the release's own image for a file, a
+   digest-pinned fetch image for a download), never by a host shell or into a host path, and fetched
+   bytes are hashed by the dashboard and refused on a mismatch before anything starts. A multi-service
    (Compose) template publishes exactly one port — its public service's, on loopback — keeps every other
    service on private networks the ingress never joins (`internal: true`, with no route out unless the
    service declares egress), takes no privilege, device, host

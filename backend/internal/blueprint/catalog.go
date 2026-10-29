@@ -131,29 +131,23 @@ func loadCatalog() {
 // DeploymentSupport says whether this dashboard can deploy a blueprint end to
 // end, and when it cannot, exactly why. A blueprint is deployed as an
 // immutable image release: its inputs become variables, its secrets are
-// generated at commit, its volumes become managed storage and its checks gate
-// activation. What that release path cannot yet do is write configuration
-// files or downloaded artifacts into a volume before the container starts, or
-// run the game-server integration; those blueprints stay in the catalogue as
-// previews and say so.
+// generated at commit, its volumes become managed storage, its install files
+// and pinned artifacts are written into those volumes by a helper before the
+// container starts, its direct ports are published on the plan's bind address
+// whichever protocol they speak, and its checks gate activation. A game server
+// is that release with the console, players and settings screens on top.
+//
+// What remains refused is the one thing the release path cannot honestly do:
+// place a download whose bytes nobody pinned. An artifact found through a
+// version source is resolved at deploy time, and the helper has nothing to
+// verify it against.
 func DeploymentSupport(blueprint *Blueprint) (bool, string) {
 	if blueprint == nil {
 		return false, "Blueprint is unavailable."
 	}
-	if blueprint.Profile == ProfileGame {
-		return false, "Game servers deploy through the reviewed game-server integration, which is not available in this release."
-	}
-	if len(blueprint.Files) > 0 {
-		return false, "This blueprint installs configuration files before start, which runtime materialization does not support yet."
-	}
 	for _, operation := range blueprint.Operations.Startup {
-		if operation.Kind == OperationFetchArtifact {
-			return false, "This blueprint downloads an install-time artifact, which runtime materialization does not support yet."
-		}
-	}
-	for _, port := range blueprint.Ports {
-		if strings.ToLower(port.Protocol) == "udp" {
-			return false, "UDP ports are not supported by the deployment runtime yet."
+		if operation.Kind == OperationFetchArtifact && operation.Checksum == "" {
+			return false, "This blueprint downloads an artifact found through a version source, which the deployment helper cannot verify against a pinned checksum."
 		}
 	}
 	return true, ""

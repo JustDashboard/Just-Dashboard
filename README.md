@@ -99,6 +99,8 @@ free.
 
 - Deploy from a repository, an image, a Compose stack or **117 reviewed templates**, 35 of them
   multi-service stacks — an application with its own database, cache or worker
+- Minecraft Java and Bedrock servers with their console, players and settings file, kept on
+  loopback until you open the port and its firewall rule
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
 - Push to deploy, plus pull-request previews only your tailnet can reach — Compose stacks too, every
   service isolated on the preview's own network and storage

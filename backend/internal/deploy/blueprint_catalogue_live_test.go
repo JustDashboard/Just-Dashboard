@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/blueprint"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/gameserver"
 )
 
 // Every deployable blueprint is started the way a deployment starts it — its
@@ -120,6 +122,9 @@ func TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks(t *testing.T) {
 			if ran == 0 {
 				t.Fatal("the definition ships no readiness check")
 			}
+			if definition.Profile == blueprint.ProfileGame {
+				liveGameScreensAnswer(t, ctx, client, definition, target.ContainerID)
+			}
 			// A published secondary port is bound where the plan said, not on
 			// the routed port's lease.
 			for _, port := range runtime.Ports {
@@ -195,4 +200,41 @@ func liveCatalogueDependencies(t *testing.T, ctx context.Context, backend *Docke
 		time.Sleep(2 * time.Second)
 	}
 	return map[string]string{"ME_CONFIG_MONGODB_URL": fmt.Sprintf("mongodb://root:%s@%s:27017/", password, address)}
+}
+
+// liveGameScreensAnswer asks a running game what its pages ask it: the
+// settings file Server settings edits is the one seeded before the first
+// start, and where the definition declares RCON the console reaches the
+// server with the generated password and the player list parses.
+func liveGameScreensAnswer(t *testing.T, ctx context.Context, client *dockerx.Client, definition *blueprint.Blueprint, containerID string) {
+	t.Helper()
+	for _, file := range definition.Files {
+		content, err := client.ReadContainerFile(ctx, containerID, file.Path)
+		if err != nil {
+			t.Fatalf("Server settings cannot read %s: %v", file.Path, err)
+		}
+		values := gameserver.ParseProperties(string(content)).Values()
+		if values["max-players"] == "" {
+			t.Fatalf("%s holds no seeded max-players:\n%s", file.Path, content)
+		}
+	}
+	for _, port := range definition.Ports {
+		if port.Name != "rcon" {
+			continue
+		}
+		var result *gameserver.ConsoleResult
+		var err error
+		for attempt := 0; attempt < 20; attempt++ {
+			if result, err = gameserver.NewConsole(client, nil).Run(ctx, containerID, "list"); err == nil && result.ExitCode == 0 {
+				break
+			}
+			time.Sleep(3 * time.Second)
+		}
+		if err != nil || result.ExitCode != 0 {
+			t.Fatalf("the console did not reach the server over RCON: %+v, %v", result, err)
+		}
+		if players, ok := gameserver.ParsePlayerList(result.Output); !ok || players.Online != 0 {
+			t.Fatalf("the player list = %q", result.Output)
+		}
+	}
 }
