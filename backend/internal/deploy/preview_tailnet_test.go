@@ -736,7 +736,7 @@ func TestRestoreTailnetLeavesAForeignMappingAloneAndUnpublishesTheRow(t *testing
 		}
 		publisher := &tailnetPublisherFake{served: test.served, servedErr: test.servedErr}
 		executor := &NormalizedStepExecutor{store: f.runs, tailnet: publisher}
-		if restored := executor.restoreTailnet(ctx, execution, release, false); restored != test.restored {
+		if restored := executor.restoreTailnet(ctx, execution, release, false, nil); restored != test.restored {
 			t.Fatalf("%s: restored = %t, want %t", test.name, restored, test.restored)
 		}
 		if got := publisher.withdrawn(); fmt.Sprint(got) != test.withdrawn {

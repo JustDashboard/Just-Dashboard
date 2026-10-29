@@ -86,9 +86,9 @@ func newGateFixture(t *testing.T) *gateFixture {
 	t.Cleanup(f.whois.Close)
 	f.app = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		fmt.Fprintf(w, "login=%s|user=%s|for=%s|host=%s|method=%s|body=%s",
+		fmt.Fprintf(w, "login=%s|user=%s|for=%s|host=%s|method=%s|body=%s|cookie=%s",
 			r.Header.Get("X-Tailnet-Login"), r.Header.Get("X-Tailnet-User"), r.Header.Get("X-Forwarded-For"),
-			r.Host, r.Method, body)
+			r.Host, r.Method, body, strings.Join(r.Header.Values("Cookie"), "+"))
 	}))
 	t.Cleanup(f.app.Close)
 	return f
@@ -101,9 +101,18 @@ func (f *gateFixture) route(listen int) TailnetGateRoute {
 	}
 }
 
+// visitorCookies is what a browser signed in to the dashboard on the same
+// name sends the tailnet address: the dashboard's session under its current
+// and legacy names between the application's own cookies.
+const visitorCookies = "theme=dark; __Host-jd_session=dashboard-secret; app_session=keep; vpsd_session=legacy-secret"
+
+// keptCookies is what the application must be sent of them.
+const keptCookies = "cookie=theme=dark; app_session=keep"
+
 // visit is a request as tailscale serve forwards one: from loopback, with the
 // tailnet address it came from in X-Forwarded-For and the node's name in Host.
-// The visitor's own claims ride along, and must never reach the application.
+// The visitor's own claims ride along, and must never reach the application,
+// and so does the dashboard's session cookie.
 func visit(t *testing.T, port int, from, method, body string) (int, string) {
 	t.Helper()
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -116,6 +125,7 @@ func visit(t *testing.T, port int, from, method, body string) (int, string) {
 		request.Header.Set("X-Forwarded-Proto", "https")
 		request.Header.Set("X-Tailnet-Login", "mallory@example.com")
 		request.Header.Set("X-Tailnet-User", "Mallory")
+		request.Header.Set("Cookie", visitorCookies)
 		if response, err = client.Do(request); err == nil || time.Now().After(deadline) {
 			break
 		}
@@ -135,6 +145,9 @@ func (f *gateFixture) exercise(t *testing.T, port int) {
 	if status != http.StatusOK || !strings.Contains(body, "login=alice@example.com|user=Alice Example|for=100.101.102.103|host=box.tail1234.ts.net:21003") ||
 		strings.Contains(body, "mallory") || strings.Contains(body, "Mallory") {
 		t.Fatalf("alice = %d %s", status, body)
+	}
+	if !strings.HasSuffix(body, keptCookies) || strings.Contains(body, "secret") {
+		t.Fatalf("the application was sent the dashboard's session: %s", body)
 	}
 	t.Logf("the application was told: %s", body)
 	if status, body := visit(t, port, "100.101.102.103", http.MethodPost, "payload"); status != http.StatusOK ||
@@ -167,6 +180,31 @@ func (f *gateFixture) exercise(t *testing.T, port int) {
 	}
 }
 
+// front is the same application behind a front that checks nobody: the
+// tailnet address of a preview, or of a tailnet-only deployment without a
+// list.
+func (f *gateFixture) front(listen int) TailnetGateRoute {
+	return TailnetGateRoute{Name: "just-dashboard-env-8.conf", Listen: listen, Upstream: f.app.URL}
+}
+
+// What a front must do: let everyone on the tailnet in, with the tailnet
+// address as theirs, nobody named whatever they claimed, and the dashboard's
+// session taken out of the cookies.
+func (f *gateFixture) exerciseFront(t *testing.T, port int) {
+	t.Helper()
+	for _, from := range []string{"100.101.102.104", "100.70.0.1"} {
+		status, body := visit(t, port, from, http.MethodGet, "")
+		if status != http.StatusOK || !strings.HasPrefix(body, "login=|user=|for="+from+"|host=box.tail1234.ts.net:21003|method=GET|body=|"+keptCookies) {
+			t.Fatalf("the front from %s = %d %s", from, status, body)
+		}
+	}
+	if status, body := visit(t, port, "100.70.0.1", http.MethodPost, "payload"); status != http.StatusOK ||
+		!strings.Contains(body, "method=POST|body=payload|"+keptCookies) {
+		t.Fatalf("a POST through the front = %d %s", status, body)
+	}
+	t.Logf("the front passed %q as %q", visitorCookies, keptCookies)
+}
+
 // The host's real nginx, from a private prefix: needs only the nginx binary.
 func TestLiveTailnetGateOnNginx(t *testing.T) {
 	root := liveNginx(t)
@@ -187,7 +225,23 @@ func TestLiveTailnetGateOnNginx(t *testing.T) {
 	if result := runValidator(context.Background(), "nginx", "-t"); !result.Valid {
 		t.Fatalf("nginx refused the gate: %s", result.Output)
 	}
+	frontPort := freePort(t)
+	frontContent, err := renderNginxTailnetGate(f.front(frontPort), filepath.Join(root, "logs", "front.access.log"), filepath.Join(root, "logs", "front.error.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	frontFile := filepath.Join(root, "sites-available", "just-dashboard-env-8.conf")
+	if err := os.WriteFile(frontFile, []byte(frontContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(frontFile, filepath.Join(root, "sites-enabled", "just-dashboard-env-8.conf")); err != nil {
+		t.Fatal(err)
+	}
+	if result := runValidator(context.Background(), "nginx", "-t"); !result.Valid {
+		t.Fatalf("nginx refused the gate and the front together: %s", result.Output)
+	}
 	startNginx(t, root)
+	f.exerciseFront(t, frontPort)
 	f.exercise(t, port)
 
 	raw, err := os.ReadFile(accessLog)
@@ -250,6 +304,11 @@ func TestLiveTailnetGateOnCaddy(t *testing.T) {
 			t.Fatalf("the gate listens on: %s", listening)
 		}
 	}
+	frontPort := freePort(t)
+	if result, err := service.applyCaddyTailnetGate(ctx, edge, f.front(frontPort)); err != nil || !result.Verified {
+		t.Fatalf("front apply = %+v %v", result, err)
+	}
+	f.exerciseFront(t, frontPort)
 	f.exercise(t, port)
 
 	// The record names who the gate let in, read the way the Logs page does.

@@ -123,7 +123,8 @@ free.
 - Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,
   e-mail and webhooks
 - Commit statuses and preview comments on GitHub, GitLab, Gitea and Forgejo
-- Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint
+- Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint,
+  and every request as an OpenTelemetry span under the `traceparent` the ingress sends your app
 - The `jd` command line and deploy keys for CI: create, configure, deploy, follow, roll back, promote,
   keep or switch back, maintenance, status, set variables
 
@@ -564,6 +565,11 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Destructive actions are confirmed and audited; deleting a project, database, stack or Git checkout,
   and uninstalling with a wipe, asks for a typed phrase checked on the server.
 - Every state-changing request lands in the audit log.
+- The session cookie stays the dashboard's. It is `__Host-jd_session` — HttpOnly, SameSite=Strict,
+  Secure and sent to no other name — and the previews and tailnet-only apps the dashboard publishes on
+  its own tailnet name, or a deployment on the dashboard's own domain, are never sent it: browsers send
+  a cookie to every port of its name, so the dashboard's proxy takes it out before the app sees the
+  request. Upgrading signs nobody out.
 - Linking to a just-dashboard.com account is optional and outbound only. A command from the site runs
   only if its signature verifies against the key pinned at link time and its kind is within the scope
   you chose; linking is a browser-session action for an administrator, or root at the terminal.
@@ -642,7 +648,7 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_ACCOUNT_URL` | `https://just-dashboard.com` | The site this install may link to: an origin only, with no path, query or credentials. `https://` everywhere; `http://` only for `localhost`, `127.0.0.1` or `[::1]`, to develop the site beside the dashboard. Anything else refuses to start. |
 | `JD_UPDATE_DIR` | discovered | The directory you cloned into. Normally empty: the dashboard asks Docker where its own stack was deployed from. Set it only if the Updates page says that failed. |
 | `JD_AGENT_MODE` | `false` | Run as an agent managed by a hub: no login, mutual TLS only. Not useful on its own yet. |
-| `JD_DEV` | `false` | Development only. Drops `Secure` from the session cookie so the UI works over plain HTTP. Never set it on a real host. |
+| `JD_DEV` | `false` | Development only. Drops `Secure` from the session cookie, which is then `jd_session` rather than `__Host-jd_session`, so the UI works over plain HTTP. Never set it on a real host. |
 | `JD_LOG_LEVEL` | `info` | `debug` for verbose logs. |
 
 **Where it looks**

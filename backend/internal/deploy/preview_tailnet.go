@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"sort"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
 // A preview's tailnet address is one port on this host's Tailscale node
@@ -97,7 +99,9 @@ func (s *OrchestrationStore) PreviewAddressFor(ctx context.Context, environmentI
 // one it already has, else the lowest free port of the range. exclude is
 // every port tailscale serves for anything at all — membership counts,
 // whatever the value says about the mapping — so a new preview never claims
-// one of those and then fails to publish. The choice and the insert share
+// one of those and then fails to publish; a port something on this host
+// already holds on 127.0.0.1 is stepped around too, since the address's
+// front answers there on the same number. The choice and the insert share
 // one transaction under the store's write lock; UNIQUE(kind, port) is the
 // cross-process authority, and a conflict there simply picks again.
 func (s *OrchestrationStore) AllocatePreviewAddress(ctx context.Context, environmentID int64, exclude map[int]int) (*PreviewAddress, error) {
@@ -173,7 +177,7 @@ func (s *OrchestrationStore) allocatePreviewAddressOnce(ctx context.Context, env
 	}
 	port := 0
 	for candidate := previewTailnetPortMin; candidate <= previewTailnetPortMax; candidate++ {
-		if _, served := exclude[candidate]; !used[candidate] && !served {
+		if _, served := exclude[candidate]; !used[candidate] && !served && loopbackFree(candidate) {
 			port = candidate
 			break
 		}
@@ -330,7 +334,7 @@ func probeTailnetURL(ctx context.Context, url string) error {
 // again. It reports whether that state was reached. predecessorRunning is
 // the recovery's own finding, since a mapping pointed at a stopped
 // predecessor would be recorded as reachable while answering nothing.
-func (e *NormalizedStepExecutor) restoreTailnet(ctx context.Context, execution StepExecution, release Release, predecessorRunning bool) bool {
+func (e *NormalizedStepExecutor) restoreTailnet(ctx context.Context, execution StepExecution, release Release, predecessorRunning bool, route *proxysvc.DeploymentRouteResult) bool {
 	address, err := e.store.PreviewAddressFor(ctx, release.EnvironmentID)
 	if err != nil {
 		return false
@@ -346,11 +350,12 @@ func (e *NormalizedStepExecutor) restoreTailnet(ctx context.Context, execution S
 	if release.PredecessorReleaseID != 0 && predecessorRunning {
 		predecessor, err := e.store.RuntimeForRelease(ctx, release.PredecessorReleaseID)
 		if err == nil && predecessor.Port != 0 {
-			// A predecessor that named its visitors was reached through its
-			// gate, whose route the recovery has already put back; one that
-			// did not was reached directly.
+			// A predecessor reached through its front — its gate, when it
+			// named its visitors — is reached through it again, the route
+			// recovery having already put it back; one published before
+			// every address had a front is reached directly again.
 			upstream := predecessor.Port
-			if _, previous, err := e.releaseSnapshot(ctx, release.PredecessorReleaseID); err == nil && previous.Plan.Tailnet.IdentityAware() {
+			if predecessorFronted(*address, route) {
 				upstream = address.Port
 			}
 			url, err := e.tailnet.PublishTailnet(ctx, address.Port, upstream, address.UpstreamPort)

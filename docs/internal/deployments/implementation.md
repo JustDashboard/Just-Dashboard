@@ -1553,7 +1553,11 @@ only renderer/executor/validation authority for their feature.
   `title`, `head_revision`, `variables_copied_revision` and `deploy_variable_revisions.copied_from_environment`,
   all in `store.addedColumns`. The activation step publishes the tailnet address after the route is
   verified and before the release pointer moves (`TailnetPublisher`, `selfcfg.TailnetServe`; step codes
-  `tailnet_unavailable`, `preview_port_missing`, `tailnet_publish_failed`, `tailnet_withdraw_failed`),
+  `tailnet_unavailable`, `preview_port_missing`, `tailnet_publish_failed`, `tailnet_withdraw_failed`) —
+  to the address's front on loopback, never to the container, since the address is a port of the name
+  the dashboard is reached by and the front keeps the dashboard's session cookie from the pull
+  request's code ([the dashboard's session cookie](tailnet-apps.md#the-dashboards-session-cookie);
+  `tailnet_gate_failed` when the front cannot be written) —
   restores the predecessor's mapping on a failed activation while the predecessor runs and otherwise
   withdraws its own and marks the row unpublished (`tailnetRestored`), and withdraws it on removal
   (`addressWithdrawn`) — restore and removal touch only a mapping whose upstream the address row
@@ -1561,7 +1565,8 @@ only renderer/executor/validation authority for their feature.
   loopback mappings in the range the address table does not vouch for (a port no preview owns, or an
   owned port serving another upstream; an operator's directory or funnel is never turned off) and
   unpublishes addresses nothing serves, quietly when the serve config is unreadable and no published
-  tailnet address exists; `PreviewReconciler` reads every open preview's pull
+  tailnet address exists, and `FrontTailnetAddresses` then moves an address an earlier release mapped
+  straight to its container behind its front; `PreviewReconciler` reads every open preview's pull
   request once a minute and closes the preview only on a decoded closed or merged state, recording a
   moved head as out of date. All of it in [preview isolation](preview-isolation.md#previews-from-the-dashboard).
   Outbound notifications are delivered by engine run observers for every terminal outcome and for run
@@ -1579,7 +1584,10 @@ only renderer/executor/validation authority for their feature.
   OpenTelemetry (OTLP/HTTP), Loki or JSON-lines endpoint while they happen, through
   `logdrain.Manager`, started with the server: a follower per wanted container, a reader per wanted
   request record, and a bounded, retried, gzip-compressed queue per drain whose status the page shows.
-  See [log drains](log-drains.md).
+  An OTLP drain's `traces` stream sends each request again as a span to `/v1/traces`, under the W3C
+  trace the ingress now sends the application (`DeploymentRoute.Trace`: Caddy's `request_header` and
+  `log_append`, nginx's `proxy_set_header` and log fields), so the application's own spans join it.
+  See [log drains](log-drains.md) and [trace context](request-observability.md#trace-context).
 - An AI client reaches the deployments over the MCP endpoint when its key was given them
   (`api_tokens.deploy_access`: none, `read`, `deploy`): it lists deployments, runs and releases,
   reads a run's transcript tail (`OrchestrationStore.RunTranscriptTail`, the stored and already
@@ -1947,10 +1955,15 @@ only renderer/executor/validation authority for their feature.
   the save (`settings/route-access.ts`).
 - Tailnet-only environments. `runtime.tailnet` publishes an environment on this host's tailnet and
   nowhere else, from the previews' own address range and table, with no public domain and no public
-  certificate; `runtime.tailnet.allow` (Tailscale logins and tags) puts a gate in front of it — nginx's
-  `auth_request` or the dashboard's own loopback Caddy's `forward_auth` — that asks
+  certificate; `runtime.tailnet.allow` (Tailscale logins and tags) makes the front every tailnet address
+  has a gate — nginx's `auth_request` or the dashboard's own loopback Caddy's `forward_auth` — that asks
   `GET /api/v1/tailnet/whois` about every request, which asks tailscaled who holds the address it came
   from. Previews and staging inherit the list. See [tailnet-only deployments](tailnet-apps.md).
+- The dashboard's session cookie stays the dashboard's. It is `__Host-jd_session`, which a browser
+  sends to no other name, so a preview domain or a deployment's own domain never sees it; a tailnet
+  address's front and a deployment route on the dashboard's own name (`JD_SITE`) take it out of the
+  request, since a browser sends a cookie to every port of its name
+  ([the dashboard's session cookie](tailnet-apps.md#the-dashboards-session-cookie)).
 - Maintenance and error pages. Maintenance is a switch beside the live route, not a plan field, so it
   applies at once and no release turns it on or off. Every route a release writes carries the check
   (`DeploymentRoute.Maintenance`, rendered on nginx as a Proxy site's maintenance behind

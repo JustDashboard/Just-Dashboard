@@ -226,7 +226,7 @@ class API:
         r = c.getresponse()
         raw = r.read()
         for name, value in r.getheaders():
-            if name.lower() == "set-cookie" and value.startswith("vpsd_session="):
+            if name.lower() == "set-cookie" and value.startswith(("__Host-jd_session=", "jd_session=")):
                 self.cookie = value.split(";", 1)[0]
         try:
             parsed = json.loads(raw) if raw else None
