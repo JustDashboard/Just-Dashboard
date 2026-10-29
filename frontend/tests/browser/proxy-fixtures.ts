@@ -12,6 +12,7 @@ import * as sitesTools from "./fixtures/proxy/sites-tools"
 import * as streams from "./fixtures/proxy/streams"
 import * as tls from "./fixtures/proxy/tls"
 import * as tlsMonitor from "./fixtures/proxy/tls-monitor"
+import * as tunnel from "./fixtures/proxy/tunnel"
 
 /**
  * One mocked host for the proxy pages, assembled from a route table per area
@@ -38,6 +39,7 @@ export const PROXY_PAGES = [
   "/proxy/streams",
   "/proxy/ports",
   "/proxy/config",
+  "/proxy/tunnel",
 ]
 
 const areas = [
@@ -53,6 +55,7 @@ const areas = [
   tlsMonitor,
   sitesTools,
   insights,
+  tunnel,
 ]
 
 /** One table from several, refusing a path two areas both claim. */

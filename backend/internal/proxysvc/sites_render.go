@@ -127,10 +127,14 @@ func renderServer(l *lines, spec *SiteSpec, names string) {
 	renderServerOptions(l, spec)
 	renderUpstreamTLS(l, spec)
 	renderErrorRouting(l, spec)
+	// The edge rules' refusals before the sleep switch, so a request they
+	// refuse never wakes a sleeping application.
+	renderEdgeChecks(l, spec)
 	renderSleepSwitch(l, spec)
 	renderAccess(l, spec)
 	renderForwardAuth(l, spec)
 	renderServerLimits(l, spec)
+	renderRateLimitAnswer(l, spec)
 	renderServerCache(l, spec)
 	renderServerHeaders(l, spec)
 	renderACMEChallenge(l, spec)
@@ -166,6 +170,7 @@ func renderServer(l *lines, spec *SiteSpec, names string) {
 		l.blank()
 		renderPageLocations(l, spec)
 	}
+	renderRateLimitLocation(l, spec)
 	if spec.ForwardAuth != nil {
 		l.blank()
 		renderForwardAuthLocation(l, spec)
@@ -246,16 +251,17 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		}
 		l.add("# nginx's combined format with the time taken added, which is what")
 		l.add("# the dashboard's traffic pages read latency from.")
-		format := timedLogFormat
+		// The trace context the application was sent, and the edge rule that
+		// decided the request, after the rest.
+		format := strings.TrimSuffix(timedLogFormat, "'")
 		if spec.Pool != nil && spec.Split != nil {
 			l.add("# rel= is the release that answered, while the route is split.")
-			format = splitLogFormat(spec)
+			format = strings.TrimSuffix(splitLogFormat(spec), "'")
 		}
 		if spec.Trace {
-			// The trace context the application was sent, after the rest.
-			format = strings.TrimSuffix(format, "'") + nginxTraceLogFields(spec) + "'"
+			format += nginxTraceLogFields(spec)
 		}
-		l.add("log_format %s %s;", spec.logFormatName(), format)
+		l.add("log_format %s %s;", spec.logFormatName(), format+spec.edgeLogField()+"'")
 		wrote = true
 	}
 	if spec.Maintenance != nil {
@@ -270,6 +276,13 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 			l.blank()
 		}
 		renderLimitZones(l, spec)
+		wrote = true
+	}
+	if spec.hasEdge() {
+		if wrote {
+			l.blank()
+		}
+		renderEdgeObjects(l, spec)
 		wrote = true
 	}
 	if spec.cachesStatic() || spec.cachesProxy() {

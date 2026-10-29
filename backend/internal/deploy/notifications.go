@@ -881,6 +881,7 @@ var hostAlertWhat = map[string][2]string{
 	"backup_failed":  {"Backup failed", "Backup job"},
 	// The subject is a deployment's environment: "shop · production".
 	"image_vulnerable": {"Vulnerable base image", "Deployment"},
+	"tunnel_down":      {"Tunnel down", "Tunnel"},
 }
 
 // renderHostAlert is the sentence a host alert sends: what, which subject on

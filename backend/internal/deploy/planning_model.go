@@ -654,6 +654,18 @@ type RuntimePlanConfig struct {
 	// ResponseHeaders are set on every answer the public route gives,
 	// replacing any header of the same name the application sent.
 	ResponseHeaders []RouteHeader `json:"responseHeaders,omitempty"`
+	// RateLimit is how many requests one client address may make to the
+	// public route; past it the route answers 429 with Retry-After. On the
+	// Docker Caddy ingress, which has no rate-limit module, it is enforced
+	// on the host instead (proxysvc/deployment_edge.go, edge-rules.md).
+	RateLimit *RouteRateLimit `json:"rateLimit,omitempty"`
+	// EdgeRules are decided in order at the proxy before the application
+	// is asked; the first a request meets decides it. Kept canonical
+	// (proxysvc.CanonicalEdgeRules).
+	EdgeRules []RouteEdgeRule `json:"edgeRules,omitempty"`
+	// CrowdSec refuses, at the route, the addresses CrowdSec's local engine
+	// has banned, from a list the dashboard refreshes from its decisions.
+	CrowdSec bool `json:"crowdSec,omitempty"`
 	// ForwardAuth has the public route ask an auth server about every
 	// request first, so only people who sign in reach the application.
 	ForwardAuth *RouteForwardAuth `json:"forwardAuth,omitempty"`
@@ -736,6 +748,14 @@ type RouteMaintenance struct {
 	// usual while it is in maintenance, kept in their canonical spelling.
 	BypassFrom []string `json:"bypassFrom,omitempty"`
 }
+
+// RouteEdgeRule and RouteRateLimit are the proxy's own shapes: both ingress
+// drivers render them, and a second copy here would be a second set of
+// bounds to keep in step.
+type (
+	RouteEdgeRule  = proxysvc.EdgeRule
+	RouteRateLimit = proxysvc.DeploymentRateLimit
+)
 
 // RouteHeader is one response header the public route sets.
 type RouteHeader struct {
@@ -917,6 +937,10 @@ type PlannedDomain struct {
 	// 302, 307 or 308; zero is 308.
 	RedirectTo   string `json:"redirectTo,omitempty"`
 	RedirectCode int    `json:"redirectCode,omitempty"`
+	// Tunnel serves the name through Cloudflare Tunnel (tunnel.go) rather
+	// than at this server's public address: Cloudflare terminates its HTTPS,
+	// and the route serves it over plain HTTP to the connector alone.
+	Tunnel bool `json:"tunnel,omitempty"`
 }
 
 // Redirects says whether the domain sends visitors to another rather than
@@ -936,6 +960,11 @@ func (d PlannedDomain) domainConfig() map[string]any {
 		if d.RedirectCode != 0 {
 			config["redirectCode"] = d.RedirectCode
 		}
+	}
+	// Written only when set, as the redirect is, so a domain saved before
+	// the tunnel existed keeps its bytes and its digest.
+	if d.Tunnel {
+		config["tunnel"] = true
 	}
 	return config
 }
@@ -1838,9 +1867,19 @@ func (c PlanConfiguration) Validate() error {
 		if err := domain.Protection.validate(fmt.Sprintf("domains[%d].protection", index)); err != nil {
 			return err
 		}
+		if domain.Tunnel && strings.HasPrefix(hostname, "*.") {
+			return invalidField(fmt.Sprintf("domains[%d].tunnel", index), "a wildcard is not routed through Cloudflare Tunnel here: it needs a wildcard record and certificate of its own at Cloudflare; route each name")
+		}
 	}
 	if err := validateDomainRedirects(c.Domains); err != nil {
 		return err
+	}
+	// Every request a tunnel brings reaches the route from its connector's
+	// address, not the visitor's, so a list of allowed addresses would refuse
+	// every visitor of the name or, with the connector listed, let all of
+	// them in. Cloudflare's own rules are where that name is fenced.
+	if len(c.Runtime.AllowFrom) > 0 && len(tunnelHostnames(c.Domains)) > 0 {
+		return invalidField("runtime.allowFrom", "allowed addresses cannot fence a name served through Cloudflare Tunnel: every request reaches this host from the tunnel's connector, not from the visitor's address; fence that name with Cloudflare Access or a WAF rule at Cloudflare instead")
 	}
 	if err := validateRouteRules(c.Runtime); err != nil {
 		return err
@@ -1887,6 +1926,12 @@ func validateRouteTailnet(c PlanConfiguration) error {
 		public = "allowed addresses"
 	case len(c.Runtime.ResponseHeaders) > 0:
 		public = "response headers"
+	case len(c.Runtime.EdgeRules) > 0:
+		public = "edge rules"
+	case c.Runtime.RateLimit != nil:
+		public = "a rate limit"
+	case c.Runtime.CrowdSec:
+		public = "the CrowdSec list"
 	case c.Runtime.HSTS != nil:
 		public = "HSTS"
 	case c.Runtime.Maintenance != nil:
@@ -2019,6 +2064,14 @@ func validateRouteRules(runtime RuntimePlanConfig) error {
 	if h := runtime.HSTS; h != nil {
 		if err := proxysvc.ValidateDeploymentHSTS(h.proxy()); err != nil {
 			return invalidField("runtime.hsts", "%v", err)
+		}
+	}
+	if err := proxysvc.ValidateEdgeRules(runtime.EdgeRules); err != nil {
+		return invalidField("runtime.edgeRules", "%v", err)
+	}
+	if limit := runtime.RateLimit; limit != nil {
+		if err := proxysvc.ValidateRateLimit(*limit); err != nil {
+			return invalidField("runtime.rateLimit", "%v", err)
 		}
 	}
 	return validateRoutePages(runtime)
@@ -2753,6 +2806,11 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 		c.Domains[index].Hostname = strings.ToLower(strings.TrimSpace(c.Domains[index].Hostname))
 		c.Domains[index].Protection = canonicalDomainProtection(c.Domains[index].Protection)
 		c.Domains[index].RedirectTo = strings.ToLower(strings.TrimSpace(c.Domains[index].RedirectTo))
+		// Cloudflare's edge answers a tunnel's name over HTTPS whatever the
+		// origin speaks, so it is one.
+		if c.Domains[index].Tunnel {
+			c.Domains[index].HTTPS = true
+		}
 	}
 	// Spelled the way the proxy writes them, so 10.0.0.1/32 and 10.0.0.1 are
 	// one entry and an edit that changes nothing changes no digest. Empty
@@ -2804,6 +2862,13 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 	}
 	c.Runtime.Replay = canonicalReplayPlan(c.Runtime.Replay)
 	c.Runtime.Sleep = canonicalSleepPlan(c.Runtime.Sleep)
+	// A copy, so canonicalising never writes through to the caller's plan.
+	c.Runtime.EdgeRules = proxysvc.CanonicalEdgeRules(c.Runtime.EdgeRules)
+	if limit := c.Runtime.RateLimit; limit != nil {
+		canonical := *limit
+		canonical.Per = strings.ToLower(strings.TrimSpace(canonical.Per))
+		c.Runtime.RateLimit = &canonical
+	}
 	// In the order the proxy writes them, and absent when there are none, so
 	// a plan that never chose a page keeps the bytes and the digest it had.
 	if len(c.Runtime.ErrorPages) == 0 {

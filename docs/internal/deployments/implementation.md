@@ -1921,6 +1921,16 @@ only renderer/executor/validation authority for their feature.
   each as a port conflict; a plan with any is stop-first only (`validateRuntimeActivationStrategy` and the
   preflight strategy finding); previews drop them; the release comparison lists them; the runtime owner
   maps each in addition to the leased routed port. The Domains settings show them as **Also published**.
+- Edge rules, rate limit and CrowdSec. `runtime.edgeRules[]` (ordered `{name, match, action}`;
+  the first rule a request meets decides), `runtime.rateLimit` (`{requests, per, burst}` per client
+  address) and `runtime.crowdSec` are the public route's, kept canonical by `canonicalConfiguration`
+  and validated by `validateRouteRules` with the other route rules (`runtime.edgeRules`,
+  `runtime.rateLimit` in a refusal); a tailnet-only environment refuses them. nginx renders maps and
+  first-match returns, `limit_req` with 429 and Retry-After, and a CrowdSec `geo` list; Caddy renders
+  named matchers each excluding the rules before it and the imported CrowdSec list, and has no
+  rate-limit module, so its limit is the host's gateway limit the Domains page offers. The request
+  record names the deciding rule (`er=` / `edge_rule`) and the requests summary counts each. See
+  [edge rules](edge-rules.md).
 - Password protection. `domains[].protection` (`username`, `password` on write, `hash` at rest) puts
   HTTP basic authentication in front of a deployment's public route without the application knowing.
   `sealDomainProtection` bcrypts the password once at the API boundary (configuration save and the draft
@@ -2186,6 +2196,16 @@ Caddy on loopback ports and a Pebble that validates nothing (`PEBBLE_VA_ALWAYS_V
 network; the certificate is issued, verified against Pebble's freshly minted root, reused on the second
 request, and served on a route whose chain verifies the same way — everything Let's Encrypt would do
 differently is the validation Pebble skipped and the roots browsers trust.
+
+A domain can instead be served through **Cloudflare Tunnel** (`domains[i].tunnel`): a host with no public
+address or open port runs Cloudflare's connector, cloudflared, as the managed container
+`just-dashboard-cloudflared`, connected from Proxy › Tunnel with a pasted token (sealed) or a tunnel
+created with the Cloudflare API token saved for DNS-01. Such a name skips the public-IP DNS precheck and
+the certificate step — Cloudflare terminates TLS — and the route serves it over plain HTTP on the
+private network the connector shares with the ingress; activation sets the tunnel's ingress rules and
+the name's proxied CNAME to `<tunnel>.cfargotunnel.com` before the public-route checks. The tunnel's
+health is cloudflared's own (its `/ready` and its log), and the host alert kind **Tunnel down** tells the
+channels when the connector loses the edge. See [Cloudflare Tunnel](cloudflare-tunnel.md).
 
 ## Deployment topology
 

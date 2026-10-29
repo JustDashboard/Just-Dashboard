@@ -5,6 +5,7 @@
 - [`implementation.md`](implementation.md) — current implementation, invariants, feature joins, automation, and topology.
 - [`game-servers.md`](game-servers.md) — the Minecraft templates as releases: install-time files and pinned artifacts written into a managed volume by a helper container before start, UDP published on the plan's bind address (loopback until the operator opens it), the `game_handshake` and `udp_probe` readiness checks, the reach readout and the Console, Players and Server settings pages.
 - [`tailnet-apps.md`](tailnet-apps.md) — environments published on the tailnet alone, and access per person from Tailscale identity: the plan's list of logins and tags, the address from the previews' range, the gate (nginx or the dashboard's loopback Caddy) that asks the whois route about every request, the route itself, audit, and what the pages say.
+- [`edge-rules.md`](edge-rules.md) — what a deployment's route decides at the proxy before the application sees a request: an ordered list of edge rules (path, method, user agent and address matches; block, status, allow or redirect), a rate limit per client address (nginx's 429 with Retry-After; host-level on the Docker Caddy ingress), CrowdSec's bans refused at the route, and the per-rule hits read from the request record.
 - [`preview-isolation.md`](preview-isolation.md) — exact-revision approval, previews tested from the dashboard, Compose previews with every service isolated, copied production variables, database branches (a preview's own masked copy of a linked database), tailnet-only addresses, reconciliation with GitHub, storage, network and cleanup.
 - [`backup-coverage.md`](backup-coverage.md) — immutable archive manifests and persistent-data coverage limitations.
 - [`restore-verification.md`](restore-verification.md) — native SQLite snapshots and artifact-bound isolated application recovery checks.
@@ -14,6 +15,10 @@
 - [`staging-promotion.md`](staging-promotion.md) — the staging environment (what it copies from production and why), promoting a staging release's exact image into production with no build — and a pull request preview's approved image into staging — promotion-only production, retention of a promotion's image, removal, routes, UI and the decision record.
 - [`database-networks.md`](database-networks.md) — logical database URLs, owned networks, replacement reconciliation and cleanup.
 - [`data-aware-rollback.md`](data-aware-rollback.md) — where each linked database stood when a release went live, a side copy of it restored on the deployment's network for a bounded time, the comparison with the live database, the restore-in-place hand-off and the sweeps.
+- [`cloudflare-tunnel.md`](cloudflare-tunnel.md) — Cloudflare Tunnel as an ingress: a pasted token or a
+  tunnel created with the saved Cloudflare API token, the cloudflared connector as a managed container,
+  a domain served through it (no certificate here, no public-address check), its routes and CNAME
+  records, health in cloudflared's own words and the Tunnel down alert.
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
   logs, the request readings, container lifecycle events, and the three container-output fixes.
 - [`image-vulnerabilities.md`](image-vulnerabilities.md) — each release's image and the bases it was

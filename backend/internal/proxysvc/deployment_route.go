@@ -108,6 +108,19 @@ type DeploymentRoute struct {
 	// dashboard is reached by, since a browser sends the dashboard's session
 	// there whatever the port (onDashboardName); nothing else sets it.
 	DropCookies []string `json:"dropCookies,omitempty"`
+	// RateLimit is how many requests one client address may make. nginx
+	// counts them with limit_req, by the visitor's address behind the
+	// dashboard's trusted proxies, and answers 429 with Retry-After.
+	// caddy:2-alpine has no rate-limit module, so the Docker Caddy ingress
+	// renders nothing for it: there the limit is the host's, a per-source
+	// limit on the ingress ports in the network gateway (deployment_edge.go).
+	RateLimit *DeploymentRateLimit `json:"rateLimit,omitempty"`
+	// EdgeRules are decided in order before the application is asked; the
+	// first a request meets decides it (deployment_edge.go).
+	EdgeRules []EdgeRule `json:"edgeRules,omitempty"`
+	// CrowdSec refuses the addresses CrowdSec's local engine has banned,
+	// from a list the dashboard refreshes from its decisions.
+	CrowdSec bool `json:"crowdSec,omitempty"`
 }
 
 // MaxDeploymentUpstreams is the most servers a route shares requests
@@ -350,6 +363,14 @@ func validateDeploymentRules(route DeploymentRoute) error {
 			return fmt.Errorf("%s is written %s", entry, normalized)
 		}
 	}
+	if err := ValidateEdgeRules(route.EdgeRules); err != nil {
+		return err
+	}
+	if route.RateLimit != nil {
+		if err := ValidateRateLimit(*route.RateLimit); err != nil {
+			return err
+		}
+	}
 	if route.ForwardAuth != nil {
 		if err := ValidateDeploymentForwardAuth(*route.ForwardAuth); err != nil {
 			return err
@@ -553,6 +574,11 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 	result := DeploymentRouteResult{Snapshot: snapshot}
 	if err := s.writeDeploymentAuthFile(route); err != nil {
 		return result, err
+	}
+	if route.CrowdSec {
+		if err := s.ensureNginxCrowdSecList(); err != nil {
+			return result, fmt.Errorf("the CrowdSec list could not be written: %w", err)
+		}
 	}
 	// Before the route that serves them, so nginx never answers with a page
 	// that is not there. A page the operator wrote is kept.
@@ -850,10 +876,21 @@ func wildcardCertificateCovers(pattern, domain string) bool {
 }
 
 // deploymentSpec is the site a route is on this host's nginx: its password
-// file and the folder its pages are served from are the service's.
+// file, the folder its pages are served from and the CrowdSec list it
+// includes are the service's, and so are the proxies whose word for the
+// visitor's address it takes.
 func (s *Service) deploymentSpec(route DeploymentRoute) *SiteSpec {
 	spec := deploymentSiteSpec(route, s.deploymentAuthFile(route))
 	s.SetPagesDir(spec)
+	if route.CrowdSec {
+		spec.crowdSecList = s.nginxCrowdSecList()
+	}
+	if trusted := s.TrustedProxies(); len(trusted) > 0 && (route.RateLimit != nil || len(route.EdgeRules) > 0 || route.CrowdSec) {
+		// The limits, the rules' address matches and the ban list are about
+		// the visitor, so behind a proxy the dashboard trusts they read the
+		// address it forwards; the header from anyone else is ignored.
+		spec.RealIP = &SiteRealIP{Source: "proxies", Trusted: trusted, Header: "X-Forwarded-For"}
+	}
 	if spec.sleep != nil {
 		spec.sleep.Socket = s.nginxWakeSocket()
 	}
@@ -930,6 +967,13 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 	}
 	spec.ErrorPages = slices.Sorted(slices.Values(route.ErrorPages))
 	spec.InterceptErrors = route.InterceptErrors
+	spec.edgeRules = slices.Clone(route.EdgeRules)
+	if limit := route.RateLimit; limit != nil {
+		// One allowance per client address, the burst answered at once, and
+		// the refusal a 429 that says when to come back.
+		spec.Limits = &SiteLimits{Request: &RequestLimit{Rate: limit.NginxRate(), Burst: limit.Burst, NoDelay: limit.Burst > 0}, ExemptFrom: []string{}}
+		spec.limitRetryAfter = limit.RetryAfter()
+	}
 	if route.Sleep != nil {
 		if host, port, err := sleepUpstream(route.Upstream); err == nil {
 			spec.sleep = &siteSleep{

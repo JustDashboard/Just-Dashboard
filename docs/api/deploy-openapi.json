@@ -293,6 +293,15 @@
               "null"
             ]
           },
+          "edgeRules": {
+            "items": {
+              "$ref": "#/components/schemas/accesslog.Facet"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "errorRate": {
             "type": "number"
           },
@@ -9987,6 +9996,9 @@
           },
           "redirectTo": {
             "type": "string"
+          },
+          "tunnel": {
+            "type": "boolean"
           }
         },
         "title": "deploy.PlannedDomain",
@@ -12444,6 +12456,9 @@
           "cpus": {
             "type": "number"
           },
+          "crowdSec": {
+            "type": "boolean"
+          },
           "devices": {
             "items": {
               "type": "string"
@@ -12456,6 +12471,15 @@
           "drainSeconds": {
             "format": "int64",
             "type": "integer"
+          },
+          "edgeRules": {
+            "items": {
+              "$ref": "#/components/schemas/proxysvc.EdgeRule"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "errorPages": {
             "items": {
@@ -12556,6 +12580,16 @@
           },
           "protocol": {
             "type": "string"
+          },
+          "rateLimit": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/proxysvc.DeploymentRateLimit"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "replay": {
             "oneOf": [
@@ -15264,6 +15298,99 @@
         "title": "metrics.SizingWindow",
         "type": "object"
       },
+      "proxysvc.DeploymentRateLimit": {
+        "properties": {
+          "burst": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "per": {
+            "type": "string"
+          },
+          "requests": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "proxysvc.DeploymentRateLimit",
+        "type": "object"
+      },
+      "proxysvc.EdgeAction": {
+        "properties": {
+          "code": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "status": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "proxysvc.EdgeAction",
+        "type": "object"
+      },
+      "proxysvc.EdgeMatch": {
+        "properties": {
+          "clientFrom": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "methods": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "pathPrefix": {
+            "type": "string"
+          },
+          "pathRegex": {
+            "type": "string"
+          },
+          "userAgent": {
+            "type": "string"
+          }
+        },
+        "title": "proxysvc.EdgeMatch",
+        "type": "object"
+      },
+      "proxysvc.EdgeRule": {
+        "properties": {
+          "action": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/proxysvc.EdgeAction"
+              }
+            ]
+          },
+          "match": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/proxysvc.EdgeMatch"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "title": "proxysvc.EdgeRule",
+        "type": "object"
+      },
       "proxysvc.MaintenanceSwitch": {
         "properties": {
           "driver": {
@@ -16685,6 +16812,15 @@
             "description": "A hostname to check instead of deriving one.",
             "in": "query",
             "name": "hostname",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "1 to ask about the hostname as one served through Cloudflare Tunnel: no public-IP DNS check and no certificate here.",
+            "in": "query",
+            "name": "tunnel",
             "required": false,
             "schema": {
               "type": "string"

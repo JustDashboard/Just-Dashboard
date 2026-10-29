@@ -665,3 +665,31 @@ func TestParseReadsTheTailnetLoginTheGateAdmitted(t *testing.T) {
 		t.Fatalf("caddy = %+v %v", entry, ok)
 	}
 }
+
+// A route with edge rules names the rule that decided each request: nginx's
+// er= field after the timed format, Caddy's edge_rule field from the route's
+// log_append. The summary counts each rule's requests, every rule listed.
+func TestParseReadsTheEdgeRuleThatDecidedAndCountsEach(t *testing.T) {
+	lines := []string{
+		`203.0.113.9 - - [29/Oct/2026:10:00:01 +0000] "GET /admin HTTP/1.1" 403 153 "-" "Mozilla/5.0" rt=0.000 urt="-" host=app.example.test cs=- er=admin`,
+		`203.0.113.9 - - [29/Oct/2026:10:00:02 +0000] "GET / HTTP/1.1" 200 12 "-" "Mozilla/5.0" rt=0.004 urt="0.003" host=app.example.test cs=- er=`,
+		`{"level":"info","ts":1793268003.1,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.4","proto":"HTTP/1.1","method":"POST","host":"app.example.test","uri":"/login","headers":{"User-Agent":["curl/8"]}},"duration":0.0001,"size":0,"status":429,"edge_rule":"bots"}`,
+		`{"level":"info","ts":1793268004.1,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.4","proto":"HTTP/1.1","method":"GET","host":"app.example.test","uri":"/admin/x","headers":{}},"duration":0.0001,"size":9,"status":403,"edge_rule":"admin"}`,
+		// Something in the field that is not a rule's name is not one.
+		`198.51.100.5 - - [29/Oct/2026:10:00:05 +0000] "GET / HTTP/1.1" 200 12 "-" "x" rt=0.004 urt="0.003" host=app.example.test cs=- er=$jd_x`,
+	}
+	collector := NewCollector(Filter{})
+	want := []string{"admin", "", "bots", "admin", ""}
+	for index, line := range lines {
+		entry, ok := Parse(line)
+		if !ok || entry.EdgeRule != want[index] {
+			t.Fatalf("line %d = %+v %v, want edge rule %q", index, entry, ok, want[index])
+		}
+		collector.Feed(entry)
+	}
+	summary := collector.Result().Summary
+	if len(summary.EdgeRules) != 2 || summary.EdgeRules[0].Value != "admin" || summary.EdgeRules[0].Count != 2 ||
+		summary.EdgeRules[1].Value != "bots" || summary.EdgeRules[1].Count != 1 {
+		t.Fatalf("edge rules = %+v", summary.EdgeRules)
+	}
+}

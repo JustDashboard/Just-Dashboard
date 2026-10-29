@@ -720,6 +720,9 @@ func (e *NormalizedStepExecutor) activate(
 			evidence.Recovery = &recovery
 			return StepResult{State: StepFailed, ErrorCode: "proxy_cutover_failed", ErrorMessage: "the proxy rejected the candidate and the prior route recovery was checked", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
+		// Before the public-route checks, which ask Cloudflare's edge for a
+		// tunnel's names.
+		e.routeThroughTunnel(ctx, execution, snapshot.Domains)
 	}
 
 	publicChecks := []PlannedCheck{}
@@ -882,6 +885,7 @@ func publicRoute(environmentID int64, snapshot runtimeReleaseSnapshot, runtime R
 	route := deploymentRoute(environmentID, snapshot.Domains, runtimeUpstreams(runtime))
 	route.MaxBodyMB = snapshot.Plan.MaxRequestBodyMB
 	route.AllowFrom = snapshot.Plan.AllowFrom
+	route.EdgeRules, route.RateLimit, route.CrowdSec = snapshot.Plan.EdgeRules, snapshot.Plan.RateLimit, snapshot.Plan.CrowdSec
 	for _, header := range snapshot.Plan.ResponseHeaders {
 		route.ResponseHeaders = append(route.ResponseHeaders, proxysvc.HeaderValue{Name: header.Name, Value: header.Value})
 	}
@@ -921,8 +925,11 @@ func deploymentRoute(environmentID int64, domains []PlannedDomain, upstreams []s
 	seen := map[string]bool{}
 	var redirects []proxysvc.HostRedirect
 	for _, domain := range domains {
-		tls = tls || domain.HTTPS
-		if !domain.HTTPS {
+		// A tunnel's name is HTTPS at Cloudflare's edge and plain HTTP here,
+		// where only the connector on the private network reaches it.
+		https := domain.HTTPS && !domain.Tunnel
+		tls = tls || https
+		if !https {
 			plain = append(plain, strings.ToLower(domain.Hostname))
 		}
 		if domain.Redirects() {

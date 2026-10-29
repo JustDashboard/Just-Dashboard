@@ -284,6 +284,9 @@ func (s *Server) Start(ctx context.Context) error {
 	s.modules.network.StartRouteHistory(ctx)
 	s.startDatabaseMetrics(ctx)
 	s.startDatabaseTLS(ctx)
+	// CrowdSec's bans are refused at every deployment route that asks, from
+	// a list kept current whether or not anybody has a page open.
+	s.startCrowdSecRefresh(ctx)
 	s.startStrandedRepair(ctx)
 	// Two things, both of which have to happen at boot rather than on request.
 	// An upgrade that was in flight when this process started is settled here,
@@ -337,6 +340,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// After the engine, so a window a restart interrupted is settled by a
 	// watcher that can already ask the engine for its rollback.
 	s.modules.rollbackWatcher.Start(ctx)
+	// The tunnel's connector and routes follow the deployments routed
+	// through it, so after the engine too.
+	s.modules.tunnel.Start(ctx)
 	// After the engine too: a run it resumes may wake an environment, and
 	// the pass leaves alone an environment with a run under way.
 	s.modules.sleeper.Start(ctx)

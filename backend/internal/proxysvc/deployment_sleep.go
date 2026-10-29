@@ -239,6 +239,12 @@ func serverErrorPages(spec *SiteSpec, skip ...int) []string {
 			out = append(out, fmt.Sprintf("error_page %d %s;", code, pageURI(strconv.Itoa(code))))
 		}
 	}
+	// The rate limit's 429 and its Retry-After (renderRateLimitAnswer):
+	// limit_req refuses in the location, so a location of its own error
+	// pages would otherwise answer nginx's bare 429.
+	if line := rateLimitErrorPage(spec); line != "" && !skipped(429) {
+		out = append(out, line)
+	}
 	return out
 }
 
