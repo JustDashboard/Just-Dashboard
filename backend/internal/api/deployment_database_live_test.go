@@ -26,6 +26,7 @@ func TestLiveDeploymentDatabaseConnection(t *testing.T) {
 	if os.Getenv("JD_DEPLOY_LIVE") != "1" {
 		t.Skip("set JD_DEPLOY_LIVE=1 on a Docker host")
 	}
+	t.Run("mongodb-kernel-probe", probeMongoKernelVariants)
 	for _, engine := range []string{"postgres", "mysql", "mariadb", "redis", "mongodb"} {
 		t.Run(engine, func(t *testing.T) {
 			s, router := dbTestRouter(t)
