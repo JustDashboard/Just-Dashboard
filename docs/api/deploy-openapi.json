@@ -10214,6 +10214,22 @@
         "title": "deploy.RouteForwardAuth",
         "type": "object"
       },
+      "deploy.RouteHSTS": {
+        "properties": {
+          "includeSubDomains": {
+            "type": "boolean"
+          },
+          "maxAge": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "preload": {
+            "type": "boolean"
+          }
+        },
+        "title": "deploy.RouteHSTS",
+        "type": "object"
+      },
       "deploy.RouteHeader": {
         "properties": {
           "name": {
@@ -10718,6 +10734,16 @@
           "hostPort": {
             "format": "int64",
             "type": "integer"
+          },
+          "hsts": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.RouteHSTS"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "image": {
             "type": "string"
