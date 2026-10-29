@@ -299,6 +299,7 @@ const (
 	CheckTLS             CheckKind = "tls"
 	CheckGameHandshake   CheckKind = "game_handshake"
 	CheckBackupFreshness CheckKind = "backup_freshness"
+	CheckUDPProbe        CheckKind = "udp_probe"
 )
 
 type EventType string

@@ -163,7 +163,9 @@ export function GamePlayers({ projectId }: { projectId: number }) {
 
   return (
     <div className="space-y-6">
-      {overview.data && <GameIdentity overview={overview.data} />}
+      {overview.data && (
+        <GameIdentity overview={overview.data} projectId={projectId} onChanged={overview.refresh} />
+      )}
       <Panel plain>
         <PanelHeader
           title="Players"

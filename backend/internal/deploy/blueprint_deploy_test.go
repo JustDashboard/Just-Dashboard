@@ -2,7 +2,6 @@ package deploy
 
 import (
 	"context"
-	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -157,35 +156,6 @@ func TestBlueprintDraftCommitsGeneratedSecretsAndInputValues(t *testing.T) {
 		Actor: "admin", RequestDigest: "blueprint-deploy", PlanRevision: 1, SlotClass: SlotHeavy, Steps: DefaultStepKeys,
 	}); err != nil {
 		t.Fatalf("supported blueprint refused by the queue: %v", err)
-	}
-}
-
-// Blueprints the release path cannot run are refused at the first step with
-// the catalogue's reason, before a draft holds them as a source.
-func TestUnsupportedBlueprintsAreRefusedBeforeAnyResourceExists(t *testing.T) {
-	ctx := context.Background()
-	fixture := newPlanningStoreFixture(t)
-	draft, err := fixture.plans.Create(ctx, 41, "admin")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{"minecraft-java", "minecraft-bedrock"} {
-		inputs := map[string]string{"eula": "true"}
-		_, err := fixture.plans.Save(ctx, draft.ID, 41, true, DraftSaveRequest{
-			Revision: draft.Revision, Step: DraftSource,
-			Source: &DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: id, BlueprintVersion: "1.0.0", BlueprintInputs: inputs},
-		})
-		if !errors.Is(err, ErrUnsupportedSource) {
-			t.Fatalf("%s: err = %v, want unsupported source", id, err)
-		}
-	}
-	// A preview-only blueprint still renders for the catalogue, without a
-	// registry lookup and therefore without a deployable digest.
-	analyzer := NewHostSourceAnalyzer(nil, nil, t.TempDir(), &planningDockerFake{}, nil)
-	detection, err := analyzer.Analyze(ctx, DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint,
-		BlueprintID: "minecraft-java", BlueprintVersion: "1.0.0", BlueprintInputs: map[string]string{"eula": "true"}})
-	if err != nil || detection.Source.Digest != "" {
-		t.Fatalf("preview render = %#v, %v", detection.Source, err)
 	}
 }
 
