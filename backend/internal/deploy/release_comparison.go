@@ -137,15 +137,22 @@ func compareRuntimeSnapshots(fromSnapshot, toSnapshot runtimeReleaseSnapshot, fr
 	field("host port", portLabel(fromSnapshot.Plan.HostPort), portLabel(toSnapshot.Plan.HostPort))
 	field("published ports", publishedPortsLabel(fromSnapshot.Plan.Ports), publishedPortsLabel(toSnapshot.Plan.Ports))
 	field("strategy", string(fromSnapshot.Plan.Strategy), string(toSnapshot.Plan.Strategy))
+	field("replicas", strconv.Itoa(fromSnapshot.Plan.EffectiveReplicas()), strconv.Itoa(toSnapshot.Plan.EffectiveReplicas()))
 	field("stop signal", fromSnapshot.Plan.StopSignal, toSnapshot.Plan.StopSignal)
 	field("grace period", secondsLabel(fromSnapshot.Plan.GracePeriodSeconds), secondsLabel(toSnapshot.Plan.GracePeriodSeconds))
 	field("memory limit", memoryLimitLabel(fromSnapshot.Plan.MemoryMB), memoryLimitLabel(toSnapshot.Plan.MemoryMB))
 	field("cpu limit", cpuLimitLabel(fromSnapshot.Plan.CPUs), cpuLimitLabel(toSnapshot.Plan.CPUs))
 	field("pid limit", countLimitLabel(fromSnapshot.Plan.PidsLimit), countLimitLabel(toSnapshot.Plan.PidsLimit))
 	field("request body limit", fromSnapshot.Plan.requestBodyLimitLabel(), toSnapshot.Plan.requestBodyLimitLabel())
+	field("traffic replay", replayLabel(fromSnapshot.Plan.Replay), replayLabel(toSnapshot.Plan.Replay))
+	field("sleep when idle", sleepLabel(fromSnapshot.Plan.Sleep), sleepLabel(toSnapshot.Plan.Sleep))
 	field("allowed addresses", allowFromLabel(fromSnapshot.Plan.AllowFrom), allowFromLabel(toSnapshot.Plan.AllowFrom))
 	field("response headers", responseHeadersLabel(fromSnapshot.Plan.ResponseHeaders), responseHeadersLabel(toSnapshot.Plan.ResponseHeaders))
+	field("edge rules", edgeRulesLabel(fromSnapshot.Plan.EdgeRules), edgeRulesLabel(toSnapshot.Plan.EdgeRules))
+	field("rate limit", rateLimitLabel(fromSnapshot.Plan.RateLimit), rateLimitLabel(toSnapshot.Plan.RateLimit))
+	field("crowdsec", onOffLabel(fromSnapshot.Plan.CrowdSec), onOffLabel(toSnapshot.Plan.CrowdSec))
 	field("sign-in", signInLabel(fromSnapshot.Plan.ForwardAuth), signInLabel(toSnapshot.Plan.ForwardAuth))
+	field("tailnet", tailnetLabel(fromSnapshot.Plan.Tailnet), tailnetLabel(toSnapshot.Plan.Tailnet))
 	field("hsts", hstsLabel(fromSnapshot.Plan.HSTS), hstsLabel(toSnapshot.Plan.HSTS))
 	field("let past maintenance", maintenanceBypassLabel(fromSnapshot.Plan.Maintenance), maintenanceBypassLabel(toSnapshot.Plan.Maintenance))
 	field("maintenance retry after", maintenanceRetryLabel(fromSnapshot.Plan.Maintenance), maintenanceRetryLabel(toSnapshot.Plan.Maintenance))
@@ -256,6 +263,37 @@ func domainPairs(domains []PlannedDomain) map[string]string {
 	return pairs
 }
 
+// edgeRulesLabel names the rules in the order they decide, with what each
+// does, so a reordering reads as the change it is.
+func edgeRulesLabel(rules []RouteEdgeRule) string {
+	if len(rules) == 0 {
+		return "none"
+	}
+	labels := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		labels = append(labels, rule.Name+" ("+rule.Action.Kind+")")
+	}
+	return strings.Join(labels, ", ")
+}
+
+func rateLimitLabel(limit *RouteRateLimit) string {
+	if limit == nil {
+		return "off"
+	}
+	label := fmt.Sprintf("%d per %s", limit.Requests, limit.Per)
+	if limit.Burst > 0 {
+		label += fmt.Sprintf(", burst %d", limit.Burst)
+	}
+	return label
+}
+
+func onOffLabel(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
+}
+
 func allowFromLabel(entries []string) string {
 	if len(entries) == 0 {
 		return "everyone"
@@ -271,6 +309,17 @@ func hstsLabel(h *RouteHSTS) string {
 		return "off"
 	}
 	return h.proxy().Value()
+}
+
+// tailnetLabel names a release's tailnet publication and who it admits.
+func tailnetLabel(tailnet *RouteTailnet) string {
+	switch {
+	case tailnet == nil:
+		return "not tailnet-only"
+	case len(tailnet.Allow) == 0:
+		return "tailnet only · everyone on the tailnet"
+	}
+	return "tailnet only · " + strings.Join(tailnet.Allow, ", ")
 }
 
 func signInLabel(gate *RouteForwardAuth) string {

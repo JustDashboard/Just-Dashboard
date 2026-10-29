@@ -23,7 +23,7 @@ import (
 var defaultPages embed.FS
 
 // SitePages are the pages a site can have, by the name its file carries.
-var SitePages = []string{"maintenance", "404", "502", "503", "504", "security", "robots"}
+var SitePages = []string{"maintenance", "404", "502", "503", "504", "security", "robots", "waking"}
 
 // pageFileName is the file a page is kept in: security.txt and robots.txt
 // are served as the text they are, every other page as HTML.
@@ -205,6 +205,9 @@ func (s *Service) writeMissingPages(spec *SiteSpec) error {
 	}
 	if spec.RobotsTxt {
 		pages = append(pages, "robots")
+	}
+	if spec.sleep != nil {
+		pages = append(pages, "waking")
 	}
 	for _, page := range pages {
 		full, err := s.pageFile(spec.Name, page, true)

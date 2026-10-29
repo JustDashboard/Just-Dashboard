@@ -84,7 +84,9 @@ free.
   projects, containers, databases, domains, backups, shells, accounts — wired together where the
   server knows they are, arranged however you like and remembered
 - Metrics with seven days of history the backend records itself, and CSV export
-- Alerts when the CPU or memory stays high, a disk fills, a container goes down or a backup fails
+- Alerts when the CPU or memory stays high, a disk fills, a container goes down, a backup fails or a
+  deployment's image has a fixable vulnerability a newer base would bring
+- A capacity forecast: when each disk fills at the rate it has been growing, and whose volumes grow fastest
 - Notable moments, top processes and the day's activity at a glance
 - Processes, PM2 apps, systemd services and scheduled jobs, each with its verbs
 - One log viewer for files, containers, stacks, PM2 and the journal, with insights
@@ -95,25 +97,51 @@ free.
 
 ### 🚀 Deployments
 
-- Deploy from a repository, an image, a Compose stack or **77 reviewed templates**, 20 of them
+- Deploy from a repository, an image, a Compose stack or **117 reviewed templates**, 35 of them
   multi-service stacks — an application with its own database, cache or worker
+- Minecraft Java and Bedrock servers with their console, players and settings file, kept on
+  loopback until you open the port and its firewall rule
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
-- Push to deploy, plus pull-request previews only your tailnet can reach
+- Push to deploy, plus pull-request previews only your tailnet can reach — Compose stacks too, every
+  service isolated on the preview's own network and storage
+- Database branches for previews: a preview's own copy of a linked PostgreSQL, MySQL or MariaDB,
+  restored from its newest backup with chosen columns masked, removed with the preview, never for a fork
 - Immutable releases, one-click rollback and health-gated cutover
+- Up to eight replicas of a stateless release behind one route, cut over and rolled back together
+- Canary releases: a new release takes a share of the requests beside the live one, read side by side,
+  and is removed if it does worse or promoted when it does not
+- Skew protection: a visitor stays on the release that first answered them for the warm window after a
+  cutover, so a page loaded before it never asks the new release for scripts it does not have
+- Right-sizing from what each app actually used: the memory and CPU limits it should have, applied in one click
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
+- Domains served through Cloudflare Tunnel from a server with no public address or open port: the
+  connector runs as a container, and its routes and DNS records are set as each release goes live
+- Edge rules per deployment: block, answer or redirect by path, method, user agent or address, a
+  rate limit per visitor, and CrowdSec's bans refused at the route
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Migrations rehearsed on a throwaway copy of the database, restored from its backup, before production
+- Real recent requests replayed against a new release before traffic moves, so a page it broke stops it
+- Sleep when idle: an app nobody visits is stopped, and the next visitor's request starts it and gets the page after a pause
+- Each release remembers where its database stood when it went live: bring that data back into a side copy to compare or restore from
 - Variables per environment, plus shared ones defined once for the server or a project
-- Variables read from HashiCorp Vault, OpenBao, Infisical or Doppler, fresh for each run
+- Variables read from HashiCorp Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager or Azure Key Vault, fresh for each run
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
+- Apps that exist only on your tailnet, opened only by the Tailscale logins and tags you list, with
+  no public domain, no sign-in server and no certificate to order
 - A maintenance page switched on at once, without a deploy, and the app's own error pages
 - Build logs, runtime, console, request logs and traffic alerts per project
 - A failed run named from its own output, and on request explained by your own model, secrets masked
+- Diagnose: ask your own model what is wrong with a deployment; it reads runs, logs, usage, events,
+  alerts, firewall rules and pending updates only as you allow each read, and proposes a restart,
+  rollback or maintenance that runs only when you press it
+- Each release's image and the base images it was built on scanned for known vulnerabilities
+  after the build and daily, offline; told when a fixable one meets a newer base, rebuilt in one click
 - Request insights that count real visitors apart from bots, with their devices and pages
 - Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,
   e-mail and webhooks
 - Commit statuses and preview comments on GitHub, GitLab, Gitea and Forgejo
-- Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint
+- Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint,
+  and every request as an OpenTelemetry span under the `traceparent` the ingress sends your app
 - The `jd` command line and deploy keys for CI: create, configure, deploy, follow, roll back, promote,
   keep or switch back, maintenance, status, set variables
 
@@ -469,7 +497,10 @@ jd runs shop / jd releases shop
 jd rollback shop                                  # to the release before the live one, or --to <id>
 jd rollback shop --instant                        # straight back to the release kept warm after the last deploy
 jd keep shop                                      # keep the new release now; the warm one is retired
+jd canary status shop                             # a canary's window and both releases' requests, 5xx and p95
+jd canary promote shop / jd canary abort shop     # decide a canary now; abort leaves the live release untouched
 jd promote shop --wait                            # staging's live release into production, as the same image
+jd promote shop --from-preview 42 --wait          # PR #42's approved preview into staging, as the same image
 jd maintenance shop on --bypass 10.0.0.0/8        # the switch acts at once; the bypass list with the next deploy
 jd status shop                                    # environments, live release, rollback watch, maintenance, rehearsal
 jd vars ls shop                                   # names, scopes and digests: never values
@@ -481,19 +512,25 @@ jd create --name blog --image nginx:1.27-alpine --port 80   # a new deployment, 
 ```
 
 Every read takes `--json`. In CI, set `JD_URL` and `JD_KEY` instead of logging in; nothing is written.
+For a client in another language, the dashboard describes the whole deployment API as OpenAPI 3.1 at
+`GET /api/v1/deploy/openapi.json` (or `.yaml`; `jd openapi` prints it), generated from its own router
+and types; **Account → API keys** links it beside the `jd` download when a deploy key is made, and the
+repository carries a copy at `docs/api/deploy-openapi.json`.
 `--env` picks an environment other than production, `--ca-file` trusts the internal Caddy certificate
 authority, and plain `http://` is refused except to loopback (an SSH tunnel). Exit codes: 0 done (the
 run succeeded), 1 refused or the run failed, 2 usage, 3 not logged in or the key is no longer valid.
 
 **What a deploy key can do.** Everything an ordinary key could on the deployments — list, read, deploy,
-cancel, retry, roll back, promote staging, switch back to the warm release or keep the new one, switch
-maintenance, runs and logs — plus what used to need a browser session: create deployments from drafts
+cancel, retry, roll back, promote staging (and a pull request's approved preview into staging), switch
+back to the warm release or keep the new one, promote or abort a canary, switch maintenance, runs and logs — plus what used to need
+a browser session: create deployments from drafts
 and duplicates (a key's drafts are its own, and a key narrowed to some deployments reaches the
 deployments it commits), change configuration, source, Git policy and triggers, and set, import,
 generate, rotate and delete variables and shared variables. Variables are write-only to it: it sees
 names and digests, never a value. **What it cannot do, whatever it reaches:** reveal a value; list,
 add, change or test saved registry and Git credentials; see or change secret-store connections; set the
-rollback-watch or rehearsal terms or edit a route's maintenance and error pages; merge or comment on
+rollback-watch or rehearsal terms or edit a route's maintenance and error pages; ask for, read or remove
+a copy of a release's data; merge or comment on
 pull requests as the dashboard's GitHub account; approve previews; archive or delete deployments; or
 reach anything outside Deployments. It also cannot give a deployment access to the server itself — a
 privileged container, the host's network, a host folder, a release task in the host's shell, a Compose
@@ -547,6 +584,11 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Destructive actions are confirmed and audited; deleting a project, database, stack or Git checkout,
   and uninstalling with a wipe, asks for a typed phrase checked on the server.
 - Every state-changing request lands in the audit log.
+- The session cookie stays the dashboard's. It is `__Host-jd_session` — HttpOnly, SameSite=Strict,
+  Secure and sent to no other name — and the previews and tailnet-only apps the dashboard publishes on
+  its own tailnet name, or a deployment on the dashboard's own domain, are never sent it: browsers send
+  a cookie to every port of its name, so the dashboard's proxy takes it out before the app sees the
+  request. Upgrading signs nobody out.
 - Linking to a just-dashboard.com account is optional and outbound only. A command from the site runs
   only if its signature verifies against the key pinned at link time and its kind is within the scope
   you chose; linking is a browser-session action for an administrator, or root at the terminal.
@@ -615,7 +657,7 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_DEPLOY_LIGHT_SLOTS` | `2` | Concurrent validation/metadata deployment workers. Valid range: 1–8. |
 | `JD_DEPLOY_LEASE_TTL` | `30s` | Time before a silent deployment worker claim is reconciled after a crash. Valid range: 5s–5m. |
 | `JD_METRICS_INTERVAL` | `15s` | How often the backend samples the host, and every running container, into its own history. Clamped to 5s and 5m. |
-| `JD_METRICS_RETENTION` | `7d` | How long that history is kept. Accepts days. `0` records nothing and leaves only the live feed. |
+| `JD_METRICS_RETENTION` | `7d` | How long that history is kept — and with it the sizes of the volumes deployments own, sampled every 15 minutes for the capacity forecast. Right-sizing needs a day of it before it suggests a limit. Accepts days. `0` records nothing and leaves only the live feed. A deployment's container events (exits, OOM kills, restarts, health changes) are kept for 30 days or this, whichever is longer, whatever this is set to. |
 | `JD_UPDATE_CHECK` | `true` | Whether the dashboard may ask GitHub whether a newer version of *itself* exists — one unauthenticated GET of one file, four times a day, carrying nothing but a version number. `false` turns it off; the release notes for the version you run stay readable, since they are compiled in. |
 | `JD_ACME_DIRECTORY` | Let's Encrypt | Another ACME directory to order deployment certificates from: Let's Encrypt's staging endpoint for a rehearsal that spends no rate limit, or a private authority on a network that never sees the internet. Both the managed Caddy and certbot follow it — the Certificates page's orders and a deployment run's, over HTTP-01 and DNS-01 alike — and certbot registers an account with that directory rather than reusing one it has with another. |
 | `JD_ACME_CA_ROOT` | system roots | A PEM bundle to trust when that authority signs with its own roots — its issuing roots, and the root behind its directory's TLS listener if that is private too. Caddy is given it as its trusted roots and certbot as `REQUESTS_CA_BUNDLE`, so keep it where both read it (under `/etc`, `/srv`, `/opt` or the data directory, which the stack mounts at the same paths). With it set, the public-DNS check before an order is skipped, because a private authority validates however it was set up to. |
@@ -625,7 +667,7 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_ACCOUNT_URL` | `https://just-dashboard.com` | The site this install may link to: an origin only, with no path, query or credentials. `https://` everywhere; `http://` only for `localhost`, `127.0.0.1` or `[::1]`, to develop the site beside the dashboard. Anything else refuses to start. |
 | `JD_UPDATE_DIR` | discovered | The directory you cloned into. Normally empty: the dashboard asks Docker where its own stack was deployed from. Set it only if the Updates page says that failed. |
 | `JD_AGENT_MODE` | `false` | Run as an agent managed by a hub: no login, mutual TLS only. Not useful on its own yet. |
-| `JD_DEV` | `false` | Development only. Drops `Secure` from the session cookie so the UI works over plain HTTP. Never set it on a real host. |
+| `JD_DEV` | `false` | Development only. Drops `Secure` from the session cookie, which is then `jd_session` rather than `__Host-jd_session`, so the UI works over plain HTTP. Never set it on a real host. |
 | `JD_LOG_LEVEL` | `info` | `debug` for verbose logs. |
 
 **Where it looks**

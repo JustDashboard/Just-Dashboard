@@ -35,7 +35,11 @@ type SiteSpec struct {
 	Upstream string `json:"upstream,omitempty"`
 	// Pool, when set, replaces Upstream with several servers.
 	Pool *SitePool `json:"pool,omitempty"`
-	Root string    `json:"root,omitempty"`
+	// Split, beside a Pool, sends a share of the requests to a second set
+	// of servers: a deployment route in a canary. Only a deployment route
+	// sets it; the form never offers it.
+	Split *SiteSplit `json:"split,omitempty"`
+	Root  string     `json:"root,omitempty"`
 	// SPA answers a path with no file of its own with index.html, for a
 	// single-page app whose router runs in the browser. Static sites only:
 	// without it a deep link or a reload on /settings is nginx's 404.
@@ -156,6 +160,10 @@ type SiteSpec struct {
 	ForwardAuth *SiteForwardAuth `json:"forwardAuth,omitempty"`
 
 	AccessLog bool `json:"accessLog"`
+	// Trace sends the application a W3C traceparent and, on a timed access
+	// log, records it (trace.go). A deployment's route sets it; the Proxy
+	// form does not offer it.
+	Trace bool `json:"trace,omitempty"`
 	// AccessLogPath and ErrorLogPath are the files the site's access_log and
 	// error_log write to, read back from the file rather than set by the
 	// form: a hand-written site logs wherever its author said, and a page that
@@ -205,6 +213,20 @@ type SiteSpec struct {
 	// set on its Domains settings rather than the Proxy page's form, so a
 	// refusal points at the control the reader has.
 	deployment bool
+	// sleep is a deployment route's wake (deployment_sleep.go): the
+	// application may be stopped while nobody visits, and a request that
+	// finds it stopped is held while the dashboard starts it.
+	sleep *siteSleep
+	// dropCookies are the deployment route's DropCookies: taken out of the
+	// Cookie header every forwarding location and the sign-in check send.
+	dropCookies []string
+	// edgeRules, crowdSecList and limitRetryAfter are a deployment route's
+	// edge rules, the CrowdSec list it includes, and the Retry-After its
+	// rate limit answers 429 with (deployment_edge.go). They are set from a
+	// validated route and never read back from a file.
+	edgeRules       []EdgeRule
+	crowdSecList    string
+	limitRetryAfter int
 	// Custom is appended verbatim inside the server block. It is the escape
 	// hatch, and it is the one field not validated beyond refusing an
 	// unbalanced brace — a form that cannot express everything needs
@@ -253,6 +275,9 @@ type SiteLocation struct {
 	// whole site signs in, or "on" to sign in here when only chosen paths
 	// do; empty follows the site.
 	ForwardAuth string `json:"forwardAuth,omitempty"`
+	// wake is a sleeping route's own: the location it forwards from
+	// (wakeMain) or the one a woken request is sent on from (wakeRetry).
+	wake string
 }
 
 // SiteMaintenance is a site's maintenance switch.
@@ -339,6 +364,13 @@ func (spec *SiteSpec) timedLog() bool {
 func (spec *SiteSpec) logFormatName() string { return NginxIdent(spec.Name) + "_timed" }
 
 func (spec *SiteSpec) connectionVar() string { return spec.varIdent() + "_connection" }
+
+// cookieVar is the Cookie header the site forwards when it drops cookies,
+// the last of its cookie maps.
+func (spec *SiteSpec) cookieVar() string { return spec.varIdent() + "_cookie" }
+
+// dropsCookies says whether the site takes cookies out of what it forwards.
+func (spec *SiteSpec) dropsCookies() bool { return spec.Kind == "proxy" && len(spec.dropCookies) > 0 }
 
 // usesWebSockets says whether any location the renderer writes forwards
 // upgrades, which is when the site's connection map is needed.
@@ -532,6 +564,9 @@ func ValidateSpec(spec *SiteSpec) error {
 		return err
 	}
 	if err := validatePool(spec); err != nil {
+		return err
+	}
+	if err := validateSplit(spec); err != nil {
 		return err
 	}
 	if err := validTLSOptions(spec); err != nil {

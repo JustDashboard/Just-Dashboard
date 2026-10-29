@@ -12,6 +12,7 @@ import {
   Layers,
 } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
+import { promotionOrigin } from "@/lib/pull-requests"
 import type {
   DeploymentDomainRoute,
   DeploymentEngineRun,
@@ -19,9 +20,10 @@ import type {
   DeploymentRelease,
   DeploymentRuntimeServices,
   DeploymentSummary,
+  DeploymentTailnetAddress,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { StatusDot, type DotTone } from "@/components/status-dot"
+import { Status, StatusDot, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
@@ -35,10 +37,12 @@ import {
   formatDuration,
   hostOf,
   runDurationSeconds,
+  runPromotion,
   type ProjectState,
 } from "@/components/deploy/vocabulary"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { serviceProduct } from "@/components/deploy/service-product"
+import { replicaReading } from "@/components/deploy/replicas-model"
 
 /** How many of the environment's runs the release node's strip draws. */
 const STRIP = 14
@@ -82,6 +86,7 @@ export function ProjectWiring({
   runs,
   runtime,
   domains,
+  tailnet,
   url,
   watch,
 }: {
@@ -107,6 +112,8 @@ export function ProjectWiring({
   runtime?: DeploymentRuntimeServices
   /** The routes the operations owner reports, when it could read them. */
   domains?: DeploymentDomainRoute[]
+  /** The tailnet address and who may open it, for a live release that is tailnet-only. */
+  tailnet?: DeploymentTailnetAddress
   url?: string
   watch?: DeploymentGitWatch
 }) {
@@ -123,6 +130,9 @@ export function ProjectWiring({
       ? runtime.services.filter((service) => service.liveRelease)
       : undefined
   const running = services?.filter((service) => service.state === "running") ?? []
+  // A replicated release is read as its replicas, against the count it was
+  // started with, so a replica Docker no longer lists is still one missing.
+  const replicas = replicaReading(services)
   const host = url && hostOf(url)
   const git = deployment.sourceKind === "git" || deployment.sourceKind === "local"
   const reading = watch && autoDeployReading(watch)
@@ -132,9 +142,13 @@ export function ProjectWiring({
     ? "danger"
     : running.length === 0
       ? "stopped"
-      : running.length === services?.length
-        ? "running"
-        : "warning"
+      : replicas
+        ? replicas.healthy === replicas.total
+          ? "running"
+          : "warning"
+        : running.length === services?.length
+          ? "running"
+          : "warning"
   const SourceGlyph =
     deployment.sourceKind === "compose"
       ? Layers
@@ -244,12 +258,16 @@ export function ProjectWiring({
                 {!liveRelease ? (
                   <span>The first deployment records it here</span>
                 ) : liveRun ? (
-                  <span className="numeric">
-                    {liveRun.operation === "rollback"
-                      ? "rolled back"
-                      : liveRun.operation === "promote"
-                        ? "promoted from staging"
-                        : "released"}{" "}
+                  <span className="numeric" data-slot="live-release-origin">
+                    {liveRun.operation === "rollback" ? (
+                      "rolled back"
+                    ) : liveRun.operation === "promote" ? (
+                      <PromotedFrom
+                        origin={promotionOrigin(liveRelease.promotion ?? runPromotion(liveRun))}
+                      />
+                    ) : (
+                      "released"
+                    )}{" "}
                     in {formatDuration(runDurationSeconds(liveRun))}
                   </span>
                 ) : (
@@ -302,6 +320,10 @@ export function ProjectWiring({
               services ? (
                 services.length === 0 ? (
                   <span className="text-muted-foreground">No containers</span>
+                ) : replicas ? (
+                  <span className="numeric">
+                    {replicas.healthy} of {replicas.total} replicas healthy
+                  </span>
                 ) : (
                   <span className="numeric">
                     {running.length} of {services.length}{" "}
@@ -337,9 +359,16 @@ export function ProjectWiring({
           />
         </li>
 
-        <li>
+        {tailnet && (
+          <li>
+            <TailnetNode nodeRef={domainNode} tailnet={tailnet} />
+          </li>
+        )}
+        {/* A tailnet-only release has no public names: its address is drawn
+            in this node's place, above. */}
+        <li hidden={Boolean(tailnet)}>
           <WireNode
-            nodeRef={domainNode}
+            nodeRef={tailnet ? undefined : domainNode}
             mark={
               host ? (
                 <WireMark tone="logo" size="md">
@@ -405,5 +434,93 @@ export function ProjectWiring({
         </li>
       </ol>
     </div>
+  )
+}
+
+/**
+ * Where a tailnet-only release answers, in the Domains node's place: its
+ * address on the tailnet as Tailscale's mark, and who may open it — the
+ * logins and tags the release admits, or the whole tailnet — with the proxy
+ * that asks who each visitor is.
+ */
+function TailnetNode({
+  nodeRef,
+  tailnet,
+}: {
+  nodeRef: React.RefObject<HTMLDivElement | null>
+  tailnet: DeploymentTailnetAddress
+}) {
+  const address = tailnet.url && hostOf(tailnet.url)
+  const gate =
+    tailnet.gate === "caddy"
+      ? "checked by the dashboard's Caddy"
+      : tailnet.gate === "nginx"
+        ? "checked by nginx"
+        : undefined
+  return (
+    <WireNode
+      nodeRef={nodeRef}
+      mark={
+        address && tailnet.published ? (
+          <WireMark tone="logo" size="md">
+            <ProductGlyph id="tailscale" />
+          </WireMark>
+        ) : (
+          <WirePlaceholder size="md" product="tailscale" />
+        )
+      }
+      eyebrow="Tailnet only"
+      title={
+        address ? (
+          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
+            <a
+              href={tailnet.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-w-0 items-center gap-1 rounded-sm focus-ring hover:underline"
+            >
+              <span className="truncate font-mono">{address}</span>
+              <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+            </a>
+            {!tailnet.published && (
+              <Status tone="warning" label="Not reachable · redeploy" className="font-normal" />
+            )}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">Gets its address on the next deployment</span>
+        )
+      }
+      hint={
+        <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          {tailnet.allow.length === 0 ? (
+            <span>Everyone on the tailnet</span>
+          ) : (
+            <>
+              <span>Only</span>
+              {tailnet.allow.map((entry) => (
+                <Tag key={entry} mono>
+                  {entry}
+                </Tag>
+              ))}
+            </>
+          )}
+          {gate && <span>· {gate}</span>}
+        </span>
+      }
+    />
+  )
+}
+
+/**
+ * Where a promoted live release came from: staging, or — for staging's own —
+ * the pull request whose preview built the image, at its commit.
+ */
+function PromotedFrom({ origin }: { origin: ReturnType<typeof promotionOrigin> }) {
+  if (origin?.kind !== "preview") return <>promoted from staging</>
+  return (
+    <>
+      promoted from {origin.from}
+      {origin.sha && <span className="font-mono"> ({origin.sha})</span>}
+    </>
   )
 }

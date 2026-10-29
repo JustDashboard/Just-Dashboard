@@ -53,11 +53,13 @@ export function useSecretStores(enabled = true) {
 
 /**
  * A key in a connected secret store, chosen rather than typed as
- * `${{store.NAME/path#KEY}}`: the store, the path in it, the key and, where
- * the store keeps versions, a version to pin. Each change writes the literal
- * into the Value field above, which stays the one the server parses. The
- * server requires a variable reading a store to be secret, so choosing one
- * says so in the Type too.
+ * `${{store.NAME/path#KEY}}`: the store, the path in it (a secret's name in
+ * Secrets Manager or Key Vault), the key (a field of a JSON secret there,
+ * optional) and, where the store keeps versions, a version to pin — a number,
+ * or the store's own version id or staging label. Each change writes the
+ * literal into the Value field above, which stays the one the server parses.
+ * The server requires a variable reading a store to be secret, so choosing
+ * one says so in the Type too.
  */
 export function StoreReferencePicker({
   value,
@@ -110,42 +112,44 @@ export function StoreReferencePicker({
       {store && info && (
         <FieldRow>
           {store.kind !== "doppler" && (
-            <Field label="Path" htmlFor="variable-store-path" hint={info.pathHint}>
+            <Field label={info.pathLabel} htmlFor="variable-store-path" hint={info.pathHint}>
               <Input
                 id="variable-store-path"
                 value={current.path}
                 onChange={(event) => write({ ...current, path: event.target.value.trim() })}
-                placeholder={store.kind === "infisical" ? "backend" : "apps/web"}
+                placeholder={info.pathPlaceholder}
                 spellCheck={false}
                 className="font-mono text-body"
               />
             </Field>
           )}
-          <Field label="Key" htmlFor="variable-store-key">
+          <Field label="Key" htmlFor="variable-store-key" hint={info.keyHint}>
             <Input
               id="variable-store-key"
               value={current.key}
               onChange={(event) => write({ ...current, key: event.target.value.trim() })}
-              placeholder="DATABASE_URL"
+              placeholder={info.keyOptional ? "whole secret" : "DATABASE_URL"}
               spellCheck={false}
               className="font-mono text-body"
             />
           </Field>
           {info.versions && (
-            <Field
-              label="Version"
-              htmlFor="variable-store-version"
-              hint="Empty reads the newest at every run, rollbacks included."
-            >
+            <Field label="Version" htmlFor="variable-store-version" hint={info.versionHint}>
               <Input
                 id="variable-store-version"
-                inputMode="numeric"
-                value={current.version ? String(current.version) : ""}
+                inputMode={info.versionNumeric ? "numeric" : undefined}
+                value={current.version ?? ""}
                 onChange={(event) => {
-                  const digits = event.target.value.replace(/\D/g, "").slice(0, 10)
-                  write({ ...current, version: digits ? Number(digits) : undefined })
+                  // A number for the stores that count versions; a version id
+                  // or a staging label, in the reference's own characters, for
+                  // the ones that name them.
+                  const version = info.versionNumeric
+                    ? event.target.value.replace(/\D/g, "").replace(/^0+/, "").slice(0, 10)
+                    : event.target.value.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 64)
+                  write({ ...current, version: version || undefined })
                 }}
-                placeholder="newest"
+                placeholder={info.versionPlaceholder}
+                spellCheck={false}
                 className="font-mono text-body"
               />
             </Field>

@@ -38,10 +38,17 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		})
 		r.Method(http.MethodGet, "/", s.handle(s.handleDeployList))
 		r.Method(http.MethodGet, "/hostname", s.handle(s.handleDeploymentHostname))
+		// The OpenAPI description of this API (deploy_openapi.go): static,
+		// for any signed-in account and any key, and registered before /{id}
+		// for the reason /hostname is.
+		r.Method(http.MethodGet, "/openapi.json", s.handle(s.handleDeployOpenAPIJSON))
+		r.Method(http.MethodGet, "/openapi.yaml", s.handle(s.handleDeployOpenAPIYAML))
 		// Static, and registered before /{id} for the same reason /hostname
 		// is: chi prefers the literal segment, so the fleet's counts never
 		// read as a project called "pull-requests".
 		r.Method(http.MethodGet, "/pull-requests", s.handle(s.handleDeploymentPullRequestSummary))
+		// Every environment's right-sizing verdict, the furthest off first.
+		r.Method(http.MethodGet, "/sizing", s.handle(s.handleDeploymentFleetSizing))
 		// Masked like an environment's variable list, and read by whoever
 		// may read that; a value leaves only through the audited reveal.
 		r.Method(http.MethodGet, "/shared-variables", s.handle(s.handleSharedVariables))
@@ -67,6 +74,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/runs/{run}/traffic", s.handle(s.handleDeploymentRunTraffic))
 		r.Method(http.MethodGet, "/{id}/lifecycle", s.handle(s.handleDeploymentLifecycle))
 		r.Method(http.MethodGet, "/{id}/lifecycle/stream", s.handle(s.handleDeploymentLifecycleStream))
+		r.Method(http.MethodGet, "/{id}/availability", s.handle(s.handleDeploymentAvailability))
 		r.Method(http.MethodGet, "/{id}/alerts", s.handle(s.handleTrafficAlertList))
 		r.Method(http.MethodGet, "/traffic", s.handle(s.handleDeploymentTrafficPulse))
 		r.Method(http.MethodGet, "/{id}/commits", s.handle(s.handleDeployCommits))
@@ -80,13 +88,21 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/environments/{env}/variables", s.handle(s.handleDeploymentVariables))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/pending", s.handle(s.handleDeploymentPending))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfiguration))
+		// A read: applying it is the configuration PUT above, with its audit.
+		r.Method(http.MethodGet, "/{id}/environments/{env}/sizing", s.handle(s.handleDeploymentSizing))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/maintenance", s.handle(s.handleDeploymentMaintenance))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/pages/{page}", s.handle(s.handleDeploymentPageGet))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/triggers", s.handle(s.handleDeploymentTriggers))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/git-watch", s.handle(s.handleDeploymentGitWatch))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/rollback-watch", s.handle(s.handleDeploymentRollbackWatch))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/canary", s.handle(s.handleDeploymentCanary))
+		s.mountDeploymentSleepReads(r)
 		r.Method(http.MethodGet, "/{id}/environments/{env}/rehearsal", s.handle(s.handleDeploymentRehearsal))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/vulnerabilities", s.handle(s.handleDeploymentImageScans))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/database-links", s.handle(s.handleDeploymentDatabaseLinks))
+		// The copies of a release's data an environment holds: what they are
+		// of and how long they are kept, never how to sign in to one.
+		r.Method(http.MethodGet, "/{id}/environments/{env}/data-copies", s.handle(s.handleDeploymentDataCopies))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/database-addresses", s.handle(s.handleDeploymentDatabaseAddresses))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/schedules", s.handle(s.handleDeploymentSchedules))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/schedules/{schedule}/runs", s.handle(s.handleDeploymentScheduleRuns))
@@ -112,9 +128,24 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// Keeping the new release only removes a container nothing routes
 			// to; it is the same control a deploy is.
 			r.Method(http.MethodPost, "/{id}/environments/{env}/rollback-watch/keep", s.handle(s.handleDeploymentKeepRelease))
+			// A canary is decided by the control a deploy is: promoting it is
+			// the cutover the deploy would have made, and aborting it removes
+			// a candidate with only its share of the traffic, the live release
+			// untouched.
+			r.Method(http.MethodPost, "/{id}/environments/{env}/canary/promote", s.handle(s.handleDeploymentCanaryPromote))
+			r.Method(http.MethodPost, "/{id}/environments/{env}/canary/abort", s.handle(s.handleDeploymentCanaryAbort))
+			s.mountDeploymentSleepWake(r)
 			// Asking about a failure takes what asking the SQL editor's
 			// assistant takes: it spends the install's model budget.
 			r.Method(http.MethodPost, "/{id}/runs/{run}/diagnosis", s.handle(s.handleDeploymentRunDiagnose))
+			// The operator reads with the person's leave a call at a time and
+			// proposes actions their press runs, so it is a session's: there
+			// is nobody to ask behind a key.
+			r.With(httpx.RequireSession).Method(http.MethodPost, "/{id}/assistant", s.handle(s.handleDeploymentOperator))
+			// A scan reads the release's images in a container with no
+			// network; it costs the host a few minutes of one CPU, as a
+			// build does, and changes nothing the release runs.
+			r.Method(http.MethodPost, "/{id}/environments/{env}/vulnerabilities/scan", s.handle(s.handleDeploymentImageScanRequest))
 			// Merging and commenting speak on GitHub as the dashboard's own
 			// account, which is why an API token may not: the same rule as
 			// the Git page's write routes, with the session requirement the
@@ -160,10 +191,25 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				// so it is an administrator's, in a session, like saving them.
 				r.Method(http.MethodPost, "/{id}/environments", s.handle(s.handleDeploymentStagingCreate))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/rehearsal", s.handle(s.handleDeploymentRehearsalPut))
+				r.Method(http.MethodPut, "/{id}/environments/{env}/vulnerabilities", s.handle(s.handleDeploymentImageScanPolicyPut))
+				// What a linked database gives the environment's previews: a
+				// second copy of production's data on a preview's network, so
+				// an administrator's in a session, like the rehearsal's terms.
+				r.Method(http.MethodPut, "/{id}/environments/{env}/database-links/{connection}/previews", s.handle(s.handleDeploymentPreviewBranchPolicyPut))
+				// A copy of a release's data beside production: a second copy
+				// of production's data, whose address carries a password, so
+				// an administrator's in a session. Nothing production holds is
+				// written, so none of it is destructive.
+				r.Method(http.MethodPost, "/{id}/environments/{env}/releases/{release}/data-copies", s.handle(s.handleDeploymentDataCopyCreate))
+				r.Method(http.MethodGet, "/{id}/environments/{env}/data-copies/{copy}/url", s.handle(s.handleDeploymentDataCopyURL))
+				r.Method(http.MethodPost, "/{id}/environments/{env}/data-copies/{copy}/extend", s.handle(s.handleDeploymentDataCopyExtend))
+				r.Method(http.MethodDelete, "/{id}/environments/{env}/data-copies/{copy}", s.handle(s.handleDeploymentDataCopyRemove))
+				r.Method(http.MethodGet, "/{id}/environments/{env}/data-copies/{copy}/comparison", s.handle(s.handleDeploymentDataCopyComparison))
 				r.Method(http.MethodPost, "/{id}/previews/approvals/{approval}/approve", s.handle(s.handleDeploymentPreviewApprove))
 				// Testing a pull request is the approval of that head, so it
 				// sits with the approval route it stands in for.
 				r.Method(http.MethodPost, "/{id}/pull-requests/{number}/preview", s.handle(s.handleDeploymentPullRequestPreview))
+				r.Method(http.MethodPost, "/{id}/pull-requests/{number}/preview/branches/{connection}/refresh", s.handle(s.handleDeploymentPreviewBranchRefresh))
 				r.Method(http.MethodPost, "/{id}/duplicate", s.handle(s.handleDeploymentDuplicate))
 				r.Method(http.MethodPost, "/{id}/removal-plan", s.handle(s.handleDeploymentRemovalPlan))
 				r.Method(http.MethodGet, "/credentials", s.handle(s.handleDeploymentCredentials))
@@ -236,6 +282,12 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 }
 
 func mapDeployError(err error) error {
+	// A preview's promotion is refused in words that name the rule: the
+	// request was understood, and this preview may not go where it asked.
+	var previewRefusal *deploy.PreviewPromotionRefusal
+	if errors.As(err, &previewRefusal) {
+		return httpx.Err(http.StatusUnprocessableEntity, previewRefusal.Code, previewRefusal.Message)
+	}
 	switch {
 	case errors.Is(err, deploy.ErrPreviewApproval), errors.Is(err, deploy.ErrPreviewIsolation), errors.Is(err, deploy.ErrPreviewCleanupPending), errors.Is(err, deploy.ErrGitManualOnly), errors.Is(err, deploy.ErrGitPolicyConflict), errors.Is(err, deploy.ErrPromotionOnly), errors.Is(err, deploy.ErrStagingIsolation):
 		return mapAutomationError(err)
@@ -364,12 +416,6 @@ func (s *Server) handleDeployList(w http.ResponseWriter, r *http.Request) error 
 		facts, err := s.modules.deployRuns.ArchivedDeploymentFacts(r.Context())
 		if err != nil {
 			return httpx.Internal(err)
-		}
-		// Each row carries what it deployed beside the project record, so the
-		// archived list can draw it as that product without a read per row.
-		type archivedDeployment struct {
-			*deploy.Project
-			deploy.DeploymentFacts
 		}
 		archived := make([]archivedDeployment, 0)
 		for _, p := range projects {
@@ -1606,4 +1652,11 @@ func (s *Server) handleDeployPurge(w http.ResponseWriter, r *http.Request) error
 	httpx.SetAudit(r, "deploy.project.purge", project.Name, map[string]any{"deploymentId": id, "resourcesRemoved": false})
 	httpx.NoContent(w)
 	return nil
+}
+
+// Each row carries what it deployed beside the project record, so the
+// archived list can draw it as that product without a read per row.
+type archivedDeployment struct {
+	*deploy.Project
+	deploy.DeploymentFacts
 }

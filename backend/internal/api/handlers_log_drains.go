@@ -27,7 +27,8 @@ type drainCatalogue struct{ s *Server }
 func (c drainCatalogue) DrainTargets(ctx context.Context) ([]logdrain.Target, error) {
 	rows, err := c.s.Store.DB.QueryContext(ctx, `
 		SELECT p.id, p.name, e.id, e.slug,
-		       EXISTS(SELECT 1 FROM deploy_dependencies d WHERE d.environment_id = e.id AND d.kind = 'domain')
+		       EXISTS(SELECT 1 FROM deploy_dependencies d WHERE d.environment_id = e.id AND d.kind = 'domain'),
+		       COALESCE((SELECT r.release_number FROM deploy_releases r WHERE r.id = e.live_release_id), 0)
 		  FROM deploy_environments e JOIN deploy_projects p ON p.id = e.project_id
 		 WHERE e.archived_at = 0 AND p.archived_at = 0`)
 	if err != nil {
@@ -38,7 +39,7 @@ func (c drainCatalogue) DrainTargets(ctx context.Context) ([]logdrain.Target, er
 	for rows.Next() {
 		var target logdrain.Target
 		var routed bool
-		if err := rows.Scan(&target.ProjectID, &target.Project, &target.EnvironmentID, &target.Environment, &routed); err != nil {
+		if err := rows.Scan(&target.ProjectID, &target.Project, &target.EnvironmentID, &target.Environment, &routed, &target.Release); err != nil {
 			return nil, err
 		}
 		if routed {
@@ -238,9 +239,7 @@ func (s *Server) handleLogDrainEnabled(w http.ResponseWriter, r *http.Request) e
 	if err != nil {
 		return err
 	}
-	var req struct {
-		Enabled bool `json:"enabled"`
-	}
+	var req enabledRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}

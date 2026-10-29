@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -30,7 +32,10 @@ type CandidateRuntimeRequest struct {
 	Host             string
 	Port             int
 	PortLeaseToken   string
-	Networks         []string
+	// ReplicaPorts are the loopback ports leased for the release's second
+	// and later replicas, in order; Port is the first replica's.
+	ReplicaPorts []int
+	Networks     []string
 }
 
 type StartedRuntime struct {
@@ -120,6 +125,10 @@ type dockerReleaseRuntimeMetadata struct {
 	PrimaryContainerID string   `json:"primaryContainerId,omitempty"`
 	ContainerIDs       []string `json:"containerIds,omitempty"`
 	VariableNames      []string `json:"variableNames"`
+	// Replicas are a replicated release's containers, first replica first,
+	// each with its own loopback publication. A release of one container
+	// records none and is its RuntimeID, as it always was.
+	Replicas []runtimeReplica `json:"replicas,omitempty"`
 }
 
 // DockerRuntimeOwner is the only deployment adapter allowed to own runtime
@@ -284,7 +293,7 @@ func (o *DockerRuntimeOwner) StartCandidate(
 	if request.Snapshot.Compose != nil {
 		return o.startCompose(ctx, request, emit)
 	}
-	return o.startContainer(ctx, request)
+	return o.startContainer(ctx, request, emit)
 }
 
 // runtimePortMappings publishes the routed port on the leased or fixed host
@@ -296,9 +305,13 @@ func runtimePortMappings(plan RuntimePlanConfig, host string, port int) []docker
 		return ports
 	}
 	if plan.InternalPort > 0 && port > 0 {
-		ports = append(ports, dockerx.PortMapping{
-			HostIP: host, HostPort: port, ContainerPort: plan.InternalPort, Protocol: "tcp",
-		})
+		// A UDP primary is a fixed publication on the plan's bind address,
+		// never a leased loopback port: validation allows nothing else.
+		for _, protocol := range plan.publishedProtocols() {
+			ports = append(ports, dockerx.PortMapping{
+				HostIP: host, HostPort: port, ContainerPort: plan.InternalPort, Protocol: protocol,
+			})
+		}
 	}
 	for _, published := range plan.Ports {
 		ports = append(ports, dockerx.PortMapping{
@@ -347,12 +360,19 @@ func runtimeMountSpecs(plan RuntimePlanConfig) []dockerx.MountSpec {
 func (o *DockerRuntimeOwner) startContainer(
 	ctx context.Context,
 	request CandidateRuntimeRequest,
+	emit func(BuildLog) error,
 ) (StartedRuntime, error) {
 	image := immutableRuntimeImage(request.Snapshot.Image)
 	if image == "" {
 		return StartedRuntime{}, fmt.Errorf("%w: candidate has no immutable image", ErrArtifactMissing)
 	}
 	plan := request.Snapshot.Plan
+	// Install files and pinned artifacts are in the volume before the
+	// container that reads them exists, written by helpers that mount only
+	// that volume (runtime_seeds.go).
+	if err := materializeSeeds(ctx, o.client, request, image, emit); err != nil {
+		return StartedRuntime{}, err
+	}
 	environment, variableNames := containerRuntimeEnvironment(plan, request.RuntimeVariables)
 	environment = append(environment, withdrawnProxyTrust(request.Snapshot, request.RuntimeVariables)...)
 	environment = append(environment, webConcurrencyEnvironment(request.Snapshot, request.RuntimeVariables)...)
@@ -361,7 +381,6 @@ func (o *DockerRuntimeOwner) startContainer(
 	for _, device := range plan.Devices {
 		devices = append(devices, dockerx.DeviceSpec{Host: device, Container: device, Permissions: "rwm"})
 	}
-	ports := runtimePortMappings(plan, request.Host, request.Port)
 	labels := releaseRuntimeLabels(request)
 	networks := append([]string(nil), request.Networks...)
 	if plan.PreviewIsolation {
@@ -372,42 +391,82 @@ func (o *DockerRuntimeOwner) startContainer(
 		networks = append([]string{network}, networks...)
 		labels = append(labels, dockerx.LabelSpec{Name: "io.just-dashboard.preview", Value: "true"})
 	}
-	name := fmt.Sprintf("jd-e%d-r%d", request.Release.EnvironmentID, request.Release.Number)
 	stopSignal := plan.StopSignal
 	if stopSignal == "" {
 		stopSignal = "SIGTERM"
 	}
-	result, err := o.client.Create(ctx, dockerx.ContainerSpec{
-		Name: name, Image: image, Command: append([]string(nil), plan.Command...), Env: environment,
-		Ports: ports, Mounts: mounts, Devices: devices, Labels: labels, Networks: networks,
-		NetworkMode:   map[bool]string{true: "host"}[plan.HostNetwork],
-		RestartPolicy: plan.EffectiveRestartPolicy(), Logging: dockerx.CappedLogging(), StopSignal: stopSignal,
-		Limits:     dockerx.ResourceLimits{MemoryMB: plan.MemoryMB, CPUs: plan.CPUs, PidsLimit: plan.PidsLimit},
-		Privileged: plan.Privileged, CapAdd: append([]string(nil), plan.Capabilities...), Init: true,
-		Pull: "missing", Start: true,
-	}, nil)
-	if err != nil {
-		return StartedRuntime{}, err
+	count := plan.EffectiveReplicas()
+	if count > 1 && len(request.ReplicaPorts) != count-1 && plan.InternalPort > 0 {
+		return StartedRuntime{}, fmt.Errorf("%w: %d replicas need %d more candidate ports", ErrInvalidPlan, count, count-1)
 	}
-	for _, binding := range result.Ports {
-		if binding.ContainerPort == plan.InternalPort && binding.Protocol == "tcp" {
-			request.Host, request.Port = binding.HostIP, binding.HostPort
-			break
+	// Every replica is the same container from the same frozen snapshot,
+	// apart from its name, its loopback port and the label saying which one
+	// it is; each has the plan's limits of its own.
+	replicas := make([]runtimeReplica, 0, count)
+	for index := 1; index <= count; index++ {
+		host, port := request.Host, request.Port
+		if index > 1 && plan.InternalPort > 0 {
+			port = request.ReplicaPorts[index-2]
 		}
+		result, err := o.client.Create(ctx, dockerx.ContainerSpec{
+			Name:  replicaContainerName(request.Release.EnvironmentID, request.Release.Number, index),
+			Image: image, Command: append([]string(nil), plan.Command...), Env: environment,
+			Ports: runtimePortMappings(plan, host, port), Mounts: mounts, Devices: devices,
+			Labels: append(append([]dockerx.LabelSpec(nil), labels...), replicaLabels(index, count)...), Networks: networks,
+			NetworkMode:   map[bool]string{true: "host"}[plan.HostNetwork],
+			RestartPolicy: plan.EffectiveRestartPolicy(), Logging: dockerx.CappedLogging(), StopSignal: stopSignal,
+			Limits:     dockerx.ResourceLimits{MemoryMB: plan.MemoryMB, CPUs: plan.CPUs, PidsLimit: plan.PidsLimit},
+			Privileged: plan.Privileged, CapAdd: append([]string(nil), plan.Capabilities...), Init: true,
+			Pull: "missing", Start: true,
+		}, nil)
+		if err != nil {
+			// A release is all of its replicas or none: the ones already
+			// started are removed, so a failed start leaves nothing behind
+			// for the compensation that follows to miss.
+			o.removeReplicas(ctx, replicas)
+			return StartedRuntime{}, err
+		}
+		for _, binding := range result.Ports {
+			if binding.ContainerPort == plan.InternalPort && binding.Protocol == plan.effectiveProtocol() {
+				host, port = binding.HostIP, binding.HostPort
+				break
+			}
+		}
+		replicas = append(replicas, runtimeReplica{Index: index, ContainerID: result.ID, Name: result.Name, Host: host, Port: port})
 	}
+	primary := replicas[0]
 	metadata := dockerReleaseRuntimeMetadata{
 		Version: 1, Strategy: string(plan.Strategy), Image: image,
 		ImageDigest: request.Snapshot.Image.Digest, ConfigDigest: request.Snapshot.Image.ConfigDigest,
-		PortLeaseToken: request.PortLeaseToken, PrimaryContainerID: result.ID,
+		PortLeaseToken: request.PortLeaseToken, PrimaryContainerID: primary.ContainerID,
 		VariableNames: variableNames,
+	}
+	if count > 1 {
+		metadata.Replicas = replicas
+		for _, replica := range replicas {
+			metadata.ContainerIDs = append(metadata.ContainerIDs, replica.ContainerID)
+		}
 	}
 	return StartedRuntime{
 		Input: ReleaseRuntimeInput{
-			ReleaseID: request.Release.ID, Kind: "container", RuntimeID: result.ID, Name: result.Name,
-			Host: request.Host, Port: request.Port, Metadata: mustJSON(metadata),
+			ReleaseID: request.Release.ID, Kind: "container", RuntimeID: primary.ContainerID, Name: primary.Name,
+			Host: primary.Host, Port: primary.Port, Metadata: mustJSON(metadata),
 		},
-		Target: CheckTarget{ContainerID: result.ID, Host: runtimeCheckHost(request.Host), Port: request.Port},
+		Target: CheckTarget{ContainerID: primary.ContainerID, Host: runtimeCheckHost(primary.Host), Port: primary.Port},
 	}, nil
+}
+
+// removeReplicas force-removes the replicas a failed start had already
+// created, bounded and detached from the request that failed.
+func (o *DockerRuntimeOwner) removeReplicas(ctx context.Context, replicas []runtimeReplica) {
+	if len(replicas) == 0 {
+		return
+	}
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	for _, replica := range replicas {
+		_ = o.client.RemoveContainer(cleanup, replica.ContainerID, true, false)
+	}
 }
 
 func (o *DockerRuntimeOwner) startCompose(
@@ -420,18 +479,29 @@ func (o *DockerRuntimeOwner) startCompose(
 		return StartedRuntime{}, fmt.Errorf("%w: Compose runtime snapshot is incomplete", ErrArtifactMissing)
 	}
 	project := fmt.Sprintf("jd-e%d", request.Release.EnvironmentID)
-	override := filepath.Join(request.SourceRoot, ".just-dashboard", "release.yml")
+	primaryService := resolved.Services[0].Plan.Name
+	if resolved.PrimaryService != "" {
+		primaryService = resolved.PrimaryService
+	}
+	overrideName := ".just-dashboard/release.yml"
 	content, err := renderComposeReleaseOverride(request)
 	if err != nil {
 		return StartedRuntime{}, err
 	}
-	if len(request.Networks) > 0 {
-		content, err = o.client.ComposeRuntimeNetworks(ctx, dockerx.ComposeReleaseSpec{ProjectName: project, ProjectDirectory: request.SourceRoot, Files: resolved.Files, Environment: request.RuntimeVariables}, content, request.Networks)
+	resolvedSpec := dockerx.ComposeReleaseSpec{ProjectName: project, ProjectDirectory: request.SourceRoot, Files: resolved.Files, Environment: request.RuntimeVariables}
+	if request.Snapshot.Plan.PreviewIsolation {
+		content, overrideName, err = o.composePreviewRelease(ctx, request, resolvedSpec, primaryService, content, emit)
+		if err != nil {
+			return StartedRuntime{}, err
+		}
+	} else if len(request.Networks) > 0 {
+		content, err = o.client.ComposeRuntimeNetworks(ctx, resolvedSpec, content, request.Networks)
 		if err != nil {
 			return StartedRuntime{}, err
 		}
 	}
-	if err := writeImmutableRuntimeFile(request.SourceRoot, ".just-dashboard/release.yml", content); err != nil {
+	override := filepath.Join(request.SourceRoot, filepath.FromSlash(overrideName))
+	if err := writeImmutableRuntimeFile(request.SourceRoot, overrideName, content); err != nil {
 		return StartedRuntime{}, err
 	}
 	spec := dockerx.ComposeReleaseSpec{
@@ -441,10 +511,6 @@ func (o *DockerRuntimeOwner) startCompose(
 	}
 	if err := o.client.RunComposeRelease(ctx, spec, dockerx.ComposeReleaseUp, runtimeGrace(request.Snapshot.Plan), composeBuildEmitter(emit)); err != nil {
 		return StartedRuntime{}, err
-	}
-	primaryService := resolved.Services[0].Plan.Name
-	if resolved.PrimaryService != "" {
-		primaryService = resolved.PrimaryService
 	}
 	containers, err := o.client.ListContainersWithLabels(ctx, map[string]string{
 		"io.just-dashboard.managed":        "true",
@@ -487,6 +553,65 @@ func (o *DockerRuntimeOwner) startCompose(
 		},
 		Target: CheckTarget{ContainerID: primaryID, Host: runtimeCheckHost(request.Host), Port: request.Port},
 	}, nil
+}
+
+// composePreviewRelease isolates every service of a preview's stack the way
+// one preview container is: on the preview's own bridge and its database
+// links' networks alone, every mount on a volume of the preview's own (a
+// read-only file of the commit itself excepted), no secret, no fixed name,
+// and no port on the host but the public service's loopback one, which the
+// preview's route and tailnet address reach. The override names its port,
+// so it is a file of its own per port: a retried start on another lease must
+// not meet the immutable bytes of the first.
+func (o *DockerRuntimeOwner) composePreviewRelease(
+	ctx context.Context,
+	request CandidateRuntimeRequest,
+	spec dockerx.ComposeReleaseSpec,
+	public, content string,
+	emit func(BuildLog) error,
+) (string, string, error) {
+	environmentID := request.Release.EnvironmentID
+	plan := request.Snapshot.Plan
+	if err := validatePreviewPlan(environmentID, BuildPlanConfig{Method: BuildCompose}, plan); err != nil {
+		return "", "", err
+	}
+	host := net.ParseIP(request.Host)
+	if plan.InternalPort <= 0 || request.Port <= 0 || host == nil || !host.IsLoopback() {
+		return "", "", fmt.Errorf("%w: a Compose preview publishes its public service on loopback only", ErrPreviewIsolation)
+	}
+	// Before Compose reads anything: the pull request's files, not
+	// production's, are what runs.
+	if err := composePreviewSources(spec.ProjectDirectory, spec.Files); err != nil {
+		return "", "", err
+	}
+	network, err := o.ensurePreviewNetwork(ctx, environmentID)
+	if err != nil {
+		return "", "", err
+	}
+	isolated, err := o.client.ComposePreviewOverride(ctx, spec, content, dockerx.ComposePreviewIsolation{
+		Network: network, Networks: request.Networks, Public: public,
+		Publish: dockerx.PortMapping{HostIP: request.Host, HostPort: request.Port, ContainerPort: plan.InternalPort, Protocol: "tcp"},
+		Volume:  func(key string) string { return previewVolumeName(environmentID, "compose:"+key) },
+		Labels:  map[string]string{"io.just-dashboard.preview": "true"},
+	})
+	if errors.Is(err, dockerx.ErrComposePreviewRefused) {
+		return "", "", fmt.Errorf("%w: %s", ErrPreviewIsolation, strings.TrimPrefix(err.Error(), dockerx.ErrComposePreviewRefused.Error()+": "))
+	}
+	if err != nil {
+		return "", "", err
+	}
+	for _, volume := range isolated.Volumes {
+		if err := o.ensurePreviewVolume(ctx, environmentID, volume); err != nil {
+			return "", "", err
+		}
+	}
+	if emit != nil {
+		for _, item := range isolated.LeftOut {
+			service, target, _ := strings.Cut(item, ":")
+			_ = emit(BuildLog{Stream: "status", Text: fmt.Sprintf("Left out %s of service %s: a preview reads no path of this server", target, service)})
+		}
+	}
+	return isolated.Override, fmt.Sprintf(".just-dashboard/preview-%d.yml", request.Port), nil
 }
 
 func composeRuntimeIdentities(containers []dockerx.Container, environmentID, releaseID int64, project, primaryService string) ([]string, string) {
@@ -634,35 +759,22 @@ func (o *DockerRuntimeOwner) StartExisting(
 			return err
 		}
 		if runtime.Kind == "container" && len(networks) > 0 {
-			detail, err := o.client.Inspect(ctx, runtime.RuntimeID)
-			if err != nil {
-				return err
-			}
-			if detail.Labels["io.just-dashboard.managed"] != "true" || detail.Labels["io.just-dashboard.environment-id"] != strconv.FormatInt(runtime.EnvironmentID, 10) {
-				return fmt.Errorf("%w: runtime network ownership changed", ErrInvalidPlan)
-			}
-			for _, name := range networks {
-				attached := false
-				for _, endpoint := range detail.NetworkList {
-					if endpoint.Name == name {
-						attached = true
-					}
-				}
-				if !attached {
-					if err := o.client.ConnectNetwork(ctx, name, runtime.RuntimeID, nil); err != nil {
-						return err
-					}
+			for _, id := range runtimeContainerIDs(runtime) {
+				if err := o.attachRuntimeNetworks(ctx, runtime.EnvironmentID, id, networks); err != nil {
+					return err
 				}
 			}
 		}
 	}
 	switch runtime.Kind {
 	case "container":
-		err := o.client.Lifecycle(ctx, runtime.RuntimeID, dockerx.ActionStart, nil)
-		if errdefs.IsNotModified(err) {
-			return nil
+		// Every replica, so a release that comes back comes back whole.
+		for _, id := range runtimeContainerIDs(runtime) {
+			if err := o.client.Lifecycle(ctx, id, dockerx.ActionStart, nil); err != nil && !errdefs.IsNotModified(err) {
+				return err
+			}
 		}
-		return err
+		return nil
 	case "compose":
 		metadata, err := decodeDockerRuntimeMetadata(runtime.Metadata)
 		if err != nil {
@@ -696,23 +808,24 @@ func (o *DockerRuntimeOwner) Stop(
 	var err error
 	switch runtime.Kind {
 	case "container":
-		err = o.client.Lifecycle(ctx, runtime.RuntimeID, dockerx.ActionStop, &grace)
-		if errdefs.IsNotFound(err) {
-			evidence.Removed = remove
-			err = nil
-			break
+		// A replicated release's containers are stopped together, each given
+		// the whole grace period, so stopping eight takes as long as one.
+		ids := runtimeContainerIDs(runtime)
+		results := make([]containerStop, len(ids))
+		var wait sync.WaitGroup
+		for index, id := range ids {
+			wait.Add(1)
+			go func() {
+				defer wait.Done()
+				results[index] = o.stopContainer(ctx, id, grace, remove)
+			}()
 		}
-		if err == nil {
-			if detail, inspectErr := o.client.Inspect(ctx, runtime.RuntimeID); inspectErr == nil {
-				evidence.Forced = detail.ExitCode == 137
-			}
-		}
-		if err == nil && remove {
-			err = o.client.RemoveContainer(ctx, runtime.RuntimeID, false, false)
-			if errdefs.IsNotFound(err) {
-				err = nil
-			}
-			evidence.Removed = err == nil
+		wait.Wait()
+		evidence.Removed = remove
+		for _, result := range results {
+			evidence.Forced = evidence.Forced || result.forced
+			evidence.Removed = evidence.Removed && result.removed
+			err = errors.Join(err, result.err)
 		}
 	case "compose":
 		metadata, decodeErr := decodeDockerRuntimeMetadata(runtime.Metadata)
@@ -741,6 +854,63 @@ func (o *DockerRuntimeOwner) Stop(
 	}
 	evidence.CompletedAt = time.Now().UTC()
 	return evidence, err
+}
+
+// containerStop is what stopping one container of a release found.
+type containerStop struct {
+	forced, removed bool
+	err             error
+}
+
+// stopContainer stops one container with the plan's grace and, when asked,
+// removes it. A container already gone is stopped and removed: a candidate
+// that crashed must not turn its own cleanup into an error.
+func (o *DockerRuntimeOwner) stopContainer(ctx context.Context, id string, grace int, remove bool) containerStop {
+	err := o.client.Lifecycle(ctx, id, dockerx.ActionStop, &grace)
+	if errdefs.IsNotFound(err) {
+		return containerStop{removed: remove}
+	}
+	if err != nil {
+		return containerStop{err: err}
+	}
+	result := containerStop{}
+	if detail, inspectErr := o.client.Inspect(ctx, id); inspectErr == nil {
+		result.forced = detail.ExitCode == 137
+	}
+	if remove {
+		err = o.client.RemoveContainer(ctx, id, false, false)
+		if errdefs.IsNotFound(err) {
+			err = nil
+		}
+		result.removed, result.err = err == nil, err
+	}
+	return result
+}
+
+// attachRuntimeNetworks joins one of the release's containers to the
+// networks it must reach, after checking it is still this environment's.
+func (o *DockerRuntimeOwner) attachRuntimeNetworks(ctx context.Context, environmentID int64, id string, networks []string) error {
+	detail, err := o.client.Inspect(ctx, id)
+	if err != nil {
+		return err
+	}
+	if detail.Labels["io.just-dashboard.managed"] != "true" || detail.Labels["io.just-dashboard.environment-id"] != strconv.FormatInt(environmentID, 10) {
+		return fmt.Errorf("%w: runtime network ownership changed", ErrInvalidPlan)
+	}
+	for _, name := range networks {
+		attached := false
+		for _, endpoint := range detail.NetworkList {
+			if endpoint.Name == name {
+				attached = true
+			}
+		}
+		if !attached {
+			if err := o.client.ConnectNetwork(ctx, name, id, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func runtimeGrace(plan RuntimePlanConfig) int {

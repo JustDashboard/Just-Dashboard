@@ -61,6 +61,14 @@ type Service struct {
 	ingressContainer string
 	nginxDir         string
 	caddyFile        string
+	// tailnetGateName and tailnetGateSource name the gate Caddy and its
+	// Caddyfile when they are not the dashboard's (tailnet_gate.go), which
+	// is how a test keeps its own gate apart from a real one.
+	tailnetGateName   string
+	tailnetGateSource string
+	// dashboardHost is the name the dashboard itself is reached by, set once
+	// before the service is used (WithDashboardHost).
+	dashboardHost string
 
 	// nginx has no way to test a config fragment in isolation, so validation
 	// has to put the candidate where nginx expects it and take it away again.
@@ -72,6 +80,11 @@ type Service struct {
 	effective effectiveCache
 	pending   pendingTracker
 	tested    testMemory
+
+	// trustedProxies are the dashboard's JD_TRUSTED_PROXIES, which a
+	// deployment route's limits and edge rules believe (deployment_crowdsec.go).
+	trustedMu      sync.RWMutex
+	trustedProxies []string
 }
 
 func New(nginxDir, caddyFile string) *Service {

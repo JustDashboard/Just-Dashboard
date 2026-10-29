@@ -30,51 +30,94 @@ type RuntimeWarmer interface {
 
 var errWarmRuntimeLost = errors.New("the warm release's container is not there to resume")
 
+// WarmState is the release's containers' state as one word. A replicated
+// release is warm as a whole: any replica gone is the release gone, since it
+// can no longer be switched back to as it served; any in another state than
+// running or paused is that state; one still running among paused ones is
+// running, which the watcher pauses again; and all paused is paused.
 func (o *DockerRuntimeOwner) WarmState(ctx context.Context, runtime ReleaseRuntime) (string, error) {
-	if o == nil || o.client == nil {
-		return "", ErrRuntimeUnavailable
-	}
-	if runtime.Kind != "container" {
-		return "", fmt.Errorf("%w: only a single container is kept warm", ErrInvalidPlan)
-	}
-	detail, err := o.client.Inspect(ctx, runtime.RuntimeID)
-	if errdefs.IsNotFound(err) {
-		return "missing", nil
-	}
+	states, err := o.replicaStates(ctx, runtime)
 	if err != nil {
 		return "", err
 	}
-	return detail.State, nil
+	return warmStateOf(states), nil
 }
 
+func warmStateOf(states []string) string {
+	summary := "paused"
+	for _, state := range states {
+		switch state {
+		case "missing":
+			return "missing"
+		case "paused":
+		case "running":
+			if summary == "paused" {
+				summary = "running"
+			}
+		default:
+			summary = state
+		}
+	}
+	return summary
+}
+
+// replicaStates is Docker's word for each of the release's containers, in
+// replica order, "missing" for one that is gone.
+func (o *DockerRuntimeOwner) replicaStates(ctx context.Context, runtime ReleaseRuntime) ([]string, error) {
+	if o == nil || o.client == nil {
+		return nil, ErrRuntimeUnavailable
+	}
+	if runtime.Kind != "container" {
+		return nil, fmt.Errorf("%w: a Compose release is never kept warm", ErrInvalidPlan)
+	}
+	ids := runtimeContainerIDs(runtime)
+	states := make([]string, 0, len(ids))
+	for _, id := range ids {
+		detail, err := o.client.Inspect(ctx, id)
+		if errdefs.IsNotFound(err) {
+			states = append(states, "missing")
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		states = append(states, detail.State)
+	}
+	return states, nil
+}
+
+// PauseRuntime freezes every replica of a release that is still running.
 func (o *DockerRuntimeOwner) PauseRuntime(ctx context.Context, runtime ReleaseRuntime) error {
-	state, err := o.WarmState(ctx, runtime)
-	if err != nil {
-		return err
-	}
-	switch state {
-	case "paused":
-		return nil
-	case "running":
-		return o.client.Lifecycle(ctx, runtime.RuntimeID, dockerx.ActionPause, nil)
-	default:
-		return fmt.Errorf("%w (%s)", errWarmRuntimeLost, state)
-	}
+	return o.warmEach(ctx, runtime, "running", "paused", dockerx.ActionPause)
 }
 
+// ResumeRuntime thaws every replica of a warm release.
 func (o *DockerRuntimeOwner) ResumeRuntime(ctx context.Context, runtime ReleaseRuntime) error {
-	state, err := o.WarmState(ctx, runtime)
+	return o.warmEach(ctx, runtime, "paused", "running", dockerx.ActionUnpause)
+}
+
+// warmEach takes each replica from one state to the other, leaving one
+// already there as it is. A replica in any third state, or gone, fails the
+// whole release before anything is changed, so a release is never left half
+// paused by a refusal.
+func (o *DockerRuntimeOwner) warmEach(ctx context.Context, runtime ReleaseRuntime, from, to string, action dockerx.LifecycleAction) error {
+	states, err := o.replicaStates(ctx, runtime)
 	if err != nil {
 		return err
 	}
-	switch state {
-	case "running":
-		return nil
-	case "paused":
-		return o.client.Lifecycle(ctx, runtime.RuntimeID, dockerx.ActionUnpause, nil)
-	default:
-		return fmt.Errorf("%w (%s)", errWarmRuntimeLost, state)
+	for _, state := range states {
+		if state != from && state != to {
+			return fmt.Errorf("%w (%s)", errWarmRuntimeLost, state)
+		}
 	}
+	for index, id := range runtimeContainerIDs(runtime) {
+		if states[index] == from {
+			if err := o.client.Lifecycle(ctx, id, action, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // instantRollback is the metadata an instant rollback run carries: the
@@ -174,8 +217,8 @@ func (e *NormalizedStepExecutor) keepWarm(
 	if kind == EnvironmentPreview {
 		return nil, "a preview is never kept warm"
 	}
-	if snapshot.Plan.Strategy != StrategyBlueGreen || previous.Kind != "container" {
-		return nil, "only a blue/green release's single container is kept warm"
+	if !snapshot.Plan.Strategy.startsBeside() || previous.Kind != "container" {
+		return nil, "only a blue/green release's own containers are kept warm, never a Compose stack's"
 	}
 	if previous.State != "draining" {
 		return nil, "the previous release was not running when this one went live"
@@ -191,12 +234,18 @@ func (e *NormalizedStepExecutor) keepWarm(
 		return nil, fmt.Sprintf("the host had %d MB available, below the %d MB a warm release may not take",
 			available>>20, warmMemoryFloor(total)>>20)
 	}
+	// With skew protection the route still sends the previous release the
+	// visitors it answered first, so it is kept running, not paused.
+	running := skewPins(execution.Run, snapshot.Plan) && len(snapshot.Domains) > 0
 	watch, err := e.store.recordWarmRelease(ctx, execution.Run, execution.ClaimToken, warmReleaseInput{
 		ReleaseID: release.ID, WarmReleaseID: previous.ReleaseID, WarmRuntimeID: previous.RuntimeID,
-		Policy: policy, CutoverAt: cutoverAt,
+		Policy: policy, CutoverAt: cutoverAt, Running: running,
 	})
 	if err != nil {
 		return nil, "the window could not be recorded: " + err.Error()
+	}
+	if running {
+		return watch, ""
 	}
 	// The window is recorded first: a process killed right here leaves a
 	// running container the watcher pauses or removes, never one nobody
@@ -288,6 +337,14 @@ func (e *NormalizedStepExecutor) closeWarmWindow(ctx context.Context, watch Roll
 		if liveErr == nil && live.Release.ID == watch.WarmReleaseID {
 			return fmt.Errorf("%w: the warm release is live", ErrInvalidPlan)
 		}
+		// A release kept running for its visitors is taken off the route
+		// before it goes; until the route says so it stays, and the window
+		// stays closing for the watcher to try again.
+		if watch.WarmRunning && liveErr == nil {
+			if err := e.applyLiveRoute(closeCtx, live.Release.ID, false); err != nil {
+				return fmt.Errorf("release #%d's visitors could not be moved to the live release: %w", watch.WarmReleaseNum, err)
+			}
+		}
 		if err := e.removeWarmRuntime(closeCtx, *runtime); err != nil {
 			return err
 		}
@@ -295,6 +352,14 @@ func (e *NormalizedStepExecutor) closeWarmWindow(ctx context.Context, watch Roll
 		return err
 	}
 	return e.store.finishCloseRollbackWatch(closeCtx, watch)
+}
+
+// dropWarmPin takes a warm release kept running for its visitors off the
+// live route, before it is removed.
+func (e *NormalizedStepExecutor) dropWarmPin(ctx context.Context, watch RollbackWatch) {
+	if watch.WarmRunning {
+		_ = e.applyLiveRoute(ctx, watch.ReleaseID, false)
+	}
 }
 
 // removeWarmRuntime stops and removes a warm container. It is resumed first
@@ -352,17 +417,37 @@ func (e *NormalizedStepExecutor) resumeWarmRelease(ctx context.Context, executio
 	}
 	if err := warmer.ResumeRuntime(ctx, *runtime); err != nil {
 		cleanup := context.WithoutCancel(ctx)
+		e.dropWarmPin(cleanup, *watch)
 		_ = e.removeWarmRuntime(cleanup, *runtime)
 		message := fmt.Sprintf("Release #%d's warm container could not be resumed, so release #%d keeps serving.", watch.WarmReleaseNum, watch.ReleaseNumber)
 		_ = e.store.failRollbackWatch(cleanup, *watch, execution.Run.ID, message)
 		return StepResult{State: StepFailed, ErrorCode: "warm_release_lost", ErrorMessage: message}
 	}
-	_ = stepLog(execution, "status", fmt.Sprintf("Resumed release #%d's warm container %s, paused since the cutover to release #%d",
-		watch.WarmReleaseNum, shortContainer(runtime.RuntimeID), watch.ReleaseNumber))
+	if watch.WarmRunning {
+		_ = stepLog(execution, "status", fmt.Sprintf("Release #%d's warm %s kept running since the cutover to release #%d, for the visitors it answered first",
+			watch.WarmReleaseNum, warmContainersLabel(*runtime), watch.ReleaseNumber))
+	} else {
+		_ = stepLog(execution, "status", fmt.Sprintf("Resumed release #%d's warm %s, paused since the cutover to release #%d",
+			watch.WarmReleaseNum, warmContainersLabel(*runtime), watch.ReleaseNumber))
+	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{
 		"releaseId": watch.WarmReleaseID, "runtime": runtime, "target": targetForRuntime(*runtime, snapshot),
 		"watchId": watch.ID, "resumed": true,
 	})}
+}
+
+// warmContainersLabel names the warm release's containers for a transcript:
+// the one container's id, or each replica's.
+func warmContainersLabel(runtime ReleaseRuntime) string {
+	replicas := runtimeReplicas(runtime)
+	if len(replicas) == 1 {
+		return "container " + shortContainer(replicas[0].ContainerID)
+	}
+	ids := make([]string, 0, len(replicas))
+	for _, replica := range replicas {
+		ids = append(ids, shortContainer(replica.ContainerID))
+	}
+	return fmt.Sprintf("%d replicas %s", len(replicas), strings.Join(ids, ", "))
 }
 
 func shortContainer(id string) string {
@@ -401,16 +486,17 @@ func (e *NormalizedStepExecutor) verifyWarmRelease(ctx context.Context, executio
 	if e.checks == nil {
 		return StepResult{State: StepUnavailable, ErrorCode: "checks_unavailable", ErrorMessage: "runtime health checks are unavailable"}
 	}
-	target := targetForRuntime(*runtime, snapshot)
-	checks := make([]CheckEvidence, 0, len(selected))
-	for _, check := range selected {
-		_ = stepLog(execution, "status", fmt.Sprintf("Running readiness check %q (%s) against release #%d", check.Name, check.Kind, watch.WarmReleaseNum))
-		checks = append(checks, e.checks.Run(ctx, check, target))
-	}
+	checks := e.runReplicaChecks(ctx, execution, *runtime, snapshot, selected, func(check PlannedCheck, replica, replicas int) string {
+		if replica == 0 {
+			return fmt.Sprintf("Running readiness check %q (%s) against release #%d", check.Name, check.Kind, watch.WarmReleaseNum)
+		}
+		return fmt.Sprintf("Running readiness check %q (%s) against release #%d's replica %d of %d", check.Name, check.Kind, watch.WarmReleaseNum, replica, replicas)
+	})
 	outcome := summarizeChecks(checks)
 	evidence := checkStepEvidence{Phase: "readiness", Outcome: outcome, Checks: checks}
 	if requiredCheckFailed(checks) {
 		cleanup := context.WithoutCancel(ctx)
+		e.dropWarmPin(cleanup, *watch)
 		_ = e.removeWarmRuntime(cleanup, *runtime)
 		message := fmt.Sprintf("Release #%d failed its readiness check after resuming, so release #%d keeps serving. %s",
 			watch.WarmReleaseNum, watch.ReleaseNumber, checkFailureMessage("readiness", outcome, checks...))
@@ -430,7 +516,9 @@ func (e *NormalizedStepExecutor) verifyWarmRelease(ctx context.Context, executio
 func (e *NormalizedStepExecutor) abandonInstantRollback(ctx context.Context, watch RollbackWatch, runID int64) {
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancel()
-	if runtime, err := e.store.RuntimeForRelease(cleanup, watch.WarmReleaseID); err == nil {
+	// One kept running for skew protection goes back to serving its own
+	// visitors, which the route put back still sends it.
+	if runtime, err := e.store.RuntimeForRelease(cleanup, watch.WarmReleaseID); err == nil && !watch.WarmRunning {
 		if warmer, ok := e.runtime.(RuntimeWarmer); ok {
 			_ = warmer.PauseRuntime(cleanup, *runtime)
 		}
@@ -481,7 +569,7 @@ func (e *NormalizedStepExecutor) activateWarmRelease(ctx context.Context, execut
 		if runtime.Port == 0 || e.proxy == nil {
 			return fail("proxy_unavailable", "A managed domain needs an available HTTP proxy.", nil)
 		}
-		value := publicRoute(release.Release.EnvironmentID, snapshot, runtime.Host, runtime.Port)
+		value := publicRoute(release.Release.EnvironmentID, snapshot, *runtime)
 		if value.TLS {
 			resolver, ok := e.proxy.(interface {
 				ResolveDeploymentCertificate(context.Context, []string) (string, string, error)
@@ -494,6 +582,12 @@ func (e *NormalizedStepExecutor) activateWarmRelease(ctx context.Context, execut
 				return fail("certificate_unavailable", "No existing certificate covers every HTTPS domain.", nil)
 			}
 			value.CertPath, value.KeyPath = certPath, keyPath
+		}
+		// The release rolled away from keeps nobody: its visitors' cookie
+		// no longer names a release the route serves, so they are answered
+		// by the warm release and told so.
+		if snapshot.Plan.SkewProtection {
+			e.withSkew(ctx, &value, release.Release.EnvironmentID, release.Release.ID, nil)
 		}
 		route = &value
 		result, applyErr := e.proxy.ApplyDeploymentRoute(ctx, value)
@@ -525,8 +619,8 @@ func (e *NormalizedStepExecutor) activateWarmRelease(ctx context.Context, execut
 	if err := e.store.activateWarmRelease(ctx, execution.Run, execution.ClaimToken, *watch, reason); err != nil {
 		return fail("activation_commit_failed", "The release pointer could not be moved back.", applied)
 	}
-	_ = stepLog(execution, "status", fmt.Sprintf("Release #%d is live again from its warm container %s, with its own frozen configuration",
-		watch.WarmReleaseNum, shortContainer(runtime.RuntimeID)))
+	_ = stepLog(execution, "status", fmt.Sprintf("Release #%d is live again from its warm %s, with its own frozen configuration",
+		watch.WarmReleaseNum, warmContainersLabel(*runtime)))
 	return StepResult{State: StepPassed, Evidence: mustJSON(evidence)}
 }
 
@@ -636,8 +730,16 @@ func (e *NormalizedStepExecutor) settleRollbackWatch(ctx context.Context, watch 
 }
 
 // restoreLiveRoute applies the route of the release the pointer names, so a
-// route an interrupted rollback moved can never outlive the rollback.
+// route an interrupted rollback moved can never outlive the rollback. A
+// release its window keeps running for skew protection is kept on it.
 func (e *NormalizedStepExecutor) restoreLiveRoute(ctx context.Context, releaseID int64) error {
+	return e.applyLiveRoute(ctx, releaseID, true)
+}
+
+// applyLiveRoute applies a release's own route; with pinned, beside the
+// warm release an open window keeps running for its visitors, and without,
+// beside nothing.
+func (e *NormalizedStepExecutor) applyLiveRoute(ctx context.Context, releaseID int64, pinned bool) error {
 	release, snapshot, err := e.releaseSnapshot(ctx, releaseID)
 	if err != nil {
 		return err
@@ -649,7 +751,7 @@ func (e *NormalizedStepExecutor) restoreLiveRoute(ctx context.Context, releaseID
 	if err != nil {
 		return err
 	}
-	route := publicRoute(release.Release.EnvironmentID, snapshot, runtime.Host, runtime.Port)
+	route := publicRoute(release.Release.EnvironmentID, snapshot, *runtime)
 	if route.TLS {
 		if resolver, ok := e.proxy.(interface {
 			ResolveDeploymentCertificate(context.Context, []string) (string, string, error)
@@ -660,6 +762,13 @@ func (e *NormalizedStepExecutor) restoreLiveRoute(ctx context.Context, releaseID
 			}
 			route.CertPath, route.KeyPath = certPath, keyPath
 		}
+	}
+	if snapshot.Plan.SkewProtection {
+		var pin *ReleaseRuntime
+		if pinned {
+			pin = e.warmPin(ctx, release.Release.EnvironmentID, releaseID)
+		}
+		e.withSkew(ctx, &route, release.Release.EnvironmentID, releaseID, pin)
 	}
 	_, err = e.proxy.ApplyDeploymentRoute(ctx, route)
 	return err

@@ -61,6 +61,13 @@ func newFake(t *testing.T) *fakeDashboard {
 	return f
 }
 
+// The description the fake serves: enough of a document to tell it came
+// through unchanged.
+var (
+	fakeOpenAPIJSON = []byte(`{"openapi":"3.1.0","info":{"title":"Just Dashboard deployment API","version":"0.0.0"},"paths":{}}` + "\n")
+	fakeOpenAPIYAML = []byte("\"openapi\": \"3.1.0\"\n\"paths\": {}\n")
+)
+
 func digestOf(value string) string {
 	sum := sha256.Sum256(append([]byte(value), 0))
 	return "sha256:" + hex.EncodeToString(sum[:])
@@ -127,9 +134,15 @@ func (f *fakeDashboard) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case route == "GET /api/v1/deploy/" && r.URL.Query().Get("view") == "fleet":
 		f.write(w, 200, f.fleetBody)
+	case route == "GET /api/v1/deploy/openapi.json":
+		f.write(w, 200, fakeOpenAPIJSON)
+	case route == "GET /api/v1/deploy/openapi.yaml":
+		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+		w.WriteHeader(200)
+		w.Write(fakeOpenAPIYAML)
 	case route == "GET "+env+"/configuration":
 		f.write(w, 200, map[string]any{"revision": f.revision, "build": map[string]any{"method": "image"},
-			"runtime":   map[string]any{"image": "nginx:1.27-alpine", "internalPort": 80, "strategy": "stop_first"},
+			"runtime":   map[string]any{"image": "nginx:1.27-alpine", "internalPort": 80, "strategy": "stop_first", "replicas": 2, "skewProtection": true},
 			"variables": f.variableList(), "domains": []any{}, "checks": []any{}, "dependencies": []any{},
 			"source": map[string]any{"kind": "image", "image": "nginx:1.27-alpine"}, "pending": map[string]any{"pending": true}})
 	case route == "PUT "+env+"/configuration":
@@ -186,14 +199,34 @@ func (f *fakeDashboard) serve(w http.ResponseWriter, r *http.Request) {
 		f.write(w, 200, []byte(`[{"id":80,"name":"Production","slug":"production","kind":"production"}]`))
 	case route == "POST "+env+"/promote":
 		f.write(w, 202, map[string]any{"id": 602, "runNumber": 7, "state": "queued", "operation": "promote"})
+	case route == "POST /api/v1/deploy/7/environments/71/promote":
+		// Staging takes a preview's image; the fake holds the server's
+		// rule that only a preview's is, and only from an approved head.
+		if body["source"] != "preview" {
+			f.fail(w, &apiError{Status: 409, Code: "promotion_target", Message: "releases are promoted into production"})
+			return
+		}
+		if body["preview"] == float64(46) {
+			f.fail(w, &apiError{Status: 422, Code: "preview_promotion_unapproved",
+				Message: "PR #46 comes from a fork (octocat/web), and a fork's code is promoted only at a commit an administrator approved: commit deadbee of PR #46 is waiting for an administrator's approval"})
+			return
+		}
+		f.write(w, 202, map[string]any{"id": 604, "runNumber": 9, "state": "queued", "operation": "promote", "environmentId": 71})
 	case route == "POST "+env+"/rollback-watch/rollback":
 		f.write(w, 202, map[string]any{"id": 603, "runNumber": 8, "state": "queued", "operation": "rollback"})
 	case route == "POST "+env+"/rollback-watch/keep":
 		f.write(w, 200, map[string]any{"state": "closed", "endReason": "kept", "releaseNumber": 3, "warmReleaseNumber": 2,
 			"endMessage": "ion kept release #3"})
+	case route == "GET "+env+"/canary":
+		f.write(w, 200, map[string]any{"canary": f.canaryWindow()})
+	case route == "POST "+env+"/canary/promote", route == "POST "+env+"/canary/abort":
+		window := f.canaryWindow()
+		window["decision"] = strings.TrimPrefix(route, "POST "+env+"/canary/")
+		f.write(w, 202, window)
 	case route == "GET "+env+"/rollback-watch":
 		f.write(w, 200, map[string]any{"policy": map[string]any{"keepWarm": true, "windowSeconds": 600, "automatic": true},
-			"watch":   map[string]any{"state": "watching", "releaseNumber": 3, "warmReleaseNumber": 2, "expiresAt": "2026-10-27T10:10:00Z"},
+			"watch": map[string]any{"state": "watching", "releaseNumber": 3, "warmReleaseNumber": 2, "expiresAt": "2026-10-27T10:10:00Z",
+				"warmRunning": true, "warmServed": map[string]any{"requests": 41}},
 			"preview": false})
 	case route == "GET "+env+"/maintenance":
 		f.write(w, 200, map[string]any{"driver": "caddy", "route": true, "ready": true, "on": f.maintenanceOn})
@@ -294,4 +327,15 @@ func TestMain(m *testing.M) {
 
 func configFile(env map[string]string) string {
 	return filepath.Join(env["XDG_CONFIG_HOME"], "jd", "config.json")
+}
+
+// canaryWindow is the environment's canary as the dashboard reads it: release
+// #4 on a tenth of the requests beside release #3.
+func (f *fakeDashboard) canaryWindow() map[string]any {
+	p95 := 91.0
+	return map[string]any{"id": 5, "runId": 501, "state": "running", "percent": 10, "autoPromote": true,
+		"startedAt": "2026-10-27T10:00:00Z", "endsAt": "2026-10-27T10:10:00Z", "releaseNumber": 4, "liveReleaseNumber": 3,
+		"live":      map[string]any{"requests": 1840, "failures": 3, "errorRate": 3.0 / 1840, "p95": 84.0},
+		"candidate": map[string]any{"requests": 203, "failures": 1, "errorRate": 1.0 / 203, "p95": p95},
+		"verdict":   map[string]any{"reason": "Within the live release's figures over 203 requests."}}
 }

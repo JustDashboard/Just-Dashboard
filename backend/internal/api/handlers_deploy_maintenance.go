@@ -58,9 +58,7 @@ func (s *Server) handleDeploymentMaintenanceSet(w http.ResponseWriter, r *http.R
 	if err != nil {
 		return err
 	}
-	var req struct {
-		On bool `json:"on"`
-	}
+	var req maintenanceSwitchRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
@@ -116,9 +114,7 @@ func (s *Server) handleDeploymentPagePut(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return err
 	}
-	var req struct {
-		Content string `json:"content"`
-	}
+	var req sitePageWrite
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
@@ -136,4 +132,14 @@ func (s *Server) handleDeploymentPagePut(w http.ResponseWriter, r *http.Request)
 	httpx.SetAudit(r, "deploy.page", strconv.FormatInt(environmentID, 10), detail)
 	httpx.JSON(w, http.StatusOK, page)
 	return nil
+}
+
+// maintenanceSwitchRequest switches the route's maintenance page on or off.
+type maintenanceSwitchRequest struct {
+	On bool `json:"on"`
+}
+
+// sitePageWrite replaces one of the route's own pages.
+type sitePageWrite struct {
+	Content string `json:"content"`
 }

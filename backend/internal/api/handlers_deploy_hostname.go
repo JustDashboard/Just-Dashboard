@@ -82,6 +82,13 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 	// A hostname that is given is being asked about, not replaced: the operator
 	// has typed their own domain and wants to know whether HTTPS will work.
 	if chosen := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("hostname"))); chosen != "" {
+		// A name served through Cloudflare Tunnel is not reached at this
+		// server's address and needs no certificate here: the public-IP DNS
+		// check and the certificate question say nothing about it.
+		if r.URL.Query().Get("tunnel") == "1" {
+			httpx.JSON(w, http.StatusOK, s.tunnelHostnameSuggestion(ctx, chosen))
+			return nil
+		}
 		suggestion := hostnameSuggestion{Hostname: chosen, Method: "custom"}
 		suggestion.Covered, suggestion.CertificateName = s.certificateCovering(ctx, chosen)
 		if strings.HasPrefix(chosen, "*.") {
@@ -149,6 +156,27 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 		certificateDetail(suggestion)
 	httpx.JSON(w, http.StatusOK, suggestion)
 	return nil
+}
+
+// tunnelHostnameSuggestion answers for a name to be served through the
+// tunnel: which tunnel, and that Cloudflare terminates its HTTPS and its
+// record is made as the release goes live.
+func (s *Server) tunnelHostnameSuggestion(ctx context.Context, hostname string) hostnameSuggestion {
+	suggestion := hostnameSuggestion{Hostname: hostname, Method: "tunnel", Covered: true}
+	if strings.HasPrefix(hostname, "*.") {
+		suggestion.Covered = false
+		suggestion.Detail = "A wildcard is not routed through Cloudflare Tunnel here: route each name."
+		return suggestion
+	}
+	name, connected := s.tunnelObserver()(ctx)
+	if !connected {
+		suggestion.Covered = false
+		suggestion.Detail = "No Cloudflare Tunnel is connected: connect one under Proxy › Tunnel, or serve the name at this server's address."
+		return suggestion
+	}
+	suggestion.CertificateName = "Cloudflare"
+	suggestion.Detail = "Served through the Cloudflare Tunnel " + name + ": Cloudflare terminates HTTPS, nothing is issued here, and the name's CNAME to the tunnel is created as the release goes live."
+	return suggestion
 }
 
 func certificateDetail(suggestion hostnameSuggestion) string {

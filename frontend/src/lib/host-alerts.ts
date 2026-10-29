@@ -1,6 +1,8 @@
 /*
  * Host alerts: rules over the machine's own readings — CPU and memory held
- * high, a filesystem filling, a container gone down, a backup job failed —
+ * high, a filesystem filling, a container gone down, a backup job failed, a
+ * deployment's image vulnerable with a newer base to rebuild on, the
+ * Cloudflare Tunnel's connector cut off from the edge —
  * that tell the deployments' notification channels once when a subject starts
  * firing and once when it comes back. The server's half is
  * `api/host_alerts.go`; this is the page's vocabulary for it, kept free of
@@ -8,7 +10,13 @@
  */
 
 export type HostAlertKind =
-  "cpu_high" | "memory_high" | "disk_filling" | "container_down" | "backup_failed"
+  | "cpu_high"
+  | "memory_high"
+  | "disk_filling"
+  | "container_down"
+  | "backup_failed"
+  | "image_vulnerable"
+  | "tunnel_down"
 
 /** Each kind reads its own; the server clears the rest. */
 export type HostAlertParams = {
@@ -35,7 +43,7 @@ export type HostAlertRule = {
 export type HostAlertSubject = {
   ruleId: number
   kind: HostAlertKind
-  /** "cpu", "memory", a mountpoint, a container's name, or "job:<id>". */
+  /** "cpu", "memory", a mountpoint, a container's name, "job:<id>" or "env:<project>:<environment>". */
   subject: string
   label: string
   detail: string
@@ -80,6 +88,8 @@ export const HOST_ALERT_KINDS: HostAlertKind[] = [
   "disk_filling",
   "container_down",
   "backup_failed",
+  "image_vulnerable",
+  "tunnel_down",
 ]
 
 /** The server's defaults (`hostAlertSpecs`), so a new form opens on them. */
@@ -89,6 +99,8 @@ export const HOST_ALERT_DEFAULTS: Record<HostAlertKind, HostAlertParams> = {
   disk_filling: { threshold: 90 },
   container_down: { minutes: 2 },
   backup_failed: {},
+  image_vulnerable: {},
+  tunnel_down: { minutes: 2 },
 }
 
 /** The ranges the server accepts, so the form says so before it is sent. */
@@ -99,6 +111,8 @@ const LIMITS: Record<HostAlertKind, { threshold?: [number, number]; minutes?: [n
     disk_filling: { threshold: [10, 99] },
     container_down: { minutes: [1, 1440] },
     backup_failed: {},
+    image_vulnerable: {},
+    tunnel_down: { minutes: [1, 1440] },
   }
 
 /** Whether a kind has a line, and whether it has minutes. */
@@ -132,6 +146,14 @@ export const HOST_ALERT_WORDS: Record<HostAlertKind, { label: string; hint: stri
     label: "Backup failed",
     hint: "The latest run of any backup job: files, volumes and database dumps alike.",
   },
+  image_vulnerable: {
+    label: "Vulnerable base image",
+    hint: "A live release's image has a vulnerability with a fix, at or above its environment's floor, and its base has a newer image to rebuild on.",
+  },
+  tunnel_down: {
+    label: "Tunnel down",
+    hint: "The Cloudflare Tunnel's connector stopped, or holding no connection to Cloudflare's edge, in cloudflared's own words.",
+  },
 }
 
 /** A minute count in words: "1 min", "90 min", "2 h", "1 day". */
@@ -157,6 +179,10 @@ export function describeHostAlert(kind: HostAlertKind, params: HostAlertParams) 
       return `exits, keeps restarting or turns unhealthy for ${minutesWords(p.minutes ?? 1)}`
     case "backup_failed":
       return "the latest run of a backup job fails"
+    case "image_vulnerable":
+      return "a live release's image has a fixable vulnerability and a newer base to rebuild on"
+    case "tunnel_down":
+      return `holds no connection to Cloudflare's edge for ${minutesWords(p.minutes ?? 1)}`
   }
 }
 

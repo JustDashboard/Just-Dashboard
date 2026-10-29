@@ -73,6 +73,10 @@ to the contribution terms above, including the additional licence grant to the p
   an explicitly managed frontend on another port when worktrees run alongside one another.
   Set `JD_BROWSER_WORKERS=1` to limit the selected browser run on a memory-constrained host; omit
   it to use the existing Playwright worker setting.
+- A change to a deployment route, to a type a deployment handler decodes or encodes, or to the
+  tables in `api/deploy_openapi.go` also regenerates the committed OpenAPI description, which a test
+  holds to the build: `cd backend && JD_UPDATE_OPENAPI=1 go test ./internal/api -run TestTheCommittedDeployOpenAPIDescriptionIsCurrent`,
+  then commit `docs/api/deploy-openapi.json` ([how it is generated](docs/internal/backend/deploy-api.md)).
 - Docker remedy changes run the live resource/policy acceptance: first make `alpine:3.20` available
   locally, then run from `backend/`:
   `JD_ADVISOR_DOCKER_LIVE=1 go test ./internal/dockerx -run '^TestLiveAdvisor' -count=1 -v`.
@@ -300,7 +304,14 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks -count=1 -v -timeout 2h`.
   Each sweep uses unique volume names. Startup/readiness is separate from first-use account setup;
   the [template matrix](docs/audits/2026-09-22-deploy-new/template-matrix.md) records which templates
-  generate credentials, require setup, have no application login, or remain unavailable.
+  generate credentials, require setup, have no application login, or remain unavailable. The two
+  Minecraft templates start with their seeded `server.properties` and answer their protocol checks
+  (`JD_BLUEPRINT_ONLY=minecraft-java,minecraft-bedrock`); the Java server downloads its build and
+  generates a world on the first start, so give it several minutes. Changes to install-time files,
+  pinned artifacts or the helper that writes them (`deploy/runtime_seeds.go`, `dockerx/volumeseed.go`)
+  also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveReleaseSeedsAreWrittenIntoTheVolumeBeforeStart -count=1 -v`,
+  which needs the local `postgres:17-alpine` image and network access to GitHub's raw file host, and
+  removes its volume and helpers ([game servers](docs/internal/deployments/game-servers.md#tests)).
 - Multi-service (Compose) templates have a sweep of their own. It saves each template's source the way
   the new-project page does (the server's render of the definition), resolves and pulls every service
   image through the Compose build step, starts the stack through the runtime owner with generated
@@ -310,7 +321,11 @@ to the contribution terms above, including the additional licence grant to the p
   it, and so are images it pulled):
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks -count=1 -v -timeout 2h`.
   A template's schema rules run at build time: every definition is parsed and validated when the
-  catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship.
+  catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship. The
+  same package checks the catalogue's size: `catalogue_counts.go` declares how many definitions
+  ship, how many deploy and how many are Compose templates, because the competitive report and the
+  README quote those numbers, and `TestCatalogueCountsMatchTheShippedDefinitions` fails until a
+  change that adds or retires a template bumps them.
 - Changes to shared variables or to how a run opens its variables also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSharedVariableReachesTheContainer -count=1 -v`,
   which starts a real container with the values a run opens for references to a server, a secret and a
@@ -322,16 +337,36 @@ to the contribution terms above, including the additional licence grant to the p
   `infisical/infisical:v0.167.4`, `postgres:17-alpine`, `redis:7-alpine`, pulled beforehand), reads a
   secret from each through AppRole and a Universal Auth machine identity into a real container's
   environment, a pinned version included, then stops OpenBao and checks the next run's first step fails in
-  the store's own words. It removes everything it made. Doppler has no self-hosted server and is covered
-  by an httptest server that follows its documented API (`secretstore_test.go`).
+  the store's own words. It removes everything it made. Changes to the AWS Secrets Manager client or the
+  SigV4 signer (`secretstore/aws.go`, `sigv4.go`) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSecretsManagerReferenceReachesTheContainer -count=1 -v`,
+  which starts a real LocalStack (`localstack/localstack:2026.10.3`, pulled beforehand, Secrets Manager
+  only) on loopback, reads a JSON secret's field, its `AWSPREVIOUS` staging label and a whole plain secret
+  into a real container through the dashboard's own signed client, then stops LocalStack and checks the
+  next run fails in the store's words; it removes what it made. LocalStack accepts any signature, so the
+  signing itself is proved by the unit tests: AWS's documented SigV4 example and a Secrets Manager request
+  checked against the AWS SDK's signature (`sigv4_test` in `secretstore_test.go`). Doppler, Secrets Manager
+  and Azure Key Vault have no self-hosted server and are covered by httptest servers that follow their
+  documented APIs — Doppler's in `secretstore_test.go`, the other two in `secretstore/secretstoretest`
+  (the Secrets Manager fake verifies every request's signature with an implementation of its own) — through
+  the unit tests, `deploy/secret_store_cloud_test.go` (the live fixture's shape without Docker) and the API
+  tests. The real AWS and Azure services are not exercised by any test.
 - Changes to staging environments, promotion or how a release is cloned also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveStagingReleaseIsPromotedAsTheSameImageAndRolledBack -count=1 -v`
   on a Docker and Buildx host (as root, through `go test -c` and `sudo`, like the others). Through the
   real routes and engine it builds a local Git checkout in staging, promotes the staging release and
   checks production runs the very image id staging built with no build step in its run, serves with
   production's variable and runs production's release task with production's value, then promotes a
-  second staging build and rolls production back to the first promoted release. Its environment and
-  run ids start far from 1, and it removes only the containers and tags its own store recorded.
+  second staging build and rolls production back to the first promoted release. It ends with a pull
+  request: a second project whose remote Git source's release mirror is pointed at a local origin by
+  `insteadOf` (a preview fetches `refs/pull/N/head`; the URL's host is under `.invalid` and commit
+  statuses are off, so nothing leaves the host), PR #41 built as a preview through a signed delivery and
+  the approval route, refused into production with `422 preview_promotion_target`, and promoted into
+  staging, which must run the very image id the preview built, serve and run its release task with
+  staging's variable and none of the preview's, and record PR #41, its commit and its approver; staging
+  keeps serving from its own tag once the preview's container and tag are gone. Changes to promoting a
+  preview run it, and the preview fixtures below. Its environment and
+  run ids start far from 1, and it removes only the containers, networks and tags its own store recorded.
 - Object-storage backups against a real S3 API (MinIO in a container: target test, upload, retention,
   restore): `JD_DEPLOY_LIVE=1 go test ./internal/backups -run TestLiveObjectStorageBackupUploadsPrunesAndRestores -count=1 -v`.
   Encrypted archives in a bucket take an S3-compatible service you started yourself, named by
@@ -367,22 +402,50 @@ to the contribution terms above, including the additional licence grant to the p
   (the wildcard served by a real `caddy:2-alpine`, then renewed and refreshed; needs the plugin above)
   and `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyRefreshesRenewedCertificateCopies -count=1 -v`
   (the renewal refresh on a real Caddy with no authority involved).
-  Changes to how a deployment route renders its redirects, response headers, allowed addresses, HSTS
-  or a domain's own scheme also
+  Changes to how a deployment route renders its redirects, response headers, allowed addresses, HSTS,
+  a domain's own scheme, edge rules or the CrowdSec list also
   run `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules -count=1 -v`,
   which asks a real Caddy what it answers for each, a route serving one name over HTTPS and another
-  over plain HTTP with HSTS included, and
+  over plain HTTP with HSTS included, a blocked path, a user agent's status, an allow ahead of a
+  block, a ban and its lifting, and the rule names in the request record; edge rules and rate limits
+  also run `go test ./internal/proxysvc -run TestLiveDeploymentRouteEdgeRulesOnNginx` on the host's
+  nginx alone (429 with Retry-After past the limit, 200 within it;
+  [edge rules](docs/internal/deployments/edge-rules.md#tests)); and
   `go test ./internal/proxysvc -run TestLiveDeploymentRouteMixedTLSOnNginx`, which asks the host's
   nginx the same. Changes to a route's sign-in, how Caddy reaches the
   auth server, or the maintenance pass that repairs that network also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyGatesRouteBehindForwardAuth -count=1 -v`,
   which signs in at a real Authelia (`authelia/authelia:4.39`, pulled on first run) in front of
   `traefik/whoami`, and `go test ./internal/proxysvc -run TestLiveDeploymentRouteSignsInOnNginx`, which
-  needs only the host's nginx. Changes to a route's maintenance switch or error pages also run
+  needs only the host's nginx. Changes to a tailnet address's front or a tailnet-only environment's
+  gate (`proxysvc/tailnet_gate.go`), the whois route (`internal/tailnetgate`) or how activation
+  publishes on the tailnet also run
+  `go test ./internal/proxysvc -run TestLiveTailnetGateOnNginx`, which needs only the host's nginx, and
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveTailnetGateOnCaddy -count=1 -v` (as root:
+  build the test binary and run it under `sudo`), which starts a real `caddy:2-alpine` the way the
+  dashboard starts its loopback gate and removes it with its volumes. Both put the real whois handler
+  over the real local API client in front of a fake tailscaled, never the host's, and check a front
+  beside the gate and that neither sends the application the dashboard's session cookie
+  ([tailnet-only deployments](docs/internal/deployments/tailnet-apps.md#verification)), and the
+  preview tailnet tests in `internal/deploy` (`go test ./internal/deploy -run 'Tailnet|Preview|Front'`)
+  are their regressions. Changes to the session cookie (`internal/sessioncookie`, `httpx/authmw.go`) or
+  to how a proxy takes it out of a request (`proxysvc/dashboard_cookie.go`) also run the `api` tests in
+  `session_cookie_test.go`, both of those, and
+  `go test ./internal/proxysvc -run TestLiveNginxRouteOnTheDashboardsNameDropsItsSession` and
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyRouteOnTheDashboardsNameDropsItsSession -count=1 -v`
+  (as root), a deployment route on the dashboard's own name on the host's nginx and on a real Caddy
+  ([the dashboard's session cookie](docs/internal/deployments/tailnet-apps.md#the-dashboards-session-cookie)). Changes to a route's maintenance switch or error pages also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesMaintenanceAndErrorPages -count=1 -v`
   and `go test ./internal/proxysvc -run TestLiveDeploymentRouteMaintenanceOnNginx`, which switch a real
   Caddy's and the host nginx's route by its file and ask each what a visitor, an address let past and a
-  stopped application get.
+  stopped application get. Changes to Cloudflare Tunnel (`internal/cftunnel`, `proxysvc/tunnel_origin.go`,
+  `deploy/tunnel.go`) also run, as root on a Docker host,
+  `JD_DEPLOY_LIVE=1 go test ./internal/cftunnel -run TestLiveConnectorReportsCloudflaredsOwnFailure -count=1 -v`,
+  which starts the pinned cloudflared with a well-formed token for a tunnel that does not exist and checks
+  that the dashboard reads its failure in cloudflared's own words (it needs outbound access to Cloudflare's
+  edge, and a real tunnel needs a Cloudflare account, which no test has), and
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesATunnelNamePlainToItsConnector -count=1 -v`,
+  which asks a real Caddy for a tunnel's name from the tunnel's network alone, as the connector does.
   This uses locked application fixtures and checks served build values, private install credentials,
   SvelteKit adapters, HTML/Containerfile defaults and Go command/version behavior, plus the catalogue's
   own starters: Astro, Nuxt, React Router, FastAPI (unpinned requirements, server auto-installed), a
@@ -427,7 +490,32 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_TEST_WALG=<path>` to the WAL-G release `backend/Dockerfile` pins,
   `TestLiveMigrationRehearsalRecoversFromThePointInTimeArchive` runs as well: a PostgreSQL 17
   archiving into a directory, the copy recovered from the archive. They remove their own
-  `jd-rehearsal-…` servers, volumes, networks and release containers.
+  `jd-rehearsal-…` servers, volumes, networks and release containers. Changes to a preview's database
+  branches (`deploy/preview_branches.go`, `api/deployment_preview_branch*.go`, or the restore they share)
+  also run, the same way,
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run 'TestLivePreviewDatabaseBranch' -count=1 -v` (PostgreSQL
+  from a dump, MariaDB, and with `JD_TEST_WALG` the point-in-time archive): a preview's branch resolves to
+  its own address and password on the preview's own network, holds the backup's rows, keeps writes apart
+  from production's both ways, masks a column in its shape, is never a fork's, and goes with the preview
+  leaving nothing with its label.
+- Changes to data-aware rollback — the data point a release records when it goes live, the copies of
+  a release's data, their restore, lifetime or sweep (`deploy/data_rollback.go`,
+  `api/deployment_data_rollback.go`), the restore path they share with the migration rehearsal, or
+  how the environment's network reconciler treats labelled containers — also run, from
+  `backend/internal/api` as root on a Docker host,
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDataCopy -count=1 -v`: it provisions a
+  PostgreSQL through the routes, dumps it with a backup job, activates two releases around a change to
+  its rows and restores a copy as of the first. The copy must be on the deployment's network alone
+  under its own name, answer an application container there with its own password and hold the rows
+  the first release went live with while production holds more — read there and through the
+  comparison route — and a rehearsal-labelled container must stay off that network across a
+  reconcile. The sweep at start keeps the copy while its lifetime runs; once it ends its owner removes
+  it, leaving nothing with its label. A rollback to the first release that asks for the copy too finds
+  it restored after the rollback succeeded. `TestLiveDataCopyRestoresAMariaDBDump` does the same
+  against MariaDB (`mariadb:11.8`, pulled once). With `JD_TEST_WALG`,
+  `TestLiveDataCopyRecoversTheMomentAReleaseWentLive` does the same from a point-in-time archive, the
+  copy recovered to the moment the first release went live. Changes to the shared restore path also
+  run the migration rehearsal family above, both ways.
 - `python3 scripts/e2e-deployments.py` is the real-backend acceptance lane for deployments: it builds the
   backend, starts it on loopback with a fresh data directory, and drives the public API through a signed
   webhook channel, an nginx image deployment with resource limits, a busybox image that exits before it
@@ -445,16 +533,34 @@ to the contribution terms above, including the additional licence grant to the p
   project, and the pull request must say which providers were exercised.
 - Log drains run against real services with
   `JD_DEPLOY_LIVE=1 go test ./internal/logdrain -run TestLiveDrainsDeliverToLokiTheCollectorAndVector -count=1 -v`:
-  Loki (push API and OTLP, read back with LogQL), an OpenTelemetry Collector and Vector, each in a
-  container on loopback. The package's concurrency is worth `-race` (it needs cgo; the `golang` image
-  has it).
+  Loki (push API and OTLP, read back with LogQL), an OpenTelemetry Collector — its logs pipeline and
+  its traces pipeline, which receives the spans — and Vector, each in a container on loopback. The
+  package's concurrency is worth `-race` (it needs cgo; the `golang` image has it).
+- Changes to the trace context a deployment route sends and records (`proxysvc/trace.go`, the
+  Caddy route's handling, the nginx location's headers or the timed log format) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddySendsAndRecordsATraceparent -count=1 -v`
+  as root — a real `caddy:2-alpine` ingress in front of `traefik/whoami`, which answers with the
+  `traceparent` it received, a new trace and a continued one each read back from the request record —
+  and, unprivileged, `go test ./internal/proxysvc -run TestLiveDeploymentRouteTracesOnNginx`, which
+  asks the host's nginx the same.
+- Changes to the volume-size sampling behind the capacity forecast (`sampleDeploymentVolumes`,
+  `metrics.WithVolumes`) or to the throttling counters right-sizing reads also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run 'TestLive(DeploymentVolumeSizesAreSampled|ThrottlingIsRecordedForACPULimitedContainer)' -count=1 -v`
+  as root on a Docker host: the first writes 8 MiB into a real managed volume and reads it back through
+  the sampler, the running recorder and `GET /system/metrics/capacity`; the second holds a busy loop to a
+  tenth of a core and reads its throttled share back from the running recorder. Both use the cached
+  `alpine:3.20` (never pulled) and remove what they made. Right-sizing's maths is pure and needs no
+  daemon ([right-sizing](docs/internal/deployments/right-sizing.md#tests)).
 - Changes to deployment variables, feature links, backup gates or managed-resource lifecycle also run
   `go test -race ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store -count=1`;
   the browser gate covers the project overview, build transcript and focused settings, including
   variables, domains, storage, dependencies, automation and lifecycle.
 - Preview changes also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run 'TestLive(PreviewStorageCredentialsNetworkAndCleanup|LegacyPreviewQuarantinePreservesProduction)$' -count=1 -v`.
-  These fixtures cover new-preview isolation and production-preserving quarantine of older previews.
+  These fixtures cover new-preview isolation and production-preserving quarantine of older previews;
+  the first has `container` and `compose` subtests, the latter previewing a two-service Compose stack
+  through `docker compose` (both services on the preview's bridge alone, only the public one
+  publishing, on loopback, production's volume, host directory and network untouched, removal exact).
   Compose backup coverage changes run
   `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveDeploymentComposeStorage -count=1 -v`.
 - Changes to the connection pooler (`dbx/pooler.go`, `api/database_pooler.go`, its routes, or how a
@@ -469,8 +575,18 @@ to the contribution terms above, including the additional licence grant to the p
   on a Docker host. It provisions five of the templates (PostgreSQL, MySQL, MariaDB, Redis and
   MongoDB), reaches each from separate application containers,
   replaces databases at a different IP, reconnects the same clients using their original URLs,
-  verifies ownership/removal, and cleans up its own containers, volumes and networks. Compose network
-  integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
+  verifies ownership/removal, and cleans up its own containers, volumes and networks. It pulls each
+  engine's image before creating anything and logs how long that took, so a slow registry reads as a
+  pull rather than as a database that never answers; each engine then has two minutes from its
+  container starting to accept a sign-in, and a failure reports the adopt route's last reply with the
+  container's state and last log lines. MongoDB 8 does not start on Linux 6.19 to 7.0.13 (MongoDB
+  SERVER-121912, which a runner image can move to) without `GLIBC_TUNABLES=glibc.pthread.rseq=1`: the
+  MongoDB subtest checks that provisioning gave it that on such a kernel and nothing on any other, and
+  fails at once, naming the kernel and MongoDB's line, if it still refuses; `mongodb-kernel-mitigation`
+  applies the mitigation from the Databases page to a server made without it, on the runner's real
+  kernel when it is one of those, and otherwise on a server that is made to log MongoDB's refusal and
+  killed, with the kernel read as 7.0.0.
+  Compose network integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
 - Changes to server TLS for the databases the dashboard starts (`api/database_tls*.go`, `internal/dbtls`,
   `dbx/servertls.go`) also run
   `JD_DB_TLS_LIVE=1 go test ./internal/api -run TestLiveDatabaseServerTLS -count=1 -v` on a Docker host
@@ -480,28 +596,76 @@ to the contribution terms above, including the additional licence grant to the p
   starts a server, switches it to TLS, requires TLS, checks the certificate on the wire against the
   recorded serial, renews it (by request and by the schedule) without a restart, switches TLS off,
   and removes its container and volumes.
+- Changes to the vulnerability watch — `internal/imagescan` (the scanner's container, the database
+  download, the report reader) or `deploy/image_scan*.go` — also run, as root (build the `internal/api`
+  test binary and run it under `sudo -n env JD_DEPLOY_LIVE=1 PATH=$PATH`),
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveImageScanStoresFindingsAndRaisesTheAlert -count=1 -v`.
+  It runs the pinned Trivy image against the real database, fetched from its registry (about 140 MB)
+  into a volume of its own: a release on `alpine:3.12` pinned on a moved `alpine:3.22` stores zlib's
+  CVE-2022-37434 as a fixable critical and raises the `image_vulnerable` reading, and one on today's
+  `alpine:3.22` raises nothing. It pulls the two alpine images and the scanner's when they are missing
+  and removes those it pulled, removes its volume, and leaves no container.
 - Changes to the ingress request record — the rendered `log` block, `accesslog.Store`, or either
   reader in `proxysvc/deployment_access_log.go` — also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveCaddyAccessLogReader -count=1 -v`, which
   drives the container-side script against `caddy:2-alpine`: a roll under the reader, the rolled
   generation found by inode with its tail recovered, the new live file, a vanished inode reading as
   absent. It starts one idle container and removes it.
-- Changes to the deployment lifecycle feed — the owner filter, the audit correlation, the kinds, or
-  either endpoint in `handlers_deploy_requests.go` — also run
+- Changes to the deployment lifecycle feed — the owner filter, the audit correlation, the kinds,
+  either endpoint in `handlers_deploy_requests.go`, or the persisted record in
+  `dockerx/events_store.go` — also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentEventsAreReadFromDockerAndNamedWithTheirCause -count=1 -v`.
   It labels a real container and a real network the way the runtime owner labels what it creates,
   lets the container exit 137, and reads both back through the real routes and the real socket. The
   feed rests on Docker putting an object's labels in an event's actor attributes, and nothing in this
   code would notice if that stopped being true — it is already false for networks, which is what the
-  fixture exists to pin. It creates two containers and one network and removes them.
+  fixture exists to pin. It then replaces the event ring with one that has never connected — a restart
+  of the dashboard, as far as the feed can tell — and requires the exit to still be in the feed, read
+  back from the store with its code, its labels and its cause. It creates two containers and one
+  network and removes them. Changes to the deployments' Prometheus exposition
+  (`api/deployment_metrics_export.go`) or the availability maths (`deploy/availability.go`) run their
+  unit tests; a real Prometheus scraping the endpoint is not part of the checks.
 - Changes to deployment routes, activation cutover or runtime ownership also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run '^TestLiveCutover(TrafficContinuity|SurvivesProxyLoss)$' -count=1 -v`
   and `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRuntimeLossKeepsExactlyOneReleaseLive -count=1 -v`.
   The first drives sustained fast, long-streamed and WebSocket traffic through 100 real nginx
-  activations and fails on a single lost request; set `JD_CUTOVER_TRANSITIONS` lower only for local
-  iteration, never for an acceptance run, and `JD_CUTOVER_EVIDENCE` to retain the measured counts.
+  activations, for a release of one container and again for one of two replicas, and fails on a single
+  lost request; the replicated run also requires both replicas to answer and a replica killed under
+  steady traffic to cost no request. Set `JD_CUTOVER_TRANSITIONS` lower only for local iteration, never
+  for an acceptance run, and `JD_CUTOVER_EVIDENCE` to retain the measured counts (the replicated run's
+  beside them, `-2-replicas.json`).
   The second kills real containers in the blue/green window and at a live release, and requires that
-  exactly one release is running afterwards.
+  exactly one release is running afterwards — for a release of three replicas, that one replica of the
+  candidate dying removes the whole candidate and one of the live release dying brings it back whole.
+  Changes to replicas — how they are started, named, labelled, stopped or kept warm, or how a route
+  shares requests between them (`deploy/runtime_replicas.go`, the pool in `proxysvc`) — also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyBalancesReplicas -count=1 -v`
+  and `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveReplicatedReleaseServesAndRollsBackAsOne -count=1 -v`
+  (as root, through `go test -c` and `sudo`). The first puts three replicas behind a real Caddy and kills
+  one under traffic; the second deploys a release of two replicas through the routes and its own Caddy
+  ingress (`JD_INGRESS_CONTAINER`, on a loopback port), cuts over to a broken release of two only after
+  both pass readiness, and requires the automatic rollback to resume both of the first release's paused
+  containers and remove both of the second's ([replicas](docs/internal/deployments/canary-and-replicas.md)).
+  Changes to canary releases — the strategy and its terms, the `canary` step, how a route is split
+  between two releases or records which one answered (`deploy/canary*.go`, `proxysvc/sites_split.go`,
+  `caddyReleases`, `accesslog`'s `Release`) — also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveCanaryAbortsAFailingReleaseAndPromotesAHealthyOne -count=1 -v`,
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveCanarySplitsTheRouteOnNginx -count=1 -v`
+  and `TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun`, whose matrix now includes the step. The
+  first runs a real engine behind its own loopback Caddy ingress: a canary that answers 500 to its share
+  is aborted on the side-by-side reading with the live release's same container serving everything, and
+  a healthy one is promoted at the end of its window with the dashboard restarted in the middle of it;
+  the second splits a real nginx route 30%, reads `rel=` from its access log and moves in and out of the
+  canary under traffic without losing a request
+  ([canary releases](docs/internal/deployments/canary-and-replicas.md#canary-releases)).
+  Changes to skew protection — the `jd_release` cookie, a route keeping a warm release for its visitors,
+  the warm release kept running and taken off the route (`deploy/skew.go`, `SiteSplit`, `caddyReleases`,
+  `DeploymentSkew`) — also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveSkewProtectionKeepsAVisitorOnTheirRelease -count=1 -v`
+  and `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveSkewProtectionPinsAVisitorOnNginx -count=1 -v`:
+  a visitor with the previous release's cookie stays on it after a cutover, a fresh one gets the new
+  release, and after the window both do, through a real Caddy and a real nginx
+  ([skew protection](docs/internal/deployments/canary-and-replicas.md#skew-protection)).
 - Changes to the warm-release window, instant rollback or the rollback watcher (`deploy/rollback_*.go`,
   `api/handlers_deploy_rollback_watch.go`) also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveMetricGatedRollbackSwitchesBackToTheWarmRelease -count=1 -v`.
@@ -513,6 +677,30 @@ to the contribution terms above, including the additional licence grant to the p
   container, the `release.rolled_back` delivery and its audit; then deploys a healthy third release and
   requires the warm container removed when its one-minute window passes. It numbers its environment
   far from any other and removes its containers.
+- Changes to the traffic replay (`deploy/replay.go`, the `replay_traffic` step, `runtime.replay`, or the
+  request record it reads) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveTrafficReplayStopsACandidateThatBreaksARecordedRoute -count=1 -v`
+  as root on a Docker host. Like the rollback acceptance it starts a Caddy ingress of its own on a
+  loopback port (`JD_INGRESS_CONTAINER`) and deploys `caddy:2-alpine` releases through the real routes
+  and engine: a first release whose replay skips for want of a record; thirty pages, a HEAD and a
+  write sent through the ingress; a release that answers 404 for one of those pages, which must end
+  `replay_status_drift` in `replay_traffic` with nothing cut over, the first release still answering
+  every page, its own container gone and the record holding only the test's requests (the replay never
+  passes through the ingress); then a release that answers like the first and goes live. It numbers
+  its environment far from any other and removes its containers.
+- Changes to scale-to-zero (`deploy/sleep.go`, `deploy/sleep_wake.go`, `proxysvc/deployment_sleep.go`,
+  `runtime.sleep`, or a route's wake) also run, as root on a Docker host,
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run 'TestLiveDeploymentRouteWakesOnNginx|TestLiveDockerCaddyRouteWakes' -count=1 -v`
+  — a real `traefik/whoami` behind the host's real nginx (a private prefix, its workers reading the
+  test's folder) and behind a real `caddy:2-alpine`, with a wake socket of the test's: the first request
+  after a stop is answered by the application, a POST through the switch keeps its body, a visitor
+  without the route's password wakes nothing, a wake still starting is the waking page and nothing to
+  wake is the route's 502 — and
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveSleepingDeploymentWakesOnTheFirstRequest -count=1 -v`,
+  the whole feature against a Caddy ingress of its own on a loopback port (`JD_INGRESS_CONTAINER`) with
+  the real engine, sleeper and wake socket: the idle pass stops the container without removing it, the
+  next request through the ingress is answered by the application, the audit and the lifecycle feed say
+  why, and Wake now wakes it again. Both remove what they created.
 - Changes to the engine, its reconciler or run persistence also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun -count=1 -v`.
   It builds `internal/deploy/testdata/engine-host`, SIGKILLs that real second process inside every

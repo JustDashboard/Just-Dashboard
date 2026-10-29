@@ -106,7 +106,10 @@ func TestGameBlueprintsAreHonestlyStopFirstAndPublishTheirOwnPort(t *testing.T) 
 	if plan.Configuration.Runtime.Strategy != StrategyStopFirst {
 		t.Fatalf("strategy = %q", plan.Configuration.Runtime.Strategy)
 	}
-	if plan.Configuration.Runtime.HostPort != 25565 || plan.Configuration.Runtime.BindAddress != "0.0.0.0" {
+	// The port is the game's own, on loopback until the operator publishes
+	// it: preflight's game_loopback_only says what that takes.
+	if plan.Configuration.Runtime.HostPort != 25565 || plan.Configuration.Runtime.BindAddress != "127.0.0.1" ||
+		plan.Configuration.Runtime.Protocol != "tcp" {
 		t.Fatalf("runtime = %#v", plan.Configuration.Runtime)
 	}
 	// The RCON port is internal and must never reach the host.
@@ -308,6 +311,8 @@ func TestEveryTemplateDeploysFromWhatTheNewProjectPageCanFillIn(t *testing.T) {
 		"open-webui":        {"admin-email"},
 		"authentik":         {"admin-email"},
 		"planka":            {"admin-email"},
+		"budibase":          {"admin-email"},
+		"kimai":             {"admin-email"},
 	}
 	definitions, err := blueprint.Catalog()
 	if err != nil {
@@ -322,6 +327,11 @@ func TestEveryTemplateDeploysFromWhatTheNewProjectPageCanFillIn(t *testing.T) {
 			for _, input := range definition.Inputs {
 				if input.Kind == blueprint.InputDomain {
 					inputs[input.Name] = "app-2f9c1a.203-0-113-7.sslip.io"
+				}
+				// An agreement is the box the panel shows beside its link;
+				// ticking it is the operator's one press, not a typed value.
+				if input.Kind == blueprint.InputAccept {
+					inputs[input.Name] = "true"
 				}
 			}
 			for _, name := range typed[definition.ID] {

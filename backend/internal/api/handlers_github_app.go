@@ -84,10 +84,7 @@ func (s *Server) handleGitHubAppManifest(w http.ResponseWriter, r *http.Request)
 // cross-site navigation, on which the browser withholds the SameSite=Strict
 // session cookie — so the API could never see who was completing it.
 func (s *Server) handleGitHubAppCallback(w http.ResponseWriter, r *http.Request) error {
-	var request struct {
-		Code  string `json:"code"`
-		State string `json:"state"`
-	}
+	var request githubAppCallbackRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
@@ -176,4 +173,11 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 	httpx.SetAudit(r, "deploy.githubapp.delivery", event.Repository, map[string]any{"deliveryId": event.DeliveryID, "event": event.Event, "triggers": len(triggers), "accepted": accepted})
 	httpx.JSON(w, http.StatusAccepted, map[string]any{"repository": event.Repository, "deliveryId": event.DeliveryID, "event": event.Event, "triggers": results})
 	return nil
+}
+
+// githubAppCallbackRequest is what GitHub sends back from the manifest flow,
+// relayed by the page.
+type githubAppCallbackRequest struct {
+	Code  string `json:"code"`
+	State string `json:"state"`
 }

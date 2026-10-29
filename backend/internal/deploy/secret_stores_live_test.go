@@ -375,3 +375,184 @@ func infisicalFixture(t *testing.T, address string) (string, string, string) {
 		map[string]string{"role": "viewer"}, http.StatusOK, nil)
 	return id, universal.IdentityUniversalAuth.ClientID, clientSecret.ClientSecret
 }
+
+// liveLocalStackImage stands in for AWS Secrets Manager: LocalStack serves
+// its JSON 1.1 protocol with versions and staging labels, but accepts any
+// signature, so the signing itself is proved by the documented vectors in
+// secretstore_test.go and secretstoretest's verifying fake, not here. 4.14.0
+// is the last community release; the 2026 images quit without a licence
+// token.
+const liveLocalStackImage = "localstack/localstack:4.14.0"
+
+// liveSecretsManagerCall sends one Secrets Manager operation to a stand-in
+// that reads the key and region out of the Authorization header without
+// checking the signature, which is how the fixture writes its secrets
+// without an AWS CLI in the container.
+func liveSecretsManagerCall(t *testing.T, endpoint, operation string, body any) {
+	t.Helper()
+	liveCall(t, http.MethodPost, endpoint+"/", map[string]string{
+		"Content-Type": "application/x-amz-json-1.1", "X-Amz-Target": "secretsmanager." + operation,
+		"X-Amz-Date":    time.Now().UTC().Format("20060102T150405Z"),
+		"Authorization": "AWS4-HMAC-SHA256 Credential=test/" + time.Now().UTC().Format("20060102") + "/us-east-1/secretsmanager/aws4_request, SignedHeaders=host;x-amz-date, Signature=0",
+	}, body, http.StatusOK, nil)
+}
+
+// TestLiveSecretsManagerReferenceReachesTheContainer reads a JSON secret's
+// field, its previous staging label and a whole plain secret from a real
+// LocalStack Secrets Manager through the dashboard's own SigV4 client, the
+// way a run does — the first step's read, then the runtime variables
+// activation opens — starts a real container with them and reads them back.
+// Then LocalStack is stopped, and the next run's first step fails in the
+// store's words with nothing started. Opt-in; it removes what it made.
+func TestLiveSecretsManagerReferenceReachesTheContainer(t *testing.T) {
+	if os.Getenv("JD_DEPLOY_LIVE") != "1" {
+		t.Skip("set JD_DEPLOY_LIVE=1 on a Docker/Buildx host")
+	}
+	ctx := context.Background()
+	client := liveC4Docker(t)
+	stamp := fmt.Sprintf("%d", time.Now().UnixNano())
+	name := "jdtest-localstack-" + stamp
+	port := freeLoopbackPort(t)
+	if _, err := liveDockerOutput(ctx, "run", "-d", "--name", name, "-p", fmt.Sprintf("127.0.0.1:%d:4566", port),
+		"-e", "SERVICES=secretsmanager", "-e", "EAGER_SERVICE_LOADING=1", liveLocalStackImage); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = liveDockerOutput(context.Background(), "rm", "--force", "--volumes", name) })
+	endpoint := fmt.Sprintf("http://127.0.0.1:%d", port)
+	waitForHTTP(t, endpoint+"/_localstack/health", 3*time.Minute)
+	// A ClientRequestToken is what the CLI adds for you: the new version's
+	// id, which has to be unique per version.
+	liveSecretsManagerCall(t, endpoint, "CreateSecret", map[string]string{"Name": "apps/web", "ClientRequestToken": "a1111111-1111-4111-8111-111111111111",
+		"SecretString": `{"DATABASE_URL":"postgres://app:aws-v1@db/app","PORT":5432}`})
+	liveSecretsManagerCall(t, endpoint, "PutSecretValue", map[string]string{"SecretId": "apps/web", "ClientRequestToken": "a2222222-2222-4222-8222-222222222222",
+		"SecretString": `{"DATABASE_URL":"postgres://app:aws-v2@db/app","PORT":5432}`})
+	liveSecretsManagerCall(t, endpoint, "CreateSecret", map[string]string{"Name": "stripe-key", "ClientRequestToken": "a3333333-3333-4333-8333-333333333333",
+		"SecretString": "sk_live_localstack"})
+
+	fixture := newPlanningStoreFixture(t)
+	repo := secretstore.NewRepository(fixture.store, fixture.sealer)
+	plans := fixture.plans.WithSecretStores(repo)
+	aws, err := repo.Create(ctx, secretstore.Write{
+		Name: "aws", Kind: secretstore.KindAWS, Address: endpoint, Settings: secretstore.Settings{Region: "us-east-1"},
+		Credentials: &map[string]string{"accessKeyId": "test", "secretAccessKey": "test"},
+	}, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tested, err := repo.Test(ctx, aws.ID, &secretstore.Probe{Path: "apps/web", Key: "DATABASE_URL"})
+	if err != nil || !tested.OK || !strings.Contains(tested.Message, "found apps/web#DATABASE_URL, version ") {
+		t.Fatalf("Secrets Manager test = %+v, %v", tested, err)
+	}
+	t.Logf("Secrets Manager test: %s", tested.Message)
+
+	projectRow, environmentID := insertConfigurationFixture(t, fixture)
+	revision := 1
+	for _, variable := range []struct{ name, reference string }{
+		{"DATABASE_URL", "${{store.aws/apps/web#DATABASE_URL}}"},
+		{"FIRST_DATABASE_URL", "${{store.aws/apps/web#DATABASE_URL@AWSPREVIOUS}}"},
+		{"STRIPE_KEY", "${{store.aws/stripe-key}}"},
+	} {
+		result, err := plans.PutVariable(ctx, projectRow, environmentID, variable.name, "operator", VariableWriteRequest{
+			Revision: revision, Reference: variable.reference, Sensitivity: "secret", Scopes: []string{"runtime"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		revision = result.DesiredRevision
+	}
+
+	builder := NewArtifactBuilder(NewDockerArtifactBackend(client))
+	owner := NewDockerRuntimeOwner(client)
+	tag := "jdtest-aws-stores:" + stamp
+	t.Cleanup(func() { _, _ = liveDockerOutput(context.Background(), "image", "rm", "--force", tag) })
+	root := t.TempDir()
+	writeBuildFixture(t, root, "Dockerfile", "FROM alpine:3.22\nCMD [\"sleep\", \"600\"]\n")
+	image := livePrepareAndBuild(t, builder, root, tag, BuildPlanConfig{Method: BuildDockerfile}, nil, nil, nil).Image
+
+	runs := NewOrchestrationStore(fixture.store)
+	executor := &NormalizedStepExecutor{store: runs, variables: plans}
+	enqueue := func(label string) *EngineRun {
+		t.Helper()
+		queued, _, err := runs.Enqueue(ctx, RunRequest{
+			ProjectID: projectRow, EnvironmentID: environmentID, Operation: OperationDeploy,
+			Trigger: TriggerManual, Actor: "operator", RequestDigest: "aws-stores-live-" + label, PlanRevision: revision,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return queued
+	}
+	first := enqueue("first")
+	output := &recordingStepOutput{}
+	if failure := executor.readSecretStores(ctx, StepExecution{Run: *first, Step: RunStep{Key: StepResolveSource}, Output: output}); failure != nil {
+		t.Fatalf("the first step's read failed: %+v\n%s", failure, output.joined())
+	}
+	t.Logf("first step's transcript:\n%s", output.joined())
+	values, err := plans.OpenRunScopedVariables(ctx, first.ID, environmentID, "runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	variables := map[string]string{}
+	for _, value := range values {
+		variables[value.Name] = value.Value
+	}
+	containerEnvironment := time.Now().UnixNano()%1_000_000_000 + 800_000_000
+	plan := RuntimePlanConfig{
+		Strategy: StrategyStopFirst, StopSignal: "SIGTERM", GracePeriodSeconds: 1,
+		Command: []string{}, Capabilities: []string{}, Devices: []string{}, Mounts: []RuntimeMount{},
+	}
+	engineRun := EngineRun{ID: containerEnvironment + 1, EnvironmentID: containerEnvironment}
+	release := Release{ID: containerEnvironment + 101, EnvironmentID: containerEnvironment, RunID: engineRun.ID, Number: 1}
+	started, err := owner.StartCandidate(ctx, CandidateRuntimeRequest{
+		Run: engineRun, Release: release, Snapshot: runtimeReleaseSnapshot{Version: 1, Plan: plan, Image: image},
+		RuntimeVariables: variables, Host: "127.0.0.1",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := runtimeFromInput(started.Input)
+	defer func() { _, _ = owner.Stop(context.Background(), runtime, plan, nil, true, nil) }()
+	inside, err := liveDockerOutput(ctx, "exec", runtime.RuntimeID, "sh", "-c",
+		`printf 'DATABASE_URL=%s\nFIRST_DATABASE_URL=%s\nSTRIPE_KEY=%s\n' "$DATABASE_URL" "$FIRST_DATABASE_URL" "$STRIPE_KEY"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("container %s read:\n%s", runtime.RuntimeID[:12], inside)
+	for _, want := range []string{
+		"DATABASE_URL=postgres://app:aws-v2@db/app\n", "FIRST_DATABASE_URL=postgres://app:aws-v1@db/app\n", "STRIPE_KEY=sk_live_localstack\n",
+	} {
+		if !strings.Contains(string(inside), want) {
+			t.Fatalf("the container read\n%s\nwithout %q", inside, want)
+		}
+	}
+	for _, want := range []string{
+		"Read DATABASE_URL from secret store aws: apps/web#DATABASE_URL, version ",
+		"Read FIRST_DATABASE_URL from secret store aws: apps/web#DATABASE_URL@AWSPREVIOUS, version ",
+		"Read STRIPE_KEY from secret store aws: stripe-key, version ",
+	} {
+		if !strings.Contains(output.joined(), want) {
+			t.Fatalf("the transcript\n%s\nlacks %q", output.joined(), want)
+		}
+	}
+	for _, value := range []string{"aws-v1", "aws-v2", "sk_live"} {
+		if strings.Contains(output.joined(), value) {
+			t.Fatalf("the transcript holds a value:\n%s", output.joined())
+		}
+	}
+	if _, err := fixture.store.DB.Exec(`UPDATE deploy_runs SET status = 'success', state = 'succeeded', ended_at = 1 WHERE id = ?`, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	plans.SecretStoreRunObserver().RunFinished(ctx, *first)
+
+	if _, err := liveDockerOutput(ctx, "stop", "--time", "1", name); err != nil {
+		t.Fatal(err)
+	}
+	second := enqueue("second")
+	output = &recordingStepOutput{}
+	failure := executor.readSecretStores(ctx, StepExecution{Run: *second, Step: RunStep{Key: StepResolveSource}, Output: output})
+	if failure == nil || failure.State != StepFailed || failure.ErrorCode != "secret_store_unreadable" ||
+		!strings.Contains(failure.ErrorMessage, "secret store aws, apps/web#DATABASE_URL: could not reach "+endpoint) {
+		t.Fatalf("with the store down = %+v\n%s", failure, output.joined())
+	}
+	t.Logf("with LocalStack stopped, the first step failed: %s: %s", failure.ErrorCode, failure.ErrorMessage)
+}

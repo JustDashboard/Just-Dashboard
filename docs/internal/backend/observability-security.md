@@ -49,6 +49,17 @@ since a tab was opened, and charts that start empty every visit cannot show last
   Each point also carries `pidsPeak` (the bucket's maximum) beside the mean `pids`.
 - The recorder keeps its **own** `sysinfo.Collector` and `dockerx.StatsSampler`: rates are deltas, and
   sharing with request handlers would let a one-shot `GET /system/metrics` shorten the next interval.
+- Samples also keep Docker's cumulative CFS counters, `cpu_periods` and `cpu_throttled` (additive,
+  nullable): written only for a container with a CPU quota, so a NULL is "no limit or not yet kept",
+  never "never throttled". [Right-sizing](../deployments/right-sizing.md) differences them per
+  container into the share of periods a limit throttled.
+- **Volume sizes** of the volumes deployments own go to `metric_volume_samples` every quarter hour
+  (`metrics.VolumeInterval`, `Recorder.WithVolumes`), on a loop of their own so Docker's disk walk never
+  delays a host sample, and are pruned with the rest. The sampler (`api.sampleDeploymentVolumes`) reads
+  the cached walk the Docker pages share and skips a size the walk did not reach.
+- `GET /system/metrics/capacity` fits a least-squares line through hourly means of each filesystem's
+  used bytes and each deployment volume's size and says when each disk fills at that rate, with the
+  fit's R² and a confidence; see [right-sizing and the capacity forecast](../deployments/right-sizing.md).
 
 **Saturation series** answer "is work waiting", which utilisation cannot: CPU **by mode** including
 `steal` (on a VPS the one whose fix is outside the machine); PSI pressure (`Supported: false` renders as
@@ -86,6 +97,16 @@ carries its project's id, so the Overview's activity row draws the project's own
 storage: a sample whose `uptime_seconds` dropped means the machine went down, which also catches
 restarts nobody initiated here. Works with `JD_METRICS_RETENTION=0`; only reboot markers go quiet.
 
+The deployments have a Prometheus exposition of their own, `GET /api/v1/metrics/deployments`
+(`api/deployment_metrics_export.go`), behind the same `metrics.read` key as the databases': per
+environment, the live release's age, its containers' CPU seconds and memory from the newest
+`metric_container_samples` row, restarts, OOM kills and exits from the persisted container events
+(`deploy_container_events`, kept at least thirty days whatever `JD_METRICS_RETENTION` says), run
+outcomes, the last hour's requests by status class and latency quantiles, the warm-release window's
+state, the maintenance switch and the availability figure over 24 h, 7 d and 30 d. The series and
+what each reads are tabled in
+[request observability](../deployments/request-observability.md#the-prometheus-exposition).
+
 ## Host alerts: told when the machine itself goes wrong
 
 The host's **Alerts** page (`/metrics/alerts`, under Monitoring beside Metrics, for administrators;
@@ -100,7 +121,7 @@ rule. Source: `api/host_alerts.go` (rules, the pass, `stepHostAlert`, history), 
 `components/metrics/alerts-page.tsx` over `lib/host-alerts.ts`, with the parts it shares with the
 proxy's page in `components/alerts/alert-parts.tsx`.
 
-- **Five kinds, a closed vocabulary** (`hostAlertSpecs`). `cpu_high` and `memory_high` take a line
+- **Seven kinds, a closed vocabulary** (`hostAlertSpecs`). `cpu_high` and `memory_high` take a line
   (default 90%, 10–100) and a window (CPU 10 min, memory 5 — the OOM killer does not wait ten; 1–1440):
   the **mean of the recorded samples** in `metric_samples` over the window, with its peak, so a spike
   inside a quiet window is a high peak and not an alert (Netdata's stock CPU alarm averages ten minutes
@@ -111,7 +132,8 @@ proxy's page in `components/alerts/alert-parts.tsx`.
   bytes for memory). `disk_filling` (default 90%, 10–99) reads the recorder's newest
   `metric_mount_samples` batch and fires a mount on its space **or** its inodes, since a filesystem out
   of inodes reports free space and refuses to create a file; a mount missing from the newest batch has
-  been unmounted and leaves. `container_down` (minutes 2, 1–1440) and `backup_failed` are below.
+  been unmounted and leaves. `container_down` (minutes 2, 1–1440), `backup_failed`, `image_vulnerable`
+  and `tunnel_down` (minutes 2, 1–1440) are below.
 - **One pass a minute** (`hostAlerts.Start` from `Server.Start`, clock, observer and deliverer fields
   for tests); each source is read once a pass and only when an enabled rule needs it. CPU, memory and
   disk are queries of what the recorder already keeps; with `JD_METRICS_RETENTION=0` those rules are
@@ -132,7 +154,11 @@ proxy's page in `components/alerts/alert-parts.tsx`.
   stop (`EventLog.Covers`) and saw no kill — otherwise it is read as a stop that outlasted its grace
   period, because a false page is worse than a late one; any other code is a crash. A deploy's release
   task and a `compose run` container are one-shot by design and never subjects, a `paused` container
-  (a backup freezing its volumes) is fine, and a removed container leaves.
+  (a backup freezing its volumes) is fine, and a removed container leaves. A down container whose image
+  is MongoDB 8 (by its tag), on a kernel MongoDB 8 refuses (Linux 6.19 to 7.0.13) and without the
+  dashboard's mitigation label, has why added to its detail: MongoDB SERVER-121912 and that the
+  Databases page applies the fix (`mongoKernelAlertLine`; *MongoDB 8 and the kernel* in
+  [Databases](databases-proxy-platform.md)). It is the same kind, not a new one.
 - **Every backup job** — files, volumes and database dumps alike — is a `backup_failed` subject
   (`job:<id>`), judged by its newest finished run in the database alerts' own words (`judgeBackupJob`
   over `readAlertBackupJobs`, the reader both share): it stays failed until a run succeeds. A job an
@@ -140,6 +166,23 @@ proxy's page in `components/alerts/alert-parts.tsx`.
   the job dumps) is **left to that rule** (`databaseBackupRules`), so one failed run is told once and
   keeps the database page's link; a job leaving the host rule that way is told it is over if it was
   firing.
+- **A deployment's image is vulnerable** (`image_vulnerable`, nothing to set, one pass) when its
+  environment scans and its live release's latest scan found a vulnerability with a published fix at
+  or above the environment's severity floor **and** a base the release was pinned on (or, for an
+  upstream image, its own tag) now names a newer image in the registry — together, what says a
+  rebuild is likely to fix something (`imageAlertReading` over `deploy.LiveImageScans`). The subject is
+  `env:<project>:<environment>`, labelled "shop · production", and the message links to the
+  project's overview, whose panel offers the rebuild. A scan not run yet, in flight or failed keeps
+  its subject where it was; an environment that stops scanning, or whose release is replaced by one
+  scanned clean, is told it is over. The scans are the deployments'
+  ([image vulnerabilities](../deployments/image-vulnerabilities.md)); the rule only reads them.
+- **The Cloudflare Tunnel is down** (`tunnel_down`, `tunnelAlertReading`) when its connector container
+  is not running, or is running and its metrics say it holds no connection to Cloudflare's edge; the
+  detail carries cloudflared's own words where it said why (the manager's last reading,
+  [Cloudflare Tunnel](../deployments/cloudflare-tunnel.md)). One subject, `tunnel:<id>`, linking to
+  Proxy › Tunnel; with no tunnel connected the rule is unjudged rather than quiet. It holds two passes
+  and the rule's minutes, as a container does, because a connector reconnects by itself after a blip of
+  the edge.
 - **Hold and state** (`stepHostAlert`, one pure function). A subject is told once when it has been over
   the line for its kind's passes and minutes — one pass for CPU, memory (their window is the hold) and
   backups, two for disks, two and the rule's minutes for containers — and once when it comes back,

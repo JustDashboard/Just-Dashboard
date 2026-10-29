@@ -22,7 +22,7 @@ type Store struct {
 // whether a pre-rename data directory should be adopted.
 const DatabaseFile = "vpsd.db"
 
-const schema = runDiagnosisSchema + rehearsalSchema + rollbackWatchSchema + serverMapSchema + sharedVariableSchema + secretStoreSchema + passkeySchema + accountLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
+const schema = cloudflareTunnelSchema + sleepSchema + runDiagnosisSchema + rehearsalSchema + dataRollbackSchema + previewBranchSchema + imageScanSchema + rollbackWatchSchema + canarySchema + deployEventSchema + serverMapSchema + sharedVariableSchema + secretStoreSchema + passkeySchema + accountLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -1423,6 +1423,22 @@ CREATE TABLE IF NOT EXISTS metric_mount_samples (
 -- Pruning walks by time across every mount, which the primary key cannot serve.
 CREATE INDEX IF NOT EXISTS idx_mount_samples_ts ON metric_mount_samples(ts);
 
+-- Named volumes' sizes, recorded by the same sampler at a slower pace
+-- (metrics.VolumeInterval) and only for the volumes a deployment owns.
+--
+-- A volume's size is a point on a line, not a reading: "the uploads volume is
+-- 38 GB" is the size of the thing, and only its growth since last week says
+-- whether the disk under it has a month left or a day. Docker's disk walk is
+-- what measures a volume, which is why this is sampled every quarter of an
+-- hour and not every fifteen seconds. Pruned past JD_METRICS_RETENTION.
+CREATE TABLE IF NOT EXISTS metric_volume_samples (
+  ts         INTEGER NOT NULL,
+  name       TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (name, ts)
+);
+CREATE INDEX IF NOT EXISTS idx_volume_samples_ts ON metric_volume_samples(ts);
+
 -- Per-container utilisation, recorded by the same sampler.
 --
 -- Keyed by container name rather than id on purpose: a compose redeploy
@@ -1819,6 +1835,13 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"metric_container_samples", "mem_limited", "INTEGER DEFAULT NULL"},
 	{"metric_container_samples", "cpu_total", "INTEGER DEFAULT NULL"},
 	{"metric_container_samples", "sample_time", "REAL DEFAULT NULL"},
+	// The CFS scheduler's cumulative periods and the periods it throttled the
+	// container in, NULL for a container without a CPU limit (it has no
+	// periods) and for every row from before they were kept: throttling is
+	// what a CPU limit set too low does, and a mean CPU figure under the limit
+	// hides it entirely.
+	{"metric_container_samples", "cpu_periods", "INTEGER DEFAULT NULL"},
+	{"metric_container_samples", "cpu_throttled", "INTEGER DEFAULT NULL"},
 
 	// Inode exhaustion fills a filesystem that reports free space, and is
 	// invisible in a used-bytes percentage.
@@ -1877,6 +1900,15 @@ var addedColumns = []struct{ table, column, spec string }{
 	// before it name only the account, as they always did.
 	{"audit_log", "key_id", "INTEGER NOT NULL DEFAULT 0"},
 	{"audit_log", "key_name", "TEXT NOT NULL DEFAULT ''"},
+	// Skew protection keeps a window's warm release running rather than
+	// paused, and the watcher reads how many requests it still answers. A
+	// window opened before either is a paused one that served nobody.
+	{"deploy_rollback_watches", "warm_running", "INTEGER NOT NULL DEFAULT 0"},
+	{"deploy_rollback_watches", "warm_served_json", "TEXT NOT NULL DEFAULT 'null'"},
+	// A drain that exports traces may name where its service shows one, a
+	// link the request console draws beside a request's trace id. Drains
+	// made before had no traces to link to.
+	{"deploy_log_drains", "trace_url", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on

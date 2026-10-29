@@ -44,6 +44,7 @@ import { MomentInspector } from "@/components/metrics/moment-inspector"
 import { getCrosshair, unpinCrosshair } from "@/lib/metrics-crosshair"
 import { NotableMoments } from "@/components/metrics/notable-moments"
 import { TopProcesses } from "@/components/metrics/top-processes"
+import { CapacityForecastSection } from "@/components/metrics/capacity-forecast"
 import { TileTrend } from "@/components/metrics/sparkline"
 import {
   InterfacesPanel,
@@ -630,6 +631,10 @@ export default function MetricsPage() {
             />
           </div>
         </Section>
+
+        {/* Where the record's lines meet the ceiling: each disk's date, and
+            the deployments whose volumes are growing fastest. */}
+        <CapacityForecastSection />
 
         {/*
           Saturation is a separate question from utilisation, and the reason most

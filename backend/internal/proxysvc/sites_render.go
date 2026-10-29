@@ -127,9 +127,14 @@ func renderServer(l *lines, spec *SiteSpec, names string) {
 	renderServerOptions(l, spec)
 	renderUpstreamTLS(l, spec)
 	renderErrorRouting(l, spec)
+	// The edge rules' refusals before the sleep switch, so a request they
+	// refuse never wakes a sleeping application.
+	renderEdgeChecks(l, spec)
+	renderSleepSwitch(l, spec)
 	renderAccess(l, spec)
 	renderForwardAuth(l, spec)
 	renderServerLimits(l, spec)
+	renderRateLimitAnswer(l, spec)
 	renderServerCache(l, spec)
 	renderServerHeaders(l, spec)
 	renderACMEChallenge(l, spec)
@@ -146,13 +151,26 @@ func renderServer(l *lines, spec *SiteSpec, names string) {
 			renderLocation(l, loc, spec)
 			l.blank()
 		}
-		renderLocation(l, SiteLocation{Path: "/", Upstream: spec.mainUpstream(), WebSockets: spec.WebSockets}, spec)
+		main := SiteLocation{Path: "/", Upstream: spec.mainUpstream(), WebSockets: spec.WebSockets}
+		if spec.sleep != nil {
+			main.wake = wakeMain
+		}
+		renderLocation(l, main, spec)
+		if spec.sleep != nil {
+			l.blank()
+			retry := main
+			retry.wake = wakeRetry
+			renderLocation(l, retry, spec)
+			l.blank()
+			renderWakeLocations(l, spec)
+		}
 	}
 
 	if spec.usesPages() {
 		l.blank()
 		renderPageLocations(l, spec)
 	}
+	renderRateLimitLocation(l, spec)
 	if spec.ForwardAuth != nil {
 		l.blank()
 		renderForwardAuthLocation(l, spec)
@@ -199,11 +217,32 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		l.add("}")
 		wrote = true
 	}
+	if spec.dropsCookies() {
+		if wrote {
+			l.blank()
+		}
+		l.add("# The dashboard is reached by this name too, on another port, and a")
+		l.add("# browser sends a cookie to every port of its name: these take the")
+		l.add("# dashboard's session out of what the application is sent.")
+		nginxDropCookieMaps(l, spec.varIdent(), spec.dropCookies)
+		wrote = true
+	}
 	if spec.Kind == "proxy" && spec.Pool != nil {
 		if wrote {
 			l.blank()
 		}
 		renderPool(l, spec)
+		wrote = true
+	}
+	if spec.Kind == "proxy" && spec.Pool != nil && spec.Split != nil {
+		l.blank()
+		renderSplit(l, spec)
+	}
+	if spec.Trace {
+		if wrote {
+			l.blank()
+		}
+		renderNginxTraceMaps(l, spec)
 		wrote = true
 	}
 	if spec.AccessLog && spec.timedLog() {
@@ -212,7 +251,17 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		}
 		l.add("# nginx's combined format with the time taken added, which is what")
 		l.add("# the dashboard's traffic pages read latency from.")
-		l.add("log_format %s %s;", spec.logFormatName(), timedLogFormat)
+		// The trace context the application was sent, and the edge rule that
+		// decided the request, after the rest.
+		format := strings.TrimSuffix(timedLogFormat, "'")
+		if spec.Pool != nil && spec.Split != nil {
+			l.add("# rel= is the release that answered, while the route is split.")
+			format = strings.TrimSuffix(splitLogFormat(spec), "'")
+		}
+		if spec.Trace {
+			format += nginxTraceLogFields(spec)
+		}
+		l.add("log_format %s %s;", spec.logFormatName(), format+spec.edgeLogField()+"'")
 		wrote = true
 	}
 	if spec.Maintenance != nil {
@@ -227,6 +276,13 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 			l.blank()
 		}
 		renderLimitZones(l, spec)
+		wrote = true
+	}
+	if spec.hasEdge() {
+		if wrote {
+			l.blank()
+		}
+		renderEdgeObjects(l, spec)
 		wrote = true
 	}
 	if spec.cachesStatic() || spec.cachesProxy() {
@@ -409,6 +465,9 @@ func renderPageLocations(l *lines, spec *SiteSpec) {
 			page(strconv.Itoa(code), nil)
 		}
 	}
+	if spec.sleep != nil {
+		page("waking", func() { renderWakingPageExtra(l, spec) })
+	}
 	renderWellKnown(l, spec, dir)
 }
 
@@ -499,7 +558,7 @@ func renderTLS(l *lines, spec *SiteSpec) {
 // writesHeaders says whether the server sets any response header, each of
 // which a location with an add_header of its own has to repeat.
 func (spec *SiteSpec) writesHeaders() bool {
-	return spec.SecurityHeaders || spec.HSTS ||
+	return spec.SecurityHeaders || spec.HSTS || (spec.Pool != nil && spec.Split != nil && spec.Split.CookieMaxAge > 0) ||
 		(spec.cachesStatic() && spec.StaticCache.Immutable) || spec.cachesProxy() ||
 		spec.headersWritten()
 }
@@ -517,6 +576,7 @@ func renderHeaders(l *lines, spec *SiteSpec) {
 	}
 	cacheHeaders(l, spec)
 	renderSiteHeaders(l, spec)
+	renderReleaseCookie(l, spec)
 }
 
 func renderServerOptions(l *lines, spec *SiteSpec) {
@@ -643,9 +703,12 @@ func renderUpstreamTLS(l *lines, spec *SiteSpec) {
 const stripMarker = "# Strips the path before forwarding"
 
 func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
-	if loc.Match != "" {
+	switch {
+	case loc.wake == wakeRetry:
+		renderWakeOpening(l, spec)
+	case loc.Match != "":
 		l.add("    location %s %s {", loc.Match, loc.renderedPath())
-	} else {
+	default:
 		l.add("    location %s {", loc.renderedPath())
 	}
 	renderLocationLimit(l, loc, spec)
@@ -674,8 +737,12 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	// As typed: a path on the upstream is how nginx is told to replace the
 	// location's own prefix, and trimming its slash turned /app/ into /app,
 	// which sent /page to the application as /apppage.
-	l.add("        proxy_pass %s;", proxyPassTarget(loc.renderedPath(), loc.renderedUpstream()))
-	if spec.Pool != nil && loc.Upstream == spec.poolUpstream() {
+	if loc.wake == wakeMain {
+		l.add("        proxy_pass http://$%s;", spec.sleepUpstreamVar())
+	} else {
+		l.add("        proxy_pass %s;", proxyPassTarget(loc.renderedPath(), loc.renderedUpstream()))
+	}
+	if spec.Pool != nil && loc.Upstream == spec.mainUpstream() {
 		renderPoolLocation(l, loc, spec)
 	}
 	l.add("        proxy_http_version 1.1;")
@@ -690,6 +757,12 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	if loc.WebSockets {
 		l.add("        proxy_set_header Upgrade    $http_upgrade;")
 		l.add("        proxy_set_header Connection $%s;", spec.connectionVar())
+	}
+	if spec.dropsCookies() {
+		l.add("        proxy_set_header Cookie     $%s;", spec.cookieVar())
+	}
+	if spec.Trace {
+		renderNginxTraceHeader(l, spec)
 	}
 	renderRequestHeaders(l, spec)
 	renderClientCertHeaders(l, spec)
@@ -731,6 +804,7 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 			l.add("        proxy_request_buffering %s;", requestBuffering)
 		}
 	}
+	renderWakeErrors(l, loc, spec)
 	l.add("    }")
 }
 

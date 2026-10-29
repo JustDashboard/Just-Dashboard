@@ -38,6 +38,45 @@ func TestPromotePicksStagingsLiveRelease(t *testing.T) {
 	}
 }
 
+// --from-preview lands a pull request's preview in staging, found by its
+// kind, with the server's words when the preview may not go.
+func TestPromoteFromPreviewLandsInStaging(t *testing.T) {
+	f := newFake(t)
+	code, stdout, stderr := jd(t, invocation{env: f.env(t)}, "promote", "web", "--from-preview", "42", "--wait")
+	if code != exitOK || !strings.Contains(stderr, "Run #5 succeeded") {
+		t.Fatalf("exit %d\n%s%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "Promoting PR #42's preview to web (Staging): run #9") {
+		t.Errorf("the promotion was not named: %s", stderr)
+	}
+	promotes := f.bodiesFor("POST /api/v1/deploy/7/environments/71/promote")
+	if len(promotes) != 1 || promotes[0]["source"] != "preview" || promotes[0]["preview"].(float64) != 42 {
+		t.Errorf("promoted with %v", promotes)
+	}
+	if _, named := promotes[0]["releaseId"]; named {
+		t.Errorf("a preview's promotion named a release: %v", promotes[0])
+	}
+	if len(f.bodiesFor("POST /api/v1/deploy/7/environments/70/promote")) != 0 {
+		t.Error("a preview was sent to production")
+	}
+	code, stdout, _ = jd(t, invocation{env: f.env(t)}, "promote", "web", "--from-preview", "42")
+	if code != exitOK || !strings.Contains(stdout, "Queued run #9 for web (Staging)") {
+		t.Errorf("without --wait: exit %d %s", code, stdout)
+	}
+	// The server's refusal reaches the operator in its own words.
+	code, _, stderr = jd(t, invocation{env: f.env(t)}, "promote", "web", "--from-preview", "46")
+	if code != exitRefused || !strings.Contains(stderr, "comes from a fork (octocat/web)") {
+		t.Errorf("an unapproved fork: exit %d %s", code, stderr)
+	}
+	if code, _, stderr := jd(t, invocation{env: f.env(t)}, "promote", "web", "--from-preview", "42", "--release", "150"); code != exitUsage || !strings.Contains(stderr, "--from-preview") {
+		t.Errorf("--from-preview with --release: exit %d %s", code, stderr)
+	}
+	code, _, stderr = jd(t, invocation{env: f.env(t)}, "promote", "api", "--from-preview", "42")
+	if code != exitRefused || !strings.Contains(stderr, "no staging environment to promote PR #42's preview into") {
+		t.Errorf("without staging: exit %d %s", code, stderr)
+	}
+}
+
 // --instant uses the window's own route, keeps nothing of --to, and keep
 // closes the window with the server's own account of it.
 func TestInstantRollbackAndKeepUseTheWindowRoutes(t *testing.T) {
@@ -134,7 +173,7 @@ func TestStatusReadsEveryPieceAndJSONIsOneObject(t *testing.T) {
 		"last run        #4 succeeded",
 		"environments    production (live release 102), staging (live release 150)",
 		"live release    #3 (id 102)",
-		"rollback watch  watching release #3, warm #2, until",
+		"rollback watch  watching release #3, warm #2 running for its visitors (41 requests), until",
 		"(keep warm 600s, automatic)",
 		"maintenance     off (caddy)",
 		"rehearsal       off",

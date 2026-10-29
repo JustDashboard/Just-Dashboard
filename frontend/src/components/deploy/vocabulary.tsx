@@ -431,7 +431,14 @@ export function useNow(intervalMs = 1000, enabled = true) {
 // ---------------------------------------------------------------------------
 
 export type ProjectState =
-  "deploying" | "ready" | "failed" | "unhealthy" | "stopped" | "not_deployed" | "archived"
+  | "deploying"
+  | "ready"
+  | "failed"
+  | "unhealthy"
+  | "stopped"
+  | "asleep"
+  | "not_deployed"
+  | "archived"
 
 const PROJECT_LABELS: Record<ProjectState, string> = {
   deploying: "Deploying",
@@ -439,6 +446,7 @@ const PROJECT_LABELS: Record<ProjectState, string> = {
   failed: "Failed",
   unhealthy: "Unhealthy",
   stopped: "Stopped",
+  asleep: "Asleep",
   not_deployed: "Not deployed",
   archived: "Archived",
 }
@@ -449,6 +457,8 @@ const PROJECT_TONES: Record<ProjectState, DotTone> = {
   failed: "danger",
   unhealthy: "danger",
   stopped: "stopped",
+  // Not down: the next request wakes it.
+  asleep: "notice",
   not_deployed: "stopped",
   archived: "stopped",
 }
@@ -473,6 +483,9 @@ export function projectState(
   if (archived) return "archived"
   if (summary.activeRun) return "deploying"
   if (!summary.liveReleaseId) return runFailed(summary.lastRun?.state) ? "failed" : "not_deployed"
+  // Asleep by design before stopped: its container is down, and the next
+  // request starts it.
+  if (summary.asleepSince && !summary.stopped) return "asleep"
   if (summary.stopped || runtimeStopped(runtime, summary.liveReleaseId)) return "stopped"
   // A failed run newer than the live release is news; a failure the live
   // release has since replaced is history and lives on the Deployments tab.
@@ -1412,7 +1425,10 @@ export const RELEASE_GROUPS = [
   // authority, and a progress line that reads "Release" throughout looks stuck.
   { label: "Certificate", keys: ["provision_certificate"] },
   { label: "Start", keys: ["start_candidate"] },
-  { label: "Verify", keys: ["verify_readiness", "verify_smoke"] },
+  // The traffic replay and a canary are the candidate verified against
+  // real traffic before the cutover — recorded requests replayed, then a
+  // share of the live route's beside the live release: the last of Verify.
+  { label: "Verify", keys: ["verify_readiness", "verify_smoke", "replay_traffic", "canary"] },
   { label: "Route", keys: ["activate", "retire_previous", "record_release", "notify"] },
 ] as const
 
@@ -1516,6 +1532,8 @@ const STEP_LABELS: Record<string, string> = {
   start_candidate: "Start new release",
   verify_readiness: "Readiness checks",
   verify_smoke: "Smoke checks",
+  replay_traffic: "Traffic replay",
+  canary: "Canary",
   activate: "Switch traffic",
   retire_previous: "Retire previous release",
   record_release: "Record release",

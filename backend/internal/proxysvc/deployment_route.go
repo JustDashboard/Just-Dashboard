@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,13 +20,27 @@ import (
 var ErrRouteRecovery = errors.New("deployment route recovery failed")
 
 type DeploymentRoute struct {
-	Name       string   `json:"name"`
-	Domains    []string `json:"domains"`
-	Upstream   string   `json:"upstream"`
-	TLS        bool     `json:"tls,omitempty"`
-	CertPath   string   `json:"certPath,omitempty"`
-	KeyPath    string   `json:"keyPath,omitempty"`
-	ForceHTTPS bool     `json:"forceHttps,omitempty"`
+	Name    string   `json:"name"`
+	Domains []string `json:"domains"`
+	// Upstreams are the servers the route shares its requests between: one
+	// per replica of the release it serves. A release of one container is
+	// one server and renders exactly as a route did before replicas.
+	Upstreams []string `json:"upstreams,omitempty"`
+	// Upstream is the single server a route named before it could name
+	// several. It is kept so a route built or decoded with it means what it
+	// did; Servers is what the renderers read, and a route sets one or the
+	// other.
+	Upstream string `json:"upstream"`
+	// Canary, while a candidate release is tried beside the live one, sends
+	// a share of the route's requests to the candidate's servers.
+	Canary *DeploymentCanary `json:"canary,omitempty"`
+	// Skew keeps each visitor on the release that first answered them, by
+	// a cookie, while that release is still served.
+	Skew       *DeploymentSkew `json:"skew,omitempty"`
+	TLS        bool            `json:"tls,omitempty"`
+	CertPath   string          `json:"certPath,omitempty"`
+	KeyPath    string          `json:"keyPath,omitempty"`
+	ForceHTTPS bool            `json:"forceHttps,omitempty"`
 	// BasicAuth puts a password in front of the route. Each entry is a user
 	// and a bcrypt hash, which is what both proxies read.
 	BasicAuth []BasicAuthUser `json:"basicAuth,omitempty"`
@@ -33,6 +48,12 @@ type DeploymentRoute struct {
 	// always done it; the Docker Caddy driver did not, which is why a
 	// deployment behind Caddy could not answer "is anyone using it" at all.
 	AccessLog bool `json:"accessLog,omitempty"`
+	// Trace has the ingress send the application a W3C traceparent — the
+	// client's trace continued, or a new one — and record it beside the
+	// request, so the request is a span the application's own spans join
+	// (proxysvc/trace.go). A Caddy older than 2.8 cannot record it and is
+	// rendered without it.
+	Trace bool `json:"trace,omitempty"`
 	// MaxBodyMB is the largest request body the route lets through, in
 	// megabytes. Zero keeps each proxy's deployment default: nginx's own is
 	// 1 MB, which refused a phone photo before the application saw it, so
@@ -80,6 +101,184 @@ type DeploymentRoute struct {
 	// sends no header, which is where a route starts: the policy outlives
 	// a mistake for as long as it says.
 	HSTS *DeploymentHSTS `json:"hsts,omitempty"`
+	// Sleep has the route wake its application when a request finds it
+	// stopped (deployment_sleep.go). Nil is a route whose application is
+	// never stopped for being idle.
+	Sleep *DeploymentSleep `json:"sleep,omitempty"`
+	// DropCookies are cookies taken out of every request before the
+	// application is sent it, every other cookie kept. The service sets the
+	// dashboard's own (DashboardCookies) on a route serving the name the
+	// dashboard is reached by, since a browser sends the dashboard's session
+	// there whatever the port (onDashboardName); nothing else sets it.
+	DropCookies []string `json:"dropCookies,omitempty"`
+	// RateLimit is how many requests one client address may make. nginx
+	// counts them with limit_req, by the visitor's address behind the
+	// dashboard's trusted proxies, and answers 429 with Retry-After.
+	// caddy:2-alpine has no rate-limit module, so the Docker Caddy ingress
+	// renders nothing for it: there the limit is the host's, a per-source
+	// limit on the ingress ports in the network gateway (deployment_edge.go).
+	RateLimit *DeploymentRateLimit `json:"rateLimit,omitempty"`
+	// EdgeRules are decided in order before the application is asked; the
+	// first a request meets decides it (deployment_edge.go).
+	EdgeRules []EdgeRule `json:"edgeRules,omitempty"`
+	// CrowdSec refuses the addresses CrowdSec's local engine has banned,
+	// from a list the dashboard refreshes from its decisions.
+	CrowdSec bool `json:"crowdSec,omitempty"`
+}
+
+// MaxDeploymentUpstreams is the most servers a route shares requests
+// between: a release's replicas are at most eight.
+const MaxDeploymentUpstreams = 8
+
+// DeploymentCanary is a candidate release sharing a route with the live
+// one. Percent of the requests, each given one release at random, go to
+// Upstreams, the candidate's replicas; the rest to the route's own servers.
+// Every answer is recorded with the release that gave it — Live or
+// Candidate, the releases' ids — so the two can be read apart while they
+// share the route.
+type DeploymentCanary struct {
+	Percent   int      `json:"percent"`
+	Upstreams []string `json:"upstreams"`
+	Live      string   `json:"live"`
+	Candidate string   `json:"candidate"`
+}
+
+// DeploymentSkew is skew protection on a route: a visitor's first answer
+// sets the jd_release cookie to the release that gave it, and a later
+// request whose cookie names a release the route still serves — the live
+// one, a canary's candidate, or one of Pinned — is answered by that
+// release. Release is the live release's label; MaxAge the cookie's
+// lifetime in seconds, the warm window's.
+type DeploymentSkew struct {
+	Release string             `json:"release"`
+	Pinned  []DeploymentPinned `json:"pinned,omitempty"`
+	MaxAge  int                `json:"maxAge"`
+}
+
+// DeploymentPinned is a release still answering the visitors it answered
+// first: the warm release after a cutover, by its label and its servers.
+type DeploymentPinned struct {
+	Release   string   `json:"release"`
+	Upstreams []string `json:"upstreams"`
+}
+
+// validateDeploymentSkew holds skew protection to what both renderers write.
+func validateDeploymentSkew(route DeploymentRoute) error {
+	skew := route.Skew
+	if skew == nil {
+		return nil
+	}
+	if skew.MaxAge < 1 || skew.MaxAge > MaxReleaseCookieAge {
+		return fmt.Errorf("the release cookie lasts between 1 and %d seconds", MaxReleaseCookieAge)
+	}
+	if !splitLabelRe.MatchString(skew.Release) {
+		return errors.New("the live release needs a name of letters, digits, dashes or underscores")
+	}
+	if route.Canary != nil && route.Canary.Live != skew.Release {
+		return errors.New("a canary and skew protection name the same live release")
+	}
+	labels := map[string]bool{skew.Release: true}
+	servers := map[string]bool{}
+	for _, upstream := range route.Servers() {
+		servers[upstream] = true
+	}
+	if route.Canary != nil {
+		labels[route.Canary.Candidate] = true
+		for _, upstream := range route.Canary.Upstreams {
+			servers[upstream] = true
+		}
+	}
+	for _, pinned := range skew.Pinned {
+		if !splitLabelRe.MatchString(pinned.Release) || labels[pinned.Release] {
+			return errors.New("each release kept for its visitors needs a name of its own")
+		}
+		labels[pinned.Release] = true
+		if len(pinned.Upstreams) == 0 || len(pinned.Upstreams) > MaxDeploymentUpstreams {
+			return fmt.Errorf("a release kept for its visitors is between 1 and %d servers", MaxDeploymentUpstreams)
+		}
+		for _, upstream := range pinned.Upstreams {
+			if upstream == "" || servers[upstream] {
+				return fmt.Errorf("%q cannot serve two releases at once", upstream)
+			}
+			servers[upstream] = true
+		}
+	}
+	return nil
+}
+
+// validateDeploymentCanary holds a canary to what both renderers write.
+func validateDeploymentCanary(route DeploymentRoute) error {
+	canary := route.Canary
+	if canary == nil {
+		return nil
+	}
+	if canary.Percent < 1 || canary.Percent > 99 {
+		return errors.New("a canary takes between 1 and 99 percent of the route's requests")
+	}
+	if len(canary.Upstreams) == 0 || len(canary.Upstreams) > MaxDeploymentUpstreams {
+		return fmt.Errorf("a canary is between 1 and %d servers", MaxDeploymentUpstreams)
+	}
+	live := route.Servers()
+	if len(live) == 0 {
+		return errors.New("a canary shares a route that already serves a release")
+	}
+	seen := map[string]bool{}
+	for _, upstream := range live {
+		seen[upstream] = true
+	}
+	for _, upstream := range canary.Upstreams {
+		if upstream == "" || seen[upstream] {
+			return fmt.Errorf("%q cannot serve the canary and the live release at once", upstream)
+		}
+		seen[upstream] = true
+	}
+	if !splitLabelRe.MatchString(canary.Live) || !splitLabelRe.MatchString(canary.Candidate) || canary.Live == canary.Candidate {
+		return errors.New("a canary's two releases need different names of letters, digits, dashes or underscores")
+	}
+	return nil
+}
+
+// Servers are the addresses the route forwards to, in order: Upstreams, or
+// the one Upstream of a route built before replicas.
+func (route DeploymentRoute) Servers() []string {
+	if len(route.Upstreams) > 0 {
+		return append([]string(nil), route.Upstreams...)
+	}
+	if route.Upstream != "" {
+		return []string{route.Upstream}
+	}
+	return nil
+}
+
+// PrimaryUpstream is the first server, which is what a single-server reader
+// asked of Upstream: the release's first replica.
+func (route DeploymentRoute) PrimaryUpstream() string {
+	if servers := route.Servers(); len(servers) > 0 {
+		return servers[0]
+	}
+	return ""
+}
+
+// validateDeploymentServers refuses a pool a renderer would write wrong: both
+// spellings at once, too many servers, or one server twice.
+func validateDeploymentServers(route DeploymentRoute) error {
+	if len(route.Upstreams) > 0 && route.Upstream != "" {
+		return errors.New("a route names its servers as upstreams or as its one upstream, not both")
+	}
+	if len(route.Upstreams) > MaxDeploymentUpstreams {
+		return fmt.Errorf("a route shares its requests between at most %d servers", MaxDeploymentUpstreams)
+	}
+	seen := map[string]bool{}
+	for _, upstream := range route.Upstreams {
+		if upstream == "" {
+			return errors.New("a route's server address is empty")
+		}
+		if seen[upstream] {
+			return fmt.Errorf("%s is named twice among the route's servers", upstream)
+		}
+		seen[upstream] = true
+	}
+	return nil
 }
 
 // DeploymentHSTS is a route's Strict-Transport-Security policy, held to the
@@ -202,6 +401,15 @@ func NormalizeAccessEntry(raw string) (string, error) {
 // validateDeploymentRules checks what both proxies render from a route
 // beyond its names: the redirects, the headers and the allowed addresses.
 func validateDeploymentRules(route DeploymentRoute) error {
+	if err := validateDeploymentServers(route); err != nil {
+		return err
+	}
+	if err := validateDeploymentCanary(route); err != nil {
+		return err
+	}
+	if err := validateDeploymentSkew(route); err != nil {
+		return err
+	}
 	if err := validateHostRedirects(route.Domains, route.Redirects); err != nil {
 		return err
 	}
@@ -214,11 +422,22 @@ func validateDeploymentRules(route DeploymentRoute) error {
 	if len(route.AllowFrom) > MaxDeploymentAllow {
 		return fmt.Errorf("at most %d allowed addresses", MaxDeploymentAllow)
 	}
+	if err := validCookieNames(route.DropCookies); err != nil {
+		return err
+	}
 	for _, entry := range route.AllowFrom {
 		if normalized, err := NormalizeAccessEntry(entry); err != nil {
 			return err
 		} else if normalized != entry {
 			return fmt.Errorf("%s is written %s", entry, normalized)
+		}
+	}
+	if err := ValidateEdgeRules(route.EdgeRules); err != nil {
+		return err
+	}
+	if route.RateLimit != nil {
+		if err := ValidateRateLimit(*route.RateLimit); err != nil {
+			return err
 		}
 	}
 	if route.ForwardAuth != nil {
@@ -230,6 +449,9 @@ func validateDeploymentRules(route DeploymentRoute) error {
 		if len(route.BasicAuth) > 0 {
 			return errors.New("signing in replaces the route's password — remove the password first")
 		}
+	}
+	if err := validateDeploymentSleep(route); err != nil {
+		return err
 	}
 	return validateDeploymentPages(route)
 }
@@ -384,6 +606,7 @@ type DeploymentRouteResult struct {
 // a deployment-owned nginx route. If apply or reload fails, the exact prior
 // bytes/link are restored and reloaded before the failure is returned.
 func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRoute) (DeploymentRouteResult, error) {
+	route = s.onDashboardName(route)
 	if err := validateDeploymentRules(route); err != nil {
 		return DeploymentRouteResult{}, err
 	}
@@ -401,6 +624,11 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 	if edge != nil {
 		return s.applyDockerCaddyRoute(ctx, edge, route)
 	}
+	if route.Sleep != nil && len(s.nginxWakeSocket()) > maxSocketPath {
+		// nginx refuses the whole configuration over a socket path longer
+		// than an address can carry.
+		return DeploymentRouteResult{}, fmt.Errorf("the wake socket %s is too long a path for nginx", s.nginxWakeSocket())
+	}
 	spec := s.deploymentSpec(route)
 	content, err := RenderNginx(spec)
 	if err != nil {
@@ -415,6 +643,11 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 	result := DeploymentRouteResult{Snapshot: snapshot}
 	if err := s.writeDeploymentAuthFile(route); err != nil {
 		return result, err
+	}
+	if route.CrowdSec {
+		if err := s.ensureNginxCrowdSecList(); err != nil {
+			return result, fmt.Errorf("the CrowdSec list could not be written: %w", err)
+		}
 	}
 	// Before the route that serves them, so nginx never answers with a page
 	// that is not there. A page the operator wrote is kept.
@@ -447,6 +680,11 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 }
 
 func (s *Service) RestoreDeploymentRoute(ctx context.Context, snapshot DeploymentRouteSnapshot) error {
+	if snapshot.Driver == TailnetGateDriver {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.restoreGateSnapshot(ctx, snapshot)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if snapshot.Driver == "docker-caddy" {
@@ -469,6 +707,14 @@ func (s *Service) RestoreDeploymentRoute(ctx context.Context, snapshot Deploymen
 // cutover. It is intentionally name-scoped so preview cleanup cannot select
 // or remove a route owned by another feature.
 func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error {
+	// A tailnet address's front — a preview's, a tailnet-only environment's
+	// gate — goes with its route, from the gate Caddy that holds it; on nginx
+	// it is the file of the route's own name.
+	if tailnetGateNameRe.MatchString(name) {
+		if err := s.removeGateContainerRoute(ctx, name); err != nil {
+			return err
+		}
+	}
 	if edge, err := s.dockerCaddy(ctx); err != nil {
 		return err
 	} else if edge != nil {
@@ -537,6 +783,7 @@ func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error 
 }
 
 func (s *Service) VerifyDeploymentRoute(ctx context.Context, route DeploymentRoute) error {
+	route = s.onDashboardName(route)
 	if edge, err := s.dockerCaddy(ctx); err != nil {
 		return err
 	} else if edge != nil {
@@ -698,24 +945,59 @@ func wildcardCertificateCovers(pattern, domain string) bool {
 }
 
 // deploymentSpec is the site a route is on this host's nginx: its password
-// file and the folder its pages are served from are the service's.
+// file, the folder its pages are served from and the CrowdSec list it
+// includes are the service's, and so are the proxies whose word for the
+// visitor's address it takes.
 func (s *Service) deploymentSpec(route DeploymentRoute) *SiteSpec {
 	spec := deploymentSiteSpec(route, s.deploymentAuthFile(route))
 	s.SetPagesDir(spec)
+	if route.CrowdSec {
+		spec.crowdSecList = s.nginxCrowdSecList()
+	}
+	if trusted := s.TrustedProxies(); len(trusted) > 0 && (route.RateLimit != nil || len(route.EdgeRules) > 0 || route.CrowdSec) {
+		// The limits, the rules' address matches and the ban list are about
+		// the visitor, so behind a proxy the dashboard trusts they read the
+		// address it forwards; the header from anyone else is ignored.
+		spec.RealIP = &SiteRealIP{Source: "proxies", Trusted: trusted, Header: "X-Forwarded-For"}
+	}
+	if spec.sleep != nil {
+		spec.sleep.Socket = s.nginxWakeSocket()
+	}
 	return spec
 }
 
 func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 	spec := &SiteSpec{
-		Name: route.Name, Domains: append([]string(nil), route.Domains...), Kind: "proxy", Upstream: route.Upstream,
+		Name: route.Name, Domains: append([]string(nil), route.Domains...), Kind: "proxy", Upstream: route.PrimaryUpstream(),
 		TLS: route.TLS, CertPath: route.CertPath, KeyPath: route.KeyPath, ForceHTTPS: route.ForceHTTPS,
 		ManagedACME: true,
 		HTTP2:       route.TLS,
-		WebSockets:  true, Gzip: true, SecurityHeaders: true, AccessLog: true,
+		WebSockets:  true, Gzip: true, SecurityHeaders: true, AccessLog: true, Trace: route.Trace,
 		AllowFrom: append([]string{}, route.AllowFrom...), DenyFrom: []string{}, Locations: []SiteLocation{},
 		ClientMaxBody: deploymentBodyLimit(route),
 		HostRedirects: append([]HostRedirect(nil), route.Redirects...),
 		deployment:    true,
+		dropCookies:   append([]string(nil), route.DropCookies...),
+	}
+	if pool := deploymentPool(route.Servers(), route.Canary != nil || route.Skew != nil); pool != nil {
+		spec.Upstream, spec.Pool = "", pool
+	}
+	if spec.Pool != nil && (route.Canary != nil || route.Skew != nil) {
+		split := &SiteSplit{}
+		if canary := route.Canary; canary != nil {
+			if candidate := deploymentPool(canary.Upstreams, true); candidate != nil {
+				split.Percent, split.Servers, split.Live, split.Candidate = canary.Percent, candidate.Servers, canary.Live, canary.Candidate
+			}
+		}
+		if skew := route.Skew; skew != nil {
+			split.Live, split.CookieMaxAge = skew.Release, skew.MaxAge
+			for _, pinned := range skew.Pinned {
+				if servers := deploymentPool(pinned.Upstreams, true); servers != nil {
+					split.Pinned = append(split.Pinned, SitePinned{Release: pinned.Release, Servers: servers.Servers})
+				}
+			}
+		}
+		spec.Split = split
 	}
 	if route.TLS {
 		// Each name on the scheme its domain chose: the plain ones get a
@@ -766,7 +1048,53 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 	}
 	spec.ErrorPages = slices.Sorted(slices.Values(route.ErrorPages))
 	spec.InterceptErrors = route.InterceptErrors
+	spec.edgeRules = slices.Clone(route.EdgeRules)
+	if limit := route.RateLimit; limit != nil {
+		// One allowance per client address, the burst answered at once, and
+		// the refusal a 429 that says when to come back.
+		spec.Limits = &SiteLimits{Request: &RequestLimit{Rate: limit.NginxRate(), Burst: limit.Burst, NoDelay: limit.Burst > 0}, ExemptFrom: []string{}}
+		spec.limitRetryAfter = limit.RetryAfter()
+	}
+	if route.Sleep != nil {
+		if host, port, err := sleepUpstream(route.Upstream); err == nil {
+			spec.sleep = &siteSleep{
+				Route: route.Name, Socket: "/etc/nginx/jd-wake/wake.sock",
+				Upstream: net.JoinHostPort(host, port), Hold: route.Sleep.HoldSeconds,
+			}
+		}
+	}
 	return spec
+}
+
+// deploymentPool is a replicated release's servers as an nginx upstream
+// block, or nil for a release of one container, which keeps the route it
+// always had: proxy_pass to the one address, with no upstream block —
+// unless always, for a canary, whose two releases are a pool each.
+//
+// Least connections rather than round robin, because a route carries
+// WebSockets and long streamed answers: a replica holding them is not the
+// one a new request should wait behind. Health is nginx's passive kind, the
+// only one it has, written out rather than left to the defaults so the file
+// says it: a replica whose request fails to connect or times out is set
+// aside for ten seconds and the request is passed to the next one — nginx
+// passes only an idempotent request, so a POST that reached a dying replica
+// is answered with its error rather than carried out twice. A replica gets
+// two seconds to accept a connection, as on Caddy, not nginx's sixty: the
+// kernel completes the handshake whatever the application is doing, so a
+// replica that takes longer is not there, and the visitor's request is
+// better passed on than held. No keepalive, as before: each request is a
+// fresh upstream connection.
+func deploymentPool(servers []string, always bool) *SitePool {
+	if len(servers) == 0 || (len(servers) < 2 && !always) {
+		return nil
+	}
+	pool := &SitePool{Method: "least_conn", ConnectTimeout: 2, Servers: make([]PoolServer, 0, len(servers))}
+	for _, server := range servers {
+		pool.Servers = append(pool.Servers, PoolServer{
+			Address: strings.TrimPrefix(server, "http://"), MaxFails: 1, FailTimeout: 10,
+		})
+	}
+	return pool
 }
 
 // deploymentBodyLimit is the route's nginx client_max_body_size.

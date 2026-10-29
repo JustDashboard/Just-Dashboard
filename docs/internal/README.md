@@ -90,6 +90,9 @@ strategy, and feature ownership behind those rules.
   the shape of each kind of box, satellites and stack frames, dragging, the three distances, the one
   read and its held sources, the links and how each is known, who is sent what, the per-account
   arrangement and the tests.
+- [`backend/deploy-api.md`](backend/deploy-api.md) — the deployment API's OpenAPI 3.1 description:
+  generated from the router and the handlers' types, served at `GET /deploy/openapi.json`, committed
+  under `docs/api/`, and the tests that keep it honest.
 - [`backend/remote-desktop.md`](backend/remote-desktop.md) — Remote Desktop: guacd as a container the
   dashboard owns on loopback, the Guacamole handshake done server-side and the relay, sealed computer
   sign-ins, the session history and the route table; Stream mode's Sunshine pairing and the Moonlight
@@ -105,8 +108,9 @@ strategy, and feature ownership behind those rules.
 - [`deployments/redesign-plan.md`](deployments/redesign-plan.md) — deployment experience redesign,
   delivered workflows, and validation evidence.
 - [`deployments/README.md`](deployments/README.md) — the index of the deployment subsystem's other
-  guides: preview isolation, staging and promotion, backup coverage, restore verification, recipes, Git
-  policy, database networks, request observability, notifications, the GitHub App and permanent deletion.
+  guides: preview isolation, tailnet-only deployments and identity-aware access, staging and promotion,
+  backup coverage, restore verification, recipes, Git policy, database networks, request observability,
+  notifications, the GitHub App and permanent deletion.
 - [`frontend/design-system.md`](frontend/design-system.md) — the design system's rules in full: one mode,
   no lift, the colour roles, the component vocabulary, and which surface to reach for.
 - [`frontend/shell-design.md`](frontend/shell-design.md) — App Router shell, navigation, the sections an

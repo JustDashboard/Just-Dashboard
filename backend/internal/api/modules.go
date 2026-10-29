@@ -15,6 +15,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accountlink"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/cftunnel"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice"
@@ -26,6 +27,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/githubapp"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/imagescan"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logdrain"
@@ -45,6 +47,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/tailnetgate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/uninstall"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/updates"
@@ -60,6 +63,10 @@ type moduleSet struct {
 	docker       *dockerx.Client
 	dockerStats  *dockerx.StatsSampler
 	dockerEvents *dockerx.EventLog
+	// deployEvents is the part of the event stream a deployment owns, kept
+	// past this process: the ring empties on a restart, and "why did this
+	// restart at four" is asked at nine.
+	deployEvents *dockerx.EventStore
 	// What a compose stack was before it was changed. Docker keeps no
 	// history, so a rollback has no target and "what changed" has no answer
 	// unless the dashboard writes it down first.
@@ -92,6 +99,9 @@ type moduleSet struct {
 	// onHost is what moves hostFiles: hostexec.InHostMounts, warning once
 	// when the namespace cannot be entered.
 	onHost func(fn func())
+	// kernelRelease reads the running kernel's release; nil is
+	// sysinfo.KernelRelease, and a test hands it the kernel it is about.
+	kernelRelease func(context.Context) (string, error)
 	// proxyExtras is the proxy pages' own state; see modules_proxy.go.
 	proxyExtras proxyExtras
 	// requests holds what every deployment's ingress and every proxy site
@@ -112,17 +122,29 @@ type moduleSet struct {
 	// and hostAlerts for the machine's own: CPU, memory, filesystems,
 	// containers and every backup job.
 	trafficAlerts *deploy.TrafficAlertEvaluator
+	// imageScans scans each release's image and its base images for known
+	// vulnerabilities after a build and daily while it is live; imageScanner
+	// is the scanner it runs, nil without Docker, which the panel reads its
+	// database's age from.
+	imageScans   *deploy.ImageScanWatcher
+	imageScanner *imagescan.Scanner
 	// rollbackWatcher reads every open warm-release window and rolls a
 	// release back, or removes the warm one, when the window says so.
 	rollbackWatcher *deploy.RollbackWatcher
-	dbAlerts        *dbAlerts
-	hostAlerts      *hostAlerts
-	dbs             *dbx.Manager
-	linuxUsers      *linuxusers.Service
-	netsec          *netsec.Service
+	// sleeper stops environments that sleep once nobody visits and wakes
+	// them on the next request (deploy/sleep.go).
+	sleeper    *deploy.Sleeper
+	dbAlerts   *dbAlerts
+	hostAlerts *hostAlerts
+	dbs        *dbx.Manager
+	linuxUsers *linuxusers.Service
+	netsec     *netsec.Service
 	// blocks records the remote addresses blocked from the connection table
 	// with why and until when, and lifts the ones that end.
 	blocks *netsec.Blocks
+	// tunnel is the Cloudflare Tunnel connection and its connector
+	// (cftunnel), the ingress a deployment's domain can be served through.
+	tunnel *cftunnel.Manager
 	// network changes the host's network: devices, routes, the gateway
 	// table, shaping, VPN and resolver. netsec keeps reading it for the
 	// posture; this is the half that writes.
@@ -174,9 +196,18 @@ type moduleSet struct {
 	// rehearser makes the throwaway database copies release tasks are
 	// rehearsed against, and removes what a stopped process left behind.
 	rehearser *migrationRehearser
+	// dataCopies restores a database as of a release into a side copy on
+	// the deployment's network and removes it when its time is up.
+	dataCopies *dataCopyOwner
+	// previewBranches restores a preview's own copy of each database its
+	// environment gives previews a branch of, and removes it with the preview.
+	previewBranches *previewBranchOwner
 	// tailnet publishes preview environments on this host's Tailscale node
 	// through `tailscale serve`; the executor and the preview route share it.
 	tailnet deploy.TailnetPublisher
+	// tailnetGate is the route a tailnet-only deployment's gate asks about
+	// every request (handlers_tailnet_whois.go).
+	tailnetGate *tailnetgate.Handler
 	// pullRequests reads pull requests through the trusted GitHub identity
 	// for the deploy pages and the reconciler.
 	pullRequests *pullRequests
@@ -199,13 +230,17 @@ func (s *Server) initModules() {
 	// so a baseline older than this is dropped rather than averaged over.
 	s.modules.dockerStats = s.modules.docker.NewStatsSampler().WithMaxAge(statsMaxAge)
 	s.modules.dockerEvents = s.modules.docker.NewEventLog(s.Log)
+	s.modules.deployEvents = dockerx.NewEventStore(s.Store.DB, s.Log, s.Cfg.MetricsRetention)
 	s.modules.dockerDeploys = dockerx.NewDeploymentStore(s.Store.DB)
 	// The recorder gets a sampler of its own rather than the shared one: a
 	// series kept for a week is worth measuring over even intervals, and an
 	// operator refreshing the container table would otherwise keep shortening
 	// the window the next stored sample is differenced over.
 	s.modules.metrics = metrics.New(s.Store, s.Log, s.Cfg.MetricsInterval, s.Cfg.MetricsRetention).
-		WithContainers(s.modules.docker.NewStatsSampler())
+		WithContainers(s.modules.docker.NewStatsSampler()).
+		// The volumes deployments own, for the capacity forecast; read when
+		// the recorder samples, by which time the deploy modules exist.
+		WithVolumes(metrics.VolumeSamplerFunc(s.sampleDeploymentVolumes))
 	// Docker's disk accounting walks every layer and volume, which takes
 	// seconds on a busy host. Priming it here means the first operator to open
 	// the Volumes tab reads a warm cache instead of waiting for the walk.
@@ -279,6 +314,17 @@ func (s *Server) initModules() {
 	if s.Cfg.IngressContainer != "" {
 		s.modules.proxy = proxysvc.NewWithIngressContainer(s.Cfg.NginxDir, s.Cfg.CaddyFile, s.Cfg.IngressContainer)
 	}
+	// A deployment route on the name this dashboard is reached by is sent
+	// the dashboard's session cookie, whatever port either is on; the route
+	// takes it out of what the application is sent.
+	s.modules.proxy.WithDashboardHost(s.Cfg.Site)
+	// A deployment route's rate limit and edge rules count the visitor, so
+	// behind a proxy this dashboard trusts they read the address it forwards.
+	trusted := make([]string, 0, len(s.Cfg.TrustedProxies))
+	for _, network := range s.Cfg.TrustedProxies {
+		trusted = append(trusted, network.String())
+	}
+	s.modules.proxy.SetTrustedProxies(trusted)
 	s.modules.requests = accesslog.NewStore(s.openRequestRecord)
 	s.modules.logDrains = logdrain.NewStore(s.Store, s.Sealer)
 	s.modules.dbs = dbx.NewManager()
@@ -358,9 +404,9 @@ func (s *Server) initModules() {
 		s.Cfg.DataDir,
 		s.modules.docker,
 		s.modules.proxy,
-	).WithFirewall(s.modules.netsec).WithDependencies(newDeploymentDependencyObserver(
+	).WithFirewall(s.modules.netsec).WithTailnet(preflightTailnet{server: s}).WithDependencies(newDeploymentDependencyObserver(
 		s.Store, s.modules.backupStore, s.modules.docker,
-	).withExtensionProbe(s.databaseExtensions))
+	).withExtensionProbe(s.databaseExtensions)).WithTunnel(s.tunnelObserver())
 	s.modules.deployChecker = deploy.NewDeploymentChecker(
 		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,
 	)
@@ -375,6 +421,8 @@ func (s *Server) initModules() {
 		}, func(err error) { s.Log.Warn("preview isolation needs attention", "error", err) })
 	s.modules.tailnet = tailnetPublisher{serve: selfcfg.NewTailnetServe()}
 	s.modules.rehearser = &migrationRehearser{server: s}
+	s.modules.dataCopies = newDataCopyOwner(s, s.modules.rehearser)
+	s.modules.previewBranches = newPreviewBranchOwner(s, s.modules.rehearser)
 	normalizedExecutor := deploy.NewNormalizedStepExecutor(
 		s.modules.deployRuns,
 		s.modules.deployPlanning,
@@ -393,9 +441,23 @@ func (s *Server) initModules() {
 		WithCertificateIssuer(auditedCertificateIssuer{issuer: s.modules.proxy, record: s.Audit.Record}).
 		WithNotifications(s.modules.deployAutomation).
 		WithTailnetPublisher(s.modules.tailnet).
+		// A tailnet-only environment that names its visitors is gated by
+		// a proxy that asks this API about every request.
+		WithTailnetGate(s.tailnetGateAPI()).
 		// Release tasks are rehearsed against copies the Databases owner
 		// makes from its own backups, when an environment asks for it.
-		WithMigrationRehearser(s.modules.rehearser)
+		WithMigrationRehearser(s.modules.rehearser).
+		// And where each linked database stands is recorded as a release
+		// goes live, for a copy of its data as of that release later.
+		WithDataPoints(releaseDataFacts{server: s}).
+		// A release's Cloudflare Tunnel names are routed as it goes live.
+		WithTunnelRouter(s.tunnelRouter())
+	if s.modules.requests != nil {
+		// The traffic replay and a canary's two releases read the same held
+		// record the Logs page and the rollback watch read, so what they
+		// replay and judge is what the page shows.
+		normalizedExecutor.WithRequestRecord(s.modules.requests)
+	}
 	s.modules.deployExecutor = normalizedExecutor
 	s.modules.deployEngine = deploy.NewEngine(
 		s.modules.deployRuns,
@@ -420,8 +482,12 @@ func (s *Server) initModules() {
 	forges := deploy.NewForgeClient(s.modules.deployPlanning)
 	s.modules.commitStatuses = deploy.NewCommitStatusPublisher(s.modules.deployRuns, githubStatusPoster{app: s.modules.githubApp, github: s.modules.github}, s.dashboardEndpoint, s.Log).
 		WithForges(forges)
+	s.modules.imageScans = s.newImageScanWatcher()
 	s.modules.deployEngine.WithObservers(
 		notifications,
+		// A build's release is scanned for known vulnerabilities once it
+		// is live, in the background; the run never waits for it.
+		s.modules.imageScans,
 		s.modules.commitStatuses,
 		deploy.NewPullRequestCommenter(s.modules.deployRuns, s.modules.githubApp, s.dashboardEndpoint, s.Log).WithForges(forges),
 		// What a run read from the secret stores is held for its own steps
@@ -442,12 +508,17 @@ func (s *Server) initModules() {
 	// a rollback through the same enqueue an operator's press takes.
 	s.modules.rollbackWatcher = deploy.NewRollbackWatcher(normalizedExecutor, s.modules.requests,
 		s.enqueueAutomaticRollback, s.auditRollbackWatch, s.Log)
+	s.modules.tunnel = s.newTunnelManager()
+	// Idle minutes are counted from the same record, and the wake listens
+	// where this host's proxy reaches it.
+	s.modules.sleeper = deploy.NewSleeper(normalizedExecutor, s.modules.requests, s.auditSleep, s.Log)
 	s.modules.dbAlerts = s.newDBAlerts()
 	s.modules.hostAlerts = s.newHostAlerts()
 	s.modules.deployGit = deploy.NewGitWatcher(s.modules.deployRuns, s.modules.deploySources, s.dispatchGitDeployment)
 	s.modules.pullRequests = newPullRequests(s.modules.github, s.modules.githubApp, s.modules.git)
 	s.modules.previewReconciler = deploy.NewPreviewReconciler(s.modules.deployAutomation, s.modules.pullRequests, s.closePreviewTarget, s.Log)
 
+	s.initTailnetGate()
 	s.initProxyExtras()
 	s.initUninstall()
 	s.initAccountLink()

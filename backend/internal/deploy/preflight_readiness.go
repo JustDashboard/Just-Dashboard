@@ -113,12 +113,15 @@ func ungatedCutoverFinding(profile WorkloadProfile, configuration PlanConfigurat
 	}
 	runtime := configuration.Runtime
 	listens := runtime.InternalPort > 0 || runtime.HostPort > 0 || len(runtime.Ports) > 0
-	if runtime.Strategy != StrategyBlueGreen && !listens && len(configuration.Domains) == 0 {
+	if !runtime.Strategy.startsBeside() && !listens && len(configuration.Domains) == 0 {
 		return PreflightFinding{}, false
 	}
 	measured := "stop-first"
-	if runtime.Strategy == StrategyBlueGreen {
+	switch runtime.Strategy {
+	case StrategyBlueGreen:
 		measured = "blue/green"
+	case StrategyCanary:
+		measured = "canary"
 	}
 	switch {
 	case runtime.InternalPort > 0:

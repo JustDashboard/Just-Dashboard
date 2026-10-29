@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowLeftRight, Box, Globe, Pause, Servers } from "@/components/icons"
+import { ArrowLeftRight, Box, Gauge, Globe, Pause, Servers } from "@/components/icons"
 import { ApiError, refusedIndex } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -54,6 +54,29 @@ import {
 } from "@/components/deploy/settings/limit-field"
 import { SettingPicture } from "@/components/deploy/settings/setting-picture"
 import { RollbackWatchForm } from "@/components/deploy/settings/rollback-watch"
+import {
+  REPLAY_DRAFT_FIELD_IDS,
+  REPLAY_FIELD_IDS,
+  ReplaySection,
+} from "@/components/deploy/settings/replay"
+import {
+  replayDraftOf,
+  replayPlanOf,
+  replayRefusal,
+  type ReplayDraft,
+} from "@/components/deploy/replay-model"
+import {
+  SLEEP_DRAFT_FIELD_IDS,
+  SLEEP_FIELD_IDS,
+  SleepSection,
+  sleepBlocker,
+} from "@/components/deploy/settings/sleep"
+import {
+  sleepDraftOf,
+  sleepPlanOf,
+  sleepRefusal,
+  type SleepDraft,
+} from "@/components/deploy/sleep-model"
 import { Segments } from "@/components/deploy/settings/segments"
 import {
   DEFAULT_GRACE_SECONDS,
@@ -69,6 +92,19 @@ import {
   savedChecks,
   type Check,
 } from "@/components/deploy/settings/health-checks"
+import {
+  MAX_REPLICAS,
+  effectiveReplicas,
+  replicaRefusal,
+  withReplicas,
+} from "@/components/deploy/replicas-model"
+import {
+  CANARY_PERCENT,
+  CANARY_SECONDS,
+  DEFAULT_CANARY_TERMS,
+  windowWords,
+  withStrategy,
+} from "@/components/deploy/canary-model"
 
 /**
  * How the release runs once it exists: the image and command, where it
@@ -83,7 +119,7 @@ import {
  * port or the host network cannot run two releases side by side, and
  * blue/green on such a plan used to be offered here and then refused at start.
  *
- * Two forms, two saves: Runtime (six sections, one PUT) and Health
+ * Two forms, two saves: Runtime (seven sections, one PUT) and Health
  * checks. Each keeps its own draft keyed on its own saved value, so saving
  * one no longer restarts the other.
  *
@@ -98,12 +134,14 @@ type RuntimePlan = DeploymentConfiguration["runtime"]
 /**
  * The Runtime form's draft: the plan, with its three lists held as the text
  * the operator types — one entry per line — so a half-typed line survives a
- * visit to another page.
+ * visit to another page, and the traffic replay's terms as typed.
  */
 type RuntimeDraft = RuntimePlan & {
   commandText: string
   capabilitiesText: string
   devicesText: string
+  replayDraft: ReplayDraft
+  sleepDraft: SleepDraft
 }
 
 function linesOf(text: string) {
@@ -127,11 +165,17 @@ function runtimeDraftOf(saved: RuntimePlan): RuntimeDraft {
   delete runtime.maintenance
   delete runtime.errorPages
   delete runtime.interceptErrors
+  delete runtime.replay
+  delete runtime.sleep
+  // Skew protection is set beside the rollback terms, which save it.
+  delete runtime.skewProtection
   return {
     ...runtime,
     commandText: (runtime.command ?? []).join("\n"),
     capabilitiesText: (runtime.capabilities ?? []).join("\n"),
     devicesText: (runtime.devices ?? []).join("\n"),
+    replayDraft: replayDraftOf(saved.replay),
+    sleepDraft: sleepDraftOf(saved.sleep),
   }
 }
 
@@ -141,10 +185,14 @@ function runtimePlanOf(draft: RuntimeDraft): RuntimePlan {
     command: linesOf(draft.commandText),
     capabilities: linesOf(draft.capabilitiesText),
     devices: linesOf(draft.devicesText),
+    replay: replayPlanOf(draft.replayDraft),
+    sleep: sleepPlanOf(draft.sleepDraft),
   }
   delete plan.commandText
   delete plan.capabilitiesText
   delete plan.devicesText
+  delete plan.replayDraft
+  delete plan.sleepDraft
   return plan
 }
 
@@ -174,6 +222,10 @@ const RUNTIME_FIELD_IDS: Record<string, string> = {
   "runtime.hostPort": "runtime-host-port",
   "runtime.bindAddress": "runtime-bind",
   "runtime.strategy": "runtime-strategy",
+  "runtime.canary": "runtime-strategy",
+  "runtime.canary.percent": "runtime-canary-percent",
+  "runtime.canary.durationSeconds": "runtime-canary-window",
+  "runtime.replicas": "runtime-replicas",
   "runtime.memoryMb": "runtime-memory",
   "runtime.cpus": "runtime-cpus",
   "runtime.pidsLimit": "runtime-pids",
@@ -184,6 +236,8 @@ const RUNTIME_FIELD_IDS: Record<string, string> = {
   "runtime.maxRequestBodyMb": "runtime-max-body",
   "runtime.capabilities": "runtime-capabilities",
   "runtime.devices": "runtime-devices",
+  ...REPLAY_FIELD_IDS,
+  ...SLEEP_FIELD_IDS,
 }
 
 /** Which section head a refused field belongs to, so that head says "Not saved". */
@@ -198,12 +252,17 @@ const FIELD_SECTION: Record<string, string> = {
   "runtime-cpus": "resources",
   "runtime-pids": "resources",
   "runtime-strategy": "releases",
+  "runtime-canary-percent": "releases",
+  "runtime-canary-window": "releases",
+  "runtime-replicas": "releases",
   "runtime-restart": "releases",
   "runtime-stop-signal": "shutdown",
   "runtime-grace": "shutdown",
   "runtime-drain": "shutdown",
   "runtime-capabilities": "access",
   "runtime-devices": "access",
+  ...Object.fromEntries(Object.values(REPLAY_FIELD_IDS).map((id) => [id, "replay"])),
+  ...Object.fromEntries(Object.values(SLEEP_FIELD_IDS).map((id) => [id, "sleep"])),
 }
 
 function clampPort(value: string) {
@@ -274,7 +333,18 @@ export function RuntimeSettings({
           <RollbackWatchForm
             projectId={projectId}
             environmentId={environmentId}
-            blueGreen={configuration.runtime.strategy === "blue_green"}
+            blueGreen={
+              configuration.runtime.strategy === "blue_green" ||
+              configuration.runtime.strategy === "canary"
+            }
+            skew={{
+              saved: Boolean(configuration.runtime.skewProtection),
+              refusal: skewRefusal(configuration),
+              save: (on) =>
+                state.save({
+                  runtime: (latest) => ({ ...latest.runtime, skewProtection: on || undefined }),
+                }),
+            }}
           />
           <HealthChecksForm projectId={projectId} configuration={configuration} save={state.save} />
         </>
@@ -284,6 +354,18 @@ export function RuntimeSettings({
 }
 
 type Save = ReturnType<typeof useConfiguration>["save"]
+
+/** Why the saved plan cannot keep visitors on their release (`validateSkewProtection`). */
+function skewRefusal(configuration: DeploymentEnvironmentConfiguration) {
+  if (configuration.runtime.strategy === "stop_first")
+    return "a stop-first release stops the previous one before the next starts"
+  const method = configuration.build.method
+  if (method === "compose" || method === "legacy_compose")
+    return "a Compose stack is never kept warm"
+  if (!configuration.domains.some((domain) => !domain.redirectTo))
+    return "it is a cookie the public route sets, and this plan has no domain"
+  return undefined
+}
 
 /**
  * One or two states for a section head, side by side, or nothing when there
@@ -297,9 +379,10 @@ function statuses(...items: React.ReactNode[]) {
 }
 
 /**
- * The Runtime form: six section heads — the image and command, where it
- * listens, what it may use, how releases replace each other, how it is
- * stopped, what it can reach — and one save, because one PUT writes all of it.
+ * The Runtime form: seven section heads — the image and command, where it
+ * listens, what it may use, how releases replace each other, what a release
+ * is replayed before its cutover, how it is stopped, what it can reach — and
+ * one save, because one PUT writes all of it.
  */
 function RuntimeForm({
   projectId,
@@ -345,14 +428,46 @@ function RuntimeForm({
   const pids = runtime.pidsLimit ?? 0
   const refusal = blueGreenRefusal(runtime, deployment.profile, method)
   const blueGreen = runtime.strategy === "blue_green"
-  const failsNext = blueGreen && Boolean(refusal)
+  const canary = runtime.strategy === "canary"
+  // A canary runs the candidate beside the live release as blue/green does,
+  // and shares the public route's requests, so it needs a domain as well.
+  const servesDomain = configuration.domains.some((domain) => !domain.redirectTo)
+  const canaryRefusal =
+    refusal ??
+    (servesDomain
+      ? undefined
+      : "a canary shares the public route's requests, and this plan has no domain")
+  const failsNext = (blueGreen && Boolean(refusal)) || (canary && Boolean(canaryRefusal))
+  const terms = runtime.canary ?? DEFAULT_CANARY_TERMS
+  const replicas = effectiveReplicas(runtime)
+  const replicasRefused = replicaRefusal(runtime, method)
+  // Saved with replicas, then given something only one container can hold:
+  // the server refuses the save, so the page says so before it is pressed.
+  const replicasFail = replicas > 1 && Boolean(replicasRefused)
   const portMark = portProduct(port)
+  const web = deployment.profile === "web" || deployment.profile === "static"
 
   const submit = async () => {
     setError(undefined)
     setFieldError(undefined)
     if (fixedPort && hostPort === 0) {
       setFieldError({ id: "runtime-host-port", message: "Use a port from 1 to 65535." })
+      return false
+    }
+    const replayRefused = replayRefusal(runtime.replayDraft)
+    if (replayRefused) {
+      setFieldError({
+        id: REPLAY_DRAFT_FIELD_IDS[replayRefused.field],
+        message: replayRefused.message,
+      })
+      return false
+    }
+    const sleepRefused = sleepRefusal(runtime.sleepDraft)
+    if (sleepRefused) {
+      setFieldError({
+        id: SLEEP_DRAFT_FIELD_IDS[sleepRefused.field],
+        message: sleepRefused.message,
+      })
       return false
     }
     setSaving(true)
@@ -366,6 +481,7 @@ function RuntimeForm({
           maintenance: latest.runtime.maintenance,
           errorPages: latest.runtime.errorPages,
           interceptErrors: latest.runtime.interceptErrors,
+          skewProtection: latest.runtime.skewProtection,
         }),
       })
       // The lists go to the server one entry per line, trimmed; the draft
@@ -376,11 +492,20 @@ function RuntimeForm({
         commandText: linesOf(prev.commandText).join("\n"),
         capabilitiesText: linesOf(prev.capabilitiesText).join("\n"),
         devicesText: linesOf(prev.devicesText).join("\n"),
+        replayDraft: replayDraftOf(replayPlanOf(prev.replayDraft)),
+        sleepDraft: sleepDraftOf(sleepPlanOf(prev.sleepDraft)),
       }))
       return true
     } catch (caught) {
-      if (caught instanceof ApiError && caught.field && RUNTIME_FIELD_IDS[caught.field]) {
-        setFieldError({ id: RUNTIME_FIELD_IDS[caught.field], message: caught.message })
+      // A refused prefix is named by its place in the list; the field is the list.
+      const field =
+        caught instanceof ApiError && caught.field?.startsWith("runtime.replay.paths[")
+          ? "runtime.replay.paths"
+          : caught instanceof ApiError
+            ? caught.field
+            : undefined
+      if (caught instanceof ApiError && field && RUNTIME_FIELD_IDS[field]) {
+        setFieldError({ id: RUNTIME_FIELD_IDS[field], message: caught.message })
       } else if (caught instanceof ApiError && (caught.status === 422 || caught.status === 400)) {
         // The plan's own refusals — a credential in argv, a path outside the
         // source — name no field, so they are the form's sentence, not a toast.
@@ -704,8 +829,9 @@ function RuntimeForm({
         </FieldRow>
       </SettingSection>
 
-      {/* No state line: it said the restart policy back ("restarts unless
-          stopped") over the select that already says it. */}
+      {/* A state line only for replicas past one, the answer that is not the
+          expected one: it used to say the restart policy back ("restarts
+          unless stopped") over the select that already says it. */}
       <SettingSection
         id="releases"
         title="Releases"
@@ -719,13 +845,28 @@ function RuntimeForm({
             />
           ),
           settingStatus({
-            dirty: draft.changed(["strategy", "restartPolicy"]),
+            dirty: draft.changed(["strategy", "canary", "replicas", "restartPolicy"]),
             refused: refusedIn("releases"),
           }),
         )}
+        state={
+          canary || replicas > 1 ? (
+            <span
+              key={`${canary}-${terms.percent}-${terms.durationSeconds}-${replicas}`}
+              className="numeric block animate-rise"
+            >
+              {[
+                canary && `Canary on ${terms.percent}% for ${windowWords(terms.durationSeconds)}`,
+                replicas > 1 && `${replicas} replicas of each release`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          ) : undefined
+        }
       >
         <Field label="Release strategy" error={errorFor("runtime-strategy")}>
-          <ChoiceGrid id="runtime-strategy" columns={2} role="group" aria-label="Release strategy">
+          <ChoiceGrid id="runtime-strategy" columns={3} role="group" aria-label="Release strategy">
             <ChoiceCard
               verb="Release blue / green"
               title="Blue / green"
@@ -742,17 +883,35 @@ function RuntimeForm({
               }
               selected={blueGreen}
               disabled={!canEdit || Boolean(refusal)}
-              onClick={() => patch({ strategy: "blue_green" })}
+              onClick={() => draft.set((prev) => withStrategy(prev, "blue_green"))}
+            />
+            <ChoiceCard
+              verb="Release as a canary"
+              title="Canary"
+              mark={Gauge}
+              index={1}
+              description={
+                <>
+                  {canary && failsNext && (
+                    <span className="sr-only">Current strategy, unavailable. </span>
+                  )}
+                  Gives the new release a share of the requests beside the live one first, and
+                  removes it if it does worse.
+                </>
+              }
+              selected={canary}
+              disabled={!canEdit || Boolean(canaryRefusal)}
+              onClick={() => draft.set((prev) => withStrategy(prev, "canary"))}
             />
             <ChoiceCard
               verb="Release stop first"
               title="Stop first"
               mark={Pause}
-              index={1}
+              index={2}
               description="Stops the live release, then starts the new one — a moment of downtime."
               selected={runtime.strategy === "stop_first"}
               disabled={!canEdit}
-              onClick={() => patch({ strategy: "stop_first" })}
+              onClick={() => draft.set((prev) => withStrategy(prev, "stop_first"))}
             />
           </ChoiceGrid>
           {/* Said beside the choice it blocks, at full ink: on the card it was
@@ -760,7 +919,118 @@ function RuntimeForm({
               operator needed and the hardest to read. */}
           {refusal && (
             <FormNote tone={failsNext ? "warning" : "default"} className="animate-rise">
-              Blue / green is unavailable: {refusal}.
+              Blue / green and canary are unavailable: {refusal}.
+            </FormNote>
+          )}
+          {!refusal && canaryRefusal && (
+            <FormNote tone={canary ? "warning" : "default"} className="animate-rise">
+              Canary is unavailable: {canaryRefusal}.
+            </FormNote>
+          )}
+        </Field>
+        {canary && (
+          <div className="animate-rise space-y-4">
+            <FieldRow columns={2}>
+              <Field
+                label="Share of requests"
+                htmlFor="runtime-canary-percent"
+                info="Each request picks a release at random, so the new release's share holds per request. Its 5xx share and p95 are compared with the live release's over the same minutes, on the rollback terms below."
+                error={errorFor("runtime-canary-percent")}
+              >
+                <InputGroup>
+                  <InputGroupInput
+                    id="runtime-canary-percent"
+                    type="number"
+                    min={CANARY_PERCENT.min}
+                    max={CANARY_PERCENT.max}
+                    value={terms.percent}
+                    readOnly={!canEdit}
+                    aria-invalid={Boolean(errorFor("runtime-canary-percent"))}
+                    className="font-mono"
+                    onChange={(event) =>
+                      patch({ canary: { ...terms, percent: Number(event.target.value) || 0 } })
+                    }
+                  />
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupText>%</InputGroupText>
+                  </InputGroupAddon>
+                </InputGroup>
+              </Field>
+              <Field
+                label="Window"
+                htmlFor="runtime-canary-window"
+                info="How long the new release keeps its share before it is promoted or waits for you. A failing comparison aborts it at once, without waiting for the end."
+                error={errorFor("runtime-canary-window")}
+              >
+                <InputGroup>
+                  <InputGroupInput
+                    id="runtime-canary-window"
+                    type="number"
+                    min={CANARY_SECONDS.min / 60}
+                    max={CANARY_SECONDS.max / 60}
+                    value={Math.round(terms.durationSeconds / 60)}
+                    readOnly={!canEdit}
+                    aria-invalid={Boolean(errorFor("runtime-canary-window"))}
+                    className="font-mono"
+                    onChange={(event) =>
+                      patch({
+                        canary: {
+                          ...terms,
+                          durationSeconds: (Number(event.target.value) || 0) * 60,
+                        },
+                      })
+                    }
+                  />
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupText>minutes</InputGroupText>
+                  </InputGroupAddon>
+                </InputGroup>
+              </Field>
+            </FieldRow>
+            <OptionList>
+              <OptionRow
+                title="Promote on its own"
+                hint="At the end of a window it got through without doing worse, the new release goes live. Off, it keeps its share until you promote or abort it from the run."
+                checked={terms.autoPromote ?? false}
+                onCheckedChange={(autoPromote) =>
+                  patch({ canary: { ...terms, autoPromote: autoPromote || undefined } })
+                }
+                disabled={!canEdit}
+              />
+            </OptionList>
+          </div>
+        )}
+        <Field
+          label="Replicas"
+          info="Containers of each release that run side by side on this server, sharing the route's requests: the one with the fewest open connections gets the next. A cutover waits until every replica passes the readiness check, and a replica that stops answering is passed over for ten seconds. Each has the limits above of its own."
+          error={errorFor("runtime-replicas")}
+        >
+          <Segments
+            id="runtime-replicas"
+            label="Replicas"
+            value={String(replicas)}
+            options={Array.from({ length: MAX_REPLICAS }, (_, index) => ({
+              value: String(index + 1),
+              label: String(index + 1),
+              mono: true,
+              // One is always on offer: it is the way out of a refusal.
+              disabled: index > 0 && Boolean(replicasRefused),
+            }))}
+            disabled={!canEdit}
+            onChange={(value) => draft.set((prev) => withReplicas(prev, Number(value)))}
+          />
+          {replicasRefused && (
+            <FormNote tone={replicasFail ? "warning" : "default"} className="animate-rise">
+              {replicasFail ? "Will not save: " : "One replica only: "}
+              {replicasRefused}.
+            </FormNote>
+          )}
+          {!replicasRefused && replicas > 1 && memory > 0 && (
+            <FormNote className="animate-rise">
+              <span className="numeric">
+                {replicas} × {memory} MB = {replicas * memory} MB for the release
+              </span>
+              {blueGreen && ", twice that while a cutover runs both releases"}.
             </FormNote>
           )}
         </Field>
@@ -789,6 +1059,57 @@ function RuntimeForm({
           </Select>
         </Field>
       </SettingSection>
+
+      {/* A gate on the release, beside how releases replace each other: a
+          worker or a game server has no requests to replay, so it is drawn
+          only where there is traffic, or where a plan already turned it on. */}
+      {(web || runtime.replayDraft.enabled) && (
+        <ReplaySection
+          draft={runtime.replayDraft}
+          onChange={(fields) =>
+            draft.set((prev) => ({ ...prev, replayDraft: { ...prev.replayDraft, ...fields } }))
+          }
+          canEdit={canEdit}
+          errorFor={errorFor}
+          servesDomain={configuration.domains.some((domain) => !domain.redirectTo)}
+          stopFirst={runtime.strategy === "stop_first"}
+          status={settingStatus({
+            dirty: draft.changed(["replayDraft"]),
+            refused: refusedIn("replay"),
+          })}
+        />
+      )}
+
+      {/* What the release does while nobody visits: drawn where there are
+          visitors to wait for, or where a plan already turned it on. */}
+      {(web || runtime.sleepDraft.enabled) && (
+        <SleepSection
+          draft={runtime.sleepDraft}
+          onChange={(fields) =>
+            draft.set((prev) => ({ ...prev, sleepDraft: { ...prev.sleepDraft, ...fields } }))
+          }
+          canEdit={canEdit}
+          errorFor={errorFor}
+          blocker={sleepBlocker({
+            servesDomain: configuration.domains.some((domain) => !domain.redirectTo),
+            compose: method === "compose" || method === "legacy_compose",
+            hostNetwork: Boolean(runtime.hostNetwork),
+            replicas,
+            canary,
+            skewProtection: Boolean(configuration.runtime.skewProtection),
+            blockingCheck: configuration.checks.find(
+              (check) =>
+                check.phase === "readiness" &&
+                check.required &&
+                (check.kind === "docker_health" || check.kind === "public_route"),
+            ),
+          })}
+          status={settingStatus({
+            dirty: draft.changed(["sleepDraft"]),
+            refused: refusedIn("sleep"),
+          })}
+        />
+      )}
 
       {/* A head that says what the three fields add up to, since the defaults
           are not on any of them: the server stops a container with SIGTERM and

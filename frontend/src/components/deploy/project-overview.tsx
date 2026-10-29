@@ -2,10 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowRight } from "@/components/icons"
+import { ArrowRight, Sparkles } from "@/components/icons"
 import { get } from "@/lib/api"
 import { percent } from "@/lib/format"
-import { pullOfPreview, unavailableReason } from "@/lib/pull-requests"
+import {
+  previewServices,
+  pullOfPreview,
+  shownBranches,
+  unavailableReason,
+} from "@/lib/pull-requests"
 import { perMinute } from "@/lib/requests"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -20,6 +25,8 @@ import type {
 } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
 import { ChoiceList } from "@/components/flow"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { buildMethodProduct, imageProduct } from "@/components/product-logo"
@@ -46,10 +53,16 @@ import { SitePreview } from "@/components/deploy/site-preview"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
 import { ProjectWiring } from "@/components/deploy/project-wiring"
 import { Insights } from "@/components/deploy/insights"
+import { Availability } from "@/components/deploy/availability"
 import { RunRow } from "@/components/deploy/run-row"
 import { UsageTiles } from "@/components/deploy/usage-tiles"
+import { PreviewBranchLines } from "@/components/deploy/preview-branches"
+import { RightSizeCard } from "@/components/deploy/right-size"
 import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
 import { ReleaseWatch, useReleaseWatch } from "@/components/deploy/release-watch"
+import { SleepPanel, useSleep } from "@/components/deploy/sleep-panel"
+import { OperatorSheet } from "@/components/deploy/operator/operator-sheet"
+import { Vulnerabilities } from "@/components/deploy/vulnerabilities"
 
 /**
  * The project's front page, in the order a visitor asks: is something
@@ -68,7 +81,10 @@ import { ReleaseWatch, useReleaseWatch } from "@/components/deploy/release-watch
  * which sat alone on its own row at every desktop width.
  *
  * Findings live here rather than on Runtime — Runtime is evidence, this is
- * the verdict — and the identity line's "needs attention" links to them. The
+ * the verdict — and the identity line's "needs attention" links to them. How
+ * much of the last day, week and month the live release was up sits over the
+ * delivery figures, read from the releases and the container events the
+ * dashboard keeps. The
  * recent deployments are runs you open, drawn as the runs list draws them,
  * beside the repository's pull requests, each with the preview built from it
  * and the verbs that test, merge or close one. Each block arrives on its own
@@ -79,6 +95,10 @@ export function ProjectOverview() {
   const { can } = useAuth()
   const { deployment, project: record, runtime } = project.detail
   const [rollbackOpen, setRollbackOpen] = useState(false)
+  const [diagnosing, setDiagnosing] = useState(false)
+  // The operator asks the install's model and proposes actions a person
+  // presses, so it is offered to whoever may control the deployment.
+  const canDiagnose = project.normalized && !project.archived && can("service.control")
 
   const url = deploymentURL(deployment.endpoint)
   const state = projectState(deployment, runtime, project.archived)
@@ -113,6 +133,7 @@ export function ProjectOverview() {
     projectName: record.name,
     info: pullRequests.data,
     refresh: pullRequests.refresh,
+    stagingId: project.archived ? undefined : project.staging?.id,
   })
   const runs = project.runs.filter((run) => run.environmentId === project.environmentId)
   // The run in flight is the page's first block; it is not listed a second
@@ -141,6 +162,8 @@ export function ProjectOverview() {
     project.environmentId,
     project.normalized && !project.archived,
   )
+  const asleep = state === "asleep"
+  const sleep = useSleep(project.projectId, project.environmentId, asleep)
 
   const blocks: [string, React.ReactNode][] = []
   if (deployment.activeRun)
@@ -164,6 +187,22 @@ export function ProjectOverview() {
         onChange={project.refresh}
       />,
     ])
+  // Asleep by design is the state the production panel is in, said before it
+  // with when, why and the one verb it has.
+  if (asleep && sleep.status && sleep.shown)
+    blocks.push([
+      "sleep",
+      <SleepPanel
+        key="sleep"
+        projectId={project.projectId}
+        environmentId={project.environmentId}
+        status={sleep.status}
+        onChange={() => {
+          sleep.refresh()
+          project.refresh()
+        }}
+      />,
+    ])
   blocks.push([
     "production",
     <Panel key="production" plain>
@@ -181,6 +220,12 @@ export function ProjectOverview() {
             {rollbackEligible && can("destructive") && (
               <Button variant="outline" size="sm" onClick={() => setRollbackOpen(true)}>
                 Roll back
+              </Button>
+            )}
+            {canDiagnose && (
+              <Button variant="outline" size="sm" onClick={() => setDiagnosing(true)}>
+                <Sparkles />
+                Diagnose
               </Button>
             )}
           </>
@@ -204,6 +249,9 @@ export function ProjectOverview() {
             product={product}
             domain={domain}
             stopped={state === "stopped"}
+            // Loading the site would be a request through its route, and
+            // wake it for nobody.
+            asleep={asleep}
           />
           <ProjectWiring
             projectId={project.projectId}
@@ -220,6 +268,7 @@ export function ProjectOverview() {
             runs={runs}
             runtime={runtime}
             domains={opsDomains}
+            tailnet={project.operations?.tailnet}
             url={url}
             watch={project.gitWatch}
           />
@@ -249,6 +298,20 @@ export function ProjectOverview() {
     </Panel>,
   ])
 
+  // What its limits should be, from the history of what it used: under the
+  // readings it is drawn from, and above what shipped. The card draws nothing
+  // for a Compose stack, whose file keeps its limits, or a legacy project.
+  if (project.normalized && !project.archived)
+    blocks.push([
+      "right-size",
+      <RightSizeCard
+        key="right-size"
+        projectId={project.projectId}
+        environmentId={project.environmentId}
+        onApplied={project.refresh}
+      />,
+    ])
+
   if (access)
     blocks.push([
       "sign-in",
@@ -262,6 +325,19 @@ export function ProjectOverview() {
         product={product}
         service={liveService?.name}
         port={deployment.internalPort}
+      />,
+    ])
+
+  // What needs attention in the image itself comes after how the release
+  // is doing: the live release read for known vulnerabilities, and whether a
+  // rebuild on a newer base would fix them. A preview is not scanned.
+  if (project.normalized && !project.archived && deployment.liveReleaseId)
+    blocks.push([
+      "vulnerabilities",
+      <Vulnerabilities
+        key="vulnerabilities"
+        projectId={project.projectId}
+        environmentId={project.environmentId}
       />,
     ])
 
@@ -333,25 +409,40 @@ export function ProjectOverview() {
             }
           />
           <PanelBody>
-            <PullRequestList info={info} verbsFor={pulls.verbsFor} previewOf={pulls.previewOf} />
+            <PullRequestList
+              info={info}
+              verbsFor={pulls.verbsFor}
+              previewOf={pulls.previewOf}
+              projectId={project.projectId}
+              canRefreshBranches={can("system.admin")}
+              onChanged={pullRequests.refresh}
+            />
           </PanelBody>
         </Panel>
       )}
     </div>
   )
 
-  // The recent runs answer what shipped before the trend asks how often.
-  // Legacy projects have no delivery figures, but still have their run list.
+  // How much of the time it was up comes before how often it shipped: the
+  // first is the reading a visitor asks after "is it up", the second is the
+  // team's. The recent runs answer what shipped before the trend asks how
+  // often. Legacy projects have no releases to read either from, but still
+  // have their run list.
   if (project.normalized)
     blocks.push([
       "delivery",
-      <Insights
-        key="delivery"
-        projectId={project.projectId}
-        environmentId={project.environmentQuery?.environment}
-      >
-        {history}
-      </Insights>,
+      <div key="delivery" className="space-y-8">
+        <Availability
+          projectId={project.projectId}
+          environmentId={project.environmentQuery?.environment}
+        />
+        <Insights
+          projectId={project.projectId}
+          environmentId={project.environmentQuery?.environment}
+        >
+          {history}
+        </Insights>
+      </div>,
     ])
   else blocks.push(["history", history])
 
@@ -373,6 +464,18 @@ export function ProjectOverview() {
         runs={project.runs}
         domains={domainHostnames}
       />
+      {canDiagnose && (
+        <OperatorSheet
+          open={diagnosing}
+          onOpenChange={setDiagnosing}
+          projectId={project.projectId}
+          environmentId={project.environmentId}
+          environment={project.environmentQuery?.environment}
+          environmentName={deployment.environmentName}
+          deploymentName={record.name}
+          onChanged={project.refresh}
+        />
+      )}
       <Confetti ref={celebrate} className="pointer-events-none fixed inset-0 z-50 size-full" />
       {pulls.dialogs}
     </div>
@@ -391,10 +494,16 @@ function PullRequestList({
   info,
   verbsFor,
   previewOf,
+  projectId,
+  canRefreshBranches,
+  onChanged,
 }: {
   info: ProjectPullRequests
   verbsFor: ReturnType<typeof usePullRequestVerbs>["verbsFor"]
   previewOf: ReturnType<typeof usePullRequestVerbs>["previewOf"]
+  projectId: number
+  canRefreshBranches: boolean
+  onChanged: () => void
 }) {
   const open = info.pulls.filter((pull) => pull.state === "open")
   const listed = new Set(open.map((pull) => pull.number))
@@ -420,18 +529,67 @@ function PullRequestList({
       )}
       {rows.length > 0 && (
         <ChoiceList aria-label="Pull requests">
-          {rows.map(({ pull, preview }) => (
-            <PullRequestRow
-              key={pull.number}
-              pull={pull}
-              preview={preview}
-              verbs={verbsFor(pull)}
-              compact={!roomy}
-            />
-          ))}
+          {rows.map(({ pull, preview }) => {
+            const services = previewServices(preview, info.composePreview?.public)
+            const branches = preview?.state === "open" ? shownBranches(preview) : []
+            return (
+              <PullRequestRow
+                key={pull.number}
+                pull={pull}
+                preview={preview}
+                verbs={verbsFor(pull)}
+                compact={!roomy}
+              >
+                {(services.length > 0 || branches.length > 0) && (
+                  <div className="min-w-0 space-y-1.5">
+                    {services.length > 0 && (
+                      <PreviewServices number={pull.number} services={services} />
+                    )}
+                    {branches.length > 0 && (
+                      <PreviewBranchLines
+                        projectId={projectId}
+                        number={pull.number}
+                        branches={branches}
+                        canRefresh={canRefreshBranches}
+                        onRefreshed={onChanged}
+                      />
+                    )}
+                  </div>
+                )}
+              </PullRequestRow>
+            )
+          })}
         </ChoiceList>
       )}
     </div>
+  )
+}
+
+/**
+ * A Compose preview's services under its row, each as its name and one
+ * reading — the public one, which the preview's address reaches, first — so
+ * a stack whose database never came up says so where the preview is.
+ */
+function PreviewServices({
+  number,
+  services,
+}: {
+  number: number
+  services: ReturnType<typeof previewServices>
+}) {
+  return (
+    <ul
+      aria-label={`Services of the preview of #${number}`}
+      className="flex min-w-0 flex-wrap gap-x-4 gap-y-1"
+    >
+      {services.map((service) => (
+        <li key={service.name} className="inline-flex min-w-0 items-center gap-1.5 text-hint">
+          <span className="truncate font-mono">{service.name}</span>
+          {service.public && <Tag>public</Tag>}
+          <Status tone={service.reading.tone} label={service.reading.label} />
+        </li>
+      ))}
+    </ul>
   )
 }
 

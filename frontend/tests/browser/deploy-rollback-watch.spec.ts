@@ -136,4 +136,72 @@ test.describe("metric-gated rollback", () => {
     expect(body).toMatchObject({ keepWarm: true, windowSeconds: 900, minRequests: 40 })
     await expectSaved(page)
   })
+
+  test("a warm release kept for its visitors says how many it answered", async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await mockProject(page, {
+      rollbackWatch: watch({
+        warmRunning: true,
+        warmServed: { requests: 37, failures: 0, errorRate: 0, from: "", until: "" },
+      }),
+    })
+    await page.goto("/deploy/7")
+    const panel = page.locator("section", { hasText: "Release #2 on watch" }).first()
+    await expect(panel.getByText("release #1 answered 37 of its visitors' requests")).toBeVisible()
+    await expect(panel.getByText("release #1 paused")).toHaveCount(0)
+    await panel.screenshot({ path: testInfo.outputPath("skew-watch-1280.png") })
+
+    await page.getByRole("button", { name: "Roll back instantly" }).click()
+    const dialog = page.getByRole("dialog", { name: "Roll back instantly" })
+    await expect(dialog.getByText(/kept running since the cutover for the visitors/)).toBeVisible()
+    await expect(dialog.getByText(/its visitors are answered by release #1/)).toBeVisible()
+  })
+
+  test("skew protection is saved with the plan, beside the warm window", async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await mockProject(page)
+    await page.goto("/deploy/7/settings/runtime")
+    const section = page.locator("#rollback-watch")
+    const toggle = section.getByRole("switch", {
+      name: "Keep each visitor on the release that answered them",
+    })
+    await expect(toggle).not.toBeChecked()
+    await toggle.click()
+    await expect(
+      section.getByText(/A visitor stays on the release that answered them for up to 10 minutes/),
+    ).toBeVisible()
+    const policies: string[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/rollback-policy"))
+        policies.push(request.url())
+    })
+    const saved = page.waitForRequest(
+      (request) => request.method() === "PUT" && request.url().endsWith("/configuration"),
+    )
+    await saveSettings(page)
+    const body = (await saved).postDataJSON()
+    expect(body.runtime).toMatchObject({ skewProtection: true, strategy: "blue_green" })
+    await expectSaved(page)
+    // Only the plan changed, so the terms were not written again.
+    expect(policies).toHaveLength(0)
+    await expect(toggle).toBeChecked()
+    await section.screenshot({ path: testInfo.outputPath("skew-settings-1280.png") })
+
+    // Turning keep warm off says what is left of it.
+    await section.getByRole("switch", { name: "Keep the previous release warm" }).click()
+    await expect(section.getByText(/stay on it only while it drains/)).toBeVisible()
+  })
+
+  test("a stop-first plan cannot keep visitors on their release", async ({ page }) => {
+    await mockProject(page, { runtimePlan: { strategy: "stop_first" } })
+    await page.goto("/deploy/7/settings/runtime")
+    const section = page.locator("#rollback-watch")
+    await expect(
+      section.getByRole("switch", { name: "Keep each visitor on the release that answered them" }),
+    ).toBeDisabled()
+  })
 })

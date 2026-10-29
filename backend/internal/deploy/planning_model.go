@@ -18,6 +18,7 @@ import (
 	"github.com/distribution/reference"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/tailnetgate"
 )
 
 type DraftStep string
@@ -622,6 +623,11 @@ type RuntimePlanConfig struct {
 	Capabilities       []string        `json:"capabilities,omitempty"`
 	Devices            []string        `json:"devices,omitempty"`
 	Mounts             []RuntimeMount  `json:"mounts,omitempty"`
+	// Seeds are written into the plan's managed volumes by a helper
+	// container before the release's own container starts: install-time
+	// files a definition renders, and downloads verified against their pinned
+	// digest (runtime_seeds.go). Each is written only where nothing is yet.
+	Seeds []RuntimeSeed `json:"seeds,omitempty"`
 	// Resource limits are optional caps handed to the container runtime. Zero
 	// means unlimited, which is Docker's own default; the plan carries them so a
 	// release snapshot pins exactly what the candidate was allowed to use.
@@ -629,6 +635,18 @@ type RuntimePlanConfig struct {
 	CPUs          float64 `json:"cpus,omitempty"`
 	PidsLimit     int64   `json:"pidsLimit,omitempty"`
 	RestartPolicy string  `json:"restartPolicy,omitempty"`
+	// Replicas is how many containers of each release run side by side
+	// behind the route, 1 to MaxRuntimeReplicas; zero is one. Only a
+	// stateless release has more than one (replicaRefusal), and the limits
+	// above are each container's own.
+	Replicas int `json:"replicas,omitempty"`
+	// Canary is the trial a canary-strategy plan's candidate gets before the
+	// cutover: its share of the requests, for how long, and whether it is
+	// promoted on its own when it compares well (canary.go).
+	Canary *CanaryTerms `json:"canary,omitempty"`
+	// SkewProtection keeps each visitor on the release that first answered
+	// them while it is kept warm, by the jd_release cookie (skew.go).
+	SkewProtection bool `json:"skewProtection,omitempty"`
 	// MaxRequestBodyMB is the largest request body the managed route lets
 	// through, in megabytes. Zero is DefaultMaxRequestBodyMB.
 	MaxRequestBodyMB int `json:"maxRequestBodyMb,omitempty"`
@@ -639,6 +657,18 @@ type RuntimePlanConfig struct {
 	// ResponseHeaders are set on every answer the public route gives,
 	// replacing any header of the same name the application sent.
 	ResponseHeaders []RouteHeader `json:"responseHeaders,omitempty"`
+	// RateLimit is how many requests one client address may make to the
+	// public route; past it the route answers 429 with Retry-After. On the
+	// Docker Caddy ingress, which has no rate-limit module, it is enforced
+	// on the host instead (proxysvc/deployment_edge.go, edge-rules.md).
+	RateLimit *RouteRateLimit `json:"rateLimit,omitempty"`
+	// EdgeRules are decided in order at the proxy before the application
+	// is asked; the first a request meets decides it. Kept canonical
+	// (proxysvc.CanonicalEdgeRules).
+	EdgeRules []RouteEdgeRule `json:"edgeRules,omitempty"`
+	// CrowdSec refuses, at the route, the addresses CrowdSec's local engine
+	// has banned, from a list the dashboard refreshes from its decisions.
+	CrowdSec bool `json:"crowdSec,omitempty"`
 	// ForwardAuth has the public route ask an auth server about every
 	// request first, so only people who sign in reach the application.
 	ForwardAuth *RouteForwardAuth `json:"forwardAuth,omitempty"`
@@ -660,7 +690,40 @@ type RuntimePlanConfig struct {
 	// for as long as it says. A domain served over plain HTTP is never sent
 	// it, so the control only means something once a served domain is HTTPS.
 	HSTS *RouteHSTS `json:"hsts,omitempty"`
+	// Replay is the traffic replay before the cutover (replay.go): the last
+	// real GET and HEAD requests the access log holds, sent to the candidate
+	// and compared with the live release's answers. Nil is off, which is
+	// where a plan starts: it costs a deployment the requests it replays.
+	Replay *ReplayPlan `json:"replay,omitempty"`
+	// Sleep stops the live release's container after this many idle
+	// minutes and has the next request start it again (sleep.go). Nil is
+	// off, which is where a plan starts: a sleeping application's first
+	// visitor waits for it.
+	Sleep *SleepPlan `json:"sleep,omitempty"`
+	// Tailnet publishes the environment on this host's tailnet and nowhere
+	// else, the way a pull request preview is published: tailscale serve
+	// maps one port of the tailnet address to it, and it has no public
+	// domain and no public certificate. Nil is an ordinary environment.
+	Tailnet *RouteTailnet `json:"tailnet,omitempty"`
 }
+
+// RouteTailnet is a tailnet-only publication (tailnet-apps.md). Allow, when
+// it names anybody, is who may open it — Tailscale logins (alice@example.com,
+// compared without case) and ACL tags (tag:ci, compared exactly) — and the
+// proxy then asks the dashboard about every request, which asks tailscaled
+// who holds the address it came from. An empty Allow lets everyone on the
+// tailnet in, as a preview's address does: the tailnet is its fence.
+//
+// A preview's plan is a copy of this one, so a preview of an environment
+// that names its visitors names the same ones.
+type RouteTailnet struct {
+	Allow []string `json:"allow,omitempty"`
+}
+
+// IdentityAware says the publication decides who may open it by their
+// tailnet identity, which is what puts the proxy between the tailnet and
+// the application.
+func (t *RouteTailnet) IdentityAware() bool { return t != nil && len(t.Allow) > 0 }
 
 // RouteHSTS is the public route's Strict-Transport-Security policy: MaxAge
 // seconds (zero is six months; at least five minutes, at most two years),
@@ -688,6 +751,14 @@ type RouteMaintenance struct {
 	// usual while it is in maintenance, kept in their canonical spelling.
 	BypassFrom []string `json:"bypassFrom,omitempty"`
 }
+
+// RouteEdgeRule and RouteRateLimit are the proxy's own shapes: both ingress
+// drivers render them, and a second copy here would be a second set of
+// bounds to keep in step.
+type (
+	RouteEdgeRule  = proxysvc.EdgeRule
+	RouteRateLimit = proxysvc.DeploymentRateLimit
+)
 
 // RouteHeader is one response header the public route sets.
 type RouteHeader struct {
@@ -733,6 +804,36 @@ type PublishedPort struct {
 	// BindAddress is the host interface. Empty publishes on every interface,
 	// which is what a port a proxy cannot front exists for.
 	BindAddress string `json:"bindAddress,omitempty"`
+}
+
+// effectiveProtocol is the primary port's protocol as checks and the
+// runtime's own binding read it: UDP only where the plan says the port is
+// UDP alone, which validation allows only for a fixed, unrouted publication.
+// A "tcp+udp" port is reached over TCP.
+func (c RuntimePlanConfig) effectiveProtocol() string {
+	if c.Protocol == "udp" {
+		return "udp"
+	}
+	return "tcp"
+}
+
+// publishedProtocols are the protocols the primary port is published with:
+// one, or both for a server that signals over TCP and plays over UDP on the
+// same number.
+func (c RuntimePlanConfig) publishedProtocols() []string {
+	switch c.Protocol {
+	case "udp":
+		return []string{"udp"}
+	case "tcp+udp":
+		return []string{"tcp", "udp"}
+	}
+	return []string{"tcp"}
+}
+
+// portLabel names the primary publication the way a firewall rule does:
+// 25565/tcp, 19132/udp, or 19132/tcp+udp for both.
+func (c RuntimePlanConfig) portLabel() string {
+	return strconv.Itoa(c.HostPort) + "/" + strings.Join(c.publishedProtocols(), "+")
 }
 
 func (p PublishedPort) effectiveProtocol() string {
@@ -839,6 +940,10 @@ type PlannedDomain struct {
 	// 302, 307 or 308; zero is 308.
 	RedirectTo   string `json:"redirectTo,omitempty"`
 	RedirectCode int    `json:"redirectCode,omitempty"`
+	// Tunnel serves the name through Cloudflare Tunnel (tunnel.go) rather
+	// than at this server's public address: Cloudflare terminates its HTTPS,
+	// and the route serves it over plain HTTP to the connector alone.
+	Tunnel bool `json:"tunnel,omitempty"`
 }
 
 // Redirects says whether the domain sends visitors to another rather than
@@ -858,6 +963,11 @@ func (d PlannedDomain) domainConfig() map[string]any {
 		if d.RedirectCode != 0 {
 			config["redirectCode"] = d.RedirectCode
 		}
+	}
+	// Written only when set, as the redirect is, so a domain saved before
+	// the tunnel existed keeps its bytes and its digest.
+	if d.Tunnel {
+		config["tunnel"] = true
 	}
 	return config
 }
@@ -1465,7 +1575,21 @@ func (c PlanConfiguration) Validate() error {
 			return fmt.Errorf("runtime command passes credential material through argv; use a scoped variable")
 		}
 	}
-	if c.Runtime.Protocol != "" && c.Runtime.Protocol != "tcp" {
+	switch c.Runtime.Protocol {
+	case "", "tcp":
+	case "udp", "tcp+udp":
+		// A UDP server is published on its own port and never routed: no
+		// proxy in front of the dashboard carries a datagram, and leasing a
+		// loopback port for one would publish it where nothing can reach it.
+		// "tcp+udp" is one number on both, for a server that signals over
+		// TCP and plays over UDP (Bedrock's NetherNet).
+		if c.Runtime.InternalPort == 0 || c.Runtime.HostPort == 0 || c.Runtime.HostNetwork {
+			return invalidField("runtime.protocol", "a UDP service is published on a fixed host port; set the host port and the container port")
+		}
+		if len(c.Domains) > 0 {
+			return invalidField("runtime.protocol", "a UDP service cannot be routed to a domain; the proxy carries HTTP")
+		}
+	default:
 		return fmt.Errorf("runtime protocol %q is not supported by this release", c.Runtime.Protocol)
 	}
 	if c.Runtime.InternalPort < 0 || c.Runtime.InternalPort > 65535 {
@@ -1490,7 +1614,7 @@ func (c PlanConfiguration) Validate() error {
 			return invalidField(field, "host networking already exposes every port; remove the published ports or the host network")
 		}
 		key := port.effectiveProtocol() + ":" + strconv.Itoa(port.HostPort)
-		if publishedHostPorts[key] || (port.effectiveProtocol() == "tcp" && port.HostPort == c.Runtime.HostPort) {
+		if publishedHostPorts[key] || (slices.Contains(c.Runtime.publishedProtocols(), port.effectiveProtocol()) && port.HostPort == c.Runtime.HostPort) {
 			return invalidField(field, "host port %d/%s is published twice", port.HostPort, port.effectiveProtocol())
 		}
 		publishedHostPorts[key] = true
@@ -1521,6 +1645,21 @@ func (c PlanConfiguration) Validate() error {
 	if !validRestartPolicy(c.Runtime.RestartPolicy) {
 		return fmt.Errorf("runtime restart policy must be one of %s", strings.Join(RestartPolicies, ", "))
 	}
+	if err := validateReplicas(c.Build.Method, c.Runtime); err != nil {
+		return err
+	}
+	if err := validateCanary(c); err != nil {
+		return err
+	}
+	if err := validateSkewProtection(c); err != nil {
+		return err
+	}
+	if err := validateReplayPlan(c.Runtime.Replay); err != nil {
+		return err
+	}
+	if err := validateSleepPlan(c); err != nil {
+		return err
+	}
 	seenMountTargets := map[string]bool{}
 	for index, mount := range c.Runtime.Mounts {
 		source := strings.TrimSpace(mount.Source)
@@ -1533,6 +1672,9 @@ func (c PlanConfiguration) Validate() error {
 			return invalidField(fmt.Sprintf("runtime.mounts[%d]", index), "runtime mount target and ownership are invalid")
 		}
 		seenMountTargets[target] = true
+	}
+	if err := validateRuntimeSeeds(c); err != nil {
+		return err
 	}
 	for _, capability := range c.Runtime.Capabilities {
 		if !capabilityRE.MatchString(capability) {
@@ -1731,14 +1873,92 @@ func (c PlanConfiguration) Validate() error {
 		if err := domain.Protection.validate(fmt.Sprintf("domains[%d].protection", index)); err != nil {
 			return err
 		}
+		if domain.Tunnel && strings.HasPrefix(hostname, "*.") {
+			return invalidField(fmt.Sprintf("domains[%d].tunnel", index), "a wildcard is not routed through Cloudflare Tunnel here: it needs a wildcard record and certificate of its own at Cloudflare; route each name")
+		}
 	}
 	if err := validateDomainRedirects(c.Domains); err != nil {
 		return err
 	}
+	// Every request a tunnel brings reaches the route from its connector's
+	// address, not the visitor's, so a list of allowed addresses would refuse
+	// every visitor of the name or, with the connector listed, let all of
+	// them in. Cloudflare's own rules are where that name is fenced.
+	if len(c.Runtime.AllowFrom) > 0 && len(tunnelHostnames(c.Domains)) > 0 {
+		return invalidField("runtime.allowFrom", "allowed addresses cannot fence a name served through Cloudflare Tunnel: every request reaches this host from the tunnel's connector, not from the visitor's address; fence that name with Cloudflare Access or a WAF rule at Cloudflare instead")
+	}
 	if err := validateRouteRules(c.Runtime); err != nil {
 		return err
 	}
-	return validateRouteSignIn(c)
+	if err := validateRouteSignIn(c); err != nil {
+		return err
+	}
+	return validateRouteTailnet(c)
+}
+
+// validateRouteTailnet checks a tailnet-only publication. It has no public
+// route, so nothing that only a public route carries may come with it, and
+// nothing may publish the container anywhere but loopback: an address on
+// every interface, a fixed or extra host port or the host's network would
+// each put the application where the tailnet does not fence it.
+func validateRouteTailnet(c PlanConfiguration) error {
+	tailnet := c.Runtime.Tailnet
+	if tailnet == nil {
+		return nil
+	}
+	if len(tailnet.Allow) > tailnetgate.MaxAllow {
+		return invalidField("runtime.tailnet.allow", "at most %d logins and tags", tailnetgate.MaxAllow)
+	}
+	seen := map[string]bool{}
+	for index, entry := range tailnet.Allow {
+		field := fmt.Sprintf("runtime.tailnet.allow[%d]", index)
+		canonical, _, err := tailnetgate.Canonical(entry)
+		if err != nil {
+			return invalidField(field, "%v", err)
+		}
+		if seen[canonical] {
+			return invalidField(field, "%s is listed twice", canonical)
+		}
+		seen[canonical] = true
+	}
+	if len(c.Domains) > 0 {
+		return invalidField("runtime.tailnet", "a tailnet-only environment has no public domain; remove %s first", c.Domains[0].Hostname)
+	}
+	public := ""
+	switch {
+	case c.Runtime.ForwardAuth != nil:
+		public = "a sign-in"
+	case len(c.Runtime.AllowFrom) > 0:
+		public = "allowed addresses"
+	case len(c.Runtime.ResponseHeaders) > 0:
+		public = "response headers"
+	case len(c.Runtime.EdgeRules) > 0:
+		public = "edge rules"
+	case c.Runtime.RateLimit != nil:
+		public = "a rate limit"
+	case c.Runtime.CrowdSec:
+		public = "the CrowdSec list"
+	case c.Runtime.HSTS != nil:
+		public = "HSTS"
+	case c.Runtime.Maintenance != nil:
+		public = "a maintenance page"
+	case len(c.Runtime.ErrorPages) > 0 || c.Runtime.InterceptErrors:
+		public = "error pages"
+	}
+	if public != "" {
+		return invalidField("runtime.tailnet", "%s belongs to the public route, which a tailnet-only environment does not have; remove it first", public)
+	}
+	switch {
+	case c.Runtime.HostNetwork:
+		return invalidField("runtime.tailnet", "on the host's network the application answers on every address, not on the tailnet alone")
+	case c.Runtime.HostPort != 0 || len(c.Runtime.Ports) > 0:
+		return invalidField("runtime.tailnet", "a fixed or extra host port would publish the application past the tailnet; remove it")
+	case c.Runtime.BindAddress != "" && c.Runtime.BindAddress != "127.0.0.1":
+		return invalidField("runtime.tailnet", "a tailnet-only environment publishes its container on loopback alone; bind it to 127.0.0.1")
+	case c.Runtime.InternalPort == 0 && c.Build.Method != BuildCompose:
+		return invalidField("runtime.tailnet", "the tailnet address forwards to the port the application listens on; set it under Runtime")
+	}
+	return nil
 }
 
 // validateRouteSignIn checks the sign-in in front of the public route: an
@@ -1850,6 +2070,14 @@ func validateRouteRules(runtime RuntimePlanConfig) error {
 	if h := runtime.HSTS; h != nil {
 		if err := proxysvc.ValidateDeploymentHSTS(h.proxy()); err != nil {
 			return invalidField("runtime.hsts", "%v", err)
+		}
+	}
+	if err := proxysvc.ValidateEdgeRules(runtime.EdgeRules); err != nil {
+		return invalidField("runtime.edgeRules", "%v", err)
+	}
+	if limit := runtime.RateLimit; limit != nil {
+		if err := proxysvc.ValidateRateLimit(*limit); err != nil {
+			return invalidField("runtime.rateLimit", "%v", err)
 		}
 	}
 	return validateRoutePages(runtime)
@@ -2070,7 +2298,7 @@ func validBuildMethod(method BuildMethod) bool {
 }
 
 func validStrategy(strategy ReleaseStrategy) bool {
-	return strategy == StrategyBlueGreen || strategy == StrategyStopFirst
+	return strategy == StrategyBlueGreen || strategy == StrategyStopFirst || strategy == StrategyCanary
 }
 
 func validOwnership(ownership OwnershipMode) bool {
@@ -2079,7 +2307,7 @@ func validOwnership(ownership OwnershipMode) bool {
 
 func validCheckKind(kind string) bool {
 	switch kind {
-	case "http", "tcp", "docker_health", "command", "public_route", "dns", "tls", "game_handshake", "backup_freshness":
+	case "http", "tcp", "docker_health", "command", "public_route", "dns", "tls", "game_handshake", "backup_freshness", "udp_probe":
 		return true
 	default:
 		return false
@@ -2584,6 +2812,11 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 		c.Domains[index].Hostname = strings.ToLower(strings.TrimSpace(c.Domains[index].Hostname))
 		c.Domains[index].Protection = canonicalDomainProtection(c.Domains[index].Protection)
 		c.Domains[index].RedirectTo = strings.ToLower(strings.TrimSpace(c.Domains[index].RedirectTo))
+		// Cloudflare's edge answers a tunnel's name over HTTPS whatever the
+		// origin speaks, so it is one.
+		if c.Domains[index].Tunnel {
+			c.Domains[index].HTTPS = true
+		}
 	}
 	// Spelled the way the proxy writes them, so 10.0.0.1/32 and 10.0.0.1 are
 	// one entry and an edit that changes nothing changes no digest. Empty
@@ -2612,10 +2845,35 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 		c.Runtime.ForwardAuth = &trimmed
 	}
 	c.Runtime.Maintenance = canonicalRouteMaintenance(c.Runtime.Maintenance)
+	if t := c.Runtime.Tailnet; t != nil {
+		// A copy, so canonicalising never writes through to the caller's
+		// plan; an entry that does not read is kept as written for
+		// validation to name.
+		allow := make([]string, 0, len(t.Allow))
+		for _, entry := range t.Allow {
+			if canonical, _, err := tailnetgate.Canonical(entry); err == nil {
+				entry = canonical
+			}
+			allow = append(allow, entry)
+		}
+		if len(allow) == 0 {
+			allow = nil
+		}
+		c.Runtime.Tailnet = &RouteTailnet{Allow: allow}
+	}
 	if h := c.Runtime.HSTS; h != nil {
 		// A copy, so canonicalising never writes through to the caller's plan.
 		policy := *h
 		c.Runtime.HSTS = &policy
+	}
+	c.Runtime.Replay = canonicalReplayPlan(c.Runtime.Replay)
+	c.Runtime.Sleep = canonicalSleepPlan(c.Runtime.Sleep)
+	// A copy, so canonicalising never writes through to the caller's plan.
+	c.Runtime.EdgeRules = proxysvc.CanonicalEdgeRules(c.Runtime.EdgeRules)
+	if limit := c.Runtime.RateLimit; limit != nil {
+		canonical := *limit
+		canonical.Per = strings.ToLower(strings.TrimSpace(canonical.Per))
+		c.Runtime.RateLimit = &canonical
 	}
 	// In the order the proxy writes them, and absent when there are none, so
 	// a plan that never chose a page keeps the bytes and the digest it had.

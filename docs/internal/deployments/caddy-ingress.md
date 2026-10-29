@@ -15,6 +15,14 @@ also provisions missing Certbot dependencies for the existing host nginx/standal
 The dashboard's own private Caddy, network allowlist, authentication and private backend/frontend
 publications are unchanged. The new public ingress serves deployment hostnames only.
 
+No tailnet address is served here: this container's network is its own, where neither tailscaled's
+loopback forward nor the dashboard's loopback API reaches. The front of every preview's and tailnet-only
+deployment's address — its gate, when it names who may open it — is a second Caddy the dashboard starts
+for that alone, `just-dashboard-tailnet`, on the host's network with every site bound to `127.0.0.1` and
+nothing published ([tailnet-only deployments](tailnet-apps.md#the-gate)). It shares this file's route machinery — the
+snapshot and restore (driver `tailnet-caddy`), the write, validate and reload, the request record — but
+not discovery, provisioning or the reconcile pass, and its admin API is a socket in its own volume.
+
 A host whose Caddy publishes 80 and 443 on one address rather than every address, or an isolated
 acceptance stack whose ingress is published on loopback, names the container instead:
 `JD_INGRESS_CONTAINER` (`proxysvc.NewWithIngressContainer`). That container — inspected by name alone,
@@ -56,6 +64,119 @@ route files use, addressing a generation by inode so a roll under the reader los
 client addresses. Host nginx routes have always written `/var/log/nginx/<route>.access.log`; only
 this driver was silent. See
 [`request-observability.md`](request-observability.md).
+
+A deployment's route also sends the application a W3C `traceparent` and records it: a `map` that
+makes a trace id of `{http.request.uuid}`, a `vars` copy of the client's header, a second `map` that
+continues a valid one, `request_header Traceparent` first in the handling, and three `log_append`
+fields. `log_append` is Caddy 2.8's, so an ingress older than that (`caddy version`, asked once per
+container) serves the route without the trace. See
+[trace context](request-observability.md#trace-context).
+
+## Replicas
+
+A release of several replicas ([replicas](canary-and-replicas.md)) is one `reverse_proxy` naming every
+replica's container address, in replica order, with a block of its own:
+
+```
+reverse_proxy "http://172.18.0.5:3000" "http://172.18.0.6:3000" {
+  lb_policy least_conn
+  lb_try_duration 5s
+  fail_duration 10s
+  max_fails 1
+  transport http {
+    dial_timeout 2s
+  }
+}
+```
+
+Least connections, as on nginx, because a route carries WebSockets and long streamed answers. Health is
+passive, as on nginx: `fail_duration` turns failure counting on, so a replica Caddy fails to reach is set
+aside for ten seconds; for five seconds a request is tried on another replica — any request whose
+connection failed, since none of it reached the application, and otherwise only a GET, Caddy's own
+`lb_retry_match` default, so a POST that reached a dying replica is never carried out twice. Caddy
+reaches a replica at its container address, where one that died answers nothing rather than refusing, so
+it gets two seconds to connect, not Caddy's three. The route's intercepted error pages
+(`@jd_error`/`handle_response`) are in the same block, since Caddy takes one per directive. A release of
+one container keeps the bare `reverse_proxy "<address>"` it always had.
+
+The route records one target comment per replica, and the lifecycle worker locates each by container
+identity: Caddy is joined to every network a replica that is there is on, and every address that moved
+is rewritten in one pass (`replaceProxiedUpstreams`), because a daemon restart can hand two replicas each
+other's addresses. A replica that is gone or stopped keeps its old address — Caddy passes over it, and
+Docker's restart policy usually brings it back — so one dead replica never leaves the others unrepaired;
+a route none of whose replicas is found is left for the next activation, as a one-container route
+always was. The inventory lists every replica's address as the route's upstreams.
+
+`JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyBalancesReplicas -count=1 -v`
+puts three replicas behind a real Caddy and checks the requests are shared, the inventory lists three
+upstreams, a replica killed under steady traffic costs no request, and a Caddy taken off the replicas'
+network is repaired by one maintenance pass while a replica is dead.
+
+## Canary releases
+
+While a candidate release is tried beside the live one ([canary releases](canary-and-replicas.md#canary-releases)),
+the route's handling ends in two `handle` blocks instead of one `reverse_proxy`:
+
+```
+@jd_canary vars_regexp {http.request.uuid} ^(?:[0][0-9a-f]|1[0123456789])
+handle @jd_canary {
+  log_append release 42
+  reverse_proxy "http://172.18.0.8:3000"
+}
+handle {
+  log_append release 41
+  reverse_proxy "http://172.18.0.5:3000" "http://172.18.0.6:3000" { … }
+}
+```
+
+Caddy draws a version-4 UUID for every request, so its first two hex digits are 256 equal buckets; the
+matcher names the candidate's run of them (`canaryUUIDPattern`: 26 for 10%), and each release keeps its
+own replicas, balancing and passive health in its handle. `log_append` (Caddy 2.8 and later; the ingress
+image is 2.11.7) puts the release in each access entry. The candidate's containers are recorded on the
+same target lines as the live release's, after them, so the maintenance pass repairs either. Caddy's
+`weighted_round_robin` exists in 2.11.7 too, but over both releases' containers as one pool it would lose
+least connections between a release's own replicas, and its record would name a container address
+rather than a release. The block is written by activation's canary step and written away again before
+the cutover or the abort; nothing else writes it.
+
+`JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveCanaryAbortsAFailingReleaseAndPromotesAHealthyOne -count=1 -v`
+runs both outcomes through a real Caddy.
+
+## Skew protection
+
+With skew protection ([skew protection](canary-and-replicas.md#skew-protection)) the route keeps each
+visitor on the release that first answered them. After the cutover from release 41 to 42, with 41 kept
+warm for its visitors, the handling is (`caddyReleases`):
+
+```
+@jd_release_41 header_regexp Cookie `(?:^|;\s*)jd_release=41(?:;|$)`
+handle @jd_release_41 {
+  log_append release 41
+  reverse_proxy "http://172.18.0.5:3000"
+}
+@jd_release_42 header_regexp Cookie `(?:^|;\s*)jd_release=42(?:;|$)`
+handle @jd_release_42 {
+  log_append release 42
+  reverse_proxy "http://172.18.0.8:3000"
+}
+handle {
+  log_append release 42
+  header {
+    +Set-Cookie "jd_release=42; Path=/; Max-Age=600; HttpOnly; SameSite=Lax; Secure"
+    defer
+  }
+  reverse_proxy "http://172.18.0.8:3000"
+}
+```
+
+A cookie naming a release the route serves is answered by that release and sets nothing; every other
+request — no cookie, or one naming a release that is gone — falls to the last branches, which add the
+cookie to the answer. A canary's draw sits between them as its own `handle`, setting its own cookie. The
+plain-HTTP server block writes the cookie without `Secure`. The pinned release's containers are recorded
+on the target lines after the live release's, so the maintenance pass repairs them as well.
+
+`JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveSkewProtectionKeepsAVisitorOnTheirRelease -count=1 -v`
+runs a cutover, a kept visitor, a fresh one and the window's end through a real Caddy.
 
 ## Request body limit
 
@@ -138,6 +259,26 @@ nameless route a certificate is issued through has no switch. The route's own er
 `proxy_intercept_errors` does. A password's 401 keeps its `WWW-Authenticate` under `handle_errors`.
 A route written before the switch existed has no matcher, and the switch says so until its next
 deployment; the reconcile pass does not add it.
+
+## Sleep when idle
+
+The route of a release that sleeps ([scale to zero](scale-to-zero.md)) carries the wake. In the route
+block, after the fence, maintenance and the password or sign-in, `@jd_asleep file { root
+/config/just-dashboard/pages/<route>; try_files /sleeping.on }` sends a request to `route @jd_asleep`,
+which asks the dashboard over `reverse_proxy unix//config/just-dashboard/wake/wake.sock` (`method GET`,
+`rewrite "/wake/<route>"`, the visitor's `Cookie` and `Authorization` removed) and, on its 2xx, sends the
+request on to `reverse_proxy {vars.jd_wake_upstream}` — the address the wake answered with in
+`X-Jd-Upstream`, since a container started again may have another. `vars jd_app 1` follows, just before
+the application's `reverse_proxy`, whose `dial_timeout` is 1 s; `handle_errors` wakes a 502 or 504 that
+carries `jd_app` before the route's pages, so an auth server that does not answer — a 502 too — never
+wakes anything past the sign-in. A 401 from the wake is the route's `waking.html` with a 503, anything
+else its 502 page or Caddy's. The switch is a file like maintenance's, written and removed with `docker
+exec`, and the socket is the dashboard's, created at the host path of this container's own `/config`
+mount (`dockerCaddy.ConfigSource`) and checked from inside the container (`test -S`) before anything is
+put to sleep behind it. After a wake the route is brought to the container's address
+(`RefreshDeploymentRoute`: the two containers inspected, the network joined if Caddy left it, the route
+rewritten and reloaded only when the address changed). The reconcile pass skips a stopped target, as
+before, so a sleeping route is left as it is.
 
 ## Sign-in
 
@@ -227,9 +368,19 @@ route within a tick. A copy no route names any more is removed once it is older 
 could still be holding a snapshot of (an hour). A rollback does not depend on any of this: a retained
 release's route is rendered again from the lineage's current files at activation.
 
+A route serving the name the dashboard itself is reached by (`JD_SITE`, or a wildcard one label above
+it) is sent the dashboard's session cookie by every browser signed in to the dashboard, whatever port
+the dashboard is on. Its `reverse_proxy` — and its `forward_auth`, for a route that signs in — carries
+two `header_up Cookie` replacements that take the dashboard's cookies out and leave every other cookie;
+a route on any other name is written as it always was
+([the dashboard's session cookie](tailnet-apps.md#the-dashboards-session-cookie)).
+`JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyRouteOnTheDashboardsNameDropsItsSession -count=1 -v`
+checks it on a real Caddy in front of `traefik/whoami`, beside a route on another name.
+
 The application remains published on loopback. Proxy resolves that publication to a running Docker
 container and an internal network address, then connects Caddy to that network. Managed route comments
-persist the exact candidate container ID, network, internal port and address. The lifecycle worker checks
+persist the exact candidate container ID, network, internal port and address — one comment per replica
+for a release that runs several. The lifecycle worker checks
 every 30 seconds and repairs a lost Caddy network attachment or changed candidate address; the same pass
 adds the access-log block to a managed route written before request recording existed, so an upgrade
 turns recording on for every existing deployment within a tick rather than at its next deploy. It never
@@ -237,6 +388,20 @@ follows a host port to a replacement container. Repairs are audited as `proxy.in
 route name and success only. Read-only verification does not reconnect networks. Recovery can have up
 to one polling interval of interruption after container recreation; missing/replaced candidates require
 the normal deployment activation path. Network memberships remain available for other managed routes.
+
+## Cloudflare Tunnel
+
+A domain marked to be served through Cloudflare Tunnel ([the tunnel](cloudflare-tunnel.md)) is a
+`PlainHostnames` name on the route like any plain one: Caddy serves it over HTTP and does not redirect
+it, since Cloudflare's edge has already answered the visitor's HTTPS, and the release orders no
+certificate for it. The connector reaches the ingress over a network of its own,
+`just-dashboard-tunnel`, which the ingress is joined to (`caddyTunnelOrigin`; the manager's pass
+rejoins a recreated ingress within 30 seconds), and asks it by its container name,
+`http://just-dashboard-ingress:80`, with the visitor's `Host`. Nothing is published for it: the
+listener the tunnel uses is the ingress's port 80 inside Docker, not the host's.
+`JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesATunnelNamePlainToItsConnector -count=1 -v`
+asks a real Caddy for a tunnel's name from a container on the tunnel's network alone and gets the
+application over plain HTTP, while the HTTPS name on the same route still redirects.
 
 ## Boundaries and verification
 
@@ -281,6 +446,12 @@ visitor from another container on the network gets the 503, the application's ow
 page, and with the application stopped Caddy's 502 gets the page the operator wrote.
 `TestLiveDeploymentRouteMaintenanceOnNginx` checks the same on the host's real nginx without Docker,
 the ACME challenge served through maintenance included.
+`JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyRouteWakes -count=1 -v` puts a
+real `traefik/whoami` behind a route that sleeps on a real Caddy, with a wake socket of the test's in the
+ingress's volume: the first request after a stop is answered by the application; with the switch on, a
+POST reaches it with its body after another container was given its old address; a visitor without the
+password gets 401 and wakes nothing; a wake still starting is the waking page.
+`TestLiveDeploymentRouteWakesOnNginx` is the same on the host's real nginx.
 `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesAWildcardProvedOverDNS01 -count=1 -v`
 is the wildcard journey on this ingress against a Pebble that really validates DNS-01 in a BIND
 (`proxysvc/acmetest`; it needs certbot's `dns-rfc2136` plugin, as the nginx one does): the run proves

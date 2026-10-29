@@ -33,10 +33,27 @@ const dockerCaddyAccessRoot = dockerCaddyRoot + "/access"
 
 type dockerCaddy struct {
 	ID, Name, Source, Identity string
+	// ConfigSource is where the ingress's /config is on the host, which is
+	// where the dashboard's wake socket goes (deployment_sleep.go).
+	ConfigSource string
 	// StartedAt is when the container last started, as Docker reports it,
 	// so the overview can say how long the ingress has been up.
 	StartedAt string
+	// Driver names the Caddy in a route's snapshot: the public ingress, or
+	// the loopback-only Caddy that gates tailnet-only deployments
+	// (tailnet_gate.go). A snapshot is only ever restored into the Caddy
+	// that took it.
+	Driver string
 }
+
+// driver is the snapshot's name for this Caddy.
+func (c *dockerCaddy) driver() string {
+	if c.Driver != "" {
+		return c.Driver
+	}
+	return accessDriverCaddy
+}
+
 type ingressContainer struct {
 	ID    string
 	Name  string
@@ -153,6 +170,7 @@ func dockerCaddyFrom(c ingressContainer) (*dockerCaddy, error) {
 		return nil, fmt.Errorf("Caddy container %s needs a persisted Caddyfile, /config and /data before deployments can share it", found.Name)
 	}
 	found.Identity = routeDigest(found.Source + "\x00" + storage["/config"] + "\x00" + storage["/data"])
+	found.ConfigSource = storage["/config"]
 	return &found, nil
 }
 
@@ -326,7 +344,10 @@ func dockerCaddyAccessLogPath(name string) (string, error) {
 	return dockerCaddyAccessRoot + "/" + strings.TrimSuffix(name, ".conf") + ".log", nil
 }
 
-func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, error) {
+// renderDockerCaddyRoute writes a route proxying to upstreams, the addresses
+// Caddy reaches the release's containers at; none answers "preparing", for
+// the nameless route a certificate is issued through.
+func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string, error) {
 	if len(route.Domains) == 0 {
 		return "", errors.New("a public route needs a domain")
 	}
@@ -351,19 +372,68 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		if pages, err = dockerCaddyPagesDir(route.Name); err != nil {
 			return "", err
 		}
-	} else if len(route.ErrorPages) > 0 || route.InterceptErrors {
+	} else if len(route.ErrorPages) > 0 || route.InterceptErrors || route.Sleep != nil {
 		return "", errors.New("a route's pages are kept under its name")
 	}
 	directive := `respond "Deployment is preparing" 503`
-	if upstream != "" {
-		parsed, err := url.Parse(upstream)
-		if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
-			return "", errors.New("invalid Caddy deployment upstream")
+	servers, err := caddyUpstreams(upstreams)
+	if err != nil {
+		return "", err
+	}
+	// The proxy to one release's servers, written at the handling's own
+	// depth: further lines are indented two spaces more than the first.
+	proxy := func(servers []string) string {
+		quoted := make([]string, 0, len(servers))
+		for _, server := range servers {
+			quoted = append(quoted, strconv.Quote(server))
 		}
-		directive = "reverse_proxy " + strconv.Quote(upstream)
+		out := "reverse_proxy " + strings.Join(quoted, " ")
+		block := caddyDropCookies("    ", route.DropCookies)
+		if len(servers) > 1 {
+			block += strings.Join(caddyReplicaBalancing, "\n") + "\n"
+		}
 		if route.InterceptErrors {
-			directive += renderCaddyInterceptErrors(route.ErrorPages)
+			block += renderCaddyInterceptErrors(route.ErrorPages)
 		}
+		if block != "" {
+			out += " {\n" + block + "  }"
+		}
+		if route.Sleep != nil {
+			// A stopped container's address answers nothing at all, and
+			// Caddy waits three seconds for it by default before the wake
+			// is asked; a running one answers in well under a millisecond.
+			out = withCaddyDialTimeout(out)
+		}
+		return out
+	}
+	if len(servers) > 0 {
+		directive = proxy(servers)
+	}
+	// A route that picks between releases — a canary, skew protection's
+	// cookie — is written per scheme, since the cookie is Secure only on the
+	// HTTPS names.
+	directiveFor := func(bool) string { return directive }
+	if (route.Canary != nil || route.Skew != nil) && len(servers) > 0 {
+		releases := caddyReleases{live: proxy(servers), recorded: route.AccessLog}
+		if canary := route.Canary; canary != nil {
+			candidate, err := caddyUpstreams(canary.Upstreams)
+			if err != nil || len(candidate) == 0 {
+				return "", errors.New("invalid Caddy canary upstream")
+			}
+			releases.canary, releases.candidate = canary, proxy(candidate)
+			releases.liveLabel = canary.Live
+		}
+		if skew := route.Skew; skew != nil {
+			releases.skew, releases.liveLabel = skew, skew.Release
+			for _, pinned := range skew.Pinned {
+				upstreams, err := caddyUpstreams(pinned.Upstreams)
+				if err != nil || len(upstreams) == 0 {
+					return "", errors.New("invalid Caddy pinned release upstream")
+				}
+				releases.pinned = append(releases.pinned, proxy(upstreams))
+			}
+		}
+		directiveFor = releases.render
 	}
 	tlsDirective := ""
 	if servesExplicitCertificate(route) {
@@ -432,7 +502,7 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 	gateDirective := ""
 	if route.ForwardAuth != nil {
 		var err error
-		if gateDirective, err = renderCaddyForwardAuth(*route.ForwardAuth); err != nil {
+		if gateDirective, err = renderCaddyForwardAuth(*route.ForwardAuth, route.DropCookies...); err != nil {
 			return "", err
 		}
 	}
@@ -448,13 +518,33 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		fence = "  @outside not remote_ip " + strings.Join(route.AllowFrom, " ") + "\n" +
 			"  respond @outside \"Forbidden\" 403\n"
 	}
-	maintenance, errorPages := "", ""
+	maintenance, errorPages, sleep := "", "", ""
 	if pages != "" {
-		maintenance, errorPages = renderCaddyMaintenance(route.Maintenance, pages), renderCaddyErrorPages(route.ErrorPages, pages)
+		wake := ""
+		if route.Sleep != nil && len(servers) > 0 {
+			// After every check, so only a request the route would hand to
+			// the application can wake it.
+			sleep, wake = renderCaddySleep(route, pages), renderCaddyWakeErrors(route, pages)
+		}
+		maintenance, errorPages = renderCaddyMaintenance(route.Maintenance, pages), renderCaddyErrorPages(route.ErrorPages, pages, wake)
 	}
-	handling := fence + maintenance + authDirective + gateDirective + bodyDirective + "  " + directive + "\n"
-	if fence != "" || maintenance != "" || route.ForwardAuth != nil {
-		handling = "  route {\n" + indentCaddy(handling) + "  }\n"
+	trace := ""
+	if route.Trace && route.Name != "" && len(servers) > 0 {
+		trace = caddyTraceDirectives
+	}
+	// The edge rules come after the fence and before maintenance, the
+	// order nginx decides them in (deployment_edge.go).
+	crowdSec := ""
+	if route.CrowdSec {
+		crowdSec = dockerCaddyCrowdSecFile
+	}
+	edge := renderCaddyEdgeRules(route, crowdSec)
+	handlingFor := func(https bool) string {
+		handling := trace + fence + edge + maintenance + authDirective + gateDirective + bodyDirective + sleep + "  " + directiveFor(https) + "\n"
+		if fence != "" || edge != "" || maintenance != "" || route.ForwardAuth != nil || route.Canary != nil || route.Skew != nil {
+			handling = "  route {\n" + indentCaddy(handling) + "  }\n"
+		}
+		return handling
 	}
 	// The names served over HTTPS are one site block and the names served
 	// over plain HTTP another, the same handling in each: Caddy refuses a
@@ -472,7 +562,7 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 				addresses[index] = "http://" + addresses[index]
 			}
 		}
-		return strings.Join(addresses, ", ") + " {\n" + content + logDirective + headerDirective(https) + handling + errorPages + "}\n"
+		return strings.Join(addresses, ", ") + " {\n" + content + logDirective + headerDirective(https) + handlingFor(https) + errorPages + "}\n"
 	}
 	tlsServed, plainServed := route.servedByScheme()
 	out := "# Managed by Just Dashboard\n"
@@ -524,7 +614,9 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 // The two headers are removed from what the visitor sent before the check.
 // Caddy 2.11's forward_auth drops them itself when the server sends none;
 // removing them first holds whichever Caddy the operator's ingress runs.
-func renderCaddyForwardAuth(gate SiteForwardAuth) (string, error) {
+// drop are cookies the check is not sent, as the application is not: the
+// dashboard's own on a route that serves the dashboard's name.
+func renderCaddyForwardAuth(gate SiteForwardAuth, drop ...string) (string, error) {
 	verify, err := url.Parse(gate.Verify)
 	if err != nil {
 		return "", err
@@ -560,6 +652,7 @@ func renderCaddyForwardAuth(gate SiteForwardAuth) (string, error) {
 	out.WriteString("    header_up Host {upstream_hostport}\n")
 	out.WriteString("    header_up X-Original-URL {scheme}://{hostport}{uri}\n")
 	out.WriteString("    header_up X-Original-Method {method}\n")
+	out.WriteString(caddyDropCookies("    ", drop))
 	out.WriteString("    copy_headers " + strings.Join(copies, " ") + "\n")
 	out.WriteString("    @signin status 401\n")
 	out.WriteString("    handle_response @signin {\n")
@@ -607,16 +700,22 @@ func renderCaddyMaintenance(m DeploymentMaintenance, pages string) string {
 // renderCaddyErrorPages answers the route's chosen codes with its own pages.
 // A file served while Caddy handles an error keeps the error's status, so a
 // 502 is still a 502. Every other error keeps Caddy's own answer.
-func renderCaddyErrorPages(codes []int, pages string) string {
+//
+// wake, when the route's application may sleep, comes first: the
+// application not answering is woken before any page is chosen for it.
+func renderCaddyErrorPages(codes []int, pages, wake string) string {
 	if len(codes) == 0 {
-		return ""
+		if wake == "" {
+			return ""
+		}
+		return "  handle_errors {\n" + wake + "  }\n"
 	}
 	sorted := slices.Sorted(slices.Values(codes))
 	list := make([]string, 0, len(sorted))
 	for _, code := range sorted {
 		list = append(list, strconv.Itoa(code))
 	}
-	return "  handle_errors {\n" +
+	return "  handle_errors {\n" + wake +
 		"    @jd_page expression `{err.status_code} in [" + strings.Join(list, ", ") + "]`\n" +
 		"    handle @jd_page {\n" +
 		"      root * " + pages + "\n" +
@@ -624,6 +723,136 @@ func renderCaddyErrorPages(codes []int, pages string) string {
 		"      file_server\n" +
 		"    }\n" +
 		"  }\n"
+}
+
+// caddyUpstreams checks the addresses a route proxies to: plain http to a
+// host and port, each once, at most MaxDeploymentUpstreams.
+func caddyUpstreams(upstreams []string) ([]string, error) {
+	servers := make([]string, 0, len(upstreams))
+	for _, upstream := range upstreams {
+		if upstream == "" {
+			continue
+		}
+		parsed, err := url.Parse(upstream)
+		if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return nil, errors.New("invalid Caddy deployment upstream")
+		}
+		if slices.Contains(servers, upstream) {
+			return nil, errors.New("a Caddy deployment upstream is named twice")
+		}
+		servers = append(servers, upstream)
+	}
+	if len(servers) > MaxDeploymentUpstreams {
+		return nil, fmt.Errorf("a route shares its requests between at most %d servers", MaxDeploymentUpstreams)
+	}
+	return servers, nil
+}
+
+// caddyReleases is a route that picks between releases on the Caddy
+// ingress: the live release, a canary's candidate, and with skew protection
+// the releases still answering the visitors they answered first.
+//
+// A canary gives each request a release at random from its own
+// {http.request.uuid} — Caddy draws a version-4 UUID per request, so its
+// first two hex digits are 256 equal buckets and the candidate's share is the
+// run of buckets the matcher names (canaryUUIDPattern) — and each release
+// keeps its own replicas, balancing and passive health in a handle of its
+// own. Caddy 2.11's weighted_round_robin would share the requests too, but
+// over the two releases' containers as one pool, losing least connections
+// between a release's own replicas, and its record would name a container
+// address rather than a release.
+//
+// Skew protection routes first by the jd_release cookie: a request whose
+// cookie names a release the route serves is answered by it, unchanged, and
+// every other one is drawn as above and told its release in a cookie of the
+// warm window's lifetime, Secure on the HTTPS names. A route whose answers
+// are recorded says which release gave each one (log_append).
+type caddyReleases struct {
+	live      string
+	liveLabel string
+	canary    *DeploymentCanary
+	candidate string
+	skew      *DeploymentSkew
+	pinned    []string
+	recorded  bool
+}
+
+func (r caddyReleases) render(secure bool) string {
+	branch := func(release, proxy string, cookie bool) string {
+		out := ""
+		if r.recorded {
+			out += "    log_append release " + release + "\n"
+		}
+		if cookie && r.skew != nil {
+			value := ReleaseCookie + "=" + release + "; Path=/; Max-Age=" + strconv.Itoa(r.skew.MaxAge) + "; HttpOnly; SameSite=Lax"
+			if secure {
+				value += "; Secure"
+			}
+			out += "    header {\n      +Set-Cookie " + strconv.Quote(value) + "\n      defer\n    }\n"
+		}
+		// The proxy was written for the handling's depth; inside a handle
+		// every line of it is two spaces further in.
+		return out + "    " + strings.ReplaceAll(proxy, "\n", "\n  ") + "\n"
+	}
+	out := []string{}
+	if skew := r.skew; skew != nil {
+		pinned := func(release, proxy string) {
+			matcher := "@jd_release_" + release
+			out = append(out, matcher+" header_regexp Cookie `(?:^|;\\s*)"+ReleaseCookie+"="+release+"(?:;|$)`\n"+
+				"  handle "+matcher+" {\n"+branch(release, proxy, false)+"  }")
+		}
+		for index, release := range skew.Pinned {
+			pinned(release.Release, r.pinned[index])
+		}
+		if r.canary != nil {
+			pinned(r.canary.Candidate, r.candidate)
+		}
+		pinned(r.liveLabel, r.live)
+	}
+	if canary := r.canary; canary != nil {
+		out = append(out, "@jd_canary vars_regexp {http.request.uuid} "+canaryUUIDPattern(canary.Percent)+"\n"+
+			"  handle @jd_canary {\n"+branch(canary.Candidate, r.candidate, true)+"  }")
+	}
+	out = append(out, "handle {\n"+branch(r.liveLabel, r.live, true)+"  }")
+	return strings.Join(out, "\n  ")
+}
+
+// canaryUUIDPattern matches the share of UUIDs whose first two hex digits
+// fall in the lowest percent of their 256 values, rounded to the nearest
+// bucket and never none or all.
+func canaryUUIDPattern(percent int) string {
+	buckets := (percent*256 + 50) / 100
+	buckets = max(1, min(buckets, 255))
+	const hex = "0123456789abcdef"
+	parts := []string{}
+	if whole := buckets / 16; whole > 0 {
+		parts = append(parts, "["+hex[:whole]+"][0-9a-f]")
+	}
+	if rest := buckets % 16; rest > 0 {
+		parts = append(parts, string(hex[buckets/16])+"["+hex[:rest]+"]")
+	}
+	return "^(?:" + strings.Join(parts, "|") + ")"
+}
+
+// caddyReplicaBalancing is how a replicated release's route shares its
+// requests, written inside its reverse_proxy. Least connections, as on
+// nginx, because a route carries WebSockets and long streamed answers.
+// Health is passive, as on nginx: a replica Caddy fails to reach is set
+// aside for ten seconds (fail_duration turns the counting on, one failure
+// is enough), and for five seconds a request is tried on another replica —
+// any request whose connection failed, since none of it reached the
+// application, and otherwise only a GET, Caddy's default, so a POST that
+// reached a dying replica is never carried out twice. Caddy reaches a
+// replica at its container address, where one that died answers nothing at
+// all rather than refusing, so it gets two seconds to connect, not three.
+var caddyReplicaBalancing = []string{
+	"    lb_policy least_conn",
+	"    lb_try_duration 5s",
+	"    fail_duration 10s",
+	"    max_fails 1",
+	"    transport http {",
+	"      dial_timeout 2s",
+	"    }",
 }
 
 // renderCaddyInterceptErrors turns the application's own answers with the
@@ -635,12 +864,10 @@ func renderCaddyInterceptErrors(codes []int) string {
 	for _, code := range sorted {
 		list = append(list, strconv.Itoa(code))
 	}
-	return " {\n" +
-		"    @jd_error status " + strings.Join(list, " ") + "\n" +
+	return "    @jd_error status " + strings.Join(list, " ") + "\n" +
 		"    handle_response @jd_error {\n" +
 		"      error \"the application's error page was replaced\" {rp.status_code}\n" +
-		"    }\n" +
-		"  }"
+		"    }\n"
 }
 
 // indentCaddy moves every line of a block one level in.
@@ -693,12 +920,12 @@ func (c *dockerCaddy) snapshot(ctx context.Context, name string) (DeploymentRout
 	if err != nil {
 		return DeploymentRouteSnapshot{}, err
 	}
-	return DeploymentRouteSnapshot{Version: 1, Driver: "docker-caddy", ContainerID: c.ID, IngressIdentity: c.Identity, Name: name, Path: path, Existed: exists, Content: content, ContentDigest: routeDigest(content), Mode: 0600}, nil
+	return DeploymentRouteSnapshot{Version: 1, Driver: c.driver(), ContainerID: c.ID, IngressIdentity: c.Identity, Name: name, Path: path, Existed: exists, Content: content, ContentDigest: routeDigest(content), Mode: 0600}, nil
 }
 
 func (c *dockerCaddy) restore(ctx context.Context, snapshot DeploymentRouteSnapshot) error {
 	path, err := dockerCaddyRoutePath(snapshot.Name)
-	if err != nil || snapshot.Version != 1 || snapshot.Driver != "docker-caddy" || path != snapshot.Path || snapshot.ContentDigest != routeDigest(snapshot.Content) || (snapshot.ContainerID != c.ID && (snapshot.IngressIdentity == "" || snapshot.IngressIdentity != c.Identity)) {
+	if err != nil || snapshot.Version != 1 || snapshot.Driver != c.driver() || path != snapshot.Path || snapshot.ContentDigest != routeDigest(snapshot.Content) || (snapshot.ContainerID != c.ID && (snapshot.IngressIdentity == "" || snapshot.IngressIdentity != c.Identity)) {
 		return ErrRouteRecovery
 	}
 	if snapshot.Existed {
@@ -808,20 +1035,77 @@ func (target dockerCaddyTarget) authMetadata() string {
 // Activation writes it and verification compares against it, so the two
 // cannot disagree about what a route with a sign-in looks like.
 func (c *dockerCaddy) routeContent(ctx context.Context, route DeploymentRoute) (string, []dockerCaddyTarget, error) {
-	target, err := c.target(ctx, route.Upstream)
-	if err != nil {
+	if err := validateDeploymentServers(route); err != nil {
 		return "", nil, err
+	}
+	servers := route.Servers()
+	if len(servers) == 0 {
+		return "", nil, errors.New("Caddy requires a private deployment upstream")
+	}
+	// One container per replica, each found by its own loopback publication
+	// and recorded on a line of its own, so the maintenance pass repairs
+	// every one of them.
+	targets := make([]dockerCaddyTarget, 0, len(servers)+1)
+	upstreams := make([]string, 0, len(servers))
+	for _, server := range servers {
+		target, err := c.target(ctx, server)
+		if err != nil {
+			return "", nil, err
+		}
+		targets = append(targets, target)
+		upstreams = append(upstreams, target.upstream())
 	}
 	rendered, auth, err := c.resolveForwardAuth(ctx, route)
 	if err != nil {
 		return "", nil, err
 	}
-	content, err := renderDockerCaddyRoute(rendered, target.upstream())
+	// A canary's servers are found the same way and recorded on the same
+	// lines, after the live release's: the maintenance pass repairs a
+	// container whichever release it serves.
+	if canary := route.Canary; canary != nil {
+		resolved := *canary
+		resolved.Upstreams = nil
+		for _, server := range canary.Upstreams {
+			target, err := c.target(ctx, server)
+			if err != nil {
+				return "", nil, err
+			}
+			targets = append(targets, target)
+			resolved.Upstreams = append(resolved.Upstreams, target.upstream())
+		}
+		rendered.Canary = &resolved
+	}
+	// So are the releases skew protection keeps for their visitors.
+	if skew := route.Skew; skew != nil {
+		resolved := *skew
+		resolved.Pinned = nil
+		for _, pinned := range skew.Pinned {
+			found := DeploymentPinned{Release: pinned.Release}
+			for _, server := range pinned.Upstreams {
+				target, err := c.target(ctx, server)
+				if err != nil {
+					return "", nil, err
+				}
+				targets = append(targets, target)
+				found.Upstreams = append(found.Upstreams, target.upstream())
+			}
+			resolved.Pinned = append(resolved.Pinned, found)
+		}
+		rendered.Skew = &resolved
+	}
+	// The trace is recorded with log_append, which Caddy has had since 2.8;
+	// an operator's older ingress serves the route without one rather than
+	// refusing the whole Caddyfile.
+	if rendered.Trace && !c.recordsTraces(ctx) {
+		rendered.Trace = false
+	}
+	content, err := renderDockerCaddyRoute(rendered, upstreams...)
 	if err != nil {
 		return "", nil, err
 	}
-	content += target.metadata()
-	targets := []dockerCaddyTarget{target}
+	for _, target := range targets {
+		content += target.metadata()
+	}
 	if auth != nil {
 		content += auth.authMetadata()
 		targets = append(targets, *auth)
@@ -937,6 +1221,7 @@ func (c *dockerCaddy) domainClaimed(ctx context.Context, domain, ownContent stri
 }
 
 func (s *Service) applyDockerCaddyRoute(ctx context.Context, c *dockerCaddy, route DeploymentRoute) (DeploymentRouteResult, error) {
+	route = s.onDashboardName(route)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	snapshot, err := c.snapshot(ctx, route.Name)
@@ -962,6 +1247,13 @@ func (s *Service) applyDockerCaddyRoute(ctx context.Context, c *dockerCaddy, rou
 	}
 	if err = c.attach(ctx); err != nil {
 		return result, err
+	}
+	if route.CrowdSec {
+		// The list the route imports is there before the route that imports
+		// it, empty until the first refresh.
+		if err := s.ensureDockerCaddyCrowdSecList(ctx, c); err != nil {
+			return result, fmt.Errorf("the CrowdSec list could not be written: %w", err)
+		}
 	}
 	if route.AccessLog {
 		if err := c.ensureAccessLogDir(ctx); err != nil {

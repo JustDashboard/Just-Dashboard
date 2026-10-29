@@ -3242,6 +3242,10 @@ export type DeploymentRuntimeService = {
   exitCode?: number
   /** The kernel killed it for exceeding its memory. */
   oomKilled?: boolean
+  /** Which of its release's replicas it is, from 1; absent for a release of one container. */
+  replica?: number
+  /** How many replicas its release runs; absent for a release of one container. */
+  replicas?: number
 }
 
 export type DeploymentRuntimeServices = {
@@ -3497,6 +3501,24 @@ export type GamePlayers = {
   observedAt: string
 }
 
+/**
+ * Where a game server's players connect, read from the live release: the
+ * port and protocol, the bind address, and what the host firewall does with
+ * it. `firewall` is "admits" (an allow rule matches), "drops" (on, refusing
+ * by default, nothing matches), "off", "open" (accepts by default) or
+ * "unknown" with a reason.
+ */
+export type GameReach = {
+  port: number
+  /** One number on both for a server that signals over TCP and plays over UDP. */
+  protocol: "tcp" | "udp" | "tcp+udp"
+  bind: string
+  public: boolean
+  firewall: "admits" | "drops" | "off" | "open" | "unknown"
+  reason?: string
+  editable?: boolean
+}
+
 export type GameOverview = {
   status: "available" | "unavailable"
   reason?: string
@@ -3506,6 +3528,9 @@ export type GameOverview = {
   address?: string
   players?: GamePlayers
   console: boolean
+  /** Why the game has no console of its own (Bedrock has no RCON). */
+  consoleReason?: string
+  reach?: GameReach
   files: BlueprintConfigFile[]
 }
 
@@ -3644,6 +3669,21 @@ export type DeploymentOperations = {
     reason?: string
     items: DeploymentDependencyItem[]
   }
+  /** The tailnet address and who may open it, for a release that is tailnet-only. */
+  tailnet?: DeploymentTailnetAddress
+}
+
+/** A tailnet-only environment as its live release and its address record have it. */
+export type DeploymentTailnetAddress = {
+  url?: string
+  port?: number
+  /** The mapping is in place for the live release. */
+  published: boolean
+  /** Who may open it; empty is everyone on the tailnet. */
+  allow: string[]
+  /** The proxy that asks who every visitor is, for a release that names them. */
+  gate?: "nginx" | "caddy"
+  gateRunning?: boolean
 }
 
 export type ReleaseFieldChange = {
@@ -3686,6 +3726,8 @@ export type ReleaseComparison = {
     domains: ReleaseListChange[]
   }
   artifacts: ReleaseArtifactStatus[]
+  /** Each release's recorded data point, per linked database. */
+  dataPoints?: { from: ReleaseDataPoint[]; to: ReleaseDataPoint[] }
 }
 
 export type ReleaseUpdateStatus = {
@@ -3715,7 +3757,7 @@ export type DeploymentSummary = {
   desiredRevision: number
   liveReleaseId?: number
   livePlanRevision?: number
-  strategy: "blue_green" | "stop_first"
+  strategy: DeploymentStrategy
   expectedDowntime: boolean
   sourceKind: DeploymentSourceKind
   buildMethod: DeploymentBuildMethod
@@ -3728,6 +3770,8 @@ export type DeploymentSummary = {
   pendingChanges: boolean
   /** The live release's runtime was stopped on purpose and waits for Start. */
   stopped?: boolean
+  /** When the live release was put to sleep, while it is asleep by design and the next request wakes it. */
+  asleepSince?: string
   /** Services in the live release's runtime: one, or a Compose stack's count. */
   serviceCount?: number
   lastRun?: DeploymentEngineRun
@@ -3827,7 +3871,8 @@ export type DeploymentCommitStatus = {
 
 /** Where deployments' output and requests are copied to: an OTLP collector, a Loki, or a JSON-lines endpoint. */
 export type LogDrainKind = "otlp" | "loki" | "http"
-export type LogDrainStream = "output" | "requests"
+/** Traces are the requests again, as OpenTelemetry spans; only an `otlp` drain takes them. */
+export type LogDrainStream = "output" | "requests" | "traces"
 
 export type LogDrain = {
   id: number
@@ -3838,6 +3883,8 @@ export type LogDrain = {
   streams: LogDrainStream[]
   /** Empty sends every project, including ones created later. */
   projects: number[]
+  /** Where the drain's service shows a trace, with `{traceId}` for the id; the request console links to it. */
+  traceUrl?: string
   /** The headers the drain sends, by name; their values are sealed and never read back. */
   headerNames: string[]
   createdAt: string
@@ -3858,9 +3905,12 @@ export type LogDrain = {
  * A connection to an external secret manager that deployment variables read
  * as `${{store.NAME/path#KEY}}`. Vault and OpenBao share the KV version 2
  * API; Infisical signs in with a Universal Auth machine identity; Doppler
- * with a service token.
+ * with a service token; AWS Secrets Manager with an access key pair (SigV4);
+ * Azure Key Vault with an application's client credentials. The last two
+ * keep whole secrets, read as `${{store.NAME/secret-name}}` or, for a field
+ * of a JSON value, `${{store.NAME/secret-name#KEY}}`.
  */
-export type SecretStoreKind = "vault" | "openbao" | "infisical" | "doppler"
+export type SecretStoreKind = "vault" | "openbao" | "infisical" | "doppler" | "aws" | "azure"
 
 export type SecretStoreSettings = {
   /** Vault and OpenBao: where the KV version 2 engine is mounted ("secret"). */
@@ -3871,6 +3921,14 @@ export type SecretStoreSettings = {
   /** Infisical: the project id and environment slug a reference reads in. */
   project?: string
   environment?: string
+  /** AWS: the region the Secrets Manager endpoint is derived from. */
+  region?: string
+  /** Azure: the vault's name (its host), the tenant signed in to, the cloud. */
+  vaultName?: string
+  tenantId?: string
+  cloud?: "public" | "usgov" | "china"
+  /** Azure: a sign-in authority other than the cloud's own. */
+  authority?: string
   /** A PEM certificate authority for a self-hosted store's TLS. */
   caCert?: string
 }
@@ -3895,6 +3953,8 @@ export type SecretStore = {
   name: string
   kind: SecretStoreKind
   address: string
+  /** Where the store is reached: the address, or what the region or vault name derives. */
+  endpoint: string
   settings: SecretStoreSettings
   /** The credentials that are set, by name; their values are sealed and never read back. */
   credentialNames: string[]
@@ -3970,8 +4030,9 @@ export type DeploymentInsights = {
 }
 
 /**
- * Where a promoted release's image came from: the staging release it was
- * promoted from, and the local image id the container is created from.
+ * Where a promoted release's image came from: the release it was promoted
+ * from — staging's, or for staging a pull request preview's — and the local
+ * image id the container is created from.
  */
 export type DeploymentPromotion = {
   environmentId: number
@@ -3982,6 +4043,30 @@ export type DeploymentPromotion = {
   imageId: string
   imageDigest: string
   sourceRevision?: string
+  /** Absent on a record from before previews could be promoted, which is staging's. */
+  sourceKind?: "staging" | "preview"
+  /** The pull request a preview's image was built from, and who approved its commit. */
+  preview?: DeploymentPromotedPreview
+}
+
+export type DeploymentPromotedPreview = {
+  number: number
+  url?: string
+  repository?: string
+  headRepository?: string
+  approvedBy: string
+}
+
+/** The newest promotion of a preview's image into staging, as the preview's row reads it. */
+export type DeploymentPreviewPromotion = {
+  runId: number
+  runNumber: number
+  state: DeploymentRunState
+  environmentId: number
+  releaseNumber: number
+  sourceRevision?: string
+  requestedAt: string
+  endedAt?: string
 }
 
 /** One of a deployment's long-lived environments, for the environment switcher. */
@@ -4005,9 +4090,11 @@ export type DeploymentStagingCopy = {
   adjusted: string[]
 }
 
-/** The Promote confirmation's read: the exact image and how production differs. */
+/** The Promote confirmation's read: the exact image and how the target differs. */
 export type DeploymentPromotionPreview = {
   source: {
+    /** "staging" into production, or "preview" into staging. */
+    kind: "staging" | "preview"
     environmentId: number
     environmentName: string
     release: DeploymentRelease
@@ -4015,6 +4102,17 @@ export type DeploymentPromotionPreview = {
     imageDigest: string
     imageSizeBytes: number
     imagePresent: boolean
+    /** The pull request behind a preview source. */
+    preview?: {
+      number: number
+      title?: string
+      url?: string
+      author?: string
+      headRepository?: string
+      fork: boolean
+      approvedBy?: string
+      approvalState?: string
+    }
   }
   target: {
     environmentId: number
@@ -4045,7 +4143,7 @@ export type DeploymentRelease = {
   imageDigest?: string
   configDigest: string
   variablesDigest: string
-  strategy: "blue_green" | "stop_first"
+  strategy: DeploymentStrategy
   expectedDowntime: boolean
   createdAt: string
   activatedAt?: string
@@ -4054,8 +4152,103 @@ export type DeploymentRelease = {
   /** Set on a release an instant rollback took traffic away from. */
   rolledBackAt?: string
   rollbackReason?: string
-  /** Set when the image was promoted from staging rather than built here. */
+  /** Set when the image was promoted — from staging, or into staging from a preview — rather than built here. */
   promotion?: DeploymentPromotion
+  /**
+   * Where each linked database stood when this release went live
+   * (`deploy/data_rollback.go`): the moment its point-in-time archive recovers
+   * to, or the newest dump that covered it. Absent on a release that went
+   * live before this was recorded, or with no linked database.
+   */
+  dataPoints?: ReleaseDataPoint[]
+  /** Whether "Restore data as of this release" is offered, and why not. */
+  dataCopy?: { eligible: boolean; reason?: string }
+}
+
+/** One linked database's state at the moment a release went live. */
+export type ReleaseDataPoint = {
+  connectionId: number
+  /** The connection's name when the point was recorded. */
+  name: string
+  engine: string
+  kind: "pitr" | "dump" | "none"
+  /** pitr: the moment the archive recovers to; dump: when its backup run started. */
+  at?: string
+  backupRunId?: number
+  backupJobId?: number
+  archiveId?: number
+  /** kind none: why there is nothing to restore a copy from. */
+  reason?: string
+  recordedAt: string
+}
+
+export type DataCopyState = "waiting" | "restoring" | "ready" | "failed" | "skipped" | "removed"
+
+/**
+ * A linked database restored from a release's data point into a throwaway
+ * container beside production, on the deployment's network. Its credentials
+ * are read by a session alone (`…/data-copies/{copy}/url`) and never ride here.
+ */
+export type DataCopy = {
+  id: number
+  projectId: number
+  environmentId: number
+  releaseId: number
+  releaseNumber: number
+  connectionId: number
+  name: string
+  engine: string
+  database: string
+  state: DataCopyState
+  source: {
+    kind: "pitr" | "dump"
+    at?: string
+    backupRunId?: number
+    backupJobId?: number
+    archiveId?: number
+  }
+  /** pitr: the moment the copy actually reached. */
+  recoveredTo?: string
+  /** The rollback run it waits for before restoring. */
+  afterRunId?: number
+  /** The copy's name on the deployment's network, e.g. db-5-copy-3.jd.internal. */
+  host?: string
+  port?: number
+  network?: string
+  expiresAt?: string
+  createdBy: string
+  createdAt: string
+  readyAt?: string
+  endedAt?: string
+  reason?: string
+  restoreMs?: number
+}
+
+export type DataCopyConnection = {
+  url: string
+  host: string
+  port: number
+  user: string
+  database: string
+}
+
+/** The copy's tables beside the live database's, with their row counts. */
+export type DataCopyComparison = {
+  copyId: number
+  database: string
+  tables: {
+    schema: string
+    name: string
+    copyRows: number | null
+    liveRows: number | null
+    estimated?: boolean
+    only?: "copy" | "live"
+  }[]
+  /** More tables than the server compares. */
+  truncated: boolean
+  copyError?: string
+  liveError?: string
+  readAt: string
 }
 
 /**
@@ -4098,6 +4291,50 @@ export type RollbackVerdict = {
 
 export type RollbackWatchState = "watching" | "rolling_back" | "rolled_back" | "closing" | "closed"
 
+/** How one release replaces the next: candidate first, stopping first, or tried as a canary between. */
+export type DeploymentStrategy = "blue_green" | "stop_first" | "canary"
+
+/** A canary plan's trial (`deploy.CanaryTerms`). */
+export type DeploymentCanaryTerms = {
+  /** The candidate's share of the requests, 1–50. */
+  percent: number
+  /** How long the trial lasts, 60–3600. */
+  durationSeconds: number
+  /** Cut over at the end of a trial that compared well, rather than waiting for an operator. */
+  autoPromote?: boolean
+}
+
+/** One canary trial, as GET …/canary reads it (`deploy.CanaryWindow`). */
+export type DeploymentCanary = {
+  id: number
+  projectId: number
+  environmentId: number
+  runId: number
+  releaseId: number
+  liveReleaseId: number
+  percent: number
+  durationSeconds: number
+  autoPromote: boolean
+  policy: RollbackPolicy
+  state: "running" | "holding" | "promoted" | "aborted"
+  /** An operator's promote or abort, asked for and not yet carried out. */
+  decision?: "promote" | "abort"
+  decidedBy?: string
+  startedAt: string
+  endsAt: string
+  live?: RollbackReading
+  candidate?: RollbackReading
+  verdict?: RollbackVerdict
+  checkedAt?: string
+  endReason?: string
+  endMessage?: string
+  endedAt?: string
+  releaseNumber: number
+  liveReleaseNumber: number
+}
+
+export type DeploymentCanaryResponse = { canary: DeploymentCanary | null }
+
 export type RollbackWatch = {
   id: number
   projectId: number
@@ -4122,6 +4359,13 @@ export type RollbackWatch = {
   createdAt: string
   releaseNumber: number
   warmReleaseNumber: number
+  /**
+   * The warm release is kept running, not paused, because skew protection
+   * still sends it the visitors it answered first.
+   */
+  warmRunning?: boolean
+  /** What the running warm release answered since the cutover. */
+  warmServed?: RollbackReading
 }
 
 export type RollbackWatchResponse = {
@@ -4287,6 +4531,72 @@ export type DeploymentPreview = {
   liveReleaseId?: number
   address?: DeploymentPreviewAddress
   lastRun?: DeploymentRecentRun
+  /** A live Compose preview's services as Docker reports them; absent for a single container. */
+  services?: DeploymentRuntimeServices
+  /** The newest promotion of this preview's image into staging, however it ended. */
+  promotion?: DeploymentPreviewPromotion
+  /** The preview's own copies of databases production gives previews a branch of. */
+  branches?: PreviewDatabaseBranch[]
+}
+
+/** What a linked database gives an environment's previews (`deploy/preview_branches.go`). */
+export type PreviewBranchMode = "none" | "branch" | "masked"
+
+export type PreviewBranchPolicy = {
+  connectionId: number
+  mode: PreviewBranchMode
+  /** table.column or schema.table.column, overwritten in their shape on the copy. */
+  maskedColumns: string[]
+  updatedBy?: string
+  updatedAt?: string
+}
+
+/** A preview's own copy of a linked database, restored from its newest backup. */
+export type PreviewDatabaseBranch = {
+  id: number
+  environmentId: number
+  connectionId: number
+  name: string
+  engine?: string
+  database?: string
+  mode: PreviewBranchMode
+  maskedColumns: string[]
+  state: "waiting" | "restoring" | "ready" | "failed" | "removed"
+  /** "dump" for a backup job's native dump, "pitr" for a point-in-time recovery. */
+  source: { kind: string; backupRunId?: number; takenAt?: string; bytes?: number; method?: string }
+  recoveredTo?: string
+  host?: string
+  port?: number
+  maskedRows?: number
+  reason?: string
+  restoreMs?: number
+  requestedBy?: string
+  createdAt: string
+  readyAt?: string
+  endedAt?: string
+}
+
+/** One service of a Compose stack, and what its preview gets in place of production's. */
+export type ComposePreviewService = {
+  name: string
+  /** The service the preview's route and tailnet address reach; the only one that answers. */
+  public: boolean
+  /** Ports production publishes on the host; the preview publishes none of them. */
+  ports: string[]
+  /** Mount targets that start empty on storage of the preview's own. */
+  volumes: string[]
+  /** Read-only files of the commit itself the preview mounts. */
+  checkout: string[]
+  /** Read-only paths of this server the preview does not get. */
+  leftOut: string[]
+}
+
+/** What a preview of a Compose stack gets, service by service, and what refuses one. */
+export type ComposePreviewFacts = {
+  public: string
+  services: ComposePreviewService[]
+  /** What no preview may have; any one refuses the preview. */
+  refusals: string[]
 }
 
 /** A deploy project's pull requests on GitHub, joined to the previews built from them. */
@@ -4308,8 +4618,12 @@ export type ProjectPullRequests = {
     awaitingFirstDeployment: boolean
   }
   tailnet: TailscaleIdentity
-  /** The production build is a Compose stack, which previews cannot isolate. */
+  /** The production build is a Compose stack; `composePreview` says what its preview gets. */
   compose: boolean
+  /** Present for a Compose stack: each service's isolation, and what refuses a preview. */
+  composePreview?: ComposePreviewFacts
+  /** The databases production gives its previews a branch of; a fork's preview gets none. */
+  databaseBranches?: (PreviewBranchPolicy & { name: string; driver?: string })[]
   /** The production source is a local checkout, which has no remote to fetch a pull request from. */
   localCheckout: boolean
   /** The runtime plan's internal port; 0 means nothing to publish. */
@@ -4379,7 +4693,8 @@ export type DeploymentHostnameSuggestion = {
   certificateMethod?: "nginx" | "webroot" | "standalone" | "caddy" | "dns-01"
   certificateDnsProvider?: string
   certificateIssue?: string
-  method: "wildcard" | "sslip" | "custom" | "none"
+  /** `tunnel` answers a name asked about with `tunnel=1`: whether a tunnel can serve it. */
+  method: "wildcard" | "sslip" | "custom" | "none" | "tunnel"
   detail: string
   /** This server's public IPv4 — for a typed hostname, what its A record should name. */
   address?: string
@@ -5047,6 +5362,37 @@ export type DeploymentBuildMethod =
 export type DeploymentOwnership = "managed" | "linked" | "observed"
 
 /** A container port published on the host next to the routed one: Gitea's SSH, Syncthing's sync protocol. */
+/** A route's request rate per client address, with the burst let through at once. */
+export type DeploymentRateLimit = { requests: number; per: "second" | "minute"; burst?: number }
+
+export type DeploymentEdgeMethod = "DELETE" | "GET" | "HEAD" | "OPTIONS" | "PATCH" | "POST" | "PUT"
+
+/** What a request has to meet, every condition at once. */
+export type DeploymentEdgeMatch = {
+  pathPrefix?: string
+  pathRegex?: string
+  methods?: DeploymentEdgeMethod[]
+  /** Matched ignoring case. */
+  userAgent?: string
+  clientFrom?: string[]
+}
+
+/**
+ * What a matching request gets: refused 403, answered with a status and
+ * nothing else, let through without asking the rules after it, or redirected.
+ */
+export type DeploymentEdgeAction =
+  | { kind: "block"; status?: 403 }
+  | { kind: "status"; status: number }
+  | { kind: "allow" }
+  | { kind: "redirect"; location: string; code: 301 | 302 | 307 | 308 }
+
+export type DeploymentEdgeRule = {
+  name: string
+  match: DeploymentEdgeMatch
+  action: DeploymentEdgeAction
+}
+
 export type DeploymentPublishedPort = {
   hostPort: number
   containerPort: number
@@ -5205,7 +5551,9 @@ export type DeploymentConfiguration = {
     hostPort?: number
     ports?: DeploymentPublishedPort[]
     bindAddress?: string
-    strategy: "blue_green" | "stop_first"
+    strategy: DeploymentStrategy
+    /** A canary plan's trial: its share of the requests, its window, and whether it promotes itself. */
+    canary?: DeploymentCanaryTerms
     privileged?: boolean
     hostNetwork?: boolean
     capabilities?: string[]
@@ -5214,6 +5562,13 @@ export type DeploymentConfiguration = {
     cpus?: number
     pidsLimit?: number
     restartPolicy?: DeploymentRestartPolicy
+    /** Containers of each release side by side behind the route, 2 to 8; empty is one. */
+    replicas?: number
+    /**
+     * Keeps each visitor on the release that first answered them while it is
+     * kept warm, by the jd_release cookie. The rollback terms' to edit.
+     */
+    skewProtection?: boolean
     /** The signal that asks the container to stop; empty is the image's own, SIGTERM. */
     stopSignal?: string
     /** Seconds the container has to exit after that signal before it is killed; empty is 10. */
@@ -5236,6 +5591,22 @@ export type DeploymentConfiguration = {
     interceptErrors?: boolean
     /** Strict-Transport-Security on every HTTPS answer; absent sends none. */
     hsts?: DeploymentRouteHSTS
+    /** Requests one client address may make; past it the route answers 429. */
+    rateLimit?: DeploymentRateLimit
+    /** Decided in order at the proxy; the first rule a request meets decides it. */
+    edgeRules?: DeploymentEdgeRule[]
+    /** Refuses the addresses CrowdSec's local engine has banned. */
+    crowdSec?: boolean
+    /**
+     * Published on this host's tailnet and nowhere else, as a preview is: no
+     * public domain and no public certificate. Absent is an ordinary
+     * environment.
+     */
+    tailnet?: DeploymentRouteTailnet
+    /** Recorded requests replayed against the candidate before the cutover; absent is off. */
+    replay?: ReplayPlan
+    /** The container is stopped while nobody visits and the next request starts it; absent is off. */
+    sleep?: SleepPlan
     mounts?: {
       source: string
       target: string
@@ -5291,9 +5662,26 @@ export type DeploymentPlannedDomain = {
   redirectTo?: string
   /** Empty is 308, permanent and keeping the method. */
   redirectCode?: DeploymentRedirectCode
+  /**
+   * Served through the connected Cloudflare Tunnel rather than at this
+   * server's address: Cloudflare terminates HTTPS, nothing is issued here,
+   * and the name's route and CNAME are set as the release goes live.
+   */
+  tunnel?: boolean
 }
 
 export type DeploymentRedirectCode = 301 | 302 | 307 | 308
+
+/**
+ * A tailnet-only publication. `allow`, when it names anybody, is who may open
+ * it — Tailscale logins (alice@example.com, compared without case) and ACL
+ * tags (tag:ci, compared exactly) — and the proxy then asks the dashboard
+ * about every request; empty lets everyone on the tailnet in. Previews
+ * inherit it with the rest of the plan.
+ */
+export type DeploymentRouteTailnet = {
+  allow?: string[]
+}
 
 /**
  * Sign-in in front of a deployment's public route: a Proxy site's single
@@ -5453,6 +5841,8 @@ export type DeploymentDatabaseLink = {
   hostname: string
   /** The connection has a pooler, so `${{database.N.pooled}}` resolves. */
   pooler?: boolean
+  /** What the environment's previews get of it: nothing, a branch, or a masked branch. */
+  previews?: PreviewBranchPolicy
   status: "pending" | "connected" | "stale" | "unavailable"
   detail?: string
   checkedAt?: string
@@ -5473,6 +5863,140 @@ export type RehearsalPolicy = {
   maxBackupMb: number
   updatedBy?: string
   updatedAt?: string
+}
+
+/** A severity as the scanner names it, worst first. */
+export type VulnerabilitySeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN"
+
+/**
+ * An environment's vulnerability scanning terms (`deploy/image_scan.go`):
+ * whether its releases' images are scanned, and the lowest severity the
+ * panel lists, the releases list counts and the alert is raised at.
+ */
+export type ImageScanPolicy = {
+  enabled: boolean
+  severityFloor: Exclude<VulnerabilitySeverity, "UNKNOWN">
+  updatedBy?: string
+  updatedAt?: string
+}
+
+export type VulnerabilityCounts = {
+  critical: number
+  high: number
+  medium: number
+  low: number
+  unknown: number
+}
+
+/** One vulnerability in one package of a release's image. */
+export type VulnerabilityFinding = {
+  id: string
+  package: string
+  installed: string
+  /** The version that fixes it; absent while no fix is published. */
+  fixed?: string
+  severity: VulnerabilitySeverity
+  title?: string
+  url?: string
+  /** The OS packages ("alpine 3.12.12") or a lock file, with a Compose service in front. */
+  target: string
+  class?: string
+  /** A base the release was built on carries it too, so a newer base may fix it. */
+  fromBase?: boolean
+}
+
+/** One image a scan read: the release's own, or a base it was pinned on. */
+export type ImageScanTarget = {
+  kind: "release" | "base"
+  service?: string
+  reference: string
+  digest?: string
+  state: "scanned" | "failed"
+  reason?: string
+  os?: string
+  endOfLife?: boolean
+  counts: VulnerabilityCounts
+  scannedAt?: string
+}
+
+/** A base the release was pinned on, against what its tag names in the registry now. */
+export type ReleaseBaseUpdate = {
+  reference: string
+  pinned?: string
+  current?: string
+  state: "current" | "outdated" | "unknown" | "local"
+  reason?: string
+  checkedAt?: string
+}
+
+/** A release's latest scan, read at its environment's floor. */
+export type ImageScan = {
+  releaseId: number
+  releaseNumber: number
+  environmentId: number
+  state: "queued" | "scanning" | "scanned" | "failed"
+  reason?: string
+  trigger?: "build" | "schedule" | "manual"
+  scanner?: string
+  databaseUpdatedAt?: string
+  databaseAgeHours?: number
+  floor: ImageScanPolicy["severityFloor"]
+  summary: {
+    counts: VulnerabilityCounts
+    fixableCounts: VulnerabilityCounts
+    /** The fixable findings at or above the floor, worst first. */
+    fixable: VulnerabilityFinding[]
+    /** The findings at or above the floor nobody has published a fix for. */
+    unfixed: VulnerabilityFinding[]
+    truncated?: boolean
+  }
+  targets: ImageScanTarget[]
+  baseUpdates: ReleaseBaseUpdate[]
+  /** A base's tag names a newer image than the release was pinned on. */
+  newerBase: boolean
+  /** A build re-pins the bases (a recipe, static, Dockerfile or Compose build). */
+  rebuildable: boolean
+  requestedAt?: string
+  startedAt?: string
+  finishedAt?: string
+}
+
+/** A release's scan as its row in the releases list says it. */
+export type ImageScanBadge = {
+  releaseId: number
+  state: ImageScan["state"]
+  floor: ImageScanPolicy["severityFloor"]
+  counts: VulnerabilityCounts
+  /** Findings at or above the floor. */
+  atFloor: number
+  /** Of those, the ones with a published fix. */
+  fixable: number
+  newerBase: boolean
+  scannedAt?: string
+}
+
+/** GET /deploy/{id}/environments/{env}/vulnerabilities. */
+export type ImageScanReading = {
+  policy: ImageScanPolicy
+  /** Whether this host has a scanner (Docker) at all; `reason` says why not. */
+  available: boolean
+  reason?: string
+  scanner: string
+  database: {
+    installed: boolean
+    updatedAt?: string
+    nextUpdate?: string
+    ageHours?: number
+    lastError?: string
+    source?: string
+  }
+  /** The release the scan is of: the live one unless another was asked for. */
+  releaseId?: number
+  scan: ImageScan | null
+  /** The run the Rebuild button asks for, through the runs route. */
+  rebuild?: { operation: "force_build"; sourceRevision?: string }
+  rebuildReason?: string
+  releases: ImageScanBadge[]
 }
 
 /** The rehearse_migration step's evidence. */
@@ -5506,6 +6030,136 @@ export type RehearsalReport = {
   isolation?: { network: string; internal: boolean; published: boolean; volumesMounted: boolean }
   cleanedUp: boolean
   totalMs: number
+}
+
+/**
+ * A plan's traffic replay terms (`deploy/replay.go`): before the cutover, the
+ * last distinct GET and HEAD requests the access log recorded for the
+ * environment's domains are sent to the candidate and its answers compared
+ * with the live release's. An absent number is the server's default.
+ */
+/**
+ * A plan's scale-to-zero terms (`deploy/sleep.go`): the live release's
+ * container is stopped once its route has served no request for the idle
+ * minutes, and the next request is held while it starts again. An absent
+ * number is the server's default.
+ */
+export type SleepPlan = {
+  enabled: boolean
+  /** Minutes without a request before it sleeps; absent is 15, 5 to 1440. */
+  idleMinutes?: number
+  /** How long a wake waits for the readiness checks; absent is 60 seconds, 5 to 600. */
+  wakeTimeoutSeconds?: number
+}
+
+/** One stretch an environment spent asleep. */
+export type SleepSpan = {
+  id: number
+  environmentId: number
+  releaseId: number
+  containerId?: string
+  idleMinutes: number
+  reason: string
+  lastRequestAt?: string
+  sleptAt: string
+  /** Absent while it is asleep now. */
+  wokeAt?: string
+  /** request, manual (Wake now), run, or repair (found started outside a wake). */
+  wakeTrigger?: string
+  /** The host a request asked for, the run, or who pressed Wake now. */
+  wakeDetail?: string
+  wakeSeconds?: number
+  wakeError?: string
+}
+
+/** GET …/environments/{env}/sleep. */
+export type SleepStatus = {
+  /** The live release's terms, the ones in force. */
+  enabled: boolean
+  idleMinutes: number
+  wakeTimeoutSeconds: number
+  holdSeconds: number
+  state: "off" | "awake" | "asleep" | "waking"
+  since?: string
+  reason?: string
+  lastRequestAt?: string
+  sleepsAt?: string
+  switch?: { driver: string; ready: boolean; on: boolean; since?: string }
+  /** The last seven days, newest first. */
+  recent: SleepSpan[]
+  asleepSeconds: number
+}
+
+/** What a wake came to. */
+export type WakeOutcome = {
+  status: number
+  upstream?: string
+  reason: string
+  seconds?: number
+}
+
+export type ReplayPlan = {
+  enabled: boolean
+  /** Distinct requests replayed, newest first; absent is 50, at most 500. */
+  requests?: number
+  /** Only recorded paths under one of these prefixes; absent replays every path. */
+  paths?: string[]
+  /** The percent of replayed requests whose status class may differ; absent is 2. */
+  maxStatusDrift?: number
+  /** What the candidate's p95 may be of the recorded p95; absent is 2. */
+  latencyFactor?: number
+  /** The whole replay's time limit; absent is 60 seconds. */
+  timeoutSeconds?: number
+}
+
+/** One replayed request the candidate answered in another status class, or not at all. */
+export type ReplayDrift = {
+  method: string
+  path: string
+  query?: string
+  recordedStatus: number
+  /** 0 is no answer, with `error` saying why. */
+  candidateStatus: number
+  error?: string
+  recordedMs?: number
+  candidateMs?: number
+}
+
+/** The replay_traffic step's evidence. */
+export type ReplayReport = {
+  replayed: boolean
+  /** Why it was not replayed. */
+  reason?: string
+  domains?: string[]
+  /** The candidate's own address the requests were sent to. */
+  target?: string
+  read: number
+  eligible: number
+  requests: number
+  answered: number
+  drifted: number
+  driftPercent: number
+  maxStatusDrift: number
+  latencyFactor: number
+  latencyRecorded: boolean
+  latencyJudged: boolean
+  recordedP95?: number
+  candidateP95?: number
+  verdict: {
+    code: "within_drift" | "status_drift" | "latency" | "unanswered" | ""
+    tripped: boolean
+    reason: string
+  }
+  drifts: ReplayDrift[]
+  concurrency: number
+  timeoutSeconds: number
+  timedOut: boolean
+  durationMs: number
+  recovery?: {
+    candidateStopped: boolean
+    runtimeRestored: boolean
+    routeRestored: boolean
+  }
 }
 
 /** A saved database a variable names by its address rather than a link. */
@@ -7007,6 +7661,23 @@ export type DbFleetEntry = DbConnection & {
    * backup job run that dumped it, whichever is later. Absent for never.
    */
   lastBackup?: string
+  /** A MongoDB 8 server that cannot start on this kernel as it is. Absent otherwise. */
+  kernelProblem?: DbKernelProblem
+}
+
+/**
+ * MongoDB 8 on Linux 6.19 to 7.0.13, which it refuses to start on without
+ * `GLIBC_TUNABLES=glibc.pthread.rseq=1` (MongoDB SERVER-121912).
+ */
+export type DbKernelProblem = {
+  /** The alert, in a few words. */
+  message: string
+  /** What applying it does, or where the compose file has to say it. */
+  detail: string
+  kernel: string
+  release: string
+  /** `POST /databases/{id}/kernel-mitigation` applies it. */
+  fixable: boolean
 }
 
 export type DbFleet = {
@@ -7693,6 +8364,16 @@ export type RequestEntry = {
   /** Absent where the format carries no duration — nginx's stock `combined` does not. */
   durationMs?: number
   tls?: boolean
+  /**
+   * The W3C trace context the ingress sent the application with this request
+   * (`traceparent`), and the client's span it continued. Absent on a route
+   * rendered before the ingress sent one, and on every Proxy site.
+   */
+  traceId?: string
+  spanId?: string
+  parentSpanId?: string
+  /** The Tailscale login (or a tagged machine's tags) a tailnet gate admitted. */
+  user?: string
 }
 
 export type RequestFacet = {
@@ -7791,6 +8472,8 @@ export type RequestSummary = {
   /** Refused paths that look like scanning, and the clients that asked for several. */
   probes: RequestFacet[]
   scanners: RequestFacet[]
+  /** How many requests each edge rule decided in the window; absent from older servers. */
+  edgeRules?: RequestFacet[]
   audience?: RequestAudience
   buckets: RequestBucket[]
   bucketSeconds: number
@@ -7910,8 +8593,46 @@ export type DeploymentLifecycle = {
   reason?: string
   /** Whether the event stream is connected, so an empty feed can explain itself. */
   watching: boolean
+  /** When this process connected to the stream; the record itself reaches back to `recordSince`. */
   since?: string
+  /**
+   * The oldest event the dashboard keeps for any deployment: how far back the
+   * feed can see. The record survives a restart of the dashboard; absent until
+   * the first event has been kept.
+   */
+  recordSince?: string
+  /** How long an event is kept. */
+  retentionDays: number
   events: DockerEvent[]
+}
+
+/** The figure over one span of time ending now (`deploy/availability.go`). */
+export type AvailabilityWindow = {
+  /** "24h", "7d" or "30d". */
+  window: string
+  seconds: number
+  /** Live-release time inside the window the record covers: what `ratio` is over. 0 means no figure. */
+  observedSeconds: number
+  downSeconds: number
+  incidents: number
+  /** 1 - down/observed, 0..1; absent while nothing was observed. */
+  ratio?: number
+  /** How much of the window the event record reaches back over. */
+  coverageSeconds: number
+}
+
+/** How much of the last day, week and month a deployment's live release was up. */
+export type DeploymentAvailability = {
+  status: "available" | "unavailable"
+  reason?: string
+  observedAt: string
+  /** When the event record began, for any deployment. */
+  recordSince?: string
+  /** The number of the release live now. */
+  liveRelease?: number
+  /** Whether the record says the live release is down at this moment. */
+  down: boolean
+  windows: AvailabilityWindow[]
 }
 
 /*

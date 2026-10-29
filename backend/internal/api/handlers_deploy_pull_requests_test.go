@@ -216,6 +216,8 @@ type gitHubDeploymentOptions struct {
 	buildMethod   string
 	localCheckout bool
 	internalPort  int
+	// evidence is the build plan's saved evidence, such as a Compose analysis.
+	evidence string
 }
 
 // insertGitHubDeploymentAPI is a normalized project deploying a github.com
@@ -253,12 +255,16 @@ func insertGitHubDeploymentAPI(t *testing.T, s *Server, name string, options git
 		runtime = fmt.Sprintf(`{"strategy":"blue_green","internalPort":%d}`, options.internalPort)
 	}
 	digest := "sha256:" + strings.Repeat("d", 64)
+	evidence := options.evidence
+	if evidence == "" {
+		evidence = "{}"
+	}
 	for _, statement := range []struct {
 		sql  string
 		args []any
 	}{
 		{`INSERT INTO deploy_sources(environment_id, revision, kind, config_json, identity_json, digest, created_at) VALUES(?, 1, 'git', ?, ?, ?, ?)`, []any{environmentID, source, identity, digest, now}},
-		{`INSERT INTO deploy_build_plans(environment_id, revision, method, config_json, evidence_json, preview, digest, created_at) VALUES(?, 1, ?, ?, '{}', '{}', ?, ?)`, []any{environmentID, method, build, digest, now}},
+		{`INSERT INTO deploy_build_plans(environment_id, revision, method, config_json, evidence_json, preview, digest, created_at) VALUES(?, 1, ?, ?, ?, '{}', ?, ?)`, []any{environmentID, method, build, evidence, digest, now}},
 		{`INSERT INTO deploy_runtime_plans(environment_id, revision, config_json, preview, digest, created_at) VALUES(?, 1, ?, '{}', ?, ?)`, []any{environmentID, runtime, digest, now}},
 	} {
 		if _, err := s.Store.DB.Exec(statement.sql, statement.args...); err != nil {
@@ -558,14 +564,22 @@ func TestTestPullRequestPreviewRefusals(t *testing.T) {
 	refuse("not github", plainID, 9, same, http.StatusNotFound, "not_github")
 	localID, _ := insertGitHubDeploymentAPI(t, f.s, "pr-local", gitHubDeploymentOptions{localCheckout: true, internalPort: 3000})
 	refuse("local checkout", localID, 9, same, http.StatusConflict, "not_remote_git")
-	composeID, _ := insertGitHubDeploymentAPI(t, f.s, "pr-compose", gitHubDeploymentOptions{buildMethod: "compose", internalPort: 3000})
-	refuse("compose", composeID, 9, same, http.StatusConflict, "preview_compose")
+	legacyID, _ := insertGitHubDeploymentAPI(t, f.s, "pr-legacy-compose", gitHubDeploymentOptions{buildMethod: "legacy_compose", internalPort: 3000})
+	refuse("legacy compose", legacyID, 9, same, http.StatusConflict, "preview_compose")
+	unanalysedID, _ := insertGitHubDeploymentAPI(t, f.s, "pr-compose", gitHubDeploymentOptions{buildMethod: "compose", internalPort: 3000})
+	refuse("compose without its analysis", unanalysedID, 9, same, http.StatusConflict, "preview_compose_host_access")
+	socketID, _ := insertGitHubDeploymentAPI(t, f.s, "pr-compose-socket", gitHubDeploymentOptions{buildMethod: "compose", internalPort: 3000,
+		evidence: `{"compose":{"primaryService":"web","services":[{"name":"web","ports":["80:3000"],"mounts":["/var/run/docker.sock:/var/run/docker.sock"],"advanced":["docker_socket"]}]}}`})
+	response := f.admin.do(http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/pull-requests/9/preview", socketID), same, nil)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "preview_compose_host_access") || !strings.Contains(response.Body.String(), "service web mounts the Docker socket") {
+		t.Fatalf("a stack mounting the Docker socket = %d %s", response.Code, response.Body.String())
+	}
 	portlessID, _ := insertGitHubDeploymentAPI(t, f.s, "pr-portless", gitHubDeploymentOptions{})
 	refuse("no port", portlessID, 9, same, http.StatusConflict, "preview_no_port")
 
 	f.fake.pulls[11] = &fakePull{Number: 11, Title: "Old", State: "CLOSED", Head: "old", HeadSHA: strings.Repeat("1", 40), Owner: "acme"}
 	refuse("closed", f.projectID, 11, fmt.Sprintf(`{"revision":%q}`, strings.Repeat("1", 40)), http.StatusConflict, "pull_request_closed")
-	response := f.admin.do(http.MethodPost, f.path(9, "/preview"), stale, nil)
+	response = f.admin.do(http.MethodPost, f.path(9, "/preview"), stale, nil)
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "pull_request_head_changed") || !strings.Contains(response.Body.String(), f.head) {
 		t.Fatalf("stale head = %d %s (the message names the current head)", response.Code, response.Body.String())
 	}
@@ -594,6 +608,44 @@ func TestTestPullRequestPreviewRefusals(t *testing.T) {
 	}
 	if got := auditCount(t, f.s, `action='deploy.preview.test' AND success=1 AND detail LIKE '%"fork":true%'`); got != 1 {
 		t.Fatalf("fork audit = %d", got)
+	}
+}
+
+// A Compose stack previews like one container: the listing says what each
+// service will and will not get, and testing a pull request builds the
+// isolated stack, stop-first, with nothing production publishes.
+func TestTestPullRequestPreviewOfAComposeStack(t *testing.T) {
+	f := newPullRequestFixture(t, "pr-compose-stack")
+	projectID, _ := insertGitHubDeploymentAPI(t, f.s, "pr-compose-stack-app", gitHubDeploymentOptions{buildMethod: "compose", internalPort: 3000,
+		evidence: `{"compose":{"files":["compose.yml"],"primaryService":"web","services":[` +
+			`{"name":"db","image":"postgres:17","ports":["5432:5432"],"mounts":["dbdata:/var/lib/postgresql/data"]},` +
+			`{"name":"web","buildContext":".","ports":["80:3000"],"mounts":["./nginx.conf:/etc/nginx.conf:ro","/etc/localtime:/etc/localtime:ro","uploads:/uploads"]}]}}`})
+	var listed projectPullRequests
+	response := f.reader.do(http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d/pull-requests", projectID), "", nil)
+	decodeJSON(t, response.Body.Bytes(), &listed)
+	facts := listed.ComposePreview
+	if !listed.Compose || facts == nil || facts.Public != "web" || len(facts.Refusals) != 0 || len(facts.Services) != 2 {
+		t.Fatalf("compose facts = %s", response.Body.String())
+	}
+	if web := facts.Services[0]; web.Name != "web" || !web.Public || len(web.Checkout) != 1 || len(web.LeftOut) != 1 || len(web.Volumes) != 1 {
+		t.Fatalf("web = %+v", web)
+	}
+	response = f.admin.do(http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/pull-requests/9/preview", projectID), fmt.Sprintf(`{"revision":%q,"copyVariables":false}`, f.head), nil)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("compose preview = %d %s", response.Code, response.Body.String())
+	}
+	var result struct {
+		Preview deploy.PreviewRef `json:"preview"`
+	}
+	decodeJSON(t, response.Body.Bytes(), &result)
+	var method, buildRaw, runtimeRaw string
+	if err := f.s.Store.DB.QueryRow(`SELECT b.method,b.config_json,r.config_json FROM deploy_build_plans b JOIN deploy_runtime_plans r ON r.environment_id=b.environment_id AND r.revision=b.revision WHERE b.environment_id=?`, result.Preview.EnvironmentID).Scan(&method, &buildRaw, &runtimeRaw); err != nil {
+		t.Fatal(err)
+	}
+	var runtime deploy.RuntimePlanConfig
+	decodeJSON(t, []byte(runtimeRaw), &runtime)
+	if method != "compose" || strings.Contains(buildRaw, "migrate") || !runtime.PreviewIsolation || runtime.Strategy != deploy.StrategyStopFirst || runtime.BindAddress != "127.0.0.1" {
+		t.Fatalf("compose preview plan = %s %s %s", method, buildRaw, runtimeRaw)
 	}
 }
 

@@ -30,6 +30,11 @@ type SitePool struct {
 	RetryOn []string `json:"retryOn,omitempty"`
 	// Tries caps the servers one request may try; 0 is no cap.
 	Tries int `json:"tries,omitempty"`
+	// ConnectTimeout is how many seconds a server has to accept a connection
+	// before the request is passed to the next; 0 is nginx's sixty, which a
+	// server that has stopped accepting holds every request it is given for.
+	// It is written only where the site sets no timeout of its own.
+	ConnectTimeout int `json:"connectTimeout,omitempty"`
 }
 
 // PoolServer is one server of a pool. Zero values are nginx's defaults:
@@ -73,8 +78,12 @@ func (spec *SiteSpec) poolUpstream() string {
 	return scheme + "://" + spec.poolName()
 }
 
-// mainUpstream is what the site's catch-all forwards to.
+// mainUpstream is what the site's catch-all forwards to: with a split, the
+// variable naming whichever of the two pools this request was given.
 func (spec *SiteSpec) mainUpstream() string {
+	if spec.Pool != nil && spec.Split != nil {
+		return "http://$" + spec.splitUpstreamVar()
+	}
 	if spec.Pool != nil {
 		return spec.poolUpstream()
 	}
@@ -133,6 +142,9 @@ func validatePool(spec *SiteSpec) error {
 	}
 	if pool.Tries < 0 || pool.Tries > 100 {
 		return fmt.Errorf("tries must be between 0 and 100")
+	}
+	if pool.ConnectTimeout < 0 || pool.ConnectTimeout > 60 {
+		return fmt.Errorf("the connect timeout must be between 1 and 60 seconds")
 	}
 	seen := map[string]bool{}
 	for _, cond := range pool.RetryOn {
@@ -208,28 +220,33 @@ func renderPool(l *lines, spec *SiteSpec) {
 		l.add("    %s", poolMethods[pool.Method])
 	}
 	for _, server := range pool.Servers {
-		line := "    server " + server.Address
-		if server.Weight > 0 {
-			line += " weight=" + strconv.Itoa(server.Weight)
-		}
-		if server.MaxFails > 0 {
-			line += " max_fails=" + strconv.Itoa(server.MaxFails)
-		}
-		if server.FailTimeout > 0 {
-			line += " fail_timeout=" + strconv.Itoa(server.FailTimeout) + "s"
-		}
-		if server.Backup {
-			line += " backup"
-		}
-		if server.Down {
-			line += " down"
-		}
-		l.add("%s;", line)
+		l.add("%s;", poolServerLine(server))
 	}
 	if pool.Keepalive > 0 {
 		l.add("    keepalive %d;", pool.Keepalive)
 	}
 	l.add("}")
+}
+
+// poolServerLine is one server of an upstream block, without its semicolon.
+func poolServerLine(server PoolServer) string {
+	line := "    server " + server.Address
+	if server.Weight > 0 {
+		line += " weight=" + strconv.Itoa(server.Weight)
+	}
+	if server.MaxFails > 0 {
+		line += " max_fails=" + strconv.Itoa(server.MaxFails)
+	}
+	if server.FailTimeout > 0 {
+		line += " fail_timeout=" + strconv.Itoa(server.FailTimeout) + "s"
+	}
+	if server.Backup {
+		line += " backup"
+	}
+	if server.Down {
+		line += " down"
+	}
+	return line
 }
 
 // renderPoolLocation writes what a location forwarding to the pool needs
@@ -241,6 +258,11 @@ func renderPoolLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	}
 	if pool.Tries > 0 {
 		l.add("        proxy_next_upstream_tries %d;", pool.Tries)
+	}
+	if pool.ConnectTimeout > 0 && spec.ProxyTimeout == 0 && loc.Timeout == 0 {
+		l.add("        # A server that does not accept a connection in time is passed")
+		l.add("        # over for the next, rather than holding the request a minute.")
+		l.add("        proxy_connect_timeout %ds;", pool.ConnectTimeout)
 	}
 	// nginx closes an upstream connection after each request unless the
 	// Connection header it sends is cleared; with WebSockets the site's

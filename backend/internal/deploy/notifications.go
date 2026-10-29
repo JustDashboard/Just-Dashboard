@@ -623,6 +623,12 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 		run = fmt.Sprintf("Run %d", envelope.RunID)
 	}
 	message := notificationMessage{URL: envelope.URL}
+	operation := humanizeOperation(envelope.Operation)
+	// Staging takes promotions only from pull request previews; production
+	// only from staging.
+	if Operation(envelope.Operation) == OperationPromote && strings.EqualFold(envelope.EnvironmentName, string(EnvironmentStaging)) {
+		operation = "Promotion from a pull request preview"
+	}
 	switch envelope.Event {
 	case NotificationEventTrafficFiring, NotificationEventTrafficRecovered:
 		return renderTrafficAlert(envelope, project, environment)
@@ -642,15 +648,15 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 	case NotificationEventStarted:
 		message.Emoji, message.Color = "🚀", 0x3b82f6
 		message.Title = fmt.Sprintf("%s · %s — %s started", project, environment, run)
-		message.Summary = fmt.Sprintf("%s requested by %s.", humanizeOperation(envelope.Operation), describeTrigger(envelope))
+		message.Summary = fmt.Sprintf("%s requested by %s.", operation, describeTrigger(envelope))
 	case NotificationEventSucceeded:
 		message.Emoji, message.Color = "✅", notificationGreen
 		message.Title = fmt.Sprintf("%s · %s — %s succeeded", project, environment, run)
-		message.Summary = fmt.Sprintf("%s completed successfully.", humanizeOperation(envelope.Operation))
+		message.Summary = fmt.Sprintf("%s completed successfully.", operation)
 	case NotificationEventCancelled:
 		message.Emoji, message.Color = "⏹", 0x6b7280
 		message.Title = fmt.Sprintf("%s · %s — %s cancelled", project, environment, run)
-		message.Summary = fmt.Sprintf("%s was cancelled before it finished.", humanizeOperation(envelope.Operation))
+		message.Summary = fmt.Sprintf("%s was cancelled before it finished.", operation)
 	default:
 		message.Emoji, message.Color = "❌", notificationRed
 		outcome := "failed"
@@ -658,9 +664,9 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 			outcome = "failed and was rolled back"
 		}
 		message.Title = fmt.Sprintf("%s · %s — %s %s", project, environment, run, outcome)
-		message.Summary = fmt.Sprintf("%s did not complete. The previous release keeps serving.", humanizeOperation(envelope.Operation))
+		message.Summary = fmt.Sprintf("%s did not complete. The previous release keeps serving.", operation)
 	}
-	fields := [][2]string{{"Operation", humanizeOperation(envelope.Operation)}, {"Trigger", describeTrigger(envelope)}}
+	fields := [][2]string{{"Operation", operation}, {"Trigger", describeTrigger(envelope)}}
 	if envelope.SourceRef != "" || envelope.SourceRevision != "" {
 		fields = append(fields, [2]string{"Source", describeSource(envelope)})
 	}
@@ -873,6 +879,9 @@ var hostAlertWhat = map[string][2]string{
 	"disk_filling":   {"Disk filling up", "Filesystem"},
 	"container_down": {"Container down", "Container"},
 	"backup_failed":  {"Backup failed", "Backup job"},
+	// The subject is a deployment's environment: "shop · production".
+	"image_vulnerable": {"Vulnerable base image", "Deployment"},
+	"tunnel_down":      {"Tunnel down", "Tunnel"},
 }
 
 // renderHostAlert is the sentence a host alert sends: what, which subject on

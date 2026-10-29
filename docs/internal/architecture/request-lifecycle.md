@@ -28,9 +28,10 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   table admitted to that very route (below); for every other key the rule is unchanged.
 - **A scoped API key** (`api_tokens.scope`, minted with `scope: "metrics.read"` on `POST /tokens` or
   from Databases → Metrics export) holds one capability and nothing else. `Authenticate` refuses it
-  on every group with `403 key_scope`; `AuthenticateScoped` admits it for
-  `GET /api/v1/metrics/databases` alone, which sits outside the `/databases` tree for that reason and
-  also refuses a browser session (`httpx.RequireToken`, `403 token_required`).
+  on every group with `403 key_scope`; `AuthenticateScoped` admits it for the two scrapes alone,
+  `GET /api/v1/metrics/databases` and `GET /api/v1/metrics/deployments`, which sit outside the
+  `/databases` and `/deploy` trees for that reason and also refuse a browser session
+  (`httpx.RequireToken`, `403 token_required`).
 - **An MCP key** (`api_tokens.scope = 'mcp'`, minted on `POST /tokens/mcp` or from Databases → MCP
   server) narrows *where* a key goes rather than what its role may do. `Authenticate` and
   `AuthenticateScoped` both refuse it with `403 key_scope`, so it opens no route but
@@ -57,8 +58,9 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   reason, and anything unlisted — including any route added later until it is given a line — answers
   `403 key_scope`. A refusal is audited as `auth.deploy_key.refused` with the key, because it happens
   before the group's audit middleware. Reveals, saved credentials, the GitHub-speaking pull-request
-  verbs, preview approval, the typed-phrase removals, the warm-release and rehearsal terms and a
-  route's pages stay session-only for it. A key narrowed to
+  verbs, preview approval, the typed-phrase removals, the warm-release and rehearsal terms, a copy of a
+  release's data, what a linked database gives previews and a preview's database branch refreshed,
+  and a route's pages stay session-only for it. A key narrowed to
   chosen deployments (`api_token_deployments`, read with the key on every request) reaches only
   routes whose `{id}` it was given and whose `{env}` belongs to that deployment, and none marked
   `every` (server shared variables, fleet-wide reads); `GET /deploy/` lists only its deployments. A
@@ -92,9 +94,13 @@ password and revokes existing sessions; the sign-in page then signs straight bac
 password, through any required second factor. Password change has its own
 authentication middleware so it cannot bypass an outstanding second factor.
 
-Two deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname) and
+Three deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname),
 `/api/v1/hooks/deploy/{hookID}` (HMAC over the raw body, still allowlisted, still audited so
-enumerating hook ids is not silent).
+enumerating hook ids is not silent), and `GET /api/v1/tailnet/whois`, which a tailnet-only
+deployment's gate asks about every request: still behind the allowlist, outside the API rate limit,
+and answering only a loopback caller that no other proxy forwarded — the dashboard's own Caddy says it
+did in `X-Forwarded-For` — with every refusal audited as `deploy.tailnet.refused`
+([tailnet-only deployments](../deployments/tailnet-apps.md#the-whois-route)).
 
 ## Handler conventions
 

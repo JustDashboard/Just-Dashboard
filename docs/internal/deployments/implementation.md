@@ -14,9 +14,14 @@ only renderer/executor/validation authority for their feature.
   The engine looks for work every 250 ms and on every `Notify`; `ClaimNext` first asks with a plain read
   whether anything is queued, so an idle queue never takes the IMMEDIATE write transaction the claim
   needs.
-- The only activation strategies are `blue_green` for an eligible proxy-owned stateless HTTP service and
-  `stop_first` for Compose, fixed-port, game and exclusive-storage workloads. A failed candidate cannot
-  replace the live release; ambiguous cutover evidence restores or stops for operator recovery.
+- The only activation strategies are `blue_green` for an eligible proxy-owned stateless HTTP service,
+  `canary` — blue/green with a trial between the checks and the cutover, the candidate on a share of the
+  live route's requests beside the live release ([canary releases](canary-and-replicas.md#canary-releases))
+  — and `stop_first` for Compose, fixed-port, game and exclusive-storage workloads. A failed candidate cannot
+  replace the live release; ambiguous cutover evidence restores or stops for operator recovery. Either
+  strategy can run a stateless release as `runtime.replicas` containers (1–8) behind one route
+  ([replicas](canary-and-replicas.md)); everything below that speaks of a release's container means
+  every one of them.
 - Events commit before publish and are monotonically sequenced per run. Reconnect resumes after a sequence;
   compacted history begins with a `resync` snapshot, and a slow subscriber is disconnected rather than
   allowed to stall execution. Streams replay all retained history in pages of at most 5,000 stored
@@ -190,10 +195,11 @@ only renderer/executor/validation authority for their feature.
   link in a README points at. `?template=<blueprint id>` (only an identifier's shape is taken) and
   `?image=<reference>` arrive on those tabs with the blueprint chosen or the reference filled in, which
   is where the project step sends the upstream repository of an application the catalogue packages.
-  Reviewed blueprints deploy as image releases (below); game-server blueprints and blueprints that
-  install configuration files or downloaded artifacts stay preview-only, the catalogue names the
-  reason per blueprint, and direct API calls are refused with the same reason before deployment work
-  is persisted. The screens share `deployment-defaults.ts` and `deployment-findings.tsx` so a default
+  Reviewed blueprints deploy as image releases (below), the two Minecraft game servers included
+  ([game servers](game-servers.md)); a definition the release path cannot run — today only one that
+  downloads an artifact through a version source, with no pinned checksum — stays preview-only, the
+  catalogue names the reason per blueprint, and direct API calls are refused with the same reason
+  before deployment work is persisted. The screens share `deployment-defaults.ts` and `deployment-findings.tsx` so a default
   one flow relies on cannot be missing from the other, and a refused plan reads identically in both.
   Detected web and static plans carry a required HTTP readiness check: preflight raises
   `readiness_missing` as a *decision* for those profiles, so an empty check list made the most
@@ -796,7 +802,13 @@ only renderer/executor/validation authority for their feature.
   becomes a warning step and the release continues. Everything a rehearsal makes carries
   `io.just-dashboard.rehearsal=<run id>` (the WAL-G tool volume too): the step removes its own
   leftovers before it starts and everything after, however it ends; a resumed run makes its copy
-  again (`ReconcileResume`); and `Server.Start` removes every rehearsal before the engine resumes.
+  again (`ReconcileResume`); and `Server.Start` removes every rehearsal before the engine resumes,
+  except a [copy of a release's data](data-aware-rollback.md) still within its lifetime, which carries
+  the same label with `copy-<id>` and is made by the same path (`prepareCopy`: the newest backup for a
+  rehearsal, a recorded dump run or archive moment for a data copy). The environment's network
+  reconciler leaves every rehearsal-labelled container where it is: it used to join a rehearsal's copy
+  and task, which carry the environment's label, to the deployment's database network on its next
+  pass, giving the internal network a way out and production's database the copy's name beside it.
   Runtime observation never counts the copy (it has no release id) or its task (the release-task
   label), and host container alerts leave both out. A promotion takes the same step in the same place
   (`PromotionStepKeys`, [staging and promotion](staging-promotion.md)): production's tasks with
@@ -838,7 +850,9 @@ only renderer/executor/validation authority for their feature.
   Docker's own unlimited default. Validation bounds them (16 MiB–4 TiB, 0.01–1024 CPUs, 16–1,048,576
   processes); preflight warns when a limit exceeds the host's available memory or CPU count; the Docker
   runtime owner passes them to container creation and release comparison labels them. Compose services keep
-  the limits their files declare.
+  the limits their files declare. What they should be is [right-sizing](right-sizing.md)'s read of the
+  environment's retained container samples (`GET …/environments/{env}/sizing`, `GET /deploy/sizing`);
+  applying its suggestion is this plan's ordinary configuration save, applied with the next release.
 - A failed readiness or smoke gate first asks the runtime owner to diagnose the candidate: container
   state, exit code, OOM flag, restart count and a bounded log tail (200 lines, 32 KiB, most recent kept).
   The tail is written to the run transcript after redaction of every runtime variable value; step
@@ -916,10 +930,12 @@ only renderer/executor/validation authority for their feature.
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime
   variable values. Disabled, unavailable, warning, passed and failed remain distinct outcomes.
-  The closed kind list also names `dns`, `tls`, `backup_freshness` and `game_handshake`, which no runner
+  `game_handshake` (the Minecraft Java status handshake over TCP) and `udp_probe` (a datagram sent,
+  an answer beginning with an expected prefix received) run too; see [game servers](game-servers.md#readiness).
+  The closed kind list also names `dns`, `tls` and `backup_freshness`, which no runner
   executes. Saving one (Settings or a draft's configuration) is refused with the reason and what to use
-  instead (`refuseUnrunnableChecks`): a `public_route` check on the https address, a storage
-  dependency's backup requirement, or the game-server integration. `Validate` still accepts them, so a
+  instead (`refuseUnrunnableChecks`): a `public_route` check on the https address, or a storage
+  dependency's backup requirement. `Validate` still accepts them, so a
   plan stored with one keeps deploying; its check reports `check_owner_unavailable`, a warning unless
   it is required.
   An HTTP check against the candidate introduces itself as the proxy does when the release has a
@@ -932,10 +948,13 @@ only renderer/executor/validation authority for their feature.
   redirecting to the old public release or to a page that returns 500. `acceptAnyAnswer` checks accept
   the first answer below 500 other than 400 and 421 (what host allowlists answer); explicit
   expected-status lists retain exact-status, no-redirect behavior, and a check cannot set both.
-- Blue/green is limited to stateless proxy-owned HTTP candidates without fixed ports, host networking or
-  writable mounts; dynamic candidate ports are loopback-leased. Fixed-port, Compose, game and exclusive
-  writable-storage plans are honest `stop_first` deployments and advertise expected downtime. A route
-  moves only after the plan's required readiness/smoke checks pass — and a plan with none is cut over
+- Blue/green, and a canary, which is blue/green with a trial, are limited to stateless proxy-owned HTTP
+  candidates without fixed ports, host networking or writable mounts; dynamic candidate ports are
+  loopback-leased, one per replica. Fixed-port, Compose,
+  game and exclusive writable-storage plans are honest `stop_first` deployments, advertise expected
+  downtime and run one container per release (`replicaRefusal`). A route moves only after the plan's
+  required readiness/smoke checks pass on every replica of the candidate (one that fails removes the
+  whole candidate) — and a plan with none is cut over
   to ungated: `verify_readiness` is skipped (`disabled`, with the reason in its evidence and a
   transcript line saying the candidate counts as ready because it started), and `activate` records
   `readinessGated: false` and writes, in the strategy's words, that traffic moved (or the release went
@@ -948,6 +967,52 @@ only renderer/executor/validation authority for their feature.
   (`ungatedCutoverFinding`), with the port and strategy measured, field `checks`, and in a run's
   preflight step a deep link to Settings → Runtime → Health checks; a worker is never asked. Not a
   refusal: an existing plan without a check keeps deploying and is told what that costs.
+- Traffic replay (`deploy/replay.go`) is the `replay_traffic` step, after `verify_smoke` and before
+  `canary` and `activate` in `DefaultStepKeys` and `PromotionStepKeys` (a redeploy, a rollback and an
+  instant rollback do not take it): the last gate before anything is routed to the candidate, and the one that
+  asks it what visitors actually asked rather than one health path. It is the plan's
+  (`runtime.replay`: `enabled`, `requests` 1–500 with 0 for 50, `paths` up to 32 prefixes that begin
+  with `/`, `maxStatusDrift` 0–100 percent with 0 for 2, `latencyFactor` 1–10 with 0 for 2,
+  `timeoutSeconds` 1–300 with 0 for 60), off by default, validated with the other runtime fields
+  (`validateReplayPlan`), stored as nothing when it asks for nothing (`canonicalReplayPlan`, so a
+  switch turned on and off is no change), edited in Runtime settings beside the release strategy
+  (`settings/replay.tsx`) and listed in the release comparison as `traffic replay`. Off, a restart, a
+  host with no request record, a plan whose every domain redirects, an empty record or one with
+  nothing eligible each skip the step with the reason in its transcript and evidence; a record that
+  cannot be read is a warning and the release continues. Otherwise the step reads the same held
+  record the Logs page and the rollback watch read (`RequestRecord.Window` on the environment's route,
+  the last 24 hours, GET and HEAD, the newest 5,000 rows) and takes the newest distinct requests —
+  method, host, path and query — answered 2xx, 3xx or 4xx, leaving out 401, 403 and 407 (decided by who
+  asked), scanner probes (`accesslog.IsProbe`), a query that names a credential (`token`, `code`,
+  `state`, `sig`, …), a path or query with a control character, a space or non-ASCII, a host no served
+  domain names (wildcards by one label), and — where the record says which requests came over TLS, as
+  Caddy's does — a plain request for an HTTPS domain, which the ingress's redirect answered. A row
+  without a host (nginx's `combined`) is the first concrete served domain's. Each request is sent
+  only to the candidate's own address (`targetForRuntime`, the readiness checks' target), built from
+  the record alone: method, path and query, the recorded `Host` and `X-Forwarded-Host`, the scheme the
+  request came over as `X-Forwarded-Proto`, `X-Forwarded-For 127.0.0.1`, `X-JD-Replay: 1` for an
+  application that keeps replays out of its analytics, and no cookie, authorization or body — the
+  record holds none. Four at a time, ten seconds each, the whole within `timeoutSeconds`; no
+  environment proxy, no redirect followed (the record holds the live release's first answer), at
+  most 256 KiB of each answer read and discarded so the time is the answer's. A request the deadline
+  left unsent is unanswered (`out_of_time`). The verdict (`summarizeReplay`): nothing answered is
+  `unanswered`; a share of requests answered in another status class than the record, or not at all,
+  above `maxStatusDrift` is `status_drift`; the candidate's p95 over requests timed on both sides
+  (at least ten, nearest-rank, `accesslog.Percentile`) past `latencyFactor` × the recorded p95 and at
+  least 250 ms slower — the rollback watch's rule, `latencyRegressed` — is `latency`; a record without
+  durations (host nginx) is never judged on p95. A tripped verdict stops the candidate and restores a
+  stop-first predecessor through `stopCandidateAndRestore`, the failed health gate's own recovery, and
+  fails the run `replay_<code>` with nothing routed; the live release is not touched. The evidence
+  (`ReplayReport`) is the counts (read, eligible, sent, answered, drifted and their share), both p95s,
+  the target and domains, at most 50 drifted requests by method, path, query, both statuses and both
+  times, the verdict and the recovery — never an answer's body or a header. The transcript names each
+  drifted request and the verdict. An interrupted replay resumes (`ReconcileResume`): it sends reads to a
+  candidate nothing routes to and changes nothing but its own evidence. Preflight says what it will
+  hold the candidate to (`replay_before_cutover`, a pass) or that there is nothing to replay
+  (`replay_without_record`, a warning: no served domain, or no proxy for one). The run page draws the
+  report in the Verify stage (`run-replay.tsx`). It is not a load test: the latency rule compares one
+  pass over a cold candidate with what the ingress recorded, which includes the time to send the answer
+  to the visitor, so it catches a release that is several times slower, not one a few percent slower.
 - A managed route lets request bodies up to `runtime.maxRequestBodyMb` through (1–10240). Zero is each
   proxy's deployment default, which differs: nginx's own default is 1 MB, which refused a phone photo
   before the application saw it, so an nginx route always writes `client_max_body_size` (64 MB unless the
@@ -959,7 +1024,9 @@ only renderer/executor/validation authority for their feature.
   target. Apply/reload/verification failure restores, reloads and verifies that exact snapshot before a
   run may report recovery. The snapshot content is held only for compensation; persisted activation
   evidence carries its digest, not the configuration bytes. The rendered nginx route proxies each
-  request over a fresh upstream connection (no `upstream` block, so no upstream keepalive): under
+  request over a fresh upstream connection (no `upstream` block for one container, and a replicated
+  release's `upstream` block — `least_conn`, passive health, a 2-second connect timeout — carries no
+  `keepalive`, so no upstream keepalive either way): under
   sustained traffic in the high hundreds of requests a second the proxy's side of every closed
   connection sits in TIME_WAIT, its ephemeral ports run out after roughly half a minute, and every
   proxied request answers 502 until they drain. The cutover continuity test throttles its own
@@ -972,9 +1039,16 @@ only renderer/executor/validation authority for their feature.
 - Metric-gated rollback keeps the release a blue/green cutover replaced **warm** instead of removing
   it (`deploy/rollback_watch.go`, `rollback_executor.go`, `rollback_watcher.go`). `retire_previous`
   drains it as before, then — when the environment's terms allow, the environment is not a preview,
-  both releases are single containers and the host still has `max(256 MB, a tenth of its memory)`
-  available — records a window (`deploy_rollback_watches`, state `watching`) and the predecessor's
-  runtime `warm` in one leased transaction and only then `docker pause`s it. Paused rather than running:
+  both releases are the runtime owner's own containers rather than Compose stacks and the host still has
+  `max(256 MB, a tenth of its memory)` available (a canary's promotion is that cutover too) — records a window (`deploy_rollback_watches`, state
+  `watching`) and the predecessor's runtime `warm` in one leased transaction and only then `docker
+  pause`s it, every replica of it. With skew protection on (`runtime.skewProtection`,
+  [skew protection](canary-and-replicas.md#skew-protection)) it is kept **running** instead, since the
+  route still sends it the visitors it answered first: the window records `warm_running`, the watcher
+  resumes rather than pauses it, judges the new release on its own answers and counts the warm one's
+  (`warm_served_json`), and every end of the window takes it off the route before it is removed. A replicated warm release is one state (`warmStateOf`): any replica
+  gone is the release gone (`warm_lost`), one a Docker restart brought back running is paused again, and
+  resuming or removing it is every replica (`warmEach`). Paused rather than running:
   the old release must not keep running schedulers, consumers or writes against a schema the new release
   may have migrated, and a frozen process costs memory and nothing else; Docker counts it as not
   running, so "exactly one release running" still holds. The step's evidence says `warm.kept` with the
@@ -1032,6 +1106,25 @@ only renderer/executor/validation authority for their feature.
   keep are a deploy key's too (`jd status`, `jd rollback --instant`, `jd keep`); the terms stay a
   session's. The live proof is
   `TestLiveMetricGatedRollbackSwitchesBackToTheWarmRelease` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
+- **Scale to zero** ([sleep when idle](scale-to-zero.md), `deploy/sleep.go`): a plan's `runtime.sleep
+  {enabled, idleMinutes 5–1440 (15), wakeTimeoutSeconds 5–600 (60)}`, off by default and refused for a
+  Compose stack, host networking, a plan without a served domain, and a required `docker_health` or
+  `public_route` readiness check; the API also refuses it beside an enabled schedule that runs a
+  command in the container, and that schedule beside it. The `Sleeper` (after the engine, every minute)
+  stops the live container — not removed — once the route has served no request for the idle minutes,
+  read from the held request record, never while a run is queued or running, a warm release is watched,
+  the runtime was stopped by hand, or the wake is not listening; the stretch is a row of
+  `deploy_sleep_spans`, written before the route's `sleeping.on` switch and the stop. A release that
+  sleeps has a route that wakes it (`DeploymentRoute.Sleep`): a request meeting the switch, or the
+  application not answering, is held by the proxy while the dashboard — asked over a Unix socket only the
+  proxy reaches, answering only a peer that is nginx or Caddy — starts the container, waits for its own
+  readiness checks and answers with its address; the proxy then sends the request on as it came, or
+  serves the waking page past the hold (`min(wakeTimeoutSeconds, 30)`). Every run wakes a sleeping
+  environment at its first step (`endSleep`), a stop only ends the stretch. The idle decision, the sleep
+  and the wake are audited (`deploy.environment.idle`, `.sleep`, `.wake`) and are what the lifecycle
+  feed attributes the stop and the start to; the summary's `asleepSince` makes the project read Asleep
+  with Wake now (`POST …/sleep/wake`), the host's container alert reads it as fine and the availability
+  figure leaves it out. `GET …/environments/{env}/sleep` is the reading.
 - A failed build names its cause instead of `internal_error` and exec's `exit status 1`. `dockerx`
   reads buildx's plain progress as it streams (over `os.Pipe`s read to EOF, because a `StdoutPipe` is
   closed by `Wait` and dropped BuildKit's closing lines; once buildx has exited a read waits at most
@@ -1113,11 +1206,27 @@ only renderer/executor/validation authority for their feature.
   and outcome (`answered`, `kept`, `failed`, `unusable`, `unmasked`), never what was sent or answered.
   Nothing the answer says is applied. The live check against a real model is
   `TestLiveFailedBuildIsDiagnosedByARealModel` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
+- A deployment's environment can be asked about as a conversation from the overview's **Diagnose**:
+  `POST /deploy/{id}/assistant` (`service.control` and a session; `api/handlers_deploy_operator.go`,
+  the tools and prompt in `assistant/operator.go`). The same provider and budget answer it; it begins
+  knowing what the overview shows and reads more — runs, a run's transcript, the live containers' last
+  lines, usage and the sizing verdict, container events, host alerts (`system.admin`), the firewall's
+  rules for the deployment's ports, pending security updates — only through tools whose every call the
+  person allows or declines first, each bounded, read with the person's role and masked by the
+  diagnosis's masker. It proposes a restart, redeploy, rollback, instant rollback, the suggested
+  limits or a maintenance switch through `propose_action`, which runs nothing: the page draws a card,
+  and its press is the request the project's own button makes to that action's route, with its
+  capability, confirmation and audit. See [the deployment operator](operator.md).
 - Deploy and force-build resolve the current desired revision (force-build disables cache); redeploy and
   rollback clone only available immutable artifacts and traverse the same checks/cutover path (a clone
-  carries its target's own source identity and promotion provenance); promote takes a staging release's
+  carries its target's own source identity and promotion provenance; a rollback moves no data, and the
+  data step is separate: the rollback dialog can ask, once the rollback succeeds, for each linked
+  database restored as of the target release into a side copy — `POST …/releases/{release}/data-copies`
+  with `afterRunId` — never into production, see [data-aware rollback](data-aware-rollback.md)); promote takes a staging release's
   exact image with production's current plan and variables, builds nothing, and runs a deploy's steps from
-  `render_runtime` on, the migration rehearsal included ([staging and promotion](staging-promotion.md)); restart
+  `render_runtime` on, the migration rehearsal included — or, into staging, an administrator-approved pull
+  request preview's exact image with staging's plan and variables, refused into production
+  ([staging and promotion](staging-promotion.md)); restart
   stops and starts the existing live runtime without creating a release, then verifies the plan's
   readiness and smoke checks against that live release before recording it. Rollback, stop and restart use
   the destructive capability and ordinary confirmation, not a typed phrase; because stop and restart share
@@ -1217,8 +1326,9 @@ only renderer/executor/validation authority for their feature.
   Audited as `deploy.shared_variable.{create,update,reveal,delete}` with the scope and never the value. A
   project's shared variables go with the project when it is purged.
 - Store references (`deploy/secret_store_references.go`, connections in `internal/secretstore`, table
-  `deploy_secret_stores`) read a value from Vault, OpenBao, Infisical or Doppler as
-  `${{store.NAME/path#KEY}}` (`@N` pins a version). They resolve through the same graph, as secret
+  `deploy_secret_stores`) read a value from Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager or Azure
+  Key Vault as `${{store.NAME/path#KEY}}` (`@N` pins a version; for the last two the path is the secret's
+  name, the key is optional and the version is the store's own id or staging label). They resolve through the same graph, as secret
   literals, and only from a secret variable. A run reads every store it references at its first step
   (`resolve_source`, a rollback's `render_runtime`, a restart's `start_candidate`; never a stop's),
   fresh, keeps the values in memory for its own later steps, and fails as `secret_store_unreadable` in the
@@ -1278,6 +1388,13 @@ only renderer/executor/validation authority for their feature.
   `deploy.release.pin`) sets `deploy_releases.pinned`, which `ArtifactRetentionPlan` already reads: a
   pinned release survives a prune plan regardless of its age or rank among the environment's other
   releases.
+- **The data point.** When a release goes live, `activate` records, right after the pointer commits,
+  where each database the environment links stood (`deploy_release_data_points`, once per release and
+  database): the activation moment when the server's point-in-time archive reaches back that far, else
+  the newest backup run holding its dump, else none with the reason. It is read from the store alone and
+  never fails the activation. The release list carries `dataPoints` and `dataCopy {eligible, reason}`,
+  the comparison both releases' points and `changes.dataPoint`; the rest is
+  [data-aware rollback](data-aware-rollback.md).
 - Remote Git production branches default to monitoring after the first explicit deployment,
   including existing projects. The environment's [automatic deployment policy](git-policy.md) supplies
   manual-only mode and shared include/exclude filters for polling and push hooks. `GitWatcher` checks refs every five seconds
@@ -1346,13 +1463,18 @@ only renderer/executor/validation authority for their feature.
   "`system.admin`, session", a deploy key is admitted too, and every other session-only deployment route
   (reveals, saved credentials, secret-store connections, pull-request merge/comment and previews,
   schedules, alerts, channels, drains, adding and removing an environment, a route's maintenance and
-  error pages, the warm-release terms, the migration rehearsal's terms, the
+  error pages, the warm-release terms, the migration rehearsal's terms, a copy of a release's data —
+  asking for one, its address, keeping it longer, removing it and comparing it — the
   typed-phrase removals) stays a session's and answers it `session_required`. The operating verbs an
-  ordinary key already had are the deploy key's as well: `POST …/promote`,
+  ordinary key already had are the deploy key's as well: `POST …/promote` (a pull request preview's
+  image into staging too, which takes the administrator role the key carries; approving the preview's
+  commit stays a session's),
   `POST …/rollback-watch/rollback` and `…/keep`, `PUT …/maintenance` (who is let past is the
   configuration's `runtime.maintenance.bypassFrom`, applied by the next release), with the reads
   `GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/maintenance`,
-  `…/pages/{page}` and `…/rehearsal`; `GET /deploy/secret-stores`, an ordinary key's read, answers it
+  `…/pages/{page}`, `…/rehearsal`, `…/data-copies` (what each copy is of and until when, never its
+  sign-in) and `…/sizing`, and the fleet's `GET /deploy/sizing` narrowed to the key's deployments;
+  `GET /deploy/secret-stores`, an ordinary key's read, answers it
   `key_scope`, since the list carries each connection's address and sign-in fields and every
   deployment's variables that read a store, and the key cannot point a variable at one. Its writes are
   held to what a person in a session could not be refused: a generate or rotate answers it without
@@ -1373,7 +1495,9 @@ only renderer/executor/validation authority for their feature.
   reads a run's log lines after a sequence number, oldest first, with the run and its steps and
   `{next, more}` (`OrchestrationStore.RunTranscriptAfter`): what the stream route sends over its socket,
   for a client without one — `jd logs --follow` and `jd deploy --wait` poll it. The `jd` program itself
-  (`backend/cmd/jd`) is described in the README.
+  (`backend/cmd/jd`) is described in the README. Every route of this API is described as OpenAPI 3.1 at
+  `GET /deploy/openapi.json` (`.yaml`; `jd openapi`), generated from the router and the handlers' types
+  and kept honest by its tests — see [`../backend/deploy-api.md`](../backend/deploy-api.md).
 - Additional automation provider hooks verify each provider's exact raw-body signature before parsing and then fence
   event, repository, ref and delivery identity. The delivery row is reserved before preview or queue side
   effects, while legacy HMAC and scoped generic hooks retain their existing contracts. Environment branch/
@@ -1416,7 +1540,15 @@ only renderer/executor/validation authority for their feature.
   refuses it afterward without any extra check, and the trigger's next delivery for that pull request
   inserts an independent new `pending` row at its own revision — a rejection does not follow it. They start without
   inherited variables, linked databases or release tasks; container mounts become fresh preview volumes on
-  a dedicated bridge. Compose and host-access plans currently fail closed. PR close retires only owned
+  a dedicated bridge. A Compose stack is isolated service by service — every service on the preview's
+  bridge alone, its mounts on preview volumes (a read-only file of the commit itself excepted), no secret,
+  fixed name or published port but the public service's loopback one — and a stack whose service needs the
+  server itself, a compatibility Compose plan and other host-access plans fail closed ([Compose
+  previews](preview-isolation.md#compose-previews)). An environment can give its previews a
+  [database branch](preview-isolation.md#database-branches) of a database it links — the preview's own
+  copy, restored from the newest backup through the rehearsal's `prepareCopy` onto the preview's database
+  network with a password made for it, chosen columns masked in their shape, never for a fork, removed with
+  the preview — and the preview's `${{database.N…}}` resolves to it. PR close retires only owned
   resources and archives after successful cleanup. Reopening waits for cleanup and a new approval
   generation; closing cancels queued/build work. Startup quarantines older unsafe previews, stops owned
   containers without deleting data, withdraws routes, and blocks old releases from activation. Failed
@@ -1438,7 +1570,11 @@ only renderer/executor/validation authority for their feature.
   identity cached two minutes, listings 30 s, four gh subprocesses at a time). `GET /deploy/{id}/pull-requests`
   answers `{repository, host, available, reason?, identity?, checkoutPath?, pulls[] (each with its
   preview), previews[], production {environmentId, automatic, intervalSeconds, awaitingFirstDeployment},
-  tailnet, compose, localCheckout, internalPort, releaseTasks}` — `reason` is one of `not_github`,
+  tailnet, compose, composePreview?, databaseBranches, localCheckout, internalPort, releaseTasks}` —
+  `databaseBranches` are the databases production gives its previews a branch of, each preview carries its
+  `branches`, `composePreview` is a
+  Compose project's `{public, services[], refusals[]}` and a live Compose preview carries its `services`
+  as Docker reports them — `reason` is one of `not_github`,
   `sign_in_required`, `app_not_installed`, `not_installed`; `previews` lists the open ones and a closed
   one only while its newest `preview_remove` run has not succeeded; a read GitHub refuses answers an
   error (`429 github_rate_limited` for a quota refusal — a 429, or a 403 or gh's text saying rate limit,
@@ -1457,7 +1593,11 @@ only renderer/executor/validation authority for their feature.
   `title`, `head_revision`, `variables_copied_revision` and `deploy_variable_revisions.copied_from_environment`,
   all in `store.addedColumns`. The activation step publishes the tailnet address after the route is
   verified and before the release pointer moves (`TailnetPublisher`, `selfcfg.TailnetServe`; step codes
-  `tailnet_unavailable`, `preview_port_missing`, `tailnet_publish_failed`, `tailnet_withdraw_failed`),
+  `tailnet_unavailable`, `preview_port_missing`, `tailnet_publish_failed`, `tailnet_withdraw_failed`) —
+  to the address's front on loopback, never to the container, since the address is a port of the name
+  the dashboard is reached by and the front keeps the dashboard's session cookie from the pull
+  request's code ([the dashboard's session cookie](tailnet-apps.md#the-dashboards-session-cookie);
+  `tailnet_gate_failed` when the front cannot be written) —
   restores the predecessor's mapping on a failed activation while the predecessor runs and otherwise
   withdraws its own and marks the row unpublished (`tailnetRestored`), and withdraws it on removal
   (`addressWithdrawn`) — restore and removal touch only a mapping whose upstream the address row
@@ -1465,7 +1605,8 @@ only renderer/executor/validation authority for their feature.
   loopback mappings in the range the address table does not vouch for (a port no preview owns, or an
   owned port serving another upstream; an operator's directory or funnel is never turned off) and
   unpublishes addresses nothing serves, quietly when the serve config is unreadable and no published
-  tailnet address exists; `PreviewReconciler` reads every open preview's pull
+  tailnet address exists, and `FrontTailnetAddresses` then moves an address an earlier release mapped
+  straight to its container behind its front; `PreviewReconciler` reads every open preview's pull
   request once a minute and closes the preview only on a decoded closed or merged state, recording a
   moved head as out of date. All of it in [preview isolation](preview-isolation.md#previews-from-the-dashboard).
   Outbound notifications are delivered by engine run observers for every terminal outcome and for run
@@ -1483,7 +1624,20 @@ only renderer/executor/validation authority for their feature.
   OpenTelemetry (OTLP/HTTP), Loki or JSON-lines endpoint while they happen, through
   `logdrain.Manager`, started with the server: a follower per wanted container, a reader per wanted
   request record, and a bounded, retried, gzip-compressed queue per drain whose status the page shows.
-  See [log drains](log-drains.md).
+  An OTLP drain's `traces` stream sends each request again as a span to `/v1/traces`, under the W3C
+  trace the ingress now sends the application (`DeploymentRoute.Trace`: Caddy's `request_header` and
+  `log_append`, nginx's `proxy_set_header` and log fields), so the application's own spans join it.
+  See [log drains](log-drains.md) and [trace context](request-observability.md#trace-context).
+- Each release's image, and the base images its recipe pinned, is read for known vulnerabilities by
+  Trivy in a container with no network, no capabilities and nobody's account
+  (`imagescan.ScanSpec`), after the build and daily while it is live (`deploy.ImageScanWatcher`, a run
+  observer that never holds a run up). The vulnerability database is fetched by the dashboard itself,
+  checked against its digest and copied into the `jd-image-scan-db` volume. One row per release keeps
+  the counts by severity, the fixable findings, the database's age and whether each pinned base's tag
+  now names a newer digest — `ReleaseUpdate`'s registry read, compared with the digest the release
+  pinned. A fixable finding at the environment's floor with a newer base is the `image_vulnerable`
+  host alert and the overview's Rebuild, which is the runs route's own `force_build` of the live
+  commit. See [image vulnerabilities](image-vulnerabilities.md).
 - An AI client reaches the deployments over the MCP endpoint when its key was given them
   (`api_tokens.deploy_access`: none, `read`, `deploy`): it lists deployments, runs and releases,
   reads a run's transcript tail (`OrchestrationStore.RunTranscriptTail`, the stored and already
@@ -1586,8 +1740,9 @@ only renderer/executor/validation authority for their feature.
   unfiltered default response stays byte-identical to before these were added, apart from
   `currentStep` on a run that has not ended, which every read of the list now carries.
 - A blueprint deploys as an image release with reviewed defaults. `blueprint.DeploymentSupport`
-  decides per definition: game profiles, blueprints that ship configuration files, blueprints that
-  download an install-time artifact and UDP ports stay preview-only with a specific reason, exposed as
+  decides per definition: game profiles, install-time files (`write_file`), artifacts pinned by
+  checksum and UDP ports all deploy ([game servers](game-servers.md)); an artifact found through a
+  version source with no checksum stays preview-only with a specific reason, exposed as
   `deploymentSupported`/`unavailableReason` on the catalogue and detail responses and enforced by
   `DraftSourceConfig.ValidateForDeployment` at source save, preflight, commit, materialization, Git
   watching and queue admission (the stored source is re-validated, so a stale draft cannot enter the
@@ -1627,7 +1782,12 @@ only renderer/executor/validation authority for their feature.
   the operator links a job under Settings → Automation instead of a nightly `invalid_plan` failure. Preview
   volume names include a hash of the unnormalized name and blueprint id, Docker-socket mounts are linked
   and read-only, startup budgets use bounded retries, and Bedrock does not receive Java save commands.
-  UDP remains an explicit unsupported runtime protocol, never silently converted to TCP.
+  UDP is a runtime protocol only for a fixed, unrouted publication (`runtime.protocol: udp`, or
+  `tcp+udp` for one number on both, needs `hostPort` and refuses a domain), never silently converted
+  to TCP; a definition's direct primary
+  port is published on loopback until the operator chooses every interface, and its install files
+  and pinned artifacts become `runtime.seeds[]`, written into the managed volume by a helper before
+  the container starts (`runtime_seeds.go`, [game servers](game-servers.md)).
   HTTP tool templates use the web profile so their default candidate-first strategy is eligible.
   Retired definitions cannot create new projects; existing release operations retain their compatibility
   contract. The template chooser keeps its detail column during loading, displays retryable failures,
@@ -1648,10 +1808,16 @@ only renderer/executor/validation authority for their feature.
   next to a routed primary (Gitea's SSH, Syncthing's sync protocol) becomes an additional
   `runtime.ports[]` publication on its own number (see published ports below) instead of silently
   replacing the routed port; the primary always stays the one the proxy and the checks reach. The
-  catalogue ships 82 reviewed definitions, 77 of them offered (see "how the first sign-in works"
-  below for the five that are retired; 20 are the multi-service templates of the next item), every
+  catalogue ships 102 reviewed definitions, 97 of them offered (see "how the first sign-in works"
+  below for the five that are retired; 35 are the multi-service templates of the next item). The
+  three counts the competitive report quotes — built in, deployable, Compose — are constants in
+  `blueprint/catalogue_counts.go`, and `catalogue_counts_test.go` fails when the shipped
+  definitions disagree, so they are bumped deliberately in the change that adds a template. Every
   image reference resolved against its registry (`docker manifest inspect`) and every deployable one
-  started live: `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks` renders each single-image
+  started live. An image whose registry publishes no release tag (Excalidraw and BentoPDF on Docker
+  Hub ship only a moving `latest`) is pinned as `name:tag@sha256:…`, the content digest the
+  validator already admits, so the definition still names exactly one build; a newer build is a new
+  digest in the definition. The sweep: `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks` renders each single-image
   definition from its fixture inputs, pulls the image, starts it through the real runtime
   owner with generated secrets, runs the definition's own readiness checks against the published
   loopback port (Mongo Express with a catalogue MongoDB beside it) and removes what it pulled;
@@ -1711,8 +1877,8 @@ only renderer/executor/validation authority for their feature.
   states before the press what the stack does by itself: only the public service is reachable, the
   rest publish nothing on a network with no route out, each deploy stops the stack first, shared
   passwords are generated here, and a backup is a file copy of a running database rather than a dump.
-  Compose previews stay refused (`preview_isolation.go`); a template is not a Git source, so it is
-  never offered one. `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
+  A template is not a Git source, so it is never offered a pull-request preview, though a Compose
+  stack from a Git source is ([Compose previews](preview-isolation.md#compose-previews)). `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
   through the real build step and runtime owner and requires every check to pass, every service's
   healthcheck to report healthy, and only the public port to be published, on loopback.
 - **How the first sign-in works**, declared rather than described. Every definition carries an
@@ -1752,11 +1918,23 @@ only renderer/executor/validation authority for their feature.
   operation now).
 - Published ports. `runtime.ports[]` (`hostPort`, `containerPort`, `protocol` tcp/udp, optional
   `bindAddress`, every interface when empty) publishes container ports beside the routed one for
-  protocols a reverse proxy cannot carry. Validation bounds each, refuses a repeated host port per
+  protocols a reverse proxy cannot carry. The fixed primary itself may be UDP, or TCP and UDP on
+  one number (`runtime.protocol` `udp` or `tcp+udp`), published once per protocol on
+  `runtime.bindAddress`, and a published port clashes with it only within the same protocol. Validation bounds each, refuses a repeated host port per
   protocol (including the fixed `hostPort`) and refuses them with host networking; preflight observes
   each as a port conflict; a plan with any is stop-first only (`validateRuntimeActivationStrategy` and the
   preflight strategy finding); previews drop them; the release comparison lists them; the runtime owner
   maps each in addition to the leased routed port. The Domains settings show them as **Also published**.
+- Edge rules, rate limit and CrowdSec. `runtime.edgeRules[]` (ordered `{name, match, action}`;
+  the first rule a request meets decides), `runtime.rateLimit` (`{requests, per, burst}` per client
+  address) and `runtime.crowdSec` are the public route's, kept canonical by `canonicalConfiguration`
+  and validated by `validateRouteRules` with the other route rules (`runtime.edgeRules`,
+  `runtime.rateLimit` in a refusal); a tailnet-only environment refuses them. nginx renders maps and
+  first-match returns, `limit_req` with 429 and Retry-After, and a CrowdSec `geo` list; Caddy renders
+  named matchers each excluding the rules before it and the imported CrowdSec list, and has no
+  rate-limit module, so its limit is the host's gateway limit the Domains page offers. The request
+  record names the deciding rule (`er=` / `edge_rule`) and the requests summary counts each. See
+  [edge rules](edge-rules.md).
 - Password protection. `domains[].protection` (`username`, `password` on write, `hash` at rest) puts
   HTTP basic authentication in front of a deployment's public route without the application knowing.
   `sealDomainProtection` bcrypts the password once at the API boundary (configuration save and the draft
@@ -1843,6 +2021,17 @@ only renderer/executor/validation authority for their feature.
   **Require sign-in** offers the Proxy page's four presets (`lib/sso-providers.ts`), **Here and on
   previews** or **Previews only**, and names a password or plain-HTTP name the server would refuse before
   the save (`settings/route-access.ts`).
+- Tailnet-only environments. `runtime.tailnet` publishes an environment on this host's tailnet and
+  nowhere else, from the previews' own address range and table, with no public domain and no public
+  certificate; `runtime.tailnet.allow` (Tailscale logins and tags) makes the front every tailnet address
+  has a gate — nginx's `auth_request` or the dashboard's own loopback Caddy's `forward_auth` — that asks
+  `GET /api/v1/tailnet/whois` about every request, which asks tailscaled who holds the address it came
+  from. Previews and staging inherit the list. See [tailnet-only deployments](tailnet-apps.md).
+- The dashboard's session cookie stays the dashboard's. It is `__Host-jd_session`, which a browser
+  sends to no other name, so a preview domain or a deployment's own domain never sees it; a tailnet
+  address's front and a deployment route on the dashboard's own name (`JD_SITE`) take it out of the
+  request, since a browser sends a cookie to every port of its name
+  ([the dashboard's session cookie](tailnet-apps.md#the-dashboards-session-cookie)).
 - Maintenance and error pages. Maintenance is a switch beside the live route, not a plan field, so it
   applies at once and no release turns it on or off. Every route a release writes carries the check
   (`DeploymentRoute.Maintenance`, rendered on nginx as a Proxy site's maintenance behind
@@ -1909,6 +2098,9 @@ only renderer/executor/validation authority for their feature.
   NUL *before* it looks at whether a container is running. Player identities come from the server's own
   reply; a server whose reply cannot be parsed reports "not supported" rather than an empty list. The
   settings editor writes only keys the blueprint declares and retains unrelated raw lines and comments.
+  The console is RCON, which a definition declares as its `rcon` port: Bedrock has none, so its
+  console and player list say so (`consoleReason`, `409 console_unsupported`) instead of failing.
+  `JavaStatusHandshake` is the bounded Server List Ping the `game_handshake` check runs.
   Public reads include only declared editable properties, excluding RCON and plugin credentials. Parsing
   understands escaped separators, Unicode escapes and continued lines; duplicate declarations use the
   last value and edits update every duplicate. Changed values escape backslashes and numeric bounds
@@ -2008,6 +2200,16 @@ Caddy on loopback ports and a Pebble that validates nothing (`PEBBLE_VA_ALWAYS_V
 network; the certificate is issued, verified against Pebble's freshly minted root, reused on the second
 request, and served on a route whose chain verifies the same way — everything Let's Encrypt would do
 differently is the validation Pebble skipped and the roots browsers trust.
+
+A domain can instead be served through **Cloudflare Tunnel** (`domains[i].tunnel`): a host with no public
+address or open port runs Cloudflare's connector, cloudflared, as the managed container
+`just-dashboard-cloudflared`, connected from Proxy › Tunnel with a pasted token (sealed) or a tunnel
+created with the Cloudflare API token saved for DNS-01. Such a name skips the public-IP DNS precheck and
+the certificate step — Cloudflare terminates TLS — and the route serves it over plain HTTP on the
+private network the connector shares with the ingress; activation sets the tunnel's ingress rules and
+the name's proxied CNAME to `<tunnel>.cfargotunnel.com` before the public-route checks. The tunnel's
+health is cloudflared's own (its `/ready` and its log), and the host alert kind **Tunnel down** tells the
+channels when the connector loses the edge. See [Cloudflare Tunnel](cloudflare-tunnel.md).
 
 ## Deployment topology
 
@@ -2213,9 +2415,14 @@ variable snapshots; the list reads the settings drift of its newest run when tha
 so a variable given another scope counts, and goes by the plan revision alone for older rows, as the
 project header's and the fleet's Retry does), Cancel (never during activation or a rollback) and,
 under the release's own name, What changed in this release (a comparison with
-the release before it), Compare with live (a sheet), Roll back to this release (a retained release,
-through a two-step dialog that names the domains, draws the swap and says what a rollback does not
-restore) and Pin or Unpin. Older runs load on request through the `before` cursor. Runtime draws the
+the release before it, with each linked database's data point), Compare with live (a sheet), Roll back
+to this release (a retained release, through a two-step dialog that names the domains, draws the swap,
+says what a rollback does not restore and offers, off by default, the database as of that release in a
+side copy once the rollback is over), Restore data as of this release (a release with a restorable data
+point, `system.admin`) and Pin or Unpin. A release's row carries its data point as a tag, and the
+Data copies panel above the list holds the copies with their address, the comparison with the live
+database, Keep 1 more hour, Restore in place (a link to the database's own restore) and Remove now
+([data-aware rollback](data-aware-rollback.md)). Older runs load on request through the `before` cursor. Runtime draws the
 managed services as cards of their image's product, joined with Docker's container list, its stats
 every ten seconds and an hour of history, the volumes every five minutes (for sizes and which
 container uses one), the saved connections and the policy's backup job with its runs — every join

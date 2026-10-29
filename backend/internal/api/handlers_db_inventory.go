@@ -107,6 +107,10 @@ type inventoryResponse struct {
 	// to produce the list.
 	Detail    string    `json:"detail"`
 	CheckedAt time.Time `json:"checkedAt"`
+	// KernelProblems is, by instance key, a MongoDB 8 container found here
+	// that cannot start on this kernel as it is (inventoryKernelProblems);
+	// read for an administrator only, as the environment it is read from is.
+	KernelProblems map[string]*dbKernelProblem `json:"kernelProblems,omitempty"`
 }
 
 // handleDBInventory lists everything on this machine that holds a database.
@@ -147,6 +151,7 @@ func (s *Server) writeInventory(ctx context.Context, w http.ResponseWriter, deta
 	out := inventoryResponse{Instances: instances, Scans: kept.scans, Ignored: ignored, Detail: "reduced", CheckedAt: kept.at}
 	if detail {
 		out.Detail = "full"
+		out.KernelProblems = s.inventoryKernelProblems(ctx, instances)
 	}
 	httpx.JSON(w, http.StatusOK, out)
 	return nil

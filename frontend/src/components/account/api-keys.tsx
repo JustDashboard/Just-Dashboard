@@ -78,6 +78,7 @@ import {
   DEPLOY_KEY_CAN,
   DEPLOY_KEY_CANNOT,
   DEPLOY_KEY_HOST_RULE,
+  OPENAPI_DESCRIPTION,
   deployKeyBody,
   deployKeyReady,
   deployReach,
@@ -1143,7 +1144,18 @@ function CliDownload() {
       </a>{" "}
       from this dashboard; for anything else, build it from the repository with{" "}
       <span className="font-mono">go build ./cmd/jd</span> in{" "}
-      <span className="font-mono">backend</span>.
+      <span className="font-mono">backend</span>. Generate a client from the dashboard’s{" "}
+      {/* A new tab: following it here would leave the dialog that shows the
+          secret once. */}
+      <a
+        href={OPENAPI_DESCRIPTION}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-brand hover:underline"
+      >
+        OpenAPI description
+      </a>{" "}
+      of the deployment API.
     </FormNote>
   )
 }

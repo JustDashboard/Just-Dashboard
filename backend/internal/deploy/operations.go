@@ -42,6 +42,12 @@ type RuntimeService struct {
 	RestartCount int  `json:"restartCount,omitempty"`
 	ExitCode     *int `json:"exitCode,omitempty"`
 	OOMKilled    bool `json:"oomKilled,omitempty"`
+	// Replica is which of its release's containers this is, from 1, and
+	// Replicas how many the release runs; both are omitted for a release of
+	// one container, so a page can say "2 of 3 replicas healthy" from the
+	// labels alone.
+	Replica  int `json:"replica,omitempty"`
+	Replicas int `json:"replicas,omitempty"`
 }
 
 func ObserveRuntimeServices(ctx context.Context, owner RuntimeObserver, environmentID, liveReleaseID int64) RuntimeServices {
@@ -124,6 +130,7 @@ func observeRuntimeServices(ctx context.Context, owner RuntimeObserver, environm
 			Health: health, ImageID: item.ImageID, Stack: item.ComposeStack,
 			Service: item.ComposeSvc, StartedAt: item.StartedAt, Image: item.Image,
 			RestartCount: item.Restarts, ExitCode: item.Exited, OOMKilled: item.WasOOMKilled,
+			Replica: labelNumber(item.Labels[replicaLabel]), Replicas: labelNumber(item.Labels[replicasLabel]),
 		})
 	}
 	sort.Slice(result.Services, func(i, j int) bool {
@@ -133,4 +140,13 @@ func observeRuntimeServices(ctx context.Context, owner RuntimeObserver, environm
 		return result.Services[i].ContainerID < result.Services[j].ContainerID
 	})
 	return result
+}
+
+// labelNumber reads a small positive count a label carries, or zero.
+func labelNumber(value string) int {
+	number, err := strconv.Atoi(value)
+	if err != nil || number < 1 || number > MaxRuntimeReplicas {
+		return 0
+	}
+	return number
 }

@@ -93,10 +93,14 @@ A change that weakens any of these has to say so explicitly.
    configuration, source, Git policy, triggers, variables and shared variables — answered any API key
    with `403 session_required`. A deploy key reaches those writes; nothing else changed for any other
    key. The operating verbs beside a deploy that an ordinary key already had — promoting staging
-   (`POST …/promote`), the warm release's instant rollback and keep (`POST …/rollback-watch/rollback`,
-   `…/keep`) and the maintenance switch (`PUT …/maintenance`) — are the deploy key's as well, with
-   their reads (`GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/maintenance`,
-   `…/pages/{page}`, which is what every visitor is shown, and `…/rehearsal`, the terms alone). It
+   (`POST …/promote`, which also takes a pull request preview's approved image into staging for an
+   administrator, the role the key carries; approving the commit stays a session's), the warm
+   release's instant rollback and keep (`POST …/rollback-watch/rollback`,
+   `…/keep`), a canary's promote and abort (`POST …/canary/promote`, `…/canary/abort`) and the
+   maintenance switch (`PUT …/maintenance`) — are the deploy key's as well, with their reads
+   (`GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/canary`, `…/maintenance`,
+   `…/pages/{page}`, which is what every visitor is shown, `…/rehearsal`, the terms alone, and
+   `…/data-copies`, what each copy is of and until when, never its sign-in). It
    holds the administrator role (narrowed to its owner's now, like every key), and where it
    goes is decided once, before any other middleware of the route runs: `Authenticate`,
    `AuthenticateScoped` and `AuthenticateMCP` refuse it, and the feature group's
@@ -105,14 +109,23 @@ A change that weakens any of these has to say so explicitly.
    with and without its trailing slash, being one route; no two routes differ by the slash alone). A route without a line answers
    `key_scope`, so a route added later is refused until someone writes its line; a line marked
    session-only answers `session_required` with the reason. Admission is what lets the key past
-   `httpx.RequireSession` (`Principal.DeployRoute`), on that route and no other. What stays a
+   `httpx.RequireSession` (`Principal.DeployRoute`), on that route and no other. The API's own
+   description, `GET /deploy/openapi.json` and `.yaml`, is a static document any signed-in account
+   and any key read, a deploy key included; it derives each operation's security from this table and
+   from `RequireSession` in the route's chain, and a test walks both keys to check it
+   ([`../backend/deploy-api.md`](../backend/deploy-api.md)). What stays a
    session's whatever the key: every reveal (`…/variables/{name}/reveal`, shared variables, the legacy
    `…/env/reveal`), the saved registry and Git credentials (list, create, update, test and delete), the secret-store
    connections that hold credentials of their own (create, update, test and delete),
    the pull-request merge and comment that speak as the dashboard's GitHub account, preview approval,
    the removals that take a typed phrase (`DELETE /deploy/{id}/permanent`, `remove-managed` and its
    plan), the terms of the warm-release window (`PUT …/rollback-policy`) and of migration rehearsal
-   (`PUT …/rehearsal`, which chooses a database whose backup is restored), and a route's maintenance
+   (`PUT …/rehearsal`, which chooses a database whose backup is restored), a copy of a release's data
+   (asking for one, revealing its address, keeping it longer, removing it and comparing it: a second
+   copy of production's data whose address carries a password), what a linked database gives
+   previews and a preview's database branch restored again (`PUT …/database-links/{connection}/previews`,
+   `POST …/pull-requests/{number}/preview/branches/{connection}/refresh`: a second copy of production's
+   data next to a pull request's code), and a route's maintenance
    and error pages (`PUT …/pages/{page}`, files on the server beside the proxy's route). The
    secret-store list (`GET /deploy/secret-stores`), which an ordinary key reads, answers a deploy key
    `key_scope`: it carries each connection's address and sign-in fields and every deployment's
@@ -189,18 +202,44 @@ A change that weakens any of these has to say so explicitly.
    port no preview owns, or an owned port serving an upstream other than the recorded one. A directory,
    a funnel or any other target of the operator's is never touched, at start, on a failed activation or
    on removal, since restore and withdrawal act only on a mapping whose upstream the row recorded. See
-   [preview isolation](../deployments/preview-isolation.md#tailnet-only-addresses).
+   [preview isolation](../deployments/preview-isolation.md#tailnet-only-addresses). An environment whose
+   plan is tailnet-only is published the same way, from the same range and table. Every such mapping,
+   a preview's included, goes to the address's front instead of the container — its tailnet gate, when
+   the plan names who may open it — a route bound to `127.0.0.1` alone, on host nginx, or on the
+   dashboard's own Caddy on the host's network, which publishes nothing and binds every site to
+   loopback, so this exception gains no listener on a routable address
+   ([tailnet-only deployments](../deployments/tailnet-apps.md)). The front is also what keeps the
+   dashboard's session cookie from the application: the address is a port of the name the dashboard is
+   reached by, and a browser sends a cookie to every port of its name, so the front, and a deployment
+   route serving the dashboard's own name, take the dashboard's cookies out of the request
+   ([the dashboard's session cookie](../deployments/tailnet-apps.md#the-dashboards-session-cookie)).
    The second exception is Remote Desktop's stream bridge: on a server on a tailnet it publishes a
    block of 20 UDP ports from 40000 on the **tailnet address only**, for WebRTC
    ([Stream mode](../backend/remote-desktop.md#stream-mode)). Nothing is sent on them without a
    stream negotiated over the bridge's WebSocket, which is behind the dashboard's session, and no
    block is published on a server off a tailnet.
+   A game server's port is published on loopback like every other deployment publication; publishing
+   it on every interface, so players can join, is the operator's explicit choice of bind address under
+   the deployment's Runtime settings, warned about in preflight (`game_loopback_only`, `public_bind`)
+   and held to the firewall review, and admitting it through the firewall is the Firewall page's own
+   audited rule route ([game servers](../deployments/game-servers.md#ports-and-binds)).
    A database's port published from its Network page — on one of the host's own addresses, on every
    interface kept to a list, or to anywhere — is not the dashboard's socket either: it is the operator's
    explicit choice, in the destructive group and audited as `database.access.change`. A list is kept by
    the network module's gateway table, whose prerouting drop runs before Docker's translation, never by
    a host firewall rule that a published port's traffic does not meet
    ([databases](../backend/databases-proxy-platform.md)).
+   Scale to zero's wake ([sleep when idle](../deployments/scale-to-zero.md#the-wake-socket)) binds no
+   address at all: the proxy asks over a Unix socket beside host nginx's sites or inside the Docker Caddy
+   ingress's own `/config` volume, and the dashboard answers only a peer whose process is nginx or Caddy
+   (`SO_PEERCRED`). What it does — start an application asleep by design — is what any visitor's request
+   to the domain does.
+   A Cloudflare Tunnel's connector binds nothing at all: cloudflared runs as the managed container
+   `just-dashboard-cloudflared` (never a process on the host) with no published port, dials out to
+   Cloudflare's edge, and reaches the proxy over a Docker network only it and the ingress share; its
+   metrics answer on that network alone. Its token is sealed with `auth.Sealer` as it arrives, never
+   returned or logged, and handed to the container through the `docker` client's environment, never its
+   argv ([Cloudflare Tunnel](../deployments/cloudflare-tunnel.md)).
    `GET /security/boundary` reports both halves as observed — a dashboard socket other than Caddy's
    on a routable address, no Caddy on the configured port, or a preview port that is funnelled or
    serves anything but a loopback upstream is a broken boundary on the Security overview — but the
@@ -217,7 +256,12 @@ A change that weakens any of these has to say so explicitly.
    no "run this string" kind, and adding one would be adding a second request-defined shell by another
    name. No blueprint may ship a default credential, publish a database port, declare a stateful workload
    without persistence, download without https plus a size limit and a checksum or declared version
-   source, name an uncontained path, or take privilege without a written reason. A multi-service
+   source, name an uncontained path, or take privilege without a written reason. An install-time file
+   is written only inside a volume the definition declares, with generated secrets as references the
+   helper fills, and a download is deployable only when a checksum pins it: both are written by a
+   short-lived helper container that mounts that one volume (the release's own image for a file, a
+   digest-pinned fetch image for a download), never by a host shell or into a host path, and fetched
+   bytes are hashed by the dashboard and refused on a mismatch before anything starts. A multi-service
    (Compose) template publishes exactly one port — its public service's, on loopback — keeps every other
    service on private networks the ingress never joins (`internal: true`, with no route out unless the
    service declares egress), takes no privilege, device, host
@@ -241,6 +285,26 @@ A change that weakens any of these has to say so explicitly.
     changing the scope and unlinking are session-only in the browser (an API key is refused) and root-only at
     the terminal, the heartbeat is a fixed field set that names nothing on the machine below `operate`, and
     the installer never handles a link credential. See [account link](../backend/account-link.md).
+13. The deployment operator reads only with the person's leave and runs nothing itself. Its reads are a
+    closed set of tools held to their own fields and bounds (`assistant.OperatorCalls`; a call to
+    anything else refuses the whole answer), each run only after the person allows that call, with the
+    person's own role and masked by the run diagnosis's masker. Its actions are proposals: the server
+    checks one and the page draws a card, and only the person's press runs it — as the request the
+    project's own button makes to that action's existing route, under that route's capability,
+    confirmation and audit. There is no shell, no command the model writes and no other path from an
+    answer to the host, and the route is a session's. See [the deployment operator](../deployments/operator.md).
+
+14. A vulnerability scanner reads an image; it never reaches the host. `imagescan.ScanSpec` runs Trivy
+    with **no network** (`NetworkMode: none`), no capabilities, a read-only root, no new privileges and
+    as nobody (65534), and mounts only the image's `docker save` archive and the database volume
+    read-only plus its own report and scratch folders — never the Docker socket, a host path of the
+    operator's or a credential. What needs a network is done by the dashboard itself, not the scanner:
+    the database is fetched over https from its registry, checked against the digest its manifest
+    names, repacked so that only `db/trivy.db` and `db/metadata.json` reach the volume, and copied in
+    through a container that is created and never started; a base image is pulled by the daemon, by
+    digest, as a build pulls it. The scanner image is pinned by tag and index digest. Scanning changes
+    nothing a release runs: a rebuild is offered as the runs route's own `force_build`, gated and
+    audited as any build is. See [image vulnerabilities](../deployments/image-vulnerabilities.md).
 
 ## Invariant 2: what two-factor still guarantees
 

@@ -178,6 +178,36 @@ describe("the one press a found instance offers", () => {
     })
   })
 
+  test("a MongoDB this kernel keeps from starting is recreated with the mitigation, not started", () => {
+    const mongo = {
+      ...stopped,
+      engine: "mongodb",
+      driver: "mongodb",
+      flavor: "mongodb",
+      state: "restarting",
+      container: { id: "m1", name: "app-db", image: "mongo:8.0", dataVolumes: [] },
+    }
+    const problem = {
+      message: "MongoDB cannot start on this kernel; apply the mitigation",
+      detail: "MongoDB 8.0.34 refuses to start on Linux 7.0.0-1017-azure (MongoDB SERVER-121912).",
+      kernel: "7.0.0-1017-azure",
+      release: "8.0.34",
+      fixable: true,
+    }
+    expect(foundAction(mongo, false, problem)).toEqual({
+      kind: "kernel-mitigation",
+      container: "m1",
+      problem,
+    })
+    expect(foundActionWords(foundAction(mongo, false, problem), "app-db")).toEqual({
+      verb: "Apply the kernel mitigation to app-db",
+      word: "Apply mitigation",
+    })
+    // Compose's file has to say it, so the row offers what it would anyway.
+    expect(foundAction(mongo, false, { ...problem, fixable: false }).kind).toBe("look")
+    expect(foundAction({ ...mongo, state: "exited" }).kind).toBe("start-container")
+  })
+
   test("an engine with no driver links to the container or unit that runs it", () => {
     expect(foundAction(memcached)).toEqual({
       kind: "look",

@@ -101,6 +101,9 @@ type fleetEntry struct {
 	// LastBackup is when it was last backed up from here, by hand or by a
 	// backup job (lastBackup); nil for never.
 	LastBackup *time.Time `json:"lastBackup,omitempty"`
+	// KernelProblem is a MongoDB 8 server that cannot start on this kernel
+	// without the mitigation (mongoKernelProblem); absent otherwise.
+	KernelProblem *dbKernelProblem `json:"kernelProblem,omitempty"`
 }
 
 type fleetResponse struct {
@@ -203,6 +206,7 @@ func (s *Server) fillFleetEntry(ctx context.Context, view *dbHostView, e *fleetE
 		e.Unit = place.Unit.Name
 	}
 	e.LastBackup = s.lastBackup(conn, jobDumps)
+	e.KernelProblem = s.mongoKernelProblem(ctx, conn.Driver, place)
 	if place.Down != "" {
 		e.State = place.Down
 		// What it said it was the last time it answered still names it.

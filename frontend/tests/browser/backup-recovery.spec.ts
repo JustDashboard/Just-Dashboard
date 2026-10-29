@@ -366,6 +366,21 @@ test("a backup job dumps saved databases natively and a run restores one into a 
   ])
 })
 
+// A deployment's data-aware rollback hands the reader here with the dump a
+// release's data point names (`?run=&restore=`): that run's database restore
+// opens with the dump chosen, behind its own confirmation as ever.
+test("a release's data point opens the run's database restore with its dump", async ({ page }) => {
+  const api = await mockBackups(page, true)
+  await page.goto("/backups/5?run=8&restore=3")
+  const restore = page.getByRole("dialog", { name: "Restore a database from run 8" })
+  await expect(restore.getByRole("combobox", { name: "Database dump" })).toContainText("shop-db")
+  await restore.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(page.getByText(/replaces the contents of/)).toBeVisible()
+  await page.getByRole("button", { name: "Restore database", exact: true }).last().click()
+  await expect(page.getByText("Restored shop-db into shop", { exact: true })).toBeVisible()
+  expect(api.restores()).toEqual([{ body: { connectionId: 3 }, confirm: undefined }])
+})
+
 test("coverage lists what the server has and writes a job for an unprotected volume", async ({
   page,
 }) => {
