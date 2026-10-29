@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowRight, Globe, Key, LockClosed } from "@/components/icons"
+import { ArrowRight, Database, Globe, Key, LockClosed } from "@/components/icons"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { SidePanel } from "@/components/side-panel"
 import { Status, type DotTone } from "@/components/status-dot"
@@ -20,6 +20,7 @@ import type {
   ReleaseUpdateStatus,
 } from "@/lib/types"
 import { CHANGE_TONE, sentence, shortIdentity, shortRevision } from "@/components/deploy/vocabulary"
+import { dataPointChanges } from "@/components/deploy/data-rollback-model"
 
 const UPDATE_TEXT: Record<NonNullable<ReleaseUpdateStatus["state"]>, string> = {
   current: "The upstream tag still resolves to the digest this release pinned.",
@@ -153,6 +154,19 @@ export function ReleaseComparisonSheet({
         },
       ]
     : []
+  // Where each linked database stood when each release went live. A pair of
+  // releases neither of which recorded one has no section to speak of, rather
+  // than an "unchanged" one that would read as two equal points.
+  const points = comparison?.dataPoints
+  if (detail && points && (points.from.length > 0 || points.to.length > 0)) {
+    sections.push({
+      title: "Data point",
+      changes: listChanges(dataPointChanges(points.from, points.to), false).map((change) => ({
+        ...change,
+        mark: <Database aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />,
+      })),
+    })
+  }
   const changed = sections.filter((section) => section.changes.length > 0)
   const unchanged = sections.filter((section) => section.changes.length === 0)
 
@@ -161,7 +175,7 @@ export function ReleaseComparisonSheet({
       open={open}
       onOpenChange={onOpenChange}
       title="What changed"
-      description="Runtime, source, variables, dependencies, checks and domains compared between two releases."
+      description="Runtime, source, variables, dependencies, checks, domains and data points compared between two releases."
       width="lg"
       actions={
         comparison && (

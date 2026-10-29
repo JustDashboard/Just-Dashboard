@@ -49,6 +49,9 @@ func databaseURLConnectionIDs(variables map[string]string) ([]int64, error) {
 			continue
 		}
 		host := strings.ToLower(u.Hostname())
+		if dataCopyHostRE.MatchString(host) {
+			return nil, errors.New("a data copy is a throwaway removed when it expires, and production never runs against it: point the variable at the database itself, or restore the copy's point into it from the database's Backups page")
+		}
 		// The pooler's name is the database's with -pool, and joins the same
 		// network through the same binding.
 		id, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(host, "db-"), ".jd.internal"), "-pool"), 10, 64)
@@ -505,6 +508,14 @@ func (o *deploymentDatabaseNetworks) attachApplications(ctx context.Context, net
 		return err
 	}
 	for _, container := range containers {
+		// A rehearsal's copy and its task are on a network of their own with
+		// no way out, and joining them to this one would put production's
+		// database beside the copy under the same name; a data copy joined
+		// this network when it was made, under a name of its own. Neither is
+		// an application of the environment's.
+		if container.Labels[rehearsalLabel] != "" {
+			continue
+		}
 		detail, err := o.server.modules.docker.Inspect(ctx, container.ID)
 		if err != nil {
 			return err
@@ -566,6 +577,11 @@ func (o *deploymentDatabaseNetworks) RemoveRuntimeNetworks(ctx context.Context, 
 }
 
 func (o *deploymentDatabaseNetworks) removeRuntimeNetworks(ctx context.Context, environmentID int64, expectedNetworkID string) error {
+	// A copy of a release's data is an endpoint on this network that is no
+	// application's: it is a throwaway and goes first.
+	if err := o.server.modules.dataCopies.removeEnvironmentCopies(ctx, environmentID); err != nil {
+		return fmt.Errorf("the environment's data copies could not be removed: %w", err)
+	}
 	n, err := o.network(ctx, environmentID, false)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
