@@ -491,7 +491,8 @@ to the contribution terms above, including the additional licence grant to the p
   image restarts its server after initialising, five) from its container starting to accept a sign-in,
   and a failure reports the adopt route's last reply with the container's state and last log lines.
   MongoDB 8 refuses to start on Linux 6.19 and newer (MongoDB SERVER-121912, which a runner image can
-  move to); when its log says so, that subtest skips at once with the line instead of waiting.
+  move to); when its log says so, that subtest fails at once, naming the kernel and the line, instead of
+  waiting out its budget.
   Compose network integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
 - Changes to server TLS for the databases the dashboard starts (`api/database_tls*.go`, `internal/dbtls`,
   `dbx/servertls.go`) also run

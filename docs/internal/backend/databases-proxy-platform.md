@@ -3370,8 +3370,8 @@ created; the engine then has two minutes (MongoDB five) from its container start
 sign-in, and a failure reports the adopt route's last reply with the container's state and last log
 lines. MongoDB 8 refuses to start on Linux 6.19 and newer (MongoDB SERVER-121912). Provisioning checks
 the CPU (`deploy.MongoCPUUnsupported`) but not the kernel, so on such a host it starts a server that
-the `unless-stopped` policy restarts for ever; the fixture's MongoDB subtest skips at once with the
-engine's own line when it sees that, instead of waiting.
+the `unless-stopped` policy restarts for ever; the fixture's MongoDB subtest fails at once with the
+engine's own line and the kernel release when it sees that, instead of waiting out its budget.
 
 ## Proxy
 

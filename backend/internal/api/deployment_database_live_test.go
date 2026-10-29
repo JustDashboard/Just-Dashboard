@@ -81,10 +81,12 @@ func TestLiveDeploymentDatabaseConnection(t *testing.T) {
 					if engine == "mongodb" {
 						// Not a slow start: the server refuses to run here and the
 						// container restarts for ever, so waiting out the budget would
-						// only fail later with the same words in its log.
+						// only fail later with the same words in its log. It fails
+						// rather than skips: a required live fixture that does not run
+						// is a failure of the live job by design.
 						tail, _ := fixtureLogTail(s.modules.docker, name, 5)
 						if refusal := mongoKernelRefusal(tail); refusal != "" {
-							t.Skipf("mongodb: this host's kernel (%s) is one the MongoDB image refuses to start on, so there is no server to connect to: %s", hostKernelRelease(), clip(refusal, 300))
+							t.Fatalf("mongodb: this host's kernel (%s) is one the MongoDB image refuses to start on (MongoDB SERVER-121912), so there is no server to connect to and waiting longer cannot help: %s", hostKernelRelease(), clip(refusal, 300))
 						}
 					}
 				}
@@ -417,8 +419,9 @@ func fixtureLogTail(docker *dockerx.Client, name string, n int) ([]string, error
 // start on this host's kernel, or "" when none of the lines does. Linux 6.19
 // and newer crash its allocator on startup (MongoDB SERVER-121912), which a
 // runner image that moves to such a kernel turns into a container that
-// restarts for ever. Only that stated refusal is matched, so any other reason
-// the server does not come up still fails the subtest.
+// restarts for ever. Only that stated refusal is matched, so that the failure can
+// name it; any other reason the server does not come up is still reported when
+// the budget runs out.
 func mongoKernelRefusal(lines []string) string {
 	for _, line := range lines {
 		if strings.Contains(line, "MongoDB cannot start") && strings.Contains(line, "Linux kernel") &&
