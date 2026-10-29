@@ -24,6 +24,9 @@ describe("host alerts", () => {
       "exits, keeps restarting or turns unhealthy for 2 h",
     )
     expect(describeHostAlert("backup_failed", {})).toBe("the latest run of a backup job fails")
+    expect(describeHostAlert("tunnel_down", {})).toBe(
+      "holds no connection to Cloudflare's edge for 2 min",
+    )
     for (const kind of HOST_ALERT_KINDS) expect(HOST_ALERT_DEFAULTS[kind]).toBeDefined()
   })
 

@@ -238,6 +238,20 @@ route name and success only. Read-only verification does not reconnect networks.
 to one polling interval of interruption after container recreation; missing/replaced candidates require
 the normal deployment activation path. Network memberships remain available for other managed routes.
 
+## Cloudflare Tunnel
+
+A domain marked to be served through Cloudflare Tunnel ([the tunnel](cloudflare-tunnel.md)) is a
+`PlainHostnames` name on the route like any plain one: Caddy serves it over HTTP and does not redirect
+it, since Cloudflare's edge has already answered the visitor's HTTPS, and the release orders no
+certificate for it. The connector reaches the ingress over a network of its own,
+`just-dashboard-tunnel`, which the ingress is joined to (`caddyTunnelOrigin`; the manager's pass
+rejoins a recreated ingress within 30 seconds), and asks it by its container name,
+`http://just-dashboard-ingress:80`, with the visitor's `Host`. Nothing is published for it: the
+listener the tunnel uses is the ingress's port 80 inside Docker, not the host's.
+`JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesATunnelNamePlainToItsConnector -count=1 -v`
+asks a real Caddy for a tunnel's name from a container on the tunnel's network alone and gets the
+application over plain HTTP, while the HTTPS name on the same route still redirects.
+
 ## Boundaries and verification
 
 This adapter covers conventional Docker Caddy and Docker HTTP applications. Existing managed host

@@ -87,6 +87,10 @@ type NormalizedStepExecutor struct {
 	// dataPoints says where each linked database stands as a release goes
 	// live (data_rollback.go); nil records none.
 	dataPoints DataPointObserver
+
+	// tunnel routes a release's Cloudflare Tunnel domains as it goes live
+	// (tunnel.go); nil on a dashboard without the tunnel manager.
+	tunnel TunnelRouter
 }
 
 // WithRequestRecord attaches the request record the traffic replay reads

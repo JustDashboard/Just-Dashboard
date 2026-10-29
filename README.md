@@ -106,6 +106,8 @@ free.
 - Immutable releases, one-click rollback and health-gated cutover
 - Right-sizing from what each app actually used: the memory and CPU limits it should have, applied in one click
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
+- Domains served through Cloudflare Tunnel from a server with no public address or open port: the
+  connector runs as a container, and its routes and DNS records are set as each release goes live
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Migrations rehearsed on a throwaway copy of the database, restored from its backup, before production
 - Real recent requests replayed against a new release before traffic moves, so a page it broke stops it

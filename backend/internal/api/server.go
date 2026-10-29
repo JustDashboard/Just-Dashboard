@@ -336,6 +336,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// After the engine, so a window a restart interrupted is settled by a
 	// watcher that can already ask the engine for its rollback.
 	s.modules.rollbackWatcher.Start(ctx)
+	// The tunnel's connector and routes follow the deployments routed
+	// through it, so after the engine too.
+	s.modules.tunnel.Start(ctx)
 	// Copies waiting for a rollback read its run, and expired ones are
 	// removed whether or not anybody has the page open.
 	s.modules.dataCopies.Start(ctx)

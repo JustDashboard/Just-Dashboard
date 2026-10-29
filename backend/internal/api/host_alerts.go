@@ -39,6 +39,10 @@ const (
 	hostAlertDiskFilling   = "disk_filling"
 	hostAlertContainerDown = "container_down"
 	hostAlertBackupFailed  = "backup_failed"
+	// hostAlertTunnelDown is the Cloudflare Tunnel's connector not running,
+	// or running with no connection to Cloudflare's edge: every name routed
+	// through it unreachable.
+	hostAlertTunnelDown = "tunnel_down"
 
 	// A container down for a minute is most of a minute nobody was told.
 	// Every reading but Docker's is a query of what the store already holds.
@@ -48,6 +52,7 @@ const (
 
 var hostAlertKinds = []string{
 	hostAlertCPUHigh, hostAlertMemoryHigh, hostAlertDiskFilling, hostAlertContainerDown, hostAlertBackupFailed,
+	hostAlertTunnelDown,
 }
 
 // hostAlertSpec is one kind's line and timing: the default and range of its
@@ -77,6 +82,9 @@ var hostAlertSpecs = map[string]hostAlertSpec{
 	hostAlertContainerDown: {minutes: 2, minMinutes: 1, maxMinutes: 1440, passes: 2, hold: true},
 	// A failed run is a fact; one reading of it is the whole of it.
 	hostAlertBackupFailed: {passes: 1},
+	// A connector reconnects on its own after a blip of the edge, so two
+	// minutes down, read twice, before anybody is told.
+	hostAlertTunnelDown: {minutes: 2, minMinutes: 1, maxMinutes: 1440, passes: 2, hold: true},
 }
 
 // hostAlertClearLine is where a percentage must fall below before a firing
@@ -618,6 +626,8 @@ func hostAlertPage(kind, subject string) string {
 			return "/backups/" + id
 		}
 		return "/backups"
+	case hostAlertTunnelDown:
+		return "/proxy/tunnel"
 	}
 	return "/metrics"
 }
@@ -629,12 +639,14 @@ var hostAlertTestDetail = map[string]string{
 	hostAlertDiskFilling:   "93% of / is used (186.0 GB of 200.0 GB); the line is 90%.",
 	hostAlertContainerDown: "It exited with code 1.",
 	hostAlertBackupFailed:  "The run of nightly that started 2026-10-25 03:00 UTC failed: upload refused.",
+	hostAlertTunnelDown:    "The connector holds no connection to Cloudflare's edge. cloudflared said: Unauthorized: Invalid tunnel secret.",
 }
 
 var hostAlertTestLabel = map[string]string{
 	hostAlertDiskFilling:   "/",
 	hostAlertContainerDown: "example-api-1",
 	hostAlertBackupFailed:  "nightly",
+	hostAlertTunnelDown:    "production-tunnel",
 }
 
 // testState is what a test message is about: the rule's kind as it would

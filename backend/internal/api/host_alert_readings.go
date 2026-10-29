@@ -118,6 +118,8 @@ func (s *Server) observeHostAlerts(ctx context.Context, rules []hostAlertRule, n
 			}
 		case hostAlertContainerDown:
 			out[rule.ID] = containerAlertReading(rule, containers, containersRead)
+		case hostAlertTunnelDown:
+			out[rule.ID] = s.tunnelAlertReading(ctx)
 		case hostAlertBackupFailed:
 			if jobsErr != nil {
 				out[rule.ID] = unjudgedHostAlert("The backup jobs could not be read.")

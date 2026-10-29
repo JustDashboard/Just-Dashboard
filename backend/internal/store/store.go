@@ -22,7 +22,7 @@ type Store struct {
 // whether a pre-rename data directory should be adopted.
 const DatabaseFile = "vpsd.db"
 
-const schema = runDiagnosisSchema + rehearsalSchema + dataRollbackSchema + previewBranchSchema + rollbackWatchSchema + deployEventSchema + serverMapSchema + sharedVariableSchema + secretStoreSchema + passkeySchema + accountLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
+const schema = cloudflareTunnelSchema + runDiagnosisSchema + rehearsalSchema + dataRollbackSchema + previewBranchSchema + rollbackWatchSchema + deployEventSchema + serverMapSchema + sharedVariableSchema + secretStoreSchema + passkeySchema + accountLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 

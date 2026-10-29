@@ -410,7 +410,14 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesMaintenanceAndErrorPages -count=1 -v`
   and `go test ./internal/proxysvc -run TestLiveDeploymentRouteMaintenanceOnNginx`, which switch a real
   Caddy's and the host nginx's route by its file and ask each what a visitor, an address let past and a
-  stopped application get.
+  stopped application get. Changes to Cloudflare Tunnel (`internal/cftunnel`, `proxysvc/tunnel_origin.go`,
+  `deploy/tunnel.go`) also run, as root on a Docker host,
+  `JD_DEPLOY_LIVE=1 go test ./internal/cftunnel -run TestLiveConnectorReportsCloudflaredsOwnFailure -count=1 -v`,
+  which starts the pinned cloudflared with a well-formed token for a tunnel that does not exist and checks
+  that the dashboard reads its failure in cloudflared's own words (it needs outbound access to Cloudflare's
+  edge, and a real tunnel needs a Cloudflare account, which no test has), and
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesATunnelNamePlainToItsConnector -count=1 -v`,
+  which asks a real Caddy for a tunnel's name from the tunnel's network alone, as the connector does.
   This uses locked application fixtures and checks served build values, private install credentials,
   SvelteKit adapters, HTML/Containerfile defaults and Go command/version behavior, plus the catalogue's
   own starters: Astro, Nuxt, React Router, FastAPI (unpinned requirements, server auto-installed), a

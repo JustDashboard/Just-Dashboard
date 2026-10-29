@@ -9362,6 +9362,9 @@
           },
           "redirectTo": {
             "type": "string"
+          },
+          "tunnel": {
+            "type": "boolean"
           }
         },
         "title": "deploy.PlannedDomain",
@@ -15604,6 +15607,15 @@
             "description": "A hostname to check instead of deriving one.",
             "in": "query",
             "name": "hostname",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "1 to ask about the hostname as one served through Cloudflare Tunnel: no public-IP DNS check and no certificate here.",
+            "in": "query",
+            "name": "tunnel",
             "required": false,
             "schema": {
               "type": "string"

@@ -15,6 +15,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accountlink"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/cftunnel"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice"
@@ -130,6 +131,9 @@ type moduleSet struct {
 	// blocks records the remote addresses blocked from the connection table
 	// with why and until when, and lifts the ones that end.
 	blocks *netsec.Blocks
+	// tunnel is the Cloudflare Tunnel connection and its connector
+	// (cftunnel), the ingress a deployment's domain can be served through.
+	tunnel *cftunnel.Manager
 	// network changes the host's network: devices, routes, the gateway
 	// table, shaping, VPN and resolver. netsec keeps reading it for the
 	// posture; this is the half that writes.
@@ -377,7 +381,7 @@ func (s *Server) initModules() {
 		s.modules.proxy,
 	).WithFirewall(s.modules.netsec).WithDependencies(newDeploymentDependencyObserver(
 		s.Store, s.modules.backupStore, s.modules.docker,
-	).withExtensionProbe(s.databaseExtensions))
+	).withExtensionProbe(s.databaseExtensions)).WithTunnel(s.tunnelObserver())
 	s.modules.deployChecker = deploy.NewDeploymentChecker(
 		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,
 	)
@@ -417,7 +421,9 @@ func (s *Server) initModules() {
 		WithMigrationRehearser(s.modules.rehearser).
 		// And where each linked database stands is recorded as a release
 		// goes live, for a copy of its data as of that release later.
-		WithDataPoints(releaseDataFacts{server: s})
+		WithDataPoints(releaseDataFacts{server: s}).
+		// A release's Cloudflare Tunnel names are routed as it goes live.
+		WithTunnelRouter(s.tunnelRouter())
 	if s.modules.requests != nil {
 		// The traffic replay reads the same held record the Logs page and
 		// the rollback watch read, so what it replays is what the page shows.
@@ -469,6 +475,7 @@ func (s *Server) initModules() {
 	// a rollback through the same enqueue an operator's press takes.
 	s.modules.rollbackWatcher = deploy.NewRollbackWatcher(normalizedExecutor, s.modules.requests,
 		s.enqueueAutomaticRollback, s.auditRollbackWatch, s.Log)
+	s.modules.tunnel = s.newTunnelManager()
 	s.modules.dbAlerts = s.newDBAlerts()
 	s.modules.hostAlerts = s.newHostAlerts()
 	s.modules.deployGit = deploy.NewGitWatcher(s.modules.deployRuns, s.modules.deploySources, s.dispatchGitDeployment)

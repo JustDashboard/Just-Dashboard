@@ -60,7 +60,9 @@ func (e *NormalizedStepExecutor) provisionCertificate(
 	}
 	names := make([]string, 0, len(snapshot.Domains))
 	for _, domain := range snapshot.Domains {
-		if domain.HTTPS {
+		// Cloudflare terminates a tunnel's HTTPS; the route serves the name
+		// over plain HTTP to the connector, so there is nothing to issue.
+		if domain.HTTPS && !domain.Tunnel {
 			names = append(names, strings.ToLower(strings.TrimSpace(domain.Hostname)))
 		}
 	}
