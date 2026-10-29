@@ -104,6 +104,11 @@ type ContainerSpec struct {
 	TTY        bool `json:"tty,omitempty"`
 	OpenStdin  bool `json:"openStdin,omitempty"`
 	ReadOnly   bool `json:"readOnlyRootfs,omitempty"`
+	// NoNewPrivileges stops a process gaining privileges through a setuid
+	// binary. It is the dashboard's own, for helper containers it runs with
+	// nothing of the host's — never a request's, so it has no JSON name and a
+	// container read back has none.
+	NoNewPrivileges bool `json:"-"`
 
 	// Pull is "missing" (default) or "always". Always is what an operator
 	// means by "update it" and is the difference between redeploying and
@@ -495,6 +500,9 @@ func (s ContainerSpec) toEngine() (*container.Config, *container.HostConfig, *ne
 	if s.Init {
 		init := true
 		hostCfg.Init = &init
+	}
+	if s.NoNewPrivileges {
+		hostCfg.SecurityOpt = append(hostCfg.SecurityOpt, "no-new-privileges:true")
 	}
 	if s.Logging.Driver != "" || len(s.Logging.Options) != 0 {
 		hostCfg.LogConfig = container.LogConfig{

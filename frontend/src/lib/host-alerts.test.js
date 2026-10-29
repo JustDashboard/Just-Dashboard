@@ -24,6 +24,10 @@ describe("host alerts", () => {
       "exits, keeps restarting or turns unhealthy for 2 h",
     )
     expect(describeHostAlert("backup_failed", {})).toBe("the latest run of a backup job fails")
+    expect(describeHostAlert("image_vulnerable", {})).toBe(
+      "a live release's image has a fixable vulnerability and a newer base to rebuild on",
+    )
+    expect(hostAlertFields("image_vulnerable")).toEqual({ threshold: false, minutes: false })
     for (const kind of HOST_ALERT_KINDS) expect(HOST_ALERT_DEFAULTS[kind]).toBeDefined()
   })
 

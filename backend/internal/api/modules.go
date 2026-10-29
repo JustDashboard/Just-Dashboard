@@ -26,6 +26,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/githubapp"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/imagescan"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logdrain"
@@ -120,6 +121,12 @@ type moduleSet struct {
 	// and hostAlerts for the machine's own: CPU, memory, filesystems,
 	// containers and every backup job.
 	trafficAlerts *deploy.TrafficAlertEvaluator
+	// imageScans scans each release's image and its base images for known
+	// vulnerabilities after a build and daily while it is live; imageScanner
+	// is the scanner it runs, nil without Docker, which the panel reads its
+	// database's age from.
+	imageScans   *deploy.ImageScanWatcher
+	imageScanner *imagescan.Scanner
 	// rollbackWatcher reads every open warm-release window and rolls a
 	// release back, or removes the warm one, when the window says so.
 	rollbackWatcher *deploy.RollbackWatcher
@@ -461,8 +468,12 @@ func (s *Server) initModules() {
 	forges := deploy.NewForgeClient(s.modules.deployPlanning)
 	s.modules.commitStatuses = deploy.NewCommitStatusPublisher(s.modules.deployRuns, githubStatusPoster{app: s.modules.githubApp, github: s.modules.github}, s.dashboardEndpoint, s.Log).
 		WithForges(forges)
+	s.modules.imageScans = s.newImageScanWatcher()
 	s.modules.deployEngine.WithObservers(
 		notifications,
+		// A build's release is scanned for known vulnerabilities once it
+		// is live, in the background; the run never waits for it.
+		s.modules.imageScans,
 		s.modules.commitStatuses,
 		deploy.NewPullRequestCommenter(s.modules.deployRuns, s.modules.githubApp, s.dashboardEndpoint, s.Log).WithForges(forges),
 		// What a run read from the secret stores is held for its own steps
