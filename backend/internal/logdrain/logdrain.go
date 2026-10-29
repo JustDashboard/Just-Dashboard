@@ -30,10 +30,13 @@ const (
 	KindHTTP = "http"
 )
 
-// The two things a deployment says.
+// The things a drain copies: what a deployment says — its containers' output
+// and the requests its ingress served — and those same requests as trace
+// spans, which only an OpenTelemetry destination takes.
 const (
 	StreamOutput   = "output"
 	StreamRequests = "requests"
+	StreamTraces   = "traces"
 )
 
 var (
@@ -59,7 +62,11 @@ type Drain struct {
 	Streams  []string `json:"streams"`
 	// Projects narrows the drain to these projects; empty sends every
 	// project, including the ones created after the drain.
-	Projects    []int64   `json:"projects"`
+	Projects []int64 `json:"projects"`
+	// TraceURL is where the drain's service shows a trace, with {traceId}
+	// where the id goes: the link the request console draws beside a
+	// request's trace. Empty draws none.
+	TraceURL    string    `json:"traceUrl,omitempty"`
 	HeaderNames []string  `json:"headerNames"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
@@ -89,6 +96,7 @@ type Write struct {
 	Enabled  bool      `json:"enabled"`
 	Streams  []string  `json:"streams"`
 	Projects []int64   `json:"projects"`
+	TraceURL string    `json:"traceUrl,omitempty"`
 	Headers  *[]Header `json:"headers,omitempty"`
 }
 
@@ -146,6 +154,22 @@ func normalizeEndpoint(raw string, hasHeaders bool) (string, error) {
 	return parsed.String(), nil
 }
 
+// normalizeTraceURL checks the link a request's trace id is put into: an
+// http or https address with {traceId} in it, because the console draws it as
+// a link and a javascript: one would run in the dashboard's own page.
+func normalizeTraceURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(strings.ReplaceAll(raw, "{traceId}", "0"))
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.User != nil ||
+		!strings.Contains(raw, "{traceId}") || len(raw) > 1024 || strings.ContainsAny(raw, " \"'<>\x00\r\n") {
+		return "", fmt.Errorf("%w: the trace link is an http or https address with {traceId} where the id goes", ErrInvalid)
+	}
+	return raw, nil
+}
+
 func normalizeWrite(w *Write, existingHeaders []Header) ([]Header, error) {
 	w.Name = strings.TrimSpace(w.Name)
 	if !nameRe.MatchString(w.Name) {
@@ -156,18 +180,29 @@ func normalizeWrite(w *Write, existingHeaders []Header) ([]Header, error) {
 	}
 	streams := []string{}
 	for _, stream := range w.Streams {
-		if stream != StreamOutput && stream != StreamRequests {
-			return nil, fmt.Errorf("%w: a stream is output or requests", ErrInvalid)
+		if stream != StreamOutput && stream != StreamRequests && stream != StreamTraces {
+			return nil, fmt.Errorf("%w: a stream is output, requests or traces", ErrInvalid)
 		}
 		if !slices.Contains(streams, stream) {
 			streams = append(streams, stream)
 		}
 	}
 	if len(streams) == 0 {
-		return nil, fmt.Errorf("%w: choose container output, requests or both", ErrInvalid)
+		return nil, fmt.Errorf("%w: choose container output, requests, traces or several", ErrInvalid)
+	}
+	if slices.Contains(streams, StreamTraces) && w.Kind != KindOTLP {
+		return nil, fmt.Errorf("%w: traces are sent over OTLP; Loki and JSON lines take logs alone", ErrInvalid)
 	}
 	slices.Sort(streams)
 	w.Streams = streams
+	traceURL, err := normalizeTraceURL(w.TraceURL)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Contains(streams, StreamTraces) {
+		traceURL = ""
+	}
+	w.TraceURL = traceURL
 	projects := []int64{}
 	for _, id := range w.Projects {
 		if id <= 0 {
@@ -238,7 +273,7 @@ func (s *Store) open(sealed string) ([]Header, error) {
 	return config.Headers, nil
 }
 
-const drainColumns = `d.id, d.name, d.kind, d.endpoint, d.enabled, d.streams_json, d.projects_json, d.config_enc, d.created_at, d.updated_at,
+const drainColumns = `d.id, d.name, d.kind, d.endpoint, d.enabled, d.streams_json, d.projects_json, d.trace_url, d.config_enc, d.created_at, d.updated_at,
 	COALESCE(st.shipped, 0), COALESCE(st.dropped, 0), COALESCE(st.batches, 0), COALESCE(st.last_success_at, 0), COALESCE(st.last_error, ''), COALESCE(st.last_error_at, 0)`
 
 const drainFrom = ` FROM deploy_log_drains d LEFT JOIN deploy_log_drain_status st ON st.drain_id = d.id`
@@ -254,7 +289,7 @@ func (s *Store) scan(row interface{ Scan(...any) error }) (*drainRow, error) {
 	var enabled int
 	var streams, projects, sealed string
 	var created, updated, lastSuccess, lastErrorAt int64
-	if err := row.Scan(&out.ID, &out.Name, &out.Kind, &out.Endpoint, &enabled, &streams, &projects, &sealed, &created, &updated,
+	if err := row.Scan(&out.ID, &out.Name, &out.Kind, &out.Endpoint, &enabled, &streams, &projects, &out.TraceURL, &sealed, &created, &updated,
 		&out.Status.Shipped, &out.Status.Dropped, &out.Status.Batches, &lastSuccess, &out.Status.LastError, &lastErrorAt); err != nil {
 		return nil, err
 	}
@@ -348,8 +383,8 @@ func (s *Store) Create(ctx context.Context, w Write) (*Drain, error) {
 		return nil, err
 	}
 	now := s.now().UTC().Unix()
-	result, err := s.db.ExecContext(ctx, `INSERT INTO deploy_log_drains(name, kind, endpoint, enabled, streams_json, projects_json, config_enc, created_at, updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?)`, w.Name, w.Kind, w.Endpoint, boolInt(w.Enabled), mustJSON(w.Streams), mustJSON(w.Projects), sealed, now, now)
+	result, err := s.db.ExecContext(ctx, `INSERT INTO deploy_log_drains(name, kind, endpoint, enabled, streams_json, projects_json, trace_url, config_enc, created_at, updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?)`, w.Name, w.Kind, w.Endpoint, boolInt(w.Enabled), mustJSON(w.Streams), mustJSON(w.Projects), w.TraceURL, sealed, now, now)
 	if isUnique(err) {
 		return nil, ErrNameTaken
 	}
@@ -373,8 +408,8 @@ func (s *Store) Update(ctx context.Context, id int64, w Write) (*Drain, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE deploy_log_drains SET name=?, kind=?, endpoint=?, enabled=?, streams_json=?, projects_json=?, config_enc=?, updated_at=? WHERE id=?`,
-		w.Name, w.Kind, w.Endpoint, boolInt(w.Enabled), mustJSON(w.Streams), mustJSON(w.Projects), sealed, s.now().UTC().Unix(), id)
+	_, err = s.db.ExecContext(ctx, `UPDATE deploy_log_drains SET name=?, kind=?, endpoint=?, enabled=?, streams_json=?, projects_json=?, trace_url=?, config_enc=?, updated_at=? WHERE id=?`,
+		w.Name, w.Kind, w.Endpoint, boolInt(w.Enabled), mustJSON(w.Streams), mustJSON(w.Projects), w.TraceURL, sealed, s.now().UTC().Unix(), id)
 	if isUnique(err) {
 		return nil, ErrNameTaken
 	}

@@ -1574,7 +1574,10 @@ only renderer/executor/validation authority for their feature.
   OpenTelemetry (OTLP/HTTP), Loki or JSON-lines endpoint while they happen, through
   `logdrain.Manager`, started with the server: a follower per wanted container, a reader per wanted
   request record, and a bounded, retried, gzip-compressed queue per drain whose status the page shows.
-  See [log drains](log-drains.md).
+  An OTLP drain's `traces` stream sends each request again as a span to `/v1/traces`, under the W3C
+  trace the ingress now sends the application (`DeploymentRoute.Trace`: Caddy's `request_header` and
+  `log_append`, nginx's `proxy_set_header` and log fields), so the application's own spans join it.
+  See [log drains](log-drains.md) and [trace context](request-observability.md#trace-context).
 - An AI client reaches the deployments over the MCP endpoint when its key was given them
   (`api_tokens.deploy_access`: none, `read`, `deploy`): it lists deployments, runs and releases,
   reads a run's transcript tail (`OrchestrationStore.RunTranscriptTail`, the stored and already
