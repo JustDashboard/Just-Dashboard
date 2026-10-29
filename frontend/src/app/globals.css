@@ -1096,3 +1096,88 @@
   outline: 2px solid var(--ring);
   outline-offset: 1px;
 }
+
+/* The server map's wiring (components/map). Its shapes are Tailwind; these are
+ * the parts React Flow draws itself, and the three distances the canvas is
+ * read at.
+ *
+ * The ports are a workflow editor's: a line leaves a box from a round port
+ * on its right and arrives at a bar on its left, and what hangs under a box
+ * hangs from a diamond on its foot with the port's name beneath. A port with
+ * no line at it is not drawn. */
+[data-slot="server-map"] .react-flow__handle.map-port {
+  width: 10px;
+  height: 10px;
+  min-width: 0;
+  min-height: 0;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 9999px;
+  background: var(--card);
+  pointer-events: none;
+}
+[data-slot="server-map"] .react-flow__handle.map-port-in {
+  width: 6px;
+  height: 16px;
+  border-radius: 2px;
+}
+[data-slot="server-map"] .react-flow__handle.map-port-sub {
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+/* The diamond is the port's own ground, cut to shape: cutting the port
+ * itself would cut its name off with it. */
+[data-slot="server-map"] .react-flow__handle.map-port-sub::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--muted-foreground);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+[data-slot="server-map"] .react-flow__handle.map-port-off {
+  opacity: 0;
+}
+[data-slot="server-map"] .react-flow__node:focus-visible {
+  outline: none;
+}
+[data-slot="server-map"] .map-frame {
+  background: color-mix(in oklab, var(--card) 42%, transparent);
+}
+
+/* A name is held to a size that reads on the screen however far out the
+ * canvas is (`--map-name-floor`, whole pixels, written by the canvas as it
+ * zooms), never below the size it is set in (`--map-base`); a state's word
+ * follows a step behind. */
+[data-slot="server-map"] .map-name {
+  font-size: max(var(--map-base, 13px), var(--map-name-floor, 0px));
+  line-height: 1.3;
+}
+[data-slot="server-map"] .map-state {
+  font-size: max(11px, calc(var(--map-name-floor, 0px) * 0.8));
+}
+
+/* Mid: a box is its mark, its name and its state. Far: each system is its
+ * name across its frame, held to the screen, over the shapes of its boxes. */
+[data-slot="server-map"][data-zoom="mid"] .map-detail,
+[data-slot="server-map"][data-zoom="far"] .map-detail,
+[data-slot="server-map"][data-zoom="far"] .map-port-label {
+  visibility: hidden;
+}
+[data-slot="server-map"] .map-far-title {
+  display: none;
+}
+[data-slot="server-map"][data-zoom="far"] .map-far-title {
+  display: flex;
+}
+[data-slot="server-map"][data-zoom="far"] .react-flow__node:not(.react-flow__node-systemFrame) {
+  opacity: 0.5;
+}
+[data-slot="server-map"][data-zoom="far"] .map-frame-head {
+  visibility: hidden;
+}
+[data-slot="server-map"][data-zoom="far"] .map-frame {
+  border-color: var(--border);
+  background: color-mix(in oklab, var(--card) 70%, transparent);
+}
