@@ -494,7 +494,8 @@ to the contribution terms above, including the additional licence grant to the p
   MongoDB subtest checks that provisioning gave it that on such a kernel and nothing on any other, and
   fails at once, naming the kernel and MongoDB's line, if it still refuses; `mongodb-kernel-mitigation`
   applies the mitigation from the Databases page to a server made without it, on the runner's real
-  kernel when it is one of those and on a stopped server with the kernel read as 7.0.0 otherwise.
+  kernel when it is one of those, and otherwise on a server that is made to log MongoDB's refusal and
+  killed, with the kernel read as 7.0.0.
   Compose network integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
 - Changes to server TLS for the databases the dashboard starts (`api/database_tls*.go`, `internal/dbtls`,
   `dbx/servertls.go`) also run

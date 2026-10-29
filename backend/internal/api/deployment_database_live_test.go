@@ -413,23 +413,6 @@ func fixtureLogTail(docker *dockerx.Client, name string, n int) ([]string, error
 	return tail, nil
 }
 
-// mongoKernelRefusal returns the log line in which MongoDB 8 says it will not
-// start on this host's kernel, or "" when none of the lines does. Linux 6.19
-// and newer crash its allocator on startup (MongoDB SERVER-121912), which a
-// runner image that moves to such a kernel turns into a container that
-// restarts for ever. Only that stated refusal is matched, so that the failure can
-// name it; any other reason the server does not come up is still reported when
-// the budget runs out.
-func mongoKernelRefusal(lines []string) string {
-	for _, line := range lines {
-		if strings.Contains(line, "MongoDB cannot start") && strings.Contains(line, "Linux kernel") &&
-			strings.Contains(line, "incompatibility with this version of MongoDB") {
-			return strings.TrimSpace(line)
-		}
-	}
-	return ""
-}
-
 // assertMongoKernelMitigation holds the provision route to what this kernel
 // asks of MongoDB 8: on Linux 6.19 to 7.0.13 the container is started with
 // GLIBC_TUNABLES handing rseq to glibc and labelled with the kernel, and the

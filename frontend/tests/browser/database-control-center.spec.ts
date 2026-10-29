@@ -400,6 +400,11 @@ test.describe("the control center", () => {
     await expect(app.locator("[data-slot=fleet-error]")).toHaveText(problem.message)
     await expect(app.locator("[data-slot=fleet-error]")).toHaveAttribute("title", problem.detail)
     await expect(app).not.toContainText("connection refused")
+    // Only that card offers it, on its foot and in its menu.
+    await expect(page.getByRole("button", { name: /Apply the kernel mitigation/ })).toHaveCount(1)
+    await app.getByRole("button", { name: "Actions for app" }).click()
+    await expect(page.getByRole("menuitem", { name: "Apply kernel mitigation" })).toBeVisible()
+    await page.keyboard.press("Escape")
     await app.getByRole("button", { name: "Apply the kernel mitigation to app" }).click()
 
     // Asked first, in what it does, then carried out once.
@@ -409,12 +414,9 @@ test.describe("the control center", () => {
     await dialog.getByRole("button", { name: "Apply" }).click()
     await expect.poll(() => server.bodies("POST /databases/5/kernel-mitigation")).toEqual([{}])
     await expect(page.getByText("app was recreated with the kernel mitigation")).toBeVisible()
-
-    // Its menu offers the same, and no other card offers it at all.
-    await app.getByRole("button", { name: "Actions for app" }).click()
-    await expect(page.getByRole("menuitem", { name: "Apply kernel mitigation" })).toBeVisible()
-    await page.keyboard.press("Escape")
-    await expect(page.getByRole("button", { name: /Apply the kernel mitigation/ })).toHaveCount(1)
+    // And it says it is starting, not offering the fix again, until it answers.
+    await expect(app).toContainText("Starting…")
+    await expect(page.getByRole("button", { name: /Apply the kernel mitigation/ })).toHaveCount(0)
   })
 
   test("forty databases fit the page, as cards and as a table", async ({ page }) => {

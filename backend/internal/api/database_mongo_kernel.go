@@ -125,6 +125,38 @@ func mongoImageRelease(image string) string {
 	return tag
 }
 
+// mongoKernelRefusal returns the log line in which MongoDB 8 says it will not
+// start on this kernel, or "" when none of the lines does. Only that stated
+// refusal is matched: it is what tells a server this kernel keeps down from
+// one that is down for any other reason, and from one that is only between
+// two of Docker's attempts.
+func mongoKernelRefusal(lines []string) string {
+	for _, line := range lines {
+		if strings.Contains(line, "MongoDB cannot start") && strings.Contains(line, "Linux kernel") &&
+			strings.Contains(line, "incompatibility with this version of MongoDB") {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
+}
+
+// mongoKernelRefused reports whether a container's last log lines carry
+// mongoKernelRefusal. The entrypoint writes little after mongod exits, and a
+// server that started writes dozens of lines, so fifty hold the refusal of a
+// crash loop and push out one from before a start that worked.
+func (s *Server) mongoKernelRefused(ctx context.Context, id string) bool {
+	lines, closer, err := s.modules.docker.Logs(ctx, id, dockerx.LogOptions{Tail: "50"})
+	if err != nil {
+		return false
+	}
+	defer closer.Close()
+	tail := []string{}
+	for line := range lines {
+		tail = append(tail, line.Text)
+	}
+	return mongoKernelRefusal(tail) != ""
+}
+
 // dbKernelProblem is a MongoDB server that does not start on this kernel and
 // would with the mitigation, as the Databases page draws it.
 type dbKernelProblem struct {
@@ -139,25 +171,39 @@ type dbKernelProblem struct {
 	Fixable bool `json:"fixable"`
 }
 
-// mongoKernelProblem is what this kernel means for a connection's server:
-// nil unless it is a MongoDB 8 container here that is not running and whose
-// environment lacks the mitigation. A running one is left alone whatever it
-// carries, so a MongoDB release that learns to start on these kernels is
-// never told it cannot.
+// mongoKernelProblem is what this kernel means for a connection's server: nil
+// unless it is a MongoDB 8 container here whose environment lacks the
+// mitigation and whose log says, in MongoDB's words, that it cannot start on
+// this kernel (mongoKernelRefused). Docker's state is not asked: a crash loop
+// reads as running for the second of each attempt. And a MongoDB release that
+// learns to start on these kernels never says it, so it is never told.
 func (s *Server) mongoKernelProblem(ctx context.Context, driver dbx.Driver, place dbPlacement) *dbKernelProblem {
-	if driver != dbx.DriverMongo || s.modules.docker == nil || place.Container == nil || place.foreign ||
-		place.Container.State == "running" {
+	if driver != dbx.DriverMongo || place.Container == nil || place.foreign {
+		return nil
+	}
+	return s.mongoContainerKernelProblem(ctx, place.Container.ID)
+}
+
+// mongoContainerKernelProblem is mongoKernelProblem for one container: one
+// inspect on a kernel MongoDB 8 refuses, and its log only for a MongoDB 8
+// without the mitigation; nothing at all on any other kernel.
+func (s *Server) mongoContainerKernelProblem(ctx context.Context, id string) *dbKernelProblem {
+	if s.modules.docker == nil || id == "" {
 		return nil
 	}
 	kernel := s.hostKernel(ctx)
 	if !deploy.MongoKernelAffected(kernel) {
 		return nil
 	}
-	detail, err := s.modules.docker.Inspect(ctx, place.Container.ID)
+	detail, err := s.modules.docker.Inspect(ctx, id)
 	if err != nil {
 		return nil
 	}
-	return mongoKernelProblemOf(kernel, detail.Image, envMap(detail.Env), place.Container.ComposeProject)
+	problem := mongoKernelProblemOf(kernel, detail.Image, envMap(detail.Env), detail.ComposeStack)
+	if problem == nil || !s.mongoKernelRefused(ctx, detail.ID) {
+		return nil
+	}
+	return problem
 }
 
 func mongoKernelProblemOf(kernel, image string, env map[string]string, composeProject string) *dbKernelProblem {
@@ -336,29 +382,21 @@ func (s *Server) mitigateKernel(ctx context.Context, w http.ResponseWriter, r *h
 	return nil
 }
 
-// inventoryKernelProblems is, by instance key, mongoKernelProblem for each
-// MongoDB container discovery found here that no connection is made to and
-// that is not running: what Found on this server offers the fix on. Nil on a
-// kernel MongoDB 8 starts on, which is the only cost on every other machine.
+// inventoryKernelProblems is, by instance key, mongoContainerKernelProblem for
+// each MongoDB container discovery found here that no connection is made to:
+// what Found on this server offers the fix on. Nil on a kernel MongoDB 8
+// starts on, which costs every other machine one uname.
 func (s *Server) inventoryKernelProblems(ctx context.Context, instances []dbx.Instance) map[string]*dbKernelProblem {
-	if s.modules.docker == nil {
-		return nil
-	}
-	kernel := s.hostKernel(ctx)
-	if !deploy.MongoKernelAffected(kernel) {
+	if s.modules.docker == nil || !deploy.MongoKernelAffected(s.hostKernel(ctx)) {
 		return nil
 	}
 	out := map[string]*dbKernelProblem{}
 	for _, inst := range instances {
 		if inst.Kind != dbx.KindServer || inst.Driver != dbx.DriverMongo || inst.Container == nil ||
-			inst.Container.ID == "" || inst.State == dbx.StateRunning || len(inst.Connections) > 0 {
+			len(inst.Connections) > 0 {
 			continue
 		}
-		detail, err := s.modules.docker.Inspect(ctx, inst.Container.ID)
-		if err != nil {
-			continue
-		}
-		if problem := mongoKernelProblemOf(kernel, detail.Image, envMap(detail.Env), detail.ComposeStack); problem != nil {
+		if problem := s.mongoContainerKernelProblem(ctx, inst.Container.ID); problem != nil {
 			out[inst.Key] = problem
 		}
 	}

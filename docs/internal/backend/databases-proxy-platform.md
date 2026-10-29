@@ -300,10 +300,12 @@ tag floats only within that line's patch releases; Timescale is pinned to one re
   it. Every later recreate keeps both, since `SpecOf` carries the environment and labels. 7.0 and 6.0
   are started as they are. **A server that already exists** — made before this, or by hand — is offered
   the fix where it is drawn: the fleet's `kernelProblem` (`mongoKernelProblem`) is set for a MongoDB 8
-  container here that is not running and whose environment lacks the tunable (its release is the image's
-  `MONGO_VERSION`, else its tag), with the alert *MongoDB cannot start on this kernel; apply the
-  mitigation*, a sentence, and `fixable`. A running server is never told, so a MongoDB release that
-  learns to start on these kernels is left alone. One that no connection is made to — on such a kernel,
+  container here whose environment lacks the tunable (its release is the image's `MONGO_VERSION`, else
+  its tag) and whose last fifty log lines carry MongoDB's own refusal (`mongoKernelRefused`), with the
+  alert *MongoDB cannot start on this kernel; apply the mitigation*, a sentence, and `fixable`. Docker's
+  state is not the test: a crash loop reads as running for the second of each attempt, which on CI hid
+  the offer from one poll in two. A MongoDB release that learns to start on these kernels never logs
+  the refusal, so it is left alone. One that no connection is made to — on such a kernel,
   the one provisioning made before it knew, whose adopt never got an answer — is reported the same way
   by the inventory, for an administrator, as `kernelProblems` by instance key
   (`inventoryKernelProblems`, which reads nothing on any other kernel), and *Found on this server*
@@ -3425,8 +3427,10 @@ other kernel none of the three is there. If MongoDB still logs its kernel refusa
 once with that line, the kernel and the container's `GLIBC_TUNABLES`, because the mitigation has stopped
 working and waiting cannot help. Then `mongodb-kernel-mitigation` makes a MongoDB 8 server as
 provisioning did before it knew of the kernel (the template's image, environment, port and named
-volume, no tunable). On a kernel MongoDB 8 refuses it restarts for ever; on any other the subtest stops
-it and has the dashboard read its kernel as `7.0.0-1017-azure`. Either way the inventory must offer the
+volume, no tunable). On a kernel MongoDB 8 refuses it restarts for ever; on any other the subtest waits
+for it to start, writes the refusal line a runner logged into its output (as the `mongodb` user, the
+one that may open mongod's descriptors), kills it, and has the dashboard read its kernel as
+`7.0.0-1017-azure`. Either way the inventory must offer the
 mitigation while nothing is connected to it; then it is saved as a connection, the fleet must offer
 it, `POST /databases/{id}/kernel-mitigation` must bring the server up within two minutes on the same
 volume with the tunable, the label and its restart policy, and the fleet must then offer nothing.

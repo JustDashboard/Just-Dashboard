@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,11 +18,13 @@ import (
 // made one before it knew of the kernel — the template's image, environment,
 // published port and named volume, without the mitigation — and saved as a
 // connection. On a kernel MongoDB 8 refuses (a runner on Linux 7.0) it
-// restarts for ever, as it would on an operator's server; on any other the
-// subtest stops it and has the dashboard read its kernel as 7.0.0, so the same
-// path runs. The Databases page must offer the mitigation, applying it must
-// bring the server up on the same volume, and the offer must then be gone.
-// It runs from TestLiveDeploymentDatabaseConnection, which the live job runs.
+// restarts for ever, as it would on an operator's server. On any other, the
+// subtest writes MongoDB's refusal into the server's log, kills it, and has
+// the dashboard read its kernel as 7.0.0, so the same path runs. Found on this
+// server and then the Databases page must offer the mitigation, applying it
+// must bring the server up on the same volume, and the offer must then be
+// gone. It runs from TestLiveDeploymentDatabaseConnection, which the live job
+// runs.
 func liveMongoKernelMitigation(t *testing.T) {
 	s, router := dbTestRouter(t)
 	docker := dockerx.New("unix:///var/run/docker.sock")
@@ -31,7 +34,7 @@ func liveMongoKernelMitigation(t *testing.T) {
 	refuses := deploy.MongoKernelAffected(kernel)
 	if !refuses {
 		s.modules.kernelRelease = func(context.Context) (string, error) { return "7.0.0-1017-azure", nil }
-		t.Logf("Linux %s does not refuse MongoDB 8; the dashboard is told 7.0.0 and the server is stopped instead", kernel)
+		t.Logf("Linux %s does not refuse MongoDB 8; the dashboard is told 7.0.0 and the server says it refused", kernel)
 	}
 	name := fmt.Sprintf("jd-redesign-mongokernel-%d", time.Now().UnixNano())
 	volume := name + "-data"
@@ -78,8 +81,31 @@ func liveMongoKernelMitigation(t *testing.T) {
 				t.Fatalf("MongoDB 8 kept running without the mitigation on Linux %s, which it refuses: %s", kernel, describeFixtureContainer(docker, name))
 			}
 		}
-	} else if err := docker.Lifecycle(ctx, name, dockerx.ActionStop, nil); err != nil {
-		t.Fatal(err)
+	} else {
+		// The image's entrypoint runs a server to initialise the data and then
+		// the real one; written before the second has finished starting, the
+		// line would be pushed out of the tail the dashboard reads.
+		for deadline := time.Now().Add(time.Minute); ; time.Sleep(time.Second) {
+			tail, _ := fixtureLogTail(docker, name, 1000)
+			if strings.Count(strings.Join(tail, "\n"), `"mongod startup complete"`) >= 2 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("MongoDB did not finish starting: %s", describeFixtureContainer(docker, name))
+			}
+		}
+		// The line a runner on Linux 7.0 logged, written where mongod's own
+		// output goes, as mongod's own user (root may not open another
+		// account's descriptors without ptrace), then a kill, which writes
+		// nothing after it.
+		const refusal = `{"t":{"$date":"2026-10-29T04:18:06.566Z"},"s":"F",  "c":"CONTROL",  "id":12257600,"ctx":"main","msg":"MongoDB cannot start: Linux kernel versions 6.19 and newer has a known incompatibility with this version of MongoDB. See https://jira.mongodb.org/browse/SERVER-121912 for more information."}`
+		if code, err := docker.ExecStream(ctx, name, []string{"sh", "-c", `printf '%s\n' "$LINE" > /proc/1/fd/1`}, "mongodb",
+			[]string{"LINE=" + refusal}, func(dockerx.LogLine) {}); err != nil || code != 0 {
+			t.Fatalf("writing the refusal into the log: exit %d, %v", code, err)
+		}
+		if err := docker.Lifecycle(ctx, name, dockerx.ActionKill, nil); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// Not connected yet, as a server whose adopt never got an answer is not:
 	// Found on this server offers the fix.
