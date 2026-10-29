@@ -66,7 +66,8 @@ var protectedRoutesAllowed = []protectedRoute{
 	// The connection's own record. Editing it is how protection is taken off
 	// again; forgetting it, changing where its server is reachable from and
 	// what its container may use leave what is in the database alone, as
-	// starting and stopping it do.
+	// starting and stopping it do, and so does recreating it, on the same
+	// volumes, with what MongoDB 8 needs to start on this kernel.
 	{http.MethodPut, "", nil},
 	{http.MethodDelete, "", nil},
 	{http.MethodPut, "/access", nil},
@@ -75,6 +76,7 @@ var protectedRoutesAllowed = []protectedRoute{
 	{http.MethodPut, "/resources", nil},
 	{http.MethodPost, "/access/preview", nil},
 	{http.MethodPost, "/power", nil},
+	{http.MethodPost, "/kernel-mitigation", nil},
 	// A dump reads the database and writes a file on this machine. One made
 	// elsewhere and added to the list, and one deleted from it, are files on
 	// this machine too. Loading any of them back is a restore, which is not

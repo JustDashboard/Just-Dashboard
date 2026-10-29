@@ -143,7 +143,11 @@ proxy's page in `components/alerts/alert-parts.tsx`.
   stop (`EventLog.Covers`) and saw no kill — otherwise it is read as a stop that outlasted its grace
   period, because a false page is worse than a late one; any other code is a crash. A deploy's release
   task and a `compose run` container are one-shot by design and never subjects, a `paused` container
-  (a backup freezing its volumes) is fine, and a removed container leaves.
+  (a backup freezing its volumes) is fine, and a removed container leaves. A down container whose image
+  is MongoDB 8 (by its tag), on a kernel MongoDB 8 refuses (Linux 6.19 to 7.0.13) and without the
+  dashboard's mitigation label, has why added to its detail: MongoDB SERVER-121912 and that the
+  Databases page applies the fix (`mongoKernelAlertLine`; *MongoDB 8 and the kernel* in
+  [Databases](databases-proxy-platform.md)). It is the same kind, not a new one.
 - **Every backup job** — files, volumes and database dumps alike — is a `backup_failed` subject
   (`job:<id>`), judged by its newest finished run in the database alerts' own words (`judgeBackupJob`
   over `readAlertBackupJobs`, the reader both share): it stays failed until a run succeeds. A job an

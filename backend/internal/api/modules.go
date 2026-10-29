@@ -92,6 +92,9 @@ type moduleSet struct {
 	// onHost is what moves hostFiles: hostexec.InHostMounts, warning once
 	// when the namespace cannot be entered.
 	onHost func(fn func())
+	// kernelRelease reads the running kernel's release; nil is
+	// sysinfo.KernelRelease, and a test hands it the kernel it is about.
+	kernelRelease func(context.Context) (string, error)
 	// proxyExtras is the proxy pages' own state; see modules_proxy.go.
 	proxyExtras proxyExtras
 	// requests holds what every deployment's ingress and every proxy site
