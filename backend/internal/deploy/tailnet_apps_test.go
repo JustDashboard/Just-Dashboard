@@ -21,8 +21,10 @@ func tailnetOnlyPlan(allow ...string) RuntimePlanConfig {
 	return plan
 }
 
-// gateProxyFake is the proxy with the gate's half: it records the gates it
-// was asked for, verifies and removes them, and fails on request.
+// gateProxyFake is the proxy with the front's half: it records the fronts it
+// was asked for, verifies and removes them, and fails on request. Its
+// snapshot says whether a front of that name stood before, as the real one's
+// does, and a restore puts that back.
 type gateProxyFake struct {
 	countingActivationProxy
 	mu       sync.Mutex
@@ -31,17 +33,23 @@ type gateProxyFake struct {
 	removed  []string
 	restored []proxysvc.DeploymentRouteSnapshot
 	applyErr error
+	standing map[string]bool
 }
 
 func (p *gateProxyFake) ApplyTailnetGate(_ context.Context, route proxysvc.TailnetGateRoute) (proxysvc.DeploymentRouteResult, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.applied = append(p.applied, route)
-	result := proxysvc.DeploymentRouteResult{Snapshot: proxysvc.DeploymentRouteSnapshot{Name: route.Name, Driver: proxysvc.TailnetGateDriver, Version: 1}}
+	if p.standing == nil {
+		p.standing = map[string]bool{}
+	}
+	result := proxysvc.DeploymentRouteResult{Snapshot: proxysvc.DeploymentRouteSnapshot{
+		Name: route.Name, Driver: proxysvc.TailnetGateDriver, Version: 1, Existed: p.standing[route.Name]}}
 	if p.applyErr != nil {
 		result.Recovered = true
 		return result, p.applyErr
 	}
+	p.standing[route.Name] = true
 	result.Applied, result.Verified = true, true
 	return result, nil
 }
@@ -57,6 +65,7 @@ func (p *gateProxyFake) RemoveTailnetGate(_ context.Context, name string) error 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.removed = append(p.removed, name)
+	delete(p.standing, name)
 	return nil
 }
 
@@ -64,6 +73,10 @@ func (p *gateProxyFake) RestoreDeploymentRoute(_ context.Context, snapshot proxy
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.restored = append(p.restored, snapshot)
+	if p.standing == nil {
+		p.standing = map[string]bool{}
+	}
+	p.standing[snapshot.Name] = snapshot.Existed
 	return nil
 }
 
@@ -170,8 +183,9 @@ func TestAllocateTailnetAddressSharesThePreviewsRange(t *testing.T) {
 }
 
 // Without a list the environment is published as a preview is: its own port
-// of the tailnet, made at its first publish, mapped straight to the
-// container.
+// of the tailnet, made at its first publish, mapped to its front — which asks
+// nobody who they are, and keeps the dashboard's session cookie from the
+// container — and the front to the container.
 func TestActivatePublishesATailnetOnlyEnvironmentOnAPortOfItsOwn(t *testing.T) {
 	t.Parallel()
 	fixture := newReleaseStoreFixture(t)
@@ -184,22 +198,50 @@ func TestActivatePublishesATailnetOnlyEnvironmentOnAPortOfItsOwn(t *testing.T) {
 		store: fixture.runs, variables: fixture.variables, runtime: owner, tailnet: publisher, proxy: proxy,
 		tailnetProbe: func(context.Context, string) error { return nil },
 	}).WithTailnetGate("http://127.0.0.1:8080")
-	result := executor.activate(context.Background(), StepExecution{Run: *run, ClaimToken: lease.Token, Output: discardStepOutput{}}, nil)
+	output := &recordingStepOutput{}
+	result := executor.activate(context.Background(), StepExecution{Run: *run, ClaimToken: lease.Token, Output: output}, nil)
 	if result.State != StepPassed {
 		t.Fatalf("activate = %#v", result)
 	}
-	if got := publisher.published(); fmt.Sprint(got) != fmt.Sprint([]tailnetPublish{{21001, 32101, 0}}) {
-		t.Fatalf("publishes = %v", got)
+	want := proxysvc.TailnetGateRoute{Name: fmt.Sprintf("just-dashboard-env-%d.conf", fixture.envID), Listen: 21001, Upstream: "http://127.0.0.1:32101"}
+	if len(proxy.applied) != 1 || proxy.applied[0] != want || proxy.verified != 1 {
+		t.Fatalf("fronts = %+v verified %d", proxy.applied, proxy.verified)
+	}
+	if err := proxysvc.ValidateTailnetGate(proxy.applied[0]); err != nil {
+		t.Fatalf("the front activation asked for is not one the proxy writes: %v", err)
+	}
+	if got := publisher.published(); fmt.Sprint(got) != fmt.Sprint([]tailnetPublish{{21001, 21001, 0}}) {
+		t.Fatalf("publishes = %v, want the tailnet port mapped to the front", got)
 	}
 	address, err := fixture.runs.PreviewAddressFor(context.Background(), fixture.envID)
-	if err != nil || address == nil || address.Port != 21001 || !address.Published || address.UpstreamPort != 32101 {
+	if err != nil || address == nil || address.Port != 21001 || !address.Published || address.UpstreamPort != 21001 {
 		t.Fatalf("address = %#v %v", address, err)
 	}
-	if len(proxy.applied) != 0 || proxy.applyCalls != 0 || liveReleaseID(t, fixture) != release.Release.ID {
-		t.Fatalf("gates = %v routes = %d live = %d", proxy.applied, proxy.applyCalls, liveReleaseID(t, fixture))
+	if proxy.applyCalls != 0 || liveReleaseID(t, fixture) != release.Release.ID {
+		t.Fatalf("routes = %d live = %d", proxy.applyCalls, liveReleaseID(t, fixture))
+	}
+	evidence := decodeActivationEvidence(t, result)
+	if evidence.TailnetGate == nil || !evidence.TailnetGate.Verified || evidence.TailnetGate.Allowed != 0 {
+		t.Fatalf("evidence = %+v", evidence.TailnetGate)
+	}
+	if log := output.joined(); !strings.Contains(log, "keeps the dashboard's session cookie from it") {
+		t.Fatalf("transcript = %s", log)
 	}
 	if allow, err := fixture.runs.LiveTailnetAllow(context.Background(), fixture.envID); err != nil || allow != nil {
 		t.Fatalf("the whole tailnet is fenced by the tailnet, not a list: %v %v", allow, err)
+	}
+
+	// An executor without the proxy's half of a front publishes the
+	// address straight to the container, as before every address had one.
+	direct := newReleaseStoreFixture(t)
+	run, lease, _ = tailnetCandidateWithPlan(t, direct, 1, "tailnet-v1", 32101, tailnetOnlyPlan())
+	publisher = &tailnetPublisherFake{}
+	result = (&NormalizedStepExecutor{
+		store: direct.runs, variables: direct.variables, runtime: &orderingRuntimeOwner{running: map[string]bool{"tailnet-v1": true}, allowConcurrent: true},
+		tailnet: publisher, proxy: &countingActivationProxy{}, tailnetProbe: func(context.Context, string) error { return nil },
+	}).activate(context.Background(), StepExecution{Run: *run, ClaimToken: lease.Token, Output: discardStepOutput{}}, nil)
+	if result.State != StepPassed || fmt.Sprint(publisher.published()) != fmt.Sprint([]tailnetPublish{{21000, 32101, 0}}) {
+		t.Fatalf("without a front = %#v %v", result, publisher.published())
 	}
 }
 
@@ -299,8 +341,8 @@ func TestAnEnvironmentThatNamesItsVisitorsNeverGoesLiveWithoutItsGate(t *testing
 }
 
 // A release that is not tailnet-only, replacing one that was, takes the
-// environment's address away once it is live; a later release without the
-// list maps straight to the container and drops the gate.
+// environment's address away once it is live, and its front with it; a
+// release without the list replaces the gate with a front that asks nobody.
 func TestLeavingTheTailnetWithdrawsTheAddressOnceTheNextReleaseIsLive(t *testing.T) {
 	t.Parallel()
 	fixture := newReleaseStoreFixture(t)
@@ -324,16 +366,22 @@ func TestLeavingTheTailnetWithdrawsTheAddressOnceTheNextReleaseIsLive(t *testing
 
 	activate(1, "tailnet-v1", 32101, tailnetOnlyPlan("alice@example.com"))
 	activate(2, "tailnet-v2", 32102, tailnetOnlyPlan())
-	if got := publisher.published(); fmt.Sprint(got) != fmt.Sprint([]tailnetPublish{{21000, 21000, 0}, {21000, 32102, 21000}}) {
+	if got := publisher.published(); fmt.Sprint(got) != fmt.Sprint([]tailnetPublish{{21000, 21000, 0}, {21000, 21000, 21000}}) {
 		t.Fatalf("publishes = %v", got)
 	}
-	if !slices.Equal(proxy.removed, []string{name}) {
-		t.Fatalf("the gate a release without the list left behind = %v", proxy.removed)
+	if len(proxy.applied) != 2 || proxy.applied[0].Check == "" || proxy.applied[1].Check != "" || proxy.applied[1].Upstream != "http://127.0.0.1:32102" {
+		t.Fatalf("fronts = %+v", proxy.applied)
+	}
+	if len(proxy.removed) != 0 {
+		t.Fatalf("the front was taken away from a release that is still on the tailnet: %v", proxy.removed)
 	}
 
 	activate(3, "tailnet-v3", 32103, tailnetPreviewPlan())
 	if got := publisher.withdrawn(); fmt.Sprint(got) != "[21000]" {
 		t.Fatalf("withdraws = %v", got)
+	}
+	if !slices.Equal(proxy.removed, []string{name}) {
+		t.Fatalf("the front of an address that was withdrawn = %v", proxy.removed)
 	}
 	// The release that left was never published on the tailnet itself.
 	if got := publisher.published(); len(got) != 2 {
@@ -443,6 +491,68 @@ func TestAFailedGatedPublishPointsTheAddressBackAtTheGate(t *testing.T) {
 	}
 }
 
+// A release whose mapping cannot be moved points the address back at what
+// reached the release before it: the front, which the recovery has put back,
+// when that release was published through one, and its container when it was
+// published before every address had a front — whose recovery takes the
+// candidate's front away again rather than leaving one nothing points at.
+func TestAFailedFrontedPublishPointsTheAddressBackAtWhatReachedThePredecessor(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name     string
+		upgraded bool
+		want     []tailnetPublish
+	}{
+		{"a predecessor behind its front", true, []tailnetPublish{{21000, 21000, 0}, {21000, 21000, 21000}, {21000, 21000, 21000}}},
+		{"a predecessor published straight to its container", false, []tailnetPublish{{21000, 32101, 0}, {21000, 21000, 32101}, {21000, 32101, 32101}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newReleaseStoreFixture(t)
+			owner := &orderingRuntimeOwner{running: map[string]bool{"tailnet-v1": true, "tailnet-v2": true}, allowConcurrent: true}
+			publisher := &tailnetPublisherFake{}
+			proxy := &gateProxyFake{}
+			executor := func(proxy ActivationProxy) *NormalizedStepExecutor {
+				return (&NormalizedStepExecutor{
+					store: fixture.runs, variables: fixture.variables, runtime: owner, tailnet: publisher, proxy: proxy,
+					tailnetProbe: func(context.Context, string) error { return nil },
+				}).WithTailnetGate("http://127.0.0.1:8080")
+			}
+			first := ActivationProxy(&countingActivationProxy{})
+			if test.upgraded {
+				first = proxy
+			}
+			firstRun, firstLease, firstRelease := tailnetCandidateWithPlan(t, fixture, 1, "tailnet-v1", 32101, tailnetPreviewPlan())
+			insertPreviewAddress(t, fixture, 21000, 0, false)
+			if result := executor(first).activate(context.Background(), StepExecution{Run: *firstRun, ClaimToken: firstLease.Token, Output: discardStepOutput{}}, nil); result.State != StepPassed {
+				t.Fatalf("first = %#v", result)
+			}
+			fixture.finishActivatedRun(t, firstRun.ID, firstRelease.Release.ID, firstLease.Token)
+			fixture.now = fixture.now.Add(time.Minute)
+
+			secondRun, secondLease, _ := tailnetCandidateWithPlan(t, fixture, 2, "tailnet-v2", 32102, tailnetPreviewPlan())
+			publisher.failNext = true
+			result := executor(proxy).activate(context.Background(), StepExecution{Run: *secondRun, ClaimToken: secondLease.Token, Output: discardStepOutput{}}, nil)
+			if result.State != StepFailed || result.ErrorCode != "tailnet_publish_failed" || !result.Recovered {
+				t.Fatalf("second = %#v", result)
+			}
+			if got := publisher.published(); fmt.Sprint(got) != fmt.Sprint(test.want) {
+				t.Fatalf("publishes = %v, want %v", got, test.want)
+			}
+			if len(proxy.restored) != 1 || proxy.restored[0].Existed != test.upgraded {
+				t.Fatalf("the front before the candidate was not put back as it stood: %+v", proxy.restored)
+			}
+			address, err := fixture.runs.PreviewAddressFor(context.Background(), fixture.envID)
+			if err != nil || address == nil || !address.Published || address.UpstreamPort != test.want[2].Upstream {
+				t.Fatalf("address = %#v %v", address, err)
+			}
+			if liveReleaseID(t, fixture) != firstRelease.Release.ID {
+				t.Fatal("the first release is not live any more")
+			}
+		})
+	}
+}
+
 type gateHostFake struct{ PlanningProxy }
 
 func (gateHostFake) TailnetGateHost(context.Context) (string, bool, error) { return "caddy", true, nil }
@@ -517,5 +627,78 @@ func TestPreflightExplainsTheTailnetAddress(t *testing.T) {
 	request := preflightObservationRequest(&Draft{Data: DraftData{Source: &DraftSourceConfig{Kind: SourceImage}, Detection: &DetectionResult{}}}, plan)
 	if !request.Tailnet {
 		t.Fatal("preflight does not ask about the tailnet for a tailnet-only plan")
+	}
+}
+
+// An address published before every address had a front is moved behind one
+// when the dashboard starts: the front is written for the container the
+// mapping reaches, the mapping moves to it and is recorded. One whose front
+// cannot be written, or whose mapping cannot be moved, is left as it was,
+// with the front taken away again; and an address already behind its front
+// is not touched.
+func TestFrontTailnetAddressesMovesADirectMappingBehindItsFront(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name     string
+		applyErr error
+		failNext bool
+	}{
+		{name: "moved"},
+		{name: "a front that cannot be written", applyErr: errors.New("127.0.0.1:21000 is already in use")},
+		{name: "a mapping that cannot be moved", failNext: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newReleaseStoreFixture(t)
+			owner := &orderingRuntimeOwner{running: map[string]bool{"tailnet-v1": true}, allowConcurrent: true}
+			publisher := &tailnetPublisherFake{}
+			run, lease, release := tailnetCandidateWithPlan(t, fixture, 1, "tailnet-v1", 32101, tailnetPreviewPlan())
+			insertPreviewAddress(t, fixture, 21000, 0, false)
+			// Published the way an earlier release published it: straight to
+			// the container.
+			if result := (&NormalizedStepExecutor{
+				store: fixture.runs, variables: fixture.variables, runtime: owner, tailnet: publisher, proxy: &countingActivationProxy{},
+				tailnetProbe: func(context.Context, string) error { return nil },
+			}).activate(context.Background(), StepExecution{Run: *run, ClaimToken: lease.Token, Output: discardStepOutput{}}, nil); result.State != StepPassed {
+				t.Fatalf("activate = %#v", result)
+			}
+			fixture.finishActivatedRun(t, run.ID, release.Release.ID, lease.Token)
+
+			proxy := &gateProxyFake{applyErr: test.applyErr}
+			publisher.failNext = test.failNext
+			executor := &NormalizedStepExecutor{store: fixture.runs, tailnet: publisher, proxy: proxy}
+			fronting, err := executor.FrontTailnetAddresses(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			address, err := fixture.runs.PreviewAddressFor(context.Background(), fixture.envID)
+			if err != nil || address == nil || !address.Published {
+				t.Fatalf("address = %#v %v", address, err)
+			}
+			want := proxysvc.TailnetGateRoute{Name: fmt.Sprintf("just-dashboard-env-%d.conf", fixture.envID), Listen: 21000, Upstream: "http://127.0.0.1:32101"}
+			if len(proxy.applied) != 1 || proxy.applied[0] != want {
+				t.Fatalf("fronts = %+v", proxy.applied)
+			}
+			if test.name == "moved" {
+				if !slices.Equal(fronting.Fronted, []int64{fixture.envID}) || len(fronting.Failed) != 0 || address.UpstreamPort != 21000 {
+					t.Fatalf("fronting = %+v address = %#v", fronting, address)
+				}
+				if got := publisher.published(); fmt.Sprint(got) != fmt.Sprint([]tailnetPublish{{21000, 32101, 0}, {21000, 21000, 32101}}) {
+					t.Fatalf("publishes = %v", got)
+				}
+				// Behind its front now, so a second start leaves it be.
+				again, err := executor.FrontTailnetAddresses(context.Background())
+				if err != nil || len(again.Fronted) != 0 || len(again.Failed) != 0 || len(proxy.applied) != 1 {
+					t.Fatalf("second pass = %+v %v, fronts %d", again, err, len(proxy.applied))
+				}
+				return
+			}
+			if len(fronting.Fronted) != 0 || fronting.Failed[fixture.envID] == "" || address.UpstreamPort != 32101 {
+				t.Fatalf("fronting = %+v address = %#v", fronting, address)
+			}
+			if test.failNext && (len(proxy.restored) != 1 || proxy.restored[0].Existed) {
+				t.Fatalf("the front was not taken away again: %+v", proxy.restored)
+			}
+		})
 	}
 }
