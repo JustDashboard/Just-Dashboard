@@ -389,9 +389,7 @@ func (s *Server) handleDeploymentNotificationEnabled(w http.ResponseWriter, r *h
 	if err != nil {
 		return err
 	}
-	var req struct {
-		Enabled bool `json:"enabled"`
-	}
+	var req enabledRequest
 	if err = httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}

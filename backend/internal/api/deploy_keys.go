@@ -105,6 +105,8 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	// The fleet and the catalogue.
 	"GET /deploy/":                                   keyOpen, // narrowed to the key's deployments by the handler
 	"GET /deploy/hostname":                           keyOpen,
+	"GET /deploy/openapi.json":                       keyOpen, // the description of this API, static
+	"GET /deploy/openapi.yaml":                       keyOpen,
 	"GET /deploy/blueprints/":                        keyOpen,
 	"GET /deploy/blueprints/{id}":                    keyOpen,
 	"GET /deploy/blueprints/{id}/versions":           keyOpen,

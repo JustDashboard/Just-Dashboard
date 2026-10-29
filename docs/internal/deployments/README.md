@@ -22,3 +22,4 @@
 - [`third-pass-plan.md`](../../audits/2026-09-16-deployments/third-pass-plan.md) — third-pass review: defects D10–D16, blueprint deployment, native database dumps, delivery insights, notification retries, and evidence.
 - [`2026-09-16 deployment audit`](../../audits/2026-09-16-deployments/README.md) — point-in-time capability map, fresh test evidence, confirmed gaps, competitor comparison, and prioritized acceptance criteria.
 - [`permanent-deletion.md`](permanent-deletion.md) — archived record deletion and resource-retention contract.
+- [`../backend/deploy-api.md`](../backend/deploy-api.md) — the OpenAPI 3.1 description of every deployment route: how it is generated, served and kept honest, and how to regenerate the committed copy.

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/agent"
@@ -22,6 +23,10 @@ import (
 // (no Docker socket, no systemd) degrades to a clear error on its own routes
 // instead of preventing the dashboard from starting.
 type Server struct {
+	// deployOpenAPI is the description of the deployment API, read off the
+	// router Routes returns the first time it is asked for (deploy_openapi.go).
+	deployOpenAPI atomic.Pointer[deployOpenAPISource]
+
 	Cfg         *config.Config
 	Log         *slog.Logger
 	Store       *store.Store

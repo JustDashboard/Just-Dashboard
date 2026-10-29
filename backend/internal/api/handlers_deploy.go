@@ -38,6 +38,11 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		})
 		r.Method(http.MethodGet, "/", s.handle(s.handleDeployList))
 		r.Method(http.MethodGet, "/hostname", s.handle(s.handleDeploymentHostname))
+		// The OpenAPI description of this API (deploy_openapi.go): static,
+		// for any signed-in account and any key, and registered before /{id}
+		// for the reason /hostname is.
+		r.Method(http.MethodGet, "/openapi.json", s.handle(s.handleDeployOpenAPIJSON))
+		r.Method(http.MethodGet, "/openapi.yaml", s.handle(s.handleDeployOpenAPIYAML))
 		// Static, and registered before /{id} for the same reason /hostname
 		// is: chi prefers the literal segment, so the fleet's counts never
 		// read as a project called "pull-requests".
@@ -364,12 +369,6 @@ func (s *Server) handleDeployList(w http.ResponseWriter, r *http.Request) error 
 		facts, err := s.modules.deployRuns.ArchivedDeploymentFacts(r.Context())
 		if err != nil {
 			return httpx.Internal(err)
-		}
-		// Each row carries what it deployed beside the project record, so the
-		// archived list can draw it as that product without a read per row.
-		type archivedDeployment struct {
-			*deploy.Project
-			deploy.DeploymentFacts
 		}
 		archived := make([]archivedDeployment, 0)
 		for _, p := range projects {
@@ -1606,4 +1605,11 @@ func (s *Server) handleDeployPurge(w http.ResponseWriter, r *http.Request) error
 	httpx.SetAudit(r, "deploy.project.purge", project.Name, map[string]any{"deploymentId": id, "resourcesRemoved": false})
 	httpx.NoContent(w)
 	return nil
+}
+
+// Each row carries what it deployed beside the project record, so the
+// archived list can draw it as that product without a read per row.
+type archivedDeployment struct {
+	*deploy.Project
+	deploy.DeploymentFacts
 }

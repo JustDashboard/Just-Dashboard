@@ -37,6 +37,7 @@ Getting started
   login URL --key KEY           Check a key against the dashboard and remember both (--key - reads stdin)
   logout                        Forget the stored URL and key
   version                       Print jd's version
+  openapi [--yaml]              Print the dashboard's OpenAPI description of the deployment API
 
 Deployments
   deployments [ls]              List deployments with their health and last run
@@ -188,6 +189,8 @@ func (a *app) dispatch(command string, pre, rest, words []string) error {
 		return a.login(words)
 	case "logout":
 		return a.logout(words)
+	case "openapi":
+		return a.openapi(words)
 	case "deployments", "deployment", "ls":
 		return a.deployments(words)
 	case "deploy":

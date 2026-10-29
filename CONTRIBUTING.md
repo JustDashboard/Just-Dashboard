@@ -73,6 +73,10 @@ to the contribution terms above, including the additional licence grant to the p
   an explicitly managed frontend on another port when worktrees run alongside one another.
   Set `JD_BROWSER_WORKERS=1` to limit the selected browser run on a memory-constrained host; omit
   it to use the existing Playwright worker setting.
+- A change to a deployment route, to a type a deployment handler decodes or encodes, or to the
+  tables in `api/deploy_openapi.go` also regenerates the committed OpenAPI description, which a test
+  holds to the build: `cd backend && JD_UPDATE_OPENAPI=1 go test ./internal/api -run TestTheCommittedDeployOpenAPIDescriptionIsCurrent`,
+  then commit `docs/api/deploy-openapi.json` ([how it is generated](docs/internal/backend/deploy-api.md)).
 - Docker remedy changes run the live resource/policy acceptance: first make `alpine:3.20` available
   locally, then run from `backend/`:
   `JD_ADVISOR_DOCKER_LIVE=1 go test ./internal/dockerx -run '^TestLiveAdvisor' -count=1 -v`.

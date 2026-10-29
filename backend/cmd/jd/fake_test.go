@@ -61,6 +61,13 @@ func newFake(t *testing.T) *fakeDashboard {
 	return f
 }
 
+// The description the fake serves: enough of a document to tell it came
+// through unchanged.
+var (
+	fakeOpenAPIJSON = []byte(`{"openapi":"3.1.0","info":{"title":"Just Dashboard deployment API","version":"0.0.0"},"paths":{}}` + "\n")
+	fakeOpenAPIYAML = []byte("\"openapi\": \"3.1.0\"\n\"paths\": {}\n")
+)
+
 func digestOf(value string) string {
 	sum := sha256.Sum256(append([]byte(value), 0))
 	return "sha256:" + hex.EncodeToString(sum[:])
@@ -127,6 +134,12 @@ func (f *fakeDashboard) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case route == "GET /api/v1/deploy/" && r.URL.Query().Get("view") == "fleet":
 		f.write(w, 200, f.fleetBody)
+	case route == "GET /api/v1/deploy/openapi.json":
+		f.write(w, 200, fakeOpenAPIJSON)
+	case route == "GET /api/v1/deploy/openapi.yaml":
+		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+		w.WriteHeader(200)
+		w.Write(fakeOpenAPIYAML)
 	case route == "GET "+env+"/configuration":
 		f.write(w, 200, map[string]any{"revision": f.revision, "build": map[string]any{"method": "image"},
 			"runtime":   map[string]any{"image": "nginx:1.27-alpine", "internalPort": 80, "strategy": "stop_first"},
