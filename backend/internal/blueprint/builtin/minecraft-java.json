@@ -9,18 +9,18 @@
   "docsUrl": "https://docker-minecraft-server.readthedocs.io/en/latest/",
   "access": {
     "kind": "open",
-    "note": "A Minecraft server has no web sign-in: players join with the Java Edition client at your host on port 25565. As shipped the whitelist is off and nobody is a server operator, so any Mojang-authenticated account that learns the address can join and build in your world."
+    "note": "A Minecraft server has no web sign-in: players join with the Java Edition client at your host on port 25565. The port is published on loopback until you choose every interface under Runtime and allow it through the firewall. As shipped the whitelist is off and nobody is a server operator, so any Mojang-authenticated account that learns the address can join and build in your world."
   },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "Apache-2.0",
     "upstreamUrl": "https://github.com/itzg/docker-minecraft-server",
-    "reviewedAt": "2026-09-22",
-    "minimumDashboard": "0.6.7",
-    "updateNotes": "The image is pinned; the Minecraft server build is resolved at deployment from the upstream version API and recorded on the release."
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2",
+    "updateNotes": "The image is pinned to its Java 25 build, which current Minecraft releases need (26.x is compiled for Java 25 and will not start on Java 21); the server build itself is resolved at deployment from the upstream version API and recorded on the release."
   },
   "image": {
-    "reference": "itzg/minecraft-server:2026.9.1-java21",
+    "reference": "itzg/minecraft-server:2026.9.1-java25",
     "tagPolicy": "pinned",
     "pullPolicy": "missing"
   },
@@ -81,9 +81,8 @@
       "kind": "text",
       "label": "Server name",
       "default": "A Minecraft Server",
-      "variable": "MOTD",
       "pattern": "^[^\\x00-\\x1f]{1,59}$",
-      "description": "The line players see in their server list."
+      "description": "The line players see in their server list. Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "memory",
@@ -101,14 +100,13 @@
       "default": "20",
       "minimum": 1,
       "maximum": 1000,
-      "variable": "MAX_PLAYERS"
+      "description": "Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "difficulty",
       "kind": "choice",
       "label": "Difficulty",
       "default": "normal",
-      "variable": "DIFFICULTY",
       "choices": [
         {
           "value": "peaceful",
@@ -126,14 +124,14 @@
           "value": "hard",
           "label": "Hard"
         }
-      ]
+      ],
+      "description": "Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "game-mode",
       "kind": "choice",
       "label": "Game mode",
       "default": "survival",
-      "variable": "MODE",
       "choices": [
         {
           "value": "survival",
@@ -151,31 +149,30 @@
           "value": "spectator",
           "label": "Spectator"
         }
-      ]
+      ],
+      "description": "Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "whitelist",
       "kind": "boolean",
       "label": "Whitelist only",
       "default": "false",
-      "variable": "ENFORCE_WHITELIST",
-      "description": "With this on, only accounts you add can join."
+      "description": "With this on, only accounts you add can join. Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "online-mode",
       "kind": "boolean",
       "label": "Verify accounts with Mojang",
       "default": "true",
-      "variable": "ONLINE_MODE",
       "advanced": true,
-      "description": "Turning this off lets anyone claim any username. Only do it behind a proxy that already authenticates."
+      "description": "Turning this off lets anyone claim any username. Only do it behind a proxy that already authenticates. Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "pvp",
       "kind": "boolean",
       "label": "Player versus player",
       "default": "true",
-      "variable": "PVP"
+      "description": "Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "view-distance",
@@ -184,9 +181,8 @@
       "default": "10",
       "minimum": 3,
       "maximum": 32,
-      "variable": "VIEW_DISTANCE",
       "advanced": true,
-      "description": "The single biggest lever on memory and CPU."
+      "description": "The single biggest lever on memory and CPU. Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "simulation-distance",
@@ -195,8 +191,8 @@
       "default": "10",
       "minimum": 3,
       "maximum": 32,
-      "variable": "SIMULATION_DISTANCE",
-      "advanced": true
+      "advanced": true,
+      "description": "Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "eula",
@@ -257,13 +253,20 @@
     {
       "name": "Accepts a Minecraft handshake",
       "kind": "game_handshake",
-      "phase": "smoke",
+      "phase": "readiness",
       "required": true,
       "port": "java",
       "timeoutSeconds": 120
     }
   ],
   "operations": {
+    "install": [
+      {
+        "kind": "write_file",
+        "path": "/data/server.properties",
+        "content": "# Written by Just Dashboard before the first start. Edit it under Server settings.\nmotd={{input.server-name}}\nmax-players={{input.max-players}}\ndifficulty={{input.difficulty}}\ngamemode={{input.game-mode}}\nwhite-list={{input.whitelist}}\nenforce-whitelist={{input.whitelist}}\nonline-mode={{input.online-mode}}\npvp={{input.pvp}}\nview-distance={{input.view-distance}}\nsimulation-distance={{input.simulation-distance}}\nenable-rcon=true\nrcon.port=25575\nrcon.password={{secret.rcon-password}}\n"
+      }
+    ],
     "startup": [
       {
         "kind": "set_variable",
@@ -278,11 +281,6 @@
       {
         "kind": "set_variable",
         "name": "ENABLE_RCON",
-        "value": "true"
-      },
-      {
-        "kind": "set_variable",
-        "name": "OVERRIDE_SERVER_PROPERTIES",
         "value": "true"
       }
     ],
@@ -436,7 +434,7 @@
       "inputs": {
         "eula": "true"
       },
-      "digest": "sha256:dec98405b9a428bfe7e8b2dd77660afb80cda92e2494578f3e9ecb4f667090fa"
+      "digest": "sha256:e90c35a95256cba5d8768783867de0c7bb72342c6b4be52bab0bd76f05b71d9c"
     },
     {
       "name": "modded",
@@ -446,7 +444,7 @@
         "version": "1.21.4",
         "memory": "6144"
       },
-      "digest": "sha256:3fc8f09168ead955888d07d4ad05dd27c2aa88bae7c72e6d10444ae7b19323bd"
+      "digest": "sha256:dd275dedf6b4d5efd76e3b05ef5d7bda7bde6ec72a937c3757fd97ce902aef76"
     }
   ]
 }

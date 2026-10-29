@@ -278,10 +278,16 @@ func blueprintConfiguration(
 		case "direct":
 			direct = true
 			if port.Primary || (configuration.Runtime.HostPort == 0 && configuration.Runtime.InternalPort == 0) {
+				// The port players or clients connect to, TCP or UDP, on its
+				// own number. It starts on loopback like every other
+				// publication: reaching it from another machine is the
+				// operator's choice of every interface under Runtime, and
+				// preflight says what that choice still needs from the
+				// firewall.
 				configuration.Runtime.InternalPort = port.Internal
 				configuration.Runtime.Protocol = port.Protocol
 				configuration.Runtime.HostPort = port.Internal
-				configuration.Runtime.BindAddress = "0.0.0.0"
+				configuration.Runtime.BindAddress = "127.0.0.1"
 				continue
 			}
 			// Gitea's SSH next to its web port, Syncthing's sync protocol next
@@ -295,6 +301,26 @@ func blueprintConfiguration(
 				configuration.Runtime.InternalPort = port.Internal
 				configuration.Runtime.Protocol = port.Protocol
 			}
+		}
+	}
+	// A direct port on the primary's own number in the other protocol is the
+	// same publication: Bedrock signals over TCP and plays over UDP on 19132.
+	// It follows the primary's bind address rather than becoming a second
+	// publication on every interface, so the one Bind address control under
+	// Runtime decides where players reach both.
+	if runtime := &configuration.Runtime; runtime.HostPort > 0 {
+		kept := runtime.Ports[:0]
+		for _, published := range runtime.Ports {
+			if published.ContainerPort == runtime.InternalPort && published.HostPort == runtime.HostPort &&
+				published.effectiveProtocol() != runtime.effectiveProtocol() {
+				runtime.Protocol = "tcp+udp"
+				continue
+			}
+			kept = append(kept, published)
+		}
+		runtime.Ports = kept
+		if len(runtime.Ports) == 0 {
+			runtime.Ports = nil
 		}
 	}
 	if exclusive || direct {
@@ -320,6 +346,10 @@ func blueprintConfiguration(
 		})
 	}
 
+	configuration.Runtime.Seeds = blueprintSeeds(definition, rendered)
+	if len(configuration.Runtime.Seeds) == 0 {
+		configuration.Runtime.Seeds = nil
+	}
 	configuration.Variables = blueprintVariables(definition, rendered)
 	configuration.Domains = blueprintDomains(rendered)
 	configuration.Checks = blueprintChecks(rendered)
@@ -372,8 +402,14 @@ func blueprintChecks(rendered *blueprint.Plan) []PlannedCheck {
 		if check.Path != "" {
 			config["path"] = check.Path
 		}
-		if check.Port > 0 && string(check.Kind) != "game_handshake" {
+		if check.Port > 0 {
 			config["port"] = check.Port
+		}
+		if check.Payload != "" {
+			config["payload"] = check.Payload
+		}
+		if check.Expect != "" {
+			config["expect"] = check.Expect
 		}
 		if len(check.Command) > 0 {
 			config["command"] = check.Command

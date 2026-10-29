@@ -4,19 +4,19 @@
   "name": "Minecraft (Bedrock Edition)",
   "category": "game",
   "profile": "game",
-  "description": "A Minecraft Bedrock server for console, mobile and Windows players. Bedrock speaks UDP, so its port is published directly and cannot go behind the HTTP proxy.",
+  "description": "A Minecraft Bedrock server for console, mobile and Windows players. Current Bedrock releases accept players over NetherNet: a handshake over TCP and gameplay over UDP, both on port 19132, which is published directly because the HTTP proxy can carry neither.",
   "iconId": "game",
   "docsUrl": "https://github.com/itzg/docker-minecraft-bedrock-server",
   "access": {
     "kind": "open",
-    "note": "A Bedrock server has no web sign-in: players join from a console, phone or Windows client at your host on UDP port 19132. As shipped the allow list is off and nobody is an operator, so any Xbox-Live-authenticated player who learns the address and port can join and build in your world."
+    "note": "A Bedrock server has no web sign-in: players join from a console, phone or Windows client at your host on port 19132, TCP and UDP. The port is published on loopback until you choose every interface under Runtime and allow it through the firewall. As shipped the allow list is off and nobody is an operator, so any Xbox-Live-authenticated player who learns the address and port can join and build in your world."
   },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "Apache-2.0",
     "upstreamUrl": "https://github.com/itzg/docker-minecraft-bedrock-server",
-    "reviewedAt": "2026-09-22",
-    "minimumDashboard": "0.6.7",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2",
     "updateNotes": "The image is pinned; the Bedrock server build is resolved at deployment and recorded on the release."
   },
   "image": {
@@ -40,8 +40,8 @@
       "kind": "text",
       "label": "Server name",
       "default": "A Minecraft Server",
-      "variable": "SERVER_NAME",
-      "pattern": "^[^\\x00-\\x1f]{1,59}$"
+      "pattern": "^[^\\x00-\\x1f]{1,59}$",
+      "description": "Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "max-players",
@@ -50,14 +50,13 @@
       "default": "10",
       "minimum": 1,
       "maximum": 100,
-      "variable": "MAX_PLAYERS"
+      "description": "Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "difficulty",
       "kind": "choice",
       "label": "Difficulty",
       "default": "normal",
-      "variable": "DIFFICULTY",
       "choices": [
         {
           "value": "peaceful",
@@ -75,14 +74,14 @@
           "value": "hard",
           "label": "Hard"
         }
-      ]
+      ],
+      "description": "Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "game-mode",
       "kind": "choice",
       "label": "Game mode",
       "default": "survival",
-      "variable": "GAMEMODE",
       "choices": [
         {
           "value": "survival",
@@ -96,22 +95,23 @@
           "value": "adventure",
           "label": "Adventure"
         }
-      ]
+      ],
+      "description": "Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "whitelist",
       "kind": "boolean",
       "label": "Allow list only",
       "default": "false",
-      "variable": "ALLOW_LIST"
+      "description": "Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "online-mode",
       "kind": "boolean",
       "label": "Verify Xbox Live accounts",
       "default": "true",
-      "variable": "ONLINE_MODE",
-      "advanced": true
+      "advanced": true,
+      "description": "Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "view-distance",
@@ -120,8 +120,8 @@
       "default": "10",
       "minimum": 3,
       "maximum": 32,
-      "variable": "VIEW_DISTANCE",
-      "advanced": true
+      "advanced": true,
+      "description": "Written into server.properties before the first start. Change it afterwards under Server settings, where the change survives restarts."
     },
     {
       "name": "memory",
@@ -145,10 +145,17 @@
     {
       "name": "bedrock",
       "internal": 19132,
-      "protocol": "udp",
-      "purpose": "Minecraft Bedrock clients connect here",
+      "protocol": "tcp",
+      "purpose": "Players connect here: the NetherNet handshake",
       "exposure": "direct",
       "primary": true
+    },
+    {
+      "name": "bedrock-play",
+      "internal": 19132,
+      "protocol": "udp",
+      "purpose": "Gameplay traffic the handshake negotiates",
+      "exposure": "direct"
     }
   ],
   "volumes": [
@@ -171,14 +178,35 @@
       "phase": "readiness",
       "required": true,
       "timeoutSeconds": 600
+    },
+    {
+      "name": "Answers the NetherNet join request",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/v1/join",
+      "port": "bedrock",
+      "timeoutSeconds": 120
     }
   ],
   "operations": {
+    "install": [
+      {
+        "kind": "write_file",
+        "path": "/data/server.properties",
+        "content": "# Written by Just Dashboard before the first start. Edit it under Server settings.\nserver-name={{input.server-name}}\ngamemode={{input.game-mode}}\ndifficulty={{input.difficulty}}\nmax-players={{input.max-players}}\nonline-mode={{input.online-mode}}\nallow-list={{input.whitelist}}\nview-distance={{input.view-distance}}\nserver-udp-ports=19132\n"
+      }
+    ],
     "startup": [
       {
         "kind": "set_variable",
         "name": "EULA",
         "value": "TRUE"
+      },
+      {
+        "kind": "set_variable",
+        "name": "TRANSPORT",
+        "value": "nethernet"
       }
     ],
     "stop": [
@@ -287,7 +315,7 @@
       "inputs": {
         "eula": "true"
       },
-      "digest": "sha256:ed9c0b12620fddfd75f1f8789eb3dba79b7da0b9085b149af13b5ba4ae59986c"
+      "digest": "sha256:bdc3541f0377111575f828d1f46c26c79b6f3d04e35a67c38a9d15104ef552b6"
     }
   ]
 }

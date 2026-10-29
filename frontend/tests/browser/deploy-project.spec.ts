@@ -863,6 +863,100 @@ test("the game workspace sends commands, moderates players and edits only declar
   await expect.poll(() => written).toEqual({ motd: "New name" })
 })
 
+test("a game server says what stands between a player and it, and opens the firewall for its port", async ({
+  page,
+}) => {
+  let reach: Record<string, unknown> = {
+    port: 19132,
+    protocol: "tcp+udp",
+    bind: "127.0.0.1",
+    public: false,
+    firewall: "drops",
+    editable: true,
+  }
+  const rules: Record<string, unknown>[] = []
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7", (route) =>
+    json(route, {
+      project,
+      running: false,
+      deployment: { ...deployment, profile: "game", buildMethod: "image", activeRun: undefined },
+    }),
+  )
+  await page.route("**/api/v1/firewall/rules", async (route) => {
+    rules.push(route.request().postDataJSON() as Record<string, unknown>)
+    if (rules.length === 2) reach = { ...reach, firewall: "admits" }
+    return json(route, { output: "Rule added", ruleId: "fw-1" })
+  })
+  await page.route("**/api/v1/deploy/7/game**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    if (path === "/deploy/7/game")
+      return json(route, {
+        status: "available",
+        blueprintId: "minecraft-bedrock",
+        edition: "bedrock",
+        containerId: "bedrock1",
+        address: "play.example.test:19132",
+        console: false,
+        consoleReason:
+          "Minecraft (Bedrock Edition) has no remote console: its server reads commands only from its own input, which this dashboard does not attach to. Its log is on the Logs page.",
+        reach,
+        players: { supported: false, status: "unsupported", online: 0, maximum: 0, names: [] },
+        files: [],
+      })
+    return route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "not_available", message: "Not mocked" } }),
+    })
+  })
+
+  // On loopback the page says only this server can connect, and where that
+  // is changed.
+  await page.goto("/deploy/7/console")
+  const loopback = page.locator("p", { hasText: "Only this server can connect" })
+  await expect(loopback).toContainText("19132/tcp+udp is published on 127.0.0.1")
+  await expect(loopback.getByRole("link", { name: "Runtime" })).toHaveAttribute(
+    "href",
+    "/deploy/7/settings/runtime",
+  )
+  // Bedrock has no console of its own, and says why rather than offering a
+  // field that would fail.
+  await expect(page.getByText(/has no remote console/)).toBeVisible()
+  await expect(page.getByRole("textbox", { name: "Command" })).toHaveCount(0)
+
+  // Published on every interface behind a firewall that drops it: the one
+  // thing left, one press away, through the firewall's own rule route.
+  reach = { ...reach, bind: "0.0.0.0", public: true }
+  await page.reload()
+  await expect(
+    page.getByText("The firewall drops 19132/tcp+udp, so players cannot connect yet."),
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Allow 19132/tcp+udp" }).click()
+  await expect
+    .poll(() => rules)
+    .toEqual([
+      // One rule per protocol, through the firewall's own route.
+      {
+        action: "allow",
+        direction: "in",
+        port: "19132",
+        protocol: "tcp",
+        comment: "just-dashboard game 19132/tcp",
+      },
+      {
+        action: "allow",
+        direction: "in",
+        port: "19132",
+        protocol: "udp",
+        comment: "just-dashboard game 19132/udp",
+      },
+    ])
+  await expect(
+    page.getByText("The firewall drops 19132/tcp+udp, so players cannot connect yet."),
+  ).toHaveCount(0)
+})
+
 test("a stopped project reads Stopped and starts from the primary button", async ({ page }) => {
   const dashboard = await mockProject(page)
   await page.route("**/api/v1/deploy/7", (route) =>
