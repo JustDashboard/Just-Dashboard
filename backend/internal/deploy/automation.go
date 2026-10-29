@@ -1128,6 +1128,12 @@ type PreviewRef struct {
 	LiveReleaseID           int64           `json:"liveReleaseId,omitempty"`
 	Address                 *PreviewAddress `json:"address,omitempty"`
 	LastRun                 *RecentRun      `json:"lastRun,omitempty"`
+	// Services are a Compose preview's services as Docker reports them, read
+	// by the pull-request listing; the store never fills them.
+	Services *RuntimeServices `json:"services,omitempty"`
+	// Branches are the preview's database branches (preview_branches.go),
+	// read by the pull-request listing; the store never fills them.
+	Branches []PreviewBranch `json:"branches,omitempty"`
 	// Promotion is the newest promotion of the preview's image into staging,
 	// however it ended.
 	Promotion *PreviewPromotion `json:"promotion,omitempty"`
@@ -1221,6 +1227,9 @@ func (s *AutomationStore) EnsurePreview(ctx context.Context, t *Trigger, event P
 					if _, err := tx.ExecContext(ctx, `UPDATE deploy_preview_quarantines SET status='cleared',updated_at=? WHERE environment_id=? AND status='quarantined'`, s.now().UTC().Unix(), existing.EnvironmentID); err != nil {
 						return nil, false, err
 					}
+					if err := requestPreviewBranchesTx(ctx, tx, t.ProjectID, t.EnvironmentID, existing.EnvironmentID, event, s.now().UTC().Unix()); err != nil {
+						return nil, false, err
+					}
 					if err := tx.Commit(); err != nil {
 						return nil, false, err
 					}
@@ -1236,6 +1245,12 @@ func (s *AutomationStore) EnsurePreview(ctx context.Context, t *Trigger, event P
 				}
 				if err == nil {
 					_, err = tx.ExecContext(ctx, `UPDATE deploy_preview_quarantines SET status='cleared',updated_at=? WHERE environment_id=? AND status='quarantined'`, s.now().UTC().Unix(), existing.EnvironmentID)
+				}
+				if err == nil {
+					// A branch of each database the environment gives its
+					// previews, unless the preview has one or the head is a
+					// fork's (preview_branches.go).
+					err = requestPreviewBranchesTx(ctx, tx, t.ProjectID, t.EnvironmentID, existing.EnvironmentID, event, s.now().UTC().Unix())
 				}
 			}
 		}
@@ -1303,6 +1318,9 @@ func (s *AutomationStore) EnsurePreview(ctx context.Context, t *Trigger, event P
 		return nil, false, err
 	}
 	previewID, _ := res.LastInsertId()
+	if err = requestPreviewBranchesTx(ctx, tx, t.ProjectID, t.EnvironmentID, envID, event, now); err != nil {
+		return nil, false, err
+	}
 	if err = tx.Commit(); err != nil {
 		return nil, false, err
 	}

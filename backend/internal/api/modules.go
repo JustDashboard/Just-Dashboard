@@ -187,6 +187,9 @@ type moduleSet struct {
 	// dataCopies restores a database as of a release into a side copy on
 	// the deployment's network and removes it when its time is up.
 	dataCopies *dataCopyOwner
+	// previewBranches restores a preview's own copy of each database its
+	// environment gives previews a branch of, and removes it with the preview.
+	previewBranches *previewBranchOwner
 	// tailnet publishes preview environments on this host's Tailscale node
 	// through `tailscale serve`; the executor and the preview route share it.
 	tailnet deploy.TailnetPublisher
@@ -219,7 +222,10 @@ func (s *Server) initModules() {
 	// operator refreshing the container table would otherwise keep shortening
 	// the window the next stored sample is differenced over.
 	s.modules.metrics = metrics.New(s.Store, s.Log, s.Cfg.MetricsInterval, s.Cfg.MetricsRetention).
-		WithContainers(s.modules.docker.NewStatsSampler())
+		WithContainers(s.modules.docker.NewStatsSampler()).
+		// The volumes deployments own, for the capacity forecast; read when
+		// the recorder samples, by which time the deploy modules exist.
+		WithVolumes(metrics.VolumeSamplerFunc(s.sampleDeploymentVolumes))
 	// Docker's disk accounting walks every layer and volume, which takes
 	// seconds on a busy host. Priming it here means the first operator to open
 	// the Volumes tab reads a warm cache instead of waiting for the walk.
@@ -390,6 +396,7 @@ func (s *Server) initModules() {
 	s.modules.tailnet = tailnetPublisher{serve: selfcfg.NewTailnetServe()}
 	s.modules.rehearser = &migrationRehearser{server: s}
 	s.modules.dataCopies = newDataCopyOwner(s, s.modules.rehearser)
+	s.modules.previewBranches = newPreviewBranchOwner(s, s.modules.rehearser)
 	normalizedExecutor := deploy.NewNormalizedStepExecutor(
 		s.modules.deployRuns,
 		s.modules.deployPlanning,

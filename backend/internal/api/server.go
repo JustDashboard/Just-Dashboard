@@ -239,6 +239,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// ended first, so the sweep removes it; one already restored and still
 	// within its lifetime is kept.
 	s.modules.dataCopies.SettleInterrupted(cleanupCtx)
+	// A preview's branch a restart interrupted is ended the same way; one
+	// ready, or still waiting for its restore, is kept.
+	s.modules.previewBranches.SettleInterrupted(cleanupCtx)
 	if err := s.modules.rehearser.RemoveOrphanedRehearsals(cleanupCtx); err != nil {
 		s.Log.Warn("migration rehearsal copies left by a previous start could not be removed", "err", err)
 	}
@@ -339,6 +342,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// Copies waiting for a rollback read its run, and expired ones are
 	// removed whether or not anybody has the page open.
 	s.modules.dataCopies.Start(ctx)
+	s.modules.previewBranches.Start(ctx)
 	s.modules.deployGit.Start(ctx)
 	s.modules.previewReconciler.Start(ctx)
 	s.modules.deployDatabases.Start(ctx)
@@ -379,6 +383,7 @@ func (s *Server) Shutdown() {
 	s.modules.deployDatabases.Stop()
 	s.modules.poolers.Stop()
 	s.modules.dataCopies.Stop()
+	s.modules.previewBranches.Stop()
 	// Stop fresh claims first. Active work is given a bounded grace to reach a
 	// persisted boundary; Engine.Shutdown never injects a cancellation into an
 	// activation or restoration.
