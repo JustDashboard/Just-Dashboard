@@ -113,7 +113,7 @@ test("a read-only root starts with /tmp, and where nginx writes for a static sit
 
 test("the section head says what the flags add up to", () => {
   expect(runtimeFlagsLine(saved)).toBe(
-    "runs as 1000:1000 · read-only root · 2 limits · 1 kernel parameter",
+    "runs as 1000:1000 · read-only root · 2 ulimits · 1 kernel parameter",
   )
   expect(runtimeFlagsLine({})).toBeUndefined()
 })

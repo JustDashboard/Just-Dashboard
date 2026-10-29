@@ -1380,16 +1380,16 @@ function RuntimeForm({
             )}
             <Disclosure
               quiet
-              summary="Limits and kernel parameters"
-              facts={`${plural(flagsRead.plan?.ulimits?.length ?? 0, "limit")} · ${plural(flagsRead.plan?.sysctls?.length ?? 0, "kernel parameter")}`}
+              summary="Ulimits and kernel parameters"
+              facts={`${plural(flagsRead.plan?.ulimits?.length ?? 0, "ulimit")} · ${plural(flagsRead.plan?.sysctls?.length ?? 0, "kernel parameter")}`}
               open={limitsOpen || limitsRefused}
               onOpenChange={setLimitsOpen}
             >
               <FieldRow>
                 <Field
-                  label="Process limits"
+                  label="Ulimits"
                   htmlFor="runtime-ulimits"
-                  info="ulimits, one per line as name=soft:hard, or name=value for both: nofile, nproc, memlock, stack, core and the rest of Docker's names. -1 or unlimited is no limit where the kernel allows one; nofile stops at 1048576."
+                  info="The kernel limits each process starts with, one per line as name=soft:hard, or name=value for both: nofile, nproc, memlock, stack, core and the rest of Docker's names. -1 or unlimited is no limit where the kernel allows one; nofile stops at 1048576."
                   error={errorFor("runtime-ulimits")}
                 >
                   <Textarea

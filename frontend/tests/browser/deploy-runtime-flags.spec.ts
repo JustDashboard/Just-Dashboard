@@ -23,11 +23,11 @@ test("the process flags are typed as docker run writes them and saved with the p
   await process.getByRole("switch", { name: "Read-only root filesystem" }).click()
   await expect(process.getByLabel("Writable paths")).toHaveValue("/tmp")
   await process.getByLabel("Writable paths").fill("/tmp 128 MiB\n/app/cache")
-  await process.getByText("Limits and kernel parameters").click()
-  await process.getByLabel("Process limits").fill("nofile=65536\nmemlock=unlimited")
+  await process.getByText("Ulimits and kernel parameters").click()
+  await process.getByLabel("Ulimits").fill("nofile=65536\nmemlock=unlimited")
   await process.getByLabel("Kernel parameters").fill("net.core.somaxconn=1024")
   await expect(process).toContainText(
-    "runs as 1000:1000 · read-only root · 2 limits · 1 kernel parameter",
+    "runs as 1000:1000 · read-only root · 2 ulimits · 1 kernel parameter",
   )
 
   const access = page.locator("#access")
@@ -76,8 +76,8 @@ test("a line the form cannot read is refused before a save, and the server's und
   })
   await page.goto("/deploy/7/settings/runtime")
   const process = page.locator("#process")
-  await process.getByText("Limits and kernel parameters").click()
-  await process.getByLabel("Process limits").fill("nofile 1024")
+  await process.getByText("Ulimits and kernel parameters").click()
+  await process.getByLabel("Ulimits").fill("nofile 1024")
   let sent = false
   page.on("request", (request) => {
     if (request.method() === "PUT" && request.url().endsWith(configuration)) sent = true
@@ -90,7 +90,7 @@ test("a line the form cannot read is refused before a save, and the server's und
   ).toBeVisible()
   expect(sent).toBe(false)
 
-  await process.getByLabel("Process limits").fill("nofile=1024")
+  await process.getByLabel("Ulimits").fill("nofile=1024")
   await process.getByLabel("Kernel parameters").fill("vm.swappiness=10")
   await saveSettings(page)
   await expect(

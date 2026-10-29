@@ -255,7 +255,7 @@ export function runtimeFlagsLine(plan: FlagsPlan) {
   const parts = [
     plan.user && `runs as ${plan.user}`,
     plan.readOnlyRootfs && "read-only root",
-    plan.ulimits?.length && plural(plan.ulimits.length, "limit"),
+    plan.ulimits?.length && plural(plan.ulimits.length, "ulimit"),
     plan.sysctls?.length && plural(plan.sysctls.length, "kernel parameter"),
   ].filter(Boolean)
   return parts.length ? parts.join(" · ") : undefined
