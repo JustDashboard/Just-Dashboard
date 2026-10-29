@@ -42,6 +42,11 @@ test("an administrator reaches Alerts from Metrics and adds a disk and a contain
   })
 
   await page.goto("/metrics")
+  // Metrics' first render, its charts, holds the main thread for seconds on
+  // a busy host, and a press made during it is handled only after it; its
+  // first reading is waited for as metrics-ui.spec.ts waits for it, so the
+  // waits after the press measure the Alerts page and not Metrics.
+  await expect(page.getByText("CPU 97%", { exact: true })).toBeVisible({ timeout: 20_000 })
   await page.locator("[data-slot='host-identity']").getByRole("link", { name: "Alerts" }).click()
   await expect(page).toHaveURL(/\/metrics\/alerts$/)
   const sheet = page.getByRole("region", { name: "Rules" })
@@ -143,9 +148,16 @@ test("the page wires what is watched to each channel, leads with what fires and 
     await json(route, { delivered: 1, failed: 0 })
   })
 
-  // Metrics counts what fires beside the way to it.
+  // Metrics counts what fires beside the way to it. The count is drawn in
+  // the page's first render, after its charts: the alerts answer arrives in
+  // about a second, and on a loaded host the main thread is then busy for
+  // seconds more (3.6 s of long tasks between the answer and the count here,
+  // 20 s with the processor throttled sixfold), so it is waited for as the
+  // page's first reading is in metrics-ui.spec.ts.
   await page.goto("/metrics")
-  await expect(page.getByRole("link", { name: "Alerts, 1 firing" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Alerts, 1 firing" })).toBeVisible({
+    timeout: 20_000,
+  })
 
   await page.goto("/metrics/alerts")
   const watched = page.getByRole("group", { name: "What the rules watch" })
