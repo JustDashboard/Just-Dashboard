@@ -1199,6 +1199,17 @@ only renderer/executor/validation authority for their feature.
   and outcome (`answered`, `kept`, `failed`, `unusable`, `unmasked`), never what was sent or answered.
   Nothing the answer says is applied. The live check against a real model is
   `TestLiveFailedBuildIsDiagnosedByARealModel` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
+- A deployment's environment can be asked about as a conversation from the overview's **Diagnose**:
+  `POST /deploy/{id}/assistant` (`service.control` and a session; `api/handlers_deploy_operator.go`,
+  the tools and prompt in `assistant/operator.go`). The same provider and budget answer it; it begins
+  knowing what the overview shows and reads more — runs, a run's transcript, the live containers' last
+  lines, usage and the sizing verdict, container events, host alerts (`system.admin`), the firewall's
+  rules for the deployment's ports, pending security updates — only through tools whose every call the
+  person allows or declines first, each bounded, read with the person's role and masked by the
+  diagnosis's masker. It proposes a restart, redeploy, rollback, instant rollback, the suggested
+  limits or a maintenance switch through `propose_action`, which runs nothing: the page draws a card,
+  and its press is the request the project's own button makes to that action's route, with its
+  capability, confirmation and audit. See [the deployment operator](operator.md).
 - Deploy and force-build resolve the current desired revision (force-build disables cache); redeploy and
   rollback clone only available immutable artifacts and traverse the same checks/cutover path (a clone
   carries its target's own source identity and promotion provenance; a rollback moves no data, and the

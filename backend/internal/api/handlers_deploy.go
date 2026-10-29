@@ -130,6 +130,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// Asking about a failure takes what asking the SQL editor's
 			// assistant takes: it spends the install's model budget.
 			r.Method(http.MethodPost, "/{id}/runs/{run}/diagnosis", s.handle(s.handleDeploymentRunDiagnose))
+			// The operator reads with the person's leave a call at a time and
+			// proposes actions their press runs, so it is a session's: there
+			// is nobody to ask behind a key.
+			r.With(httpx.RequireSession).Method(http.MethodPost, "/{id}/assistant", s.handle(s.handleDeploymentOperator))
 			// Merging and commenting speak on GitHub as the dashboard's own
 			// account, which is why an API token may not: the same rule as
 			// the Git page's write routes, with the session requirement the

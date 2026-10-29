@@ -299,6 +299,9 @@ var deployOperations = map[string]deployOperation{
 	"GET /deploy/{id}/runs/{run}/settings-drift": {Tag: "runs", Summary: "Read what differed between a run's settings and the environment's at the time.", Response: (*deploy.RunSettingsDrift)(nil)},
 	"GET /deploy/{id}/runs/{run}/diagnosis":      {Tag: "runs", Summary: "Read the kept diagnosis of a failed run.", Response: shape{"diagnosis": (*runDiagnosisView)(nil)}},
 	"POST /deploy/{id}/runs/{run}/diagnosis":     {Tag: "runs", Summary: "Ask the configured model to diagnose a failed run, or to diagnose it again.", Request: diagnoseRequest{}, Response: shape{"diagnosis": (*runDiagnosisView)(nil)}},
+	"POST /deploy/{id}/assistant": {Tag: "runs", Summary: "Ask the deployment operator about an environment, or answer the reads it asked for.", Request: operatorRequest{}, Content: "application/x-ndjson",
+		Query: []openapiQuery{{Name: "environment", Type: "integer", Description: "Staging's environment id; production when absent."}},
+		Note:  "A session's route. The answer streams one JSON object a line: start, thinking, text, ran (what each allowed read read), proposal (an action whose card the person may press; nothing has run), done (with the reads waiting for a decision) or error."},
 
 	// Variables.
 	"GET /deploy/{id}/environments/{env}/variables":                  {Tag: "variables", Summary: "List an environment's variables: name, sensitivity, scopes, the value's digest and whether it awaits a deploy; never a value.", Response: []deploy.DeploymentVariable(nil)},
