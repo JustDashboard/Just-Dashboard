@@ -103,6 +103,7 @@ free.
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Migrations rehearsed on a throwaway copy of the database, restored from its backup, before production
+- Each release remembers where its database stood when it went live: bring that data back into a side copy to compare or restore from
 - Variables per environment, plus shared ones defined once for the server or a project
 - Variables read from HashiCorp Vault, OpenBao, Infisical or Doppler, fresh for each run
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
@@ -493,7 +494,8 @@ deployments it commits), change configuration, source, Git policy and triggers, 
 generate, rotate and delete variables and shared variables. Variables are write-only to it: it sees
 names and digests, never a value. **What it cannot do, whatever it reaches:** reveal a value; list,
 add, change or test saved registry and Git credentials; see or change secret-store connections; set the
-rollback-watch or rehearsal terms or edit a route's maintenance and error pages; merge or comment on
+rollback-watch or rehearsal terms or edit a route's maintenance and error pages; ask for, read or remove
+a copy of a release's data; merge or comment on
 pull requests as the dashboard's GitHub account; approve previews; archive or delete deployments; or
 reach anything outside Deployments. It also cannot give a deployment access to the server itself — a
 privileged container, the host's network, a host folder, a release task in the host's shell, a Compose

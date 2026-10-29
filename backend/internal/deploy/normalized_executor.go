@@ -74,6 +74,9 @@ type NormalizedStepExecutor struct {
 	// rehearser makes the throwaway database copies release tasks are
 	// rehearsed against (rehearsal.go); nil reports a rehearsal unavailable.
 	rehearser MigrationRehearser
+	// dataPoints says where each linked database stands as a release goes
+	// live (data_rollback.go); nil records none.
+	dataPoints DataPointObserver
 }
 
 func (e *NormalizedStepExecutor) WithNotifications(store *AutomationStore) *NormalizedStepExecutor {

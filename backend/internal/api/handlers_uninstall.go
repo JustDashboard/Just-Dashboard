@@ -100,6 +100,7 @@ func (s *Server) pauseForUninstall(ctx context.Context, out io.Writer) error {
 	s.modules.deploySchedule.Stop()
 	s.modules.deployDatabases.Stop()
 	s.modules.poolers.Stop()
+	s.modules.dataCopies.Stop()
 	s.modules.backupSched.Stop()
 	if s.ingressStop != nil {
 		s.ingressStop()

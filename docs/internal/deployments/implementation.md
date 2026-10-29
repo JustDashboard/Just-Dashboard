@@ -796,7 +796,13 @@ only renderer/executor/validation authority for their feature.
   becomes a warning step and the release continues. Everything a rehearsal makes carries
   `io.just-dashboard.rehearsal=<run id>` (the WAL-G tool volume too): the step removes its own
   leftovers before it starts and everything after, however it ends; a resumed run makes its copy
-  again (`ReconcileResume`); and `Server.Start` removes every rehearsal before the engine resumes.
+  again (`ReconcileResume`); and `Server.Start` removes every rehearsal before the engine resumes,
+  except a [copy of a release's data](data-aware-rollback.md) still within its lifetime, which carries
+  the same label with `copy-<id>` and is made by the same path (`prepareCopy`: the newest backup for a
+  rehearsal, a recorded dump run or archive moment for a data copy). The environment's network
+  reconciler leaves every rehearsal-labelled container where it is: it used to join a rehearsal's copy
+  and task, which carry the environment's label, to the deployment's database network on its next
+  pass, giving the internal network a way out and production's database the copy's name beside it.
   Runtime observation never counts the copy (it has no release id) or its task (the release-task
   label), and host container alerts leave both out. A promotion takes the same step in the same place
   (`PromotionStepKeys`, [staging and promotion](staging-promotion.md)): production's tasks with
@@ -1115,7 +1121,10 @@ only renderer/executor/validation authority for their feature.
   `TestLiveFailedBuildIsDiagnosedByARealModel` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
 - Deploy and force-build resolve the current desired revision (force-build disables cache); redeploy and
   rollback clone only available immutable artifacts and traverse the same checks/cutover path (a clone
-  carries its target's own source identity and promotion provenance); promote takes a staging release's
+  carries its target's own source identity and promotion provenance; a rollback moves no data, and the
+  data step is separate: the rollback dialog can ask, once the rollback succeeds, for each linked
+  database restored as of the target release into a side copy — `POST …/releases/{release}/data-copies`
+  with `afterRunId` — never into production, see [data-aware rollback](data-aware-rollback.md)); promote takes a staging release's
   exact image with production's current plan and variables, builds nothing, and runs a deploy's steps from
   `render_runtime` on, the migration rehearsal included ([staging and promotion](staging-promotion.md)); restart
   stops and starts the existing live runtime without creating a release, then verifies the plan's
@@ -1278,6 +1287,13 @@ only renderer/executor/validation authority for their feature.
   `deploy.release.pin`) sets `deploy_releases.pinned`, which `ArtifactRetentionPlan` already reads: a
   pinned release survives a prune plan regardless of its age or rank among the environment's other
   releases.
+- **The data point.** When a release goes live, `activate` records, right after the pointer commits,
+  where each database the environment links stood (`deploy_release_data_points`, once per release and
+  database): the activation moment when the server's point-in-time archive reaches back that far, else
+  the newest backup run holding its dump, else none with the reason. It is read from the store alone and
+  never fails the activation. The release list carries `dataPoints` and `dataCopy {eligible, reason}`,
+  the comparison both releases' points and `changes.dataPoint`; the rest is
+  [data-aware rollback](data-aware-rollback.md).
 - Remote Git production branches default to monitoring after the first explicit deployment,
   including existing projects. The environment's [automatic deployment policy](git-policy.md) supplies
   manual-only mode and shared include/exclude filters for polling and push hooks. `GitWatcher` checks refs every five seconds
@@ -1346,13 +1362,15 @@ only renderer/executor/validation authority for their feature.
   "`system.admin`, session", a deploy key is admitted too, and every other session-only deployment route
   (reveals, saved credentials, secret-store connections, pull-request merge/comment and previews,
   schedules, alerts, channels, drains, adding and removing an environment, a route's maintenance and
-  error pages, the warm-release terms, the migration rehearsal's terms, the
+  error pages, the warm-release terms, the migration rehearsal's terms, a copy of a release's data —
+  asking for one, its address, keeping it longer, removing it and comparing it — the
   typed-phrase removals) stays a session's and answers it `session_required`. The operating verbs an
   ordinary key already had are the deploy key's as well: `POST …/promote`,
   `POST …/rollback-watch/rollback` and `…/keep`, `PUT …/maintenance` (who is let past is the
   configuration's `runtime.maintenance.bypassFrom`, applied by the next release), with the reads
   `GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/maintenance`,
-  `…/pages/{page}` and `…/rehearsal`; `GET /deploy/secret-stores`, an ordinary key's read, answers it
+  `…/pages/{page}`, `…/rehearsal` and `…/data-copies` (what each copy is of and until when, never its
+  sign-in); `GET /deploy/secret-stores`, an ordinary key's read, answers it
   `key_scope`, since the list carries each connection's address and sign-in fields and every
   deployment's variables that read a store, and the key cannot point a variable at one. Its writes are
   held to what a person in a session could not be refused: a generate or rotate answers it without
@@ -2213,9 +2231,14 @@ variable snapshots; the list reads the settings drift of its newest run when tha
 so a variable given another scope counts, and goes by the plan revision alone for older rows, as the
 project header's and the fleet's Retry does), Cancel (never during activation or a rollback) and,
 under the release's own name, What changed in this release (a comparison with
-the release before it), Compare with live (a sheet), Roll back to this release (a retained release,
-through a two-step dialog that names the domains, draws the swap and says what a rollback does not
-restore) and Pin or Unpin. Older runs load on request through the `before` cursor. Runtime draws the
+the release before it, with each linked database's data point), Compare with live (a sheet), Roll back
+to this release (a retained release, through a two-step dialog that names the domains, draws the swap,
+says what a rollback does not restore and offers, off by default, the database as of that release in a
+side copy once the rollback is over), Restore data as of this release (a release with a restorable data
+point, `system.admin`) and Pin or Unpin. A release's row carries its data point as a tag, and the
+Data copies panel above the list holds the copies with their address, the comparison with the live
+database, Keep 1 more hour, Restore in place (a link to the database's own restore) and Remove now
+([data-aware rollback](data-aware-rollback.md)). Older runs load on request through the `before` cursor. Runtime draws the
 managed services as cards of their image's product, joined with Docker's container list, its stats
 every ten seconds and an hour of history, the volumes every five minutes (for sizes and which
 container uses one), the saved connections and the policy's backup job with its runs — every join

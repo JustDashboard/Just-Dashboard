@@ -3686,6 +3686,8 @@ export type ReleaseComparison = {
     domains: ReleaseListChange[]
   }
   artifacts: ReleaseArtifactStatus[]
+  /** Each release's recorded data point, per linked database. */
+  dataPoints?: { from: ReleaseDataPoint[]; to: ReleaseDataPoint[] }
 }
 
 export type ReleaseUpdateStatus = {
@@ -4056,6 +4058,101 @@ export type DeploymentRelease = {
   rollbackReason?: string
   /** Set when the image was promoted from staging rather than built here. */
   promotion?: DeploymentPromotion
+  /**
+   * Where each linked database stood when this release went live
+   * (`deploy/data_rollback.go`): the moment its point-in-time archive recovers
+   * to, or the newest dump that covered it. Absent on a release that went
+   * live before this was recorded, or with no linked database.
+   */
+  dataPoints?: ReleaseDataPoint[]
+  /** Whether "Restore data as of this release" is offered, and why not. */
+  dataCopy?: { eligible: boolean; reason?: string }
+}
+
+/** One linked database's state at the moment a release went live. */
+export type ReleaseDataPoint = {
+  connectionId: number
+  /** The connection's name when the point was recorded. */
+  name: string
+  engine: string
+  kind: "pitr" | "dump" | "none"
+  /** pitr: the moment the archive recovers to; dump: when its backup run started. */
+  at?: string
+  backupRunId?: number
+  backupJobId?: number
+  archiveId?: number
+  /** kind none: why there is nothing to restore a copy from. */
+  reason?: string
+  recordedAt: string
+}
+
+export type DataCopyState = "waiting" | "restoring" | "ready" | "failed" | "skipped" | "removed"
+
+/**
+ * A linked database restored from a release's data point into a throwaway
+ * container beside production, on the deployment's network. Its credentials
+ * are read by a session alone (`…/data-copies/{copy}/url`) and never ride here.
+ */
+export type DataCopy = {
+  id: number
+  projectId: number
+  environmentId: number
+  releaseId: number
+  releaseNumber: number
+  connectionId: number
+  name: string
+  engine: string
+  database: string
+  state: DataCopyState
+  source: {
+    kind: "pitr" | "dump"
+    at?: string
+    backupRunId?: number
+    backupJobId?: number
+    archiveId?: number
+  }
+  /** pitr: the moment the copy actually reached. */
+  recoveredTo?: string
+  /** The rollback run it waits for before restoring. */
+  afterRunId?: number
+  /** The copy's name on the deployment's network, e.g. db-5-copy-3.jd.internal. */
+  host?: string
+  port?: number
+  network?: string
+  expiresAt?: string
+  createdBy: string
+  createdAt: string
+  readyAt?: string
+  endedAt?: string
+  reason?: string
+  restoreMs?: number
+}
+
+export type DataCopyConnection = {
+  url: string
+  host: string
+  port: number
+  user: string
+  database: string
+}
+
+/** The copy's tables beside the live database's, with their row counts. */
+export type DataCopyComparison = {
+  copyId: number
+  database: string
+  tables: {
+    schema: string
+    name: string
+    copyRows: number | null
+    liveRows: number | null
+    estimated?: boolean
+    only?: "copy" | "live"
+  }[]
+  /** More tables than the server compares. */
+  truncated: boolean
+  copyError?: string
+  liveError?: string
+  readAt: string
 }
 
 /**

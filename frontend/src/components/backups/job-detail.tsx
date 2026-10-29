@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import {
   ArrowLeft,
@@ -105,7 +105,10 @@ export function JobPage() {
   const selectedId = selectedRun && /^\d+$/.test(selectedRun) ? Number(selectedRun) : null
   const setSelectedId = (id: number | null) => selectRun(id === null ? null : String(id))
   const [restore, setRestore] = useState<{ run: BackupRun; paths: string[] } | null>(null)
-  const [restoreDatabase, setRestoreDatabase] = useState<BackupRun | null>(null)
+  const [restoreDatabase, setRestoreDatabase] = useState<{
+    run: BackupRun
+    connectionId?: number
+  } | null>(null)
   const [browsing, setBrowsing] = useState<BackupRun | null>(null)
   const [verifying, setVerifying] = useState<number | null>(null)
   const jobPoll = usePoll(
@@ -148,6 +151,24 @@ export function JobPage() {
   const runList = runs.data?.runs ?? []
   const shown = runList.find((run) => run.id === selectedId) ?? runList[0]
 
+  // ?run=<id>&restore=<connection> is how a deployment's data-aware rollback
+  // hands the reader here ("Restore in place to this point"): that run's
+  // database restore opens once with the release's dump chosen, behind the
+  // same destructive confirmation as ever. Who may not restore is not asked.
+  const restoreAsked = Number(useSearchParams().get("restore") ?? 0)
+  const [handedOver, setHandedOver] = useState(false)
+  const askedRun = runList.find((run) => run.id === selectedId)
+  if (
+    !handedOver &&
+    restoreAsked > 0 &&
+    askedRun?.status === "success" &&
+    can("destructive") &&
+    askedRun.manifest?.databaseDumps?.some((dump) => dump.connectionId === restoreAsked)
+  ) {
+    setHandedOver(true)
+    setRestoreDatabase({ run: askedRun, connectionId: restoreAsked })
+  }
+
   const verify = async (run: BackupRun) => {
     setVerifying(run.id)
     try {
@@ -183,7 +204,7 @@ export function JobPage() {
           key: "restore-db",
           label: "Restore database…",
           icon: Database,
-          run: () => setRestoreDatabase(run),
+          run: () => setRestoreDatabase({ run }),
         })
       }
     }
@@ -442,7 +463,8 @@ export function JobPage() {
       )}
       {restoreDatabase && (
         <RestoreDatabaseDialog
-          run={restoreDatabase}
+          run={restoreDatabase.run}
+          connectionId={restoreDatabase.connectionId}
           confirm={confirm}
           onOpenChange={(open) => !open && setRestoreDatabase(null)}
           onDone={runs.refresh}
@@ -891,17 +913,26 @@ function RestoreFilesDialog({
  */
 function RestoreDatabaseDialog({
   run,
+  connectionId: chosen,
   confirm,
   onOpenChange,
   onDone,
 }: {
   run: BackupRun
+  /** The dump to open on, handed over from elsewhere; the first otherwise. */
+  connectionId?: number
   confirm: Confirm
   onOpenChange: (open: boolean) => void
   onDone: () => void
 }) {
   const dumps = run.manifest?.databaseDumps ?? []
-  const [connectionId, setConnectionId] = useState(String(dumps[0]?.connectionId ?? ""))
+  const [connectionId, setConnectionId] = useState(
+    String(
+      dumps.find((dump) => dump.connectionId === chosen)?.connectionId ??
+        dumps[0]?.connectionId ??
+        "",
+    ),
+  )
   const [database, setDatabase] = useState("")
   const selected = dumps.find((dump) => String(dump.connectionId) === connectionId)
   const target = database.trim() || selected?.database || ""
