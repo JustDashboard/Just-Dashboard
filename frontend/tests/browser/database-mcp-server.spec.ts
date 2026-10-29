@@ -127,18 +127,20 @@ test.describe("MCP server", () => {
     await choice(dialog, "notes").getByRole("checkbox").click()
     await create.click()
 
-    expect(server.bodies("POST /tokens/mcp")).toEqual([
-      {
-        name: "cursor",
-        ttlDays: 90,
-        connections: [
-          { connectionId: 1, access: "write" },
-          { connectionId: 7, access: "read" },
-        ],
-        deployments: "",
-        deploymentIds: [],
-      },
-    ])
+    await expect
+      .poll(() => server.bodies("POST /tokens/mcp"))
+      .toEqual([
+        {
+          name: "cursor",
+          ttlDays: 90,
+          connections: [
+            { connectionId: 1, access: "write" },
+            { connectionId: 7, access: "read" },
+          ],
+          deployments: "",
+          deploymentIds: [],
+        },
+      ])
     await expect(dialog.getByRole("heading", { name: "Your new MCP key" })).toBeVisible()
     await expect(dialog.getByText("stored hashed, so it cannot be shown again")).toBeVisible()
     const config = dialog.locator("[data-slot=well]").nth(1)
@@ -176,16 +178,18 @@ test.describe("MCP server", () => {
     await expect(save).toBeDisabled()
     await choice(dialog, "notes").getByRole("checkbox").click()
     await save.click()
-    expect(server.bodies("PUT /tokens/9/connections")).toEqual([
-      {
-        connections: [
-          { connectionId: 1, access: "read" },
-          { connectionId: 7, access: "read" },
-        ],
-        deployments: "",
-        deploymentIds: [],
-      },
-    ])
+    await expect
+      .poll(() => server.bodies("PUT /tokens/9/connections"))
+      .toEqual([
+        {
+          connections: [
+            { connectionId: 1, access: "read" },
+            { connectionId: 7, access: "read" },
+          ],
+          deployments: "",
+          deploymentIds: [],
+        },
+      ])
     await expect(keys).toContainText("reads notes, shop")
 
     await keys.getByRole("button", { name: "More actions for claude-code" }).click()
@@ -217,9 +221,11 @@ test.describe("MCP server", () => {
     await blog.getByRole("checkbox").click()
     await expect(blog.getByRole("checkbox")).toBeDisabled()
     await dialog.getByRole("button", { name: "Save", exact: true }).click()
-    expect(server.bodies("PUT /tokens/9/connections")).toEqual([
-      { connections: [{ connectionId: 1, access: "read" }], deployments: "", deploymentIds: [] },
-    ])
+    await expect
+      .poll(() => server.bodies("PUT /tokens/9/connections"))
+      .toEqual([
+        { connections: [{ connectionId: 1, access: "read" }], deployments: "", deploymentIds: [] },
+      ])
   })
 
   test("a key made to read only is never given a database to change", async ({ page }) => {
@@ -241,15 +247,17 @@ test.describe("MCP server", () => {
     await deploymentChoice(dialog, "Deploy").click()
     await expect(dialog.getByText("Also deploys, rolls back and changes them")).toBeVisible()
     await create.click()
-    expect(server.bodies("POST /tokens/mcp")).toEqual([
-      {
-        name: "claude-code",
-        ttlDays: 90,
-        connections: [],
-        deployments: "deploy",
-        deploymentIds: [],
-      },
-    ])
+    await expect
+      .poll(() => server.bodies("POST /tokens/mcp"))
+      .toEqual([
+        {
+          name: "claude-code",
+          ttlDays: 90,
+          connections: [],
+          deployments: "deploy",
+          deploymentIds: [],
+        },
+      ])
     await dialog.getByRole("button", { name: "Done" }).click()
     const keys = dialog.getByRole("list", { name: "MCP keys" })
     await expect(keys).toContainText("deploys")
@@ -263,9 +271,9 @@ test.describe("MCP server", () => {
     await expect(save).toBeDisabled()
     await deploymentChoice(dialog, "Read").click()
     await save.click()
-    expect(server.bodies("PUT /tokens/12/connections")).toEqual([
-      { connections: [], deployments: "read", deploymentIds: [] },
-    ])
+    await expect
+      .poll(() => server.bodies("PUT /tokens/12/connections"))
+      .toEqual([{ connections: [], deployments: "read", deploymentIds: [] }])
   })
 
   test("narrows a key's deployments to the ones ticked, and widens it again", async ({ page }) => {
@@ -285,15 +293,17 @@ test.describe("MCP server", () => {
     await picked(dialog, "status-page").click()
     await picked(dialog, "shop").click()
     await create.click()
-    expect(server.bodies("POST /tokens/mcp")).toEqual([
-      {
-        name: "claude-code",
-        ttlDays: 90,
-        connections: [],
-        deployments: "read",
-        deploymentIds: [3, 8],
-      },
-    ])
+    await expect
+      .poll(() => server.bodies("POST /tokens/mcp"))
+      .toEqual([
+        {
+          name: "claude-code",
+          ttlDays: 90,
+          connections: [],
+          deployments: "read",
+          deploymentIds: [3, 8],
+        },
+      ])
     await dialog.getByRole("button", { name: "Done" }).click()
     const keys = dialog.getByRole("list", { name: "MCP keys" })
     await expect(keys).toContainText("reads 2 deployments")
@@ -308,9 +318,9 @@ test.describe("MCP server", () => {
       .getByRole("radio", { name: "Every deployment" })
       .click()
     await save.click()
-    expect(server.bodies("PUT /tokens/12/connections")).toEqual([
-      { connections: [], deployments: "read", deploymentIds: [] },
-    ])
+    await expect
+      .poll(() => server.bodies("PUT /tokens/12/connections"))
+      .toEqual([{ connections: [], deployments: "read", deploymentIds: [] }])
     await expect(keys).toContainText("reads deployments")
   })
 

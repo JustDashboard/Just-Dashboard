@@ -1031,8 +1031,8 @@ export function DeploymentChoice({
         every
           ? "Every deployment on this server, including the ones made after the key."
           : chosen.size === 0
-            ? "Tick at least one. A key limited to some deployments cannot create new ones."
-            : `Only ${plural(chosen.size, "deployment")}. A key limited to some deployments cannot create new ones.`
+            ? "Tick at least one. A key limited to some deployments also reaches the ones it creates."
+            : `Only ${plural(chosen.size, "deployment")}, and the ones the key creates from its own drafts.`
       }
     >
       <div className="min-w-0 space-y-2">
