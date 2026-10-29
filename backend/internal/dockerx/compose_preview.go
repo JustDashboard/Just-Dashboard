@@ -190,11 +190,11 @@ func dockerSocketPath(path string) bool {
 	return clean == "/var/run/docker.sock" || clean == "/run/docker.sock" || strings.HasSuffix(clean, "/docker.sock")
 }
 
-// checkoutPath answers the bind source as the checkout's own file when it is
-// one: inside the project directory, with no symbolic link anywhere on the
-// way, since a link in a pull request's tree could otherwise point a
-// read-only mount at any file on this server.
-func checkoutPath(root, source string) (string, bool) {
+// CheckoutPath answers a path as the checkout's own file when it is one:
+// inside the project directory, with no symbolic link anywhere on the way,
+// since a link in a pull request's tree could otherwise point a read-only
+// mount, or a file Compose reads itself, at any file on this server.
+func CheckoutPath(root, source string) (string, bool) {
 	if root == "" || !filepath.IsAbs(source) {
 		return "", false
 	}
@@ -287,7 +287,7 @@ func composePreviewOverride(raw []byte, override, root string, isolation Compose
 				mounts = append(mounts, map[string]any{"type": "tmpfs", "target": mount.Target})
 				continue
 			case mount.Type == "bind" && mount.ReadOnly:
-				if path, inside := checkoutPath(root, mount.Source); inside {
+				if path, inside := CheckoutPath(root, mount.Source); inside {
 					// The commit's own file, read-only: the bytes the build
 					// already read, and none of production's state.
 					mounts = append(mounts, map[string]any{"type": "bind", "source": path, "target": mount.Target, "read_only": true})

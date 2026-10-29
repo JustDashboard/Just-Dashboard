@@ -3,9 +3,16 @@ package deploy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"gopkg.in/yaml.v3"
 )
 
 // ComposePreviewFacts is what a pull request's preview of a Compose release
@@ -138,4 +145,116 @@ func composePreviewRefusal(build BuildPlanConfig, evidenceRaw string) error {
 		return fmt.Errorf("%w: a preview of this Compose stack would need what no preview gets: %s", ErrPreviewIsolation, strings.Join(facts.Refusals, "; "))
 	}
 	return nil
+}
+
+// composePreviewSources reads the pull request's own Compose files, which
+// are what the preview runs: production's analysis, which the preview's plan
+// carries, says nothing about them, and Compose reads some files on this
+// server itself — an env_file, a config's or secret's file — before any
+// container exists. So the files are analysed as planning analyses a stack
+// (a path outside the commit, an include or an extends refused there), a
+// service that needs the server itself is refused, and every file Compose
+// would read must be the commit's own, with no symbolic link on the way out
+// of it.
+func composePreviewSources(root string, files []string) error {
+	refuse := func(format string, args ...any) error {
+		return fmt.Errorf("%w: %s", ErrPreviewIsolation, fmt.Sprintf(format, args...))
+	}
+	documents := make([]ComposeDocument, 0, len(files))
+	for index, file := range files {
+		path, inside := dockerx.CheckoutPath(root, filepath.Join(root, filepath.FromSlash(file)))
+		if !inside {
+			return refuse("the Compose file %s is not a file of the commit", file)
+		}
+		handle, err := os.Open(path)
+		if err != nil {
+			return refuse("the Compose file %s could not be read", file)
+		}
+		content, err := io.ReadAll(io.LimitReader(handle, 4<<20+1))
+		handle.Close()
+		if err != nil || len(content) > 4<<20 {
+			return refuse("the Compose file %s could not be read", file)
+		}
+		documents = append(documents, ComposeDocument{Path: file, Content: string(content), Order: index})
+	}
+	analysis, err := analyzeComposeDocuments(documents)
+	if err != nil {
+		return refuse("the pull request's Compose files are refused: %s", strings.TrimPrefix(err.Error(), ErrInvalidCompose.Error()+": "))
+	}
+	if len(analysis.Unsupported) > 0 {
+		return refuse("the pull request's Compose files ask for what a deployment does not run: %s", strings.Join(analysis.Unsupported, "; "))
+	}
+	if facts := composePreviewFacts(BuildPlanConfig{}, &analysis); len(facts.Refusals) > 0 {
+		return refuse("%s, which no preview gets", strings.Join(facts.Refusals, "; "))
+	}
+	for _, document := range documents {
+		for _, reference := range composeReadFiles(document.Content) {
+			if strings.Contains(reference.path, "$") {
+				return refuse("%s names a file by a variable, which cannot be checked before Compose reads it", document.Path)
+			}
+			// Compose resolves the path from the project directory or from
+			// the file's own; both have to be the commit's.
+			for _, base := range []string{root, filepath.Join(root, filepath.Dir(filepath.FromSlash(document.Path)))} {
+				candidate := filepath.Join(base, filepath.FromSlash(reference.path))
+				if _, err := os.Lstat(candidate); errors.Is(err, os.ErrNotExist) {
+					continue
+				}
+				if _, inside := dockerx.CheckoutPath(root, candidate); !inside {
+					return refuse("%s reads %s, which is not a file of the commit", document.Path, reference.path)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+type composeReadFile struct{ path string }
+
+// composeReadFiles are the files a Compose document has Compose read on the
+// host: each service's env_file and label_file, and each config's and
+// secret's file.
+func composeReadFiles(content string) []composeReadFile {
+	var root yaml.Node
+	if yaml.Unmarshal([]byte(content), &root) != nil {
+		return nil
+	}
+	mapping := documentMapping(&root)
+	if mapping == nil {
+		return nil
+	}
+	out := []composeReadFile{}
+	add := func(node *yaml.Node) {
+		if node == nil {
+			return
+		}
+		items := []*yaml.Node{node}
+		if node.Kind == yaml.SequenceNode {
+			items = node.Content
+		}
+		for _, item := range items {
+			if item.Kind == yaml.MappingNode {
+				item = mappingValue(item, "path")
+			}
+			if item != nil && item.Kind == yaml.ScalarNode && item.Value != "" {
+				out = append(out, composeReadFile{path: item.Value})
+			}
+		}
+	}
+	if services := mappingValue(mapping, "services"); services != nil && services.Kind == yaml.MappingNode {
+		for index := 0; index+1 < len(services.Content); index += 2 {
+			service := services.Content[index+1]
+			add(mappingValue(service, "env_file"))
+			add(mappingValue(service, "label_file"))
+		}
+	}
+	for _, key := range []string{"configs", "secrets"} {
+		entries := mappingValue(mapping, key)
+		if entries == nil || entries.Kind != yaml.MappingNode {
+			continue
+		}
+		for index := 0; index+1 < len(entries.Content); index += 2 {
+			add(mappingValue(entries.Content[index+1], "file"))
+		}
+	}
+	return out
 }

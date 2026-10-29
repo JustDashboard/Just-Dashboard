@@ -3,6 +3,8 @@ package deploy
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -141,5 +143,78 @@ func TestComposePreviewOfAStackNeedingTheServerIsRefused(t *testing.T) {
 	_ = f.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_environments WHERE kind='preview'`).Scan(&environments)
 	if environments != 0 {
 		t.Fatalf("a refused preview left %d environments", environments)
+	}
+}
+
+// The pull request's files are what a preview runs, so they are read before
+// Compose is: a file Compose would read on this server outside the commit,
+// through a link or by an absolute path, refuses the preview.
+func TestComposePreviewSourcesRefuseFilesOutsideTheCommit(t *testing.T) {
+	write := func(t *testing.T, root, name, content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const stack = "services:\n  web:\n    image: caddy:2-alpine\n    env_file: [app.env]\n    configs: [site]\n    volumes: [\"/etc/localtime:/etc/localtime:ro\", \"./site.txt:/srv/site.txt:ro\"]\nconfigs:\n  site:\n    file: ./site.txt\n"
+	fixture := func(t *testing.T, compose string) string {
+		root := t.TempDir()
+		write(t, root, "compose.yml", compose)
+		write(t, root, "app.env", "GREETING=hello\n")
+		write(t, root, "site.txt", "hello\n")
+		return root
+	}
+	if err := composePreviewSources(fixture(t, stack), []string{"compose.yml"}); err != nil {
+		t.Fatalf("the commit's own stack was refused: %v", err)
+	}
+	for name, setup := range map[string]func(t *testing.T) string{
+		"a linked env file": func(t *testing.T) string {
+			root := fixture(t, stack)
+			_ = os.Remove(filepath.Join(root, "app.env"))
+			if err := os.Symlink("/etc/hostname", filepath.Join(root, "app.env")); err != nil {
+				t.Fatal(err)
+			}
+			return root
+		},
+		"a linked config file": func(t *testing.T) string {
+			root := fixture(t, stack)
+			_ = os.Remove(filepath.Join(root, "site.txt"))
+			if err := os.Symlink("/etc/hostname", filepath.Join(root, "site.txt")); err != nil {
+				t.Fatal(err)
+			}
+			return root
+		},
+		"an absolute env file": func(t *testing.T) string {
+			return fixture(t, strings.Replace(stack, "env_file: [app.env]", "env_file: [/etc/hostname]", 1))
+		},
+		"a linked Compose file": func(t *testing.T) string {
+			root := fixture(t, stack)
+			write(t, root, "real/compose.yml", stack)
+			_ = os.Remove(filepath.Join(root, "compose.yml"))
+			if err := os.Symlink(filepath.Join(root, "real", "compose.yml"), filepath.Join(root, "compose.yml")); err != nil {
+				t.Fatal(err)
+			}
+			return root
+		},
+		"a privileged service": func(t *testing.T) string {
+			return fixture(t, strings.Replace(stack, "image: caddy:2-alpine", "image: caddy:2-alpine\n    privileged: true", 1))
+		},
+		"an include": func(t *testing.T) string {
+			return fixture(t, "include: [other.yml]\n"+stack)
+		},
+		"a file named by a variable": func(t *testing.T) string {
+			return fixture(t, strings.Replace(stack, "env_file: [app.env]", "env_file: [\"${ENV_FILE}\"]", 1))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := composePreviewSources(setup(t), []string{"compose.yml"})
+			if !errors.Is(err, ErrPreviewIsolation) {
+				t.Fatalf("refusal = %v", err)
+			}
+			t.Log(err)
+		})
 	}
 }

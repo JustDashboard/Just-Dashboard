@@ -521,6 +521,11 @@ func (o *DockerRuntimeOwner) composePreviewRelease(
 	if plan.InternalPort <= 0 || request.Port <= 0 || host == nil || !host.IsLoopback() {
 		return "", "", fmt.Errorf("%w: a Compose preview publishes its public service on loopback only", ErrPreviewIsolation)
 	}
+	// Before Compose reads anything: the pull request's files, not
+	// production's, are what runs.
+	if err := composePreviewSources(spec.ProjectDirectory, spec.Files); err != nil {
+		return "", "", err
+	}
 	network, err := o.ensurePreviewNetwork(ctx, environmentID)
 	if err != nil {
 		return "", "", err

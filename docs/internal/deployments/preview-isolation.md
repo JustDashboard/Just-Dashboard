@@ -158,7 +158,15 @@ socket, privilege, devices, added capabilities or the host's network (`composePr
 with no Compose analysis to read. `validatePreviewPlan` admits `compose` and still refuses
 `legacy_compose`.
 
-The start is the authority. `DockerRuntimeOwner.startCompose` hands a preview's release to
+The start is the authority, and what it reads is the pull request's own files, which production's saved
+analysis says nothing about. Before Compose reads anything, `composePreviewSources` reads each Compose file
+of the release — a file of the commit, with no symbolic link on the way (`dockerx.CheckoutPath`) — and
+analyses them as planning analyses a stack (`analyzeComposeDocuments`: a path outside the source, an
+`include`, an `extends`, a secret literal refused there), refuses a service that needs the server
+itself, and requires every file Compose would read on this server — each service's `env_file` and
+`label_file`, each config's and secret's `file` — to be the commit's own, from the project directory and
+from the Compose file's, never named by a variable. A `.env` beside the files is never read: the release
+passes Compose its own `--env-file`. Then `DockerRuntimeOwner.startCompose` hands the release to
 `composePreviewRelease`, which reads the stack as Compose resolves it — the source files alone, merged and
 interpolated with the preview's own frozen variables (`dockerx.ComposePreviewOverride`, the same `compose
 config` the storage coverage reads) — and writes the release override that isolates it, every field in it
@@ -356,7 +364,9 @@ credentials are absent, the services reach each other by name and alias and neit
 and removal leaves no container, volume or network of the preview's (nor any of its Compose project)
 while production's volume, host directory and answer are unchanged. `TestComposePreviewOverride…`
 (`dockerx/compose_preview_test.go`) pins the override — deterministic bytes, the rewritten mounts, a
-checkout link left out, every refusal — and `TestComposePreview…` (`deploy/compose_preview_test.go`) and
+checkout link left out, every refusal — `TestComposePreviewSourcesRefuseFilesOutsideTheCommit` the pull
+request's own files (a linked env file, config or Compose file, an absolute env file, a variable path, an
+include, a privileged service), and `TestComposePreview…` (`deploy/compose_preview_test.go`) and
 `TestTestPullRequestPreviewOfAComposeStack` the plan, the facts and the route. Browser coverage verifies
 revision review, empty preview variables and separate deployment, and (`deploy-project.spec.ts`) a Compose
 preview's services under its row and the dialog's account of each service and its refusal. These tests do
