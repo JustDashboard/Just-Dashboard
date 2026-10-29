@@ -343,6 +343,9 @@ func renderCaddyWake(route DeploymentRoute, pages string) string {
 		"    }\n" +
 		"  }\n" +
 		"  reverse_proxy {vars.jd_wake_upstream} {\n" +
+		// The woken application is sent the request as the route's own
+		// reverse_proxy sends it: without the cookies the route drops.
+		caddyDropCookies("    ", route.DropCookies) +
 		"    lb_try_duration 5s\n" +
 		"    lb_try_interval 250ms\n" +
 		"  }\n"

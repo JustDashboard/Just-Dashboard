@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/sessioncookie"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -335,6 +336,9 @@ func TestLiveDockerCaddyRouteWakes(t *testing.T) {
 		Upstream: "http://127.0.0.1:" + published, AccessLog: true,
 		ErrorPages: []int{502}, Sleep: &DeploymentSleep{HoldSeconds: 20},
 		BasicAuth: []BasicAuthUser{{Username: "visitor", Hash: hash}},
+		// As on the name the dashboard is reached by: its session cookie
+		// is never the application's, asleep or awake.
+		DropCookies: DashboardCookies(),
 	}
 	if result, err := service.applyDockerCaddyRoute(ctx, edge, route); err != nil || !result.Verified {
 		t.Fatalf("apply = %+v, %v; %s", result, err, sleepDocker(t, ctx, "logs", id))
@@ -357,7 +361,7 @@ func TestLiveDockerCaddyRouteWakes(t *testing.T) {
 		return WakeAwake, upstream
 	})
 	endpoint := "http://127.0.0.1:" + strconv.Itoa(port)
-	signedIn := []string{"Authorization", "Basic " + basicCredentials("visitor", "s3cret"), "Cookie", "session=private"}
+	signedIn := []string{"Authorization", "Basic " + basicCredentials("visitor", "s3cret"), "Cookie", "session=private; " + sessioncookie.Name + "=dashboard-secret"}
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(200 * time.Millisecond) {
 		if a := sleepRequest(t, endpoint, "sleepy.example.test", http.MethodGet, "/awake", "", signedIn...); a.status == 200 {
 			break
@@ -367,7 +371,8 @@ func TestLiveDockerCaddyRouteWakes(t *testing.T) {
 	}
 
 	sleepDocker(t, ctx, "stop", "-t", "1", app)
-	if a := sleepRequest(t, endpoint, "sleepy.example.test", http.MethodGet, "/first-after-sleep?x=1", "", signedIn...); a.status != 200 || !strings.Contains(a.body, "GET /first-after-sleep?x=1") {
+	if a := sleepRequest(t, endpoint, "sleepy.example.test", http.MethodGet, "/first-after-sleep?x=1", "", signedIn...); a.status != 200 || !strings.Contains(a.body, "GET /first-after-sleep?x=1") ||
+		!strings.Contains(a.body, "session=private") || strings.Contains(a.body, "dashboard-secret") {
 		t.Fatalf("the first request after sleep = %d %q", a.status, a.body)
 	}
 	if starts != 1 || strings.HasSuffix(wake.last(), "private") {

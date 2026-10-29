@@ -232,3 +232,31 @@ func TestSleepingSwitchOnNginx(t *testing.T) {
 		t.Fatalf("wake sockets = %+v, %v", sockets, err)
 	}
 }
+
+// A route on the name the dashboard is reached by drops the dashboard's
+// session cookie from what the application is sent; a request held for a
+// wake is sent on without it too, on either proxy.
+func TestSleepingRouteKeepsDroppingTheDashboardsCookies(t *testing.T) {
+	route := sleepingRoute()
+	route.DropCookies = DashboardCookies()
+	content, err := renderDockerCaddyRoute(route, "http://172.18.0.5:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	drop := strings.TrimSpace(strings.SplitN(caddyDropCookies("", route.DropCookies), "\n", 2)[0])
+	retries := strings.Split(content, "reverse_proxy {vars.jd_wake_upstream} {\n")
+	if len(retries) != 3 {
+		t.Fatalf("want the woken request sent on in the asleep route and in handle_errors, got %d:\n%s", len(retries)-1, content)
+	}
+	for _, block := range retries[1:] {
+		if !strings.HasPrefix(strings.TrimLeft(block, " "), drop) {
+			t.Fatalf("a woken request keeps the dashboard's cookie:\n%s", content)
+		}
+	}
+	nginx := mustRender(t, deploymentSiteSpec(route, ""))
+	retry := nginx[strings.Index(nginx, "location @jd_wake {"):]
+	retry = retry[:strings.Index(retry, "\n    }\n")]
+	if !strings.Contains(retry, "proxy_set_header Cookie     $") {
+		t.Fatalf("nginx's retry keeps the dashboard's cookie:\n%s", nginx)
+	}
+}

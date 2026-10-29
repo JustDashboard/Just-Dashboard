@@ -132,8 +132,11 @@ unix//config/just-dashboard/wake/wake.sock` with `method GET`, `rewrite "/wake/<
 and the visitor's `Cookie`, `Authorization` and `Proxy-Authorization` removed; a 2xx sets `vars
 jd_wake_upstream {rp.header.X-Jd-Upstream}` and the request goes on to `reverse_proxy
 {vars.jd_wake_upstream}` (`lb_try_duration 5s`, `lb_try_interval 250ms`): the address the wake answers
-with, because a container started again may have been given another. A 401 is the waking page with a
-503; anything else is the route's 502 page, or Caddy's `502`.
+with, because a container started again may have been given another, and with the cookies the route
+drops (`DropCookies`: the dashboard's session, on a route serving the dashboard's own name) taken out as
+the route's own `reverse_proxy` takes them out — nginx's `@jd_wake` is a location of the route, so it
+does the same. A 401 is the waking page with a 503; anything else is the route's 502 page, or Caddy's
+`502`.
 
 ## The wake socket
 
