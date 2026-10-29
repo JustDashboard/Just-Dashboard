@@ -1072,6 +1072,7 @@ function RuntimeForm({
             compose: method === "compose" || method === "legacy_compose",
             hostNetwork: Boolean(runtime.hostNetwork),
             replicas,
+            canary,
             blockingCheck: configuration.checks.find(
               (check) =>
                 check.phase === "readiness" &&

@@ -251,3 +251,5 @@ protection's work, not the split's.
 - During the trial the route serves the live release's frozen rules; the candidate's own domains,
   headers and sign-in apply from its cutover.
 - A trial is per environment and per run; a second deploy queues behind the run holding one.
+- Scale to zero (`runtime.sleep`) is refused for a canary plan (`sleepRefusal`): a trial puts a second
+  release on the route, and a wake starts one container and holds the request for it.
