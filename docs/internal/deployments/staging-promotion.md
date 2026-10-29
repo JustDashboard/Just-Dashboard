@@ -90,8 +90,8 @@ production at enqueue like any run, metadata `promotion` (environment, release i
 id, digest, commit) plus the staging run's `commit` reading, `sourceRevision` the promoted commit when
 production's source is remote Git. Its steps are `PromotionStepKeys` — a deploy's from `render_runtime`
 on (`render_runtime`, `backup_gate`, `rehearse_migration`, `release_task`, `provision_certificate`,
-`start_candidate`, `verify_readiness`, `verify_smoke`, `activate`, `retire_previous`, `record_release`,
-`notify`), with no source, plan analysis, context or build step; `TestPromotionStepsAreADeploysFromRenderRuntimeOn`
+`start_candidate`, `verify_readiness`, `verify_smoke`, `replay_traffic`, `activate`, `retire_previous`,
+`record_release`, `notify`), with no source, plan analysis, context or build step; `TestPromotionStepsAreADeploysFromRenderRuntimeOn`
 holds the list to exactly `DefaultStepKeys` from `render_runtime` on, so a step added to a deploy is
 not quietly left out of a promotion. `render_runtime` (`renderPromotedRuntime`)
 re-validates the source, inspects the image by its id, tags it as `just-dashboard/deployment-<prod>:run-<id>`
@@ -115,8 +115,9 @@ transcript says so ("Rehearsing production's release tasks in the promoted image
 variables"). A task that fails against the copy ends the promotion `rehearsal_failed` before any task
 touches production, and a rehearsal that cannot be carried out ends it `rehearsal_unavailable` (or warns,
 as the terms say), exactly as either ends a deploy: production's schema, rows and live release are as
-they were. Then the certificate, the candidate, readiness and smoke checks, blue/green or stop-first
-activation, automatic restore of the previous release on a failed activation, retirement, notification
+they were. Then the certificate, the candidate, readiness and smoke checks, production's
+[traffic replay](implementation.md) when production's plan turns it on (production's request record
+replayed against the promoted image before the cutover), blue/green or stop-first activation, automatic restore of the previous release on a failed activation, retirement, notification
 ("Promotion from staging", titled with the environment) and a commit status under production's context
 (`just-dashboard/production`; staging's own runs report under `just-dashboard/staging`).
 

@@ -1102,6 +1102,29 @@ test("a document database has its own home, and its profiler is switched on by a
   )
 })
 
+test("a MongoDB started with the kernel mitigation says so where it runs", async ({ page }) => {
+  const app = CONNECTIONS.find((conn) => conn.id === 5)!
+  const said =
+    "Started with GLIBC_TUNABLES=glibc.pthread.rseq=1, without which MongoDB 8 does not start on Linux 7.0.0-1017-azure (MongoDB SERVER-121912). mongod warns that it costs performance; Linux 7.0.14 and later do not need it."
+  await mockHome(page)
+  await page.route("**/api/v1/databases/5", (route) =>
+    route.fulfill({
+      json: summaryOf(app, {
+        ...IN_DOCKER,
+        container: {
+          ...IN_DOCKER.container,
+          name: "app-db",
+          image: "mongo:8.0",
+          kernelMitigation: said,
+        },
+      }),
+    }),
+  )
+  await visit(page, "/databases/5")
+  await expect(block(page, "Runs as")).toContainText("mongo:8.0")
+  await expect(block(page, "Runs as")).toContainText(`Kernel${said}`)
+})
+
 test("a stopped database keeps its home, is asked nothing, and Start brings it back", async ({
   page,
 }) => {
