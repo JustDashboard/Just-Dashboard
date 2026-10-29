@@ -948,6 +948,52 @@ only renderer/executor/validation authority for their feature.
   (`ungatedCutoverFinding`), with the port and strategy measured, field `checks`, and in a run's
   preflight step a deep link to Settings → Runtime → Health checks; a worker is never asked. Not a
   refusal: an existing plan without a check keeps deploying and is told what that costs.
+- Traffic replay (`deploy/replay.go`) is the `replay_traffic` step, after `verify_smoke` and before
+  `activate` in `DefaultStepKeys` and `PromotionStepKeys` (a redeploy, a rollback and an instant
+  rollback do not take it): the last gate before anything is routed to the candidate, and the one that
+  asks it what visitors actually asked rather than one health path. It is the plan's
+  (`runtime.replay`: `enabled`, `requests` 1–500 with 0 for 50, `paths` up to 32 prefixes that begin
+  with `/`, `maxStatusDrift` 0–100 percent with 0 for 2, `latencyFactor` 1–10 with 0 for 2,
+  `timeoutSeconds` 1–300 with 0 for 60), off by default, validated with the other runtime fields
+  (`validateReplayPlan`), stored as nothing when it asks for nothing (`canonicalReplayPlan`, so a
+  switch turned on and off is no change), edited in Runtime settings beside the release strategy
+  (`settings/replay.tsx`) and listed in the release comparison as `traffic replay`. Off, a restart, a
+  host with no request record, a plan whose every domain redirects, an empty record or one with
+  nothing eligible each skip the step with the reason in its transcript and evidence; a record that
+  cannot be read is a warning and the release continues. Otherwise the step reads the same held
+  record the Logs page and the rollback watch read (`RequestRecord.Window` on the environment's route,
+  the last 24 hours, GET and HEAD, the newest 5,000 rows) and takes the newest distinct requests —
+  method, host, path and query — answered 2xx, 3xx or 4xx, leaving out 401, 403 and 407 (decided by who
+  asked), scanner probes (`accesslog.IsProbe`), a query that names a credential (`token`, `code`,
+  `state`, `sig`, …), a path or query with a control character, a space or non-ASCII, a host no served
+  domain names (wildcards by one label), and — where the record says which requests came over TLS, as
+  Caddy's does — a plain request for an HTTPS domain, which the ingress's redirect answered. A row
+  without a host (nginx's `combined`) is the first concrete served domain's. Each request is sent
+  only to the candidate's own address (`targetForRuntime`, the readiness checks' target), built from
+  the record alone: method, path and query, the recorded `Host` and `X-Forwarded-Host`, the scheme the
+  request came over as `X-Forwarded-Proto`, `X-Forwarded-For 127.0.0.1`, `X-JD-Replay: 1` for an
+  application that keeps replays out of its analytics, and no cookie, authorization or body — the
+  record holds none. Four at a time, ten seconds each, the whole within `timeoutSeconds`; no
+  environment proxy, no redirect followed (the record holds the live release's first answer), at
+  most 256 KiB of each answer read and discarded so the time is the answer's. A request the deadline
+  left unsent is unanswered (`out_of_time`). The verdict (`summarizeReplay`): nothing answered is
+  `unanswered`; a share of requests answered in another status class than the record, or not at all,
+  above `maxStatusDrift` is `status_drift`; the candidate's p95 over requests timed on both sides
+  (at least ten, nearest-rank, `accesslog.Percentile`) past `latencyFactor` × the recorded p95 and at
+  least 250 ms slower — the rollback watch's rule, `latencyRegressed` — is `latency`; a record without
+  durations (host nginx) is never judged on p95. A tripped verdict stops the candidate and restores a
+  stop-first predecessor through `stopCandidateAndRestore`, the failed health gate's own recovery, and
+  fails the run `replay_<code>` with nothing routed; the live release is not touched. The evidence
+  (`ReplayReport`) is the counts (read, eligible, sent, answered, drifted and their share), both p95s,
+  the target and domains, at most 50 drifted requests by method, path, query, both statuses and both
+  times, the verdict and the recovery — never an answer's body or a header. The transcript names each
+  drifted request and the verdict. An interrupted replay resumes (`ReconcileResume`): it sends reads to a
+  candidate nothing routes to and changes nothing but its own evidence. Preflight says what it will
+  hold the candidate to (`replay_before_cutover`, a pass) or that there is nothing to replay
+  (`replay_without_record`, a warning: no served domain, or no proxy for one). The run page draws the
+  report in the Verify stage (`run-replay.tsx`). It is not a load test: the latency rule compares one
+  pass over a cold candidate with what the ingress recorded, which includes the time to send the answer
+  to the visitor, so it catches a release that is several times slower, not one a few percent slower.
 - A managed route lets request bodies up to `runtime.maxRequestBodyMb` through (1–10240). Zero is each
   proxy's deployment default, which differs: nginx's own default is 1 MB, which refused a phone photo
   before the application saw it, so an nginx route always writes `client_max_body_size` (64 MB unless the

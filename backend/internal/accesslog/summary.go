@@ -760,6 +760,16 @@ func (c *Collector) histogram() ([]Bucket, int) {
 	return out, int(width / time.Second)
 }
 
+// Percentile is percentile's nearest-rank reading over values in any order,
+// for a caller holding a sample of its own: the deployment engine's traffic
+// replay compares a candidate's p95 with the record's over the same
+// requests, and the two must be the one percentile the page shows.
+func Percentile(values []float64, q float64) float64 {
+	sorted := append([]float64(nil), values...)
+	sort.Float64s(sorted)
+	return percentile(sorted, q)
+}
+
 // percentile reads the nearest-rank value of an already-sorted sample. Nearest
 // rank rather than interpolation because a latency percentile that reports a
 // duration no request actually took is a number an operator cannot go and find

@@ -396,6 +396,11 @@ func (s *Server) initModules() {
 		// Release tasks are rehearsed against copies the Databases owner
 		// makes from its own backups, when an environment asks for it.
 		WithMigrationRehearser(s.modules.rehearser)
+	if s.modules.requests != nil {
+		// The traffic replay reads the same held record the Logs page and
+		// the rollback watch read, so what it replays is what the page shows.
+		normalizedExecutor.WithRequestRecord(s.modules.requests)
+	}
 	s.modules.deployExecutor = normalizedExecutor
 	s.modules.deployEngine = deploy.NewEngine(
 		s.modules.deployRuns,

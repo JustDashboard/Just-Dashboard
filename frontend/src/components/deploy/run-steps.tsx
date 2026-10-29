@@ -37,6 +37,8 @@ import { Segment } from "@/components/deploy/run-pipeline"
 import { FindingRow } from "@/components/deploy/deployment-findings"
 import { rehearsalOf } from "@/components/deploy/rehearsal-model"
 import { RehearsalView } from "@/components/deploy/run-rehearsal"
+import { replayOf } from "@/components/deploy/replay-model"
+import { ReplayView } from "@/components/deploy/run-replay"
 import {
   runValidationFindings,
   findingFixAction,
@@ -129,6 +131,36 @@ function drawnElsewhere(step: DeploymentStep): string[] {
             "isolation",
             "cleanedUp",
             "totalMs",
+          ]
+        : []
+    case "replay_traffic":
+      // Every replay records a report, the ones that did not run with only
+      // their reason, and `ReplayView` draws either.
+      return replayOf(step.evidence)
+        ? [
+            "replayed",
+            "reason",
+            "domains",
+            "target",
+            "read",
+            "eligible",
+            "requests",
+            "answered",
+            "drifted",
+            "driftPercent",
+            "maxStatusDrift",
+            "latencyFactor",
+            "latencyRecorded",
+            "latencyJudged",
+            "recordedP95",
+            "candidateP95",
+            "verdict",
+            "drifts",
+            "concurrency",
+            "timeoutSeconds",
+            "timedOut",
+            "durationMs",
+            "recovery",
           ]
         : []
     case "build_artifact": {
@@ -502,6 +534,7 @@ function Inspector({
   const evidence = step.evidence ?? {}
   const preflight = step.key === "analyze_plan" ? preflightOf(evidence) : undefined
   const rehearsal = step.key === "rehearse_migration" ? rehearsalOf(evidence) : undefined
+  const replay = step.key === "replay_traffic" ? replayOf(evidence) : undefined
   const tail = rows.filter((row) => row.stepId === step.id).slice(-TAIL)
   const recorded = Object.keys(evidence).length > 0
   const name = stepName(step.key, operation)
@@ -558,6 +591,7 @@ function Inspector({
 
       {preflight && <PreflightChecks projectId={projectId} {...preflight} />}
       {rehearsal && <RehearsalView step={step} report={rehearsal} />}
+      {replay && <ReplayView step={step} report={replay} />}
 
       {tail.length > 0 && (
         <figure className="min-w-0 overflow-hidden rounded-lg border border-hairline bg-surface-sunken">
