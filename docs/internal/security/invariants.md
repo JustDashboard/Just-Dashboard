@@ -210,6 +210,11 @@ A change that weakens any of these has to say so explicitly.
    the network module's gateway table, whose prerouting drop runs before Docker's translation, never by
    a host firewall rule that a published port's traffic does not meet
    ([databases](../backend/databases-proxy-platform.md)).
+   Scale to zero's wake ([sleep when idle](../deployments/scale-to-zero.md#the-wake-socket)) binds no
+   address at all: the proxy asks over a Unix socket beside host nginx's sites or inside the Docker Caddy
+   ingress's own `/config` volume, and the dashboard answers only a peer whose process is nginx or Caddy
+   (`SO_PEERCRED`). What it does — start an application asleep by design — is what any visitor's request
+   to the domain does.
    `GET /security/boundary` reports both halves as observed — a dashboard socket other than Caddy's
    on a routable address, no Caddy on the configured port, or a preview port that is funnelled or
    serves anything but a loopback upstream is a broken boundary on the Security overview — but the

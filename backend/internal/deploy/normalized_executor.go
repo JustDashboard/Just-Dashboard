@@ -87,6 +87,10 @@ type NormalizedStepExecutor struct {
 	// dataPoints says where each linked database stands as a release goes
 	// live (data_rollback.go); nil records none.
 	dataPoints DataPointObserver
+
+	// sleeper stops idle environments and wakes them (sleep.go); a run that
+	// starts on one asleep wakes it first. Nil on a host that does not.
+	sleeper *Sleeper
 }
 
 // WithRequestRecord attaches the request record the traffic replay reads
@@ -221,6 +225,7 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 		return e.executeInstantRollback(ctx, execution, request)
 	}
 	e.endWarmWindow(ctx, execution)
+	e.endSleep(ctx, execution)
 	if failure := e.readSecretStores(ctx, execution); failure != nil {
 		return *failure
 	}

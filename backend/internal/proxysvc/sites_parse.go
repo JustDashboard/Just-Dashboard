@@ -28,6 +28,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	location := ""
 	var current *SiteLocation
 	rootLocationUpstream := ""
+	// sleepUpstream is the application's address a sleeping deployment
+	// route sets at server level and forwards to through a variable.
+	sleepUpstream := ""
 	rootLocationWS := false
 	sawTLSListen := false
 	sawPlainRedirect := false
@@ -174,7 +177,12 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			}
 			// The check's location is the renderer's too, and so is the one
 			// a switched maintenance answers from.
-			if (location == forwardAuthURI || location == maintenanceAnswerURI) && m[1] == "=" {
+			if (location == forwardAuthURI || location == maintenanceAnswerURI || location == wakeURI) && m[1] == "=" {
+				current = nil
+				return
+			}
+			// A sleeping route's wake is the renderer's as well.
+			if strings.HasPrefix(location, "@jd_") {
 				current = nil
 				return
 			}
@@ -218,6 +226,14 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		}
 
 		directive, value := cutDirective(raw)
+		if strings.HasPrefix(location, "@jd_") {
+			return
+		}
+		if directive == "set" && location == "" && depth == 1 {
+			if fields := strings.Fields(value); len(fields) == 2 && sleepVarRe.MatchString(fields[0]) {
+				sleepUpstream = fields[1]
+			}
+		}
 		if limits.directive(directive, value, location, current, len(spec.Locations)-1) {
 			return
 		}
@@ -231,7 +247,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			switch {
 			case directive == "alias":
 				spec.PagesDir = filepath.Dir(value)
-			case directive == "add_header" && strings.HasPrefix(value, "Retry-After "):
+			case directive == "add_header" && strings.HasPrefix(value, "Retry-After ") && location == pageURI("maintenance"):
 				maintenance().RetryAfter = parseSeconds(strings.Fields(value)[1])
 			}
 			return
@@ -528,6 +544,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		}
 	}
 
+	if sleepUpstream != "" && sleepVarRe.MatchString(strings.TrimPrefix(rootLocationUpstream, "http://")) {
+		rootLocationUpstream = "http://" + sleepUpstream
+	}
 	spec.Upstream = rootLocationUpstream
 	pools.settle(spec, rootRetryOn, rootTries)
 	spec.WebSockets = rootLocationWS
@@ -690,7 +709,10 @@ func accessLogFormat(value string) string {
 var (
 	maintGeoRe = regexp.MustCompile(`^\$jd_\w+_maint_ip\s*\{$`)
 	maintIfRe  = regexp.MustCompile(`^if\s*\(\$jd_\w+_maint\)\s*\{$`)
-	pageURIRe  = regexp.MustCompile(`^/__jd/(maintenance|\d{3})\.html$`)
+	pageURIRe  = regexp.MustCompile(`^/__jd/(maintenance|waking|\d{3})\.html$`)
+	// sleepVarRe is the variable a sleeping deployment route forwards
+	// through (deployment_sleep.go).
+	sleepVarRe = regexp.MustCompile(`^\$jd_\w+_up$`)
 )
 
 // maintSwitchRe is the test for the file a switched maintenance follows, in

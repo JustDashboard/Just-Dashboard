@@ -50,5 +50,7 @@ func (s *Server) deploymentAvailability(ctx context.Context, environmentID int64
 	if err != nil {
 		return deploy.Unavailability(now, "The container event record could not be read.")
 	}
-	return deploy.ComputeAvailability(now, since, spans, events)
+	// Asleep by design is not down: a visitor got the page after a pause.
+	asleep, _ := s.modules.deployRuns.SleepSpans(ctx, environmentID, from, 1000)
+	return deploy.ComputeAvailability(now, since, spans, events, asleep...)
 }

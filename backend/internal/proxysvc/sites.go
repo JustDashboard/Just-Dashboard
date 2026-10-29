@@ -205,6 +205,10 @@ type SiteSpec struct {
 	// set on its Domains settings rather than the Proxy page's form, so a
 	// refusal points at the control the reader has.
 	deployment bool
+	// sleep is a deployment route's wake (deployment_sleep.go): the
+	// application may be stopped while nobody visits, and a request that
+	// finds it stopped is held while the dashboard starts it.
+	sleep *siteSleep
 	// Custom is appended verbatim inside the server block. It is the escape
 	// hatch, and it is the one field not validated beyond refusing an
 	// unbalanced brace — a form that cannot express everything needs
@@ -253,6 +257,9 @@ type SiteLocation struct {
 	// whole site signs in, or "on" to sign in here when only chosen paths
 	// do; empty follows the site.
 	ForwardAuth string `json:"forwardAuth,omitempty"`
+	// wake is a sleeping route's own: the location it forwards from
+	// (wakeMain) or the one a woken request is sent on from (wakeRetry).
+	wake string
 }
 
 // SiteMaintenance is a site's maintenance switch.

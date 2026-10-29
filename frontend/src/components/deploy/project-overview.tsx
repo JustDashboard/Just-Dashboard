@@ -51,6 +51,7 @@ import { RunRow } from "@/components/deploy/run-row"
 import { UsageTiles } from "@/components/deploy/usage-tiles"
 import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
 import { ReleaseWatch, useReleaseWatch } from "@/components/deploy/release-watch"
+import { SleepPanel, useSleep } from "@/components/deploy/sleep-panel"
 
 /**
  * The project's front page, in the order a visitor asks: is something
@@ -146,6 +147,8 @@ export function ProjectOverview() {
     project.environmentId,
     project.normalized && !project.archived,
   )
+  const asleep = state === "asleep"
+  const sleep = useSleep(project.projectId, project.environmentId, asleep)
 
   const blocks: [string, React.ReactNode][] = []
   if (deployment.activeRun)
@@ -167,6 +170,22 @@ export function ProjectOverview() {
         projectId={project.projectId}
         state={{ ...releaseWatch, watch: releaseWatch.watch }}
         onChange={project.refresh}
+      />,
+    ])
+  // Asleep by design is the state the production panel is in, said before it
+  // with when, why and the one verb it has.
+  if (asleep && sleep.status && sleep.shown)
+    blocks.push([
+      "sleep",
+      <SleepPanel
+        key="sleep"
+        projectId={project.projectId}
+        environmentId={project.environmentId}
+        status={sleep.status}
+        onChange={() => {
+          sleep.refresh()
+          project.refresh()
+        }}
       />,
     ])
   blocks.push([
@@ -209,6 +228,9 @@ export function ProjectOverview() {
             product={product}
             domain={domain}
             stopped={state === "stopped"}
+            // Loading the site would be a request through its route, and
+            // wake it for nobody.
+            asleep={asleep}
           />
           <ProjectWiring
             projectId={project.projectId}

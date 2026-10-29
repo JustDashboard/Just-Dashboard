@@ -388,6 +388,9 @@ func (s *Server) handleDeploymentConfigurationSave(w http.ResponseWriter, r *htt
 			return refuseHostAuthority("this configuration", reasons)
 		}
 	}
+	if err := s.refuseSleepWithContainerSchedules(r.Context(), projectID, environmentID, request.Runtime); err != nil {
+		return err
+	}
 	configuration, err := s.modules.deployPlanning.SaveEnvironmentConfiguration(
 		r.Context(), projectID, environmentID, request,
 	)

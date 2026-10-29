@@ -440,7 +440,9 @@ covers — what the ratio is over), `downSeconds`, `incidents`, `ratio` and `cov
 before `recordSince` is not counted either way, so a thirty-day window read on the ninth day is a
 nine-day figure that says so, never a steady month. A release switched back to after a rollback has
 its activation overwritten, so it contributes its later span alone and the time between reads as
-unobserved. `Down` says whether an interval is open at this moment.
+unobserved. `Down` says whether an interval is open at this moment. Stretches asleep by design
+([scale to zero](scale-to-zero.md), `deploy_sleep_spans`) are cut out of the down intervals, and an
+environment asleep now is not `Down`: a visitor then got the page after a pause, not an error.
 
 ### The Prometheus exposition
 
@@ -510,6 +512,12 @@ it belongs to. The deployment pass then matches the project's name across a wind
 minutes, because a release's containers appear after the build rather than with the button) and never
 follow it — a symmetric window would let a deploy at 10:05 explain a container that died at 10:01,
 which reads as "the deploy broke it" when the truth is the reverse.
+
+A sleeping environment's stop and start ([scale to zero](scale-to-zero.md)) are matched before the
+release pass (`correlateSleepEvents`): a `kill`, `stop` or `die` to the `deploy.environment.idle` entry
+written just before it, a `start` to the `deploy.environment.wake` entry written just after it, the
+nearest within eleven minutes on the side it falls — otherwise the directional release pass would file a
+wake's start under the sleep before it.
 
 Three actions are never a release's doing however well they line up. `die`, `oom` and
 `health_status:*` are the daemon and the kernel reporting something that happened *to* a container,

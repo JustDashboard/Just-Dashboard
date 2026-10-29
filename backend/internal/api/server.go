@@ -333,6 +333,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// After the engine, so a window a restart interrupted is settled by a
 	// watcher that can already ask the engine for its rollback.
 	s.modules.rollbackWatcher.Start(ctx)
+	// After the engine too: a run it resumes may wake an environment, and
+	// the pass leaves alone an environment with a run under way.
+	s.modules.sleeper.Start(ctx)
 	// Copies waiting for a rollback read its run, and expired ones are
 	// removed whether or not anybody has the page open.
 	s.modules.dataCopies.Start(ctx)

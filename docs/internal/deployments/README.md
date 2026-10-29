@@ -13,6 +13,9 @@
 - [`data-aware-rollback.md`](data-aware-rollback.md) — where each linked database stood when a release went live, a side copy of it restored on the deployment's network for a bounded time, the comparison with the live database, the restore-in-place hand-off and the sweeps.
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
   logs, the request readings, container lifecycle events, and the three container-output fixes.
+- [`scale-to-zero.md`](scale-to-zero.md) — sleep when idle: the terms and what refuses them, the idle
+  decision, stopping without removing, the route's wake on nginx and Caddy, the wake socket only the proxy
+  reaches, waking on the first request, runs and repair, and what reads asleep as not down.
 - [`log-drains.md`](log-drains.md) — copying deployments' container output and requests to OpenTelemetry
   (OTLP), Loki or a JSON-lines endpoint: formats, severity, sealed headers, delivery, retries and status.
 - [`secret-stores.md`](secret-stores.md) — Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager and Azure
