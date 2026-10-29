@@ -1,0 +1,113 @@
+{
+  "id": "pocket-id",
+  "version": "1.0.0",
+  "name": "Pocket ID",
+  "category": "tool",
+  "profile": "web",
+  "description": "A small OpenID Connect provider that signs people in with passkeys instead of passwords: register applications as OIDC clients and give users access per group. One container with its SQLite database on the data volume.",
+  "iconId": "key",
+  "docsUrl": "https://pocket-id.org/docs/setup/installation",
+  "access": {
+    "kind": "setup",
+    "path": "/setup",
+    "note": "Pocket ID starts with no account: open https://<domain>/setup right after deploying to create the administrator and register its passkey, because whoever finishes that page first owns the instance. Passkeys need HTTPS on the real domain, so do this on the public address, not on a preview port."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "BSD-2-Clause",
+    "upstreamUrl": "https://github.com/pocket-id/pocket-id",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "ghcr.io/pocket-id/pocket-id:v2.19.1",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "The issuer every application trusts; passkeys are bound to it, so it cannot change later without re-registering them."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 1411,
+      "protocol": "tcp",
+      "purpose": "The sign-in pages, the administration UI and the OIDC endpoints",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/app/data",
+      "purpose": "The SQLite database, signing keys and uploaded logos",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 256,
+    "minMemoryMb": 128
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/healthz",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "APP_URL",
+        "value": "https://{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "TRUST_PROXY",
+        "value": "true"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Pocket ID migrates its database on start. Keep ENCRYPTION_KEY with any backup: the stored keys cannot be read without it.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "id.example.test"
+      },
+      "digest": "sha256:8ed06042f6e7bcbf0264bf17772323c146b8443d08af53d9e12aef03ebb2bd11"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "encryption-key",
+      "variable": "ENCRYPTION_KEY",
+      "label": "Encryption key",
+      "length": 48,
+      "description": "Encrypts the signing keys and secrets Pocket ID stores; losing it makes them unreadable."
+    }
+  ]
+}

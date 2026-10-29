@@ -1,0 +1,100 @@
+{
+  "id": "browserless",
+  "version": "1.0.0",
+  "name": "Browserless",
+  "category": "tool",
+  "profile": "web",
+  "description": "Headless Chrome as a service: programs drive it over the Chrome DevTools protocol with Puppeteer or Playwright, or call its REST routes for screenshots, PDFs, scraping and content. It answers only requests carrying the generated token.",
+  "iconId": "globe",
+  "docsUrl": "https://docs.browserless.io/enterprise/docker/config",
+  "access": {
+    "kind": "client",
+    "secretVariable": "TOKEN",
+    "note": "Browserless has no sign-in page: every program that connects passes the generated TOKEN, as ?token=<value> on the WebSocket or REST URL. Reveal it from the Variables tab. The browser fetches whatever pages it is told to from this server, so hand the token only to programs you trust. Its licence (SSPL, or a commercial one) asks closed-source commercial users to buy the commercial licence."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "SSPL-1.0 or commercial",
+    "upstreamUrl": "https://github.com/browserless/browserless",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "ghcr.io/browserless/chromium:v2.58.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address programs connect to; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 3000,
+      "protocol": "tcp",
+      "purpose": "The DevTools WebSocket endpoint and the REST API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 2048,
+    "minMemoryMb": 1024
+  },
+  "checks": [
+    {
+      "name": "Documentation page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/docs",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "CONCURRENT",
+        "value": "5"
+      },
+      {
+        "kind": "set_variable",
+        "name": "QUEUED",
+        "value": "10"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry"
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:bb055e4eccf1a3f334a66f79946bb9115fde6f0e900e03bb6fa438557be7c550"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "token",
+      "variable": "TOKEN",
+      "label": "API token",
+      "length": 32,
+      "description": "Every connection and API call must carry it."
+    }
+  ]
+}

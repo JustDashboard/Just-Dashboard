@@ -1,0 +1,78 @@
+{
+  "id": "web-check",
+  "version": "1.0.0",
+  "name": "Web-Check",
+  "category": "tool",
+  "profile": "web",
+  "description": "An all-in-one website inspector: type an address and it reports DNS records, TLS chain, headers, cookies, open ports, trackers, redirects, carbon footprint and more, each from a check run from this server. Some checks use third-party APIs and stay empty until their keys are added as variables.",
+  "iconId": "globe",
+  "docsUrl": "https://github.com/Lissy93/web-check#deployment",
+  "access": {
+    "kind": "open",
+    "note": "Web-Check has no accounts: anyone who can open the address can make this server scan any site they name. Keep it behind the deployment's password protection unless you mean to offer it publicly."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/Lissy93/web-check",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "lissy93/web-check:2.3.11",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address the page is opened at; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 3000,
+      "protocol": "tcp",
+      "purpose": "The page and the API each check calls",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 1024,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry"
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:dd04fbfd7bed4a55f0bd6c27abfea8aabb7d4196ca3d3130a6b7b0da23f43a36"
+    }
+  ]
+}
