@@ -97,6 +97,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/environments/{env}/rollback-watch", s.handle(s.handleDeploymentRollbackWatch))
 		s.mountDeploymentSleepReads(r)
 		r.Method(http.MethodGet, "/{id}/environments/{env}/rehearsal", s.handle(s.handleDeploymentRehearsal))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/vulnerabilities", s.handle(s.handleDeploymentImageScans))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/database-links", s.handle(s.handleDeploymentDatabaseLinks))
 		// The copies of a release's data an environment holds: what they are
 		// of and how long they are kept, never how to sign in to one.
@@ -130,6 +131,14 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// Asking about a failure takes what asking the SQL editor's
 			// assistant takes: it spends the install's model budget.
 			r.Method(http.MethodPost, "/{id}/runs/{run}/diagnosis", s.handle(s.handleDeploymentRunDiagnose))
+			// The operator reads with the person's leave a call at a time and
+			// proposes actions their press runs, so it is a session's: there
+			// is nobody to ask behind a key.
+			r.With(httpx.RequireSession).Method(http.MethodPost, "/{id}/assistant", s.handle(s.handleDeploymentOperator))
+			// A scan reads the release's images in a container with no
+			// network; it costs the host a few minutes of one CPU, as a
+			// build does, and changes nothing the release runs.
+			r.Method(http.MethodPost, "/{id}/environments/{env}/vulnerabilities/scan", s.handle(s.handleDeploymentImageScanRequest))
 			// Merging and commenting speak on GitHub as the dashboard's own
 			// account, which is why an API token may not: the same rule as
 			// the Git page's write routes, with the session requirement the
@@ -175,6 +184,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				// so it is an administrator's, in a session, like saving them.
 				r.Method(http.MethodPost, "/{id}/environments", s.handle(s.handleDeploymentStagingCreate))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/rehearsal", s.handle(s.handleDeploymentRehearsalPut))
+				r.Method(http.MethodPut, "/{id}/environments/{env}/vulnerabilities", s.handle(s.handleDeploymentImageScanPolicyPut))
 				// What a linked database gives the environment's previews: a
 				// second copy of production's data on a preview's network, so
 				// an administrator's in a session, like the rehearsal's terms.

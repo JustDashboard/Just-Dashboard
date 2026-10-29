@@ -1189,6 +1189,17 @@ only renderer/executor/validation authority for their feature.
   and outcome (`answered`, `kept`, `failed`, `unusable`, `unmasked`), never what was sent or answered.
   Nothing the answer says is applied. The live check against a real model is
   `TestLiveFailedBuildIsDiagnosedByARealModel` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
+- A deployment's environment can be asked about as a conversation from the overview's **Diagnose**:
+  `POST /deploy/{id}/assistant` (`service.control` and a session; `api/handlers_deploy_operator.go`,
+  the tools and prompt in `assistant/operator.go`). The same provider and budget answer it; it begins
+  knowing what the overview shows and reads more — runs, a run's transcript, the live containers' last
+  lines, usage and the sizing verdict, container events, host alerts (`system.admin`), the firewall's
+  rules for the deployment's ports, pending security updates — only through tools whose every call the
+  person allows or declines first, each bounded, read with the person's role and masked by the
+  diagnosis's masker. It proposes a restart, redeploy, rollback, instant rollback, the suggested
+  limits or a maintenance switch through `propose_action`, which runs nothing: the page draws a card,
+  and its press is the request the project's own button makes to that action's route, with its
+  capability, confirmation and audit. See [the deployment operator](operator.md).
 - Deploy and force-build resolve the current desired revision (force-build disables cache); redeploy and
   rollback clone only available immutable artifacts and traverse the same checks/cutover path (a clone
   carries its target's own source identity and promotion provenance; a rollback moves no data, and the
@@ -1600,6 +1611,16 @@ only renderer/executor/validation authority for their feature.
   trace the ingress now sends the application (`DeploymentRoute.Trace`: Caddy's `request_header` and
   `log_append`, nginx's `proxy_set_header` and log fields), so the application's own spans join it.
   See [log drains](log-drains.md) and [trace context](request-observability.md#trace-context).
+- Each release's image, and the base images its recipe pinned, is read for known vulnerabilities by
+  Trivy in a container with no network, no capabilities and nobody's account
+  (`imagescan.ScanSpec`), after the build and daily while it is live (`deploy.ImageScanWatcher`, a run
+  observer that never holds a run up). The vulnerability database is fetched by the dashboard itself,
+  checked against its digest and copied into the `jd-image-scan-db` volume. One row per release keeps
+  the counts by severity, the fixable findings, the database's age and whether each pinned base's tag
+  now names a newer digest — `ReleaseUpdate`'s registry read, compared with the digest the release
+  pinned. A fixable finding at the environment's floor with a newer base is the `image_vulnerable`
+  host alert and the overview's Rebuild, which is the runs route's own `force_build` of the live
+  commit. See [image vulnerabilities](image-vulnerabilities.md).
 - An AI client reaches the deployments over the MCP endpoint when its key was given them
   (`api_tokens.deploy_access`: none, `read`, `deploy`): it lists deployments, runs and releases,
   reads a run's transcript tail (`OrchestrationStore.RunTranscriptTail`, the stored and already

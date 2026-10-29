@@ -25,9 +25,15 @@ var DescribeTables = Tool{
 const maxToolTables = 10
 
 // ToolCall is one call the model asked for, as the person is asked to allow it.
+// A describe_tables call names its tables; any other tool is named with its
+// checked input.
 type ToolCall struct {
 	ID     string   `json:"id"`
-	Tables []string `json:"tables"`
+	Tables []string `json:"tables,omitempty"`
+	// Name and Input are a tool other than describe_tables, its input as
+	// the tool's own check read it.
+	Name  string          `json:"tool,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
 }
 
 // ErrMalformedCall is an answer that asked for something no tool here does,

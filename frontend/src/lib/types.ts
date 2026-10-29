@@ -5794,6 +5794,140 @@ export type RehearsalPolicy = {
   updatedAt?: string
 }
 
+/** A severity as the scanner names it, worst first. */
+export type VulnerabilitySeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN"
+
+/**
+ * An environment's vulnerability scanning terms (`deploy/image_scan.go`):
+ * whether its releases' images are scanned, and the lowest severity the
+ * panel lists, the releases list counts and the alert is raised at.
+ */
+export type ImageScanPolicy = {
+  enabled: boolean
+  severityFloor: Exclude<VulnerabilitySeverity, "UNKNOWN">
+  updatedBy?: string
+  updatedAt?: string
+}
+
+export type VulnerabilityCounts = {
+  critical: number
+  high: number
+  medium: number
+  low: number
+  unknown: number
+}
+
+/** One vulnerability in one package of a release's image. */
+export type VulnerabilityFinding = {
+  id: string
+  package: string
+  installed: string
+  /** The version that fixes it; absent while no fix is published. */
+  fixed?: string
+  severity: VulnerabilitySeverity
+  title?: string
+  url?: string
+  /** The OS packages ("alpine 3.12.12") or a lock file, with a Compose service in front. */
+  target: string
+  class?: string
+  /** A base the release was built on carries it too, so a newer base may fix it. */
+  fromBase?: boolean
+}
+
+/** One image a scan read: the release's own, or a base it was pinned on. */
+export type ImageScanTarget = {
+  kind: "release" | "base"
+  service?: string
+  reference: string
+  digest?: string
+  state: "scanned" | "failed"
+  reason?: string
+  os?: string
+  endOfLife?: boolean
+  counts: VulnerabilityCounts
+  scannedAt?: string
+}
+
+/** A base the release was pinned on, against what its tag names in the registry now. */
+export type ReleaseBaseUpdate = {
+  reference: string
+  pinned?: string
+  current?: string
+  state: "current" | "outdated" | "unknown" | "local"
+  reason?: string
+  checkedAt?: string
+}
+
+/** A release's latest scan, read at its environment's floor. */
+export type ImageScan = {
+  releaseId: number
+  releaseNumber: number
+  environmentId: number
+  state: "queued" | "scanning" | "scanned" | "failed"
+  reason?: string
+  trigger?: "build" | "schedule" | "manual"
+  scanner?: string
+  databaseUpdatedAt?: string
+  databaseAgeHours?: number
+  floor: ImageScanPolicy["severityFloor"]
+  summary: {
+    counts: VulnerabilityCounts
+    fixableCounts: VulnerabilityCounts
+    /** The fixable findings at or above the floor, worst first. */
+    fixable: VulnerabilityFinding[]
+    /** The findings at or above the floor nobody has published a fix for. */
+    unfixed: VulnerabilityFinding[]
+    truncated?: boolean
+  }
+  targets: ImageScanTarget[]
+  baseUpdates: ReleaseBaseUpdate[]
+  /** A base's tag names a newer image than the release was pinned on. */
+  newerBase: boolean
+  /** A build re-pins the bases (a recipe, static, Dockerfile or Compose build). */
+  rebuildable: boolean
+  requestedAt?: string
+  startedAt?: string
+  finishedAt?: string
+}
+
+/** A release's scan as its row in the releases list says it. */
+export type ImageScanBadge = {
+  releaseId: number
+  state: ImageScan["state"]
+  floor: ImageScanPolicy["severityFloor"]
+  counts: VulnerabilityCounts
+  /** Findings at or above the floor. */
+  atFloor: number
+  /** Of those, the ones with a published fix. */
+  fixable: number
+  newerBase: boolean
+  scannedAt?: string
+}
+
+/** GET /deploy/{id}/environments/{env}/vulnerabilities. */
+export type ImageScanReading = {
+  policy: ImageScanPolicy
+  /** Whether this host has a scanner (Docker) at all; `reason` says why not. */
+  available: boolean
+  reason?: string
+  scanner: string
+  database: {
+    installed: boolean
+    updatedAt?: string
+    nextUpdate?: string
+    ageHours?: number
+    lastError?: string
+    source?: string
+  }
+  /** The release the scan is of: the live one unless another was asked for. */
+  releaseId?: number
+  scan: ImageScan | null
+  /** The run the Rebuild button asks for, through the runs route. */
+  rebuild?: { operation: "force_build"; sourceRevision?: string }
+  rebuildReason?: string
+  releases: ImageScanBadge[]
+}
+
 /** The rehearse_migration step's evidence. */
 export type RehearsalReport = {
   rehearsed: boolean

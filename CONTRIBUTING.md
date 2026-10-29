@@ -589,6 +589,15 @@ to the contribution terms above, including the additional licence grant to the p
   starts a server, switches it to TLS, requires TLS, checks the certificate on the wire against the
   recorded serial, renews it (by request and by the schedule) without a restart, switches TLS off,
   and removes its container and volumes.
+- Changes to the vulnerability watch — `internal/imagescan` (the scanner's container, the database
+  download, the report reader) or `deploy/image_scan*.go` — also run, as root (build the `internal/api`
+  test binary and run it under `sudo -n env JD_DEPLOY_LIVE=1 PATH=$PATH`),
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveImageScanStoresFindingsAndRaisesTheAlert -count=1 -v`.
+  It runs the pinned Trivy image against the real database, fetched from its registry (about 140 MB)
+  into a volume of its own: a release on `alpine:3.12` pinned on a moved `alpine:3.22` stores zlib's
+  CVE-2022-37434 as a fixable critical and raises the `image_vulnerable` reading, and one on today's
+  `alpine:3.22` raises nothing. It pulls the two alpine images and the scanner's when they are missing
+  and removes those it pulled, removes its volume, and leaves no container.
 - Changes to the ingress request record — the rendered `log` block, `accesslog.Store`, or either
   reader in `proxysvc/deployment_access_log.go` — also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveCaddyAccessLogReader -count=1 -v`, which

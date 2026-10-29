@@ -251,6 +251,12 @@ var deployOperations = map[string]deployOperation{
 	"POST /deploy/{id}/environments/{env}/watch-paths/simulate": {Tag: "triggers", Summary: "Try the environment's watch-path filter against a list of changed paths.", Request: watchSimulationRequest{}, Response: shape{"matched": false}},
 	"GET /deploy/{id}/environments/{env}/rehearsal":             {Tag: "environments", Summary: "Read an environment's migration rehearsal terms: whether it is on, which database's backup is restored, and the limits.", Response: deploy.RehearsalPolicy{}},
 	"PUT /deploy/{id}/environments/{env}/rehearsal":             {Tag: "environments", Summary: "Set an environment's migration rehearsal terms.", Request: deploy.RehearsalPolicy{}, Response: deploy.RehearsalPolicy{}},
+	"GET /deploy/{id}/environments/{env}/vulnerabilities": {Tag: "environments", Summary: "Read the latest image scan of an environment's live release: counts by severity, the findings with a fix, the vulnerability database's age, whether its base tag names a newer image, the rebuild that would pin it again, and the scanning terms.",
+		Query: []openapiQuery{{"release", "integer", "A release's id, to read that release's scan in place of the live one's."}}, Response: imageScanReading{}},
+	"PUT /deploy/{id}/environments/{env}/vulnerabilities": {Tag: "environments", Summary: "Set an environment's scanning terms: whether its images are scanned, and the severity findings are counted from.", Request: deploy.ImageScanPolicy{}, Response: deploy.ImageScanPolicy{},
+		Note: "Turning scanning on queues a scan of the live release."},
+	"POST /deploy/{id}/environments/{env}/vulnerabilities/scan": {Tag: "environments", Summary: "Queue a scan of the live release's images (or the release named) and the bases it was pinned on, now rather than at the day's scan.", Request: imageScanRequest{}, Response: (*deploy.ImageScan)(nil), Status: http.StatusAccepted,
+		Note: "Answers 409 scanner_unavailable without Docker, no_release before the first release, and scanning_off when the terms turn it off or the environment is a preview."},
 
 	// Domains: what the public route serves.
 	"GET /deploy/hostname":                             {Tag: "domains", Summary: "Suggest a public hostname under this server's domain for a deployment name, and say whether the name is taken and how a certificate would cover it.", Query: []openapiQuery{{"name", "string", "The deployment's name to derive a hostname from."}, {"hostname", "string", "A hostname to check instead of deriving one."}}, Response: hostnameSuggestion{}},
@@ -299,6 +305,9 @@ var deployOperations = map[string]deployOperation{
 	"GET /deploy/{id}/runs/{run}/settings-drift": {Tag: "runs", Summary: "Read what differed between a run's settings and the environment's at the time.", Response: (*deploy.RunSettingsDrift)(nil)},
 	"GET /deploy/{id}/runs/{run}/diagnosis":      {Tag: "runs", Summary: "Read the kept diagnosis of a failed run.", Response: shape{"diagnosis": (*runDiagnosisView)(nil)}},
 	"POST /deploy/{id}/runs/{run}/diagnosis":     {Tag: "runs", Summary: "Ask the configured model to diagnose a failed run, or to diagnose it again.", Request: diagnoseRequest{}, Response: shape{"diagnosis": (*runDiagnosisView)(nil)}},
+	"POST /deploy/{id}/assistant": {Tag: "runs", Summary: "Ask the deployment operator about an environment, or answer the reads it asked for.", Request: operatorRequest{}, Content: "application/x-ndjson",
+		Query: []openapiQuery{{Name: "environment", Type: "integer", Description: "Staging's environment id; production when absent."}},
+		Note:  "A session's route. The answer streams one JSON object a line: start, thinking, text, ran (what each allowed read read), proposal (an action whose card the person may press; nothing has run), done (with the reads waiting for a decision) or error."},
 
 	// Variables.
 	"GET /deploy/{id}/environments/{env}/variables":                  {Tag: "variables", Summary: "List an environment's variables: name, sensitivity, scopes, the value's digest and whether it awaits a deploy; never a value.", Response: []deploy.DeploymentVariable(nil)},

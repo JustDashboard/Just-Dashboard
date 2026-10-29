@@ -65,6 +65,8 @@ var sessionOnlyBefore = []string{
 	"POST /deploy/{id}/environments", "DELETE /deploy/{id}/environments/{env}",
 	"PUT /deploy/{id}/environments/{env}/pages/{page}", "PUT /deploy/{id}/environments/{env}/rollback-policy",
 	"PUT /deploy/{id}/environments/{env}/rehearsal",
+	"POST /deploy/{id}/assistant",
+	"PUT /deploy/{id}/environments/{env}/vulnerabilities",
 	// A copy of a release's data: asked for, read, kept and removed in a
 	// session, whatever the key.
 	"POST /deploy/{id}/environments/{env}/releases/{release}/data-copies",

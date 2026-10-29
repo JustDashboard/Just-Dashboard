@@ -121,7 +121,7 @@ rule. Source: `api/host_alerts.go` (rules, the pass, `stepHostAlert`, history), 
 `components/metrics/alerts-page.tsx` over `lib/host-alerts.ts`, with the parts it shares with the
 proxy's page in `components/alerts/alert-parts.tsx`.
 
-- **Five kinds, a closed vocabulary** (`hostAlertSpecs`). `cpu_high` and `memory_high` take a line
+- **Six kinds, a closed vocabulary** (`hostAlertSpecs`). `cpu_high` and `memory_high` take a line
   (default 90%, 10–100) and a window (CPU 10 min, memory 5 — the OOM killer does not wait ten; 1–1440):
   the **mean of the recorded samples** in `metric_samples` over the window, with its peak, so a spike
   inside a quiet window is a high peak and not an alert (Netdata's stock CPU alarm averages ten minutes
@@ -132,7 +132,8 @@ proxy's page in `components/alerts/alert-parts.tsx`.
   bytes for memory). `disk_filling` (default 90%, 10–99) reads the recorder's newest
   `metric_mount_samples` batch and fires a mount on its space **or** its inodes, since a filesystem out
   of inodes reports free space and refuses to create a file; a mount missing from the newest batch has
-  been unmounted and leaves. `container_down` (minutes 2, 1–1440) and `backup_failed` are below.
+  been unmounted and leaves. `container_down` (minutes 2, 1–1440), `backup_failed` and
+  `image_vulnerable` are below.
 - **One pass a minute** (`hostAlerts.Start` from `Server.Start`, clock, observer and deliverer fields
   for tests); each source is read once a pass and only when an enabled rule needs it. CPU, memory and
   disk are queries of what the recorder already keeps; with `JD_METRICS_RETENTION=0` those rules are
@@ -165,6 +166,16 @@ proxy's page in `components/alerts/alert-parts.tsx`.
   the job dumps) is **left to that rule** (`databaseBackupRules`), so one failed run is told once and
   keeps the database page's link; a job leaving the host rule that way is told it is over if it was
   firing.
+- **A deployment's image is vulnerable** (`image_vulnerable`, nothing to set, one pass) when its
+  environment scans and its live release's latest scan found a vulnerability with a published fix at
+  or above the environment's severity floor **and** a base the release was pinned on (or, for an
+  upstream image, its own tag) now names a newer image in the registry — together, what says a
+  rebuild is likely to fix something (`imageAlertReading` over `deploy.LiveImageScans`). The subject is
+  `env:<project>:<environment>`, labelled "shop · production", and the message links to the
+  project's overview, whose panel offers the rebuild. A scan not run yet, in flight or failed keeps
+  its subject where it was; an environment that stops scanning, or whose release is replaced by one
+  scanned clean, is told it is over. The scans are the deployments'
+  ([image vulnerabilities](../deployments/image-vulnerabilities.md)); the rule only reads them.
 - **Hold and state** (`stepHostAlert`, one pure function). A subject is told once when it has been over
   the line for its kind's passes and minutes — one pass for CPU, memory (their window is the hold) and
   backups, two for disks, two and the rule's minutes for containers — and once when it comes back,
