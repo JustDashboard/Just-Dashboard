@@ -235,6 +235,7 @@ export function ProjectOverview() {
             runs={runs}
             runtime={runtime}
             domains={opsDomains}
+            tailnet={project.operations?.tailnet}
             url={url}
             watch={project.gitWatch}
           />

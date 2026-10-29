@@ -162,11 +162,17 @@ export function StatusCode({
 export function ClientCell({
   ip,
   userAgent,
+  user,
   plain,
   className,
 }: {
   ip?: string
   userAgent?: string
+  /**
+   * Who a tailnet gate admitted, which says who asked better than the
+   * address: the address stays in the cell's title.
+   */
+  user?: string
   plain?: boolean
   className?: string
 }) {
@@ -179,7 +185,7 @@ export function ClientCell({
   const Place = network && !agent ? NETWORK_GLYPH[network.kind] : undefined
   return (
     <span
-      title={[userAgent ? clientName(userAgent) : "No user agent", network?.label]
+      title={[user, userAgent ? clientName(userAgent) : "No user agent", network?.label, user && ip]
         .filter(Boolean)
         .join(" · ")}
       className={cn("flex min-w-0 items-center gap-1.5", className)}
@@ -196,7 +202,13 @@ export function ClientCell({
         ) : null}
       </span>
       {agent && network?.product && <ProductGlyph id={network.product} />}
-      {ip ? <Address ip={ip} plain={plain} /> : <span className="text-muted-foreground/60">—</span>}
+      {user ? (
+        <span className="truncate font-mono">{user}</span>
+      ) : ip ? (
+        <Address ip={ip} plain={plain} />
+      ) : (
+        <span className="text-muted-foreground/60">—</span>
+      )}
     </span>
   )
 }

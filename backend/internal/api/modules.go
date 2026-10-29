@@ -46,6 +46,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/tailnetgate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/uninstall"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/updates"
@@ -197,6 +198,9 @@ type moduleSet struct {
 	// tailnet publishes preview environments on this host's Tailscale node
 	// through `tailscale serve`; the executor and the preview route share it.
 	tailnet deploy.TailnetPublisher
+	// tailnetGate is the route a tailnet-only deployment's gate asks about
+	// every request (handlers_tailnet_whois.go).
+	tailnetGate *tailnetgate.Handler
 	// pullRequests reads pull requests through the trusted GitHub identity
 	// for the deploy pages and the reconciler.
 	pullRequests *pullRequests
@@ -382,7 +386,7 @@ func (s *Server) initModules() {
 		s.Cfg.DataDir,
 		s.modules.docker,
 		s.modules.proxy,
-	).WithFirewall(s.modules.netsec).WithDependencies(newDeploymentDependencyObserver(
+	).WithFirewall(s.modules.netsec).WithTailnet(preflightTailnet{server: s}).WithDependencies(newDeploymentDependencyObserver(
 		s.Store, s.modules.backupStore, s.modules.docker,
 	).withExtensionProbe(s.databaseExtensions))
 	s.modules.deployChecker = deploy.NewDeploymentChecker(
@@ -419,6 +423,9 @@ func (s *Server) initModules() {
 		WithCertificateIssuer(auditedCertificateIssuer{issuer: s.modules.proxy, record: s.Audit.Record}).
 		WithNotifications(s.modules.deployAutomation).
 		WithTailnetPublisher(s.modules.tailnet).
+		// A tailnet-only environment that names its visitors is gated by
+		// a proxy that asks this API about every request.
+		WithTailnetGate(s.tailnetGateAPI()).
 		// Release tasks are rehearsed against copies the Databases owner
 		// makes from its own backups, when an environment asks for it.
 		WithMigrationRehearser(s.modules.rehearser).
@@ -486,6 +493,7 @@ func (s *Server) initModules() {
 	s.modules.pullRequests = newPullRequests(s.modules.github, s.modules.githubApp, s.modules.git)
 	s.modules.previewReconciler = deploy.NewPreviewReconciler(s.modules.deployAutomation, s.modules.pullRequests, s.closePreviewTarget, s.Log)
 
+	s.initTailnetGate()
 	s.initProxyExtras()
 	s.initUninstall()
 	s.initAccountLink()
