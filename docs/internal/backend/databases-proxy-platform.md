@@ -1167,13 +1167,19 @@ the page.
   system prompt cached and the conversation under automatic caching, and the server-side refusal
   fallback (`fallbacks: "default"`) for Opus and Sonnet. The OpenAI-compatible request carries the
   model, the messages, the stream and the usage option, and nothing a server might not know.
-- **The same provider answers two other questions**, each one request sent only when somebody
-  presses for it: a drawing's *Describe a diagram* (`POST /boards/diagram`, the prompt alone, audited
-  as `board.diagram`) and a failed deployment's *Ask why it failed*
+- **The same provider answers three other questions**, each sent only when somebody presses for it:
+  a drawing's *Describe a diagram* (`POST /boards/diagram`, the prompt alone, audited as
+  `board.diagram`), a failed deployment's *Ask why it failed*
   (`POST /deploy/{id}/runs/{run}/diagnosis`, the run's record masked on the server first, audited as
-  `deploy.run.diagnose`; [the deployment contract](../deployments/implementation.md) says what is sent).
-  Both share the install's budget of model calls and its four answers at once, and the settings sheet
-  names all three under *Used by*.
+  `deploy.run.diagnose`; [the deployment contract](../deployments/implementation.md) says what is sent),
+  and a deployment's *Diagnose* (`POST /deploy/{id}/assistant`, session-only, audited as
+  `deploy.assistant.ask` and `deploy.assistant.tool`): a conversation of its own kind, with its own
+  closed set of read tools — the environment's runs, a run's transcript, the live containers' lines,
+  usage and sizing, container events, host alerts, firewall rules, security updates — each call allowed
+  or declined by the person as `describe_tables` is, masked as the diagnosis is, and a
+  `propose_action` tool that runs nothing but draws a card whose press calls the project's own route
+  ([the deployment operator](../deployments/operator.md)). All of them share the install's budget of
+  model calls and its four answers at once, and the settings sheet names all four under *Used by*.
 - **Engines** come from the capability table: `assistant` is every engine with a dialect, and
   `assistantPolicy` is PostgreSQL and its forks but CockroachDB. The editor offers the assistant to a
   role with `service.control` on those engines; a failed statement and a plan offer a question of

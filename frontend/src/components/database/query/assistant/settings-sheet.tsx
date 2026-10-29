@@ -190,8 +190,8 @@ function SettingsForm({
     >
       <FormFacts>
         <FormFact label="Used by">
-          every SQL database&rsquo;s editor, a drawing&rsquo;s Describe a diagram, and a failed
-          deployment&rsquo;s Ask why it failed
+          every SQL database&rsquo;s editor, a drawing&rsquo;s Describe a diagram, a failed
+          deployment&rsquo;s Ask why it failed, and a deployment&rsquo;s Diagnose
         </FormFact>
       </FormFacts>
 

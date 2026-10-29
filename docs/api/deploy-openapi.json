@@ -1790,6 +1790,27 @@
         "title": "api.maintenanceSwitchRequest",
         "type": "object"
       },
+      "api.operatorRequest": {
+        "properties": {
+          "conversation": {
+            "type": "string"
+          },
+          "decisions": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "question": {
+            "type": "string"
+          }
+        },
+        "title": "api.operatorRequest",
+        "type": "object"
+      },
       "api.previewApproveRequest": {
         "properties": {
           "deploy": {
@@ -17765,6 +17786,71 @@
           "fleet"
         ],
         "x-deploy-key": "refused (key_scope): archiving a deployment is done in the dashboard or with an ordinary key"
+      }
+    },
+    "/deploy/{id}/assistant": {
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ],
+      "post": {
+        "description": "A session's route. The answer streams one JSON object a line: start, thinking, text, ran (what each allowed read read), proposal (an action whose card the person may press; nothing has run), done (with the reads waiting for a decision) or error.",
+        "operationId": "deploymentOperator",
+        "parameters": [
+          {
+            "description": "Staging's environment id; production when absent.",
+            "in": "query",
+            "name": "environment",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/api.operatorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Ask the deployment operator about an environment, or answer the reads it asked for.",
+        "tags": [
+          "runs"
+        ],
+        "x-deploy-key": "refused (session_required): the operator reads with a person's leave a call at a time and proposes actions only a person's press runs, in the dashboard"
       }
     },
     "/deploy/{id}/availability": {
