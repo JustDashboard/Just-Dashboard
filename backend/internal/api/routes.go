@@ -61,6 +61,14 @@ func (s *Server) Routes() http.Handler {
 			r.Use(httpx.AuditMutations(s.Audit))
 			r.Method(http.MethodPost, "/deploy/{id}/hooks/{triggerID}", s.handle(s.handleDeploymentGenericWebhook))
 		})
+		// A tailnet-only deployment's gate asks here about every request it
+		// is sent (handlers_tailnet_whois.go). No session, as a webhook has
+		// none: the handler answers only the proxy — a loopback caller no
+		// other proxy forwarded — and refuses anybody else before it looks
+		// anything up. Outside the API rate limit, because every request to
+		// the deployment is one call here, and its few-second cache, not a
+		// budget per address, is what bounds what reaches tailscaled.
+		s.mountTailnetGate(r)
 
 		if s.Cfg.AgentMode {
 			// An agent has no human login surface at all: no password route,

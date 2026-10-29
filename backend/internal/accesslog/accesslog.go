@@ -63,6 +63,11 @@ type Entry struct {
 	TraceID      string `json:"traceId,omitempty"`
 	SpanID       string `json:"spanId,omitempty"`
 	ParentSpanID string `json:"parentSpanId,omitempty"`
+	// User is who the route's tailnet gate admitted: the Tailscale login,
+	// or a tagged machine's tags, the dashboard answered the proxy with
+	// (tailnet-apps.md). Empty on every other route, and on a request the
+	// gate refused.
+	User string `json:"user,omitempty"`
 
 	// at is unix nanoseconds, kept unexported so every consumer sorts and
 	// buckets on the same value rather than re-parsing a string.
@@ -174,6 +179,8 @@ type caddyLine struct {
 	TraceID      string `json:"trace_id"`
 	SpanID       string `json:"span_id"`
 	ParentSpanID string `json:"parent_span_id"`
+	// TailnetLogin is the field the tailnet gate's log_append adds.
+	TailnetLogin string `json:"tailnet_login"`
 }
 
 func parseCaddy(line string) (Entry, bool) {
@@ -202,6 +209,7 @@ func parseCaddy(line string) (Entry, bool) {
 	entry.Path, entry.Query = splitURI(raw.Request.URI)
 	entry.UserAgent = header(raw.Request.Headers, "User-Agent")
 	entry.Referer = header(raw.Request.Headers, "Referer")
+	entry.User = strings.TrimSpace(raw.TailnetLogin)
 	if raw.Duration != nil {
 		entry.duration, entry.timed = *raw.Duration*1000, true
 	}
@@ -348,7 +356,8 @@ func parseCombined(line string) (Entry, bool) {
 
 // readTrailing reads what an operator appended to `combined` in a log_format
 // of their own: `rt=$request_time` gives the latency the stock format lacks,
-// and `host=$host` names the site on a log several share. A trailing field
+// `host=$host` names the site on a log several share, and `tl=` is the login
+// a tailnet gate admitted. A trailing field
 // this does not know, or one written `-`, is left alone rather than failing
 // the line, because the line up to it is still a served request.
 func readTrailing(entry *Entry, rest string) {
@@ -377,6 +386,10 @@ func readTrailing(entry *Entry, rest string) {
 			span = value
 		case "parent":
 			parent = value
+		case "tl":
+			// The tailnet gate's login, which nginx writes escaped as
+			// \xHH where it is not printable ASCII.
+			entry.User = value
 		}
 	}
 }

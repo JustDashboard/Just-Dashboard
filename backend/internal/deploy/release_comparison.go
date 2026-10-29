@@ -147,6 +147,7 @@ func compareRuntimeSnapshots(fromSnapshot, toSnapshot runtimeReleaseSnapshot, fr
 	field("allowed addresses", allowFromLabel(fromSnapshot.Plan.AllowFrom), allowFromLabel(toSnapshot.Plan.AllowFrom))
 	field("response headers", responseHeadersLabel(fromSnapshot.Plan.ResponseHeaders), responseHeadersLabel(toSnapshot.Plan.ResponseHeaders))
 	field("sign-in", signInLabel(fromSnapshot.Plan.ForwardAuth), signInLabel(toSnapshot.Plan.ForwardAuth))
+	field("tailnet", tailnetLabel(fromSnapshot.Plan.Tailnet), tailnetLabel(toSnapshot.Plan.Tailnet))
 	field("hsts", hstsLabel(fromSnapshot.Plan.HSTS), hstsLabel(toSnapshot.Plan.HSTS))
 	field("let past maintenance", maintenanceBypassLabel(fromSnapshot.Plan.Maintenance), maintenanceBypassLabel(toSnapshot.Plan.Maintenance))
 	field("maintenance retry after", maintenanceRetryLabel(fromSnapshot.Plan.Maintenance), maintenanceRetryLabel(toSnapshot.Plan.Maintenance))
@@ -272,6 +273,17 @@ func hstsLabel(h *RouteHSTS) string {
 		return "off"
 	}
 	return h.proxy().Value()
+}
+
+// tailnetLabel names a release's tailnet publication and who it admits.
+func tailnetLabel(tailnet *RouteTailnet) string {
+	switch {
+	case tailnet == nil:
+		return "not tailnet-only"
+	case len(tailnet.Allow) == 0:
+		return "tailnet only · everyone on the tailnet"
+	}
+	return "tailnet only · " + strings.Join(tailnet.Allow, ", ")
 }
 
 func signInLabel(gate *RouteForwardAuth) string {

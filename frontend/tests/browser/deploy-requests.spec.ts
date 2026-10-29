@@ -269,6 +269,32 @@ test.describe("a deployment's traffic", () => {
     await expect(page.getByTitle("1 exit or restart in the last hour")).toBeVisible()
   })
 
+  test("a request a tailnet gate admitted names the login it let in", async ({ page }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/requests*", (route) => {
+      const body = deploymentRequests(new URL(route.request().url()))
+      const admitted = {
+        ...body.entries[1],
+        seq: 9918,
+        time: "2026-09-03T11:59:40Z",
+        path: "/notes",
+        query: undefined,
+        remoteIp: "100.101.102.103",
+        host: "box.tail1234.ts.net:21003",
+        user: "alice@example.com",
+      }
+      return json(route, { ...body, entries: [admitted, ...body.entries] })
+    })
+    await page.goto("/deploy/7/logs")
+    const row = page.getByRole("button", { name: /\/notes/ }).first()
+    await expect(row).toBeVisible()
+    // Who asked is the login, with the tailnet address behind it.
+    await expect(row.getByText("alice@example.com", { exact: true })).toBeVisible()
+    await expect(row.getByTitle(/100\.101\.102\.103/)).toBeVisible()
+    await row.click()
+    await expect(page.getByText("Tailnet login", { exact: true })).toBeVisible()
+  })
+
   test("a request row carries its status, its timing and its path, and opens for the rest", async ({
     page,
   }) => {

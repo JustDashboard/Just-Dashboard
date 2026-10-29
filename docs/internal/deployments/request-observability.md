@@ -101,6 +101,14 @@ operator already owned; adding a bind mount would mean recreating their running 
 on a log. Reads go through one `docker exec` per read (`caddyReadScript` in
 `deployment_access_log.go`), the same mechanism route files already use.
 
+A tailnet-only environment that names who may open it is recorded by its tailnet gate
+([tailnet-only deployments](tailnet-apps.md#the-gate)): on host nginx in the same file, in the timed
+format with `tl=<login>` after it and the tailnet address as `$remote_addr`; on the dashboard's own
+loopback Caddy in the same JSON, with the login as the `tailnet_login` field its `log_append` adds and
+the tailnet address as `client_ip`. `AccessLogReader` reads the gate Caddy's record when that
+container holds the route, and `accesslog.Entry.User` carries the login, which the Logs page shows in
+the client column (the address in its title) and as **Tailnet login** in the request's detail.
+
 `RemoveDeploymentRoute` deletes the Caddy record and its rolled generations with the route. It holds
 client addresses, and leaving it behind after the deployment it described is gone would keep personal
 data on the host with nothing left to read it. nginx's file is left alone — it is in the host's log
@@ -137,7 +145,9 @@ Caddyfile. nginx has had `$request_id` since 1.11. The nginx parser reads the re
 `accesslog` reads the ids into `Entry.TraceID`, `SpanID` and `ParentSpanID` from either spelling,
 keeping only 32 and 16 lowercase hex characters that are not all zeros, so a placeholder or another
 format's field is no context rather than a wrong one. A route rendered before this has none until its
-next deploy; nothing rewrites it in place.
+next deploy; nothing rewrites it in place. A tailnet-only environment's gate
+([tailnet apps](tailnet-apps.md)) is a route of its own kind and sends no trace context, so its requests
+are recorded without one; a drain still exports them as spans, each under ids of its own.
 
 ### Reading
 
