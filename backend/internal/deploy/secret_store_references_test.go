@@ -57,8 +57,10 @@ func (f *fakeStores) Resolve(_ context.Context, references []secretstore.Referen
 func TestStoreReferencesParseOnlyInTheirOwnKind(t *testing.T) {
 	t.Parallel()
 	for value, want := range map[string]VariableReference{
-		"${{store.vault-prod/apps/web#DATABASE_URL}}": {Kind: "store", Target: "vault-prod/apps/web#DATABASE_URL"},
-		"${{store.infisical#API_KEY@3}}":              {Kind: "store", Target: "infisical#API_KEY@3"},
+		"${{store.vault-prod/apps/web#DATABASE_URL}}":     {Kind: "store", Target: "vault-prod/apps/web#DATABASE_URL"},
+		"${{store.infisical#API_KEY@3}}":                  {Kind: "store", Target: "infisical#API_KEY@3"},
+		"${{store.aws/prod/db#DATABASE_URL@AWSPREVIOUS}}": {Kind: "store", Target: "aws/prod/db#DATABASE_URL@AWSPREVIOUS"},
+		"${{store.kv/database-url}}":                      {Kind: "store", Target: "kv/database-url"},
 	} {
 		got, err := ParseVariableReference(value)
 		if err != nil || got != want {
@@ -68,7 +70,7 @@ func TestStoreReferencesParseOnlyInTheirOwnKind(t *testing.T) {
 	// The store grammar's slashes, # and @ belong to it alone: no older kind
 	// gains them, and a malformed store reference is refused, not literal.
 	for _, value := range []string{
-		"${{store.vault}}", "${{store.vault/../x#K}}", "${{store.vault/a#K@0}}", "${{store.Vault/a#K}}",
+		"${{store.vault}}", "${{store.vault/../x#K}}", "${{store.vault/a#K@}}", "${{store.vault/a#K@a@b}}", "${{store.Vault/a#K}}",
 		"${{credential.a/b}}", "${{credential.a#b}}", "${{database.1@2}}", "${{variable.A#B}}", "${{server.A/B}}",
 	} {
 		if _, err := ParseVariableReference(value); !errors.Is(err, ErrInvalidVariable) {

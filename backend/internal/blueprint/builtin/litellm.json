@@ -1,0 +1,247 @@
+{
+  "id": "litellm",
+  "version": "1.0.0",
+  "name": "LiteLLM",
+  "category": "automation",
+  "profile": "compose",
+  "description": "An OpenAI-compatible gateway in front of a hundred model providers: one base URL and one key for every application, with per-key budgets, spend logs and an admin UI. Models and keys are kept in the PostgreSQL database on a private network beside it.",
+  "iconId": "bolt",
+  "docsUrl": "https://docs.litellm.ai/docs/proxy/deploy",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "UI_USERNAME",
+    "secretVariable": "UI_PASSWORD",
+    "path": "/ui",
+    "note": "The admin UI at https://<domain>/ui signs in with the user named here and the password generated here; reveal it from the Variables tab. Applications authenticate with the master key instead, which LiteLLM requires to start with \"sk-\": it is \"sk-\" followed by the generated master-key value. Models and their provider keys are added from the UI and stored encrypted in the database, so nothing here holds a provider's key."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/BerriAI/litellm",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address applications and the UI are reached at. LiteLLM builds no absolute URLs, so nothing else here changes when it is set."
+    },
+    {
+      "name": "admin-user",
+      "kind": "text",
+      "label": "UI admin user",
+      "variable": "UI_USERNAME",
+      "default": "admin",
+      "required": true,
+      "pattern": "^[a-zA-Z0-9_.@-]{1,64}$"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "ui-password",
+      "variable": "UI_PASSWORD",
+      "label": "UI admin password",
+      "length": 24,
+      "description": "Reveal it from the Variables tab to sign in to /ui."
+    },
+    {
+      "name": "master-key",
+      "variable": "LITELLM_MASTER_KEY_SUFFIX",
+      "label": "Master key (after the sk- prefix)",
+      "length": 40,
+      "description": "The master key applications send is \"sk-\" followed by this value. It also mints every other virtual key."
+    },
+    {
+      "name": "salt-key",
+      "variable": "LITELLM_SALT_KEY_SUFFIX",
+      "label": "Salt key (after the sk- prefix)",
+      "length": 40,
+      "description": "Encrypts provider keys stored in the database; LiteLLM says never to change it once models exist."
+    },
+    {
+      "name": "db-password",
+      "variable": "LITELLM_DB_PASSWORD",
+      "label": "Database password",
+      "length": 40,
+      "description": "Generated here and given only to the services that sign in to the database."
+    }
+  ],
+  "services": [
+    {
+      "name": "litellm",
+      "role": "app",
+      "purpose": "The proxy, the admin UI and the key API, behind the domain",
+      "image": {
+        "reference": "ghcr.io/berriai/litellm:v1.106.5",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "DATABASE_URL",
+          "value": "postgresql://litellm:{{secret.db-password}}@db:5432/litellm"
+        },
+        {
+          "name": "STORE_MODEL_IN_DB",
+          "value": "True"
+        },
+        {
+          "name": "LITELLM_MASTER_KEY",
+          "value": "sk-{{secret.master-key}}"
+        },
+        {
+          "name": "LITELLM_SALT_KEY",
+          "value": "sk-{{secret.salt-key}}"
+        },
+        {
+          "name": "UI_USERNAME",
+          "value": "{{variable.UI_USERNAME}}"
+        },
+        {
+          "name": "UI_PASSWORD",
+          "value": "{{secret.ui-password}}"
+        },
+        {
+          "name": "PORT",
+          "value": "4000"
+        },
+        {
+          "name": "LITELLM_TELEMETRY",
+          "value": "False"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 4000,
+          "protocol": "tcp",
+          "purpose": "The OpenAI-compatible API and the admin UI",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 1024,
+        "minMemoryMb": 512
+      },
+      "healthcheck": {
+        "test": [
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness')"
+        ],
+        "intervalSeconds": 15,
+        "timeoutSeconds": 10,
+        "retries": 20,
+        "startPeriodSeconds": 60
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "PostgreSQL, holding models, virtual keys, teams and spend logs",
+      "image": {
+        "reference": "postgres:17.11-alpine",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "POSTGRES_DB",
+          "value": "litellm"
+        },
+        {
+          "name": "POSTGRES_USER",
+          "value": "litellm"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "value": "{{secret.db-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "postgres",
+          "internal": 5432,
+          "protocol": "tcp",
+          "purpose": "SQL connections from LiteLLM",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/var/lib/postgresql/data",
+          "purpose": "Every table LiteLLM keeps",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "pg_isready",
+          "-h",
+          "127.0.0.1",
+          "-U",
+          "litellm",
+          "-d",
+          "litellm"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 20
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Liveliness endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health/liveliness",
+      "port": "http",
+      "timeoutSeconds": 300
+    }
+  ],
+  "operations": {},
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "LiteLLM migrates its database on start. Keep the salt key: provider keys stored in the database are encrypted with it and cannot be read with another."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:69c86b6ef3f2a2199d0561ccbba77530967ff3368f505c5827f86d5f9c2bad9e"
+    }
+  ]
+}
