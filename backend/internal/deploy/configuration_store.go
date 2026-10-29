@@ -746,9 +746,31 @@ func (s *PlanningStore) CopyEnvironmentVariables(
 	if err != nil {
 		return nil, nil, err
 	}
+	// A reference to a database the preview holds a branch of resolves to
+	// the branch (preview_branches.go), so it is copied like a value; every
+	// other reference names production's own resources.
+	branched := map[int64]bool{}
+	branchRows, err := tx.QueryContext(ctx, `SELECT DISTINCT connection_id FROM deploy_preview_branches
+		WHERE environment_id = ? AND state IN ('waiting', 'restoring', 'ready')`, toEnvironmentID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for branchRows.Next() {
+		var id int64
+		if err := branchRows.Scan(&id); err != nil {
+			branchRows.Close()
+			return nil, nil, err
+		}
+		branched[id] = true
+	}
+	branchRows.Close()
 	copied, skipped = []string{}, []string{}
 	for _, value := range values {
-		if (value.valueMode != "literal" && strings.HasPrefix(value.value, "${{")) || own[value.name] {
+		reference := value.valueMode != "literal" && strings.HasPrefix(value.value, "${{")
+		if reference && branched[previewBranchReferenceTx(ctx, tx, value.value)] {
+			reference = false
+		}
+		if reference || own[value.name] {
 			skipped = append(skipped, value.name)
 			continue
 		}

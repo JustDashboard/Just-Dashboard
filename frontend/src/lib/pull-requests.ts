@@ -1,5 +1,14 @@
 import type { DotTone } from "@/components/status-dot"
-import type { DeploymentPreview, GitPullRequest, ProjectPullRequests } from "@/lib/types"
+import type {
+  ComposePreviewService,
+  DeploymentPreview,
+  DeploymentPromotion,
+  DeploymentRuntimeService,
+  GitPullRequest,
+  PreviewBranchPolicy,
+  PreviewDatabaseBranch,
+  ProjectPullRequests,
+} from "@/lib/types"
 
 /**
  * What a pull request and the preview built from it say about themselves, as
@@ -138,6 +147,105 @@ export function cleanupFailed(preview: DeploymentPreview | null | undefined): bo
 }
 
 /**
+ * Why a project cannot have a preview at all, as the sentence the dialog
+ * says in place of building; nothing when it can. The order is the route's:
+ * the server refuses for the same reasons, in the same order, before
+ * anything is written.
+ */
+export function previewBlocker(
+  info:
+    | Pick<
+        ProjectPullRequests,
+        "compose" | "composePreview" | "localCheckout" | "internalPort" | "tailnet"
+      >
+    | undefined,
+): string | undefined {
+  if (!info) return undefined
+  if (info.localCheckout)
+    return "This project deploys a local checkout; previews need a remote Git source."
+  if (info.compose && !info.composePreview)
+    return "A compatibility Compose deployment has no release engine to build a preview with. Deploy it from a Compose source first."
+  const refusals = info.composePreview?.refusals ?? []
+  if (refusals.length > 0)
+    return `A preview isolates every service of the stack, and ${refusals.join("; ")}, which no preview gets.`
+  if (info.internalPort === 0) return "The runtime plan has no port to publish."
+  if (!info.tailnet.running) return info.tailnet.detail || "Tailscale is not running on this host."
+  return undefined
+}
+
+/**
+ * What one service of a Compose stack gets in its preview, as the short
+ * sentences the dialog lists under its name: where it answers, the ports of
+ * production's it does not publish, the storage it starts with and what of
+ * this server it is not given.
+ */
+export function composeServiceLines(service: ComposePreviewService): string[] {
+  const lines = [
+    service.public
+      ? "Answers the preview's route and tailnet address, on loopback only"
+      : "Reached only by the stack's own services",
+  ]
+  if (service.ports.length > 0)
+    lines.push(`Publishes none of production's ports (${service.ports.join(", ")})`)
+  if (service.volumes.length > 0)
+    lines.push(
+      `${service.volumes.join(", ")} start${service.volumes.length === 1 ? "s" : ""} empty, on a volume of its own`,
+    )
+  if (service.checkout.length > 0)
+    lines.push(`${service.checkout.join(", ")} read from this commit, read-only`)
+  if (service.leftOut.length > 0)
+    lines.push(`${service.leftOut.join(", ")} from this server left out`)
+  return lines
+}
+
+/**
+ * A preview service as one dot and one word: Docker's health where the
+ * service has a check, otherwise whether it runs, and for one that stopped,
+ * how it ended.
+ */
+export function previewServiceReading(
+  service: Pick<DeploymentRuntimeService, "state" | "health" | "exitCode" | "oomKilled">,
+): PreviewReading {
+  if (service.state === "running") {
+    if (service.health === "healthy") return { tone: "running", label: "Healthy" }
+    if (service.health === "unhealthy") return { tone: "danger", label: "Unhealthy" }
+    if (service.health === "starting") return { tone: "warning", label: "Starting" }
+    return { tone: "running", label: "Running" }
+  }
+  if (service.state === "restarting") return { tone: "warning", label: "Restarting" }
+  if (service.oomKilled) return { tone: "danger", label: "Out of memory" }
+  if (service.state === "exited" || service.state === "dead")
+    return {
+      tone: "danger",
+      label: service.exitCode === undefined ? "Exited" : `Exited ${service.exitCode}`,
+    }
+  return {
+    tone: "stopped",
+    label: service.state
+      ? `${service.state[0].toUpperCase()}${service.state.slice(1)}`
+      : "Not running",
+  }
+}
+
+/**
+ * The live release's services of a Compose preview, by their Compose name,
+ * the public one first: what the preview's row lists under it.
+ */
+export function previewServices(
+  preview: DeploymentPreview | null | undefined,
+  publicService?: string,
+): { name: string; public: boolean; reading: PreviewReading }[] {
+  if (!preview?.services || preview.services.status !== "available") return []
+  return preview.services.services
+    .filter((service) => service.liveRelease)
+    .map((service) => {
+      const name = service.service || service.name
+      return { name, public: name === publicService, reading: previewServiceReading(service) }
+    })
+    .sort((a, b) => (a.public === b.public ? a.name.localeCompare(b.name) : a.public ? -1 : 1))
+}
+
+/**
  * Whether "Test this pull request" has an exact commit to build. The route
  * refuses anything but the head it was told, so a listing without the sha
  * cannot offer the verb — and a closed pull request has nothing to test.
@@ -204,4 +312,139 @@ export function pullOfPreview(
       preview.headRepository.toLowerCase() !== repository.toLowerCase(),
     ),
   }
+}
+
+/**
+ * Whether a preview is one "Promote to staging" can be offered for: open,
+ * isolated, serving a live release built from the head its approval is for,
+ * and not busy building or closing. The server decides — approval, image,
+ * staging's release tasks — and the dialog says what refused it; this only
+ * keeps the verb off rows it could never apply to.
+ */
+export function canPromotePreview(preview: DeploymentPreview | null | undefined): boolean {
+  if (!preview || preview.state !== "open" || !preview.liveReleaseId) return false
+  if (preview.isolationStatus && preview.isolationStatus !== "cleared") return false
+  if (preview.approvalState && preview.approvalState !== "approved") return false
+  const reading = previewStatus(preview)?.label
+  return reading !== "Building" && reading !== "Closing" && reading !== "Cleanup failed"
+}
+
+/**
+ * What a preview's row says of its newest promotion into staging: promoting
+ * while the run is in flight, promoted once it succeeded. A promotion that
+ * failed leaves the preview where it was, and the row says nothing of it.
+ */
+export function previewPromotionStatus(
+  preview: DeploymentPreview | null | undefined,
+): PreviewReading | undefined {
+  const promotion = preview?.promotion
+  if (!promotion) return undefined
+  if (RUN_IN_FLIGHT.has(promotion.state)) return { tone: "notice", label: "Promoting to staging" }
+  if (promotion.state === "succeeded") return { tone: "running", label: "Promoted to staging" }
+  return undefined
+}
+
+/**
+ * Where a promoted release's image came from, in the words the release list,
+ * the run header and the live release line share: a staging release, "staging
+ * release #2", or a pull request's preview, "PR #12" at commit "abc1234".
+ */
+export function promotionOrigin(promotion: DeploymentPromotion | undefined) {
+  if (!promotion) return undefined
+  if (promotion.sourceKind === "preview" && promotion.preview) {
+    return {
+      kind: "preview" as const,
+      from: `PR #${promotion.preview.number}`,
+      sha: promotion.sourceRevision ? promotion.sourceRevision.slice(0, 7) : "",
+      url: promotion.preview.url,
+      approvedBy: promotion.preview.approvedBy,
+    }
+  }
+  return {
+    kind: "staging" as const,
+    from: `${promotion.environmentName.toLowerCase()} release #${promotion.releaseNumber}`,
+    sha: "",
+    url: undefined,
+    approvedBy: undefined,
+  }
+}
+
+/** A database branch's state as one dot and one word. */
+export function branchReading(branch: Pick<PreviewDatabaseBranch, "state">): PreviewReading {
+  switch (branch.state) {
+    case "waiting":
+      return { tone: "notice", label: "Waiting to restore" }
+    case "restoring":
+      return { tone: "notice", label: "Restoring" }
+    case "ready":
+      return { tone: "running", label: "Ready" }
+    case "failed":
+      return { tone: "danger", label: "Failed" }
+    default:
+      return { tone: "stopped", label: "Removed" }
+  }
+}
+
+/**
+ * Where a branch's data came from, in words: the backup run's dump and when
+ * it was taken, or the moment a point-in-time recovery reached.
+ */
+export function branchSource(
+  branch: Pick<PreviewDatabaseBranch, "source" | "recoveredTo">,
+  when: (iso: string) => string,
+): string | undefined {
+  if (branch.source.kind === "pitr")
+    return branch.recoveredTo
+      ? `recovered to ${when(branch.recoveredTo)} from its archive`
+      : "recovered from its point-in-time archive"
+  if (branch.source.kind === "dump") {
+    const run = branch.source.backupRunId ? ` (run ${branch.source.backupRunId})` : ""
+    return branch.source.takenAt
+      ? `from the backup of ${when(branch.source.takenAt)}${run}`
+      : `from a backup${run}`
+  }
+  return undefined
+}
+
+/** A preview's branches worth showing: active ones, and a failed one that says why. */
+export function shownBranches(preview: DeploymentPreview | null | undefined) {
+  return (preview?.branches ?? []).filter((branch) => branch.state !== "removed")
+}
+
+/**
+ * What a preview of this pull request will get of production's databases,
+ * as the sentence the dialog says: a fork's never a branch, a branch's every
+ * database production gives previews one of, masked where it says so.
+ */
+export function branchPlan(
+  policies: (PreviewBranchPolicy & { name: string })[] | undefined,
+  fork: boolean,
+): string | undefined {
+  const given = (policies ?? []).filter((policy) => policy.mode !== "none")
+  if (given.length === 0) return undefined
+  if (fork)
+    return "A preview of a fork never gets a database branch: its code would read production's data."
+  return given
+    .map((policy) =>
+      policy.mode === "masked" && policy.maskedColumns.length > 0
+        ? `${policy.name} gets a branch restored from its newest backup, with ${policy.maskedColumns.join(", ")} masked.`
+        : `${policy.name} gets a branch restored from its newest backup.`,
+    )
+    .concat("A variable copied from production that references it reads the branch.")
+    .join(" ")
+}
+
+/**
+ * The masked columns a person typed, as the list the server takes: one name
+ * a line or between commas, blanks dropped. The server checks each name.
+ */
+export function parseMaskedColumns(text: string): string[] {
+  return [
+    ...new Set(
+      text
+        .split(/[\n,]/)
+        .map((part) => part.trim())
+        .filter(Boolean),
+    ),
+  ]
 }

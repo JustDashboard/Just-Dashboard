@@ -188,6 +188,12 @@ type moduleSet struct {
 	// rehearser makes the throwaway database copies release tasks are
 	// rehearsed against, and removes what a stopped process left behind.
 	rehearser *migrationRehearser
+	// dataCopies restores a database as of a release into a side copy on
+	// the deployment's network and removes it when its time is up.
+	dataCopies *dataCopyOwner
+	// previewBranches restores a preview's own copy of each database its
+	// environment gives previews a branch of, and removes it with the preview.
+	previewBranches *previewBranchOwner
 	// tailnet publishes preview environments on this host's Tailscale node
 	// through `tailscale serve`; the executor and the preview route share it.
 	tailnet deploy.TailnetPublisher
@@ -220,7 +226,10 @@ func (s *Server) initModules() {
 	// operator refreshing the container table would otherwise keep shortening
 	// the window the next stored sample is differenced over.
 	s.modules.metrics = metrics.New(s.Store, s.Log, s.Cfg.MetricsInterval, s.Cfg.MetricsRetention).
-		WithContainers(s.modules.docker.NewStatsSampler())
+		WithContainers(s.modules.docker.NewStatsSampler()).
+		// The volumes deployments own, for the capacity forecast; read when
+		// the recorder samples, by which time the deploy modules exist.
+		WithVolumes(metrics.VolumeSamplerFunc(s.sampleDeploymentVolumes))
 	// Docker's disk accounting walks every layer and volume, which takes
 	// seconds on a busy host. Priming it here means the first operator to open
 	// the Volumes tab reads a warm cache instead of waiting for the walk.
@@ -390,6 +399,8 @@ func (s *Server) initModules() {
 		}, func(err error) { s.Log.Warn("preview isolation needs attention", "error", err) })
 	s.modules.tailnet = tailnetPublisher{serve: selfcfg.NewTailnetServe()}
 	s.modules.rehearser = &migrationRehearser{server: s}
+	s.modules.dataCopies = newDataCopyOwner(s, s.modules.rehearser)
+	s.modules.previewBranches = newPreviewBranchOwner(s, s.modules.rehearser)
 	normalizedExecutor := deploy.NewNormalizedStepExecutor(
 		s.modules.deployRuns,
 		s.modules.deployPlanning,
@@ -410,7 +421,10 @@ func (s *Server) initModules() {
 		WithTailnetPublisher(s.modules.tailnet).
 		// Release tasks are rehearsed against copies the Databases owner
 		// makes from its own backups, when an environment asks for it.
-		WithMigrationRehearser(s.modules.rehearser)
+		WithMigrationRehearser(s.modules.rehearser).
+		// And where each linked database stands is recorded as a release
+		// goes live, for a copy of its data as of that release later.
+		WithDataPoints(releaseDataFacts{server: s})
 	if s.modules.requests != nil {
 		// The traffic replay reads the same held record the Logs page and
 		// the rollback watch read, so what it replays is what the page shows.

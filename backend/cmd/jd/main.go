@@ -37,6 +37,7 @@ Getting started
   login URL --key KEY           Check a key against the dashboard and remember both (--key - reads stdin)
   logout                        Forget the stored URL and key
   version                       Print jd's version
+  openapi [--yaml]              Print the dashboard's OpenAPI description of the deployment API
 
 Deployments
   deployments [ls]              List deployments with their health and last run
@@ -47,7 +48,8 @@ Deployments
   rollback APP [--to ID] [--wait]  Go back to a release (default: the one before the live one)
   rollback APP --instant [--wait]  Switch traffic back to the release kept warm after the last deploy
   keep APP                      Keep the new release now and retire the warm one
-  promote APP [--wait]          Promote staging's live release to production (--release ID for another)
+  promote APP [--wait]          Promote staging's live release to production (--release ID for another,
+                                --from-preview N for PR N's preview into staging)
   maintenance APP on|off        Switch the maintenance page at once (--bypass CIDR,... for who is let past)
   status APP                    Environments, live release, rollback watch, maintenance and rehearsal
   create --name N --image IMG [--port P]  Create a deployment from an image, through a draft
@@ -188,6 +190,8 @@ func (a *app) dispatch(command string, pre, rest, words []string) error {
 		return a.login(words)
 	case "logout":
 		return a.logout(words)
+	case "openapi":
+		return a.openapi(words)
 	case "deployments", "deployment", "ls":
 		return a.deployments(words)
 	case "deploy":

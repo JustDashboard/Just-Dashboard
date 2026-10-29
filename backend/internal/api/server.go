@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/agent"
@@ -22,6 +23,10 @@ import (
 // (no Docker socket, no systemd) degrades to a clear error on its own routes
 // instead of preventing the dashboard from starting.
 type Server struct {
+	// deployOpenAPI is the description of the deployment API, read off the
+	// router Routes returns the first time it is asked for (deploy_openapi.go).
+	deployOpenAPI atomic.Pointer[deployOpenAPISource]
+
 	Cfg         *config.Config
 	Log         *slog.Logger
 	Store       *store.Store
@@ -230,7 +235,13 @@ func (s *Server) Start(ctx context.Context) error {
 		s.Log.Warn("release task containers left by a previous start could not be removed", "err", err)
 	}
 	// And the database copies a rehearsal it was running made: a resumed run
-	// makes its own again.
+	// makes its own again. A copy of a release's data it was restoring is
+	// ended first, so the sweep removes it; one already restored and still
+	// within its lifetime is kept.
+	s.modules.dataCopies.SettleInterrupted(cleanupCtx)
+	// A preview's branch a restart interrupted is ended the same way; one
+	// ready, or still waiting for its restore, is kept.
+	s.modules.previewBranches.SettleInterrupted(cleanupCtx)
 	if err := s.modules.rehearser.RemoveOrphanedRehearsals(cleanupCtx); err != nil {
 		s.Log.Warn("migration rehearsal copies left by a previous start could not be removed", "err", err)
 	}
@@ -325,6 +336,10 @@ func (s *Server) Start(ctx context.Context) error {
 	// After the engine, so a window a restart interrupted is settled by a
 	// watcher that can already ask the engine for its rollback.
 	s.modules.rollbackWatcher.Start(ctx)
+	// Copies waiting for a rollback read its run, and expired ones are
+	// removed whether or not anybody has the page open.
+	s.modules.dataCopies.Start(ctx)
+	s.modules.previewBranches.Start(ctx)
 	// Scans run one at a time behind the engine, never inside a run.
 	s.startImageScans(ctx)
 	s.modules.deployGit.Start(ctx)
@@ -366,6 +381,8 @@ func (s *Server) Shutdown() {
 	s.modules.previewReconciler.Stop()
 	s.modules.deployDatabases.Stop()
 	s.modules.poolers.Stop()
+	s.modules.dataCopies.Stop()
+	s.modules.previewBranches.Stop()
 	// Stop fresh claims first. Active work is given a bounded grace to reach a
 	// persisted boundary; Engine.Shutdown never injects a cancellation into an
 	// activation or restoration.

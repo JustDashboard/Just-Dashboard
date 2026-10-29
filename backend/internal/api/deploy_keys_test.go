@@ -66,6 +66,17 @@ var sessionOnlyBefore = []string{
 	"PUT /deploy/{id}/environments/{env}/pages/{page}", "PUT /deploy/{id}/environments/{env}/rollback-policy",
 	"PUT /deploy/{id}/environments/{env}/rehearsal",
 	"PUT /deploy/{id}/environments/{env}/vulnerabilities",
+	// A copy of a release's data: asked for, read, kept and removed in a
+	// session, whatever the key.
+	"POST /deploy/{id}/environments/{env}/releases/{release}/data-copies",
+	"GET /deploy/{id}/environments/{env}/data-copies/{copy}/url",
+	"POST /deploy/{id}/environments/{env}/data-copies/{copy}/extend",
+	"DELETE /deploy/{id}/environments/{env}/data-copies/{copy}",
+	"GET /deploy/{id}/environments/{env}/data-copies/{copy}/comparison",
+	// A preview's database branch: what a database gives previews, and a
+	// branch again from the newest backup, decided in a session.
+	"PUT /deploy/{id}/environments/{env}/database-links/{connection}/previews",
+	"POST /deploy/{id}/pull-requests/{number}/preview/branches/{connection}/refresh",
 }
 
 // keyBench is a server with an administrator, a session, and the three kinds

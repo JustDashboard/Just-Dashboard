@@ -3686,6 +3686,8 @@ export type ReleaseComparison = {
     domains: ReleaseListChange[]
   }
   artifacts: ReleaseArtifactStatus[]
+  /** Each release's recorded data point, per linked database. */
+  dataPoints?: { from: ReleaseDataPoint[]; to: ReleaseDataPoint[] }
 }
 
 export type ReleaseUpdateStatus = {
@@ -3983,8 +3985,9 @@ export type DeploymentInsights = {
 }
 
 /**
- * Where a promoted release's image came from: the staging release it was
- * promoted from, and the local image id the container is created from.
+ * Where a promoted release's image came from: the release it was promoted
+ * from — staging's, or for staging a pull request preview's — and the local
+ * image id the container is created from.
  */
 export type DeploymentPromotion = {
   environmentId: number
@@ -3995,6 +3998,30 @@ export type DeploymentPromotion = {
   imageId: string
   imageDigest: string
   sourceRevision?: string
+  /** Absent on a record from before previews could be promoted, which is staging's. */
+  sourceKind?: "staging" | "preview"
+  /** The pull request a preview's image was built from, and who approved its commit. */
+  preview?: DeploymentPromotedPreview
+}
+
+export type DeploymentPromotedPreview = {
+  number: number
+  url?: string
+  repository?: string
+  headRepository?: string
+  approvedBy: string
+}
+
+/** The newest promotion of a preview's image into staging, as the preview's row reads it. */
+export type DeploymentPreviewPromotion = {
+  runId: number
+  runNumber: number
+  state: DeploymentRunState
+  environmentId: number
+  releaseNumber: number
+  sourceRevision?: string
+  requestedAt: string
+  endedAt?: string
 }
 
 /** One of a deployment's long-lived environments, for the environment switcher. */
@@ -4018,9 +4045,11 @@ export type DeploymentStagingCopy = {
   adjusted: string[]
 }
 
-/** The Promote confirmation's read: the exact image and how production differs. */
+/** The Promote confirmation's read: the exact image and how the target differs. */
 export type DeploymentPromotionPreview = {
   source: {
+    /** "staging" into production, or "preview" into staging. */
+    kind: "staging" | "preview"
     environmentId: number
     environmentName: string
     release: DeploymentRelease
@@ -4028,6 +4057,17 @@ export type DeploymentPromotionPreview = {
     imageDigest: string
     imageSizeBytes: number
     imagePresent: boolean
+    /** The pull request behind a preview source. */
+    preview?: {
+      number: number
+      title?: string
+      url?: string
+      author?: string
+      headRepository?: string
+      fork: boolean
+      approvedBy?: string
+      approvalState?: string
+    }
   }
   target: {
     environmentId: number
@@ -4067,8 +4107,103 @@ export type DeploymentRelease = {
   /** Set on a release an instant rollback took traffic away from. */
   rolledBackAt?: string
   rollbackReason?: string
-  /** Set when the image was promoted from staging rather than built here. */
+  /** Set when the image was promoted — from staging, or into staging from a preview — rather than built here. */
   promotion?: DeploymentPromotion
+  /**
+   * Where each linked database stood when this release went live
+   * (`deploy/data_rollback.go`): the moment its point-in-time archive recovers
+   * to, or the newest dump that covered it. Absent on a release that went
+   * live before this was recorded, or with no linked database.
+   */
+  dataPoints?: ReleaseDataPoint[]
+  /** Whether "Restore data as of this release" is offered, and why not. */
+  dataCopy?: { eligible: boolean; reason?: string }
+}
+
+/** One linked database's state at the moment a release went live. */
+export type ReleaseDataPoint = {
+  connectionId: number
+  /** The connection's name when the point was recorded. */
+  name: string
+  engine: string
+  kind: "pitr" | "dump" | "none"
+  /** pitr: the moment the archive recovers to; dump: when its backup run started. */
+  at?: string
+  backupRunId?: number
+  backupJobId?: number
+  archiveId?: number
+  /** kind none: why there is nothing to restore a copy from. */
+  reason?: string
+  recordedAt: string
+}
+
+export type DataCopyState = "waiting" | "restoring" | "ready" | "failed" | "skipped" | "removed"
+
+/**
+ * A linked database restored from a release's data point into a throwaway
+ * container beside production, on the deployment's network. Its credentials
+ * are read by a session alone (`…/data-copies/{copy}/url`) and never ride here.
+ */
+export type DataCopy = {
+  id: number
+  projectId: number
+  environmentId: number
+  releaseId: number
+  releaseNumber: number
+  connectionId: number
+  name: string
+  engine: string
+  database: string
+  state: DataCopyState
+  source: {
+    kind: "pitr" | "dump"
+    at?: string
+    backupRunId?: number
+    backupJobId?: number
+    archiveId?: number
+  }
+  /** pitr: the moment the copy actually reached. */
+  recoveredTo?: string
+  /** The rollback run it waits for before restoring. */
+  afterRunId?: number
+  /** The copy's name on the deployment's network, e.g. db-5-copy-3.jd.internal. */
+  host?: string
+  port?: number
+  network?: string
+  expiresAt?: string
+  createdBy: string
+  createdAt: string
+  readyAt?: string
+  endedAt?: string
+  reason?: string
+  restoreMs?: number
+}
+
+export type DataCopyConnection = {
+  url: string
+  host: string
+  port: number
+  user: string
+  database: string
+}
+
+/** The copy's tables beside the live database's, with their row counts. */
+export type DataCopyComparison = {
+  copyId: number
+  database: string
+  tables: {
+    schema: string
+    name: string
+    copyRows: number | null
+    liveRows: number | null
+    estimated?: boolean
+    only?: "copy" | "live"
+  }[]
+  /** More tables than the server compares. */
+  truncated: boolean
+  copyError?: string
+  liveError?: string
+  readAt: string
 }
 
 /**
@@ -4300,6 +4435,72 @@ export type DeploymentPreview = {
   liveReleaseId?: number
   address?: DeploymentPreviewAddress
   lastRun?: DeploymentRecentRun
+  /** A live Compose preview's services as Docker reports them; absent for a single container. */
+  services?: DeploymentRuntimeServices
+  /** The newest promotion of this preview's image into staging, however it ended. */
+  promotion?: DeploymentPreviewPromotion
+  /** The preview's own copies of databases production gives previews a branch of. */
+  branches?: PreviewDatabaseBranch[]
+}
+
+/** What a linked database gives an environment's previews (`deploy/preview_branches.go`). */
+export type PreviewBranchMode = "none" | "branch" | "masked"
+
+export type PreviewBranchPolicy = {
+  connectionId: number
+  mode: PreviewBranchMode
+  /** table.column or schema.table.column, overwritten in their shape on the copy. */
+  maskedColumns: string[]
+  updatedBy?: string
+  updatedAt?: string
+}
+
+/** A preview's own copy of a linked database, restored from its newest backup. */
+export type PreviewDatabaseBranch = {
+  id: number
+  environmentId: number
+  connectionId: number
+  name: string
+  engine?: string
+  database?: string
+  mode: PreviewBranchMode
+  maskedColumns: string[]
+  state: "waiting" | "restoring" | "ready" | "failed" | "removed"
+  /** "dump" for a backup job's native dump, "pitr" for a point-in-time recovery. */
+  source: { kind: string; backupRunId?: number; takenAt?: string; bytes?: number; method?: string }
+  recoveredTo?: string
+  host?: string
+  port?: number
+  maskedRows?: number
+  reason?: string
+  restoreMs?: number
+  requestedBy?: string
+  createdAt: string
+  readyAt?: string
+  endedAt?: string
+}
+
+/** One service of a Compose stack, and what its preview gets in place of production's. */
+export type ComposePreviewService = {
+  name: string
+  /** The service the preview's route and tailnet address reach; the only one that answers. */
+  public: boolean
+  /** Ports production publishes on the host; the preview publishes none of them. */
+  ports: string[]
+  /** Mount targets that start empty on storage of the preview's own. */
+  volumes: string[]
+  /** Read-only files of the commit itself the preview mounts. */
+  checkout: string[]
+  /** Read-only paths of this server the preview does not get. */
+  leftOut: string[]
+}
+
+/** What a preview of a Compose stack gets, service by service, and what refuses one. */
+export type ComposePreviewFacts = {
+  public: string
+  services: ComposePreviewService[]
+  /** What no preview may have; any one refuses the preview. */
+  refusals: string[]
 }
 
 /** A deploy project's pull requests on GitHub, joined to the previews built from them. */
@@ -4321,8 +4522,12 @@ export type ProjectPullRequests = {
     awaitingFirstDeployment: boolean
   }
   tailnet: TailscaleIdentity
-  /** The production build is a Compose stack, which previews cannot isolate. */
+  /** The production build is a Compose stack; `composePreview` says what its preview gets. */
   compose: boolean
+  /** Present for a Compose stack: each service's isolation, and what refuses a preview. */
+  composePreview?: ComposePreviewFacts
+  /** The databases production gives its previews a branch of; a fork's preview gets none. */
+  databaseBranches?: (PreviewBranchPolicy & { name: string; driver?: string })[]
   /** The production source is a local checkout, which has no remote to fetch a pull request from. */
   localCheckout: boolean
   /** The runtime plan's internal port; 0 means nothing to publish. */
@@ -5468,6 +5673,8 @@ export type DeploymentDatabaseLink = {
   hostname: string
   /** The connection has a pooler, so `${{database.N.pooled}}` resolves. */
   pooler?: boolean
+  /** What the environment's previews get of it: nothing, a branch, or a masked branch. */
+  previews?: PreviewBranchPolicy
   status: "pending" | "connected" | "stale" | "unavailable"
   detail?: string
   checkedAt?: string
