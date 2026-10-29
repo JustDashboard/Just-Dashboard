@@ -83,6 +83,10 @@ type NormalizedStepExecutor struct {
 	requests     RequestRecord
 	replayClient replayClient
 	replayOnce   sync.Once
+
+	// dataPoints says where each linked database stands as a release goes
+	// live (data_rollback.go); nil records none.
+	dataPoints DataPointObserver
 }
 
 // WithRequestRecord attaches the request record the traffic replay reads

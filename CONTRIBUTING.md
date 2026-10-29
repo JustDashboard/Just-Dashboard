@@ -444,6 +444,24 @@ to the contribution terms above, including the additional licence grant to the p
   `TestLiveMigrationRehearsalRecoversFromThePointInTimeArchive` runs as well: a PostgreSQL 17
   archiving into a directory, the copy recovered from the archive. They remove their own
   `jd-rehearsal-…` servers, volumes, networks and release containers.
+- Changes to data-aware rollback — the data point a release records when it goes live, the copies of
+  a release's data, their restore, lifetime or sweep (`deploy/data_rollback.go`,
+  `api/deployment_data_rollback.go`), the restore path they share with the migration rehearsal, or
+  how the environment's network reconciler treats labelled containers — also run, from
+  `backend/internal/api` as root on a Docker host,
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDataCopy -count=1 -v`: it provisions a
+  PostgreSQL through the routes, dumps it with a backup job, activates two releases around a change to
+  its rows and restores a copy as of the first. The copy must be on the deployment's network alone
+  under its own name, answer an application container there with its own password and hold the rows
+  the first release went live with while production holds more — read there and through the
+  comparison route — and a rehearsal-labelled container must stay off that network across a
+  reconcile. The sweep at start keeps the copy while its lifetime runs; once it ends its owner removes
+  it, leaving nothing with its label. A rollback to the first release that asks for the copy too finds
+  it restored after the rollback succeeded. `TestLiveDataCopyRestoresAMariaDBDump` does the same
+  against MariaDB (`mariadb:11.8`, pulled once). With `JD_TEST_WALG`,
+  `TestLiveDataCopyRecoversTheMomentAReleaseWentLive` does the same from a point-in-time archive, the
+  copy recovered to the moment the first release went live. Changes to the shared restore path also
+  run the migration rehearsal family above, both ways.
 - `python3 scripts/e2e-deployments.py` is the real-backend acceptance lane for deployments: it builds the
   backend, starts it on loopback with a fresh data directory, and drives the public API through a signed
   webhook channel, an nginx image deployment with resource limits, a busybox image that exits before it
