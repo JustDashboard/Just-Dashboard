@@ -183,6 +183,11 @@ func (s *Server) handleDeploymentImageScanPolicyPut(w http.ResponseWriter, r *ht
 	return nil
 }
 
+// imageScanRequest names the release to scan; none is the live one.
+type imageScanRequest struct {
+	ReleaseID int64 `json:"releaseId,omitempty"`
+}
+
 // handleDeploymentImageScanRequest asks for the live release (or the one
 // named) to be scanned now, its bases with it.
 func (s *Server) handleDeploymentImageScanRequest(w http.ResponseWriter, r *http.Request) error {
@@ -190,9 +195,7 @@ func (s *Server) handleDeploymentImageScanRequest(w http.ResponseWriter, r *http
 	if err != nil {
 		return err
 	}
-	var request struct {
-		ReleaseID int64 `json:"releaseId"`
-	}
+	var request imageScanRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}

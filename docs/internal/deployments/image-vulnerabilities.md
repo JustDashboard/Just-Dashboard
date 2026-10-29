@@ -155,6 +155,9 @@ when its source is detected, not when it is built.
 | `PUT /deploy/{id}/environments/{env}/vulnerabilities` | `system.admin`, session | The terms; audited `deploy.vulnerabilities.update` |
 | `POST /deploy/{id}/environments/{env}/vulnerabilities/scan` | `service.control`; a deploy key | Queue a scan of the live release (or `releaseId`) with its bases; audited `deploy.vulnerabilities.scan`; 409 without Docker, without a release, with scanning off, or for a preview |
 
+Each has its line in `deployOperations` (`api/deploy_openapi.go`), so the three are in the deploy
+API's description, `docs/api/deploy-openapi.json`.
+
 ## The pages
 
 - The project overview's **Vulnerabilities** panel (`deploy/vulnerabilities.tsx`, its words in
