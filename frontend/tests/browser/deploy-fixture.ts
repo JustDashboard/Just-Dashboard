@@ -2557,11 +2557,53 @@ export async function mockProject(
           until: "2026-09-03T12:00:00Z",
         },
       }
+    } else if (path === "/deploy/7/availability") {
+      // Nine days of record: a steady day, six minutes down over the week,
+      // and a month the record only reaches nine days into.
+      const recordSince = minutesAgo(9 * 24 * 60)
+      body = {
+        status: "available",
+        observedAt: now,
+        recordSince,
+        liveRelease: 20,
+        down: false,
+        windows: [
+          {
+            window: "24h",
+            seconds: 86400,
+            observedSeconds: 86400,
+            downSeconds: 0,
+            incidents: 0,
+            ratio: 1,
+            coverageSeconds: 86400,
+          },
+          {
+            window: "7d",
+            seconds: 7 * 86400,
+            observedSeconds: 7 * 86400,
+            downSeconds: 372,
+            incidents: 2,
+            ratio: 1 - 372 / (7 * 86400),
+            coverageSeconds: 7 * 86400,
+          },
+          {
+            window: "30d",
+            seconds: 30 * 86400,
+            observedSeconds: 9 * 86400,
+            downSeconds: 372,
+            incidents: 2,
+            ratio: 1 - 372 / (9 * 86400),
+            coverageSeconds: 9 * 86400,
+          },
+        ],
+      }
     } else if (path === "/deploy/7/lifecycle") {
       body = {
         status: "available",
         watching: true,
         since: minutesAgo(6 * 60),
+        recordSince: minutesAgo(9 * 24 * 60),
+        retentionDays: 30,
         events: [
           {
             time: minutesAgo(12),

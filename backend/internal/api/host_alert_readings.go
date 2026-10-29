@@ -307,6 +307,9 @@ type hostContainer struct {
 	RecentRestarts int
 	// Exit is a stopped container's last run; nil when it could not be read.
 	Exit *hostContainerExit
+	// Kernel says why, for a MongoDB 8 container on a kernel it refuses to
+	// start on (mongoKernelAlertLine); empty for every other.
+	Kernel string
 }
 
 type hostContainerExit struct {
@@ -371,11 +374,13 @@ func (s *Server) observeHostContainers(ctx context.Context, a *hostAlerts, now t
 	if err != nil {
 		return nil, false
 	}
+	kernel := s.hostKernel(read)
 	seen := map[string]bool{}
 	out := make([]hostContainer, 0, len(list))
 	for _, ct := range list {
 		seen[ct.ID] = true
-		item := hostContainer{ID: ct.ID, Name: ct.Name, State: ct.State, Health: ct.Health, Labels: ct.Labels}
+		item := hostContainer{ID: ct.ID, Name: ct.Name, State: ct.State, Health: ct.Health, Labels: ct.Labels,
+			Kernel: mongoKernelAlertLine(kernel, ct)}
 		switch ct.State {
 		case "running":
 			delete(a.exits, ct.ID)
@@ -483,7 +488,7 @@ func containerAlertReading(rule hostAlertRule, list []hostContainer, listed bool
 			case ct.Health == "unhealthy":
 				fire("It is running, but its health check reports it unhealthy.")
 			case ct.RecentRestarts >= hostRestartLoop:
-				fire(fmt.Sprintf("Docker restarted it %d times in the last %d min; it keeps crashing.", ct.RecentRestarts, int(hostRestartWindow.Minutes())))
+				fire(withKernelLine(fmt.Sprintf("Docker restarted it %d times in the last %d min; it keeps crashing.", ct.RecentRestarts, int(hostRestartWindow.Minutes())), ct))
 			case ct.RecentRestarts > 0:
 				// One or two restarts: not a loop yet, and not over either.
 				reading.Unknown[subject] = true
@@ -493,7 +498,7 @@ func containerAlertReading(rule hostAlertRule, list []hostContainer, listed bool
 				fine("It is running.")
 			}
 		case "restarting":
-			fire("Docker is restarting it: it exited and its restart policy is bringing it back.")
+			fire(withKernelLine("Docker is restarting it: it exited and its restart policy is bringing it back.", ct))
 		case "paused":
 			// A backup freezes a container while it archives its volumes.
 			fine("It is paused, not stopped.")
@@ -507,13 +512,22 @@ func containerAlertReading(rule hostAlertRule, list []hostContainer, listed bool
 				continue
 			}
 			if down, detail := judgeExit(ct.State, *ct.Exit); down {
-				fire(detail)
+				fire(withKernelLine(detail, ct))
 			} else {
 				fine(detail)
 			}
 		}
 	}
 	return reading
+}
+
+// withKernelLine adds why to what a down container's alert says, where it is
+// MongoDB 8 on a kernel it does not start on.
+func withKernelLine(detail string, ct hostContainer) string {
+	if ct.Kernel == "" {
+		return detail
+	}
+	return detail + " " + ct.Kernel
 }
 
 // judgeExit says whether a stopped container is down, and how it stopped.

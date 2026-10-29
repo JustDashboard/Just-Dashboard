@@ -10,11 +10,12 @@ import {
   SettingsGear,
   StopCircle,
   Trash,
+  Wrench,
 } from "@/components/icons"
 import { ApiError, del, get, post, put } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { DbAccessChange, DbFleetEntry, Job } from "@/lib/types"
+import type { DbAccessChange, DbFleetEntry, DbKernelProblem, Job } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { FormFact } from "@/components/form"
@@ -116,6 +117,20 @@ export function useFleetControl({
     }
   }
 
+  /** A card goes on saying it is starting until its server answers, or for a minute. */
+  const settle = (entry: DbFleetEntry, word: string) => {
+    setSettling((held) => ({ ...held, [entry.id]: word }))
+    window.setTimeout(
+      () =>
+        setSettling((held) => {
+          const next = { ...held }
+          delete next[entry.id]
+          return next
+        }),
+      SETTLE_MS,
+    )
+  }
+
   const runPower = async (entry: DbFleetEntry, action: DbPowerAction) => {
     const words = POWER[action]
     mark(entry.id, words.progressive)
@@ -126,16 +141,7 @@ export function useFleetControl({
         // The container is up before the engine inside it answers, and the
         // fleet reads it as unreachable for those seconds: the card goes on
         // saying it is starting until it is.
-        setSettling((held) => ({ ...held, [entry.id]: words.progressive }))
-        window.setTimeout(
-          () =>
-            setSettling((held) => {
-              const next = { ...held }
-              delete next[entry.id]
-              return next
-            }),
-          SETTLE_MS,
-        )
+        settle(entry, words.progressive)
       }
     } catch (err) {
       notify.error(`Could not ${action} ${entry.name}`, err)
@@ -252,6 +258,46 @@ export function useFleetControl({
     )
   }
 
+  /**
+   * MongoDB 8 on a kernel it refuses to start on: recreate its container with
+   * the variable that lets it, on the same volumes. The server keeps it until
+   * the container answers, which is seconds once it starts.
+   */
+  const mitigate = (entry: DbFleetEntry, problem: DbKernelProblem) => {
+    confirm(
+      {
+        title: `Apply the kernel mitigation to ${entry.name}`,
+        subject: subjectOf(entry),
+        description: (
+          <>
+            <p>{problem.detail}</p>
+            <p>
+              MongoDB warns that it runs slower this way; Linux 7.0.14 and later do not need it.
+            </p>
+          </>
+        ),
+        confirmLabel: "Apply",
+        action: async () => {
+          void (async () => {
+            mark(entry.id, "Applying")
+            try {
+              await post(`/databases/${entry.id}/kernel-mitigation`, {})
+              notify.success(`${entry.name} was recreated with the kernel mitigation`)
+              settle(entry, "Starting")
+            } catch (err) {
+              notify.error(`Could not apply the kernel mitigation to ${entry.name}`, err)
+            } finally {
+              mark(entry.id)
+              refreshFleet()
+            }
+          })()
+          return "reported"
+        },
+      },
+      menuOf(entry),
+    )
+  }
+
   const forget = (entry: DbFleetEntry) => {
     // The server puts the found server a connection came from on the ignore
     // list only when this was the last connection to it, and never for a
@@ -305,6 +351,7 @@ export function useFleetControl({
     restart: can("service.control") && can("destructive"),
     backup: can("service.control"),
     restrict: can("system.admin") && can("destructive"),
+    mitigate: can("system.admin") && can("destructive"),
     forget: can("system.admin") && can("destructive"),
   }
 
@@ -319,12 +366,27 @@ export function useFleetControl({
   const canBackup = (entry: DbFleetEntry) =>
     allowed.backup && !entry.broken && entry.ok && data.dumps(entry)
   const canRestrict = (entry: DbFleetEntry) => allowed.restrict && restrictable(entry)
+  /** The kernel mitigation, where the server would take it from here. */
+  const mitigation = (entry: DbFleetEntry) =>
+    allowed.mitigate && entry.kernelProblem?.fixable ? entry.kernelProblem : undefined
 
   /** The card's menu: the server's power, then what is done with the database as a thing kept. */
   const verbsFor = (entry: DbFleetEntry): Verb[] => {
     const busy = Boolean(busyWord(entry))
     const offers = powerOffers(entry)
     const verbs: Verb[] = []
+    const problem = mitigation(entry)
+    if (problem) {
+      verbs.push({
+        key: "kernel-mitigation",
+        label: "Apply kernel mitigation",
+        icon: Wrench,
+        progressive: "Applying",
+        group: "Server",
+        disabled: busy,
+        run: () => mitigate(entry, problem),
+      })
+    }
     for (const action of ["start", "stop", "restart"] as const) {
       if (!offers[action] || !allowed[action]) continue
       verbs.push({
@@ -380,7 +442,19 @@ export function useFleetControl({
     return verbs
   }
 
-  return { power, backup, restrict, forget, busyWord, canStart, canBackup, canRestrict, verbsFor }
+  return {
+    power,
+    backup,
+    restrict,
+    mitigate,
+    forget,
+    busyWord,
+    canStart,
+    canBackup,
+    canRestrict,
+    mitigation,
+    verbsFor,
+  }
 }
 
 export type FleetControl = ReturnType<typeof useFleetControl>

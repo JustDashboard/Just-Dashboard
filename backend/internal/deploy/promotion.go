@@ -444,7 +444,7 @@ func promotionSourceWords(promotion ReleasePromotion) string {
 // data ran it on production's unrehearsed.
 var PromotionStepKeys = []StepKey{
 	StepRenderRuntime, StepBackupGate, StepRehearseMigration, StepReleaseTask, StepProvisionCertificate,
-	StepStartCandidate, StepVerifyReadiness, StepVerifySmoke, StepActivate,
+	StepStartCandidate, StepVerifyReadiness, StepVerifySmoke, StepReplayTraffic, StepActivate,
 	StepRetirePrevious, StepRecordRelease, StepNotify,
 }
 
