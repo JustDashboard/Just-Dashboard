@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/tailnetgate"
@@ -17,19 +19,32 @@ import (
 // An environment whose plan carries runtime.tailnet is published the way a
 // pull request preview is: one port of the host's tailnet address, from the
 // previews' own range and table, that tailscale serve maps to loopback. It
-// has no public route. When the plan names who may open it, tailscale serve
-// maps to the environment's tailnet gate instead of the container — a route
-// on loopback that asks the dashboard about every request — and the gate
-// forwards to the container; when it does not, the tailnet is the fence and
-// the mapping goes straight to the container, exactly as a preview's does.
+// has no public route. tailscale serve maps the port to the environment's
+// front, a route on loopback in front of the container, rather than to the
+// container itself: the address is a port of the node's MagicDNS name, which
+// is the name the dashboard is reached by, so a browser signed in to the
+// dashboard sends its session cookie there, and the front takes it out of
+// what the application is sent. When the plan names who may open it, the
+// front is the gate as well and asks the dashboard about every request; when
+// it does not, the tailnet is the fence, exactly as for a preview.
 
-// TailnetGateProxy is the proxy's half of a gate. proxysvc.Service is the
+// TailnetGateProxy is the proxy's half of a front. proxysvc.Service is the
 // host implementation; a proxy without it cannot gate, and an environment
 // that names its visitors fails to activate rather than going live open.
+// Without it an environment that does not is published straight to the
+// container, as before every tailnet address had a front.
 type TailnetGateProxy interface {
 	ApplyTailnetGate(context.Context, proxysvc.TailnetGateRoute) (proxysvc.DeploymentRouteResult, error)
 	VerifyTailnetGate(context.Context, proxysvc.TailnetGateRoute) error
 	RemoveTailnetGate(context.Context, string) error
+}
+
+// frontsTailnet says whether this host's proxy can put a front before a
+// tailnet address. Every production executor's can; only an executor built
+// without the proxy's half publishes an address straight to its container.
+func (e *NormalizedStepExecutor) frontsTailnet() bool {
+	_, ok := e.proxy.(TailnetGateProxy)
+	return ok
 }
 
 // WithTailnetGate names the dashboard's own API on loopback,
@@ -100,15 +115,6 @@ func (e *NormalizedStepExecutor) tailnetAddressFor(ctx context.Context, environm
 	for port, upstream := range served {
 		exclude[port] = upstream
 	}
-	if plan.Tailnet.IdentityAware() {
-		// The gate answers on loopback on the same port number, so a port
-		// something on this host already holds there is no port for it.
-		for port := previewTailnetPortMin; port <= previewTailnetPortMax; port++ {
-			if _, taken := exclude[port]; !taken && !loopbackFree(port) {
-				exclude[port] = 0
-			}
-		}
-	}
 	address, err = e.store.AllocateTailnetAddress(ctx, environmentID, exclude)
 	switch {
 	case errors.Is(err, ErrPreviewAddressExhausted):
@@ -130,9 +136,10 @@ func loopbackFree(port int) bool {
 	return true
 }
 
-// applyTailnetGate writes the environment's gate in front of the candidate.
-// The route result is returned whether or not it failed, so the recovery
-// that follows a failure puts the previous gate back.
+// applyTailnetGate writes the environment's front before the candidate: its
+// gate, asking the dashboard about every visitor, when the plan names who may
+// open it. The route result is returned whether or not it failed, so the
+// recovery that follows a failure puts the previous front back.
 func (e *NormalizedStepExecutor) applyTailnetGate(
 	ctx context.Context,
 	execution StepExecution,
@@ -141,8 +148,9 @@ func (e *NormalizedStepExecutor) applyTailnetGate(
 	runtime ReleaseRuntime,
 	plan RuntimePlanConfig,
 ) (*tailnetGateEvidence, *proxysvc.DeploymentRouteResult, *StepResult) {
+	gated := plan.Tailnet.IdentityAware()
 	gates, ok := e.proxy.(TailnetGateProxy)
-	if !ok || e.tailnetCheck == "" {
+	if !ok || (gated && e.tailnetCheck == "") {
 		return nil, nil, &StepResult{State: StepUnavailable, ErrorCode: "tailnet_gate_unavailable",
 			ErrorMessage: "this environment admits only the tailnet logins and tags it lists, and no proxy on this host can check them"}
 	}
@@ -153,28 +161,49 @@ func (e *NormalizedStepExecutor) applyTailnetGate(
 	route := proxysvc.TailnetGateRoute{
 		Name: deploymentRouteName(environmentID), Listen: address.Port,
 		Upstream:  "http://" + net.JoinHostPort(runtimeCheckHost(runtime.Host), strconv.Itoa(runtime.Port)),
-		Check:     tailnetGateCheck(e.tailnetCheck, environmentID),
 		MaxBodyMB: plan.MaxRequestBodyMB,
 	}
-	evidence := &tailnetGateEvidence{Name: route.Name, Listen: route.Listen, Allowed: len(plan.Tailnet.Allow)}
+	evidence := &tailnetGateEvidence{Name: route.Name, Listen: route.Listen}
+	what := "front"
+	if gated {
+		route.Check = tailnetGateCheck(e.tailnetCheck, environmentID)
+		evidence.Allowed, what = len(plan.Tailnet.Allow), "gate"
+	}
 	applied, err := gates.ApplyTailnetGate(ctx, route)
 	evidence.Applied = applied.Applied
 	if err != nil {
 		return evidence, &applied, &StepResult{State: StepFailed, ErrorCode: "tailnet_gate_failed",
-			ErrorMessage: "the tailnet gate could not be put in front of the candidate: " + err.Error()}
+			ErrorMessage: "the tailnet " + what + " could not be put in front of the candidate: " + err.Error()}
 	}
 	if err := gates.VerifyTailnetGate(ctx, route); err != nil {
 		return evidence, &applied, &StepResult{State: StepFailed, ErrorCode: "tailnet_gate_failed",
-			ErrorMessage: "the tailnet gate could not be verified: " + err.Error()}
+			ErrorMessage: "the tailnet " + what + " could not be verified: " + err.Error()}
 	}
 	evidence.Verified = true
-	_ = stepLog(execution, "status", fmt.Sprintf("The tailnet gate asks who every visitor is and admits %d listed logins and tags", len(plan.Tailnet.Allow)))
+	if gated {
+		_ = stepLog(execution, "status", fmt.Sprintf("The tailnet gate asks who every visitor is and admits %d listed logins and tags", len(plan.Tailnet.Allow)))
+	} else {
+		_ = stepLog(execution, "status", "The tailnet address reaches the candidate through the dashboard's front, which keeps the dashboard's session cookie from it")
+	}
 	return evidence, &applied, nil
 }
 
-// dropTailnetGate takes away a gate the environment no longer needs, once
+// predecessorFronted says whether the release before a failed candidate was
+// reached through the environment's front. route is what activation wrote
+// before the candidate, whose snapshot is what stood there until then and
+// what the recovery has just put back; without one nothing was written, the
+// mapping was never moved, and the address row still says what it points
+// at: the front answers on the tailnet port's own number.
+func predecessorFronted(address PreviewAddress, route *proxysvc.DeploymentRouteResult) bool {
+	if route == nil || route.Snapshot.Name == "" {
+		return address.UpstreamPort != 0 && address.UpstreamPort == address.Port
+	}
+	return route.Snapshot.Existed && proxysvc.IsTailnetGateSnapshot(route.Snapshot)
+}
+
+// dropTailnetGate takes away a front the environment no longer needs, once
 // what replaced it is published. A failure is logged rather than failing a
-// release that is already live: the gate left behind answers nobody, since
+// release that is already live: the front left behind answers nobody, since
 // tailscale serve no longer points at it.
 func (e *NormalizedStepExecutor) dropTailnetGate(ctx context.Context, execution StepExecution, environmentID int64) {
 	gates, ok := e.proxy.(TailnetGateProxy)
@@ -184,6 +213,102 @@ func (e *NormalizedStepExecutor) dropTailnetGate(ctx context.Context, execution 
 	if err := gates.RemoveTailnetGate(context.WithoutCancel(ctx), deploymentRouteName(environmentID)); err != nil {
 		_ = stepLog(execution, "stderr", "The tailnet gate this environment no longer needs could not be removed: "+err.Error())
 	}
+}
+
+// TailnetFronting is what FrontTailnetAddresses put right, for the caller's
+// log and audit: the environments whose address now reaches the container
+// through its front, and those that could not be moved, with why.
+type TailnetFronting struct {
+	Fronted []int64
+	Failed  map[int64]string
+}
+
+// FrontTailnetAddresses puts a front before every tailnet address still
+// mapped straight to its container — one published before every address had
+// a front — so the dashboard's session cookie stops reaching it at the
+// upgrade rather than at the environment's next release. The caller runs it
+// after the sweep and before the engine starts, so nothing publishes while a
+// mapping moves. The front is written and verified before the mapping moves
+// to it, the mapping is recorded before the move counts, and an address
+// whose front cannot be written, verified, published or recorded is left as
+// it was, its front taken away again: its next release puts one there.
+func (e *NormalizedStepExecutor) FrontTailnetAddresses(ctx context.Context) (TailnetFronting, error) {
+	out := TailnetFronting{Failed: map[int64]string{}}
+	if e == nil || e.store == nil || e.tailnet == nil {
+		return out, nil
+	}
+	gates, ok := e.proxy.(TailnetGateProxy)
+	if !ok {
+		return out, nil
+	}
+	addresses, err := e.store.ListPreviewAddresses(ctx)
+	if err != nil {
+		return out, err
+	}
+	environments := make([]int64, 0, len(addresses))
+	for environmentID, address := range addresses {
+		if address.Kind == previewAddressTailnet && address.Published && address.UpstreamPort != 0 && address.UpstreamPort != address.Port {
+			environments = append(environments, environmentID)
+		}
+	}
+	slices.Sort(environments)
+	for _, environmentID := range environments {
+		address := addresses[environmentID]
+		if err := e.frontTailnetAddress(ctx, gates, environmentID, address); err != nil {
+			out.Failed[environmentID] = err.Error()
+			continue
+		}
+		out.Fronted = append(out.Fronted, environmentID)
+	}
+	return out, nil
+}
+
+func (e *NormalizedStepExecutor) frontTailnetAddress(ctx context.Context, gates TailnetGateProxy, environmentID int64, address PreviewAddress) error {
+	live, err := e.store.LiveRelease(ctx, environmentID)
+	if err != nil {
+		return fmt.Errorf("its live release could not be read: %w", err)
+	}
+	snapshot, err := decodeReleaseRuntimeSnapshot(live)
+	if err != nil {
+		return err
+	}
+	// A gated environment is never mapped past its gate; one that looks it
+	// is not this pass's to touch.
+	if snapshot.Plan.Tailnet.IdentityAware() {
+		return errors.New("it names its visitors, and is published through its gate by its next release")
+	}
+	route := proxysvc.TailnetGateRoute{
+		Name: deploymentRouteName(environmentID), Listen: address.Port,
+		Upstream:  "http://127.0.0.1:" + strconv.Itoa(address.UpstreamPort),
+		MaxBodyMB: snapshot.Plan.MaxRequestBodyMB,
+	}
+	applied, err := gates.ApplyTailnetGate(ctx, route)
+	if err != nil {
+		return fmt.Errorf("its front could not be written: %w", err)
+	}
+	undo := func(cause error) error {
+		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if restoreErr := e.proxy.RestoreDeploymentRoute(recovery, applied.Snapshot); restoreErr != nil {
+			return fmt.Errorf("%w; the front could not be taken away again: %v", cause, restoreErr)
+		}
+		return cause
+	}
+	if err := gates.VerifyTailnetGate(ctx, route); err != nil {
+		return undo(fmt.Errorf("its front could not be verified: %w", err))
+	}
+	url, err := e.tailnet.PublishTailnet(ctx, address.Port, address.Port, address.UpstreamPort)
+	if err != nil {
+		return undo(fmt.Errorf("its mapping could not be moved to the front: %w", err))
+	}
+	if err := e.store.MarkPreviewAddressPublished(context.WithoutCancel(ctx), environmentID, url, address.Port, true); err != nil {
+		cause := fmt.Errorf("its mapping moved to the front but could not be recorded: %w", err)
+		if _, backErr := e.tailnet.PublishTailnet(context.WithoutCancel(ctx), address.Port, address.UpstreamPort, address.Port); backErr != nil {
+			return fmt.Errorf("%w; the mapping could not be pointed back at the container either: %v", cause, backErr)
+		}
+		return undo(cause)
+	}
+	return nil
 }
 
 // leftTheTailnet says the release replaced a tailnet-only one of an
@@ -256,7 +381,7 @@ func tailnetFindings(configuration PlanConfiguration, observed *TailnetObservati
 	if !tailnet.IdentityAware() {
 		return append(findings, finding("tailnet_identity", PreflightPass,
 			"Everyone on the tailnet can open it", "",
-			"The tailnet is its fence, as it is for a pull request preview. List Tailscale logins or tags under Domains to admit only them.",
+			"The tailnet is its fence, as it is for a pull request preview. Requests reach it through the dashboard's own front on loopback, which keeps the dashboard's session cookie from it: the address is a port of the name the dashboard is reached by. List Tailscale logins or tags under Domains to admit only them.",
 			"", "network", "runtime.tailnet.allow"))
 	}
 	gate := "this host's nginx"
@@ -271,6 +396,6 @@ func tailnetFindings(configuration PlanConfiguration, observed *TailnetObservati
 	}
 	return append(findings, finding("tailnet_identity", PreflightPass,
 		"Only the listed logins and tags open it", strings.Join(tailnet.Allow, ", "),
-		"Every request first goes to "+gate+", which asks the dashboard who it is: the dashboard asks tailscaled which login or tagged machine holds the address it came from. Anyone else is answered 403, and if tailscaled cannot be asked, 503. The application is told X-Tailnet-Login and X-Tailnet-User.",
+		"Every request first goes to "+gate+", which asks the dashboard who it is: the dashboard asks tailscaled which login or tagged machine holds the address it came from. Anyone else is answered 403, and if tailscaled cannot be asked, 503. The application is told X-Tailnet-Login and X-Tailnet-User, and is never sent the dashboard's session cookie.",
 		"", "network", "runtime.tailnet.allow"))
 }

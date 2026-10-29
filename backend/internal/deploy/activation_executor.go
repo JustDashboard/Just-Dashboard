@@ -781,17 +781,22 @@ func (e *NormalizedStepExecutor) activate(
 		failure.Evidence, failure.Recovered = mustJSON(evidence), recoveryComplete(recovery, snapshot.Plan, release.Release)
 		return *failure
 	}
+	// Every tailnet address is reached through the environment's front,
+	// which keeps the dashboard's session cookie from the application; an
+	// environment that names its visitors has its gate there, and goes live
+	// behind it or not at all.
 	gated := snapshot.Plan.Tailnet.IdentityAware()
+	fronted := gated || e.frontsTailnet()
 	// A release that is no longer tailnet-only, replacing one that was, is
 	// not published there: its address is withdrawn once it is live.
 	leaving := address != nil && address.Kind == previewAddressTailnet && snapshot.Plan.Tailnet == nil &&
 		!snapshot.Plan.PreviewIsolation && e.leftTheTailnet(ctx, release.Release)
 	if address != nil && address.Kind == previewAddressTailnet && !leaving {
 		upstream := runtime.Port
-		if gated {
-			// The gate goes in front of the candidate first and the mapping
-			// moves to the gate after, so the tailnet never reaches the
-			// candidate without the check.
+		if fronted {
+			// The front goes before the candidate first and the mapping
+			// moves to the front after, so the tailnet never reaches the
+			// candidate without it — or without the check, for a gate.
 			gate, applied, failure := e.applyTailnetGate(ctx, execution, release.Release.EnvironmentID, *address, *runtime, snapshot.Plan)
 			if applied != nil {
 				appliedRoute = applied
@@ -837,10 +842,10 @@ func (e *NormalizedStepExecutor) activate(
 		// The environment left the tailnet, and what replaced it is live
 		// now: its address goes.
 		e.leaveTailnet(ctx, execution, release.Release.EnvironmentID)
-	case !gated:
-		// It does not name its visitors (or no longer does): the mapping
-		// reaches the container directly, and a gate left in front of an
-		// older release answers nobody.
+	case !fronted:
+		// No proxy here can front it: the mapping reaches the container
+		// directly, and a front left before an older release answers
+		// nobody.
 		e.dropTailnetGate(ctx, execution, release.Release.EnvironmentID)
 	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(evidence)}
@@ -943,6 +948,10 @@ func deploymentRoute(environmentID int64, domains []PlannedDomain, upstreams []s
 		// always written one for these routes; asking Caddy for it too is what
 		// makes the two drivers answer the same question.
 		AccessLog: true,
+		// And each request it records is a span: the ingress sends the
+		// application a traceparent and writes the same ids beside the
+		// request, which a log drain's traces stream exports.
+		Trace: true,
 	}
 	if tls {
 		route.PlainHostnames = plain
@@ -1003,7 +1012,7 @@ func (e *NormalizedStepExecutor) stopCandidateAndRestore(
 	} else {
 		recovery.RuntimeRestored = previous.RuntimeRestored
 	}
-	recovery.TailnetRestored = e.restoreTailnet(recoveryCtx, execution, release, recovery.RuntimeRestored)
+	recovery.TailnetRestored = e.restoreTailnet(recoveryCtx, execution, release, recovery.RuntimeRestored, route)
 	_ = e.store.SetRuntimeState(recoveryCtx, execution.Run.ID, execution.ClaimToken, release.ID, "failed")
 	return recovery
 }

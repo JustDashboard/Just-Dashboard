@@ -47,6 +47,12 @@ type DeploymentRoute struct {
 	// always done it; the Docker Caddy driver did not, which is why a
 	// deployment behind Caddy could not answer "is anyone using it" at all.
 	AccessLog bool `json:"accessLog,omitempty"`
+	// Trace has the ingress send the application a W3C traceparent — the
+	// client's trace continued, or a new one — and record it beside the
+	// request, so the request is a span the application's own spans join
+	// (proxysvc/trace.go). A Caddy older than 2.8 cannot record it and is
+	// rendered without it.
+	Trace bool `json:"trace,omitempty"`
 	// MaxBodyMB is the largest request body the route lets through, in
 	// megabytes. Zero keeps each proxy's deployment default: nginx's own is
 	// 1 MB, which refused a phone photo before the application saw it, so
@@ -94,6 +100,12 @@ type DeploymentRoute struct {
 	// sends no header, which is where a route starts: the policy outlives
 	// a mistake for as long as it says.
 	HSTS *DeploymentHSTS `json:"hsts,omitempty"`
+	// DropCookies are cookies taken out of every request before the
+	// application is sent it, every other cookie kept. The service sets the
+	// dashboard's own (DashboardCookies) on a route serving the name the
+	// dashboard is reached by, since a browser sends the dashboard's session
+	// there whatever the port (onDashboardName); nothing else sets it.
+	DropCookies []string `json:"dropCookies,omitempty"`
 }
 
 // MaxDeploymentUpstreams is the most servers a route shares requests
@@ -392,6 +404,9 @@ func validateDeploymentRules(route DeploymentRoute) error {
 	if len(route.AllowFrom) > MaxDeploymentAllow {
 		return fmt.Errorf("at most %d allowed addresses", MaxDeploymentAllow)
 	}
+	if err := validCookieNames(route.DropCookies); err != nil {
+		return err
+	}
 	for _, entry := range route.AllowFrom {
 		if normalized, err := NormalizeAccessEntry(entry); err != nil {
 			return err
@@ -562,6 +577,7 @@ type DeploymentRouteResult struct {
 // a deployment-owned nginx route. If apply or reload fails, the exact prior
 // bytes/link are restored and reloaded before the failure is returned.
 func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRoute) (DeploymentRouteResult, error) {
+	route = s.onDashboardName(route)
 	if err := validateDeploymentRules(route); err != nil {
 		return DeploymentRouteResult{}, err
 	}
@@ -652,8 +668,9 @@ func (s *Service) RestoreDeploymentRoute(ctx context.Context, snapshot Deploymen
 // cutover. It is intentionally name-scoped so preview cleanup cannot select
 // or remove a route owned by another feature.
 func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error {
-	// A tailnet-only environment's gate goes with its route, from the gate
-	// Caddy that holds it; on nginx it is the file of the route's own name.
+	// A tailnet address's front — a preview's, a tailnet-only environment's
+	// gate — goes with its route, from the gate Caddy that holds it; on nginx
+	// it is the file of the route's own name.
 	if tailnetGateNameRe.MatchString(name) {
 		if err := s.removeGateContainerRoute(ctx, name); err != nil {
 			return err
@@ -727,6 +744,7 @@ func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error 
 }
 
 func (s *Service) VerifyDeploymentRoute(ctx context.Context, route DeploymentRoute) error {
+	route = s.onDashboardName(route)
 	if edge, err := s.dockerCaddy(ctx); err != nil {
 		return err
 	} else if edge != nil {
@@ -901,11 +919,12 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 		TLS: route.TLS, CertPath: route.CertPath, KeyPath: route.KeyPath, ForceHTTPS: route.ForceHTTPS,
 		ManagedACME: true,
 		HTTP2:       route.TLS,
-		WebSockets:  true, Gzip: true, SecurityHeaders: true, AccessLog: true,
+		WebSockets:  true, Gzip: true, SecurityHeaders: true, AccessLog: true, Trace: route.Trace,
 		AllowFrom: append([]string{}, route.AllowFrom...), DenyFrom: []string{}, Locations: []SiteLocation{},
 		ClientMaxBody: deploymentBodyLimit(route),
 		HostRedirects: append([]HostRedirect(nil), route.Redirects...),
 		deployment:    true,
+		dropCookies:   append([]string(nil), route.DropCookies...),
 	}
 	if pool := deploymentPool(route.Servers(), route.Canary != nil || route.Skew != nil); pool != nil {
 		spec.Upstream, spec.Pool = "", pool

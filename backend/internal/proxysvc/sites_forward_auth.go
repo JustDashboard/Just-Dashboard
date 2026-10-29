@@ -266,6 +266,9 @@ func renderForwardAuthLocation(l *lines, spec *SiteSpec) {
 	l.add("        proxy_set_header X-Forwarded-Host   $http_host;")
 	l.add("        proxy_set_header X-Forwarded-Uri    $request_uri;")
 	l.add("        proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;")
+	if spec.dropsCookies() {
+		l.add("        proxy_set_header Cookie             $%s;", spec.cookieVar())
+	}
 	if strings.HasPrefix(f.Verify, "https://") {
 		l.add("        proxy_ssl_server_name on;")
 	}

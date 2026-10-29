@@ -1905,6 +1905,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	// window opened before either is a paused one that served nobody.
 	{"deploy_rollback_watches", "warm_running", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_rollback_watches", "warm_served_json", "TEXT NOT NULL DEFAULT 'null'"},
+	// A drain that exports traces may name where its service shows one, a
+	// link the request console draws beside a request's trace id. Drains
+	// made before had no traces to link to.
+	{"deploy_log_drains", "trace_url", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on

@@ -384,15 +384,15 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 			quoted = append(quoted, strconv.Quote(server))
 		}
 		out := "reverse_proxy " + strings.Join(quoted, " ")
-		var options []string
+		block := caddyDropCookies("    ", route.DropCookies)
 		if len(servers) > 1 {
-			options = append(options, caddyReplicaBalancing...)
+			block += strings.Join(caddyReplicaBalancing, "\n") + "\n"
 		}
 		if route.InterceptErrors {
-			options = append(options, caddyInterceptErrors(route.ErrorPages)...)
+			block += renderCaddyInterceptErrors(route.ErrorPages)
 		}
-		if len(options) > 0 {
-			out += " {\n" + strings.Join(options, "\n") + "\n  }"
+		if block != "" {
+			out += " {\n" + block + "  }"
 		}
 		return out
 	}
@@ -492,7 +492,7 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 	gateDirective := ""
 	if route.ForwardAuth != nil {
 		var err error
-		if gateDirective, err = renderCaddyForwardAuth(*route.ForwardAuth); err != nil {
+		if gateDirective, err = renderCaddyForwardAuth(*route.ForwardAuth, route.DropCookies...); err != nil {
 			return "", err
 		}
 	}
@@ -512,8 +512,12 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 	if pages != "" {
 		maintenance, errorPages = renderCaddyMaintenance(route.Maintenance, pages), renderCaddyErrorPages(route.ErrorPages, pages)
 	}
+	trace := ""
+	if route.Trace && route.Name != "" && len(servers) > 0 {
+		trace = caddyTraceDirectives
+	}
 	handlingFor := func(https bool) string {
-		handling := fence + maintenance + authDirective + gateDirective + bodyDirective + "  " + directiveFor(https) + "\n"
+		handling := trace + fence + maintenance + authDirective + gateDirective + bodyDirective + "  " + directiveFor(https) + "\n"
 		if fence != "" || maintenance != "" || route.ForwardAuth != nil || route.Canary != nil || route.Skew != nil {
 			handling = "  route {\n" + indentCaddy(handling) + "  }\n"
 		}
@@ -587,7 +591,9 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 // The two headers are removed from what the visitor sent before the check.
 // Caddy 2.11's forward_auth drops them itself when the server sends none;
 // removing them first holds whichever Caddy the operator's ingress runs.
-func renderCaddyForwardAuth(gate SiteForwardAuth) (string, error) {
+// drop are cookies the check is not sent, as the application is not: the
+// dashboard's own on a route that serves the dashboard's name.
+func renderCaddyForwardAuth(gate SiteForwardAuth, drop ...string) (string, error) {
 	verify, err := url.Parse(gate.Verify)
 	if err != nil {
 		return "", err
@@ -623,6 +629,7 @@ func renderCaddyForwardAuth(gate SiteForwardAuth) (string, error) {
 	out.WriteString("    header_up Host {upstream_hostport}\n")
 	out.WriteString("    header_up X-Original-URL {scheme}://{hostport}{uri}\n")
 	out.WriteString("    header_up X-Original-Method {method}\n")
+	out.WriteString(caddyDropCookies("    ", drop))
 	out.WriteString("    copy_headers " + strings.Join(copies, " ") + "\n")
 	out.WriteString("    @signin status 401\n")
 	out.WriteString("    handle_response @signin {\n")
@@ -819,21 +826,19 @@ var caddyReplicaBalancing = []string{
 	"    }",
 }
 
-// caddyInterceptErrors turns the application's own answers with the route's
-// chosen codes into Caddy's errors, which its pages then answer, as nginx's
-// proxy_intercept_errors does. The status is the application's.
-func caddyInterceptErrors(codes []int) []string {
+// renderCaddyInterceptErrors turns the application's own answers with the
+// route's chosen codes into Caddy's errors, which its pages then answer, as
+// nginx's proxy_intercept_errors does. The status is the application's.
+func renderCaddyInterceptErrors(codes []int) string {
 	sorted := slices.Sorted(slices.Values(codes))
 	list := make([]string, 0, len(sorted))
 	for _, code := range sorted {
 		list = append(list, strconv.Itoa(code))
 	}
-	return []string{
-		"    @jd_error status " + strings.Join(list, " "),
-		"    handle_response @jd_error {",
-		"      error \"the application's error page was replaced\" {rp.status_code}",
-		"    }",
-	}
+	return "    @jd_error status " + strings.Join(list, " ") + "\n" +
+		"    handle_response @jd_error {\n" +
+		"      error \"the application's error page was replaced\" {rp.status_code}\n" +
+		"    }\n"
 }
 
 // indentCaddy moves every line of a block one level in.
@@ -1059,6 +1064,12 @@ func (c *dockerCaddy) routeContent(ctx context.Context, route DeploymentRoute) (
 		}
 		rendered.Skew = &resolved
 	}
+	// The trace is recorded with log_append, which Caddy has had since 2.8;
+	// an operator's older ingress serves the route without one rather than
+	// refusing the whole Caddyfile.
+	if rendered.Trace && !c.recordsTraces(ctx) {
+		rendered.Trace = false
+	}
 	content, err := renderDockerCaddyRoute(rendered, upstreams...)
 	if err != nil {
 		return "", nil, err
@@ -1181,6 +1192,7 @@ func (c *dockerCaddy) domainClaimed(ctx context.Context, domain, ownContent stri
 }
 
 func (s *Service) applyDockerCaddyRoute(ctx context.Context, c *dockerCaddy, route DeploymentRoute) (DeploymentRouteResult, error) {
+	route = s.onDashboardName(route)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	snapshot, err := c.snapshot(ctx, route.Name)

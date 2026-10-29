@@ -602,6 +602,52 @@ func TestCanaryEntriesSayWhichReleaseAnswered(t *testing.T) {
 	}
 }
 
+// The trace context a deployment route records is read from both proxies'
+// lines: Caddy's log_append fields and the trailing fields of nginx's timed
+// format. Anything that is not one — a placeholder Caddy left, an all-zero
+// id, nginx's "-" — is no context.
+func TestTheTraceContextARouteRecordsIsRead(t *testing.T) {
+	trace, span, parent := "4bf92f3577b34da6a3ce929d0e0e4736", "a3ce929d0e0e4736", "00f067aa0ba902b7"
+	caddy := `{"level":"info","ts":1793263529.9,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"203.0.113.9","proto":"HTTP/1.1","method":"GET","host":"shop.example.test","uri":"/cart","headers":{}},"duration":0.0123,"size":12,"status":200,` +
+		`"trace_id":"` + trace + `","span_id":"` + span + `","parent_span_id":"` + parent + `"}`
+	entry, ok := Parse(caddy)
+	if !ok || entry.TraceID != trace || entry.SpanID != span || entry.ParentSpanID != parent {
+		t.Fatalf("caddy = %+v", entry)
+	}
+	nginx := `203.0.113.9 - - [29/Oct/2026:09:00:00 +0000] "GET /cart HTTP/1.1" 200 12 "-" "curl/8" rt=0.012 urt="0.011" host=shop.example.test cs=- trace=` + trace + ` span=` + span + ` parent=-`
+	entry, ok = Parse(nginx)
+	if !ok || entry.TraceID != trace || entry.SpanID != span || entry.ParentSpanID != "" || entry.Host != "shop.example.test" {
+		t.Fatalf("nginx = %+v", entry)
+	}
+	for name, line := range map[string]string{
+		"a placeholder": strings.Replace(caddy, trace, "{jd_trace}", 1),
+		"all zeros":     strings.Replace(caddy, trace, strings.Repeat("0", 32), 1),
+		"uppercase":     strings.Replace(caddy, trace, strings.ToUpper(trace), 1),
+		"a short span":  strings.Replace(nginx, "span="+span, "span=abc", 1),
+	} {
+		if entry, _ := Parse(line); entry.TraceID != "" || entry.SpanID != "" {
+			t.Errorf("%s was read as a trace: %+v", name, entry)
+		}
+	}
+	if raw, _ := json.Marshal(entry); !strings.Contains(string(raw), `"traceId":"`+trace+`"`) {
+		t.Fatalf("the request's JSON does not carry its trace: %s", raw)
+	}
+}
+
+func TestEachRequestHasAClientClass(t *testing.T) {
+	for want, entry := range map[string]Entry{
+		"browser": {Path: "/", UserAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 Safari/605.1.15"},
+		"bot":     {Path: "/", UserAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"},
+		"scanner": {Path: "/.env", Status: 404, UserAgent: "Mozilla/5.0"},
+		"client":  {Path: "/api/orders", UserAgent: "MyApp/3.2 (iPhone; iOS 18.0)"},
+		"unknown": {Path: "/"},
+	} {
+		if got := ClientClass(entry); got != want {
+			t.Errorf("%+v = %s, want %s", entry, got, want)
+		}
+	}
+}
+
 // A tailnet gate's record names who it let in: nginx's tl= field after the
 // timed format, Caddy's tailnet_login field from the gate's log_append.
 func TestParseReadsTheTailnetLoginTheGateAdmitted(t *testing.T) {

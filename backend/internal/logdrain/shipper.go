@@ -214,15 +214,30 @@ func (s *shipper) deliver(ctx context.Context) error {
 			}
 			return nil
 		}
-		err := s.send(ctx, batch)
+		// Logs and spans are two requests to two paths. The logs go first;
+		// when the spans then fail, only they go back to the queue, so the
+		// logs a destination took are not sent to it twice.
+		logs, spans := splitSignals(batch, s.drain.Kind)
+		var err error
+		failed := batch
+		if len(logs) > 0 {
+			err = deliverBatch(ctx, s.client, s.drain.Kind, s.drain.Endpoint, s.headers, logs, s.host)
+		}
+		if err == nil && len(spans) > 0 {
+			failed = spans
+			if err = deliverSpans(ctx, s.client, s.drain.Endpoint, s.headers, spans, s.host); err != nil && len(logs) > 0 {
+				s.store.recordDelivery(context.Background(), s.drain.ID, int64(len(logs)), dropped, "", time.Now())
+				dropped = 0
+			}
+		}
 		if err != nil {
-			s.requeue(batch)
+			s.requeue(failed)
 			s.mu.Lock()
 			s.dropped += dropped
 			s.mu.Unlock()
 			s.store.recordDelivery(context.Background(), s.drain.ID, 0, 0, err.Error(), time.Now())
 			if s.log != nil {
-				s.log.Warn("log drain delivery failed", "drain", s.drain.Name, "records", len(batch), "err", err)
+				s.log.Warn("log drain delivery failed", "drain", s.drain.Name, "records", len(failed), "err", err)
 			}
 			return err
 		}
@@ -230,9 +245,17 @@ func (s *shipper) deliver(ctx context.Context) error {
 	}
 }
 
-// send makes one request with a batch, gzip-compressed.
-func (s *shipper) send(ctx context.Context, batch []Record) error {
-	return deliverBatch(ctx, s.client, s.drain.Kind, s.drain.Endpoint, s.headers, batch, s.host)
+// splitSignals parts a batch into log records and spans. A span can only go
+// to an OTLP destination; one queued for another kind is not sent anywhere.
+func splitSignals(batch []Record, kind string) (logs, spans []Record) {
+	for _, record := range batch {
+		if record.Stream != StreamTraces {
+			logs = append(logs, record)
+		} else if kind == KindOTLP && record.Request != nil {
+			spans = append(spans, record)
+		}
+	}
+	return logs, spans
 }
 
 func deliverBatch(ctx context.Context, client *http.Client, kind, endpoint string, headers []Header, batch []Record, host string) error {
@@ -240,6 +263,20 @@ func deliverBatch(ctx context.Context, client *http.Client, kind, endpoint strin
 	if err != nil {
 		return err
 	}
+	return post(ctx, client, endpointFor(kind, endpoint), headers, encoded)
+}
+
+// deliverSpans sends requests as spans to the drain's OTLP /v1/traces, with
+// the drain's headers, compressed and bounded as its logs are.
+func deliverSpans(ctx context.Context, client *http.Client, endpoint string, headers []Header, batch []Record, host string) error {
+	encoded, err := encodeTraces(batch, host)
+	if err != nil {
+		return err
+	}
+	return post(ctx, client, tracesEndpoint(endpoint), headers, encoded)
+}
+
+func post(ctx context.Context, client *http.Client, address string, headers []Header, encoded Encoded) error {
 	var compressed bytes.Buffer
 	writer := gzip.NewWriter(&compressed)
 	if _, err := writer.Write(encoded.Body); err != nil {
@@ -250,7 +287,7 @@ func deliverBatch(ctx context.Context, client *http.Client, kind, endpoint strin
 	}
 	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointFor(kind, endpoint), &compressed)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, address, &compressed)
 	if err != nil {
 		return err
 	}
