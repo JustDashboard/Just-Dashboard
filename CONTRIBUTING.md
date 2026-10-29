@@ -406,7 +406,16 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyGatesRouteBehindForwardAuth -count=1 -v`,
   which signs in at a real Authelia (`authelia/authelia:4.39`, pulled on first run) in front of
   `traefik/whoami`, and `go test ./internal/proxysvc -run TestLiveDeploymentRouteSignsInOnNginx`, which
-  needs only the host's nginx. Changes to a route's maintenance switch or error pages also run
+  needs only the host's nginx. Changes to a tailnet-only environment's gate (`proxysvc/tailnet_gate.go`),
+  the whois route (`internal/tailnetgate`) or how activation publishes on the tailnet also run
+  `go test ./internal/proxysvc -run TestLiveTailnetGateOnNginx`, which needs only the host's nginx, and
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveTailnetGateOnCaddy -count=1 -v` (as root:
+  build the test binary and run it under `sudo`), which starts a real `caddy:2-alpine` the way the
+  dashboard starts its loopback gate and removes it with its volumes. Both put the real whois handler
+  over the real local API client in front of a fake tailscaled, never the host's
+  ([tailnet-only deployments](docs/internal/deployments/tailnet-apps.md#verification)), and the
+  preview tailnet tests in `internal/deploy` (`go test ./internal/deploy -run 'Tailnet|Preview'`) are
+  their regressions. Changes to a route's maintenance switch or error pages also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesMaintenanceAndErrorPages -count=1 -v`
   and `go test ./internal/proxysvc -run TestLiveDeploymentRouteMaintenanceOnNginx`, which switch a real
   Caddy's and the host nginx's route by its file and ask each what a visitor, an address let past and a
@@ -455,7 +464,14 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_TEST_WALG=<path>` to the WAL-G release `backend/Dockerfile` pins,
   `TestLiveMigrationRehearsalRecoversFromThePointInTimeArchive` runs as well: a PostgreSQL 17
   archiving into a directory, the copy recovered from the archive. They remove their own
-  `jd-rehearsal-…` servers, volumes, networks and release containers.
+  `jd-rehearsal-…` servers, volumes, networks and release containers. Changes to a preview's database
+  branches (`deploy/preview_branches.go`, `api/deployment_preview_branch*.go`, or the restore they share)
+  also run, the same way,
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run 'TestLivePreviewDatabaseBranch' -count=1 -v` (PostgreSQL
+  from a dump, MariaDB, and with `JD_TEST_WALG` the point-in-time archive): a preview's branch resolves to
+  its own address and password on the preview's own network, holds the backup's rows, keeps writes apart
+  from production's both ways, masks a column in its shape, is never a fork's, and goes with the preview
+  leaving nothing with its label.
 - Changes to data-aware rollback — the data point a release records when it goes live, the copies of
   a release's data, their restore, lifetime or sweep (`deploy/data_rollback.go`,
   `api/deployment_data_rollback.go`), the restore path they share with the migration rehearsal, or
@@ -508,7 +524,10 @@ to the contribution terms above, including the additional licence grant to the p
   variables, domains, storage, dependencies, automation and lifecycle.
 - Preview changes also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run 'TestLive(PreviewStorageCredentialsNetworkAndCleanup|LegacyPreviewQuarantinePreservesProduction)$' -count=1 -v`.
-  These fixtures cover new-preview isolation and production-preserving quarantine of older previews.
+  These fixtures cover new-preview isolation and production-preserving quarantine of older previews;
+  the first has `container` and `compose` subtests, the latter previewing a two-service Compose stack
+  through `docker compose` (both services on the preview's bridge alone, only the public one
+  publishing, on loopback, production's volume, host directory and network untouched, removal exact).
   Compose backup coverage changes run
   `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveDeploymentComposeStorage -count=1 -v`.
 - Changes to the connection pooler (`dbx/pooler.go`, `api/database_pooler.go`, its routes, or how a

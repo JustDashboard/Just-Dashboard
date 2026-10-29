@@ -307,6 +307,15 @@ func (s *PlanningStore) CreateStagingEnvironment(
 		result.Adjusted = append(result.Adjusted, fmt.Sprintf("%s mounts a new, empty volume %s instead of %s.", mount.Target, replacement, mount.Source))
 		mount.Source, mount.Ownership = replacement, OwnershipManaged
 	}
+	// A tailnet-only production makes a tailnet-only staging, admitting the
+	// same people, on an address of its own; a public name for it would
+	// publish what production keeps off one.
+	if runtime.Tailnet != nil {
+		if domain != "" {
+			return nil, fmt.Errorf("%w: production is tailnet-only, so staging is too and takes no public domain", ErrInvalidPlan)
+		}
+		result.Adjusted = append(result.Adjusted, "Production is tailnet-only, so staging is published on the tailnet alone, at an address of its own, admitting the same people.")
+	}
 	// A sign-in for previews only exists to keep work in progress private
 	// while production stays public; staging is work in progress too.
 	if runtime.ForwardAuth != nil && runtime.ForwardAuth.PreviewsOnly {

@@ -3,7 +3,8 @@
 - [`Deployment creation audit`](../../audits/2026-09-22-deploy-new/README.md) — wizard state, template
   usability, encrypted draft inputs, database connections and local acceptance evidence.
 - [`implementation.md`](implementation.md) — current implementation, invariants, feature joins, automation, and topology.
-- [`preview-isolation.md`](preview-isolation.md) — exact-revision approval, previews tested from the dashboard, copied production variables, tailnet-only addresses, reconciliation with GitHub, storage, network and cleanup.
+- [`tailnet-apps.md`](tailnet-apps.md) — environments published on the tailnet alone, and access per person from Tailscale identity: the plan's list of logins and tags, the address from the previews' range, the gate (nginx or the dashboard's loopback Caddy) that asks the whois route about every request, the route itself, audit, and what the pages say.
+- [`preview-isolation.md`](preview-isolation.md) — exact-revision approval, previews tested from the dashboard, Compose previews with every service isolated, copied production variables, database branches (a preview's own masked copy of a linked database), tailnet-only addresses, reconciliation with GitHub, storage, network and cleanup.
 - [`backup-coverage.md`](backup-coverage.md) — immutable archive manifests and persistent-data coverage limitations.
 - [`restore-verification.md`](restore-verification.md) — native SQLite snapshots and artifact-bound isolated application recovery checks.
 - [`recipes.md`](recipes.md) — build variable delivery, the framework catalogue (JavaScript, Python, Go, Rust, Java, .NET, Deno, PHP), environment discovery, Procfiles, where a server listens and whom it trusts behind the proxy, repository shape and candidate selection, other platforms' deployment files, background processes, ecosystems without a recipe, submodules and LFS, the single-page fallback and toolchain selection.

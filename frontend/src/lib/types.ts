@@ -3644,6 +3644,21 @@ export type DeploymentOperations = {
     reason?: string
     items: DeploymentDependencyItem[]
   }
+  /** The tailnet address and who may open it, for a release that is tailnet-only. */
+  tailnet?: DeploymentTailnetAddress
+}
+
+/** A tailnet-only environment as its live release and its address record have it. */
+export type DeploymentTailnetAddress = {
+  url?: string
+  port?: number
+  /** The mapping is in place for the live release. */
+  published: boolean
+  /** Who may open it; empty is everyone on the tailnet. */
+  allow: string[]
+  /** The proxy that asks who every visitor is, for a release that names them. */
+  gate?: "nginx" | "caddy"
+  gateRunning?: boolean
 }
 
 export type ReleaseFieldChange = {
@@ -4435,8 +4450,72 @@ export type DeploymentPreview = {
   liveReleaseId?: number
   address?: DeploymentPreviewAddress
   lastRun?: DeploymentRecentRun
+  /** A live Compose preview's services as Docker reports them; absent for a single container. */
+  services?: DeploymentRuntimeServices
   /** The newest promotion of this preview's image into staging, however it ended. */
   promotion?: DeploymentPreviewPromotion
+  /** The preview's own copies of databases production gives previews a branch of. */
+  branches?: PreviewDatabaseBranch[]
+}
+
+/** What a linked database gives an environment's previews (`deploy/preview_branches.go`). */
+export type PreviewBranchMode = "none" | "branch" | "masked"
+
+export type PreviewBranchPolicy = {
+  connectionId: number
+  mode: PreviewBranchMode
+  /** table.column or schema.table.column, overwritten in their shape on the copy. */
+  maskedColumns: string[]
+  updatedBy?: string
+  updatedAt?: string
+}
+
+/** A preview's own copy of a linked database, restored from its newest backup. */
+export type PreviewDatabaseBranch = {
+  id: number
+  environmentId: number
+  connectionId: number
+  name: string
+  engine?: string
+  database?: string
+  mode: PreviewBranchMode
+  maskedColumns: string[]
+  state: "waiting" | "restoring" | "ready" | "failed" | "removed"
+  /** "dump" for a backup job's native dump, "pitr" for a point-in-time recovery. */
+  source: { kind: string; backupRunId?: number; takenAt?: string; bytes?: number; method?: string }
+  recoveredTo?: string
+  host?: string
+  port?: number
+  maskedRows?: number
+  reason?: string
+  restoreMs?: number
+  requestedBy?: string
+  createdAt: string
+  readyAt?: string
+  endedAt?: string
+}
+
+/** One service of a Compose stack, and what its preview gets in place of production's. */
+export type ComposePreviewService = {
+  name: string
+  /** The service the preview's route and tailnet address reach; the only one that answers. */
+  public: boolean
+  /** Ports production publishes on the host; the preview publishes none of them. */
+  ports: string[]
+  /** Mount targets that start empty on storage of the preview's own. */
+  volumes: string[]
+  /** Read-only files of the commit itself the preview mounts. */
+  checkout: string[]
+  /** Read-only paths of this server the preview does not get. */
+  leftOut: string[]
+}
+
+/** What a preview of a Compose stack gets, service by service, and what refuses one. */
+export type ComposePreviewFacts = {
+  public: string
+  services: ComposePreviewService[]
+  /** What no preview may have; any one refuses the preview. */
+  refusals: string[]
 }
 
 /** A deploy project's pull requests on GitHub, joined to the previews built from them. */
@@ -4458,8 +4537,12 @@ export type ProjectPullRequests = {
     awaitingFirstDeployment: boolean
   }
   tailnet: TailscaleIdentity
-  /** The production build is a Compose stack, which previews cannot isolate. */
+  /** The production build is a Compose stack; `composePreview` says what its preview gets. */
   compose: boolean
+  /** Present for a Compose stack: each service's isolation, and what refuses a preview. */
+  composePreview?: ComposePreviewFacts
+  /** The databases production gives its previews a branch of; a fork's preview gets none. */
+  databaseBranches?: (PreviewBranchPolicy & { name: string; driver?: string })[]
   /** The production source is a local checkout, which has no remote to fetch a pull request from. */
   localCheckout: boolean
   /** The runtime plan's internal port; 0 means nothing to publish. */
@@ -5386,6 +5469,12 @@ export type DeploymentConfiguration = {
     interceptErrors?: boolean
     /** Strict-Transport-Security on every HTTPS answer; absent sends none. */
     hsts?: DeploymentRouteHSTS
+    /**
+     * Published on this host's tailnet and nowhere else, as a preview is: no
+     * public domain and no public certificate. Absent is an ordinary
+     * environment.
+     */
+    tailnet?: DeploymentRouteTailnet
     /** Recorded requests replayed against the candidate before the cutover; absent is off. */
     replay?: ReplayPlan
     mounts?: {
@@ -5446,6 +5535,17 @@ export type DeploymentPlannedDomain = {
 }
 
 export type DeploymentRedirectCode = 301 | 302 | 307 | 308
+
+/**
+ * A tailnet-only publication. `allow`, when it names anybody, is who may open
+ * it — Tailscale logins (alice@example.com, compared without case) and ACL
+ * tags (tag:ci, compared exactly) — and the proxy then asks the dashboard
+ * about every request; empty lets everyone on the tailnet in. Previews
+ * inherit it with the rest of the plan.
+ */
+export type DeploymentRouteTailnet = {
+  allow?: string[]
+}
 
 /**
  * Sign-in in front of a deployment's public route: a Proxy site's single
@@ -5605,6 +5705,8 @@ export type DeploymentDatabaseLink = {
   hostname: string
   /** The connection has a pooler, so `${{database.N.pooled}}` resolves. */
   pooler?: boolean
+  /** What the environment's previews get of it: nothing, a branch, or a masked branch. */
+  previews?: PreviewBranchPolicy
   status: "pending" | "connected" | "stale" | "unavailable"
   detail?: string
   checkedAt?: string
@@ -7932,6 +8034,8 @@ export type RequestEntry = {
   /** Absent where the format carries no duration — nginx's stock `combined` does not. */
   durationMs?: number
   tls?: boolean
+  /** The Tailscale login (or a tagged machine's tags) a tailnet gate admitted. */
+  user?: string
 }
 
 export type RequestFacet = {

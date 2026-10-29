@@ -43,11 +43,13 @@ approval; it cannot reuse an earlier generation's run. New environment slugs inc
 the same PR number from different triggers cannot select the same environment.
 
 Preview configuration deliberately inherits no variables or database/dependency links. Every top-level
-mount, including read-only mounts, is rewritten to a distinct, managed named volume. Production release
+mount, including read-only mounts, is rewritten to a distinct, managed named volume (a Compose stack's
+mounts are rewritten service by service at start: [Compose previews](#compose-previews)). Production release
 tasks and explicit build-secret mappings are removed. Preview-specific values can then be configured
 through the normal scoped-variable API. Existing previews without provenance lose copied variable/link
 state when approved configuration is regenerated. Production resource contents are never copied or deleted.
-Database references are checked before build or runtime values are returned: known links/bindings to
+Database references are checked before build or runtime values are returned (a preview holding a
+[database branch](#database-branches) of the database reads the branch instead): known links/bindings to
 another environment cannot share a connection or saved endpoint when either environment is a preview
 (or a staging environment, for its own reason: [staging and promotion](staging-promotion.md)).
 This includes aliases with another saved connection ID. Runtime joins also compare observed container
@@ -58,7 +60,8 @@ Container previews use a dedicated Docker bridge with owner labels and loopback 
 existing ingress owner. Docker does not publish ports on containers attached only to an internal network;
 the dedicated bridge permits outbound traffic and is not a hostile-code sandbox. Administrator code
 review remains required. Host network, privileged mode, devices, added capabilities, any release task,
-fixed host ports, production mounts and Compose preview plans are refused at admission and execution.
+fixed host ports, production mounts and compatibility (`legacy_compose`) plans are refused at admission and
+execution; a Compose stack is admitted and isolated service by service, below.
 Dockerfile instructions run only after approval; an approved Dockerfile is trusted executable code.
 
 Checks target the preview's own endpoint rather than inherited production URLs. A configured domain
@@ -79,7 +82,9 @@ carries production's allowed addresses, response headers, HSTS and sign-in as th
 route stays open and every preview's asks the auth server first, so work in progress is seen only by
 people who sign in. The auth server has to answer for the preview names too (Authelia's session cookie
 domain, for instance, covering the preview pattern's parent). A tailnet-only address does not pass
-through the proxy and is not gated; the tailnet is its fence.
+through the public route's sign-in; the tailnet is its fence — unless the environment it previews is
+tailnet-only and names who may open it, in which case the preview's copy of the plan names the same
+logins and tags and its address is gated the same way ([tailnet-only deployments](tailnet-apps.md)).
 
 ## Previews from the dashboard
 
@@ -116,7 +121,9 @@ and never from a checkout: the GitHub App's installation where the App is instal
 else the dashboard's own gh login (`dir ""`). A host account owning a checkout under `JD_GIT_ROOTS` would
 otherwise be supplying the commit this server builds and runs. The refusals, in order: `400 bad_request`
 (not a full sha), `404 not_github`, `409 not_remote_git` (a local checkout has nothing to fetch the ref
-from), `409 preview_compose`, `409 preview_no_port` (no internal port to publish), the identity
+from), `409 preview_compose` (a compatibility Compose deployment, which has no release engine), `409
+preview_compose_host_access` (a Compose service needs the server itself, or production's plan carries no
+Compose analysis to isolate), `409 preview_no_port` (no internal port to publish), the identity
 (`409 sign_in_required | app_not_installed | not_installed`, `404 pull_request_not_found`,
 `429 github_rate_limited`), `409 pull_request_closed`, `409 pull_request_head_changed` (the message
 ends with the head GitHub reports now, so the operator reviews the new commits before testing them),
@@ -141,6 +148,81 @@ ended short of success, cancelled and superseded included, which the server's li
 `deploy.preview.close` with reason `closed`. The reconciler below closes through the same helper with
 actor `reconciler` and reason `merged` or `closed`.
 
+## Compose previews
+
+A preview of a Compose release isolates every service of the stack the way one preview container is
+isolated, and the public service — the one the release routes to (`build.primaryService`, else the
+analysis's) — is the only one anything outside the stack reaches. `createIsolatedPreviewPlansTx` keeps the
+`compose` build, strips its release tasks and build secrets as for any preview, sets the runtime plan's
+`previewIsolation`, no host port, `bindAddress` `127.0.0.1`, and `stop_first`, since one Compose project
+per environment (`jd-e<preview environment>`) holds one release at a time. It refuses, before an
+environment exists, a stack whose saved analysis says a service needs the server itself — the Docker
+socket, privilege, devices, added capabilities or the host's network (`composePreviewFacts`) — and a plan
+with no Compose analysis to read. `validatePreviewPlan` admits `compose` and still refuses
+`legacy_compose`.
+
+The start is the authority, and what it reads is the pull request's own files, which production's saved
+analysis says nothing about. Before Compose reads anything, `composePreviewSources` reads each Compose file
+of the release — a file of the commit, with no symbolic link on the way (`dockerx.CheckoutPath`) — and
+analyses them as planning analyses a stack (`analyzeComposeDocuments`: a path outside the source, an
+`include`, an `extends`, a secret literal refused there), refuses a service that needs the server
+itself, and requires every file Compose would read on this server — each service's `env_file` and
+`label_file`, each config's and secret's `file` — to be the commit's own, from the project directory and
+from the Compose file's, never named by a variable. A `.env` beside the files is never read: the release
+passes Compose its own `--env-file`. Then `DockerRuntimeOwner.startCompose` hands the release to
+`composePreviewRelease`, which reads the stack as Compose resolves it — the source files alone, merged and
+interpolated with the preview's own frozen variables (`dockerx.ComposePreviewOverride`, the same `compose
+config` the storage coverage reads) — and writes the release override that isolates it, every field in it
+a Compose `!override` or `!reset` so nothing of the source files' own value survives the merge:
+
+- **Networks.** Every service joins `jd-preview-e<env>` (created and owned as for a container preview) and
+  the preview's own database-link networks, and nothing else; the aliases the file gave it on its own
+  networks are kept on the preview's bridge, and Compose adds the service name there, so the services
+  still find each other. A `network_mode` of any kind is refused. The top-level networks are replaced, so
+  Compose creates none of the file's (no `jd-e<env>_default`) and joins none of production's.
+- **Ports.** Every service publishes nothing, the public one only `127.0.0.1:<leased port>:<internal
+  port>`, the loopback port the preview's route and tailnet address reach. The override names that port,
+  so it is a file of its own, `.just-dashboard/preview-<port>.yml`: a retried start on another lease must
+  not meet the immutable bytes of the first.
+- **Storage.** A named volume becomes `jd-preview-e<env>-<hash>` keyed by the volume's name in the file (two
+  services that share one in production share one here), an anonymous volume one keyed by its service
+  and target, and a writable bind one keyed by its source; each is created with the preview's labels
+  before Compose runs and adopted only with them (`ensurePreviewVolume`), and the top-level volumes are
+  replaced so production's, external or not, are never named. A read-only bind of a file of the commit
+  itself — inside the release's checkout, with no symbolic link anywhere on the way
+  (`filepath.EvalSymlinks` must answer the path itself) — is kept read-only: those are the bytes the
+  build already read, and a volume over a file would not start. Any other read-only bind, a path of this
+  server or a link out of the checkout, is left out, and the run's transcript says which (`Left out
+  /etc/localtime of service web: a preview reads no path of this server`). `tmpfs` stays.
+- **Everything else production's.** Compose secrets are reset on every service and at the top level,
+  `container_name` (production's container's name) and `external_links` are reset, and every service is
+  labelled `io.just-dashboard.preview=true` beside the release's labels, which is what removal finds.
+
+The same read refuses, as `ErrPreviewIsolation` naming the service, what no preview may have however the
+file reaches it: `network_mode`, privilege, added capabilities, devices, GPUs or device reservations, a
+`host` or `container:` pid, ipc or uts namespace, a `host` user or cgroup namespace, a cgroup parent, a
+runtime other than `runc` or `runsc`, a provider service, `volumes_from`, the Docker socket, an `image`
+or other mount type, a security option that turns confinement off (`seccomp`/`apparmor` unconfined,
+`label:disable`; `no-new-privileges` is fine), a privileged lifecycle hook, and an `io.just-dashboard.*`
+label of the file's own (it could hide a container from cleanup or hand it to another owner's sweep).
+Only structure leaves the resolved document — targets, the preview's own names, aliases and the
+checkout's own paths, never an interpolated value.
+
+Removal is the container preview's: `RemovePreviewResources` removes every container carrying the
+preview's labels (all of the stack's services, with their anonymous volumes), then the
+`jd-preview-e<env>-` volumes carrying them, then the bridge, so nothing is left with the preview's
+labels and production's volumes, binds and network are never named. Variables are copied only on the
+existing opt-in and never for a fork; database links are never copied.
+
+`GET /deploy/{id}/pull-requests` answers `composePreview {public, services[{name, public, ports, volumes,
+checkout, leftOut}], refusals}` for a Compose project, read from the saved analysis
+(`PlanningStore.ComposePreviewFacts`), and each live Compose preview's `services` as Docker reports them
+(`ObserveRuntimeServices` of the preview environment's live release). The test dialog lists what each
+service will and will not get under **Every service is isolated** and says a refusal in place of
+building (`previewBlocker`, `composeServiceLines` in `lib/pull-requests.ts`); the preview's row on the
+Overview lists its services, the public one first, each with its health or state
+(`previewServices`, `previewServiceReading`).
+
 ## Copying production variables
 
 The one thing a dashboard-started preview may inherit is production's variables, and only when asked:
@@ -153,7 +235,9 @@ deactivated first, then every active production variable — sensitive or not �
 `${{` reference and whose key the preview has not set for itself is written through
 `writeVariableRevisionTx` with `copied_from_environment` set to production's environment id. The rest
 are skipped and named in `skipped`: a database, credential, domain or service reference resolves to
-production's own resources, which a preview must never reach, a variable alias means nothing without
+production's own resources, which a preview must never reach — except a database reference, plain or
+shaped (`${{database.5.url}}`, `${{database.orders}}`, never `.pooled`), to a database the preview holds
+a [branch](#database-branches) of, which is copied because it resolves to the branch — a variable alias means nothing without
 its target, and a key with an active revision of the preview's own (`copied_from_environment` 0,
 `ownVariableKeysTx`, read once the earlier copies are deactivated) is the operator's word over
 production's — the copy never overwrites it, and neither `DeactivateCopiedVariables` nor the close drops it. The head the copies were made for is kept in
@@ -162,6 +246,78 @@ box unchecked deactivates the copies (`DeactivateCopiedVariables`) and clears th
 `CompletePreviewRemoval` does both when the preview closes, leaving whatever the operator typed into the
 preview's own editor untouched. A webhook preview still starts with none. The Automation page's previews
 tag such a preview `production variables`.
+
+## Database branches
+
+A preview reaches no database of production's, which keeps production safe and leaves most applications
+with nothing to show. An environment may instead give its previews a **branch** of a database it links:
+its own copy, restored from the newest backup, on the preview's own network, with a sign-in made for it,
+removed with the preview. It is off by default and set per link on Settings → Databases, under **Previews
+get**: *Nothing*, *A branch* (from the newest backup) or *A masked branch* (with named columns
+overwritten). `deploy_preview_branch_policies` holds one row per environment and connection that gives
+previews something (`mode` `branch` or `masked`, `masked_columns` a JSON list of `table.column` or
+`schema.table.column`, each a plain identifier: `NormalizePreviewBranchPolicy`); `PUT
+/deploy/{id}/environments/{env}/database-links/{connection}/previews` (`system.admin`, session, audited
+`deploy.preview_branch.policy`) saves one for a connection the environment links (a dependency or a
+binding), never on a preview, and `GET …/database-links` reports each link's `previews`. Only PostgreSQL,
+MySQL and MariaDB are restored.
+
+`EnsurePreview` asks for the branches (`requestPreviewBranchesTx`, in the transaction that configures the
+preview, for the dashboard's route and a webhook's approval alike): a `waiting` row in
+`deploy_preview_branches` for each policy the preview holds no active branch of. A head whose repository
+is another than the pull request's — **a fork's**, or one whose repository was not recorded — is asked for
+none, and loses any it holds: its code would read the data. A new head keeps the branch it has. The
+Databases owner (`api/deployment_preview_branches.go`, `previewBranchOwner`, a pass every ten seconds and
+on a poke) claims one waiting branch at a time and restores it through the migration rehearsal's own path
+(`prepareCopy`, shared with [data copies](data-aware-rollback.md)): the production server's container
+configuration on a fresh volume, archiving off, none of its ports, labels or writable mounts, recovered
+from its point-in-time archive to the archive's end where it has one, else from the newest native dump a
+backup job took, within the previewed environment's [rehearsal limits](implementation.md) (restore time,
+largest backup). The copy, `jd-preview-e<env>-branch<id>-db`, joins the **preview's own database network**
+(`jd-e<preview>-db-…`, created for it) under a name of its own, `db-<connection>-branch.jd.internal` —
+production's `db-<connection>.jd.internal` is never on that network. On a masked branch every named
+column is overwritten first, while only production's passwords open the copy and the preview holds neither
+(a refreshed branch's preview already holds its address, so the order matters), then the application's
+account is given a password made for it (`setCopyPassword`) and the superuser's network password is
+replaced too (`lockSuperuser`), so no password production accepts opens the branch. The masking
+(`deployment_preview_branch_mask.go`) goes through the readers and writers
+the Databases pages use (`dbx.BrowseTablePage`, `dbx.ApplyChanges`), a thousand rows at a time by primary
+key, as the server's superuser on the copy, each value replaced in its shape — every letter by a letter of
+the same case, every digit by a digit, everything else (an `@`, a dot, a dash, a space) kept, a number's
+sign and point kept and no leading zero gained, a UUID still a UUID — drawn from HMAC-SHA256 of the value
+under a key made for the branch and forgotten after it, so equal values mask equally and a join on the
+column still joins, and a short value cannot be recovered by hashing guesses. NULL stays NULL. Text,
+integer, decimal and UUID columns are masked; an enum, set, XML, date, JSON, binary or other column, a
+column of the primary key, a table with no primary key or more than 200,000 rows refuses the branch, which
+ends `failed` with the reason rather than standing unmasked. The sign-in `{user, password, url}` is sealed
+in the row; the source (dump run and time, or the recovered moment), engine, database, masked rows and
+restore time are recorded.
+
+The preview's `${{database.N…}}` resolves to the branch (`ResolveVariable`: `previewBranchURL`), shaped as
+asked (`.jdbc`, `.url.<database>`); a branch still being restored is waited for within the restore limit,
+a failed one fails the resolution with its reason, and `.pooled` is refused (a branch has no pooler).
+`NetworksForRuntime` joins the preview to its database network for a variable naming a branch host
+(`previewBranchConnectionIDs`) — the branch must be ready and on that network — and binds nothing of
+production's; any other managed database name is checked against isolation as before. A preview without a
+branch of the database meets the isolation refusal it always did. The branch carries the preview's labels,
+the rehearsal label with `branch-<id>` and `io.just-dashboard.preview-branch=<id>`, so runtime observation
+and host alerts leave it out, the database network's reconciler leaves it where it is, the start-up sweep
+of rehearsals keeps a ready or waiting one (`livePreviewBranches`) and removes the rest, the owner's
+`sweepOrphans` removes what an ended branch left, and `SettleInterrupted` ends one a restart cut short
+(`failed`; refresh it). `RemovePreviewResources` takes it with the preview: its container and volume with
+the preview's, then `removeEnvironmentBranches` (from `removeRuntimeNetworks`, before the preview's database
+network goes) ends its row `removed` and removes anything else carrying its label.
+
+`POST /deploy/{id}/pull-requests/{number}/preview/branches/{connection}/refresh` (`system.admin`, session,
+audited `deploy.preview_branch.refresh`) restores a ready or failed branch again from the newest backup:
+the ready copy's container and volume go first, then `RefreshPreviewBranch` ends the row and asks for a new
+one carrying the sealed sign-in over, so the preview's host and password stay what they were and the
+application reconnects (`409 preview_branch_busy` while one is restoring, `preview_branch_fork`,
+`preview_branch_policy` once the environment gives previews nothing, `404 preview_branch_not_found`).
+The pull-request listing carries each preview's `branches` and production's `databaseBranches`; the
+preview's row on the Overview lists each branch (engine, state, source backup, age, masked columns) with
+**Refresh the branch** behind a confirmation, and the test dialog says what the preview will get — and that
+a fork's gets none.
 
 ## Tailnet-only addresses
 
@@ -173,7 +329,11 @@ one row per preview environment (`kind`, `port`, `upstream_port`, `url`, `publis
 `UNIQUE(kind, port)`); `AllocatePreviewAddress` takes the lowest free port in **21000–21999** that
 tailscaled is not already serving (`ServedTailnetPorts` is passed in as the exclusion) and answers
 `ErrPreviewAddressExhausted` (`409 preview_address_exhausted`) when the range is full. A non-preview
-environment is refused with `ErrPreviewIsolation`.
+environment is refused with `ErrPreviewIsolation`. An environment that is not a preview gets a row of
+the same table, from the same range, only when its plan is tailnet-only (`AllocateTailnetAddress`,
+[tailnet-only deployments](tailnet-apps.md)); everything below — the publish, the restore, the
+withdrawals and the startup sweep — treats its row as it treats a preview's, and when its plan names
+who may open it the mapping points at its tailnet gate on loopback rather than at the container.
 
 Publishing is a step of activation (`activation_executor.go`): after the route is verified and before
 `ActivateCandidate` moves the release pointer, so a mapping that cannot be made never leaves a live
@@ -290,16 +450,31 @@ controls. Stopped legacy containers and their storage remain available for delib
 After isolation, redeliver the PR event and approve its exact revision. Reconfiguration clears inherited
 variable/dependency links and creates isolated plans before enabling a fresh deployment. Already exposed
 external credentials cannot be revoked by stopping a container; rotate any credentials shared with an
-older preview. Compose previews remain unsupported and need a supported container plan.
+older preview. A Compose preview made before Compose previews were isolated has no `previewIsolation`
+plan, so it is quarantined like any other; reconfiguring it builds the isolated stack above.
 
 ## Verification
 
 `TestPreviewWebhookRequiresSessionApprovalAndCloseRemainsRetryable` verifies the API trust boundary and
 retry semantics. `TestLivePreviewStorageCredentialsNetworkAndCleanup` serves distinct canary contents,
 checks that production credentials are absent and the production bridge endpoint is unreachable, then
-removes preview resources while production continues serving. Browser coverage verifies revision review,
-empty preview variables and separate deployment. These tests do not certify arbitrary Dockerfile code,
-Compose previews, public provider delivery, or public DNS/TLS.
+removes preview resources while production continues serving (its `container` subtest); its `compose`
+subtest previews a two-service stack whose file asks for production's container name, published ports,
+named volume, a host directory it writes, a host file, a secret and production's network, beside a
+production container holding them: both services are on the preview's bridge alone, only the public one
+publishes, on the loopback port the route reaches, the private one answers nothing on the port its file
+publishes, the commit's own file is mounted read-only, the host file, the secret and production's
+credentials are absent, the services reach each other by name and alias and neither reaches production,
+and removal leaves no container, volume or network of the preview's (nor any of its Compose project)
+while production's volume, host directory and answer are unchanged. `TestComposePreviewOverride…`
+(`dockerx/compose_preview_test.go`) pins the override — deterministic bytes, the rewritten mounts, a
+checkout link left out, every refusal — `TestComposePreviewSourcesRefuseFilesOutsideTheCommit` the pull
+request's own files (a linked env file, config or Compose file, an absolute env file, a variable path, an
+include, a privileged service), and `TestComposePreview…` (`deploy/compose_preview_test.go`) and
+`TestTestPullRequestPreviewOfAComposeStack` the plan, the facts and the route. Browser coverage verifies
+revision review, empty preview variables and separate deployment, and (`deploy-project.spec.ts`) a Compose
+preview's services under its row and the dialog's account of each service and its refusal. These tests do
+not certify arbitrary Dockerfile code, public provider delivery, or public DNS/TLS.
 `TestLiveLegacyPreviewQuarantinePreservesProduction` stops a real legacy container with a production
 mount/credential, refuses a production container identity, preserves production's HTTP canary and volume,
 and verifies approved reconfiguration. Its route adapter is a fixture; proxy removal has separate owner
@@ -355,7 +530,20 @@ pull request numbered 429 is not a rate limit), `TestPullRequestRateLimitIsAQuot
 `TestClosePullRequestPreviewIsDestructiveIdempotentAndAudited` and
 `TestMergePullRequestFromDeployPageReconcilesAndRequiresSession`;
 `TestOpenAddsPullRequestPreviewColumnsToAPreExistingDatabase` covers the added columns and table on a
-pre-feature database. Browser coverage (`deploy-project.spec.ts`, `git-features.spec.ts`, `git-ui.spec.ts`)
+pre-feature database. Database branches: `TestNormalizePreviewBranchPolicy`,
+`TestPreviewBranchesAreRequestedForAPreviewAndNeverForAFork` (once per preview, kept across heads, none
+for a fork or an unrecorded head, the branched reference copied and the pooled one skipped),
+`TestPreviewBranchLifecycleKeepsItsSignInAcrossARefresh`, `TestMaskShapeKeepsAValuesShapeAndNothingElse`,
+`TestPreviewBranchPolicyIsAnAdministratorsInASession` and `TestPreviewBranchFromTestToRefresh` (the
+listing, the resolution in every shape, `.pooled` refused, a fork's preview still isolated, the refresh
+carrying the sign-in); live, as root, `TestLivePreviewDatabaseBranchIsThePreviewsOwnAndGoesWithIt`
+(PostgreSQL from a dump), `TestLivePreviewDatabaseBranchOfAMariaDBDump` and, with `JD_TEST_WALG`,
+`TestLivePreviewDatabaseBranchRecoversFromThePointInTimeArchive`: the preview resolves the branch's own
+address and password and joins its own database network alone, the branch holds the backup's rows, a row
+written there is not in production and production's later row is not there, production's name does not
+resolve on the preview's network, the start-up sweep keeps the branch, a masked branch has the column
+overwritten in its shape with its NULL kept, a fork's preview gets none and still meets isolation, and
+removing the preview removes the branch with nothing left carrying its label and production's rows intact. Browser coverage (`deploy-project.spec.ts`, `git-features.spec.ts`, `git-ui.spec.ts`)
 posts the exact head with the variable choice and the fork acceptance, reads a fork before building it,
 refuses a held preview from the picker and re-reads a head that moved under the dialog, retries a failed
 cleanup from the Git page's row rather than testing again, holds the strip's verb on a Ready preview, and

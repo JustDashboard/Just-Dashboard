@@ -3,6 +3,7 @@ import {
   backupJob,
   deployment,
   expectSaved,
+  healthyOperations,
   json,
   mockProject,
   now,
@@ -450,6 +451,178 @@ test.describe("Sign-in", () => {
       access.getByText("Only 1 address here · previews sign in through Authelia"),
     ).toBeVisible()
     await shot("deploy-sign-in-previews-1280.png")
+  })
+})
+
+test.describe("Tailnet only", () => {
+  const tailnetOperations = {
+    ...healthyOperations,
+    domains: { status: "available" as const, domains: [] },
+    tailnet: {
+      url: "https://box.tail1234.ts.net:21003",
+      port: 21003,
+      published: true,
+      allow: ["alice@example.com", "tag:ci"],
+      gate: "caddy" as const,
+      gateRunning: true,
+    },
+  }
+
+  test("turning it on says what goes, reads every login, and saves the list without the public route", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    const puts: Record<string, unknown>[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
+        puts.push(request.postDataJSON())
+      }
+    })
+    await page.goto("/deploy/7/settings/domains")
+    const tailnet = page.getByRole("form", { name: "Tailnet" })
+    await expect(tailnet.getByText("Off · answers on its public domains")).toBeVisible()
+
+    await tailnet.getByRole("switch", { name: "Tailnet only" }).click()
+    await expect(
+      tailnet.getByText(
+        "Saving also takes away the domain api.example.test: a tailnet-only environment has no public route.",
+      ),
+    ).toBeVisible()
+    await expect(tailnet.getByText("Not saved yet", { exact: true })).toBeVisible()
+    await expect(tailnet.getByText("Everyone on the tailnet", { exact: true })).toBeVisible()
+
+    // Each entry is read as the server reads it before it joins the list.
+    const who = tailnet.getByRole("textbox", { name: "Who may open it" })
+    await who.fill("alice")
+    await who.press("Enter")
+    await expect(
+      tailnet.getByText(
+        "alice is neither a Tailscale login (user@example.com) nor a tag (tag:name)",
+      ),
+    ).toBeVisible()
+    await who.fill("Alice@Example.com")
+    await who.press("Enter")
+    await who.fill("tag:ci")
+    await tailnet.getByRole("button", { name: "Add to who may open it" }).click()
+    await who.fill("ALICE@example.com")
+    await who.press("Enter")
+    await expect(tailnet.getByText("alice@example.com is already on the list")).toBeVisible()
+    const list = tailnet.getByRole("list", { name: "Admitted on the tailnet" })
+    await expect(list.getByRole("listitem")).toHaveText(["alice@example.com", "tag:ci"])
+    await expect(tailnet.getByText("Only 2 logins and tags")).toBeVisible()
+    await expect(tailnet.getByText(/The application is told X-Tailnet-Login/)).toBeVisible()
+
+    await saveSettings(page)
+    await expectSaved(page)
+    const saved = puts.at(-1)!
+    expect(saved.domains).toEqual([])
+    const runtime = saved.runtime as Record<string, unknown>
+    expect(runtime.tailnet).toEqual({ allow: ["alice@example.com", "tag:ci"] })
+    // The form writes the publication and keeps the rest of the runtime.
+    expect(runtime.internalPort).toBe(3000)
+    expect(runtime.command).toEqual(["bun", "start"])
+    // Saved tailnet-only, the public route's forms are gone with the route.
+    await expect(page.getByRole("form", { name: "Domains" })).toHaveCount(0)
+    await expect(page.getByRole("form", { name: "Access and headers" })).toHaveCount(0)
+  })
+
+  test("a tailnet-only environment shows its address and who opens it, and edits the list", async ({
+    page,
+  }) => {
+    const mock = await mockProject(page, { operations: tailnetOperations })
+    mock.configuration().domains = []
+    Object.assign(mock.configuration().runtime, {
+      tailnet: { allow: ["alice@example.com", "tag:ci"] },
+    })
+    const puts: Record<string, unknown>[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
+        puts.push(request.postDataJSON())
+      }
+    })
+    await page.goto("/deploy/7/settings/domains")
+    const tailnet = page.getByRole("form", { name: "Tailnet" })
+    await expect(tailnet.getByRole("switch", { name: "Tailnet only" })).toBeChecked()
+    await expect(
+      page.getByRole("link", { name: "Open box.tail1234.ts.net:21003" }),
+    ).toHaveAttribute("href", "https://box.tail1234.ts.net:21003")
+    await expect(tailnet.getByText("Published on the tailnet", { exact: true })).toBeVisible()
+    await expect(
+      tailnet.getByText("Checked by the dashboard's own Caddy on loopback"),
+    ).toBeVisible()
+    await expect(page.getByRole("form", { name: "Domains" })).toHaveCount(0)
+
+    await tailnet.getByRole("button", { name: "Remove tag:ci" }).click()
+    await expect(tailnet.getByText("Only alice@example.com", { exact: true })).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
+    expect((puts.at(-1)!.runtime as Record<string, unknown>).tailnet).toEqual({
+      allow: ["alice@example.com"],
+    })
+
+    // Off, the publication leaves the plan, and the public domains come back.
+    await tailnet.getByRole("switch", { name: "Tailnet only" }).click()
+    await saveSettings(page)
+    await expectSaved(page)
+    expect(puts.at(-1)!.runtime as Record<string, unknown>).not.toHaveProperty("tailnet")
+    await expect(page.getByRole("form", { name: "Domains" })).toBeVisible()
+  })
+
+  test("the overview draws the tailnet address and who may open it", async ({ page }) => {
+    const mock = await mockProject(page, { operations: tailnetOperations })
+    mock.configuration().domains = []
+    await page.goto("/deploy/7")
+    const wiring = page.getByRole("list", { name: "How the project is wired" })
+    await expect(wiring.getByText("Tailnet only", { exact: true })).toBeVisible()
+    await expect(
+      wiring.getByRole("link", { name: /box\.tail1234\.ts\.net:21003/ }),
+    ).toHaveAttribute("href", "https://box.tail1234.ts.net:21003")
+    await expect(wiring.getByText("alice@example.com", { exact: true })).toBeVisible()
+    await expect(wiring.getByText("tag:ci", { exact: true })).toBeVisible()
+    await expect(wiring.getByText("· checked by the dashboard's Caddy")).toBeVisible()
+  })
+
+  test("tailnet only, for the pull request @shots", async ({ page }) => {
+    test.skip(!process.env.JD_SHOTS, "JD_SHOTS names the directory the pictures go in")
+    const shot = (name: string) =>
+      page.screenshot({
+        path: `${process.env.JD_SHOTS}/${name}`,
+        fullPage: true,
+        animations: "disabled",
+      })
+    const mock = await mockProject(page, { operations: tailnetOperations })
+    mock.configuration().domains = []
+    Object.assign(mock.configuration().runtime, {
+      tailnet: { allow: ["alice@example.com", "tag:ci"] },
+    })
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto("/deploy/7/settings/domains")
+      await expect(page.getByText("Published on the tailnet", { exact: true })).toBeVisible()
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+      ).toBe(false)
+      await shot(`tailnet-domains-${width}.png`)
+      await page.goto("/deploy/7")
+      await expect(page.getByText("Tailnet only", { exact: true })).toBeVisible()
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+      ).toBe(false)
+      await shot(`tailnet-overview-${width}.png`)
+    }
+    // The switch on a public environment, with what saving it takes away.
+    mock.configuration().domains = [
+      { hostname: "api.example.test", https: true, ownership: "managed" },
+    ]
+    delete (mock.configuration().runtime as Record<string, unknown>).tailnet
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto("/deploy/7/settings/domains")
+    const tailnet = page.getByRole("form", { name: "Tailnet" })
+    await tailnet.getByRole("switch", { name: "Tailnet only" }).click()
+    await tailnet.getByRole("textbox", { name: "Who may open it" }).fill("bob")
+    await tailnet.getByRole("textbox", { name: "Who may open it" }).press("Enter")
+    await tailnet.evaluate((element) => element.scrollIntoView({ block: "start" }))
+    await shot("tailnet-switch-1280.png")
   })
 })
 
@@ -1053,6 +1226,45 @@ test.describe("Databases & backups evidence", () => {
       "href",
       "/backups?database=9",
     )
+  })
+
+  test("what a linked database gives previews is saved apart: a branch, masked by the columns named", async ({
+    page,
+  }, testInfo) => {
+    await mockLinkedDatabase(page)
+    await page.route("**/api/v1/backups/", (route) => json(route, []))
+    await page.route("**/api/v1/deploy/7/environments/12/database-links/9/previews", (route) =>
+      json(route, {
+        connectionId: 9,
+        mode: "masked",
+        maskedColumns: ["users.email", "users.phone"],
+      }),
+    )
+    const saved = page.waitForRequest(
+      (request) =>
+        request.url().endsWith("/deploy/7/environments/12/database-links/9/previews") &&
+        request.method() === "PUT",
+    )
+    await page.goto("/deploy/7/settings/databases")
+    await expect(page.getByRole("heading", { name: "Previews get" })).toBeVisible()
+    await expect(page.getByText("No database of this environment's")).toBeVisible()
+    await page.getByRole("radio", { name: "A masked branch" }).click()
+    await page
+      .getByRole("textbox", { name: "Columns of orders-db to mask" })
+      .fill("users.email\nusers.phone, users.email")
+    await expect(page.getByText("A branch of orders-db")).toBeVisible()
+    await page
+      .getByRole("textbox", { name: "Columns of orders-db to mask" })
+      .scrollIntoViewIfNeeded()
+    await testInfo.attach("settings-preview-branches", {
+      body: await page.screenshot({ path: testInfo.outputPath("settings-preview-branches.png") }),
+      contentType: "image/png",
+    })
+    await saveSettings(page)
+    expect((await saved).postDataJSON()).toEqual({
+      mode: "masked",
+      maskedColumns: ["users.email", "users.phone"],
+    })
   })
 
   test("the variable that carries a database is named, and removal takes it with the link", async ({
