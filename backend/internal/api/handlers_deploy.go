@@ -236,6 +236,12 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 }
 
 func mapDeployError(err error) error {
+	// A preview's promotion is refused in words that name the rule: the
+	// request was understood, and this preview may not go where it asked.
+	var previewRefusal *deploy.PreviewPromotionRefusal
+	if errors.As(err, &previewRefusal) {
+		return httpx.Err(http.StatusUnprocessableEntity, previewRefusal.Code, previewRefusal.Message)
+	}
 	switch {
 	case errors.Is(err, deploy.ErrPreviewApproval), errors.Is(err, deploy.ErrPreviewIsolation), errors.Is(err, deploy.ErrPreviewCleanupPending), errors.Is(err, deploy.ErrGitManualOnly), errors.Is(err, deploy.ErrGitPolicyConflict), errors.Is(err, deploy.ErrPromotionOnly), errors.Is(err, deploy.ErrStagingIsolation):
 		return mapAutomationError(err)

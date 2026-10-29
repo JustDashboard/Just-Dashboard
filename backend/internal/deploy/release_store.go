@@ -671,7 +671,7 @@ func (s *OrchestrationStore) ArtifactRetentionPlan(ctx context.Context, now time
 		SELECT a.id, a.release_id, a.kind, a.reference, a.digest, a.metadata_json,
 		       a.size_bytes, a.retain_until, a.state, a.created_at,
 		       r.environment_id, r.release_number, r.state, r.pinned,
-		       e.live_release_id,
+		       e.live_release_id, e.kind,
 		       EXISTS(SELECT 1 FROM deploy_queue_leases q JOIN deploy_runs dr ON dr.id = q.run_id
 		               WHERE dr.environment_id = r.environment_id),
 		       `+promotionRetainedWhere("r")+`
@@ -687,7 +687,7 @@ func (s *OrchestrationStore) ArtifactRetentionPlan(ctx context.Context, now time
 	type item struct {
 		artifact                             ReleaseArtifact
 		environmentID, number, liveReleaseID int64
-		releaseState                         string
+		releaseState, environmentKind        string
 		pinned, active, promoting            bool
 	}
 	items := []item{}
@@ -699,7 +699,7 @@ func (s *OrchestrationStore) ArtifactRetentionPlan(ctx context.Context, now time
 		if err := rows.Scan(&current.artifact.ID, &current.artifact.ReleaseID, &current.artifact.Kind,
 			&current.artifact.Reference, &current.artifact.Digest, &metadata, &current.artifact.SizeBytes,
 			&retainUntil, &current.artifact.State, &createdAt, &current.environmentID, &current.number,
-			&current.releaseState, &pinned, &current.liveReleaseID, &active, &promoting); err != nil {
+			&current.releaseState, &pinned, &current.liveReleaseID, &current.environmentKind, &active, &promoting); err != nil {
 			return nil, err
 		}
 		current.artifact.Metadata = json.RawMessage(metadata)
@@ -732,8 +732,12 @@ func (s *OrchestrationStore) ArtifactRetentionPlan(ctx context.Context, now time
 		case current.promoting:
 			// The run is queued, so no lease protects it yet; without this a
 			// prune between the request and the render step would leave the
-			// promotion with nothing to promote.
+			// promotion with nothing to promote. A preview's image goes to
+			// staging; staging's to production.
 			decision.Retain, decision.Reason = true, "source of an unfinished promotion to production"
+			if current.environmentKind == string(EnvironmentPreview) {
+				decision.Reason = "source of an unfinished promotion to staging"
+			}
 		case current.artifact.ReleaseID == current.liveReleaseID || current.releaseState == "live":
 			decision.Retain, decision.Reason = true, "current live release"
 		case current.pinned:

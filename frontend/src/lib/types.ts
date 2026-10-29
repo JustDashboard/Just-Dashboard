@@ -3970,8 +3970,9 @@ export type DeploymentInsights = {
 }
 
 /**
- * Where a promoted release's image came from: the staging release it was
- * promoted from, and the local image id the container is created from.
+ * Where a promoted release's image came from: the release it was promoted
+ * from — staging's, or for staging a pull request preview's — and the local
+ * image id the container is created from.
  */
 export type DeploymentPromotion = {
   environmentId: number
@@ -3982,6 +3983,30 @@ export type DeploymentPromotion = {
   imageId: string
   imageDigest: string
   sourceRevision?: string
+  /** Absent on a record from before previews could be promoted, which is staging's. */
+  sourceKind?: "staging" | "preview"
+  /** The pull request a preview's image was built from, and who approved its commit. */
+  preview?: DeploymentPromotedPreview
+}
+
+export type DeploymentPromotedPreview = {
+  number: number
+  url?: string
+  repository?: string
+  headRepository?: string
+  approvedBy: string
+}
+
+/** The newest promotion of a preview's image into staging, as the preview's row reads it. */
+export type DeploymentPreviewPromotion = {
+  runId: number
+  runNumber: number
+  state: DeploymentRunState
+  environmentId: number
+  releaseNumber: number
+  sourceRevision?: string
+  requestedAt: string
+  endedAt?: string
 }
 
 /** One of a deployment's long-lived environments, for the environment switcher. */
@@ -4005,9 +4030,11 @@ export type DeploymentStagingCopy = {
   adjusted: string[]
 }
 
-/** The Promote confirmation's read: the exact image and how production differs. */
+/** The Promote confirmation's read: the exact image and how the target differs. */
 export type DeploymentPromotionPreview = {
   source: {
+    /** "staging" into production, or "preview" into staging. */
+    kind: "staging" | "preview"
     environmentId: number
     environmentName: string
     release: DeploymentRelease
@@ -4015,6 +4042,17 @@ export type DeploymentPromotionPreview = {
     imageDigest: string
     imageSizeBytes: number
     imagePresent: boolean
+    /** The pull request behind a preview source. */
+    preview?: {
+      number: number
+      title?: string
+      url?: string
+      author?: string
+      headRepository?: string
+      fork: boolean
+      approvedBy?: string
+      approvalState?: string
+    }
   }
   target: {
     environmentId: number
@@ -4054,7 +4092,7 @@ export type DeploymentRelease = {
   /** Set on a release an instant rollback took traffic away from. */
   rolledBackAt?: string
   rollbackReason?: string
-  /** Set when the image was promoted from staging rather than built here. */
+  /** Set when the image was promoted — from staging, or into staging from a preview — rather than built here. */
   promotion?: DeploymentPromotion
 }
 
@@ -4287,6 +4325,8 @@ export type DeploymentPreview = {
   liveReleaseId?: number
   address?: DeploymentPreviewAddress
   lastRun?: DeploymentRecentRun
+  /** The newest promotion of this preview's image into staging, however it ended. */
+  promotion?: DeploymentPreviewPromotion
 }
 
 /** A deploy project's pull requests on GitHub, joined to the previews built from them. */

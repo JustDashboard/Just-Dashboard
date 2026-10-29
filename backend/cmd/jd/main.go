@@ -47,7 +47,8 @@ Deployments
   rollback APP [--to ID] [--wait]  Go back to a release (default: the one before the live one)
   rollback APP --instant [--wait]  Switch traffic back to the release kept warm after the last deploy
   keep APP                      Keep the new release now and retire the warm one
-  promote APP [--wait]          Promote staging's live release to production (--release ID for another)
+  promote APP [--wait]          Promote staging's live release to production (--release ID for another,
+                                --from-preview N for PR N's preview into staging)
   maintenance APP on|off        Switch the maintenance page at once (--bypass CIDR,... for who is let past)
   status APP                    Environments, live release, rollback watch, maintenance and rehearsal
   create --name N --image IMG [--port P]  Create a deployment from an image, through a draft

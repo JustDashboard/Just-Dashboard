@@ -470,6 +470,7 @@ jd rollback shop                                  # to the release before the li
 jd rollback shop --instant                        # straight back to the release kept warm after the last deploy
 jd keep shop                                      # keep the new release now; the warm one is retired
 jd promote shop --wait                            # staging's live release into production, as the same image
+jd promote shop --from-preview 42 --wait          # PR #42's approved preview into staging, as the same image
 jd maintenance shop on --bypass 10.0.0.0/8        # the switch acts at once; the bypass list with the next deploy
 jd status shop                                    # environments, live release, rollback watch, maintenance, rehearsal
 jd vars ls shop                                   # names, scopes and digests: never values
@@ -486,8 +487,9 @@ authority, and plain `http://` is refused except to loopback (an SSH tunnel). Ex
 run succeeded), 1 refused or the run failed, 2 usage, 3 not logged in or the key is no longer valid.
 
 **What a deploy key can do.** Everything an ordinary key could on the deployments — list, read, deploy,
-cancel, retry, roll back, promote staging, switch back to the warm release or keep the new one, switch
-maintenance, runs and logs — plus what used to need a browser session: create deployments from drafts
+cancel, retry, roll back, promote staging (and a pull request's approved preview into staging), switch
+back to the warm release or keep the new one, switch maintenance, runs and logs — plus what used to need
+a browser session: create deployments from drafts
 and duplicates (a key's drafts are its own, and a key narrowed to some deployments reaches the
 deployments it commits), change configuration, source, Git policy and triggers, and set, import,
 generate, rotate and delete variables and shared variables. Variables are write-only to it: it sees

@@ -2,10 +2,17 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Cross, External, RefreshClockwise, RotateCounterClockwise } from "@/components/icons"
+import {
+  ArrowCircleUp,
+  Cross,
+  External,
+  RefreshClockwise,
+  RotateCounterClockwise,
+} from "@/components/icons"
 import { post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import {
+  canPromotePreview,
   canTest,
   cleanupFailed,
   previewHeld,
@@ -26,6 +33,7 @@ import { ForgeFace } from "@/components/git/marks"
 import { MergePullDialog, type MergeResult } from "@/components/git/merge-pull-dialog"
 import { openPreview } from "@/components/git/pull-request-row"
 import { TestPullDialog } from "@/components/git/test-pull-dialog"
+import { PromoteDialog } from "@/components/deploy/promote-dialog"
 import type { Verb } from "@/components/verbs"
 
 /**
@@ -39,6 +47,9 @@ import type { Verb } from "@/components/verbs"
  * so it takes `system.admin`; closing a preview tears an environment down,
  * so it takes the destructive capability and asks first, without a phrase:
  * the pull request stays where it is and a second test builds it again.
+ * Promoting a preview's image into staging puts the pull request's code in
+ * front of staging's variables, so it is the administrator's too, and only
+ * where the project has a staging environment to promote into.
  *
  * The dialogs the verbs open are returned as `dialogs`, for the caller to
  * draw once beside its list.
@@ -48,6 +59,7 @@ export function usePullRequestVerbs({
   projectName,
   info,
   refresh,
+  stagingId,
 }: {
   projectId: number
   projectName: string
@@ -55,6 +67,8 @@ export function usePullRequestVerbs({
   info?: ProjectPullRequests
   /** Reads the listing again after a verb changes what it says. */
   refresh: () => void
+  /** The project's staging environment, which a preview's image can be promoted into. */
+  stagingId?: number
 }) {
   const router = useRouter()
   const { can } = useAuth()
@@ -64,6 +78,7 @@ export function usePullRequestVerbs({
     preview?: DeploymentPreview | null
   }>()
   const [merging, setMerging] = useState<GitPullRequest>()
+  const [promoting, setPromoting] = useState<GitPullRequest>()
   // The request in flight, so no row offers a second one until it answers.
   const [busy, setBusy] = useState<string>()
   const base = `/deploy/${projectId}/pull-requests`
@@ -167,6 +182,17 @@ export function usePullRequestVerbs({
         run: () => openPreview(preview),
       })
     }
+    // The server decides whether this preview may go — its approval, its
+    // image, staging's release tasks — and the dialog says what refused it.
+    if (stagingId && can("system.admin") && canPromotePreview(preview)) {
+      verbs.push({
+        key: "promote-to-staging",
+        label: "Promote to staging",
+        icon: ArrowCircleUp,
+        disabled: Boolean(busy),
+        run: () => setPromoting(pull),
+      })
+    }
     if (preview && cleanupFailed(preview) && preview.lastRun && can("service.control")) {
       const run = preview.lastRun
       verbs.push({
@@ -223,6 +249,16 @@ export function usePullRequestVerbs({
           info={info}
           onStarted={(runId) => router.push(`/deploy/${projectId}/runs/${runId}`)}
           onRefresh={refresh}
+        />
+      )}
+      {promoting && stagingId && info && (
+        <PromoteDialog
+          open
+          onOpenChange={(next) => !next && setPromoting(undefined)}
+          projectId={projectId}
+          productionId={info.production.environmentId}
+          stagingId={stagingId}
+          preview={{ number: promoting.number, title: promoting.title }}
         />
       )}
       {merging && (

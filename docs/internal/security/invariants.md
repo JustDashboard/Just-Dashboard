@@ -93,7 +93,9 @@ A change that weakens any of these has to say so explicitly.
    configuration, source, Git policy, triggers, variables and shared variables — answered any API key
    with `403 session_required`. A deploy key reaches those writes; nothing else changed for any other
    key. The operating verbs beside a deploy that an ordinary key already had — promoting staging
-   (`POST …/promote`), the warm release's instant rollback and keep (`POST …/rollback-watch/rollback`,
+   (`POST …/promote`, which also takes a pull request preview's approved image into staging for an
+   administrator, the role the key carries; approving the commit stays a session's), the warm
+   release's instant rollback and keep (`POST …/rollback-watch/rollback`,
    `…/keep`) and the maintenance switch (`PUT …/maintenance`) — are the deploy key's as well, with
    their reads (`GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/maintenance`,
    `…/pages/{page}`, which is what every visitor is shown, and `…/rehearsal`, the terms alone). It
