@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
@@ -1141,21 +1141,25 @@ function AddDomainPanel({
     setSuggestion(undefined)
   }
 
+  // The newest question asked. Leaving the field asks one and the tunnel
+  // switch, pressed straight after, asks another; only the newest answer is
+  // the sheet's, whichever arrives last.
+  const asked = useRef(0)
   const check = async (through = tunnel) => {
     const value = hostname.trim().toLowerCase()
     if (!value) return
+    const question = ++asked.current
     setChecking(true)
     try {
-      setSuggestion(
-        await get<DeploymentHostnameSuggestion>("/deploy/hostname", {
-          hostname: value,
-          ...(through ? { tunnel: "1" } : {}),
-        }),
-      )
+      const answer = await get<DeploymentHostnameSuggestion>("/deploy/hostname", {
+        hostname: value,
+        ...(through ? { tunnel: "1" } : {}),
+      })
+      if (question === asked.current) setSuggestion(answer)
     } catch {
       // The saved answer stays on screen; the deploy itself is what settles this.
     } finally {
-      setChecking(false)
+      if (question === asked.current) setChecking(false)
     }
   }
 
