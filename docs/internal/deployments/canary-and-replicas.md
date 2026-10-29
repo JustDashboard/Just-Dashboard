@@ -31,6 +31,7 @@ anything only one container can hold refuses them, with the reason in words:
 | a fixed host port | the port can be held by one container at a time |
 | a published port | the same, for each published port |
 | a writable mount | replicas would write to it at the same time |
+| a tailnet-only publication (`runtime.tailnet`) | tailscale serve, or the environment's tailnet gate, maps one port of the tailnet address to one container's loopback port |
 
 A read-only mount is shared without harm. `PlanConfiguration.Validate` refuses such a plan on
 `runtime.replicas` (so a draft, a settings save, `jd config set` and a blueprint are all refused the same
