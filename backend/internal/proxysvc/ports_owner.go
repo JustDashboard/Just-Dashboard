@@ -436,8 +436,17 @@ func containerOf(c *RunningContainer, published bool) *ListenerContainer {
 // dashboard's; where none does, the dashboard is not a container, and only
 // its own PID is its own.
 func SelfProject(containers []RunningContainer, dataDir string) string {
+	if c := SelfContainer(containers, dataDir); c != nil {
+		return c.Project
+	}
+	return ""
+}
+
+// SelfContainer is the container mounting the dashboard's data directory:
+// the only one that does, or the backend where the frontend mounts it too.
+func SelfContainer(containers []RunningContainer, dataDir string) *RunningContainer {
 	if dataDir == "" {
-		return ""
+		return nil
 	}
 	want := filepath.Clean(dataDir)
 	var mounting []*RunningContainer
@@ -450,14 +459,14 @@ func SelfProject(containers []RunningContainer, dataDir string) string {
 		}
 	}
 	if len(mounting) == 1 {
-		return mounting[0].Project
+		return mounting[0]
 	}
 	for _, c := range mounting {
 		if c.Service == "backend" {
-			return c.Project
+			return c
 		}
 	}
-	return ""
+	return nil
 }
 
 // UnderPM2 reports a socket whose owner a PM2 daemon started: its parent is

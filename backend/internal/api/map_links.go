@@ -33,7 +33,7 @@ import (
 var mapViaOrder = []string{
 	"binding", "reference", "dependency", "release", "route", "serves", "pooler",
 	"source", "workdir", "member", "self", "mount", "certificate", "backup", "starts",
-	"access", "owner", "notifies", "user", "image", "network", "env", "session",
+	"access", "owner", "notifies", "user", "image", "network", "tailnet", "env", "session",
 }
 
 func mapViaRank(via string) int {
@@ -117,8 +117,12 @@ func mapJoins(b *mapBuilder, in mapInputs) {
 		}
 		// The dashboard's own stack: the compose project of the container
 		// mounting its data directory, as the ports page tells its sockets.
-		if self := proxysvc.SelfProject(runningContainers(in.containers.Value), in.dataDir); self != "" {
-			b.link("dashboard:self", "stack:"+self, "self")
+		// That container is the one its store is kept in.
+		if self := proxysvc.SelfContainer(runningContainers(in.containers.Value), in.dataDir); self != nil {
+			if self.Project != "" {
+				b.link("dashboard:self", "stack:"+self.Project, "self")
+			}
+			b.link("container:"+self.ID, "dashboard:store", "mount")
 		}
 	}
 
