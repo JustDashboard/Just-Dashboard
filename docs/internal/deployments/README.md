@@ -12,6 +12,10 @@
 - [`database-networks.md`](database-networks.md) — logical database URLs, owned networks, replacement reconciliation and cleanup.
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
   logs, the request readings, container lifecycle events, and the three container-output fixes.
+- [`right-sizing.md`](right-sizing.md) — the memory and CPU limits each environment should have, read
+  from its retained container samples (percentiles, headroom, throttling and OOM kills, verdicts, the
+  apply through the configuration PUT), and the capacity forecast: days until each disk is full and the
+  fastest-growing deployment volumes.
 - [`log-drains.md`](log-drains.md) — copying deployments' container output and requests to OpenTelemetry
   (OTLP), Loki or a JSON-lines endpoint: formats, severity, sealed headers, delivery, retries and status.
 - [`secret-stores.md`](secret-stores.md) — Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager and Azure

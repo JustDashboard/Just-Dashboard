@@ -42,6 +42,8 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		// is: chi prefers the literal segment, so the fleet's counts never
 		// read as a project called "pull-requests".
 		r.Method(http.MethodGet, "/pull-requests", s.handle(s.handleDeploymentPullRequestSummary))
+		// Every environment's right-sizing verdict, the furthest off first.
+		r.Method(http.MethodGet, "/sizing", s.handle(s.handleDeploymentFleetSizing))
 		// Masked like an environment's variable list, and read by whoever
 		// may read that; a value leaves only through the audited reveal.
 		r.Method(http.MethodGet, "/shared-variables", s.handle(s.handleSharedVariables))
@@ -80,6 +82,8 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/environments/{env}/variables", s.handle(s.handleDeploymentVariables))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/pending", s.handle(s.handleDeploymentPending))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfiguration))
+		// A read: applying it is the configuration PUT above, with its audit.
+		r.Method(http.MethodGet, "/{id}/environments/{env}/sizing", s.handle(s.handleDeploymentSizing))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/maintenance", s.handle(s.handleDeploymentMaintenance))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/pages/{page}", s.handle(s.handleDeploymentPageGet))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/triggers", s.handle(s.handleDeploymentTriggers))

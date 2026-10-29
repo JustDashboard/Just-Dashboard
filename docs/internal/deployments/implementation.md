@@ -838,7 +838,9 @@ only renderer/executor/validation authority for their feature.
   Docker's own unlimited default. Validation bounds them (16 MiB–4 TiB, 0.01–1024 CPUs, 16–1,048,576
   processes); preflight warns when a limit exceeds the host's available memory or CPU count; the Docker
   runtime owner passes them to container creation and release comparison labels them. Compose services keep
-  the limits their files declare.
+  the limits their files declare. What they should be is [right-sizing](right-sizing.md)'s read of the
+  environment's retained container samples (`GET …/environments/{env}/sizing`, `GET /deploy/sizing`);
+  applying its suggestion is this plan's ordinary configuration save, applied with the next release.
 - A failed readiness or smoke gate first asks the runtime owner to diagnose the candidate: container
   state, exit code, OOM flag, restart count and a bounded log tail (200 lines, 32 KiB, most recent kept).
   The tail is written to the run transcript after redaction of every runtime variable value; step
@@ -1353,7 +1355,8 @@ only renderer/executor/validation authority for their feature.
   `POST …/rollback-watch/rollback` and `…/keep`, `PUT …/maintenance` (who is let past is the
   configuration's `runtime.maintenance.bypassFrom`, applied by the next release), with the reads
   `GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/maintenance`,
-  `…/pages/{page}` and `…/rehearsal`; `GET /deploy/secret-stores`, an ordinary key's read, answers it
+  `…/pages/{page}`, `…/rehearsal` and `…/sizing`, and the fleet's `GET /deploy/sizing` narrowed to the
+  key's deployments; `GET /deploy/secret-stores`, an ordinary key's read, answers it
   `key_scope`, since the list carries each connection's address and sign-in fields and every
   deployment's variables that read a store, and the key cannot point a variable at one. Its writes are
   held to what a person in a session could not be refused: a generate or rotate answers it without

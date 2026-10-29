@@ -85,6 +85,7 @@ free.
   server knows they are, arranged however you like and remembered
 - Metrics with seven days of history the backend records itself, and CSV export
 - Alerts when the CPU or memory stays high, a disk fills, a container goes down or a backup fails
+- A capacity forecast: when each disk fills at the rate it has been growing, and whose volumes grow fastest
 - Notable moments, top processes and the day's activity at a glance
 - Processes, PM2 apps, systemd services and scheduled jobs, each with its verbs
 - One log viewer for files, containers, stacks, PM2 and the journal, with insights
@@ -100,6 +101,7 @@ free.
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
 - Push to deploy, plus pull-request previews only your tailnet can reach
 - Immutable releases, one-click rollback and health-gated cutover
+- Right-sizing from what each app actually used: the memory and CPU limits it should have, applied in one click
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Migrations rehearsed on a throwaway copy of the database, restored from its backup, before production
@@ -615,7 +617,7 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_DEPLOY_LIGHT_SLOTS` | `2` | Concurrent validation/metadata deployment workers. Valid range: 1–8. |
 | `JD_DEPLOY_LEASE_TTL` | `30s` | Time before a silent deployment worker claim is reconciled after a crash. Valid range: 5s–5m. |
 | `JD_METRICS_INTERVAL` | `15s` | How often the backend samples the host, and every running container, into its own history. Clamped to 5s and 5m. |
-| `JD_METRICS_RETENTION` | `7d` | How long that history is kept. Accepts days. `0` records nothing and leaves only the live feed. |
+| `JD_METRICS_RETENTION` | `7d` | How long that history is kept — and with it the sizes of the volumes deployments own, sampled every 15 minutes for the capacity forecast. Right-sizing needs a day of it before it suggests a limit. Accepts days. `0` records nothing and leaves only the live feed. |
 | `JD_UPDATE_CHECK` | `true` | Whether the dashboard may ask GitHub whether a newer version of *itself* exists — one unauthenticated GET of one file, four times a day, carrying nothing but a version number. `false` turns it off; the release notes for the version you run stay readable, since they are compiled in. |
 | `JD_ACME_DIRECTORY` | Let's Encrypt | Another ACME directory to order deployment certificates from: Let's Encrypt's staging endpoint for a rehearsal that spends no rate limit, or a private authority on a network that never sees the internet. Both the managed Caddy and certbot follow it — the Certificates page's orders and a deployment run's, over HTTP-01 and DNS-01 alike — and certbot registers an account with that directory rather than reusing one it has with another. |
 | `JD_ACME_CA_ROOT` | system roots | A PEM bundle to trust when that authority signs with its own roots — its issuing roots, and the root behind its directory's TLS listener if that is private too. Caddy is given it as its trusted roots and certbot as `REQUESTS_CA_BUNDLE`, so keep it where both read it (under `/etc`, `/srv`, `/opt` or the data directory, which the stack mounts at the same paths). With it set, the public-DNS check before an order is skipped, because a private authority validates however it was set up to. |

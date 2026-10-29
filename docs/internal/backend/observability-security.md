@@ -49,6 +49,17 @@ since a tab was opened, and charts that start empty every visit cannot show last
   Each point also carries `pidsPeak` (the bucket's maximum) beside the mean `pids`.
 - The recorder keeps its **own** `sysinfo.Collector` and `dockerx.StatsSampler`: rates are deltas, and
   sharing with request handlers would let a one-shot `GET /system/metrics` shorten the next interval.
+- Samples also keep Docker's cumulative CFS counters, `cpu_periods` and `cpu_throttled` (additive,
+  nullable): written only for a container with a CPU quota, so a NULL is "no limit or not yet kept",
+  never "never throttled". [Right-sizing](../deployments/right-sizing.md) differences them per
+  container into the share of periods a limit throttled.
+- **Volume sizes** of the volumes deployments own go to `metric_volume_samples` every quarter hour
+  (`metrics.VolumeInterval`, `Recorder.WithVolumes`), on a loop of their own so Docker's disk walk never
+  delays a host sample, and are pruned with the rest. The sampler (`api.sampleDeploymentVolumes`) reads
+  the cached walk the Docker pages share and skips a size the walk did not reach.
+- `GET /system/metrics/capacity` fits a least-squares line through hourly means of each filesystem's
+  used bytes and each deployment volume's size and says when each disk fills at that rate, with the
+  fit's R² and a confidence; see [right-sizing and the capacity forecast](../deployments/right-sizing.md).
 
 **Saturation series** answer "is work waiting", which utilisation cannot: CPU **by mode** including
 `steal` (on a VPS the one whose fix is outside the machine); PSI pressure (`Supported: false` renders as

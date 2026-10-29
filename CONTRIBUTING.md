@@ -464,6 +464,14 @@ to the contribution terms above, including the additional licence grant to the p
   Loki (push API and OTLP, read back with LogQL), an OpenTelemetry Collector and Vector, each in a
   container on loopback. The package's concurrency is worth `-race` (it needs cgo; the `golang` image
   has it).
+- Changes to the volume-size sampling behind the capacity forecast (`sampleDeploymentVolumes`,
+  `metrics.WithVolumes`) or to the throttling counters right-sizing reads also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run 'TestLive(DeploymentVolumeSizesAreSampled|ThrottlingIsRecordedForACPULimitedContainer)' -count=1 -v`
+  as root on a Docker host: the first writes 8 MiB into a real managed volume and reads it back through
+  the sampler, the running recorder and `GET /system/metrics/capacity`; the second holds a busy loop to a
+  tenth of a core and reads its throttled share back from the running recorder. Both use the cached
+  `alpine:3.20` (never pulled) and remove what they made. Right-sizing's maths is pure and needs no
+  daemon ([right-sizing](docs/internal/deployments/right-sizing.md#tests)).
 - Changes to deployment variables, feature links, backup gates or managed-resource lifecycle also run
   `go test -race ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store -count=1`;
   the browser gate covers the project overview, build transcript and focused settings, including
