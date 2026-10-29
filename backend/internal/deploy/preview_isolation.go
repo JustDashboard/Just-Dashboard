@@ -196,6 +196,14 @@ func createIsolatedPreviewPlansTx(ctx context.Context, tx *sql.Tx, sourceID int6
 	// Nor is a preview ever kept warm, so there is no release to keep its
 	// visitors on.
 	runtime.SkewProtection = false
+	// Nor does it get the server's GPUs unless the environment says its
+	// previews do: a preview runs a branch nobody has deployed, and a GPU is
+	// a device of the host's. The other process flags — the user, the
+	// read-only root, ulimits and kernel parameters — are the application's
+	// and come with the copy.
+	if runtime.GPUs != nil && !runtime.GPUs.Previews {
+		runtime.GPUs = nil
+	}
 	for index := range runtime.Mounts {
 		mount := &runtime.Mounts[index]
 		mount.Source, mount.Ownership = previewVolumeName(environmentID, mount.Target), OwnershipManaged
@@ -277,6 +285,9 @@ func validatePreviewPlan(environmentID int64, build BuildPlanConfig, runtime Run
 		if mount.Source != previewVolumeName(environmentID, mount.Target) || mount.Ownership != OwnershipManaged {
 			return ErrPreviewIsolation
 		}
+	}
+	if runtime.GPUs != nil && !runtime.GPUs.Previews {
+		return ErrPreviewIsolation
 	}
 	return nil
 }

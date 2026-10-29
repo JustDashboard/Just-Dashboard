@@ -62,6 +62,12 @@ the dedicated bridge permits outbound traffic and is not a hostile-code sandbox.
 review remains required. Host network, privileged mode, devices, added capabilities, any release task,
 fixed host ports, production mounts and compatibility (`legacy_compose`) plans are refused at admission and
 execution; a Compose stack is admitted and isolated service by service, below.
+The process flags are the application's and come with the copy — the user it runs as, a read-only root
+with its writable paths, ulimits and kernel parameters ([runtime flags](implementation.md)) — but the
+server's GPUs do not: the copy leaves `runtime.gpus` out unless the environment's request says
+`previews: true` (*Pull request previews get them too* on Runtime settings), and `validatePreviewPlan`
+refuses a preview plan that holds GPUs without it. `TestAPreviewInheritsTheProcessFlagsAndTheGPUsOnlyWhenAsked`
+(`deploy/runtime_flags_test.go`) holds both.
 Dockerfile instructions run only after approval; an approved Dockerfile is trusted executable code.
 
 Checks target the preview's own endpoint rather than inherited production URLs. A configured domain

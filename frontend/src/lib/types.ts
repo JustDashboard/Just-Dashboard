@@ -5402,6 +5402,51 @@ export type DeploymentPublishedPort = {
 
 export type DeploymentRestartPolicy = "unless-stopped" | "always" | "on-failure" | "no"
 
+/** The limits Docker sets with --ulimit (`deploy.UlimitNames`). */
+export type DeploymentUlimitName =
+  | "core"
+  | "cpu"
+  | "data"
+  | "fsize"
+  | "locks"
+  | "memlock"
+  | "msgqueue"
+  | "nice"
+  | "nofile"
+  | "nproc"
+  | "rss"
+  | "rtprio"
+  | "rttime"
+  | "sigpending"
+  | "stack"
+
+export interface DeploymentUlimit {
+  name: DeploymentUlimitName
+  soft: number
+  hard: number
+}
+
+export interface DeploymentTmpfs {
+  path: string
+  sizeMb?: number
+}
+
+export interface DeploymentSysctl {
+  name: string
+  value: string
+}
+
+/** Every GPU, a number of them, or the ones named by index or UUID. */
+export type DeploymentGPUMode = "all" | "count" | "devices"
+
+export interface DeploymentGPUs {
+  mode: DeploymentGPUMode
+  count?: number
+  deviceIds?: string[]
+  /** A pull request preview of the environment gets them too. */
+  previews?: boolean
+}
+
 export type NotificationChannelKind =
   | "webhook"
   | "discord"
@@ -5562,6 +5607,18 @@ export type DeploymentConfiguration = {
     cpus?: number
     pidsLimit?: number
     restartPolicy?: DeploymentRestartPolicy
+    /** The user the process runs as, `uid[:gid]` or a name the image has; empty is the image's own. */
+    user?: string
+    /** The root filesystem is mounted read-only; the tmpfs paths (default /tmp) stay writable. */
+    readOnlyRootfs?: boolean
+    /** Paths kept writable in memory, each at its size in MiB (empty is 64). */
+    tmpfs?: DeploymentTmpfs[]
+    /** Kernel limits each process starts with; -1 is unlimited where the limit allows it. */
+    ulimits?: DeploymentUlimit[]
+    /** Kernel parameters of the container's own namespaces: net.*, fs.mqueue.*, the IPC limits. */
+    sysctls?: DeploymentSysctl[]
+    /** The server's NVIDIA GPUs; a preview gets them only when `previews` says so. */
+    gpus?: DeploymentGPUs
     /** Containers of each release side by side behind the route, 2 to 8; empty is one. */
     replicas?: number
     /**

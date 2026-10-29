@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,6 +111,14 @@ type ContainerSpec struct {
 	// nothing of the host's — never a request's, so it has no JSON name and a
 	// container read back has none.
 	NoNewPrivileges bool `json:"-"`
+	// Ulimits, Sysctls and GPUs are a deployment's process flags
+	// (deploy/runtime_flags.go). The Docker page's form does not offer them,
+	// so they have no JSON name and a request cannot carry one; SpecOf reads
+	// them back all the same, so a container recreated from its own spec
+	// keeps them.
+	Ulimits []Ulimit          `json:"-"`
+	Sysctls map[string]string `json:"-"`
+	GPUs    *GPURequest       `json:"-"`
 
 	// Pull is "missing" (default) or "always". Always is what an operator
 	// means by "update it" and is the difference between redeploying and
@@ -174,6 +184,21 @@ type MountSpec struct {
 	ReadOnly bool   `json:"readOnly,omitempty"`
 	// SizeMB applies to tmpfs only.
 	SizeMB int64 `json:"sizeMb,omitempty"`
+}
+
+// Ulimit is one --ulimit: the soft and hard values, -1 for unlimited.
+type Ulimit struct {
+	Name string
+	Soft int64
+	Hard int64
+}
+
+// GPURequest is --gpus: Count GPUs (-1 for every one) or the DeviceIDs
+// named, from Driver's devices with the gpu capability.
+type GPURequest struct {
+	Driver    string
+	Count     int
+	DeviceIDs []string
 }
 
 type DeviceSpec struct {
@@ -580,6 +605,19 @@ func (s ContainerSpec) toEngine() (*container.Config, *container.HostConfig, *ne
 		})
 	}
 
+	for _, limit := range s.Ulimits {
+		hostCfg.Ulimits = append(hostCfg.Ulimits, &container.Ulimit{Name: limit.Name, Soft: limit.Soft, Hard: limit.Hard})
+	}
+	if len(s.Sysctls) > 0 {
+		hostCfg.Sysctls = maps.Clone(s.Sysctls)
+	}
+	if s.GPUs != nil {
+		hostCfg.DeviceRequests = append(hostCfg.DeviceRequests, container.DeviceRequest{
+			Driver: s.GPUs.Driver, Count: s.GPUs.Count, DeviceIDs: slices.Clone(s.GPUs.DeviceIDs),
+			Capabilities: [][]string{{"gpu"}},
+		})
+	}
+
 	if s.Limits.MemoryMB > 0 {
 		hostCfg.Memory = s.Limits.MemoryMB * 1024 * 1024
 	}
@@ -812,6 +850,20 @@ func (c *Client) SpecOf(ctx context.Context, id string) (*ContainerSpec, error) 
 				Host: d.PathOnHost, Container: d.PathInContainer, Permissions: d.CgroupPermissions,
 			})
 		}
+		for _, limit := range hc.Ulimits {
+			if limit != nil {
+				spec.Ulimits = append(spec.Ulimits, Ulimit{Name: limit.Name, Soft: limit.Soft, Hard: limit.Hard})
+			}
+		}
+		if len(hc.Sysctls) > 0 {
+			spec.Sysctls = maps.Clone(hc.Sysctls)
+		}
+		for _, request := range hc.DeviceRequests {
+			if gpuRequest(request) {
+				spec.GPUs = &GPURequest{Driver: request.Driver, Count: request.Count, DeviceIDs: slices.Clone(request.DeviceIDs)}
+				break
+			}
+		}
 		mode := string(hc.NetworkMode)
 		if mode == "host" || mode == "none" || strings.HasPrefix(mode, "container:") {
 			spec.NetworkMode = mode
@@ -853,6 +905,32 @@ func (c *Client) SpecOf(ctx context.Context, id string) (*ContainerSpec, error) 
 	sort.Slice(spec.Ports, func(i, j int) bool { return spec.Ports[i].ContainerPort < spec.Ports[j].ContainerPort })
 	sort.Slice(spec.Mounts, func(i, j int) bool { return spec.Mounts[i].Target < spec.Mounts[j].Target })
 	return spec, nil
+}
+
+// gpuRequest says a device request asks for GPUs, as --gpus writes one.
+func gpuRequest(request container.DeviceRequest) bool {
+	for _, set := range request.Capabilities {
+		if slices.Contains(set, "gpu") {
+			return true
+		}
+	}
+	return false
+}
+
+// ContainerRuntimes are the OCI runtimes the daemon offers (`docker info`),
+// by name: runc everywhere, nvidia where the NVIDIA Container Toolkit
+// registered itself.
+func (c *Client) ContainerRuntimes(ctx context.Context) ([]string, error) {
+	info, err := c.Info(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(info.Runtimes))
+	for name := range info.Runtimes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func mountSource(kind mount.Type, name, source string) string {
