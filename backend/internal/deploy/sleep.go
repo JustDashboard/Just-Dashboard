@@ -120,6 +120,8 @@ func sleepRefusal(c PlanConfiguration) string {
 		return "a tailnet-only environment is reached through tailscale serve, not through the proxy's route, so no request could wake it"
 	case c.Runtime.Strategy == StrategyCanary:
 		return "a canary puts a second release on the route beside the live one, and a wake starts one container and holds the request for it; sleeping is offered for a blue/green or stop-first release"
+	case c.Runtime.SkewProtection:
+		return "skew protection keeps the previous release on the route for its visitors, and a wake starts one container and holds the request for it; turn skew protection off to let the application sleep"
 	case c.Runtime.EffectiveReplicas() > 1:
 		return fmt.Sprintf("a wake starts one container and holds the request for it, and this release runs %d replicas; sleeping is offered for a single-container release", c.Runtime.EffectiveReplicas())
 	case len(servedDomains(c.Domains)) == 0:

@@ -1096,6 +1096,7 @@ function RuntimeForm({
             hostNetwork: Boolean(runtime.hostNetwork),
             replicas,
             canary,
+            skewProtection: Boolean(configuration.runtime.skewProtection),
             blockingCheck: configuration.checks.find(
               (check) =>
                 check.phase === "readiness" &&
