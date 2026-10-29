@@ -504,7 +504,11 @@ func (m *migrationRehearser) RemoveOrphanedRehearsals(ctx context.Context) error
 	if m.server.modules.docker == nil {
 		return nil
 	}
-	err := m.removeRehearsals(ctx, nil, m.server.liveDataCopies(ctx))
+	keep := m.server.liveDataCopies(ctx)
+	for value := range m.server.livePreviewBranches(ctx) {
+		keep[value] = true
+	}
+	err := m.removeRehearsals(ctx, nil, keep)
 	if errors.Is(err, dockerx.ErrUnavailable) {
 		return nil
 	}

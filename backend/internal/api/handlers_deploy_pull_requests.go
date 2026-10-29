@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -65,24 +66,68 @@ type projectPullRequests struct {
 	LocalCheckout bool                     `json:"localCheckout"`
 	InternalPort  int                      `json:"internalPort"`
 	ReleaseTasks  int                      `json:"releaseTasks"`
+	// ComposePreview is what a preview of a Compose stack gets, service by
+	// service, and what refuses one; absent for any other build.
+	ComposePreview *deploy.ComposePreviewFacts `json:"composePreview,omitempty"`
+	// DatabaseBranches are the databases production gives its previews a
+	// branch of, so the dialog can say what a preview of a branch — never of
+	// a fork — will get.
+	DatabaseBranches []previewBranchFact `json:"databaseBranches"`
+}
+
+// previewBranchFact is one database production gives its previews a branch
+// of, by name.
+type previewBranchFact struct {
+	deploy.PreviewBranchPolicy
+	Name   string `json:"name"`
+	Driver string `json:"driver,omitempty"`
+}
+
+// previewBranchFacts names the databases an environment gives its previews
+// a branch of.
+func (s *Server) previewBranchFacts(ctx context.Context, environmentID int64) []previewBranchFact {
+	out := []previewBranchFact{}
+	policies, err := s.modules.deployRuns.PreviewBranchPolicies(ctx, environmentID)
+	if err != nil {
+		return out
+	}
+	for _, policy := range policies {
+		fact := previewBranchFact{PreviewBranchPolicy: policy, Name: fmt.Sprintf("Database %d", policy.ConnectionID)}
+		if conn, _, err := s.dbConnRow(ctx, policy.ConnectionID); err == nil {
+			fact.Name, fact.Driver = conn.Name, string(conn.Driver)
+		}
+		out = append(out, fact)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // previewFacts are the reasons a project cannot preview a pull request at
 // all, read once and answered on the list so the dialog can say them before
 // the button is pressed.
 type previewFacts struct {
-	compose       bool
-	localCheckout bool
-	internalPort  int
-	releaseTasks  int
-	production    productionFacts
+	compose        bool
+	legacyCompose  bool
+	composePreview *deploy.ComposePreviewFacts
+	localCheckout  bool
+	internalPort   int
+	releaseTasks   int
+	production     productionFacts
 }
 
 func (s *Server) previewFactsFor(ctx context.Context, projectID int64, summary *deploy.DeploymentSummary) previewFacts {
 	facts := previewFacts{
-		compose:      summary.BuildMethod == deploy.BuildCompose || summary.BuildMethod == deploy.BuildLegacyCompose,
-		internalPort: summary.InternalPort,
-		production:   productionFacts{EnvironmentID: summary.EnvironmentID},
+		compose:       summary.BuildMethod == deploy.BuildCompose || summary.BuildMethod == deploy.BuildLegacyCompose,
+		legacyCompose: summary.BuildMethod == deploy.BuildLegacyCompose,
+		internalPort:  summary.InternalPort,
+		production:    productionFacts{EnvironmentID: summary.EnvironmentID},
+	}
+	if summary.BuildMethod == deploy.BuildCompose {
+		composePreview, err := s.modules.deployPlanning.ComposePreviewFacts(ctx, summary.EnvironmentID)
+		if err != nil || composePreview == nil {
+			composePreview = &deploy.ComposePreviewFacts{Services: []deploy.ComposePreviewService{}, Refusals: []string{"production's Compose plan could not be read"}}
+		}
+		facts.composePreview = composePreview
 	}
 	source, err := s.modules.deployRuns.SourceConfiguration(ctx, summary.EnvironmentID, summary.DesiredRevision)
 	facts.localCheckout = err != nil || !deploy.IsRemoteGitSource(source)
@@ -159,6 +204,23 @@ func pullRequestsError(err error) error {
 	return httpx.BadRequest("%v", err)
 }
 
+// observePreviewServices reads each live Compose preview's services and
+// their health, the way the project page reads production's, so the
+// preview's row can say which of its services is up.
+func (s *Server) observePreviewServices(ctx context.Context, previews []deploy.PreviewRef) {
+	if s.modules.docker == nil {
+		return
+	}
+	for index := range previews {
+		preview := &previews[index]
+		if preview.State != "open" || preview.LiveReleaseID == 0 {
+			continue
+		}
+		observed := deploy.ObserveRuntimeServices(ctx, s.modules.docker, preview.EnvironmentID, preview.LiveReleaseID)
+		preview.Services = &observed
+	}
+}
+
 func (s *Server) deploymentRepository(ctx context.Context, projectID int64) (*deploy.DeploymentSummary, string, error) {
 	summary, err := s.modules.deployRuns.DeploymentSummary(ctx, projectID, deploy.QueueBudget{
 		Heavy: s.Cfg.DeployHeavySlots, Light: s.Cfg.DeployLightSlots,
@@ -197,7 +259,13 @@ func (s *Server) handleDeploymentPullRequests(w http.ResponseWriter, r *http.Req
 		Production: facts.production, Tailnet: s.modules.pullRequests.Tailnet(r.Context()),
 		Compose: facts.compose, LocalCheckout: facts.localCheckout,
 		InternalPort: facts.internalPort, ReleaseTasks: facts.releaseTasks,
+		ComposePreview:   facts.composePreview,
+		DatabaseBranches: s.previewBranchFacts(r.Context(), summary.EnvironmentID),
 	}
+	if facts.composePreview != nil {
+		s.observePreviewServices(r.Context(), response.Previews)
+	}
+	s.attachPreviewBranches(r.Context(), response.Previews)
 	if !ok {
 		response.Reason = "not_github"
 		httpx.JSON(w, http.StatusOK, response)
@@ -298,8 +366,10 @@ func (s *Server) handleDeploymentPullRequestPreview(w http.ResponseWriter, r *ht
 	switch {
 	case facts.localCheckout:
 		return httpx.Err(http.StatusConflict, "not_remote_git", "this project deploys a local checkout; previews need a remote Git source to fetch the pull request from")
-	case facts.compose:
-		return httpx.Err(http.StatusConflict, "preview_compose", "previews are not available for Compose projects")
+	case facts.legacyCompose:
+		return httpx.Err(http.StatusConflict, "preview_compose", "a compatibility Compose deployment has no release engine to build a preview with; deploy it from a Compose source first")
+	case facts.composePreview != nil && len(facts.composePreview.Refusals) > 0:
+		return httpx.Err(http.StatusConflict, "preview_compose_host_access", "a preview isolates every service of the stack, and "+strings.Join(facts.composePreview.Refusals, "; ")+", which no preview gets")
 	case facts.internalPort == 0:
 		return httpx.Err(http.StatusConflict, "preview_no_port", "the runtime plan has no internal port to publish on the tailnet")
 	}
@@ -422,9 +492,22 @@ func (s *Server) handleDeploymentPullRequestPreview(w http.ResponseWriter, r *ht
 		}
 	}
 	s.modules.pullRequests.Invalidate(repository)
+	// The preview's database branches were asked for with its configuration;
+	// the owner starts restoring them now rather than on its next pass.
+	branchNames := []string{}
+	if branches, err := s.modules.deployRuns.PreviewBranches(ctx, preview.EnvironmentID); err == nil {
+		for _, branch := range branches {
+			if deploy.PreviewBranchActive(branch.State) {
+				branchNames = append(branchNames, branch.Name)
+			}
+		}
+	}
+	if len(branchNames) > 0 {
+		s.modules.previewBranches.Poke()
+	}
 	httpx.SetAudit(r, "deploy.preview.test", strconv.Itoa(number), map[string]any{
 		"deploymentId": projectID, "number": number, "revision": revision, "runId": run.ID,
-		"copiedVariables": copied, "skipped": skipped, "fork": pull.Fork,
+		"copiedVariables": copied, "skipped": skipped, "fork": pull.Fork, "databaseBranches": branchNames,
 	})
 	final, err := s.modules.deployAutomation.PreviewByNumber(ctx, projectID, number)
 	if err != nil {

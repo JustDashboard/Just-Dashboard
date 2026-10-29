@@ -185,6 +185,9 @@ type moduleSet struct {
 	// dataCopies restores a database as of a release into a side copy on
 	// the deployment's network and removes it when its time is up.
 	dataCopies *dataCopyOwner
+	// previewBranches restores a preview's own copy of each database its
+	// environment gives previews a branch of, and removes it with the preview.
+	previewBranches *previewBranchOwner
 	// tailnet publishes preview environments on this host's Tailscale node
 	// through `tailscale serve`; the executor and the preview route share it.
 	tailnet deploy.TailnetPublisher
@@ -394,6 +397,7 @@ func (s *Server) initModules() {
 	s.modules.tailnet = tailnetPublisher{serve: selfcfg.NewTailnetServe()}
 	s.modules.rehearser = &migrationRehearser{server: s}
 	s.modules.dataCopies = newDataCopyOwner(s, s.modules.rehearser)
+	s.modules.previewBranches = newPreviewBranchOwner(s, s.modules.rehearser)
 	normalizedExecutor := deploy.NewNormalizedStepExecutor(
 		s.modules.deployRuns,
 		s.modules.deployPlanning,

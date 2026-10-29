@@ -1228,6 +1228,45 @@ test.describe("Databases & backups evidence", () => {
     )
   })
 
+  test("what a linked database gives previews is saved apart: a branch, masked by the columns named", async ({
+    page,
+  }, testInfo) => {
+    await mockLinkedDatabase(page)
+    await page.route("**/api/v1/backups/", (route) => json(route, []))
+    await page.route("**/api/v1/deploy/7/environments/12/database-links/9/previews", (route) =>
+      json(route, {
+        connectionId: 9,
+        mode: "masked",
+        maskedColumns: ["users.email", "users.phone"],
+      }),
+    )
+    const saved = page.waitForRequest(
+      (request) =>
+        request.url().endsWith("/deploy/7/environments/12/database-links/9/previews") &&
+        request.method() === "PUT",
+    )
+    await page.goto("/deploy/7/settings/databases")
+    await expect(page.getByRole("heading", { name: "Previews get" })).toBeVisible()
+    await expect(page.getByText("No database of this environment's")).toBeVisible()
+    await page.getByRole("radio", { name: "A masked branch" }).click()
+    await page
+      .getByRole("textbox", { name: "Columns of orders-db to mask" })
+      .fill("users.email\nusers.phone, users.email")
+    await expect(page.getByText("A branch of orders-db")).toBeVisible()
+    await page
+      .getByRole("textbox", { name: "Columns of orders-db to mask" })
+      .scrollIntoViewIfNeeded()
+    await testInfo.attach("settings-preview-branches", {
+      body: await page.screenshot({ path: testInfo.outputPath("settings-preview-branches.png") }),
+      contentType: "image/png",
+    })
+    await saveSettings(page)
+    expect((await saved).postDataJSON()).toEqual({
+      mode: "masked",
+      maskedColumns: ["users.email", "users.phone"],
+    })
+  })
+
   test("the variable that carries a database is named, and removal takes it with the link", async ({
     page,
   }) => {

@@ -97,22 +97,39 @@ func (o *DockerRuntimeOwner) ensurePreviewResources(ctx context.Context, environ
 	if err := validatePreviewPlan(environmentID, BuildPlanConfig{}, plan); err != nil {
 		return "", err
 	}
-	labels := previewLabels(environmentID)
 	for _, mount := range plan.Mounts {
-		volume, err := o.client.InspectVolume(ctx, mount.Source)
-		if errdefs.IsNotFound(err) {
-			if _, err = o.client.CreateVolume(ctx, dockerx.VolumeSpec{Name: mount.Source, Labels: labels}); err != nil {
-				return "", err
-			}
-			volume, err = o.client.InspectVolume(ctx, mount.Source)
-		}
-		if err != nil {
+		if err := o.ensurePreviewVolume(ctx, environmentID, mount.Source); err != nil {
 			return "", err
 		}
-		if !matchesPreviewLabels(volume.Labels, environmentID) || volume.Driver != "local" || len(volume.Options) > 0 {
-			return "", fmt.Errorf("%w: preview volume name belongs to other storage", ErrPreviewIsolation)
-		}
 	}
+	return o.ensurePreviewNetwork(ctx, environmentID)
+}
+
+// ensurePreviewVolume creates a preview volume, or adopts one only when its
+// labels and plain local driver say it is this preview's own.
+func (o *DockerRuntimeOwner) ensurePreviewVolume(ctx context.Context, environmentID int64, name string) error {
+	if !strings.HasPrefix(name, fmt.Sprintf("jd-preview-e%d-", environmentID)) {
+		return fmt.Errorf("%w: a preview volume must carry its preview's name", ErrPreviewIsolation)
+	}
+	labels := previewLabels(environmentID)
+	volume, err := o.client.InspectVolume(ctx, name)
+	if errdefs.IsNotFound(err) {
+		if _, err = o.client.CreateVolume(ctx, dockerx.VolumeSpec{Name: name, Labels: labels}); err != nil {
+			return err
+		}
+		volume, err = o.client.InspectVolume(ctx, name)
+	}
+	if err != nil {
+		return err
+	}
+	if !matchesPreviewLabels(volume.Labels, environmentID) || volume.Driver != "local" || len(volume.Options) > 0 {
+		return fmt.Errorf("%w: preview volume name belongs to other storage", ErrPreviewIsolation)
+	}
+	return nil
+}
+
+func (o *DockerRuntimeOwner) ensurePreviewNetwork(ctx context.Context, environmentID int64) (string, error) {
+	labels := previewLabels(environmentID)
 	name := previewNetworkName(environmentID)
 	network, err := o.client.InspectNetwork(ctx, name)
 	if errdefs.IsNotFound(err) {
