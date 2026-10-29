@@ -186,6 +186,19 @@ func (f *fakeDashboard) serve(w http.ResponseWriter, r *http.Request) {
 		f.write(w, 200, []byte(`[{"id":80,"name":"Production","slug":"production","kind":"production"}]`))
 	case route == "POST "+env+"/promote":
 		f.write(w, 202, map[string]any{"id": 602, "runNumber": 7, "state": "queued", "operation": "promote"})
+	case route == "POST /api/v1/deploy/7/environments/71/promote":
+		// Staging takes a preview's image; the fake holds the server's
+		// rule that only a preview's is, and only from an approved head.
+		if body["source"] != "preview" {
+			f.fail(w, &apiError{Status: 409, Code: "promotion_target", Message: "releases are promoted into production"})
+			return
+		}
+		if body["preview"] == float64(46) {
+			f.fail(w, &apiError{Status: 422, Code: "preview_promotion_unapproved",
+				Message: "PR #46 comes from a fork (octocat/web), and a fork's code is promoted only at a commit an administrator approved: commit deadbee of PR #46 is waiting for an administrator's approval"})
+			return
+		}
+		f.write(w, 202, map[string]any{"id": 604, "runNumber": 9, "state": "queued", "operation": "promote", "environmentId": 71})
 	case route == "POST "+env+"/rollback-watch/rollback":
 		f.write(w, 202, map[string]any{"id": 603, "runNumber": 8, "state": "queued", "operation": "rollback"})
 	case route == "POST "+env+"/rollback-watch/keep":

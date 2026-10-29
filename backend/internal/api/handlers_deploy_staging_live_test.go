@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,9 +30,13 @@ import (
 // built — the same image id, with no build step in its run — under
 // production's variables and not staging's. Then a second staging release is
 // promoted and production is rolled back to the first promoted release.
+// Finally a pull request's preview is built through the webhook and approval
+// routes and its image promoted into a staging environment: staging runs the
+// very image the preview built, with staging's variable and its release task
+// run with staging's value, and production refuses the preview outright.
 //
-// It creates only its own project, containers and image tags, binds no
-// public port and removes everything it made.
+// It creates only its own projects, containers, networks and image tags,
+// binds no public port and removes everything it made.
 func TestLiveStagingReleaseIsPromotedAsTheSameImageAndRolledBack(t *testing.T) {
 	if os.Getenv("JD_DEPLOY_LIVE") != "1" {
 		t.Skip("set JD_DEPLOY_LIVE=1 on a Docker and Buildx host")
@@ -153,6 +159,194 @@ func TestLiveStagingReleaseIsPromotedAsTheSameImageAndRolledBack(t *testing.T) {
 		t.Fatal("the rollback built")
 	}
 	t.Logf("rolled production back to release %d: image %s again", restored.Number, stagingImage)
+
+	livePromotePreviewIntoStaging(t, s, c, root)
+}
+
+// livePromotePreviewIntoStaging builds pull request 41's preview through a
+// signed delivery and the approval route, then promotes the preview's image
+// into staging. A preview fetches refs/pull/N/head from a remote, which this
+// host cannot reach, so the project's source is saved as a remote Git URL
+// whose release mirror is pointed at a local origin by `insteadOf` — the
+// fetch, build and every route after it are the real ones. The URL's host is
+// under .invalid and commit statuses are off, so nothing leaves the host.
+func livePromotePreviewIntoStaging(t *testing.T, s *Server, c *client, root string) {
+	nonce := time.Now().UnixNano() % 1_000_000
+	origin := newLiveStagingRepository(t, filepath.Join(root, "preview-origin"))
+	origin.git(t, "checkout", "-q", "-b", "feature")
+	origin.commit(t, "pr-41")
+	head := strings.TrimSpace(origin.output(t, "rev-parse", "HEAD"))
+	origin.git(t, "update-ref", "refs/pull/41/head", head)
+	origin.git(t, "checkout", "-q", "main")
+	mainHead := strings.TrimSpace(origin.output(t, "rev-parse", "HEAD"))
+
+	projectID, production := livePlanLocalProject(t, c, origin.dir, fmt.Sprintf("live-preview-%d", nonce))
+	t.Cleanup(func() { removeLiveEnvironment(s, production) })
+	repository := fmt.Sprintf("jd-live/preview-%d", nonce)
+	remote := "https://git.jd-live.invalid/" + repository + ".git"
+	liveUseRemoteSource(t, s, production, remote, repository, mainHead)
+	mirror := filepath.Join(s.Cfg.DataDir, "deployment-detection", "git-release-mirrors", liveDigest(remote)+".git")
+	if err := os.MkdirAll(filepath.Dir(mirror), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "-q", "--bare", "--", mirror}, {"-C", mirror, "config", "url." + origin.dir + ".insteadOf", remote}} {
+		if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+	}
+	quiet := `{"automatic":false,"watchInclude":[],"watchExclude":[],"commitStatuses":false,"revision":0}`
+	if response := c.do(http.MethodPut, fmt.Sprintf("/api/v1/deploy/%d/environments/%d/git-policy", projectID, production), quiet, nil); response.Code != http.StatusOK {
+		t.Fatalf("production git policy = %d %s", response.Code, response.Body.String())
+	}
+
+	added := c.do(http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/environments", projectID), `{"kind":"staging"}`, nil)
+	var copied deploy.StagingCopy
+	if added.Code != http.StatusCreated || json.Unmarshal(added.Body.Bytes(), &copied) != nil {
+		t.Fatalf("add staging = %d %s", added.Code, added.Body.String())
+	}
+	staging := copied.Environment.ID
+	t.Cleanup(func() { removeLiveEnvironment(s, staging) })
+	putLiveVariable(t, c, projectID, staging, "GREETING", "staging")
+
+	created := c.do(http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/environments/%d/triggers", projectID, production),
+		fmt.Sprintf(`{"name":"Previews","kind":"github","provider":"github","enabled":true,"config":{"repository":%q,"ref":"main","events":["pull_request"],"preview":true}}`, repository), nil)
+	var trigger deploy.TriggerCreated
+	if created.Code != http.StatusCreated || json.Unmarshal(created.Body.Bytes(), &trigger) != nil {
+		t.Fatalf("create trigger = %d %s", created.Code, created.Body.String())
+	}
+	payload := fmt.Sprintf(`{"action":"opened","number":41,"repository":{"full_name":%q},"pull_request":{"title":"Serve pr-41","user":{"login":"contributor"},"head":{"sha":%q,"ref":"feature","repo":{"full_name":%q}}}}`,
+		repository, head, repository)
+	if response := (&client{t: t, h: s.Routes()}).do(http.MethodPost, "/api/v1/hooks/providers/github/"+trigger.Trigger.HookID, payload, map[string]string{
+		"X-GitHub-Event": "pull_request", "X-GitHub-Delivery": fmt.Sprintf("opened-%d", nonce),
+		"X-Hub-Signature-256": signProviderPayload([]byte(payload), trigger.Secret),
+	}); response.Code != http.StatusAccepted {
+		t.Fatalf("opened delivery = %d %s", response.Code, response.Body.String())
+	}
+	listed := c.do(http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d/previews/approvals", projectID), "", nil)
+	var approvals []deploy.PreviewApproval
+	if err := json.Unmarshal(listed.Body.Bytes(), &approvals); err != nil || len(approvals) != 1 {
+		t.Fatalf("approvals = %s, %v", listed.Body.String(), err)
+	}
+	approve := fmt.Sprintf("/api/v1/deploy/%d/previews/approvals/%d/approve", projectID, approvals[0].ID)
+	configured := c.do(http.MethodPost, approve, fmt.Sprintf(`{"revision":%q}`, head), nil)
+	var approved struct {
+		Preview deploy.PreviewRef `json:"preview"`
+		RunID   int64             `json:"runId"`
+	}
+	if configured.Code >= 300 || json.Unmarshal(configured.Body.Bytes(), &approved) != nil || approved.Preview.EnvironmentID == 0 {
+		t.Fatalf("approve = %d %s", configured.Code, configured.Body.String())
+	}
+	preview := approved.Preview.EnvironmentID
+	t.Cleanup(func() {
+		removeLiveEnvironment(s, preview)
+		_ = exec.Command("docker", "network", "rm", fmt.Sprintf("jd-preview-e%d", preview)).Run()
+	})
+	// The preview's own value, and a secret only it has: staging must run
+	// with neither.
+	putLiveVariable(t, c, projectID, preview, "GREETING", "preview")
+	putLiveVariable(t, c, projectID, preview, "PREVIEW_ONLY", "preview-only")
+	deployed := c.do(http.MethodPost, approve, fmt.Sprintf(`{"revision":%q,"deploy":true}`, head), nil)
+	if deployed.Code != http.StatusAccepted || json.Unmarshal(deployed.Body.Bytes(), &approved) != nil || approved.RunID == 0 {
+		t.Fatalf("approve and deploy = %d %s", deployed.Code, deployed.Body.String())
+	}
+	liveAwaitSuccess(t, s, approved.RunID)
+	previewRelease := liveLiveRelease(t, s, preview)
+	previewImage := liveContainerImage(t, s, previewRelease)
+	if got := liveServe(t, s, previewRelease); got != "preview pr-41" {
+		t.Fatalf("the preview serves %q", got)
+	}
+	t.Logf("PR #41's preview release %d runs image %s at %s", previewRelease.Number, previewImage, head)
+
+	refused := c.do(http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/environments/%d/promote", projectID, production), `{"source":"preview","preview":41}`, nil)
+	if refused.Code != http.StatusUnprocessableEntity || !strings.Contains(refused.Body.String(), "preview_promotion_target") {
+		t.Fatalf("a preview straight into production = %d %s", refused.Code, refused.Body.String())
+	}
+	promotion := liveRunToSuccess(t, c, s, projectID, staging, "/promote", `{"source":"preview","preview":41}`)
+	for _, key := range []deploy.StepKey{deploy.StepResolveSource, deploy.StepAcquireSource, deploy.StepAnalyzePlan, deploy.StepPrepareContext, deploy.StepBuildArtifact} {
+		if liveRunHasStep(t, s, promotion, key) {
+			t.Fatalf("the preview's promotion has a %s step", key)
+		}
+	}
+	transcript := liveTranscript(t, s, promotion)
+	if !strings.Contains(transcript, "PR #41 ("+head[:7]+"), preview release #") || !strings.Contains(transcript, "no build") ||
+		!strings.Contains(transcript, "migrated with GREETING=staging") || strings.Contains(transcript, "GREETING=preview") {
+		t.Fatalf("promotion transcript:\n%s", transcript)
+	}
+	promoted := liveLiveRelease(t, s, staging)
+	if got := liveContainerImage(t, s, promoted); got != previewImage {
+		t.Fatalf("staging runs %s, the preview built %s", got, previewImage)
+	}
+	if got := liveServe(t, s, promoted); got != "staging pr-41" {
+		t.Fatalf("staging serves %q after the promotion", got)
+	}
+	if env := liveContainerEnv(t, s, promoted); !strings.Contains(env, "GREETING=staging") || strings.Contains(env, "GREETING=preview") || strings.Contains(env, "PREVIEW_ONLY") {
+		t.Fatalf("staging container environment: %s", env)
+	}
+	record := promoted.Promotion
+	if !record.FromPreview() || record.Preview == nil || record.Preview.Number != 41 || record.Preview.ApprovedBy != "live-staging" ||
+		record.SourceRevision != head || record.ImageID != previewImage || record.ReleaseID != previewRelease.ID ||
+		record.Preview.URL != "https://git.jd-live.invalid/"+repository+"/pull/41" {
+		t.Fatalf("staging's release does not say where it came from: %#v %#v", record, record.Preview)
+	}
+	t.Logf("staging release %d runs PR #41's image %s with staging's variables, promoted with no build", promoted.Number, previewImage)
+
+	// The preview's container, its network and its tag of the image go, as
+	// closing the pull request and retention take them: staging keeps
+	// serving from its own tag of the very image. (The engine's preview_remove
+	// also withdraws the preview's route, which needs a proxy adapter this
+	// fixture's server has not got; preview removal has its own fixtures.)
+	removeLiveEnvironment(s, preview)
+	_ = exec.Command("docker", "network", "rm", fmt.Sprintf("jd-preview-e%d", preview)).Run()
+	tag := fmt.Sprintf("just-dashboard/deployment-%d:run-%d", staging, promotion)
+	if output, err := exec.Command("docker", "image", "inspect", "--format", "{{.Id}}", tag).Output(); err != nil || strings.TrimSpace(string(output)) != previewImage {
+		t.Fatalf("staging's tag %s = %q, %v; want the preview's image %s", tag, output, err, previewImage)
+	}
+	if got := liveServe(t, s, promoted); got != "staging pr-41" {
+		t.Fatalf("staging serves %q once the preview is gone", got)
+	}
+}
+
+func (r *liveStagingRepository) output(t *testing.T, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = r.dir
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+	}
+	return string(output)
+}
+
+// liveUseRemoteSource saves an environment's desired source as a remote Git
+// URL. There is no route for that offline: saving a source resolves it on
+// the remote first.
+func liveUseRemoteSource(t *testing.T, s *Server, environmentID int64, remote, repository, revision string) {
+	t.Helper()
+	var desired int
+	if err := s.Store.DB.QueryRow(`SELECT desired_revision FROM deploy_environments WHERE id = ?`, environmentID).Scan(&desired); err != nil {
+		t.Fatal(err)
+	}
+	config, _ := json.Marshal(deploy.DraftSourceConfig{Kind: deploy.SourceGit, Mode: deploy.SourceModeGitURL, URL: remote, Ref: "main"})
+	identity, _ := json.Marshal(deploy.SourceIdentity{Kind: deploy.SourceGit, Remote: remote, Repository: repository, Ref: "main", Revision: revision})
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`DELETE FROM deploy_sources WHERE environment_id = ? AND revision = ?`, []any{environmentID, desired}},
+		{`INSERT INTO deploy_sources(environment_id, revision, kind, config_json, identity_json, digest, created_at) VALUES(?, ?, 'git', ?, ?, ?, ?)`,
+			[]any{environmentID, desired, string(config), string(identity), liveDigest(string(config) + string(identity)), time.Now().Unix()}},
+	} {
+		if _, err := s.Store.DB.Exec(statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// liveDigest is the store's own digest of one value: sha256 over it and a
+// zero byte, hex, which also names a remote's release mirror.
+func liveDigest(value string) string {
+	sum := sha256.Sum256(append([]byte(value), 0))
+	return hex.EncodeToString(sum[:])
 }
 
 type liveStagingRepository struct{ dir string }
@@ -319,22 +513,29 @@ func liveRunToSuccess(t *testing.T, c *client, s *Server, projectID, environment
 	if response.Code != http.StatusAccepted || json.Unmarshal(response.Body.Bytes(), &run) != nil {
 		t.Fatalf("POST %s = %d %s", route, response.Code, response.Body.String())
 	}
+	liveAwaitSuccess(t, s, run.ID)
+	return run.ID
+}
+
+// liveAwaitSuccess waits for a run to end and fails the test unless it
+// succeeded.
+func liveAwaitSuccess(t *testing.T, s *Server, runID int64) {
+	t.Helper()
 	deadline := time.Now().Add(8 * time.Minute)
 	for time.Now().Before(deadline) {
-		current, err := s.modules.deployRuns.Run(t.Context(), run.ID)
+		current, err := s.modules.deployRuns.Run(t.Context(), runID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if current.State.Terminal() {
 			if current.State != deploy.RunSucceeded {
-				t.Fatalf("run %d (%s) ended %s: %s %s\n%s", run.ID, run.Operation, current.State, current.TerminalCode, current.TerminalReason, liveTranscript(t, s, run.ID))
+				t.Fatalf("run %d (%s) ended %s: %s %s\n%s", runID, current.Operation, current.State, current.TerminalCode, current.TerminalReason, liveTranscript(t, s, runID))
 			}
-			return run.ID
+			return
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	t.Fatalf("run %d did not finish", run.ID)
-	return 0
+	t.Fatalf("run %d did not finish", runID)
 }
 
 func liveLiveRelease(t *testing.T, s *Server, environmentID int64) deploy.Release {

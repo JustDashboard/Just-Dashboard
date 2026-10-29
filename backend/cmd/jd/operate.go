@@ -38,23 +38,33 @@ func (a *app) environments(t target) ([]environmentSummary, []byte, error) {
 }
 
 // promote queues a production run that activates staging's release: its
-// live one, or the one --release names.
+// live one, or the one --release names. With --from-preview it queues a
+// staging run that activates a pull request preview's live release instead.
 func (a *app) promote(args []string) error {
-	fs := a.newFlags("promote", "promote APP [--release ID] [--wait]")
+	const usage = "promote APP [--release ID | --from-preview N] [--wait]"
+	fs := a.newFlags("promote", usage)
 	releaseID := fs.Int64("release", 0, "the staging release id to promote (default: staging's live release)")
+	fromPreview := fs.Int("from-preview", 0, "promote pull request N's preview into staging instead")
 	wait := fs.Bool("wait", false, "follow the run and exit with its result")
 	positional, err := a.parse(fs, args)
 	if err != nil {
 		return err
 	}
-	if err := exactly(positional, 1, "promote APP [--release ID] [--wait]"); err != nil {
+	if err := exactly(positional, 1, usage); err != nil {
 		return err
 	}
+	if *fromPreview < 0 || (*fromPreview > 0 && *releaseID != 0) {
+		return usagef("usage: jd %s: --from-preview takes the preview's live release, so it goes without --release", usage)
+	}
 	// A promotion lands in production, which is the environment the fleet
-	// names for the deployment, so there is no --env here.
+	// names for the deployment, so there is no --env here; a preview's lands
+	// in staging, which is found by its kind.
 	t, err := a.resolve(positional[0], "")
 	if err != nil {
 		return err
+	}
+	if *fromPreview > 0 {
+		return a.promotePreview(t, *fromPreview, *wait)
 	}
 	from := ""
 	if *releaseID <= 0 {
@@ -84,6 +94,33 @@ func (a *app) promote(args []string) error {
 		return err
 	}
 	return a.afterQueue(t, run, raw, *wait, fmt.Sprintf("Promoting release %d%s to", *releaseID, from))
+}
+
+// promotePreview promotes pull request number's preview into the
+// deployment's staging environment. Whether the preview may go — approved,
+// live, its image still here — is the server's decision, in its words.
+func (a *app) promotePreview(t target, number int, wait bool) error {
+	environments, _, err := a.environments(t)
+	if err != nil {
+		return err
+	}
+	var staging *environmentSummary
+	for i := range environments {
+		if environments[i].Kind == "staging" {
+			staging = &environments[i]
+		}
+	}
+	if staging == nil {
+		return fmt.Errorf("%s has no staging environment to promote PR #%d's preview into; add one on its Environments page", t.row.Name, number)
+	}
+	t.env, t.envName = staging.ID, orDash(staging.Name)
+	var run engineRun
+	raw, err := a.client.sendJSON(http.MethodPost, t.envPath("/promote"), nil,
+		map[string]any{"source": "preview", "preview": number}, &run)
+	if err != nil {
+		return err
+	}
+	return a.afterQueue(t, run, raw, wait, fmt.Sprintf("Promoting PR #%d's preview to", number))
 }
 
 // rollbackWatch is the window route's answer: the terms, and the open or

@@ -22,7 +22,8 @@ import (
 // CI pipeline use. It deliberately changes one boundary: several deployment
 // writes that were a session's alone — drafts, configuration, source, Git
 // policy, triggers, variables and shared variables — answer it too, and so do
-// the operating verbs beside a deploy: promoting staging, switching back to
+// the operating verbs beside a deploy: promoting staging (or a pull request's
+// approved preview into staging), switching back to
 // the warm release or keeping the new one, and the maintenance switch.
 // Everything else holds:
 //
@@ -177,8 +178,12 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"POST /deploy/{id}/runs/{run}/diagnosis":        keyOpen,
 	"POST /deploy/{id}/rollback":                    keyOpen,
 	"POST /deploy/{id}/environments/{env}/rollback": keyOpen,
-	// Promoting is deploying production with staging's image: the same
-	// capability, queue, checks and cutover as a deploy.
+	// Promoting is deploying production with staging's image, or staging
+	// with a pull request preview's: the same capability, queue, checks and
+	// cutover as a deploy. A preview's takes the administrator's role, which
+	// a deploy key carries; approving the commit it was built from stays a
+	// person's in the dashboard (whyPreview), and promotion takes only an
+	// approved one.
 	"POST /deploy/{id}/environments/{env}/promote": keyOpen,
 	// The warm release's window. Switching traffic back to it is a rollback,
 	// destructive as the one from the release list is, and the key spends

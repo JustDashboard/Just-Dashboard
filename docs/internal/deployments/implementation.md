@@ -1172,7 +1172,9 @@ only renderer/executor/validation authority for their feature.
   database restored as of the target release into a side copy — `POST …/releases/{release}/data-copies`
   with `afterRunId` — never into production, see [data-aware rollback](data-aware-rollback.md)); promote takes a staging release's
   exact image with production's current plan and variables, builds nothing, and runs a deploy's steps from
-  `render_runtime` on, the migration rehearsal included ([staging and promotion](staging-promotion.md)); restart
+  `render_runtime` on, the migration rehearsal included — or, into staging, an administrator-approved pull
+  request preview's exact image with staging's plan and variables, refused into production
+  ([staging and promotion](staging-promotion.md)); restart
   stops and starts the existing live runtime without creating a release, then verifies the plan's
   readiness and smoke checks against that live release before recording it. Rollback, stop and restart use
   the destructive capability and ordinary confirmation, not a typed phrase; because stop and restart share
@@ -1412,7 +1414,9 @@ only renderer/executor/validation authority for their feature.
   error pages, the warm-release terms, the migration rehearsal's terms, a copy of a release's data —
   asking for one, its address, keeping it longer, removing it and comparing it — the
   typed-phrase removals) stays a session's and answers it `session_required`. The operating verbs an
-  ordinary key already had are the deploy key's as well: `POST …/promote`,
+  ordinary key already had are the deploy key's as well: `POST …/promote` (a pull request preview's
+  image into staging too, which takes the administrator role the key carries; approving the preview's
+  commit stays a session's),
   `POST …/rollback-watch/rollback` and `…/keep`, `PUT …/maintenance` (who is let past is the
   configuration's `runtime.maintenance.bypassFrom`, applied by the next release), with the reads
   `GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/maintenance`,
