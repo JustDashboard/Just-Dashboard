@@ -35,7 +35,8 @@ func TestLiveDeploymentRouteEdgeRulesOnNginx(t *testing.T) {
 	service := New(root, filepath.Join(root, "Caddyfile"))
 	route := DeploymentRoute{
 		Name: "just-dashboard-env-21.conf", Domains: []string{"edge.example.test"}, Upstream: app.URL,
-		AccessLog: true, CrowdSec: true,
+		// Traced, as activation renders every route.
+		AccessLog: true, Trace: true, CrowdSec: true,
 		RateLimit: &DeploymentRateLimit{Requests: 1, Per: "second", Burst: 2},
 		EdgeRules: CanonicalEdgeRules([]EdgeRule{
 			{Name: "office", Match: EdgeMatch{PathPrefix: "/admin", ClientFrom: []string{"127.0.0.3"}}, Action: EdgeAction{Kind: "allow"}},
