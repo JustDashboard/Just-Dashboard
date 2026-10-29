@@ -431,7 +431,14 @@ export function useNow(intervalMs = 1000, enabled = true) {
 // ---------------------------------------------------------------------------
 
 export type ProjectState =
-  "deploying" | "ready" | "failed" | "unhealthy" | "stopped" | "not_deployed" | "archived"
+  | "deploying"
+  | "ready"
+  | "failed"
+  | "unhealthy"
+  | "stopped"
+  | "asleep"
+  | "not_deployed"
+  | "archived"
 
 const PROJECT_LABELS: Record<ProjectState, string> = {
   deploying: "Deploying",
@@ -439,6 +446,7 @@ const PROJECT_LABELS: Record<ProjectState, string> = {
   failed: "Failed",
   unhealthy: "Unhealthy",
   stopped: "Stopped",
+  asleep: "Asleep",
   not_deployed: "Not deployed",
   archived: "Archived",
 }
@@ -449,6 +457,8 @@ const PROJECT_TONES: Record<ProjectState, DotTone> = {
   failed: "danger",
   unhealthy: "danger",
   stopped: "stopped",
+  // Not down: the next request wakes it.
+  asleep: "notice",
   not_deployed: "stopped",
   archived: "stopped",
 }
@@ -473,6 +483,9 @@ export function projectState(
   if (archived) return "archived"
   if (summary.activeRun) return "deploying"
   if (!summary.liveReleaseId) return runFailed(summary.lastRun?.state) ? "failed" : "not_deployed"
+  // Asleep by design before stopped: its container is down, and the next
+  // request starts it.
+  if (summary.asleepSince && !summary.stopped) return "asleep"
   if (summary.stopped || runtimeStopped(runtime, summary.liveReleaseId)) return "stopped"
   // A failed run newer than the live release is news; a failure the live
   // release has since replaced is history and lives on the Deployments tab.

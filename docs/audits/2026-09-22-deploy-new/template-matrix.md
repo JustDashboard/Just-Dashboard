@@ -1,6 +1,6 @@
 # Template and recipe review, 2026-09-22
 
-The shipped catalogue contains **122 definitions**: **117 offered**, of which **115 can deploy** — 80 single images through the image runtime and 35 multi-service templates through the Compose release path. The first 62 are in the table below; the 20 multi-service templates added 2026-10-27 and the second batch of 20 added 2026-10-28 are each listed in their own table further down. The two Minecraft definitions remain preview-only. `backend/internal/blueprint/catalogue_counts.go` declares these three counts (built in, deployable, Compose) and `catalogue_counts_test.go` fails when the shipped definitions disagree, so a template cannot join or leave the catalogue without the numbers being bumped on purpose. Five retired definitions stay resolvable for existing deployments and recovery; new drafts, preflight and commit refuse them. A third batch of twenty (fourteen single images and six stacks, 2026-10-28) is listed in its own table as well.
+The shipped catalogue contains **122 definitions**: **117 offered**, all of which **can deploy** — 82 single images through the image runtime and 35 multi-service templates through the Compose release path. The first 62 are in the table below; the 20 multi-service templates added 2026-10-27 and the second batch of 20 added 2026-10-28 are each listed in their own table further down. The two Minecraft definitions deploy since 2026-10-29: their `server.properties` is an install-time file written into the data volume before the first start, Bedrock's UDP port is published on the plan's bind address, and both are gated on a protocol check (`game_handshake`, `udp_probe`); see [game servers](../../internal/deployments/game-servers.md). `backend/internal/blueprint/catalogue_counts.go` declares these three counts (built in, deployable, Compose) and `catalogue_counts_test.go` fails when the shipped definitions disagree, so a template cannot join or leave the catalogue without the numbers being bumped on purpose. Five retired definitions stay resolvable for existing deployments and recovery; new drafts, preflight and commit refuse them. A third batch of twenty (fourteen single images and six stacks, 2026-10-28) is listed in its own table as well.
 
 This table records the current definitions and the automated configuration checks. Fresh runtime results are recorded in the companion review report; a rendered plan is not proof that an image started or that first sign-in succeeded.
 
@@ -38,8 +38,8 @@ Required inputs exclude supplied defaults. `domain` is filled by the hostname su
 | [meilisearch](../../../backend/internal/blueprint/builtin/meilisearch.json) | Yes | Yes | client | None |
 | [memos](../../../backend/internal/blueprint/builtin/memos.json) | Yes | Yes | setup | None |
 | [metabase](../../../backend/internal/blueprint/builtin/metabase.json) | Yes | Yes | setup | None |
-| [minecraft-bedrock](../../../backend/internal/blueprint/builtin/minecraft-bedrock.json) | Yes | Preview only | open | eula |
-| [minecraft-java](../../../backend/internal/blueprint/builtin/minecraft-java.json) | Yes | Preview only | open | eula |
+| [minecraft-bedrock](../../../backend/internal/blueprint/builtin/minecraft-bedrock.json) | Yes | Yes | open | eula |
+| [minecraft-java](../../../backend/internal/blueprint/builtin/minecraft-java.json) | Yes | Yes | open | eula |
 | [minio](../../../backend/internal/blueprint/builtin/minio.json) | Retired | Existing deployments only | client | None |
 | [mongo-express](../../../backend/internal/blueprint/builtin/mongo-express.json) | Yes | Yes | credentials | mongodb-url (encrypted) |
 | [mongodb](../../../backend/internal/blueprint/builtin/mongodb.json) | Yes | Yes | client | None |

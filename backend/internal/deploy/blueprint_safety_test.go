@@ -1,37 +1,40 @@
 package deploy
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/blueprint"
 )
 
-func TestUnsupportedBlueprintStopsBeforeDraftSaveAndPreflight(t *testing.T) {
+// The three gates that once refused a game server — draft save, a stale
+// draft's preflight and commit validation — now let it through, because the
+// release path runs what it used to refuse. Each still re-validates the
+// stored source, so the refusal for what remains unsupported is the same
+// code path (DeploymentSupport, tested in internal/blueprint).
+func TestGameBlueprintPassesTheGatesThatOnceRefusedIt(t *testing.T) {
 	fixture := newPlanningStoreFixture(t)
 	draft, err := fixture.plans.Create(t.Context(), 41, "operator")
 	if err != nil {
 		t.Fatal(err)
 	}
 	source := DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: "minecraft-java", BlueprintVersion: "1.0.0", BlueprintInputs: map[string]string{"eula": "true"}}
-	if _, err := fixture.plans.Save(t.Context(), draft.ID, 41, true, DraftSaveRequest{Revision: draft.Revision, Step: DraftSource, Source: &source}); !errors.Is(err, ErrUnsupportedSource) {
-		t.Fatalf("save: %v", err)
+	saved, err := fixture.plans.Save(t.Context(), draft.ID, 41, true, DraftSaveRequest{Revision: draft.Revision, Step: DraftSource, Source: &source})
+	if err != nil || saved.Data.Source == nil || saved.Data.Source.BlueprintID != "minecraft-java" {
+		t.Fatalf("save: %#v %v", saved, err)
 	}
-	persisted, err := fixture.plans.Get(t.Context(), draft.ID)
-	if err != nil || persisted.Data.Source != nil || persisted.Revision != draft.Revision {
-		t.Fatalf("failed save changed draft: %#v %v", persisted, err)
+	if err := source.ValidateForDeployment(); err != nil {
+		t.Fatalf("a game source is refused at materialization and queue admission: %v", err)
 	}
-	stale := completePlanningDraftModel()
-	stale.Data.Source = &source
-	if _, err := PreflightDraft(t.Context(), stale, nil, true); !errors.Is(err, ErrUnsupportedSource) {
-		t.Fatalf("stale preflight: %v", err)
-	}
-	stale.CurrentStep, stale.PlanPreview = DraftPreflight, "old preview"
-	if err := validateDraftComplete(stale); !errors.Is(err, ErrUnsupportedSource) {
-		t.Fatalf("stale commit: %v", err)
+	// The EULA is still the gate it was: Render refuses an unaccepted
+	// agreement, so no plan exists to deploy.
+	unaccepted := source
+	unaccepted.BlueprintInputs = map[string]string{"eula": "false"}
+	if _, err := RenderBlueprintPlan(unaccepted, "x"); err == nil {
+		t.Fatal("an unaccepted EULA renders a deployable plan")
 	}
 }
+
 func TestBlueprintVolumeSlugsCannotCollide(t *testing.T) {
 	for _, pair := range [][2]string{{"same_name", "same-name"}, {"App", "app"}, {strings.Repeat("a", 50) + "x", strings.Repeat("a", 50) + "y"}} {
 		if blueprintVolumePrefix(pair[0], "minecraft-java") == blueprintVolumePrefix(pair[1], "minecraft-java") {
@@ -57,11 +60,29 @@ func TestBlueprintPreviewKeepsSocketReadOnlyAndUDPExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bedrock.Configuration.Runtime.Protocol != "udp" {
-		t.Fatal("lost UDP protocol")
+	runtime := bedrock.Configuration.Runtime
+	if runtime.Protocol != "tcp+udp" || runtime.HostPort != 19132 || runtime.InternalPort != 19132 ||
+		runtime.BindAddress != "127.0.0.1" || len(runtime.Ports) != 0 {
+		t.Fatalf("Bedrock's port is not one fixed loopback publication on TCP and UDP: %#v", runtime)
 	}
-	if err := bedrock.Configuration.Validate(); err == nil {
-		t.Fatal("unsupported UDP plan accepted as runnable")
+	if err := bedrock.Configuration.Validate(); err != nil {
+		t.Fatalf("a UDP plan the runtime can publish is refused: %v", err)
+	}
+	// Never silently converted to TCP, and never routed: a domain on a UDP
+	// plan is a route the proxy could not carry.
+	routed := bedrock.Configuration
+	routed.Domains = []PlannedDomain{{Hostname: "mc.example.com", Ownership: OwnershipManaged}}
+	if err := routed.Validate(); err == nil || !strings.Contains(err.Error(), "UDP") {
+		t.Fatalf("a routed UDP plan = %v", err)
+	}
+	mappings := runtimePortMappings(runtime, runtime.BindAddress, runtime.HostPort)
+	if len(mappings) != 2 || mappings[0].Protocol != "tcp" || mappings[1].Protocol != "udp" {
+		t.Fatalf("Bedrock is published as %#v", mappings)
+	}
+	for _, mapping := range mappings {
+		if mapping.ContainerPort != 19132 || mapping.HostPort != 19132 || mapping.HostIP != "127.0.0.1" {
+			t.Fatalf("a publication left the plan's bind address: %#v", mapping)
+		}
 	}
 	if schedules := BlueprintSchedules(bedrock.Rendered); len(schedules) != 0 {
 		t.Fatalf("unsafe Bedrock save preset: %#v", schedules)
@@ -72,20 +93,15 @@ func TestBlueprintPreviewKeepsSocketReadOnlyAndUDPExplicit(t *testing.T) {
 			t.Fatalf("%s: %v", check.Name, err)
 		}
 	}
-	// Blueprints the release path cannot run end to end say so in the
-	// catalogue; the ones it can are offered without a caveat. No shipped
-	// definition declares a pre-start configuration file any more — that is
-	// what kept Gitea and Prometheus undeployable — so the refusal is proved
-	// against the rule rather than against a definition that no longer breaks it.
+	// An editable file is the Server settings page's, so only a game may
+	// declare one; a file an image needs before it starts is an install
+	// write_file, which every single-image profile may ship.
 	withFile := *mustBlueprint(t, "prometheus")
 	withFile.Files = []blueprint.ConfigFile{{Path: "/etc/prometheus/prometheus.yml", Label: "Scrape configuration", Format: "yaml"}}
-	if summary := blueprint.Summarize(&withFile); summary.DeploymentSupported || !strings.Contains(summary.UnavailableReason, "configuration files") {
-		t.Fatalf("catalogue hides the config-file limitation: %+v", summary)
+	if err := blueprint.Validate(&withFile); err == nil || !strings.Contains(err.Error(), "Server settings") {
+		t.Fatalf("a web blueprint declared an editable file nothing edits: %v", err)
 	}
-	if summary := blueprint.Summarize(mustBlueprint(t, "minecraft-java")); summary.DeploymentSupported || !strings.Contains(summary.UnavailableReason, "game-server") {
-		t.Fatalf("catalogue hides the game limitation: %+v", summary)
-	}
-	for _, id := range []string{"redis", "postgresql", "uptime-kuma", "dozzle", "prometheus", "gitea"} {
+	for _, id := range []string{"redis", "postgresql", "uptime-kuma", "dozzle", "prometheus", "gitea", "minecraft-java", "minecraft-bedrock"} {
 		if summary := blueprint.Summarize(mustBlueprint(t, id)); !summary.DeploymentSupported || summary.UnavailableReason != "" {
 			t.Fatalf("%s should be deployable: %+v", id, summary)
 		}

@@ -132,7 +132,7 @@ var openapiEnums = map[reflect.Type][]string{
 	reflect.TypeOf(deploy.StepKey("")):             {"resolve_source", "acquire_source", "analyze_plan", "prepare_context", "build_artifact", "render_runtime", "release_task", "backup_gate", "rehearse_migration", "provision_certificate", "start_candidate", "verify_readiness", "verify_smoke", "replay_traffic", "activate", "retire_previous", "record_release", "notify", "legacy_pipeline"},
 	reflect.TypeOf(metrics.Verdict("")):            {"too_tight", "oversized", "unlimited", "right", "insufficient_history"},
 	reflect.TypeOf(deploy.StepState("")):           {"pending", "blocked", "running", "passed", "warning", "failed", "skipped", "cancelled", "unavailable"},
-	reflect.TypeOf(deploy.CheckKind("")):           {"http", "tcp", "docker_health", "command", "public_route", "dns", "tls", "game_handshake", "backup_freshness"},
+	reflect.TypeOf(deploy.CheckKind("")):           {"http", "tcp", "docker_health", "command", "public_route", "dns", "tls", "game_handshake", "backup_freshness", "udp_probe"},
 	reflect.TypeOf(deploy.EventType("")):           {"run.state", "step.state", "step.log", "step.evidence", "queue.position", "finding", "artifact", "heartbeat", "resync"},
 	reflect.TypeOf(deploy.PreflightSeverity("")):   {"pass", "decision", "warning", "blocked", "unavailable"},
 	reflect.TypeOf(deploy.HealthOutcome("")):       {"disabled", "unavailable", "warning", "passed", "failed"},
@@ -147,7 +147,7 @@ var openapiEnums = map[reflect.Type][]string{
 	reflect.TypeOf(blueprint.Category("")):         {"http", "database", "tool", "automation", "game"},
 	reflect.TypeOf(blueprint.InputKind("")):        {"text", "secret", "number", "boolean", "choice", "domain", "memory", "accept"},
 	reflect.TypeOf(blueprint.OperationKind("")):    {"set_variable", "write_file", "console_command", "stop_signal", "wait_for_log", "fetch_artifact"},
-	reflect.TypeOf(blueprint.CheckKind("")):        {"http", "tcp", "docker_health", "command", "game_handshake"},
+	reflect.TypeOf(blueprint.CheckKind("")):        {"http", "tcp", "docker_health", "command", "game_handshake", "udp_probe"},
 	reflect.TypeOf(blueprint.AccessKind("")):       {"setup", "credentials", "token", "client", "open", "unavailable"},
 	reflect.TypeOf(blueprint.ServiceRole("")):      {"app", "worker", "database", "cache"},
 	reflect.TypeOf(blueprint.StartCondition("")):   {"healthy", "started", "completed"},
@@ -282,6 +282,8 @@ var deployOperations = map[string]deployOperation{
 	"GET /deploy/{id}/environments/{env}/data-copies/{copy}/comparison":   {Tag: "releases", Summary: "Compare a side copy with the live database: tables and row counts side by side.", Response: (*DataCopyComparison)(nil)},
 	"POST /deploy/{id}/environments/{env}/rollback-watch/keep":            {Tag: "releases", Summary: "Keep the new release now and retire the warm one.", Response: (*deploy.RollbackWatch)(nil)},
 	"PUT /deploy/{id}/environments/{env}/rollback-policy":                 {Tag: "releases", Summary: "Set the terms a release is kept warm and rolled back on after a deploy.", Request: deploy.RollbackPolicy{}, Response: deploy.RollbackPolicy{}},
+	"GET /deploy/{id}/environments/{env}/sleep":                           {Tag: "releases", Summary: "Read an environment's sleep: whether its live release sleeps when idle, whether it is asleep now, since when and why, and the last seven days of it.", Response: deploy.SleepStatus{}, Note: "The terms are runtime.sleep in the configuration; a change goes live with the next release."},
+	"POST /deploy/{id}/environments/{env}/sleep/wake":                     {Tag: "releases", Summary: "Wake a sleeping environment now: start its live release's container and wait for its readiness checks.", Response: shape{"outcome": deploy.WakeOutcome{}, "sleep": deploy.SleepStatus{}}, Note: "Answers 409 not_asleep when there is nothing asleep to wake."},
 
 	// Runs.
 	"POST /deploy/{id}/run":                      {Tag: "runs", Summary: "Queue a deploy of a legacy project.", Response: shape{"started": false, "project": "", "runId": int64(0), "state": deploy.RunState("")}, Status: http.StatusAccepted},

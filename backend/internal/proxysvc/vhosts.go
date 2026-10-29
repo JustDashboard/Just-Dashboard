@@ -429,7 +429,14 @@ func (s *Service) fileVHost(name, path, layout string, logs logDefaults) VHost {
 		}
 	}
 	for _, m := range proxyPassRe.FindAllStringSubmatch(text, -1) {
-		v.Upstreams = appendNew(v.Upstreams, unquote(strings.TrimSpace(m[1])))
+		upstream := unquote(strings.TrimSpace(m[1]))
+		// A sleeping deployment route forwards through a variable and wakes
+		// through the dashboard's socket; the application's own address is
+		// the one its wake location names.
+		if sleepVarRe.MatchString(strings.TrimPrefix(upstream, "http://")) || strings.Contains(upstream, ":/wake/") {
+			continue
+		}
+		v.Upstreams = appendNew(v.Upstreams, upstream)
 	}
 	certs := certificatePaths(text)
 	for _, m := range includeRe.FindAllStringSubmatch(text, -1) {
