@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
 
@@ -25,6 +26,10 @@ func (s *Server) handleDeploymentDatabaseLinks(w http.ResponseWriter, r *http.Re
 		return httpx.Internal(err)
 	}
 	defer rows.Close()
+	policies, err := s.modules.deployRuns.PreviewBranchPolicies(r.Context(), environmentID)
+	if err != nil {
+		return httpx.Internal(err)
+	}
 	items := []databaseLink{}
 	// The database a connection opens is inside the sealed DSN rather than in
 	// a column of its own, so it is read the way every other database route
@@ -45,6 +50,10 @@ func (s *Server) handleDeploymentDatabaseLinks(w http.ResponseWriter, r *http.Re
 		}
 		item.Hostname = databaseDNSName(item.ConnectionID)
 		item.Database = databaseName(item.ConnectionID)
+		item.Previews = deploy.PreviewBranchPolicy{ConnectionID: item.ConnectionID, Mode: deploy.PreviewBranchNone, MaskedColumns: []string{}}
+		if policy, ok := policies[item.ConnectionID]; ok {
+			item.Previews = policy
+		}
 		if checked > 0 {
 			stamp := time.Unix(checked, 0).UTC()
 			item.CheckedAt = &stamp
@@ -150,6 +159,10 @@ type databaseLink struct {
 	// Empty while it is connected.
 	Detail    string     `json:"detail,omitempty"`
 	CheckedAt *time.Time `json:"checkedAt,omitempty"`
+	// Previews is what the environment's previews get of the database:
+	// nothing, a branch from its newest backup, or one with columns masked
+	// (deploy/preview_branches.go).
+	Previews deploy.PreviewBranchPolicy `json:"previews"`
 }
 
 // databaseAddress is where an environment reaches one linked database.
