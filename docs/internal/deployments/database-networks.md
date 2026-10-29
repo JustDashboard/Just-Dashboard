@@ -56,7 +56,12 @@ Network labels, name, environment and driver must match before adoption or mutat
 not change host bindings: a database quick setup provisions is published to loopback only, and a
 database the operator opened or created as reachable from anywhere keeps that binding. This is environment
 network separation, not a sandbox against an administrator or arbitrary outbound network access.
-Previews and staging environments cannot share a linked database endpoint/container with another
+A preview's [database branch](preview-isolation.md#database-branches) — its own copy of a linked database,
+restored from the newest backup — is the one database a preview environment's network holds that is not
+bound like the rest: it joins the preview's network when it is made, under
+`db-<connection>-branch.jd.internal`, a variable naming that host joins the preview to the network without a
+binding (`previewBranchConnectionIDs`), and `${{database.N…}}` in the preview resolves to it. Previews and
+staging environments cannot share a linked database endpoint/container with another
 environment, including another preview or a different saved connection ID: a staging release task would
 otherwise migrate production's schema from code that was never promoted (`staging_isolation_required`;
 [staging and promotion](staging-promotion.md)). Reference resolution checks known links and bindings before
@@ -112,8 +117,8 @@ dashboard restarts. Bindings remain for retained releases and rollback until exp
 Removing a variable alone does not detach a database from existing releases.
 
 Configuration's removal preview includes the current managed network ID. Applications/Compose stacks
-are removed before their network, and so are the environment's data copies, which are endpoints on it
-that are no application's. Cleanup refuses unknown endpoints, disconnects only bound database
+are removed before their network, and so are the environment's data copies and a preview's database
+branches (`removeEnvironmentBranches`), which are endpoints on it that are no application's. Cleanup refuses unknown endpoints, disconnects only bound database
 endpoints and leaves the database container and its data intact. Preview close uses the same cleanup.
 Removing a stale network ID cannot delete a newer replacement. Successful cleanup removes bindings and
 clears the Docker ID while preserving the logical network name for subsequent deployment.
