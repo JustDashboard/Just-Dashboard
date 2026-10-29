@@ -52,6 +52,11 @@ func databaseURLConnectionIDs(variables map[string]string) ([]int64, error) {
 		if dataCopyHostRE.MatchString(host) {
 			return nil, errors.New("a data copy is a throwaway removed when it expires, and production never runs against it: point the variable at the database itself, or restore the copy's point into it from the database's Backups page")
 		}
+		// A preview's database branch is joined through its own network
+		// (previewBranchConnectionIDs), never bound like a database.
+		if deploy.PreviewBranchHostConnection(host) > 0 {
+			continue
+		}
 		// The pooler's name is the database's with -pool, and joins the same
 		// network through the same binding.
 		id, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(host, "db-"), ".jd.internal"), "-pool"), 10, 64)
@@ -66,10 +71,48 @@ func databaseURLConnectionIDs(variables map[string]string) ([]int64, error) {
 	return ids, nil
 }
 
+// previewBranchConnectionIDs are the connections whose branch a runtime's
+// variables reach by the branch's own name.
+func previewBranchConnectionIDs(variables map[string]string) []int64 {
+	ids := []int64{}
+	for _, value := range variables {
+		u, err := url.Parse(value)
+		if err != nil {
+			continue
+		}
+		if id := deploy.PreviewBranchHostConnection(u.Hostname()); id > 0 && !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
 func (o *deploymentDatabaseNetworks) NetworksForRuntime(ctx context.Context, environmentID int64, plan deploy.RuntimePlanConfig, variables map[string]string) ([]string, error) {
 	ids, err := databaseURLConnectionIDs(variables)
-	if err != nil || len(ids) == 0 {
+	if err != nil {
 		return nil, err
+	}
+	// A preview's branch is already on the preview's database network; the
+	// preview joins that network and binds nothing of production's.
+	branchNetworks := []string{}
+	for _, id := range previewBranchConnectionIDs(variables) {
+		if plan.HostNetwork {
+			return nil, errors.New("host-network workloads cannot reach a database branch")
+		}
+		name, err := o.previewBranchNetwork(ctx, environmentID, id)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.Contains(branchNetworks, name) {
+			branchNetworks = append(branchNetworks, name)
+		}
+	}
+	if len(ids) == 0 {
+		if len(branchNetworks) == 0 {
+			return nil, nil
+		}
+		return branchNetworks, nil
 	}
 	if plan.HostNetwork {
 		return nil, errors.New("host-network workloads need the host database URL")
@@ -279,6 +322,20 @@ func (o *deploymentDatabaseNetworks) ResolveVariable(ctx context.Context, enviro
 	conn, dsn, err := o.server.dbConnRow(ctx, id)
 	if err != nil {
 		return "", errors.New("database reference could not be opened")
+	}
+	// A preview holding a branch of the database reads the branch: its own
+	// copy, on its own network, with its own sign-in.
+	if branchURL, branched, err := o.server.previewBranchURL(ctx, environmentID, id); branched {
+		if err != nil {
+			return "", err
+		}
+		if pooled {
+			return "", fmt.Errorf("a database branch has no connection pooler: read ${{database.%d}} in the preview", id)
+		}
+		if format != "" && format != "url" || database != "" {
+			return deploy.ConnectionStringForFormat(branchURL, format, database)
+		}
+		return branchURL, nil
 	}
 	if err := o.checkEnvironmentIsolation(ctx, environmentID, conn, dsn); err != nil {
 		return "", err
@@ -581,6 +638,10 @@ func (o *deploymentDatabaseNetworks) removeRuntimeNetworks(ctx context.Context, 
 	// application's: it is a throwaway and goes first.
 	if err := o.server.modules.dataCopies.removeEnvironmentCopies(ctx, environmentID); err != nil {
 		return fmt.Errorf("the environment's data copies could not be removed: %w", err)
+	}
+	// So is a preview's database branch, which lives as long as the preview.
+	if err := o.server.modules.previewBranches.removeEnvironmentBranches(ctx, environmentID); err != nil {
+		return fmt.Errorf("the preview's database branches could not be removed: %w", err)
 	}
 	n, err := o.network(ctx, environmentID, false)
 	if errors.Is(err, sql.ErrNoRows) {

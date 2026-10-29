@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Play, Warning } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { plural, shortSha } from "@/lib/format"
-import { composeServiceLines, heldReason, previewBlocker } from "@/lib/pull-requests"
+import { branchPlan, composeServiceLines, heldReason, previewBlocker } from "@/lib/pull-requests"
 import { notify } from "@/lib/toast"
 import type {
   DeploymentPreview,
@@ -118,6 +118,7 @@ export function TestPullDialog({
 
   const blocker = previewBlocker(info)
   const stack = info?.composePreview
+  const branches = branchPlan(info?.databaseBranches, fork)
   // Nothing to build while the preview is ready at this commit, building,
   // closing or waiting on a failed cleanup. The rows hold their verb for the
   // same readings; the header's picker, which lists every open pull request,
@@ -237,6 +238,9 @@ export function TestPullDialog({
           <Notice title="Release tasks don't run in previews">
             {plural(info.releaseTasks, "release task")} configured for production will be skipped.
           </Notice>
+        )}
+        {branches && !blocker && (
+          <Notice title={fork ? "No database branch" : "Database branches"}>{branches}</Notice>
         )}
         {stack && !blocker && stack.services.length > 0 && (
           <Notice title="Every service is isolated">

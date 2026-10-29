@@ -455,7 +455,14 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_TEST_WALG=<path>` to the WAL-G release `backend/Dockerfile` pins,
   `TestLiveMigrationRehearsalRecoversFromThePointInTimeArchive` runs as well: a PostgreSQL 17
   archiving into a directory, the copy recovered from the archive. They remove their own
-  `jd-rehearsal-…` servers, volumes, networks and release containers.
+  `jd-rehearsal-…` servers, volumes, networks and release containers. Changes to a preview's database
+  branches (`deploy/preview_branches.go`, `api/deployment_preview_branch*.go`, or the restore they share)
+  also run, the same way,
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run 'TestLivePreviewDatabaseBranch' -count=1 -v` (PostgreSQL
+  from a dump, MariaDB, and with `JD_TEST_WALG` the point-in-time archive): a preview's branch resolves to
+  its own address and password on the preview's own network, holds the backup's rows, keeps writes apart
+  from production's both ways, masks a column in its shape, is never a fork's, and goes with the preview
+  leaving nothing with its label.
 - Changes to data-aware rollback — the data point a release records when it goes live, the copies of
   a release's data, their restore, lifetime or sweep (`deploy/data_rollback.go`,
   `api/deployment_data_rollback.go`), the restore path they share with the migration rehearsal, or

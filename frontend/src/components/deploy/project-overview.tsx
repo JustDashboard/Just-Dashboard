@@ -5,7 +5,12 @@ import Link from "next/link"
 import { ArrowRight } from "@/components/icons"
 import { get } from "@/lib/api"
 import { percent } from "@/lib/format"
-import { previewServices, pullOfPreview, unavailableReason } from "@/lib/pull-requests"
+import {
+  previewServices,
+  pullOfPreview,
+  shownBranches,
+  unavailableReason,
+} from "@/lib/pull-requests"
 import { perMinute } from "@/lib/requests"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -51,6 +56,7 @@ import { Insights } from "@/components/deploy/insights"
 import { Availability } from "@/components/deploy/availability"
 import { RunRow } from "@/components/deploy/run-row"
 import { UsageTiles } from "@/components/deploy/usage-tiles"
+import { PreviewBranchLines } from "@/components/deploy/preview-branches"
 import { RightSizeCard } from "@/components/deploy/right-size"
 import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
 import { ReleaseWatch, useReleaseWatch } from "@/components/deploy/release-watch"
@@ -355,7 +361,14 @@ export function ProjectOverview() {
             }
           />
           <PanelBody>
-            <PullRequestList info={info} verbsFor={pulls.verbsFor} previewOf={pulls.previewOf} />
+            <PullRequestList
+              info={info}
+              verbsFor={pulls.verbsFor}
+              previewOf={pulls.previewOf}
+              projectId={project.projectId}
+              canRefreshBranches={can("system.admin")}
+              onChanged={pullRequests.refresh}
+            />
           </PanelBody>
         </Panel>
       )}
@@ -421,10 +434,16 @@ function PullRequestList({
   info,
   verbsFor,
   previewOf,
+  projectId,
+  canRefreshBranches,
+  onChanged,
 }: {
   info: ProjectPullRequests
   verbsFor: ReturnType<typeof usePullRequestVerbs>["verbsFor"]
   previewOf: ReturnType<typeof usePullRequestVerbs>["previewOf"]
+  projectId: number
+  canRefreshBranches: boolean
+  onChanged: () => void
 }) {
   const open = info.pulls.filter((pull) => pull.state === "open")
   const listed = new Set(open.map((pull) => pull.number))
@@ -452,6 +471,7 @@ function PullRequestList({
         <ChoiceList aria-label="Pull requests">
           {rows.map(({ pull, preview }) => {
             const services = previewServices(preview, info.composePreview?.public)
+            const branches = preview?.state === "open" ? shownBranches(preview) : []
             return (
               <PullRequestRow
                 key={pull.number}
@@ -460,8 +480,21 @@ function PullRequestList({
                 verbs={verbsFor(pull)}
                 compact={!roomy}
               >
-                {services.length > 0 && (
-                  <PreviewServices number={pull.number} services={services} />
+                {(services.length > 0 || branches.length > 0) && (
+                  <div className="min-w-0 space-y-1.5">
+                    {services.length > 0 && (
+                      <PreviewServices number={pull.number} services={services} />
+                    )}
+                    {branches.length > 0 && (
+                      <PreviewBranchLines
+                        projectId={projectId}
+                        number={pull.number}
+                        branches={branches}
+                        canRefresh={canRefreshBranches}
+                        onRefreshed={onChanged}
+                      />
+                    )}
+                  </div>
                 )}
               </PullRequestRow>
             )
