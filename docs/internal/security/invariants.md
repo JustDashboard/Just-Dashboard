@@ -108,7 +108,11 @@ A change that weakens any of these has to say so explicitly.
    with and without its trailing slash, being one route; no two routes differ by the slash alone). A route without a line answers
    `key_scope`, so a route added later is refused until someone writes its line; a line marked
    session-only answers `session_required` with the reason. Admission is what lets the key past
-   `httpx.RequireSession` (`Principal.DeployRoute`), on that route and no other. What stays a
+   `httpx.RequireSession` (`Principal.DeployRoute`), on that route and no other. The API's own
+   description, `GET /deploy/openapi.json` and `.yaml`, is a static document any signed-in account
+   and any key read, a deploy key included; it derives each operation's security from this table and
+   from `RequireSession` in the route's chain, and a test walks both keys to check it
+   ([`../backend/deploy-api.md`](../backend/deploy-api.md)). What stays a
    session's whatever the key: every reveal (`…/variables/{name}/reveal`, shared variables, the legacy
    `…/env/reveal`), the saved registry and Git credentials (list, create, update, test and delete), the secret-store
    connections that hold credentials of their own (create, update, test and delete),

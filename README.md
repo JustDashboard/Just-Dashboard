@@ -484,6 +484,10 @@ jd create --name blog --image nginx:1.27-alpine --port 80   # a new deployment, 
 ```
 
 Every read takes `--json`. In CI, set `JD_URL` and `JD_KEY` instead of logging in; nothing is written.
+For a client in another language, the dashboard describes the whole deployment API as OpenAPI 3.1 at
+`GET /api/v1/deploy/openapi.json` (or `.yaml`; `jd openapi` prints it), generated from its own router
+and types; **Account → API keys** links it beside the `jd` download when a deploy key is made, and the
+repository carries a copy at `docs/api/deploy-openapi.json`.
 `--env` picks an environment other than production, `--ca-file` trusts the internal Caddy certificate
 authority, and plain `http://` is refused except to loopback (an SSH tunnel). Exit codes: 0 done (the
 run succeeded), 1 refused or the run failed, 2 usage, 3 not logged in or the key is no longer valid.

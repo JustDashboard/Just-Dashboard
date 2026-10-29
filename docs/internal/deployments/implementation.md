@@ -1442,7 +1442,9 @@ only renderer/executor/validation authority for their feature.
   reads a run's log lines after a sequence number, oldest first, with the run and its steps and
   `{next, more}` (`OrchestrationStore.RunTranscriptAfter`): what the stream route sends over its socket,
   for a client without one — `jd logs --follow` and `jd deploy --wait` poll it. The `jd` program itself
-  (`backend/cmd/jd`) is described in the README.
+  (`backend/cmd/jd`) is described in the README. Every route of this API is described as OpenAPI 3.1 at
+  `GET /deploy/openapi.json` (`.yaml`; `jd openapi`), generated from the router and the handlers' types
+  and kept honest by its tests — see [`../backend/deploy-api.md`](../backend/deploy-api.md).
 - Additional automation provider hooks verify each provider's exact raw-body signature before parsing and then fence
   event, repository, ref and delivery identity. The delivery row is reserved before preview or queue side
   effects, while legacy HMAC and scoped generic hooks retain their existing contracts. Environment branch/

@@ -16,6 +16,9 @@ import type { ApiToken } from "@/lib/types"
 /** Where the dashboard serves `jd`, built for this server's own Linux. */
 export const CLI_DOWNLOAD = "/api/v1/cli/jd"
 
+/** The dashboard's OpenAPI 3.1 description of its deployment API, for a client generator. */
+export const OPENAPI_DESCRIPTION = "/api/v1/deploy/openapi.json"
+
 /** Where `install.sh` puts `jd` on the server itself. */
 export const CLI_ON_SERVER = "/usr/local/bin/jd"
 
