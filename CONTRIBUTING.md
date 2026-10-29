@@ -406,7 +406,16 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyGatesRouteBehindForwardAuth -count=1 -v`,
   which signs in at a real Authelia (`authelia/authelia:4.39`, pulled on first run) in front of
   `traefik/whoami`, and `go test ./internal/proxysvc -run TestLiveDeploymentRouteSignsInOnNginx`, which
-  needs only the host's nginx. Changes to a route's maintenance switch or error pages also run
+  needs only the host's nginx. Changes to a tailnet-only environment's gate (`proxysvc/tailnet_gate.go`),
+  the whois route (`internal/tailnetgate`) or how activation publishes on the tailnet also run
+  `go test ./internal/proxysvc -run TestLiveTailnetGateOnNginx`, which needs only the host's nginx, and
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveTailnetGateOnCaddy -count=1 -v` (as root:
+  build the test binary and run it under `sudo`), which starts a real `caddy:2-alpine` the way the
+  dashboard starts its loopback gate and removes it with its volumes. Both put the real whois handler
+  over the real local API client in front of a fake tailscaled, never the host's
+  ([tailnet-only deployments](docs/internal/deployments/tailnet-apps.md#verification)), and the
+  preview tailnet tests in `internal/deploy` (`go test ./internal/deploy -run 'Tailnet|Preview'`) are
+  their regressions. Changes to a route's maintenance switch or error pages also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesMaintenanceAndErrorPages -count=1 -v`
   and `go test ./internal/proxysvc -run TestLiveDeploymentRouteMaintenanceOnNginx`, which switch a real
   Caddy's and the host nginx's route by its file and ask each what a visitor, an address let past and a
