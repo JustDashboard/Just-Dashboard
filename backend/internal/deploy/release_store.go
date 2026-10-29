@@ -58,6 +58,12 @@ type Release struct {
 	// Promotion is set on a release whose image was promoted from staging
 	// rather than built for this environment, read from its provenance.
 	Promotion *ReleasePromotion `json:"promotion,omitempty"`
+	// DataPoints is where each linked database could be brought back to as
+	// of this release going live, and DataCopy whether a copy of it as it was
+	// is offered (data_rollback.go). Both are read with an environment's
+	// release list.
+	DataPoints []ReleaseDataPoint   `json:"dataPoints,omitempty"`
+	DataCopy   *DataCopyEligibility `json:"dataCopy,omitempty"`
 }
 
 type ReleaseArtifact struct {
@@ -173,7 +179,8 @@ func (s *OrchestrationStore) EnvironmentReleases(
 	if limit <= 0 || limit > 200 {
 		limit = 30
 	}
-	if _, err := s.EnvironmentExecutionTarget(ctx, projectID, environmentID); err != nil {
+	target, err := s.EnvironmentExecutionTarget(ctx, projectID, environmentID)
+	if err != nil {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT `+releaseColumns+`
@@ -191,7 +198,24 @@ func (s *OrchestrationStore) EnvironmentReleases(
 		}
 		releases = append(releases, *release)
 	}
-	return releases, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	ids := make([]int64, 0, len(releases))
+	for _, release := range releases {
+		ids = append(ids, release.ID)
+	}
+	points, err := s.ReleaseDataPoints(ctx, ids...)
+	if err != nil {
+		return nil, err
+	}
+	for index := range releases {
+		releases[index].DataPoints = points[releases[index].ID]
+		eligibility := DataCopyEligibilityFor(target.Kind, releases[index], releases[index].DataPoints)
+		releases[index].DataCopy = &eligibility
+	}
+	return releases, nil
 }
 
 func (s *OrchestrationStore) ExecutionPlan(ctx context.Context, run EngineRun) (*StoredExecutionPlan, error) {
@@ -587,6 +611,14 @@ type ReleaseComparison struct {
 	Changes       map[string]bool         `json:"changes"`
 	Detail        ReleaseDetailComparison `json:"detail"`
 	Artifacts     []ReleaseArtifactStatus `json:"artifacts"`
+	// DataPoints is where each release's linked databases stood when it went
+	// live: what a copy of either release's data would be restored from.
+	DataPoints ReleaseDataPointComparison `json:"dataPoints"`
+}
+
+type ReleaseDataPointComparison struct {
+	From []ReleaseDataPoint `json:"from"`
+	To   []ReleaseDataPoint `json:"to"`
 }
 
 func (s *OrchestrationStore) CompareReleases(ctx context.Context, fromID, toID int64) (*ReleaseComparison, error) {
@@ -601,6 +633,17 @@ func (s *OrchestrationStore) CompareReleases(ctx context.Context, fromID, toID i
 	if from.Release.EnvironmentID != to.Release.EnvironmentID {
 		return nil, fmt.Errorf("%w: releases belong to different environments", ErrInvalidPlan)
 	}
+	points, err := s.ReleaseDataPoints(ctx, fromID, toID)
+	if err != nil {
+		return nil, err
+	}
+	dataPoints := ReleaseDataPointComparison{From: points[fromID], To: points[toID]}
+	if dataPoints.From == nil {
+		dataPoints.From = []ReleaseDataPoint{}
+	}
+	if dataPoints.To == nil {
+		dataPoints.To = []ReleaseDataPoint{}
+	}
 	return &ReleaseComparison{FromReleaseID: fromID, ToReleaseID: toID, Changes: map[string]bool{
 		"source":    from.Release.SourceRevision != to.Release.SourceRevision,
 		"build":     releaseBuildFingerprint(from.Artifacts) != releaseBuildFingerprint(to.Artifacts),
@@ -608,7 +651,33 @@ func (s *OrchestrationStore) CompareReleases(ctx context.Context, fromID, toID i
 		"variables": from.Release.VariablesDigest != to.Release.VariablesDigest,
 		"strategy":  from.Release.Strategy != to.Release.Strategy,
 		"downtime":  from.Release.ExpectedDowntime != to.Release.ExpectedDowntime,
-	}}, nil
+		"dataPoint": dataPointsDiffer(dataPoints.From, dataPoints.To),
+	}, DataPoints: dataPoints}, nil
+}
+
+// dataPointsDiffer says whether two releases would bring their data back to
+// different places: a different point for any database either recorded.
+func dataPointsDiffer(from, to []ReleaseDataPoint) bool {
+	key := func(point ReleaseDataPoint) string {
+		at := ""
+		if point.At != nil {
+			at = point.At.UTC().Format(time.RFC3339)
+		}
+		return fmt.Sprintf("%s|%s|%d|%d", point.Kind, at, point.BackupRunID, point.ArchiveID)
+	}
+	if len(from) != len(to) {
+		return true
+	}
+	seen := map[int64]string{}
+	for _, point := range from {
+		seen[point.ConnectionID] = key(point)
+	}
+	for _, point := range to {
+		if previous, ok := seen[point.ConnectionID]; !ok || previous != key(point) {
+			return true
+		}
+	}
+	return false
 }
 
 func artifactInputFingerprint(artifacts []ReleaseArtifactInput) string {

@@ -71,6 +71,7 @@ import {
   runPlanIsStale,
 } from "@/components/deploy/failure-cause"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
+import { RestoreDataDialog, RunDataCopies } from "@/components/deploy/data-copies"
 import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-sheet"
 
 /**
@@ -127,6 +128,7 @@ export function RunPage() {
   // "Show the line" twice scrolls to it twice.
   const [focusLine, setFocusLine] = useState<{ seq: number; nonce: number }>()
   const [rollbackOpen, setRollbackOpen] = useState(false)
+  const [restoreDataOpen, setRestoreDataOpen] = useState(false)
   const [compare, setCompare] = useState<{
     open: boolean
     releaseId?: number
@@ -513,6 +515,7 @@ export function RunPage() {
           }),
         rollback: () => setRollbackOpen(true),
         pin: (target) => void togglePin(target),
+        restoreData: forPreview ? undefined : () => setRestoreDataOpen(true),
       },
     }),
   ]
@@ -688,6 +691,18 @@ export function RunPage() {
         />
       )}
 
+      {/* A rollback that asked for a side copy of the database links it here,
+          from waiting on this run to ready; the copy is worked with on the
+          Deployments page. */}
+      {run.operation === "rollback" && (
+        <RunDataCopies
+          projectId={projectId}
+          environmentId={run.environmentId}
+          runId={run.id}
+          enabled={!forPreview}
+        />
+      )}
+
       <Section
         title="Build logs"
         actions={
@@ -747,6 +762,14 @@ export function RunPage() {
         domains={rollbackDomains(operations.data, deployment)}
         remote={deployment?.sourceRemote}
         initialReleaseId={release?.id}
+      />
+      <RestoreDataDialog
+        open={restoreDataOpen}
+        onOpenChange={setRestoreDataOpen}
+        projectId={projectId}
+        environmentId={run.environmentId}
+        release={release}
+        onStarted={() => router.push(`/deploy/${projectId}/deployments#data-copies`)}
       />
       <ReleaseComparisonSheet
         open={compare.open}

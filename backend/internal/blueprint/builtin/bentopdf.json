@@ -1,0 +1,80 @@
+{
+  "id": "bentopdf",
+  "version": "1.0.0",
+  "name": "BentoPDF",
+  "category": "tool",
+  "profile": "web",
+  "description": "A PDF toolkit — merge, split, compress, rotate, sign, convert, redact — that runs entirely in the visitor's browser. The container only serves the page; no document is uploaded to this server.",
+  "iconId": "bolt",
+  "docsUrl": "https://github.com/alam00000/bentopdf#readme",
+  "access": {
+    "kind": "open",
+    "note": "BentoPDF has no accounts and no login: anyone who reaches this address gets every tool on the page. Every tool runs in that visitor's own browser and nothing is sent to the server, so an open address costs you only the page's bandwidth. Put the domain behind the dashboard's password protection if the copy should be yours alone."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/alam00000/bentopdf",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "bentopdf/bentopdf:latest@sha256:4eb4ec8f5030faf87c29a73d3d5a2781f28a597cf440c3ab111eb96aee550871",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8080,
+      "protocol": "tcp",
+      "purpose": "The tools page, served by an unprivileged nginx",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [],
+  "resources": {
+    "memoryMb": 128,
+    "minMemoryMb": 64
+  },
+  "checks": [
+    {
+      "name": "Page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 30
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Stateless. Docker Hub publishes releases only under a moving latest tag beside per-commit tags, so the definition pins the content digest of the release it was reviewed with; a newer release is a new digest in this definition."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:78f3dc475d07089b0c9187681d17f5f634beec69778a0e1fc249340f5551511d"
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, LockClosed, Play } from "@/components/icons"
+import { ArrowRight, LockClosed, Play, Wrench } from "@/components/icons"
 import { bytes, relativeTime, truncateMiddle } from "@/lib/format"
 import type { DbFleetEntry } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -130,7 +130,11 @@ export function FleetCard({
   const busy = control.busyWord(entry)
   const status = fleetStatus(entry)
   const down = entry.state === "stopped" || entry.state === "paused"
-  const failed = !entry.ok && !down
+  // A MongoDB that this kernel keeps from starting is a failure whether
+  // Docker is restarting it or it has stopped: Start would not help it.
+  const kernel = entry.kernelProblem
+  const fix = control.mitigation(entry)
+  const failed = (!entry.ok && !down) || Boolean(kernel)
   const where = whereWord(entry)
   const has = (kind: Concern["kind"]) => concerns.some((concern) => concern.kind === kind)
   const pages = workPages(engine)
@@ -198,13 +202,25 @@ export function FleetCard({
               // on other cards: shorter, a failed card stood shorter than its
               // neighbours wherever a row did not stretch it.
               <div className="flex min-h-12 min-w-0 items-start">
-                <p
-                  data-slot="fleet-error"
-                  title={status.error}
-                  className="line-clamp-2 min-w-0 font-mono text-hint leading-4.5 break-words text-destructive"
-                >
-                  {status.error || "The server did not answer."}
-                </p>
+                {kernel ? (
+                  // The reason, not the refused dial: in words, with the
+                  // sentence behind it for the pointer and in the dialog.
+                  <p
+                    data-slot="fleet-error"
+                    title={kernel.detail}
+                    className="line-clamp-2 min-w-0 text-hint leading-4.5 break-words text-destructive"
+                  >
+                    {kernel.message}
+                  </p>
+                ) : (
+                  <p
+                    data-slot="fleet-error"
+                    title={status.error}
+                    className="line-clamp-2 min-w-0 font-mono text-hint leading-4.5 break-words text-destructive"
+                  >
+                    {status.error || "The server did not answer."}
+                  </p>
+                )}
               </div>
             ) : (
               // The middle column is the engine's own noun and the widest of
@@ -304,7 +320,18 @@ export function FleetCard({
                   {truncateMiddle(where.text, 30)}
                 </span>
                 <span className="-my-1 -mr-1.5 flex shrink-0 items-center gap-0.5">
-                  {control.canStart(entry) && !busy ? (
+                  {fix && !busy ? (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      className="text-foreground"
+                      onClick={() => control.mitigate(entry, fix)}
+                      aria-label={`Apply the kernel mitigation to ${entry.name}`}
+                    >
+                      <Wrench className="size-3" />
+                      Apply mitigation
+                    </Button>
+                  ) : control.canStart(entry) && !busy && !kernel ? (
                     <Button
                       size="xs"
                       variant="outline"
