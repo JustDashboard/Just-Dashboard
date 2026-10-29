@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 )
 
@@ -225,6 +227,12 @@ type mapInputs struct {
 	// dataDir is the dashboard's data directory: the container mounting it
 	// is the dashboard's own, and so is the compose project it is in.
 	dataDir string
+	// site and tlsMode are where this dashboard answers and with what
+	// certificate, as its own configuration says (JD_SITE, JD_TLS); store is
+	// its database file.
+	site    string
+	tlsMode string
+	store   mapStore
 
 	// absent names the kinds whose module this server does not run.
 	absent map[string]bool
@@ -491,7 +499,21 @@ func buildServerMap(in mapInputs) mapResponse {
 		return out
 	})
 	kindFrom(b, "dashboard", in.dashboard, false, func(r selfupdate.Report) []mapItem {
-		return []mapItem{mapDashboard(r)}
+		out := []mapItem{mapDashboard(r)}
+		if site, ok := mapDashboardSite(in.site, in.tlsMode); ok {
+			out = append(out, site)
+			b.link(site.ID, "dashboard:self", "route")
+			// A Tailscale certificate is issued to the machine's MagicDNS name,
+			// so an address it is served on is reached over the tailnet; so is
+			// a *.ts.net name whatever the certificate.
+			if in.tlsMode == selfcfg.TLSTailscale || strings.HasSuffix(siteHost(in.site), ".ts.net") {
+				b.link(site.ID, "vpn:tailscale", "tailnet")
+			}
+		}
+		if in.store.Path != "" {
+			out = append(out, mapDashboardStore(in.store))
+		}
+		return out
 	})
 
 	// Workspace.
@@ -1192,6 +1214,63 @@ func mapDashboard(r selfupdate.Report) mapItem {
 		item.Tone, item.State = mapOK, "up to date"
 	}
 	item.Facts = mapFacts("Version", r.Version, "Newest", r.Latest)
+	return item
+}
+
+// mapStore is the dashboard's own database file, as a stat of it found it.
+type mapStore struct {
+	Path string
+	Size int64
+	Err  error
+}
+
+// mapDashboardSite is the address this dashboard answers on: the name its
+// Caddy serves and the certificate it serves it with.
+func mapDashboardSite(site, tlsMode string) (mapItem, bool) {
+	site = strings.TrimSpace(site)
+	if site == "" {
+		return mapItem{}, false
+	}
+	item := mapItem{ID: "dashboard:site", Name: site, Href: "/dashboard/configuration", Tone: mapOK, State: "https"}
+	certificate := "Caddy's own"
+	switch tlsMode {
+	case selfcfg.TLSTailscale:
+		certificate = "Tailscale's, for the machine's name"
+	case selfcfg.TLSOff:
+		item.State, certificate = "http", "none (loopback only)"
+	}
+	item.Detail = certificate
+	item.Facts = mapFacts("Address", site, "Certificate", certificate)
+	return item, true
+}
+
+// siteHost is a JD_SITE value's host, lowercased: it may carry a scheme or a port.
+func siteHost(site string) string {
+	host := strings.ToLower(strings.TrimSpace(site))
+	if u, err := url.Parse(host); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return strings.TrimSuffix(host, ".")
+}
+
+// mapDashboardStore is the SQLite file every account, session, deployment
+// and setting of this dashboard is kept in.
+func mapDashboardStore(st mapStore) mapItem {
+	item := mapItem{
+		ID: "dashboard:store", Name: filepath.Base(st.Path), Product: "sqlite", Href: "/dashboard",
+		Tone: mapOK, State: "in use",
+	}
+	size := ""
+	if st.Err != nil {
+		item.Tone, item.State = mapUnknown, "not read"
+	} else if st.Size > 0 {
+		size = alertBytes(st.Size)
+		item.Detail = size
+	}
+	item.Facts = mapFacts("Engine", "SQLite", "Size", size)
 	return item
 }
 

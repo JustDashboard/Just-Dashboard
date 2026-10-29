@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 )
 
 // The server map: one read of everything the dashboard manages, for the page
@@ -149,6 +151,15 @@ func (s *Server) readServerMap(p *httpx.Principal) mapInputs {
 		in.listeners = readMapSource(c, spec("listeners", mapSteady), s.mapListeners)
 	})
 	in.dataDir = s.Cfg.DataDir
+	in.site, in.tlsMode = s.Cfg.Site, strings.ToLower(strings.TrimSpace(s.Cfg.TLSMode))
+	if s.Cfg.DataDir != "" {
+		in.store.Path = filepath.Join(s.Cfg.DataDir, store.DatabaseFile)
+		if fi, err := os.Stat(in.store.Path); err != nil {
+			in.store.Err = err
+		} else {
+			in.store.Size = fi.Size()
+		}
+	}
 	if m.proxy == nil {
 		in.absent["proxy"] = true
 	} else {
