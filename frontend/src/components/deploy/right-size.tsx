@@ -42,7 +42,7 @@ import {
  * route, the same audit, the same validation and the same "applies with the
  * next release" — a stale read is refused as any settings save is.
  */
-async function applySuggestedLimits(sizing: EnvironmentSizing) {
+export async function applySuggestedLimits(sizing: EnvironmentSizing) {
   if (!sizing.apply) return
   const path = `/deploy/${sizing.projectId}/environments/${sizing.environmentId}/configuration`
   const configuration = await get<DeploymentEnvironmentConfiguration>(path)

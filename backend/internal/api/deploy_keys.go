@@ -95,6 +95,7 @@ const (
 	whyPages           = "a route's maintenance and error pages are files on the server beside the proxy's route, and are edited in the dashboard"
 	whyRollbackTerms   = "the terms a release is kept warm and rolled back on are set in the dashboard"
 	whyRehearsalTerms  = "a migration rehearsal restores a database's backup, and which database and on what terms is chosen in the dashboard"
+	whyOperator        = "the operator reads with a person's leave a call at a time and proposes actions only a person's press runs, in the dashboard"
 	whyDataCopy        = "a copy of a release's data is a second copy of production's data, and its address carries a password: it is asked for, read and removed in the dashboard"
 )
 
@@ -302,6 +303,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"PUT /deploy/{id}/environments/{env}/pages/{page}":                    keySession(whyPages),
 	"PUT /deploy/{id}/environments/{env}/rollback-policy":                 keySession(whyRollbackTerms),
 	"PUT /deploy/{id}/environments/{env}/rehearsal":                       keySession(whyRehearsalTerms),
+	"POST /deploy/{id}/assistant":                                         keySession(whyOperator),
 	"POST /deploy/blueprints/{id}/render":                                 keySession("a template's plan is previewed in the dashboard; a draft from it is a deploy key's to make"),
 	"POST /deploy/import/preview":                                         keySession(whyHost),
 	"POST /deploy/import/adopt":                                           keySession(whyHost),

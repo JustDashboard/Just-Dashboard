@@ -17,6 +17,10 @@
   from its retained container samples (percentiles, headroom, throttling and OOM kills, verdicts, the
   apply through the configuration PUT), and the capacity forecast: days until each disk is full and the
   fastest-growing deployment volumes.
+- [`operator.md`](operator.md) — Diagnose: the assistant asked about one environment and its server,
+  reading runs, transcripts, container lines, usage, events, host alerts, firewall rules and security
+  updates only with the person's leave a read at a time, and proposing actions whose card runs the
+  project's own audited route when pressed.
 - [`log-drains.md`](log-drains.md) — copying deployments' container output and requests to OpenTelemetry
   (OTLP), Loki or a JSON-lines endpoint: formats, severity, sealed headers, delivery, retries and status.
 - [`secret-stores.md`](secret-stores.md) — Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager and Azure
