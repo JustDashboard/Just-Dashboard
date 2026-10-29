@@ -124,7 +124,8 @@ free.
 - Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,
   e-mail and webhooks
 - Commit statuses and preview comments on GitHub, GitLab, Gitea and Forgejo
-- Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint
+- Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint,
+  and every request as an OpenTelemetry span under the `traceparent` the ingress sends your app
 - The `jd` command line and deploy keys for CI: create, configure, deploy, follow, roll back, promote,
   keep or switch back, maintenance, status, set variables
 

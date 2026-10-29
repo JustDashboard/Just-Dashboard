@@ -156,6 +156,10 @@ type SiteSpec struct {
 	ForwardAuth *SiteForwardAuth `json:"forwardAuth,omitempty"`
 
 	AccessLog bool `json:"accessLog"`
+	// Trace sends the application a W3C traceparent and, on a timed access
+	// log, records it (trace.go). A deployment's route sets it; the Proxy
+	// form does not offer it.
+	Trace bool `json:"trace,omitempty"`
 	// AccessLogPath and ErrorLogPath are the files the site's access_log and
 	// error_log write to, read back from the file rather than set by the
 	// form: a hand-written site logs wherever its author said, and a page that
