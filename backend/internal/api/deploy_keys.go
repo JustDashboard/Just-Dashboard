@@ -138,6 +138,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/{id}/requests/export":                                  keyOpen,
 	"GET /deploy/{id}/lifecycle":                                        keyOpen,
 	"GET /deploy/{id}/lifecycle/stream":                                 keyOpen,
+	"GET /deploy/{id}/availability":                                     keyOpen,
 	"GET /deploy/{id}/alerts":                                           keyOpen,
 	"GET /deploy/{id}/commits":                                          keyOpen,
 	"GET /deploy/{id}/operations":                                       keyOpen,

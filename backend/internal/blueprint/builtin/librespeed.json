@@ -1,0 +1,122 @@
+{
+  "id": "librespeed",
+  "version": "1.0.0",
+  "name": "LibreSpeed",
+  "category": "tool",
+  "profile": "web",
+  "description": "A self-hosted speed test: download, upload, ping and jitter measured against this server from the browser, with results kept in a local SQLite database.",
+  "iconId": "bolt",
+  "docsUrl": "https://github.com/librespeed/speedtest/blob/master/doc_docker.md",
+  "access": {
+    "kind": "open",
+    "note": "The speed test has no accounts: anyone who reaches the address can run it against this server, which costs bandwidth, so keep the domain behind the dashboard's password protection if strangers should not. The statistics page at /results/stats.php is the one protected part — it asks for the generated PASSWORD, which you reveal from the Variables tab."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "LGPL-3.0",
+    "upstreamUrl": "https://github.com/librespeed/speedtest",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "ghcr.io/librespeed/speedtest:6.3.1",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    },
+    {
+      "name": "title",
+      "kind": "text",
+      "label": "Page title",
+      "variable": "TITLE",
+      "default": "LibreSpeed",
+      "pattern": "^[^\\x00-\\x1f]{1,80}$"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "stats-password",
+      "variable": "PASSWORD",
+      "label": "Statistics page password",
+      "length": 24,
+      "description": "Asked for by /results/stats.php, the page listing every test that was run."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8080,
+      "protocol": "tcp",
+      "purpose": "The test page and its measurement endpoints",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "database",
+      "target": "/database",
+      "purpose": "The SQLite database of test results",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 256,
+    "minMemoryMb": 128
+  },
+  "checks": [
+    {
+      "name": "Test page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 30
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "MODE",
+        "value": "standalone"
+      },
+      {
+        "kind": "set_variable",
+        "name": "TELEMETRY",
+        "value": "true"
+      },
+      {
+        "kind": "set_variable",
+        "name": "ENABLE_ID_OBFUSCATION",
+        "value": "true"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "The results database is a plain SQLite file the image opens as it is; there is nothing to migrate."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:66a42c0a2a686352353c6724e4142119ac0687838cb824ed79ee549203557151"
+    }
+  ]
+}

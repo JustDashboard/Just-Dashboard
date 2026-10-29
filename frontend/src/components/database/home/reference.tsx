@@ -116,6 +116,11 @@ export function RunsAs() {
               {container.status ?? container.state}
               {container.health ? ` · ${container.health}` : ""}
             </FactRow>
+            {/* Set without asking where MongoDB 8 needs it to start, so it
+                is said where the container is described. */}
+            {container.kernelMitigation && (
+              <FactRow label="Kernel">{container.kernelMitigation}</FactRow>
+            )}
             {container.composeProject && (
               <FactRow label="Compose" className="font-mono wrap-anywhere">
                 {container.composeProject}

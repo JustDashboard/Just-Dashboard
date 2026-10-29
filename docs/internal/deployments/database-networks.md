@@ -16,7 +16,10 @@ a connection name containing dots is never misread. Relinking a variable from Se
 keeps the shape its previous reference asked for. Quick setup also offers PostgreSQL 16 with pgvector
 (`pgvector/pgvector:pg16`) or PostGIS (`postgis/postgis:16-3.5-alpine`, offered and accepted only on
 x86-64, the one architecture that image is published for), which Databases already recognises, and
-refuses MongoDB 7 on a CPU without AVX or ARMv8.2 atomics before pulling it.
+refuses MongoDB 7 on a CPU without AVX or ARMv8.2 atomics before pulling it. On Linux 6.19 up to 7.0.13
+it starts MongoDB 8 with `GLIBC_TUNABLES=glibc.pthread.rseq=1`, without which it does not start there
+(MongoDB SERVER-121912; *MongoDB 8 and the kernel* in
+[Databases](../backend/databases-proxy-platform.md)).
 
 A PostgreSQL connection that has a [connection pooler](../backend/databases-proxy-platform.md) also has
 `${{database.5.pooled}}` (and `5.pooled.jdbc`, `5.pooled.url.app_cache`, …): the same string with the host
@@ -142,7 +145,13 @@ No hosted-provider account or live provider credentials are required by the loca
   replaces each database with the original persistent volume and a different IP, reconciles, then
   restarts the same client with its unchanged URL and authenticates again. It checks loopback publication,
   cleanup ordering and refusal to adopt a foreign network. This establishes DNS reconnection, not a
-  continuous application traffic test.
+  continuous application traffic test. Each engine's image is pulled, and the pull timed in the log,
+  before anything is created; the engine then has two minutes from its container starting to accept a
+  sign-in, and a failure reports the adopt route's last reply with the container's state and last log
+  lines. The MongoDB subtest checks that provisioning gave MongoDB 8 what it needs on Linux 6.19 to
+  7.0.13 (MongoDB SERVER-121912) and nothing on any other kernel, and fails at once, naming the kernel,
+  the line and the container's `GLIBC_TUNABLES`, if MongoDB still refuses; `mongodb-kernel-mitigation`
+  applies the mitigation from the Databases page to a server made without it.
 - `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`
   checks the merged network configuration with the real Compose parser.
 - Browser coverage checks that new and existing database selection saves a logical reference without
