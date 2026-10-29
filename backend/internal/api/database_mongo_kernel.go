@@ -134,7 +134,8 @@ type dbKernelProblem struct {
 	Detail  string `json:"detail"`
 	Kernel  string `json:"kernel"`
 	Release string `json:"release"`
-	// Fixable reports that POST /databases/{id}/kernel-mitigation applies it.
+	// Fixable reports that POST /databases/{id}/kernel-mitigation, or POST
+	// /databases/kernel-mitigation for a container not connected, applies it.
 	Fixable bool `json:"fixable"`
 }
 
@@ -183,9 +184,12 @@ func mongoKernelUnneeded(kernel, release string, env map[string]string) string {
 	switch {
 	case !deploy.MongoKernelAffected(kernel):
 		return fmt.Sprintf("Linux %s is not a kernel MongoDB 8 refuses to start on; only 6.19 up to 7.0.13 are", cmp.Or(kernel, "(unreadable)"))
+	case release == "":
+		return fmt.Sprintf("neither its image's tag nor its MONGO_VERSION names a MongoDB release, and only MongoDB 8 and later need %s=%s",
+			deploy.MongoKernelTunables, deploy.MongoKernelTunable)
 	case !deploy.MongoReleaseAffected(release):
 		return fmt.Sprintf("MongoDB %s starts on this kernel as it is; only MongoDB 8 and later need %s=%s",
-			cmp.Or(release, "of an unknown release"), deploy.MongoKernelTunables, deploy.MongoKernelTunable)
+			release, deploy.MongoKernelTunables, deploy.MongoKernelTunable)
 	case deploy.MongoKernelMitigated(env[deploy.MongoKernelTunables]):
 		return fmt.Sprintf("its environment already sets %s=%s", deploy.MongoKernelTunables, env[deploy.MongoKernelTunables])
 	}
@@ -205,14 +209,10 @@ func mongoKernelAlertLine(kernel string, ct dockerx.Container) string {
 
 // POST /databases/{id}/kernel-mitigation
 //
-// Recreates a MongoDB 8 container that cannot start on this kernel with the
-// mitigation in its environment: the same configuration, volumes and name,
-// through Recreate, which puts the old container back if the new one cannot
-// be created. Refused, and audited either way, for a container that does not
-// need it (mongoKernelUnneeded) or that compose owns. Whether the container is
-// running is not asked: Docker reports a restarting one as running between
-// attempts, and the mitigation on a server that runs costs only the
-// performance mongod warns of.
+// The mitigation for a saved connection's server: its container, found where
+// the connection's page finds it, recreated by mitigateKernel. While that
+// runs, everyone reading the connection sees it restarting, as they would for
+// a restart from the power route.
 func (s *Server) handleDBKernelMitigation(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
@@ -227,33 +227,84 @@ func (s *Server) handleDBKernelMitigation(w http.ResponseWriter, r *http.Request
 	}
 	ctx, cancel := timeoutCtx(r, 5*time.Minute)
 	defer cancel()
-	refuse := func(code, message string, audit map[string]any) error {
-		audit["refused"] = message
-		httpx.SetAudit(r, "database.server.kernel_mitigation", conn.Name, audit)
-		return httpx.Err(http.StatusConflict, code, message)
-	}
-	kernel := s.hostKernel(ctx)
-	audit := map[string]any{"kernel": kernel}
 	if conn.Driver != dbx.DriverMongo {
-		return refuse("kernel_mitigation_unneeded", "the kernel mitigation is MongoDB's; this is not a MongoDB server", audit)
+		return s.refuseKernelMitigation(r, conn.Name, map[string]any{}, "kernel_mitigation_unneeded",
+			"the kernel mitigation is MongoDB's; this is not a MongoDB server")
 	}
 	place := s.newDBHostView(ctx).place(ctx, conn, dsn)
 	if place.Container == nil || place.foreign {
-		return refuse("kernel_mitigation_unavailable", "no MongoDB container on this machine was found serving it, so there is no container to recreate", audit)
+		return s.refuseKernelMitigation(r, conn.Name, map[string]any{}, "kernel_mitigation_unavailable",
+			"no MongoDB container on this machine was found serving it, so there is no container to recreate")
 	}
-	detail, err := s.modules.docker.Inspect(ctx, place.Container.ID)
+	return s.mitigateKernel(ctx, w, r, conn.Name, place.Container.ID, func(recreate func() error) error {
+		change, carriedOut := s.dbConns.begin(id, "restart"), false
+		defer func() { s.dbConns.finish(id, change, carriedOut) }()
+		if err := recreate(); err != nil {
+			return err
+		}
+		carriedOut = true
+		// The pool dialled the old container; the new one has a new socket.
+		s.modules.dbs.Close(id)
+		s.dbConns.stale(id)
+		return nil
+	})
+}
+
+// POST /databases/kernel-mitigation {"container": "<id or name>"}
+//
+// The same for a MongoDB container found here and not connected — on an
+// affected kernel, the one provisioning made before it knew, whose adopt never
+// got an answer. Once it starts, discovery connects it like any other.
+func (s *Server) handleDBKernelMitigationContainer(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Container string `json:"container"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	container := strings.TrimSpace(req.Container)
+	if container == "" {
+		return httpx.BadRequest("name the container")
+	}
+	if s.modules.docker == nil {
+		return httpx.Err(http.StatusServiceUnavailable, "docker_unavailable", "this host has no Docker socket")
+	}
+	ctx, cancel := timeoutCtx(r, 5*time.Minute)
+	defer cancel()
+	return s.mitigateKernel(ctx, w, r, container, container, func(recreate func() error) error { return recreate() })
+}
+
+func (s *Server) refuseKernelMitigation(r *http.Request, target string, audit map[string]any, code, message string) error {
+	audit["refused"] = message
+	httpx.SetAudit(r, "database.server.kernel_mitigation", target, audit)
+	return httpx.Err(http.StatusConflict, code, message)
+}
+
+// mitigateKernel recreates a MongoDB 8 container that cannot start on this
+// kernel with the mitigation in its environment: the same configuration,
+// volumes and name, through Recreate, which puts the old container back if the
+// new one cannot be created. wrap runs around the recreate. Refused, and
+// audited under target either way, for a container that does not need it
+// (mongoKernelUnneeded) or that compose owns. Whether the container is running
+// is not asked: Docker reports a restarting one as running between attempts,
+// and the mitigation on a server that runs costs only the performance mongod
+// warns of.
+func (s *Server) mitigateKernel(ctx context.Context, w http.ResponseWriter, r *http.Request, target, container string, wrap func(recreate func() error) error) error {
+	kernel := s.hostKernel(ctx)
+	audit := map[string]any{"kernel": kernel}
+	detail, err := s.modules.docker.Inspect(ctx, container)
 	if err != nil {
 		return s.dockerErr(err)
 	}
 	audit["container"], audit["id"] = detail.Name, detail.ID
 	env := envMap(detail.Env)
-	problem := mongoKernelProblemOf(kernel, detail.Image, env, place.Container.ComposeProject)
+	problem := mongoKernelProblemOf(kernel, detail.Image, env, detail.ComposeStack)
 	switch {
 	case problem == nil:
-		return refuse("kernel_mitigation_unneeded", fmt.Sprintf("%s does not need the mitigation: %s",
-			detail.Name, mongoKernelUnneeded(kernel, mongoContainerRelease(detail.Image, env), env)), audit)
+		return s.refuseKernelMitigation(r, target, audit, "kernel_mitigation_unneeded", fmt.Sprintf(
+			"%s does not need the mitigation: %s", detail.Name, mongoKernelUnneeded(kernel, mongoContainerRelease(detail.Image, env), env)))
 	case !problem.Fixable:
-		return refuse("compose_managed", problem.Detail, audit)
+		return s.refuseKernelMitigation(r, target, audit, "compose_managed", problem.Detail)
 	}
 	audit["release"] = problem.Release
 	spec, err := s.modules.docker.SpecOf(ctx, detail.ID)
@@ -261,29 +312,55 @@ func (s *Server) handleDBKernelMitigation(w http.ResponseWriter, r *http.Request
 		return s.dockerErr(err)
 	}
 	audit["tunables"] = applyMongoKernelMitigation(spec, kernel)
-	// Everyone reading the connection sees it restarting until it answers,
-	// as they would for a restart from the power route.
-	change, carriedOut := s.dbConns.begin(id, "restart"), false
-	defer func() { s.dbConns.finish(id, change, carriedOut) }()
-	res, err := s.modules.docker.Recreate(ctx, detail.ID, dockerx.RecreateOptions{Spec: spec}, nil)
+	var res *dockerx.CreateResult
+	err = wrap(func() error {
+		var err error
+		res, err = s.modules.docker.Recreate(ctx, detail.ID, dockerx.RecreateOptions{Spec: spec}, nil)
+		return err
+	})
 	if err != nil {
 		audit["error"] = err.Error()
-		httpx.SetAudit(r, "database.server.kernel_mitigation", conn.Name, audit)
+		httpx.SetAudit(r, "database.server.kernel_mitigation", target, audit)
 		if errors.Is(err, dockerx.ErrComposeManaged) {
 			return httpx.Err(http.StatusConflict, "compose_managed", err.Error())
 		}
 		return s.dockerErr(err)
 	}
-	carriedOut = true
 	warnings := append([]string{}, res.Warnings...)
 	audit["newId"], audit["warnings"] = res.ID, warnings
-	// The pool dialled the old container; the new one has a new socket.
-	s.modules.dbs.Close(id)
-	s.dbConns.stale(id)
-	httpx.SetAudit(r, "database.server.kernel_mitigation", conn.Name, audit)
+	httpx.SetAudit(r, "database.server.kernel_mitigation", target, audit)
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"container": detail.Name, "kernel": kernel, "release": problem.Release,
 		"tunables": audit["tunables"], "warnings": warnings,
 	})
 	return nil
+}
+
+// inventoryKernelProblems is, by instance key, mongoKernelProblem for each
+// MongoDB container discovery found here that no connection is made to and
+// that is not running: what Found on this server offers the fix on. Nil on a
+// kernel MongoDB 8 starts on, which is the only cost on every other machine.
+func (s *Server) inventoryKernelProblems(ctx context.Context, instances []dbx.Instance) map[string]*dbKernelProblem {
+	if s.modules.docker == nil {
+		return nil
+	}
+	kernel := s.hostKernel(ctx)
+	if !deploy.MongoKernelAffected(kernel) {
+		return nil
+	}
+	out := map[string]*dbKernelProblem{}
+	for _, inst := range instances {
+		if inst.Kind != dbx.KindServer || inst.Driver != dbx.DriverMongo || inst.Container == nil ||
+			inst.Container.ID == "" || inst.State == dbx.StateRunning || len(inst.Connections) > 0 {
+			continue
+		}
+		detail, err := s.modules.docker.Inspect(ctx, inst.Container.ID)
+		if err != nil {
+			continue
+		}
+		if problem := mongoKernelProblemOf(kernel, detail.Image, envMap(detail.Env), detail.ComposeStack); problem != nil {
+			out[inst.Key] = problem
+		}
+	}
+	return out
 }

@@ -2603,7 +2603,17 @@ The passes, in order. Each one is a diff you can review on its own.
    its shelf for a server that does not answer, the Backups block and the card's foot for a dump
    that is old or missing, the card's foot for a port open to the internet, *Found on this server* for a
    server that waits for a password, and every fix it carried (Start, Back up now, Restrict to this
-   server, Settings) a verb on the card. The page opens on `HostIdentity`: the server's engines as
+   server, Settings) a verb on the card. A MongoDB 8 server this kernel keeps from starting (the fleet's
+   `kernelProblem`) says *MongoDB cannot start on this kernel; apply the mitigation* where a failed
+   card prints what its server said, with the sentence behind it as the line's title, and its foot
+   offers *Apply mitigation* in Start's place (Start would only start it failing again), the same as
+   the menu's *Apply kernel mitigation*: the ordinary confirmation, saying what the recreate does,
+   then `POST /databases/{id}/kernel-mitigation` and *Starting…* until it answers. For a compose
+   service the line says to add the mitigation to its compose file, and nothing is offered. A found
+   server the inventory reports the same way (`kernelProblems`) says it as its row's reason, and its
+   one press is *Apply mitigation* (`foundAction`'s `kernel-mitigation`), asked first, after which
+   Connect is what the row offers. The database's home says the mitigation is on, and why, as a
+   *Kernel* row under *Runs as*. The page opens on `HostIdentity`: the server's engines as
    a stack of their own logos, the commonest and then the largest first, the host's name, how many
    databases, what they store, the sessions open, how many things read them (a link to the map),
    how many were dumped in the last day and, in amber, how many never were; at its right end the

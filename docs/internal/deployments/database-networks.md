@@ -18,7 +18,8 @@ keeps the shape its previous reference asked for. Quick setup also offers Postgr
 x86-64, the one architecture that image is published for), which Databases already recognises, and
 refuses MongoDB 7 on a CPU without AVX or ARMv8.2 atomics before pulling it. On Linux 6.19 up to 7.0.13
 it starts MongoDB 8 with `GLIBC_TUNABLES=glibc.pthread.rseq=1`, without which it does not start there
-(MongoDB SERVER-121912; *MongoDB 8 and the kernel* in [Databases](../backend/databases-proxy-platform.md)).
+(MongoDB SERVER-121912; *MongoDB 8 and the kernel* in
+[Databases](../backend/databases-proxy-platform.md)).
 
 A PostgreSQL connection that has a [connection pooler](../backend/databases-proxy-platform.md) also has
 `${{database.5.pooled}}` (and `5.pooled.jdbc`, `5.pooled.url.app_cache`, …): the same string with the host

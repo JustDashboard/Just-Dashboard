@@ -106,6 +106,8 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 				// container's environment by recreating it, as the access
 				// change recreates it with another binding.
 				r.Method(http.MethodPost, "/{id}/kernel-mitigation", s.handle(s.handleDBKernelMitigation))
+				// And for such a server found here that is not connected.
+				r.Method(http.MethodPost, "/kernel-mitigation", s.handle(s.handleDBKernelMitigationContainer))
 			})
 		})
 		// Read surface: available to any authenticated role, including readonly.

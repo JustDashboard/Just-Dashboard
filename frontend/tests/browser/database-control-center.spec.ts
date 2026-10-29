@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { hold } from "./database-fixture"
-import { dockerlessInventory, mockFleet, refusal } from "./database-fleet-fixture"
+import { dockerInventory, dockerlessInventory, mockFleet, refusal } from "./database-fleet-fixture"
 
 /**
  * The section-wide pages of Databases: the control center, the map and Add a
@@ -370,6 +370,53 @@ test.describe("the control center", () => {
     await expect(foundRow(page, "postgresql@17-main")).toBeVisible()
   })
 
+  test("a MongoDB this kernel keeps from starting is fixed from its own card", async ({ page }) => {
+    const problem = {
+      message: "MongoDB cannot start on this kernel; apply the mitigation",
+      detail:
+        "MongoDB 8.0.34 refuses to start on Linux 7.0.0-1017-azure (MongoDB SERVER-121912). Applying the mitigation recreates its container with GLIBC_TUNABLES=glibc.pthread.rseq=1, on the same volumes.",
+      kernel: "7.0.0-1017-azure",
+      release: "8.0.34",
+      fixable: true,
+    }
+    const server = await mockFleet(page, {
+      fleet: {
+        5: {
+          ok: false,
+          state: "unreachable",
+          error: "server selection error: connection refused",
+          kernelProblem: problem,
+        },
+      },
+    })
+    server.answer("POST /databases/5/kernel-mitigation", () => ({
+      body: { container: "app-db", kernel: problem.kernel, release: problem.release, warnings: [] },
+    }))
+    await page.goto("/databases")
+
+    // The reason where a failure is said, not the dial it refused, and the
+    // fix in its foot where Start would be.
+    const app = card(page, "app")
+    await expect(app.locator("[data-slot=fleet-error]")).toHaveText(problem.message)
+    await expect(app.locator("[data-slot=fleet-error]")).toHaveAttribute("title", problem.detail)
+    await expect(app).not.toContainText("connection refused")
+    await app.getByRole("button", { name: "Apply the kernel mitigation to app" }).click()
+
+    // Asked first, in what it does, then carried out once.
+    const dialog = page.getByRole("dialog")
+    await expect(dialog).toContainText("GLIBC_TUNABLES=glibc.pthread.rseq=1")
+    await expect(dialog).toContainText("Linux 7.0.14 and later do not need it")
+    await dialog.getByRole("button", { name: "Apply" }).click()
+    await expect.poll(() => server.bodies("POST /databases/5/kernel-mitigation")).toEqual([{}])
+    await expect(page.getByText("app was recreated with the kernel mitigation")).toBeVisible()
+
+    // Its menu offers the same, and no other card offers it at all.
+    await app.getByRole("button", { name: "Actions for app" }).click()
+    await expect(page.getByRole("menuitem", { name: "Apply kernel mitigation" })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(page.getByRole("button", { name: /Apply the kernel mitigation/ })).toHaveCount(1)
+  })
+
   test("forty databases fit the page, as cards and as a table", async ({ page }) => {
     const server = await mockFleet(page)
     server.answer("GET /databases/fleet", () => ({
@@ -719,6 +766,65 @@ test.describe("the control center", () => {
 })
 
 test.describe("found on this server", () => {
+  test("a MongoDB that never started on this kernel is recreated with the mitigation, asked first", async ({
+    page,
+  }) => {
+    const inventory = dockerInventory()
+    const mysql = inventory.instances.find((one) => one.key === "docker:old-mysql")!
+    const problem = {
+      message: "MongoDB cannot start on this kernel; apply the mitigation",
+      detail:
+        "MongoDB 8.0.34 refuses to start on Linux 7.0.0-1017-azure (MongoDB SERVER-121912). Applying the mitigation recreates its container with GLIBC_TUNABLES=glibc.pthread.rseq=1, on the same volumes.",
+      kernel: "7.0.0-1017-azure",
+      release: "8.0.34",
+      fixable: true,
+    }
+    inventory.instances.push({
+      ...mysql,
+      key: "docker:orders-mongo",
+      name: "orders-mongo",
+      engine: "mongodb",
+      driver: "mongodb",
+      flavor: "mongodb",
+      label: "MongoDB",
+      state: "restarting",
+      reason: "the container is restarting",
+      container: {
+        ...mysql.container!,
+        id: "c-mongo",
+        name: "orders-mongo",
+        image: "mongo:8.0",
+        status: "Restarting (1) 4 seconds ago",
+      },
+    })
+    const server = await mockFleet(page, {
+      inventory: Object.assign(inventory, { kernelProblems: { "docker:orders-mongo": problem } }),
+    })
+    server.answer("POST /databases/kernel-mitigation", () => ({
+      body: {
+        container: "orders-mongo",
+        kernel: problem.kernel,
+        release: problem.release,
+        warnings: [],
+      },
+    }))
+    await page.goto("/databases")
+
+    // Said as the reason it does not start, with the fix as its one press.
+    await expect(foundRow(page, "orders-mongo")).toContainText(problem.message)
+    await page.getByRole("button", { name: "Apply the kernel mitigation to orders-mongo" }).click()
+    const dialog = page.getByRole("dialog")
+    await expect(dialog).toContainText("GLIBC_TUNABLES=glibc.pthread.rseq=1")
+    await expect(dialog).toContainText("mongo:8.0")
+    await dialog.getByRole("button", { name: "Apply" }).click()
+    await expect
+      .poll(() => server.bodies("POST /databases/kernel-mitigation"))
+      .toEqual([{ container: "c-mongo" }])
+    await expect(
+      page.getByText("orders-mongo was recreated with the kernel mitigation"),
+    ).toBeVisible()
+  })
+
   test("lists what is not connected with the one thing to do about each", async ({ page }) => {
     await mockFleet(page)
     await page.goto("/databases")

@@ -67,7 +67,7 @@ func TestMongoKernelProblemIsOnlyMongoDB8WithoutTheTunable(t *testing.T) {
 		if got := mongoKernelProblemOf(c.kernel, c.image, c.env, ""); got != nil {
 			t.Errorf("%s: offered %+v", why, got)
 		}
-		if why != "MongoDB 7.0" && why != "an unknown image" && mongoKernelUnneeded(c.kernel, mongoContainerRelease(c.image, c.env), c.env) == "" {
+		if mongoKernelUnneeded(c.kernel, mongoContainerRelease(c.image, c.env), c.env) == "" {
 			t.Errorf("%s: no reason given for not needing it", why)
 		}
 	}
@@ -174,5 +174,12 @@ func TestKernelMitigationRefusesWhatIsNotMongoDB(t *testing.T) {
 	rec := do(t, router, http.MethodPost, "/databases/1/kernel-mitigation", "")
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "not a MongoDB server") {
 		t.Fatalf("a SQLite connection = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestKernelMitigationOfAContainerNamesOne(t *testing.T) {
+	_, router := dbTestRouter(t)
+	if rec := do(t, router, http.MethodPost, "/databases/kernel-mitigation", `{}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("no container = %d %s", rec.Code, rec.Body.String())
 	}
 }

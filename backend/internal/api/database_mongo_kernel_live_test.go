@@ -81,6 +81,11 @@ func liveMongoKernelMitigation(t *testing.T) {
 	} else if err := docker.Lifecycle(ctx, name, dockerx.ActionStop, nil); err != nil {
 		t.Fatal(err)
 	}
+	// Not connected yet, as a server whose adopt never got an answer is not:
+	// Found on this server offers the fix.
+	if found := liveInventoryKernelProblem(t, router, name); found == nil || !found.Fixable {
+		t.Fatalf("Found on this server did not offer the mitigation for %s: %+v\n%s", name, found, describeFixtureContainer(docker, name))
+	}
 	sealed, err := s.Sealer.Seal(fmt.Sprintf("mongodb://%s:%s@127.0.0.1:%d/app?authSource=admin", tmpl.user, password, port))
 	if err != nil {
 		t.Fatal(err)
@@ -143,6 +148,34 @@ func liveMongoKernelMitigation(t *testing.T) {
 	if after := liveKernelProblem(t, router, id); after != nil {
 		t.Fatalf("the Databases page still offers the mitigation once it is applied: %+v", after)
 	}
+}
+
+// liveInventoryKernelProblem is what the inventory says of one container's kernel.
+func liveInventoryKernelProblem(t *testing.T, router http.Handler, container string) *dbKernelProblem {
+	t.Helper()
+	read := do(t, router, http.MethodGet, "/databases/inventory", "")
+	if read.Code != http.StatusOK {
+		t.Fatalf("inventory: HTTP %d: %s", read.Code, read.Body)
+	}
+	var inventory struct {
+		Instances []struct {
+			Key       string `json:"key"`
+			Container *struct {
+				Name string `json:"name"`
+			} `json:"container"`
+		} `json:"instances"`
+		KernelProblems map[string]*dbKernelProblem `json:"kernelProblems"`
+	}
+	if err := json.Unmarshal(read.Body.Bytes(), &inventory); err != nil {
+		t.Fatal(err)
+	}
+	for _, inst := range inventory.Instances {
+		if inst.Container != nil && inst.Container.Name == container {
+			return inventory.KernelProblems[inst.Key]
+		}
+	}
+	t.Fatalf("%s is not in the inventory", container)
+	return nil
 }
 
 // liveKernelProblem is what the fleet says of one connection's kernel.
