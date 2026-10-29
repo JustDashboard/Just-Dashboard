@@ -353,6 +353,53 @@ func TestValidationRejectsEachUnsafeShape(t *testing.T) {
 		{"a generated secret shorter than review allows", func(b *Blueprint) {
 			b.Secrets = []Secret{{Name: "token", Variable: "APP_TOKEN", Label: "Token", Length: 8}}
 		}, "generated secrets are 24-128"},
+		{"an install file outside every volume", func(b *Blueprint) {
+			b.Operations.Install = []Operation{{Kind: OperationWriteFile, Path: "/etc/app.conf", Content: "x=1"}}
+		}, "not inside a writable volume"},
+		{"an install file written as a volume's root", func(b *Blueprint) {
+			b.Volumes = []Volume{{Name: "data", Target: "/data", Purpose: "State", Data: true}}
+			b.Operations.Install = []Operation{{Kind: OperationWriteFile, Path: "/data", Content: "x=1"}}
+		}, "not inside a writable volume"},
+		{"an install file in a read-only volume", func(b *Blueprint) {
+			b.Volumes = []Volume{{Name: "conf", Target: "/conf", Purpose: "Settings", ReadOnly: true}}
+			b.Operations.Install = []Operation{{Kind: OperationWriteFile, Path: "/conf/app.conf", Content: "x=1"}}
+		}, "not inside a writable volume"},
+		{"a write_file at startup", func(b *Blueprint) {
+			b.Volumes = []Volume{{Name: "data", Target: "/data", Purpose: "State", Data: true}}
+			b.Operations.Startup = []Operation{{Kind: OperationWriteFile, Path: "/data/app.conf", Content: "x=1"}}
+		}, "write_file is an install operation"},
+		{"an install file naming an undeclared secret", func(b *Blueprint) {
+			b.Volumes = []Volume{{Name: "data", Target: "/data", Purpose: "State", Data: true}}
+			b.Operations.Install = []Operation{{Kind: OperationWriteFile, Path: "/data/app.conf", Content: "key={{secret.ghost}}"}}
+		}, "undeclared secret"},
+		{"an install file with a placeholder outside the vocabulary", func(b *Blueprint) {
+			b.Volumes = []Volume{{Name: "data", Target: "/data", Purpose: "State", Data: true}}
+			b.Operations.Install = []Operation{{Kind: OperationWriteFile, Path: "/data/app.conf", Content: "key={{variable.HOME}}"}}
+		}, "placeholder other than"},
+		{"an artifact with nowhere to go", func(b *Blueprint) {
+			b.Operations.Startup = []Operation{{Kind: OperationFetchArtifact, URL: "https://example.test/x.zip", MaxBytes: 1024, Checksum: "sha256:" + strings.Repeat("a", 64)}}
+		}, "does not say where"},
+		{"a pinned artifact at a templated URL", func(b *Blueprint) {
+			b.Inputs = []Input{{Name: "version", Kind: InputText, Label: "Version", Default: "1"}}
+			b.Operations.Startup = []Operation{{Kind: OperationFetchArtifact, URL: "https://example.test/{{input.version}}.zip", MaxBytes: 1024, Checksum: "sha256:" + strings.Repeat("a", 64)}}
+		}, "URL is templated"},
+		{"a UDP probe of a TCP port", func(b *Blueprint) {
+			b.Checks = append(b.Checks, Check{Name: "Ping", Kind: CheckUDPProbe, Phase: "readiness", Port: "http"})
+		}, "sends a datagram to tcp port"},
+		{"a game handshake over UDP", func(b *Blueprint) {
+			b.Ports = append(b.Ports, Port{Name: "game", Internal: 19132, Protocol: "udp", Purpose: "Players", Exposure: "direct"})
+			b.Checks = append(b.Checks, Check{Name: "Handshake", Kind: CheckHandshake, Phase: "readiness", Port: "game"})
+		}, "opens a TCP connection to udp port"},
+		{"a probe payload that is not hexadecimal", func(b *Blueprint) {
+			b.Ports = append(b.Ports, Port{Name: "game", Internal: 19132, Protocol: "udp", Purpose: "Players", Exposure: "direct"})
+			b.Checks = append(b.Checks, Check{Name: "Ping", Kind: CheckUDPProbe, Phase: "readiness", Port: "game", Payload: "ping"})
+		}, "hexadecimal"},
+		{"a datagram on an HTTP check", func(b *Blueprint) {
+			b.Checks[0].Payload = "01"
+		}, "only a udp_probe sends"},
+		{"an editable file on a web blueprint", func(b *Blueprint) {
+			b.Files = []ConfigFile{{Path: "/etc/app.yml", Label: "Settings", Format: "yaml"}}
+		}, "Server settings"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
@@ -515,5 +562,77 @@ func TestBlueprintDomainsHaveDNSLengthLimits(t *testing.T) {
 	}
 	if _, err := Render(definition, map[string]string{"domain": strings.Repeat("a.", 126) + "aa"}); err == nil {
 		t.Fatal("a 254-byte hostname was accepted")
+	}
+}
+
+// Both game servers deploy, and the one thing still refused is an artifact
+// whose bytes nobody pinned.
+func TestDeploymentSupportRefusesOnlyAnUnpinnedArtifact(t *testing.T) {
+	t.Parallel()
+	for _, id := range []string{"minecraft-java", "minecraft-bedrock"} {
+		definition, err := Get(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if supported, reason := DeploymentSupport(definition); !supported {
+			t.Fatalf("%s is still a preview: %s", id, reason)
+		}
+	}
+	unpinned := minimalBlueprint()
+	unpinned.Volumes = []Volume{{Name: "data", Target: "/data", Purpose: "State", Data: true}}
+	unpinned.Operations.Startup = []Operation{{Kind: OperationFetchArtifact, Path: "/data/server.jar",
+		URL: "https://example.test/server.jar", MaxBytes: 1 << 20, Value: "https://example.test/versions.json"}}
+	if err := Validate(unpinned); err != nil {
+		t.Fatal(err)
+	}
+	if supported, reason := DeploymentSupport(unpinned); supported || !strings.Contains(reason, "pinned checksum") {
+		t.Fatalf("an unpinned artifact = %v, %q", supported, reason)
+	}
+	pinned := *unpinned
+	pinned.Operations.Startup = []Operation{{Kind: OperationFetchArtifact, Path: "/data/server.jar",
+		URL: "https://example.test/server.jar", MaxBytes: 1 << 20, Checksum: "sha256:" + strings.Repeat("b", 64)}}
+	if supported, _ := DeploymentSupport(&pinned); !supported {
+		t.Fatal("a pinned artifact is refused")
+	}
+	plan, err := Render(&pinned, nil)
+	if err != nil || len(plan.Artifacts) != 1 || plan.Artifacts[0].Path != "/data/server.jar" {
+		t.Fatalf("artifact = %#v, %v", plan, err)
+	}
+}
+
+// An install file is rendered with the operator's inputs escaped for its
+// format and the generated secret as a reference, so the plan stays
+// secret-free and a value cannot smuggle in a reference of its own.
+func TestInstallFilesRenderInputsAndReferenceSecrets(t *testing.T) {
+	t.Parallel()
+	definition, err := Get("minecraft-java")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := Render(definition, map[string]string{"eula": "true", "server-name": "Ünïcode \\ server", "max-players": "8"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.InstallFiles) != 1 || plan.InstallFiles[0].Path != "/data/server.properties" || plan.InstallFiles[0].Format != "properties" {
+		t.Fatalf("install files = %#v", plan.InstallFiles)
+	}
+	content := plan.InstallFiles[0].Content
+	for _, want := range []string{"motd=\\u00dcn\\u00efcode \\\\ server\n", "max-players=8\n", "rcon.password={{variable.RCON_PASSWORD}}\n"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("server.properties lacks %q:\n%s", want, content)
+		}
+	}
+	for _, variable := range plan.Variables {
+		// The inputs that became the file no longer reach the image as
+		// variables, which it would apply over the operator's later edits.
+		if variable.Name == "MOTD" || variable.Name == "MAX_PLAYERS" || variable.Name == "DIFFICULTY" {
+			t.Fatalf("%s is still a variable the image rewrites the file from", variable.Name)
+		}
+	}
+	if _, err := Render(definition, map[string]string{"eula": "true", "server-name": "{{variable.RCON_PASSWORD}}"}); err == nil {
+		t.Fatal("a server name spelling a reference was rendered into the file")
+	}
+	if EscapeProperty("a\\b") != "a\\\\b" || EscapeProperty("😀") != "\\ud83d\\ude00" {
+		t.Fatalf("escape = %q %q", EscapeProperty("a\\b"), EscapeProperty("😀"))
 	}
 }

@@ -623,6 +623,11 @@ type RuntimePlanConfig struct {
 	Capabilities       []string        `json:"capabilities,omitempty"`
 	Devices            []string        `json:"devices,omitempty"`
 	Mounts             []RuntimeMount  `json:"mounts,omitempty"`
+	// Seeds are written into the plan's managed volumes by a helper
+	// container before the release's own container starts: install-time
+	// files a definition renders, and downloads verified against their pinned
+	// digest (runtime_seeds.go). Each is written only where nothing is yet.
+	Seeds []RuntimeSeed `json:"seeds,omitempty"`
 	// Resource limits are optional caps handed to the container runtime. Zero
 	// means unlimited, which is Docker's own default; the plan carries them so a
 	// release snapshot pins exactly what the candidate was allowed to use.
@@ -767,6 +772,36 @@ type PublishedPort struct {
 	// BindAddress is the host interface. Empty publishes on every interface,
 	// which is what a port a proxy cannot front exists for.
 	BindAddress string `json:"bindAddress,omitempty"`
+}
+
+// effectiveProtocol is the primary port's protocol as checks and the
+// runtime's own binding read it: UDP only where the plan says the port is
+// UDP alone, which validation allows only for a fixed, unrouted publication.
+// A "tcp+udp" port is reached over TCP.
+func (c RuntimePlanConfig) effectiveProtocol() string {
+	if c.Protocol == "udp" {
+		return "udp"
+	}
+	return "tcp"
+}
+
+// publishedProtocols are the protocols the primary port is published with:
+// one, or both for a server that signals over TCP and plays over UDP on the
+// same number.
+func (c RuntimePlanConfig) publishedProtocols() []string {
+	switch c.Protocol {
+	case "udp":
+		return []string{"udp"}
+	case "tcp+udp":
+		return []string{"tcp", "udp"}
+	}
+	return []string{"tcp"}
+}
+
+// portLabel names the primary publication the way a firewall rule does:
+// 25565/tcp, 19132/udp, or 19132/tcp+udp for both.
+func (c RuntimePlanConfig) portLabel() string {
+	return strconv.Itoa(c.HostPort) + "/" + strings.Join(c.publishedProtocols(), "+")
 }
 
 func (p PublishedPort) effectiveProtocol() string {
@@ -1499,7 +1534,21 @@ func (c PlanConfiguration) Validate() error {
 			return fmt.Errorf("runtime command passes credential material through argv; use a scoped variable")
 		}
 	}
-	if c.Runtime.Protocol != "" && c.Runtime.Protocol != "tcp" {
+	switch c.Runtime.Protocol {
+	case "", "tcp":
+	case "udp", "tcp+udp":
+		// A UDP server is published on its own port and never routed: no
+		// proxy in front of the dashboard carries a datagram, and leasing a
+		// loopback port for one would publish it where nothing can reach it.
+		// "tcp+udp" is one number on both, for a server that signals over
+		// TCP and plays over UDP (Bedrock's NetherNet).
+		if c.Runtime.InternalPort == 0 || c.Runtime.HostPort == 0 || c.Runtime.HostNetwork {
+			return invalidField("runtime.protocol", "a UDP service is published on a fixed host port; set the host port and the container port")
+		}
+		if len(c.Domains) > 0 {
+			return invalidField("runtime.protocol", "a UDP service cannot be routed to a domain; the proxy carries HTTP")
+		}
+	default:
 		return fmt.Errorf("runtime protocol %q is not supported by this release", c.Runtime.Protocol)
 	}
 	if c.Runtime.InternalPort < 0 || c.Runtime.InternalPort > 65535 {
@@ -1524,7 +1573,7 @@ func (c PlanConfiguration) Validate() error {
 			return invalidField(field, "host networking already exposes every port; remove the published ports or the host network")
 		}
 		key := port.effectiveProtocol() + ":" + strconv.Itoa(port.HostPort)
-		if publishedHostPorts[key] || (port.effectiveProtocol() == "tcp" && port.HostPort == c.Runtime.HostPort) {
+		if publishedHostPorts[key] || (slices.Contains(c.Runtime.publishedProtocols(), port.effectiveProtocol()) && port.HostPort == c.Runtime.HostPort) {
 			return invalidField(field, "host port %d/%s is published twice", port.HostPort, port.effectiveProtocol())
 		}
 		publishedHostPorts[key] = true
@@ -1573,6 +1622,9 @@ func (c PlanConfiguration) Validate() error {
 			return invalidField(fmt.Sprintf("runtime.mounts[%d]", index), "runtime mount target and ownership are invalid")
 		}
 		seenMountTargets[target] = true
+	}
+	if err := validateRuntimeSeeds(c); err != nil {
+		return err
 	}
 	for _, capability := range c.Runtime.Capabilities {
 		if !capabilityRE.MatchString(capability) {
@@ -2181,7 +2233,7 @@ func validOwnership(ownership OwnershipMode) bool {
 
 func validCheckKind(kind string) bool {
 	switch kind {
-	case "http", "tcp", "docker_health", "command", "public_route", "dns", "tls", "game_handshake", "backup_freshness":
+	case "http", "tcp", "docker_health", "command", "public_route", "dns", "tls", "game_handshake", "backup_freshness", "udp_probe":
 		return true
 	default:
 		return false

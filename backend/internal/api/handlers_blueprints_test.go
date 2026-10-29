@@ -234,3 +234,31 @@ func TestGamePlayerActionsAreClosedAtTheRoute(t *testing.T) {
 		}
 	}
 }
+
+// Java's console is RCON, which its definition declares; Bedrock has none,
+// so its console and player list say so instead of failing on every press.
+func TestOnlyAGameWithRCONHasAConsole(t *testing.T) {
+	t.Parallel()
+	java, err := blueprint.Get("minecraft-java")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bedrock, err := blueprint.Get("minecraft-bedrock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reason := gameConsoleUnsupported(java); reason != "" {
+		t.Fatalf("Java has no console: %s", reason)
+	}
+	if reason := gameConsoleUnsupported(bedrock); !strings.Contains(reason, "no remote console") {
+		t.Fatalf("Bedrock's console = %q", reason)
+	}
+	if reason := gameConsoleUnsupported(nil); reason != "" {
+		t.Fatalf("an unknown definition lost its console: %s", reason)
+	}
+	s := testServer(t)
+	players := s.observePlayers(t.Context(), &gameContext{Definition: bedrock, ContainerID: "abc"})
+	if players.Supported || players.Status != "unsupported" {
+		t.Fatalf("Bedrock players = %#v", players)
+	}
+}

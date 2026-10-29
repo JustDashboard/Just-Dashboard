@@ -3497,6 +3497,24 @@ export type GamePlayers = {
   observedAt: string
 }
 
+/**
+ * Where a game server's players connect, read from the live release: the
+ * port and protocol, the bind address, and what the host firewall does with
+ * it. `firewall` is "admits" (an allow rule matches), "drops" (on, refusing
+ * by default, nothing matches), "off", "open" (accepts by default) or
+ * "unknown" with a reason.
+ */
+export type GameReach = {
+  port: number
+  /** One number on both for a server that signals over TCP and plays over UDP. */
+  protocol: "tcp" | "udp" | "tcp+udp"
+  bind: string
+  public: boolean
+  firewall: "admits" | "drops" | "off" | "open" | "unknown"
+  reason?: string
+  editable?: boolean
+}
+
 export type GameOverview = {
   status: "available" | "unavailable"
   reason?: string
@@ -3506,6 +3524,9 @@ export type GameOverview = {
   address?: string
   players?: GamePlayers
   console: boolean
+  /** Why the game has no console of its own (Bedrock has no RCON). */
+  consoleReason?: string
+  reach?: GameReach
   files: BlueprintConfigFile[]
 }
 

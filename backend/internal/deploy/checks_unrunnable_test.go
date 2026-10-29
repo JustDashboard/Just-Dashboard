@@ -14,7 +14,6 @@ var unrunnableKinds = map[string]string{
 	"dns":              "public_route",
 	"tls":              "public_route",
 	"backup_freshness": "storage dependency",
-	"game_handshake":   "game-server integration",
 }
 
 func TestSettingsCannotSaveACheckNothingRuns(t *testing.T) {
@@ -91,7 +90,7 @@ func TestAStoredPlanWithACheckNothingRunsStillDeploys(t *testing.T) {
 			t.Fatalf("a %s check ran as %#v", kind, evidence)
 		}
 	}
-	for _, kind := range []string{"http", "tcp", "docker_health", "command", "public_route"} {
+	for _, kind := range []string{"http", "tcp", "docker_health", "command", "public_route", "game_handshake", "udp_probe"} {
 		if reason := unrunnableCheck(kind); reason != "" {
 			t.Fatalf("%s is a kind the runner runs, but is refused: %s", kind, reason)
 		}
