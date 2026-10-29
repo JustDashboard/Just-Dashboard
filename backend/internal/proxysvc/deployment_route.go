@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -100,6 +101,10 @@ type DeploymentRoute struct {
 	// sends no header, which is where a route starts: the policy outlives
 	// a mistake for as long as it says.
 	HSTS *DeploymentHSTS `json:"hsts,omitempty"`
+	// Sleep has the route wake its application when a request finds it
+	// stopped (deployment_sleep.go). Nil is a route whose application is
+	// never stopped for being idle.
+	Sleep *DeploymentSleep `json:"sleep,omitempty"`
 	// DropCookies are cookies taken out of every request before the
 	// application is sent it, every other cookie kept. The service sets the
 	// dashboard's own (DashboardCookies) on a route serving the name the
@@ -424,6 +429,9 @@ func validateDeploymentRules(route DeploymentRoute) error {
 			return errors.New("signing in replaces the route's password — remove the password first")
 		}
 	}
+	if err := validateDeploymentSleep(route); err != nil {
+		return err
+	}
 	return validateDeploymentPages(route)
 }
 
@@ -594,6 +602,11 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 	}
 	if edge != nil {
 		return s.applyDockerCaddyRoute(ctx, edge, route)
+	}
+	if route.Sleep != nil && len(s.nginxWakeSocket()) > maxSocketPath {
+		// nginx refuses the whole configuration over a socket path longer
+		// than an address can carry.
+		return DeploymentRouteResult{}, fmt.Errorf("the wake socket %s is too long a path for nginx", s.nginxWakeSocket())
 	}
 	spec := s.deploymentSpec(route)
 	content, err := RenderNginx(spec)
@@ -910,6 +923,9 @@ func wildcardCertificateCovers(pattern, domain string) bool {
 func (s *Service) deploymentSpec(route DeploymentRoute) *SiteSpec {
 	spec := deploymentSiteSpec(route, s.deploymentAuthFile(route))
 	s.SetPagesDir(spec)
+	if spec.sleep != nil {
+		spec.sleep.Socket = s.nginxWakeSocket()
+	}
 	return spec
 }
 
@@ -995,6 +1011,14 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 	}
 	spec.ErrorPages = slices.Sorted(slices.Values(route.ErrorPages))
 	spec.InterceptErrors = route.InterceptErrors
+	if route.Sleep != nil {
+		if host, port, err := sleepUpstream(route.Upstream); err == nil {
+			spec.sleep = &siteSleep{
+				Route: route.Name, Socket: "/etc/nginx/jd-wake/wake.sock",
+				Upstream: net.JoinHostPort(host, port), Hold: route.Sleep.HoldSeconds,
+			}
+		}
+	}
 	return spec
 }
 

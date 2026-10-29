@@ -202,6 +202,9 @@ func (s *Server) handleDeploymentScheduleCreate(w http.ResponseWriter, r *http.R
 	if err = httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
+	if err := s.refuseContainerScheduleWhileSleeping(r.Context(), projectID, environmentID, req); err != nil {
+		return err
+	}
 	item, err := s.modules.deployAutomation.CreateSchedule(r.Context(), projectID, environmentID, req)
 	if err != nil {
 		return mapAutomationError(err)
@@ -221,6 +224,9 @@ func (s *Server) handleDeploymentScheduleUpdate(w http.ResponseWriter, r *http.R
 	}
 	var req deploy.ScheduleWrite
 	if err = httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if err := s.refuseContainerScheduleWhileSleeping(r.Context(), projectID, environmentID, req); err != nil {
 		return err
 	}
 	item, err := s.modules.deployAutomation.UpdateSchedule(r.Context(), projectID, environmentID, scheduleID, req)

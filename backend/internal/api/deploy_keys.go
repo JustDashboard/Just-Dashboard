@@ -95,6 +95,7 @@ const (
 	whyPages           = "a route's maintenance and error pages are files on the server beside the proxy's route, and are edited in the dashboard"
 	whyRollbackTerms   = "the terms a release is kept warm and rolled back on are set in the dashboard"
 	whyRehearsalTerms  = "a migration rehearsal restores a database's backup, and which database and on what terms is chosen in the dashboard"
+	whyOperator        = "the operator reads with a person's leave a call at a time and proposes actions only a person's press runs, in the dashboard"
 	whyDataCopy        = "a copy of a release's data is a second copy of production's data, and its address carries a password: it is asked for, read and removed in the dashboard"
 	whyPreviewBranch   = "what a database gives previews is a second copy of production's data next to a pull request's code: it is decided in the dashboard"
 )
@@ -162,6 +163,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/{id}/environments/{env}/rollback-watch":                keyOpen,
 	"GET /deploy/{id}/environments/{env}/canary":                        keyOpen,
 	"GET /deploy/{id}/environments/{env}/maintenance":                   keyOpen,
+	"GET /deploy/{id}/environments/{env}/sleep":                         keyOpen,
 	"GET /deploy/{id}/environments/{env}/pages/{page}":                  keyOpen, // what every visitor is shown
 	"GET /deploy/{id}/environments/{env}/rehearsal":                     keyOpen, // the terms; the last report is the run's
 	"GET /deploy/{id}/environments/{env}/releases":                      keyOpen,
@@ -209,6 +211,9 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	// configuration's (runtime.maintenance.bypassFrom), which the key writes
 	// as any configuration, and reaches the route with the next release.
 	"PUT /deploy/{id}/environments/{env}/maintenance": keyOpen,
+	// Waking a sleeping environment starts its live container, which any
+	// visitor's request does and Start does.
+	"POST /deploy/{id}/environments/{env}/sleep/wake": keyOpen,
 
 	// Creating a deployment: session-only until a deploy key. A key's drafts
 	// are its own — the draft records the key, and the handlers hold a key to
@@ -320,6 +325,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"POST /deploy/github-app/manifest":                                               keySession(whyGitHubApp),
 	"POST /deploy/github-app/callback":                                               keySession(whyGitHubApp),
 	"DELETE /deploy/github-app/":                                                     keySession(whyGitHubApp),
+	"POST /deploy/{id}/assistant":                                                    keySession(whyOperator),
 
 	// What an ordinary key reaches and a deploy key does not.
 	"GET /deploy/secret-stores":               keyDeny(whySecretStoreList),

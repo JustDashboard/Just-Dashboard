@@ -260,6 +260,26 @@ nameless route a certificate is issued through has no switch. The route's own er
 A route written before the switch existed has no matcher, and the switch says so until its next
 deployment; the reconcile pass does not add it.
 
+## Sleep when idle
+
+The route of a release that sleeps ([scale to zero](scale-to-zero.md)) carries the wake. In the route
+block, after the fence, maintenance and the password or sign-in, `@jd_asleep file { root
+/config/just-dashboard/pages/<route>; try_files /sleeping.on }` sends a request to `route @jd_asleep`,
+which asks the dashboard over `reverse_proxy unix//config/just-dashboard/wake/wake.sock` (`method GET`,
+`rewrite "/wake/<route>"`, the visitor's `Cookie` and `Authorization` removed) and, on its 2xx, sends the
+request on to `reverse_proxy {vars.jd_wake_upstream}` — the address the wake answered with in
+`X-Jd-Upstream`, since a container started again may have another. `vars jd_app 1` follows, just before
+the application's `reverse_proxy`, whose `dial_timeout` is 1 s; `handle_errors` wakes a 502 or 504 that
+carries `jd_app` before the route's pages, so an auth server that does not answer — a 502 too — never
+wakes anything past the sign-in. A 401 from the wake is the route's `waking.html` with a 503, anything
+else its 502 page or Caddy's. The switch is a file like maintenance's, written and removed with `docker
+exec`, and the socket is the dashboard's, created at the host path of this container's own `/config`
+mount (`dockerCaddy.ConfigSource`) and checked from inside the container (`test -S`) before anything is
+put to sleep behind it. After a wake the route is brought to the container's address
+(`RefreshDeploymentRoute`: the two containers inspected, the network joined if Caddy left it, the route
+rewritten and reloaded only when the address changed). The reconcile pass skips a stopped target, as
+before, so a sleeping route is left as it is.
+
 ## Sign-in
 
 A route that signs in (`DeploymentRoute.ForwardAuth`) asks the auth server what nginx's `auth_request`
@@ -412,6 +432,12 @@ visitor from another container on the network gets the 503, the application's ow
 page, and with the application stopped Caddy's 502 gets the page the operator wrote.
 `TestLiveDeploymentRouteMaintenanceOnNginx` checks the same on the host's real nginx without Docker,
 the ACME challenge served through maintenance included.
+`JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyRouteWakes -count=1 -v` puts a
+real `traefik/whoami` behind a route that sleeps on a real Caddy, with a wake socket of the test's in the
+ingress's volume: the first request after a stop is answered by the application; with the switch on, a
+POST reaches it with its body after another container was given its old address; a visitor without the
+password gets 401 and wakes nothing; a wake still starting is the waking page.
+`TestLiveDeploymentRouteWakesOnNginx` is the same on the host's real nginx.
 `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesAWildcardProvedOverDNS01 -count=1 -v`
 is the wildcard journey on this ingress against a Pebble that really validates DNS-01 in a BIND
 (`proxysvc/acmetest`; it needs certbot's `dns-rfc2136` plugin, as the nginx one does): the run proves

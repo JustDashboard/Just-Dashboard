@@ -137,7 +137,7 @@ export function GameConsole({ projectId }: { projectId: number }) {
   const data = overview.data
   return (
     <div className="space-y-6">
-      {data && <GameIdentity overview={data} />}
+      {data && <GameIdentity overview={data} projectId={projectId} onChanged={overview.refresh} />}
       {overview.error ? (
         <ErrorState error={overview.error} />
       ) : !data ? (
@@ -218,7 +218,10 @@ export function GameConsole({ projectId }: { projectId: number }) {
                     see who is online.
                   </p>
                 ) : (
-                  <p>This game declares no console, so commands cannot be sent from here.</p>
+                  <p>
+                    {data.consoleReason ??
+                      "This game declares no console, so commands cannot be sent from here."}
+                  </p>
                 )}
               </div>
             ) : (

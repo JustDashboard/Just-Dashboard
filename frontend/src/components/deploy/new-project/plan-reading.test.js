@@ -120,6 +120,13 @@ test("checks and variable counts read the way Review reads them", () => {
     "GET / (any answer)",
   )
   expect(checkTarget({ kind: "docker_health" })).toBe("the image's HEALTHCHECK")
+  // A game template's own checks name the protocol, not just the socket.
+  expect(checkTarget({ kind: "game_handshake", config: { port: 25565 } })).toBe(
+    "a Minecraft status handshake on 25565",
+  )
+  expect(checkTarget({ kind: "udp_probe", config: { port: 19132, payload: "01" } })).toBe(
+    "an answered datagram on 19132/udp",
+  )
   expect(variablesFact(3, 0)).toBe("3 declared")
   expect(variablesFact(0, 0)).toBe("None")
 })
