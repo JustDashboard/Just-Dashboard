@@ -35,6 +35,8 @@ export function replicaRefusal(
 ): string | undefined {
   if (method === "compose" || method === "legacy_compose")
     return "a Compose stack runs one copy of each of its services"
+  if (runtime.tailnet)
+    return "a tailnet-only environment is published on one port of the tailnet address, which reaches one container"
   if (runtime.hostNetwork) return "on the host network every replica would claim the same ports"
   if ((runtime.hostPort ?? 0) > 0)
     return `host port ${runtime.hostPort} can be held by one container at a time`

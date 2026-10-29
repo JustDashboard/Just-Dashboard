@@ -24,6 +24,7 @@ describe("replica refusal", () => {
     expect(replicaRefusal(runtime(), "compose")).toBe(
       "a Compose stack runs one copy of each of its services",
     )
+    expect(replicaRefusal(runtime({ tailnet: {} }), "image")).toContain("tailnet-only environment")
     expect(replicaRefusal(runtime({ hostNetwork: true }), "image")).toContain("host network")
     expect(replicaRefusal(runtime({ hostPort: 8080 }), "image")).toBe(
       "host port 8080 can be held by one container at a time",

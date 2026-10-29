@@ -49,6 +49,7 @@ func TestReplicasAreOnlyForStatelessReleases(t *testing.T) {
 			p.Runtime.Ports = []PublishedPort{{HostPort: 2222, ContainerPort: 22}}
 		}, "published port 2222"},
 		{"compose", func(p *PlanConfiguration) { p.Build.Method = BuildCompose }, "Compose stack"},
+		{"tailnet only", func(p *PlanConfiguration) { p.Runtime.Tailnet = &RouteTailnet{} }, "tailnet-only environment"},
 	}
 	for _, tc := range cases {
 		plan := base()

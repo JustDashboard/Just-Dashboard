@@ -38,11 +38,15 @@ func (c RuntimePlanConfig) EffectiveReplicas() int {
 // hold: a Compose stack runs its services once each, a host port or a
 // published port is one listener, the host network is every port at once,
 // and a writable mount would be written by all of them at the same time. A
-// read-only mount is shared without harm.
+// read-only mount is shared without harm. A tailnet-only environment is
+// published by tailscale serve, or its gate, on one loopback port, which is
+// one container's.
 func replicaRefusal(method BuildMethod, runtime RuntimePlanConfig) string {
 	switch {
 	case method == BuildCompose || method == BuildLegacyCompose:
 		return "a Compose stack runs one copy of each of its services"
+	case runtime.Tailnet != nil:
+		return "a tailnet-only environment is published on one port of the tailnet address, which reaches one container"
 	case runtime.HostNetwork:
 		return "on the host network every replica would claim the same ports"
 	case runtime.HostPort > 0:
