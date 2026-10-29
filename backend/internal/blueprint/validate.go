@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -95,6 +96,16 @@ func Validate(blueprint *Blueprint) error {
 	}
 	if err := validateTemplatedInputs(blueprint); err != nil {
 		return fail("%v", err)
+	}
+	if err := validateVolumeWrites(blueprint); err != nil {
+		return fail("%v", err)
+	}
+	if len(blueprint.Files) > 0 && blueprint.Profile != ProfileGame {
+		// An editable file is edited from a game server's Server settings
+		// page, and nothing else reads the declaration. Shipping one on
+		// another profile would promise an editor the operator never gets;
+		// a file the image needs before it starts is an install write_file.
+		return fail("editable files are edited from a game server's Server settings; a %s blueprint has no such page", blueprint.Profile)
 	}
 	if err := validateFiles(blueprint.Files); err != nil {
 		return fail("%v", err)
@@ -522,9 +533,9 @@ func validateResources(resources Resources) error {
 
 func validateChecks(blueprint *Blueprint) error {
 	names := map[string]bool{}
-	ports := map[string]bool{}
+	ports := map[string]string{}
 	for _, port := range checkedPorts(blueprint) {
-		ports[port.Name] = true
+		ports[port.Name] = strings.ToLower(port.Protocol)
 	}
 	required := 0
 	for _, check := range blueprint.Checks {
@@ -549,6 +560,22 @@ func validateChecks(blueprint *Blueprint) error {
 			if check.Port == "" {
 				return fmt.Errorf("check %q does not name a port", check.Name)
 			}
+			if protocol, found := ports[check.Port]; found && protocol != "tcp" {
+				return fmt.Errorf("check %q opens a TCP connection to %s port %q", check.Name, protocol, check.Port)
+			}
+		case CheckUDPProbe:
+			if check.Port == "" {
+				return fmt.Errorf("check %q does not name a port", check.Name)
+			}
+			if protocol, found := ports[check.Port]; found && protocol != "udp" {
+				return fmt.Errorf("check %q sends a datagram to %s port %q", check.Name, protocol, check.Port)
+			}
+			if err := validateProbeBytes(check.Payload, maxProbePayload); err != nil {
+				return fmt.Errorf("check %q payload: %v", check.Name, err)
+			}
+			if err := validateProbeBytes(check.Expect, maxProbeExpect); err != nil {
+				return fmt.Errorf("check %q expected answer: %v", check.Name, err)
+			}
 		case CheckCommand:
 			if len(check.Command) == 0 {
 				return fmt.Errorf("check %q has no command", check.Name)
@@ -557,8 +584,11 @@ func validateChecks(blueprint *Blueprint) error {
 		default:
 			return fmt.Errorf("check %q has unsupported kind %q", check.Name, check.Kind)
 		}
-		if check.Port != "" && !ports[check.Port] {
+		if _, found := ports[check.Port]; check.Port != "" && !found {
 			return fmt.Errorf("check %q names undeclared port %q", check.Name, check.Port)
+		}
+		if check.Kind != CheckUDPProbe && (check.Payload != "" || check.Expect != "") {
+			return fmt.Errorf("check %q carries a datagram, which only a udp_probe sends", check.Name)
 		}
 		if check.Required {
 			required++
@@ -583,6 +613,25 @@ func checkedPorts(blueprint *Blueprint) []Port {
 	return blueprint.Ports
 }
 
+// Probe bounds: a ping is tens of bytes, and an expected answer is a few
+// bytes of its header, never a whole reply.
+const (
+	maxProbePayload = 512
+	maxProbeExpect  = 64
+)
+
+var hexRE = regexp.MustCompile(`^(?:[0-9a-f]{2})*$`)
+
+func validateProbeBytes(value string, limit int) error {
+	if !hexRE.MatchString(value) {
+		return errors.New("is not lowercase hexadecimal bytes")
+	}
+	if len(value)/2 > limit {
+		return fmt.Errorf("is longer than %d bytes", limit)
+	}
+	return nil
+}
+
 func validateOperations(operations Operations) error {
 	for name, list := range map[string][]Operation{
 		"install": operations.Install, "release": operations.Release,
@@ -592,9 +641,100 @@ func validateOperations(operations Operations) error {
 			if err := validateOperation(operation); err != nil {
 				return fmt.Errorf("%s operation: %v", name, err)
 			}
+			// A file is installed once, before the first start, and an
+			// artifact is fetched before every start that lacks it. A
+			// write_file anywhere else would be a phase nothing renders, and
+			// a definition that silently loses a step is worse than one that
+			// is refused.
+			if operation.Kind == OperationWriteFile && name != "install" {
+				return fmt.Errorf("%s operation: write_file is an install operation", name)
+			}
+			if operation.Kind == OperationFetchArtifact && name != "startup" {
+				return fmt.Errorf("%s operation: fetch_artifact is a startup operation", name)
+			}
 		}
 	}
 	return nil
+}
+
+// maxInstallFileBytes bounds an install-time file. These are configuration
+// files written from a definition, not payloads; anything larger is an
+// artifact with a digest.
+const maxInstallFileBytes = 64 << 10
+
+var (
+	contentPlaceholderRE = regexp.MustCompile(`\{\{(input|secret)\.([a-z0-9-]+)\}\}`)
+	anyPlaceholderRE     = regexp.MustCompile(`\{\{[^}]*\}\}`)
+)
+
+// validateVolumeWrites holds install files and artifacts to the volumes the
+// definition declares. Both are written by a helper that mounts exactly one
+// managed volume, so a path that is not strictly inside one names a place
+// the helper could not reach — and must not be able to.
+func validateVolumeWrites(blueprint *Blueprint) error {
+	secrets := map[string]bool{}
+	for _, secret := range blueprint.Secrets {
+		secrets[secret.Name] = true
+	}
+	written := map[string]bool{}
+	for _, list := range [][]Operation{blueprint.Operations.Install, blueprint.Operations.Startup} {
+		for _, operation := range list {
+			if operation.Kind != OperationWriteFile && operation.Kind != OperationFetchArtifact {
+				continue
+			}
+			if operation.Path == "" {
+				return fmt.Errorf("%s does not say where in a volume it writes", operation.Kind)
+			}
+			if !absolutePathRE.MatchString(operation.Path) || strings.Contains(operation.Path, "..") ||
+				path.Clean(operation.Path) != operation.Path {
+				return fmt.Errorf("%s writes to uncontained path %q", operation.Kind, operation.Path)
+			}
+			if _, _, found := VolumeFor(blueprint, operation.Path); !found {
+				return fmt.Errorf("%s writes %q, which is not inside a writable volume this blueprint declares", operation.Kind, operation.Path)
+			}
+			if written[operation.Path] {
+				return fmt.Errorf("%q is written twice", operation.Path)
+			}
+			written[operation.Path] = true
+			if operation.Kind != OperationWriteFile {
+				continue
+			}
+			if operation.Content == "" || len(operation.Content) > maxInstallFileBytes || strings.ContainsRune(operation.Content, 0) {
+				return fmt.Errorf("install file %q must hold between 1 byte and %d KiB of text", operation.Path, maxInstallFileBytes>>10)
+			}
+			recognised := 0
+			for _, match := range contentPlaceholderRE.FindAllStringSubmatch(operation.Content, -1) {
+				recognised++
+				if match[1] == "secret" && !secrets[match[2]] {
+					return fmt.Errorf("install file %q templates undeclared secret %q", operation.Path, match[2])
+				}
+			}
+			if len(anyPlaceholderRE.FindAllString(operation.Content, -1)) != recognised {
+				return fmt.Errorf("install file %q contains a placeholder other than {{input.name}} or {{secret.name}}", operation.Path)
+			}
+		}
+	}
+	return nil
+}
+
+// VolumeFor finds the declared, writable volume a container path lives in
+// and the path relative to the volume's root. The volume's root itself is not
+// a file anything can be written as.
+func VolumeFor(blueprint *Blueprint, target string) (Volume, string, bool) {
+	best, relative, found := Volume{}, "", false
+	for _, volume := range blueprint.Volumes {
+		if volume.ReadOnly {
+			continue
+		}
+		prefix := strings.TrimSuffix(volume.Target, "/") + "/"
+		if !strings.HasPrefix(target, prefix) || len(target) == len(prefix) {
+			continue
+		}
+		if !found || len(volume.Target) > len(best.Target) {
+			best, relative, found = volume, strings.TrimPrefix(target, prefix), true
+		}
+	}
+	return best, relative, found
 }
 
 func validateOperation(operation Operation) error {
@@ -632,11 +772,19 @@ func validateOperation(operation Operation) error {
 			return errors.New("waits for a log without a bounded timeout")
 		}
 	case OperationFetchArtifact:
+		if operation.Checksum != "" && strings.Contains(operation.URL, "{{") {
+			// One digest pins one file; a URL an input can steer would
+			// make the digest wrong for every other value of it.
+			return errors.New("pins a checksum for an artifact whose URL is templated")
+		}
 		if err := validateHTTPSURL(operation.URL); err != nil {
 			return fmt.Errorf("fetches %v", err)
 		}
 		if operation.MaxBytes <= 0 || operation.MaxBytes > 8<<30 {
 			return errors.New("fetches an artifact without a size limit")
+		}
+		if operation.TimeoutSeconds < 0 || operation.TimeoutSeconds > 3600 {
+			return errors.New("fetches an artifact for longer than an hour")
 		}
 		// Either the bytes are pinned by checksum, or the version is resolved
 		// through a declared API and the resolved artifact is recorded on the

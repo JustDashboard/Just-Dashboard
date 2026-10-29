@@ -160,7 +160,9 @@ export function GameSettings({ projectId }: { projectId: number }) {
 
   return (
     <div className="space-y-6 pb-20">
-      {overview.data && <GameIdentity overview={overview.data} />}
+      {overview.data && (
+        <GameIdentity overview={overview.data} projectId={projectId} onChanged={overview.refresh} />
+      )}
       {properties.error ? (
         <ErrorState error={properties.error} />
       ) : !data ? (

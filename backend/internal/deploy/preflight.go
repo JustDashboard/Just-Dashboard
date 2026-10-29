@@ -626,9 +626,11 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 		}
 	}
 	if configuration.Runtime.HostPort != 0 {
-		request.Ports = append(request.Ports, PortObservation{
-			Address: configuration.Runtime.BindAddress, Port: configuration.Runtime.HostPort, Protocol: "tcp",
-		})
+		for _, protocol := range configuration.Runtime.publishedProtocols() {
+			request.Ports = append(request.Ports, PortObservation{
+				Address: configuration.Runtime.BindAddress, Port: configuration.Runtime.HostPort, Protocol: protocol,
+			})
+		}
 	}
 	for _, port := range configuration.Runtime.Ports {
 		request.Ports = append(request.Ports, PortObservation{
@@ -979,6 +981,9 @@ func preflightFindings(
 			"Docker-published ports may bypass ordinary firewall expectations.",
 			"Prefer loopback behind the proxy unless public exposure is intentional.", "docker", "runtime.bindAddress"))
 	}
+	if item, ok := gameReachFinding(draft.Data.Intent.Profile, configuration.Runtime); ok {
+		findings = append(findings, item)
+	}
 	if request := preflightObservationRequest(draft, configuration); request.NeedsFirewall {
 		switch {
 		case !observation.Firewall.Available:
@@ -1297,6 +1302,29 @@ func uniquePorts(values []PortObservation) []PortObservation {
 		return result[i].Protocol < result[j].Protocol
 	})
 	return result
+}
+
+// gameReachFinding says what a game server's loopback default means: it
+// starts and answers its own checks, and nobody on another machine can join.
+// Publishing it is two decisions this dashboard leaves to the operator — the
+// bind address under Runtime, and the firewall rule the existing firewall
+// review then asks for — so the finding names both instead of making either.
+func gameReachFinding(profile WorkloadProfile, runtime RuntimePlanConfig) (PreflightFinding, bool) {
+	if profile != ProfileGame || runtime.HostPort == 0 || publicRuntimeBind(runtime) {
+		return PreflightFinding{}, false
+	}
+	port := runtime.portLabel()
+	bind := runtime.BindAddress
+	if bind == "" {
+		bind = "127.0.0.1"
+	}
+	item := finding("game_loopback_only", PreflightWarning,
+		"Players on other machines cannot join yet", port+" on "+bind,
+		"The game server is published on loopback, so it starts and answers its checks but only this server can connect to it.",
+		"To let players join, choose every interface under Runtime → Bind address; preflight then checks that the firewall admits "+port+", which you allow from the Firewall page.",
+		"deploy", "runtime.bindAddress")
+	item.DeepLink = "/network/firewall"
+	return item, true
 }
 
 func publicRuntimeBind(runtime RuntimePlanConfig) bool {

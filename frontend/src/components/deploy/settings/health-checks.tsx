@@ -35,6 +35,9 @@ type Config = {
   /** Any answer below 500 (but 400 and 421) counts, as detection sets for an API. */
   acceptAnyAnswer?: boolean
   command?: string[]
+  /** A UDP probe's datagram and the prefix its answer must start with, in hex. */
+  payload?: string
+  expect?: string
   attempts?: number
   timeoutSeconds?: number
   intervalSeconds?: number
@@ -116,7 +119,15 @@ function checkSummary(check: Check, port?: number) {
   const cadence = config.intervalSeconds
     ? `${attempts} × ${config.intervalSeconds} s`
     : `${attempts} tries`
-  switch (check.kind as CheckKind) {
+  // The two game kinds come from a template's definition rather than this
+  // editor's picker, so they are read here but not offered there.
+  switch (check.kind as CheckKind | "game_handshake" | "udp_probe") {
+    case "game_handshake":
+      return `Minecraft status handshake on ${config.host ?? ""}:${config.port || port || "port"} · ${cadence}`
+    case "udp_probe":
+      return `UDP datagram to ${config.host ?? ""}:${config.port || port || "port"}${
+        config.expect ? `, answer starting ${config.expect}` : ", any answer"
+      } · ${cadence}`
     case "http": {
       const codes = config.acceptAnyAnswer
         ? "any answer < 500 but 400, 421"

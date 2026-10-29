@@ -79,6 +79,11 @@ const (
 	CheckDocker    CheckKind = "docker_health"
 	CheckCommand   CheckKind = "command"
 	CheckHandshake CheckKind = "game_handshake"
+	// CheckUDPProbe sends one datagram to a UDP port and passes when the
+	// server answers it. A protocol a proxy cannot carry still has to say it
+	// is up: a Bedrock server answers a RakNet ping long after its process
+	// has started.
+	CheckUDPProbe CheckKind = "udp_probe"
 )
 
 // AccessKind is how the first person to open this workload gets in. It is a
@@ -233,6 +238,12 @@ type Check struct {
 	Port           string    `json:"port,omitempty"`
 	Command        []string  `json:"command,omitempty"`
 	TimeoutSeconds int       `json:"timeoutSeconds,omitempty"`
+	// Payload is the datagram a udp_probe sends, in hexadecimal: data, so a
+	// definition says what to ask without a probe that runs anything. Expect
+	// is a hexadecimal prefix the answer must begin with; empty accepts any
+	// answer at all.
+	Payload string `json:"payload,omitempty"`
+	Expect  string `json:"expect,omitempty"`
 }
 
 type Operation struct {
@@ -249,6 +260,11 @@ type Operation struct {
 	TimeoutSeconds int           `json:"timeoutSeconds,omitempty"`
 }
 
+// Operations are the closed steps a definition may ask for. An install
+// write_file is a file rendered from the inputs and the generated secrets and
+// written into the volume that holds its path before the container first
+// starts, where nothing is yet; a startup fetch_artifact is a download into a
+// volume, verified against its pinned digest before the container starts.
 type Operations struct {
 	Install []Operation `json:"install,omitempty"`
 	Release []Operation `json:"release,omitempty"`

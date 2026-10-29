@@ -824,13 +824,11 @@ export function defaultChecks(
   if (profile === "game")
     return [
       {
-        // "game_handshake" is a closed check kind the backend's planning
-        // model already accepts, but `validateCheckConfiguration` (checks.go)
-        // refuses it any port/host/url/command — no protocol handshake is
-        // wired in yet, so a plan saved with that kind and a port was
-        // rejected outright. "tcp" is a real, executable check and a
-        // reasonable readiness signal for a game server: the process is
-        // listening on its own port.
+        // An image typed by hand may be any game, so its default is the one
+        // check every game answers: its own port accepting a connection.
+        // The reviewed Minecraft templates bring their own protocol checks
+        // ("game_handshake" over TCP, "udp_probe" for Bedrock), which the
+        // runner executes (checks.go).
         name: "Game port reachable",
         kind: "tcp",
         phase: "readiness",
