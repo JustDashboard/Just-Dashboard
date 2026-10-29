@@ -26,31 +26,11 @@ func (s *Server) handleDeploymentDatabaseLinks(w http.ResponseWriter, r *http.Re
 		return httpx.Internal(err)
 	}
 	defer rows.Close()
-	type link struct {
-		ConnectionID int64  `json:"connectionId"`
-		Name         string `json:"name"`
-		Driver       string `json:"driver"`
-		Database     string `json:"database"`
-		Network      string `json:"network"`
-		Hostname     string `json:"hostname"`
-		// Pooler is whether the connection has a connection pooler, which
-		// the pooled form of its reference (${{database.N.pooled}}) reaches.
-		Pooler bool   `json:"pooler"`
-		Status string `json:"status"`
-		// Detail is why the last reconciliation could not repair the binding.
-		// Empty while it is connected.
-		Detail    string     `json:"detail,omitempty"`
-		CheckedAt *time.Time `json:"checkedAt,omitempty"`
-		// Previews is what the environment's previews get of the database:
-		// nothing, a branch from its newest backup, or one with columns
-		// masked (deploy/preview_branches.go).
-		Previews deploy.PreviewBranchPolicy `json:"previews"`
-	}
 	policies, err := s.modules.deployRuns.PreviewBranchPolicies(r.Context(), environmentID)
 	if err != nil {
 		return httpx.Internal(err)
 	}
-	items := []link{}
+	items := []databaseLink{}
 	// The database a connection opens is inside the sealed DSN rather than in
 	// a column of its own, so it is read the way every other database route
 	// reads it. A connection whose DSN no longer resolves against the current
@@ -63,7 +43,7 @@ func (s *Server) handleDeploymentDatabaseLinks(w http.ResponseWriter, r *http.Re
 		return conn.Database
 	}
 	for rows.Next() {
-		var item link
+		var item databaseLink
 		var checked int64
 		if err := rows.Scan(&item.ConnectionID, &item.Name, &item.Driver, &item.Network, &item.Status, &item.Detail, &checked, &item.Pooler); err != nil {
 			return httpx.Internal(err)
@@ -111,15 +91,7 @@ func (s *Server) handleDeploymentDatabaseAddresses(w http.ResponseWriter, r *htt
 	if err != nil {
 		return mapDeploymentPlanningError(err)
 	}
-	type address struct {
-		ConnectionID int64  `json:"connectionId"`
-		Name         string `json:"name"`
-		Driver       string `json:"driver"`
-		Database     string `json:"database"`
-		// Variables are the names whose values hold its address.
-		Variables []string `json:"variables"`
-	}
-	items := []address{}
+	items := []databaseAddress{}
 	if len(values) == 0 {
 		httpx.JSON(w, http.StatusOK, items)
 		return nil
@@ -161,7 +133,7 @@ func (s *Server) handleDeploymentDatabaseAddresses(w http.ResponseWriter, r *htt
 		if len(named) == 0 {
 			continue
 		}
-		items = append(items, address{
+		items = append(items, databaseAddress{
 			ConnectionID: conn.ID, Name: conn.Name, Driver: string(conn.Driver),
 			Database: conn.Database, Variables: named,
 		})
@@ -169,4 +141,36 @@ func (s *Server) handleDeploymentDatabaseAddresses(w http.ResponseWriter, r *htt
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	httpx.JSON(w, http.StatusOK, items)
 	return nil
+}
+
+// databaseLink is one database an environment reads, as the links route lists it.
+type databaseLink struct {
+	ConnectionID int64  `json:"connectionId"`
+	Name         string `json:"name"`
+	Driver       string `json:"driver"`
+	Database     string `json:"database"`
+	Network      string `json:"network"`
+	Hostname     string `json:"hostname"`
+	// Pooler is whether the connection has a connection pooler, which
+	// the pooled form of its reference (${{database.N.pooled}}) reaches.
+	Pooler bool   `json:"pooler"`
+	Status string `json:"status"`
+	// Detail is why the last reconciliation could not repair the binding.
+	// Empty while it is connected.
+	Detail    string     `json:"detail,omitempty"`
+	CheckedAt *time.Time `json:"checkedAt,omitempty"`
+	// Previews is what the environment's previews get of the database:
+	// nothing, a branch from its newest backup, or one with columns masked
+	// (deploy/preview_branches.go).
+	Previews deploy.PreviewBranchPolicy `json:"previews"`
+}
+
+// databaseAddress is where an environment reaches one linked database.
+type databaseAddress struct {
+	ConnectionID int64  `json:"connectionId"`
+	Name         string `json:"name"`
+	Driver       string `json:"driver"`
+	Database     string `json:"database"`
+	// Variables are the names whose values hold its address.
+	Variables []string `json:"variables"`
 }

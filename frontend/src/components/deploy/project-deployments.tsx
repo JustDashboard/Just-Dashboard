@@ -13,7 +13,7 @@ import {
 } from "@/components/icons"
 import { get, post, put } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
-import { previewURL } from "@/lib/pull-requests"
+import { previewURL, promotionOrigin } from "@/lib/pull-requests"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -21,6 +21,7 @@ import type {
   DeployCommit,
   DeploymentEngineRun,
   DeploymentPreview,
+  DeploymentPromotion,
   DeploymentRelease,
   DeploymentRunSettingsDrift,
   DeploymentRunState,
@@ -670,11 +671,10 @@ export function ProjectDeployments() {
                                   )}
                                   {release && release.id === warmReleaseId && <Tag>Warm</Tag>}
                                   {/* Provenance, fixed with the release: the
-                                      image was staging's, not built here. */}
+                                      image was staging's — or for staging, a
+                                      pull request preview's — not built here. */}
                                   {release?.promotion && (
-                                    <Tag icon={ArrowCircleUp}>
-                                      From staging #{release.promotion.releaseNumber}
-                                    </Tag>
+                                    <PromotionTag promotion={release.promotion} />
                                   )}
                                   {preview && <Tag>{preview}</Tag>}
                                 </>
@@ -887,4 +887,21 @@ function LegacyRecovery({
       {dialog}
     </Panel>
   )
+}
+
+/** "From staging #2", or "Promoted from PR #12 (abc1234)" on a staging release. */
+function PromotionTag({ promotion }: { promotion: DeploymentPromotion }) {
+  const origin = promotionOrigin(promotion)
+  if (origin?.kind === "preview") {
+    return (
+      <Tag
+        icon={ArrowCircleUp}
+        title={origin.approvedBy ? `Approved by ${origin.approvedBy}` : undefined}
+      >
+        Promoted from {origin.from}
+        {origin.sha && <span className="font-mono normal-case"> ({origin.sha})</span>}
+      </Tag>
+    )
+  }
+  return <Tag icon={ArrowCircleUp}>From staging #{promotion.releaseNumber}</Tag>
 }

@@ -1,4 +1,4 @@
-import type { DbDriver, DbEndOfLife, DbFlavor, Job } from "@/lib/types"
+import type { DbDriver, DbEndOfLife, DbFlavor, DbKernelProblem, Job } from "@/lib/types"
 
 /**
  * What the server says about the machine's databases beyond the saved
@@ -128,6 +128,11 @@ export type DbInventory = {
   /** `full` for an administrator, `reduced` for every other role. */
   detail: "full" | "reduced"
   checkedAt: string
+  /**
+   * By instance key, a MongoDB 8 container found here and not connected that
+   * cannot start on this kernel as it is. An administrator's reading only.
+   */
+  kernelProblems?: Record<string, DbKernelProblem>
 }
 
 export type DbInventoryConnectRequest = {

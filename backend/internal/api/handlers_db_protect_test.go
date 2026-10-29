@@ -47,6 +47,8 @@ var protectedRouteVerdicts = map[string]string{
 	"POST /tls/renew":      staysOpen,
 	"POST /power":          staysOpen,
 	"PUT /settings":        isRefused,
+	// Recreated on the same volumes with one more environment variable.
+	"POST /kernel-mitigation": staysOpen,
 	// A pooler is a container and, in one mode, an account in the database.
 	"PUT /pooler":    isRefused,
 	"DELETE /pooler": isRefused,

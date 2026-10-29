@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -74,9 +75,26 @@ type NormalizedStepExecutor struct {
 	// rehearser makes the throwaway database copies release tasks are
 	// rehearsed against (rehearsal.go); nil reports a rehearsal unavailable.
 	rehearser MigrationRehearser
+
+	// requests is the held request record the traffic replay reads its
+	// requests from (replay.go); nil skips the replay, since there is no
+	// record on this host to replay from. replayClient is what the replay
+	// sends with, built once, or set by a test.
+	requests     RequestRecord
+	replayClient replayClient
+	replayOnce   sync.Once
+
 	// dataPoints says where each linked database stands as a release goes
 	// live (data_rollback.go); nil records none.
 	dataPoints DataPointObserver
+}
+
+// WithRequestRecord attaches the request record the traffic replay reads
+// (replay.go): the same held record the Logs page and the rollback watch
+// read, so the requests replayed are the ones the page shows.
+func (e *NormalizedStepExecutor) WithRequestRecord(record RequestRecord) *NormalizedStepExecutor {
+	e.requests = record
+	return e
 }
 
 func (e *NormalizedStepExecutor) WithNotifications(store *AutomationStore) *NormalizedStepExecutor {
@@ -243,6 +261,8 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 		return e.verifyChecks(ctx, execution, plan, "readiness")
 	case StepVerifySmoke:
 		return e.verifyChecks(ctx, execution, plan, "smoke")
+	case StepReplayTraffic:
+		return e.replayTraffic(ctx, execution, plan)
 	case StepActivate:
 		return e.activate(ctx, execution, plan)
 	case StepRetirePrevious:
@@ -663,6 +683,9 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 	execution StepExecution,
 	plan *StoredExecutionPlan,
 ) StepResult {
+	if err := e.refuseShellTasksForReleaseOfPullRequest(ctx, execution.Run, plan.Build.ReleaseTasks); err != nil {
+		return promotionStepFailure(err)
+	}
 	if execution.Run.Operation == OperationPromote && !needsSourceTree(plan.Build.ReleaseTasks) {
 		// A promotion has no workspace of its own to clean up, and a task in
 		// the release image reads no checkout: the promoted commit is fetched
@@ -1111,6 +1134,11 @@ func (r *NormalizedStepReconciler) Reconcile(ctx context.Context, request Reconc
 		// A rehearsal changes nothing but a copy and a network of its own,
 		// which the step removes before it starts again: running it twice
 		// cannot touch production.
+		return ReconcileResult{Action: ReconcileResume}
+	case StepReplayTraffic:
+		// A replay sends reads to a candidate nothing routes to yet and
+		// changes nothing but its own evidence; running it twice costs the
+		// candidate the requests again and nobody anything.
 		return ReconcileResult{Action: ReconcileResume}
 	case StepReleaseTask:
 		return ReconcileResult{

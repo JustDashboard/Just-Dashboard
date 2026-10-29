@@ -3985,8 +3985,9 @@ export type DeploymentInsights = {
 }
 
 /**
- * Where a promoted release's image came from: the staging release it was
- * promoted from, and the local image id the container is created from.
+ * Where a promoted release's image came from: the release it was promoted
+ * from — staging's, or for staging a pull request preview's — and the local
+ * image id the container is created from.
  */
 export type DeploymentPromotion = {
   environmentId: number
@@ -3997,6 +3998,30 @@ export type DeploymentPromotion = {
   imageId: string
   imageDigest: string
   sourceRevision?: string
+  /** Absent on a record from before previews could be promoted, which is staging's. */
+  sourceKind?: "staging" | "preview"
+  /** The pull request a preview's image was built from, and who approved its commit. */
+  preview?: DeploymentPromotedPreview
+}
+
+export type DeploymentPromotedPreview = {
+  number: number
+  url?: string
+  repository?: string
+  headRepository?: string
+  approvedBy: string
+}
+
+/** The newest promotion of a preview's image into staging, as the preview's row reads it. */
+export type DeploymentPreviewPromotion = {
+  runId: number
+  runNumber: number
+  state: DeploymentRunState
+  environmentId: number
+  releaseNumber: number
+  sourceRevision?: string
+  requestedAt: string
+  endedAt?: string
 }
 
 /** One of a deployment's long-lived environments, for the environment switcher. */
@@ -4020,9 +4045,11 @@ export type DeploymentStagingCopy = {
   adjusted: string[]
 }
 
-/** The Promote confirmation's read: the exact image and how production differs. */
+/** The Promote confirmation's read: the exact image and how the target differs. */
 export type DeploymentPromotionPreview = {
   source: {
+    /** "staging" into production, or "preview" into staging. */
+    kind: "staging" | "preview"
     environmentId: number
     environmentName: string
     release: DeploymentRelease
@@ -4030,6 +4057,17 @@ export type DeploymentPromotionPreview = {
     imageDigest: string
     imageSizeBytes: number
     imagePresent: boolean
+    /** The pull request behind a preview source. */
+    preview?: {
+      number: number
+      title?: string
+      url?: string
+      author?: string
+      headRepository?: string
+      fork: boolean
+      approvedBy?: string
+      approvalState?: string
+    }
   }
   target: {
     environmentId: number
@@ -4069,7 +4107,7 @@ export type DeploymentRelease = {
   /** Set on a release an instant rollback took traffic away from. */
   rolledBackAt?: string
   rollbackReason?: string
-  /** Set when the image was promoted from staging rather than built here. */
+  /** Set when the image was promoted — from staging, or into staging from a preview — rather than built here. */
   promotion?: DeploymentPromotion
   /**
    * Where each linked database stood when this release went live
@@ -4399,6 +4437,8 @@ export type DeploymentPreview = {
   lastRun?: DeploymentRecentRun
   /** A live Compose preview's services as Docker reports them; absent for a single container. */
   services?: DeploymentRuntimeServices
+  /** The newest promotion of this preview's image into staging, however it ended. */
+  promotion?: DeploymentPreviewPromotion
   /** The preview's own copies of databases production gives previews a branch of. */
   branches?: PreviewDatabaseBranch[]
 }
@@ -5414,6 +5454,8 @@ export type DeploymentConfiguration = {
     interceptErrors?: boolean
     /** Strict-Transport-Security on every HTTPS answer; absent sends none. */
     hsts?: DeploymentRouteHSTS
+    /** Recorded requests replayed against the candidate before the cutover; absent is off. */
+    replay?: ReplayPlan
     mounts?: {
       source: string
       target: string
@@ -5686,6 +5728,76 @@ export type RehearsalReport = {
   isolation?: { network: string; internal: boolean; published: boolean; volumesMounted: boolean }
   cleanedUp: boolean
   totalMs: number
+}
+
+/**
+ * A plan's traffic replay terms (`deploy/replay.go`): before the cutover, the
+ * last distinct GET and HEAD requests the access log recorded for the
+ * environment's domains are sent to the candidate and its answers compared
+ * with the live release's. An absent number is the server's default.
+ */
+export type ReplayPlan = {
+  enabled: boolean
+  /** Distinct requests replayed, newest first; absent is 50, at most 500. */
+  requests?: number
+  /** Only recorded paths under one of these prefixes; absent replays every path. */
+  paths?: string[]
+  /** The percent of replayed requests whose status class may differ; absent is 2. */
+  maxStatusDrift?: number
+  /** What the candidate's p95 may be of the recorded p95; absent is 2. */
+  latencyFactor?: number
+  /** The whole replay's time limit; absent is 60 seconds. */
+  timeoutSeconds?: number
+}
+
+/** One replayed request the candidate answered in another status class, or not at all. */
+export type ReplayDrift = {
+  method: string
+  path: string
+  query?: string
+  recordedStatus: number
+  /** 0 is no answer, with `error` saying why. */
+  candidateStatus: number
+  error?: string
+  recordedMs?: number
+  candidateMs?: number
+}
+
+/** The replay_traffic step's evidence. */
+export type ReplayReport = {
+  replayed: boolean
+  /** Why it was not replayed. */
+  reason?: string
+  domains?: string[]
+  /** The candidate's own address the requests were sent to. */
+  target?: string
+  read: number
+  eligible: number
+  requests: number
+  answered: number
+  drifted: number
+  driftPercent: number
+  maxStatusDrift: number
+  latencyFactor: number
+  latencyRecorded: boolean
+  latencyJudged: boolean
+  recordedP95?: number
+  candidateP95?: number
+  verdict: {
+    code: "within_drift" | "status_drift" | "latency" | "unanswered" | ""
+    tripped: boolean
+    reason: string
+  }
+  drifts: ReplayDrift[]
+  concurrency: number
+  timeoutSeconds: number
+  timedOut: boolean
+  durationMs: number
+  recovery?: {
+    candidateStopped: boolean
+    runtimeRestored: boolean
+    routeRestored: boolean
+  }
 }
 
 /** A saved database a variable names by its address rather than a link. */
@@ -7187,6 +7299,23 @@ export type DbFleetEntry = DbConnection & {
    * backup job run that dumped it, whichever is later. Absent for never.
    */
   lastBackup?: string
+  /** A MongoDB 8 server that cannot start on this kernel as it is. Absent otherwise. */
+  kernelProblem?: DbKernelProblem
+}
+
+/**
+ * MongoDB 8 on Linux 6.19 to 7.0.13, which it refuses to start on without
+ * `GLIBC_TUNABLES=glibc.pthread.rseq=1` (MongoDB SERVER-121912).
+ */
+export type DbKernelProblem = {
+  /** The alert, in a few words. */
+  message: string
+  /** What applying it does, or where the compose file has to say it. */
+  detail: string
+  kernel: string
+  release: string
+  /** `POST /databases/{id}/kernel-mitigation` applies it. */
+  fixable: boolean
 }
 
 export type DbFleet = {
@@ -8090,8 +8219,46 @@ export type DeploymentLifecycle = {
   reason?: string
   /** Whether the event stream is connected, so an empty feed can explain itself. */
   watching: boolean
+  /** When this process connected to the stream; the record itself reaches back to `recordSince`. */
   since?: string
+  /**
+   * The oldest event the dashboard keeps for any deployment: how far back the
+   * feed can see. The record survives a restart of the dashboard; absent until
+   * the first event has been kept.
+   */
+  recordSince?: string
+  /** How long an event is kept. */
+  retentionDays: number
   events: DockerEvent[]
+}
+
+/** The figure over one span of time ending now (`deploy/availability.go`). */
+export type AvailabilityWindow = {
+  /** "24h", "7d" or "30d". */
+  window: string
+  seconds: number
+  /** Live-release time inside the window the record covers: what `ratio` is over. 0 means no figure. */
+  observedSeconds: number
+  downSeconds: number
+  incidents: number
+  /** 1 - down/observed, 0..1; absent while nothing was observed. */
+  ratio?: number
+  /** How much of the window the event record reaches back over. */
+  coverageSeconds: number
+}
+
+/** How much of the last day, week and month a deployment's live release was up. */
+export type DeploymentAvailability = {
+  status: "available" | "unavailable"
+  reason?: string
+  observedAt: string
+  /** When the event record began, for any deployment. */
+  recordSince?: string
+  /** The number of the release live now. */
+  liveRelease?: number
+  /** Whether the record says the live release is down at this moment. */
+  down: boolean
+  windows: AvailabilityWindow[]
 }
 
 /*

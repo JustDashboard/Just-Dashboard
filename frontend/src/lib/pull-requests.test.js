@@ -3,6 +3,7 @@ import {
   branchPlan,
   branchReading,
   branchSource,
+  canPromotePreview,
   canTest,
   cleanupFailed,
   composeServiceLines,
@@ -11,9 +12,11 @@ import {
   previewBlocker,
   previewHeld,
   previewOutOfDate,
+  previewPromotionStatus,
   previewServiceReading,
   previewServices,
   previewStatus,
+  promotionOrigin,
   previewURL,
   pullChecksTone,
   pullOfPreview,
@@ -384,6 +387,87 @@ describe("Compose previews", () => {
     expect(
       previewServices(preview({ services: { status: "unavailable", services: [] } }), "web"),
     ).toEqual([])
+  })
+})
+
+describe("promoting a preview into staging", () => {
+  const live = (over = {}) =>
+    preview({
+      liveReleaseId: 40,
+      approvalState: "approved",
+      address: { kind: "tailnet", url: "https://n.ts.net:21000", port: 21000, published: true },
+      lastRun: run("succeeded"),
+      ...over,
+    })
+  test("an open, approved preview serving a live release can be offered", () => {
+    expect(canPromotePreview(live())).toBe(true)
+    // Unreachable on the tailnet is still an image to promote.
+    expect(canPromotePreview(live({ address: undefined }))).toBe(true)
+  })
+  test("not without a live release, an approval, an open preview or isolation", () => {
+    expect(canPromotePreview(undefined)).toBe(false)
+    expect(canPromotePreview(live({ liveReleaseId: undefined }))).toBe(false)
+    expect(canPromotePreview(live({ approvalState: "superseded" }))).toBe(false)
+    expect(canPromotePreview(live({ state: "closed" }))).toBe(false)
+    expect(canPromotePreview(live({ isolationStatus: "quarantined" }))).toBe(false)
+  })
+  test("not while it builds or closes", () => {
+    expect(canPromotePreview(live({ lastRun: run("running") }))).toBe(false)
+    expect(canPromotePreview(live({ lastRun: run("running", "preview_remove") }))).toBe(false)
+  })
+  test("the row says promoting, then promoted, and nothing of a failed promotion", () => {
+    const promotion = (state) => ({
+      runId: 90,
+      runNumber: 12,
+      state,
+      environmentId: 13,
+      releaseNumber: 3,
+      requestedAt: "2026-09-22T12:00:00Z",
+    })
+    expect(previewPromotionStatus(live())).toBeUndefined()
+    expect(previewPromotionStatus(live({ promotion: promotion("queued") }))?.label).toBe(
+      "Promoting to staging",
+    )
+    expect(previewPromotionStatus(live({ promotion: promotion("succeeded") }))).toEqual({
+      tone: "running",
+      label: "Promoted to staging",
+    })
+    expect(previewPromotionStatus(live({ promotion: promotion("failed") }))).toBeUndefined()
+  })
+})
+
+describe("where a promoted release came from", () => {
+  const base = {
+    environmentId: 13,
+    environmentName: "Staging",
+    releaseId: 31,
+    releaseNumber: 2,
+    runId: 96,
+    imageId: "sha256:" + "c".repeat(64),
+    imageDigest: "sha256:" + "c".repeat(64),
+    sourceRevision: sha,
+  }
+  test("a staging release, including a record from before previews were promoted", () => {
+    expect(promotionOrigin(base)).toMatchObject({ kind: "staging", from: "staging release #2" })
+    expect(promotionOrigin({ ...base, sourceKind: "staging" })?.kind).toBe("staging")
+  })
+  test("a preview's names the pull request, the commit and who approved it", () => {
+    const origin = promotionOrigin({
+      ...base,
+      environmentName: "Preview 12",
+      sourceKind: "preview",
+      preview: { number: 12, url: "https://github.com/acme/app/pull/12", approvedBy: "mira" },
+    })
+    expect(origin).toEqual({
+      kind: "preview",
+      from: "PR #12",
+      sha: "aaaaaaa",
+      url: "https://github.com/acme/app/pull/12",
+      approvedBy: "mira",
+    })
+  })
+  test("nothing for a release that was built", () => {
+    expect(promotionOrigin(undefined)).toBeUndefined()
   })
 })
 

@@ -246,7 +246,7 @@ func JudgeRollback(policy RollbackPolicy, baseline *RollbackReading, observed Ro
 	verdict.LatencyJudged = latencyRecorded && trusted && observed.P95 != nil && baseline.P95 != nil
 	if !verdict.Tripped && verdict.LatencyJudged {
 		was, is := *baseline.P95, *observed.P95
-		if is > was*policy.LatencyFactor && is-was >= rollbackLatencyFloorMs {
+		if latencyRegressed(was, is, policy.LatencyFactor) {
 			verdict.Code, verdict.Tripped = RollbackVerdictLatency, true
 			verdict.Reason = fmt.Sprintf("p95 rose to %s from %s before (%d requests).",
 				humanMillis(is), humanMillis(was), observed.Requests)
@@ -267,6 +267,13 @@ func JudgeRollback(policy RollbackPolicy, baseline *RollbackReading, observed Ro
 	}
 	verdict.Reason = fmt.Sprintf("Within the previous release's baseline over %d requests: %s.", observed.Requests, strings.Join(parts, ", "))
 	return verdict
+}
+
+// latencyRegressed is the one p95 rule the rollback watch and the traffic
+// replay share: past the factor, and at least a quarter of a second slower,
+// so 4 ms becoming 9 ms is not a regression.
+func latencyRegressed(was, is, factor float64) bool {
+	return is > was*factor && is-was >= rollbackLatencyFloorMs
 }
 
 func percent(value float64) string {

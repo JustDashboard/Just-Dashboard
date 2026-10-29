@@ -13,11 +13,13 @@ import {
 } from "@/components/icons"
 import { del } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
+import { promotionOrigin } from "@/lib/pull-requests"
 import { cn } from "@/lib/utils"
 import type {
   DeploymentDomainRoute,
   DeploymentEngineRun,
   DeploymentEnvironmentConfiguration,
+  DeploymentPromotion,
   DeploymentSummary,
   DeployProject,
   BlueprintDetail,
@@ -51,6 +53,7 @@ import {
   deploymentURL,
   frameworkLabel,
   hostOf,
+  runPromotion,
   sourceProduct,
 } from "@/components/deploy/vocabulary"
 
@@ -236,7 +239,11 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
               <span className="numeric shrink-0 text-foreground">
                 Release #{project.liveRelease.number}
               </span>
-              <ReleaseLine run={project.liveRun} activatedAt={project.liveRelease.activatedAt} />
+              <ReleaseLine
+                run={project.liveRun}
+                activatedAt={project.liveRelease.activatedAt}
+                promotion={project.liveRelease.promotion}
+              />
             </span>
           )}
           <AutoDeployFact
@@ -553,16 +560,36 @@ function RuntimeFact({
 
 /**
  * The live release's age stays visible, and says so only when it got there by
- * a rollback or a promotion from staging; who shipped it is read with that
- * deployment's full provenance in the history.
+ * a rollback or a promotion; who shipped it is read with that deployment's
+ * full provenance in the history. A staging release promoted from a pull
+ * request's preview names the pull request and its commit, since that is
+ * the code staging is running.
  */
-function ReleaseLine({ run, activatedAt }: { run?: DeploymentEngineRun; activatedAt?: string }) {
+function ReleaseLine({
+  run,
+  activatedAt,
+  promotion,
+}: {
+  run?: DeploymentEngineRun
+  activatedAt?: string
+  promotion?: DeploymentPromotion
+}) {
   if (!run)
     return activatedAt ? <span className="truncate">{relativeTime(activatedAt)}</span> : null
+  const origin =
+    run.operation === "promote" ? promotionOrigin(promotion ?? runPromotion(run)) : undefined
   return (
-    <span className="truncate">
+    <span className="truncate" data-slot="release-line">
       {run.operation === "rollback" && "rolled back "}
-      {run.operation === "promote" && "promoted "}
+      {run.operation === "promote" &&
+        (origin?.kind === "preview" ? (
+          <>
+            promoted from {origin.from}
+            {origin.sha && <span className="font-mono"> ({origin.sha})</span>}{" "}
+          </>
+        ) : (
+          "promoted "
+        ))}
       {relativeTime(run.endedAt ?? run.requestedAt)}
     </span>
   )

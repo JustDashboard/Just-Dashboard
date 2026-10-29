@@ -1134,6 +1134,9 @@ type PreviewRef struct {
 	// Branches are the preview's database branches (preview_branches.go),
 	// read by the pull-request listing; the store never fills them.
 	Branches []PreviewBranch `json:"branches,omitempty"`
+	// Promotion is the newest promotion of the preview's image into staging,
+	// however it ended.
+	Promotion *PreviewPromotion `json:"promotion,omitempty"`
 }
 
 func (s *AutomationStore) ListPreviews(ctx context.Context, projectID int64) ([]PreviewRef, error) {

@@ -1,5 +1,13 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
-import { deployment, mockProject, now, project } from "./deploy-fixture"
+import {
+  deployment,
+  mockProject,
+  now,
+  previewEnvironment,
+  project,
+  projectPullRequests,
+  pullRequest,
+} from "./deploy-fixture"
 
 /**
  * Staging and promotion over the mocked project: adding staging from the
@@ -77,6 +85,20 @@ const promotion = {
   imageId,
   imageDigest: imageId,
 }
+/** Staging's release #2 when it was a pull request preview's image, promoted. */
+const previewPromotion = {
+  environmentId: 52,
+  environmentName: "Preview 42",
+  releaseId: 520,
+  releaseNumber: 1,
+  runId: 520,
+  imageId,
+  imageDigest: imageId,
+  sourceRevision: pullRequest.headSha,
+  sourceKind: "preview",
+  preview: { number: 42, url: pullRequest.url, repository: "acme/api", approvedBy: "mira" },
+}
+
 const promotionRun = {
   ...stagingRun,
   id: 97,
@@ -102,9 +124,24 @@ async function mockStaging(
     promoted?: boolean
     idle?: boolean
     refused?: boolean
+    /** Staging's live release is a pull request preview's image. */
+    fromPreview?: boolean
   } = {},
 ) {
   let exists = options.exists ?? true
+  const liveRun = options.fromPreview
+    ? {
+        ...stagingRun,
+        operation: "promote",
+        trigger: "manual",
+        actor: "operator",
+        sourceRevision: pullRequest.headSha,
+        metadata: { promotion: previewPromotion },
+      }
+    : stagingRun
+  const liveRelease = options.fromPreview
+    ? { ...stagingRelease, sourceRevision: pullRequest.headSha, promotion: previewPromotion }
+    : stagingRelease
   const requests: { method: string; path: string; body?: unknown }[] = []
   await page.route("**/api/v1/deploy/7**", async (route) => {
     const request = route.request()
@@ -158,7 +195,7 @@ async function mockStaging(
           sourceRef: "staging",
           endpoint: "https://staging.api.example.test",
           activeRun: undefined,
-          lastRun: stagingRun,
+          lastRun: liveRun,
         },
       })
     }
@@ -173,9 +210,9 @@ async function mockStaging(
       return json(route, { runs: [promotionRun], running: false })
     }
     if (path === "/deploy/7/runs" && url.searchParams.get("environment") === "13") {
-      return json(route, { runs: [stagingRun], running: false })
+      return json(route, { runs: [liveRun], running: false })
     }
-    if (path === "/deploy/7/environments/13/releases") return json(route, [stagingRelease])
+    if (path === "/deploy/7/environments/13/releases") return json(route, [liveRelease])
     if (path === "/deploy/7/environments/12/releases" && options.promoted) {
       return json(route, [
         {
@@ -318,4 +355,234 @@ test("a staging release production cannot take says why instead of waiting", asy
   const confirm = page.getByRole("dialog", { name: /^Promote/ })
   await expect(confirm.getByText("only a successful, retained staging release")).toBeVisible()
   await expect(confirm.getByRole("button", { name: "Promote to production" })).toBeDisabled()
+})
+
+/** What the confirmation reads for #42's preview into staging. */
+const previewReading = {
+  source: {
+    kind: "preview",
+    environmentId: 52,
+    environmentName: "Preview 42",
+    release: {
+      ...stagingRelease,
+      id: 520,
+      environmentId: 52,
+      number: 1,
+      runId: 520,
+      sourceRevision: pullRequest.headSha,
+    },
+    imageId,
+    imageDigest: imageId,
+    imageSizeBytes: 187_000_000,
+    imagePresent: true,
+    preview: {
+      number: 42,
+      title: pullRequest.title,
+      url: pullRequest.url,
+      author: "mira",
+      headRepository: "acme/api",
+      fork: false,
+      approvedBy: "operator",
+      approvalState: "approved",
+    },
+  },
+  target: {
+    environmentId: 13,
+    environmentName: "Staging",
+    liveRelease: stagingRelease,
+    desiredRevision: 1,
+    activeRuns: 0,
+    promotionOnly: false,
+    pendingChanges: [],
+    releaseTasks: ["migrate"],
+    rehearsal: false,
+  },
+  detail: {
+    status: "available",
+    fields: [{ field: "memory limit", from: "256 MiB", to: "512 MiB", changed: true }],
+    variables: [
+      { name: "STAGING_API_TOKEN", change: "added", secret: true },
+      { name: "PREVIEW_FLAG", change: "removed", secret: false },
+    ],
+    dependencies: [],
+    checks: [],
+    domains: [{ name: "staging.api.example.test", change: "added" }],
+  },
+  blockers: [],
+}
+
+test("a pull request's preview is promoted into staging from its row, with staging's configuration", async ({
+  page,
+}, testInfo) => {
+  await mockProject(page)
+  const requests = await mockStaging(page)
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) =>
+    json(route, projectPullRequests(false)),
+  )
+  await page.route("**/api/v1/deploy/7/environments/13/promotion?**", (route) => {
+    const url = new URL(route.request().url())
+    expect(url.searchParams.get("source")).toBe("preview")
+    expect(url.searchParams.get("preview")).toBe("42")
+    return json(route, previewReading)
+  })
+  await page.route("**/api/v1/deploy/7/environments/13/promote", (route) => {
+    requests.push({
+      method: "POST",
+      path: "/deploy/7/environments/13/promote",
+      body: route.request().postDataJSON(),
+    })
+    return json(route, { ...stagingRun, id: 101, operation: "promote" }, 202)
+  })
+  await page.goto("/deploy/7")
+
+  const list = page.getByRole("list", { name: "Pull requests" })
+  await list.getByRole("button", { name: "More actions for #42" }).click()
+  await page.getByRole("menuitem", { name: "Promote to staging" }).click()
+  const confirm = page.getByRole("dialog", { name: "Promote PR #42 to staging" })
+  await expect(confirm.getByText(imageId)).toBeVisible()
+  await expect(confirm.getByText("PR #42 · preview release #1")).toBeVisible()
+  await expect(confirm.locator('[data-slot="promotion-approval"]')).toContainText(
+    "approved by operator",
+  )
+  // What the release will run with, said before anything is queued: staging's
+  // plan and variables, never the preview's.
+  await expect(confirm.locator('[data-slot="promotion-runs-with"]')).toContainText(
+    "The release runs with staging's plan and variables",
+  )
+  await expect(
+    confirm.getByRole("listitem").filter({ hasText: "STAGING_API_TOKEN" }),
+  ).toContainText("only in staging")
+  await expect(confirm.getByRole("listitem").filter({ hasText: "PREVIEW_FLAG" })).toContainText(
+    "only in preview",
+  )
+  await expect(confirm.getByText("Staging's release tasks run first")).toBeVisible()
+  await expect(confirm.getByText("This pull request comes from a fork")).toHaveCount(0)
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `horizontal viewport overflow at ${width}px`,
+    ).toBe(true)
+    await testInfo.attach(`promote-preview-${width}`, {
+      body: await page.screenshot({ path: testInfo.outputPath(`promote-preview-${width}.png`) }),
+      contentType: "image/png",
+    })
+  }
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await confirm.getByRole("button", { name: "Promote to staging" }).click()
+  await expect(page).toHaveURL(/\/deploy\/7\/runs\/101$/)
+  expect(
+    requests.find((entry) => entry.path === "/deploy/7/environments/13/promote")?.body,
+  ).toEqual({
+    source: "preview",
+    preview: 42,
+  })
+  // Production was never asked to take it.
+  expect(requests.some((entry) => entry.path === "/deploy/7/environments/12/promote")).toBe(false)
+})
+
+test("a fork's preview the server refuses says why and cannot be promoted", async ({ page }) => {
+  await mockProject(page)
+  await mockStaging(page)
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) =>
+    json(route, projectPullRequests(false)),
+  )
+  await page.route("**/api/v1/deploy/7/environments/13/promotion?**", (route) =>
+    json(route, {
+      ...previewReading,
+      source: {
+        ...previewReading.source,
+        preview: {
+          ...previewReading.source.preview,
+          fork: true,
+          headRepository: "octocat/api",
+          approvedBy: "",
+          approvalState: "rejected",
+        },
+      },
+      blockers: [
+        {
+          code: "preview_promotion_unapproved",
+          message:
+            "PR #42 comes from a fork (octocat/api), and a fork's code is promoted only at a commit an administrator approved: an administrator rejected commit c0ffee4 of PR #42",
+        },
+      ],
+    }),
+  )
+  await page.goto("/deploy/7")
+  await page
+    .getByRole("list", { name: "Pull requests" })
+    .getByRole("button", { name: "More actions for #42" })
+    .click()
+  await page.getByRole("menuitem", { name: "Promote to staging" }).click()
+  const confirm = page.getByRole("dialog", { name: "Promote PR #42 to staging" })
+  await expect(confirm.getByText("comes from a fork (octocat/api)")).toBeVisible()
+  await expect(confirm.getByText("This pull request comes from a fork")).toBeVisible()
+  await expect(confirm.getByRole("button", { name: "Promote to staging" })).toBeDisabled()
+})
+
+test("staging's overview names the pull request its live release was promoted from", async ({
+  page,
+}, testInfo) => {
+  await mockProject(page)
+  await mockStaging(page, { fromPreview: true })
+  await page.goto("/deploy/7?env=staging")
+  const line = page.locator('[data-slot="project-header"] [data-slot="release-line"]')
+  await expect(line).toContainText("promoted from PR #42")
+  await expect(line).toContainText("(c0ffee4)")
+  // The overview's live release reads the same, where it says how the
+  // release got there.
+  await expect(page.locator('[data-slot="live-release-origin"]')).toContainText(
+    "promoted from PR #42 (c0ffee4)",
+  )
+  await testInfo.attach("staging-promoted-from-preview", {
+    body: await page.screenshot({
+      path: testInfo.outputPath("staging-promoted-from-preview.png"),
+    }),
+    contentType: "image/png",
+  })
+  await page.goto("/deploy/7/deployments?env=staging")
+  const row = page.getByRole("listitem").filter({ hasText: "Promoted from PR #42" }).first()
+  await expect(row).toBeVisible()
+  await testInfo.attach("staging-releases-from-preview", {
+    body: await row.screenshot({
+      path: testInfo.outputPath("staging-releases-from-preview.png"),
+    }),
+    contentType: "image/png",
+  })
+})
+
+test("a preview whose image went to staging says so on its row", async ({ page }, testInfo) => {
+  await mockProject(page)
+  await mockStaging(page)
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) => {
+    const listing = projectPullRequests(false)
+    const promoted = {
+      ...previewEnvironment,
+      promotion: {
+        runId: 101,
+        runNumber: 9,
+        state: "succeeded",
+        environmentId: 13,
+        releaseNumber: 1,
+        sourceRevision: pullRequest.headSha,
+        requestedAt: now,
+        endedAt: now,
+      },
+    }
+    return json(route, {
+      ...listing,
+      pulls: [{ ...pullRequest, preview: promoted }],
+      previews: [promoted],
+    })
+  })
+  await page.goto("/deploy/7")
+  const list = page.getByRole("list", { name: "Pull requests" })
+  const row = list.getByRole("listitem").first()
+  await expect(row.locator('[data-slot="preview-promotion"]')).toHaveText("Promoted to staging")
+  await list.scrollIntoViewIfNeeded()
+  await testInfo.attach("preview-row-promoted", {
+    body: await page.screenshot({ path: testInfo.outputPath("preview-row-promoted.png") }),
+    contentType: "image/png",
+  })
 })

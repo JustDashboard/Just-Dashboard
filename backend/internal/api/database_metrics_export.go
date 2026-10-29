@@ -26,10 +26,12 @@ const promPrefix = "jd_database_"
 // agree on when a server went quiet.
 const databaseMetricStale = 3 * databaseMetricEvery
 
-// mountDatabaseMetricsExport registers the scrape endpoint on its own, because
-// it is the one route a scoped API key may reach: every other group refuses
-// such a key before its capability is asked. A session is refused here too,
-// since a browser has no use for it and its cookie must never be the way in.
+// mountDatabaseMetricsExport registers the scrape endpoints on their own,
+// because they are the routes a scoped API key may reach: every other group
+// refuses such a key before its capability is asked. A session is refused
+// here too, since a browser has no use for it and its cookie must never be
+// the way in. The deployments' exposition (deployment_metrics_export.go) sits
+// behind the same key, so one Prometheus job scrapes both.
 func (s *Server) mountDatabaseMetricsExport(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(s.Authn.AuthenticateScoped)
@@ -38,6 +40,7 @@ func (s *Server) mountDatabaseMetricsExport(r chi.Router) {
 		r.Use(httpx.RequireToken)
 		r.Use(httpx.RequireCapability(auth.CapMetricsRead))
 		r.Method(http.MethodGet, databaseMetricsPath, s.handle(s.handleDatabaseMetricsExport))
+		r.Method(http.MethodGet, deploymentMetricsPath, s.handle(s.handleDeploymentMetricsExport))
 	})
 }
 
@@ -322,10 +325,18 @@ type promFamily struct {
 }
 
 // promFamilies collects series by metric name, because the text format wants
-// each name's lines together under one HELP and TYPE.
-type promFamilies struct{ byName map[string]*promFamily }
+// each name's lines together under one HELP and TYPE. Every name takes the
+// prefix: one exposition is one subject, and the prefix is what says so.
+type promFamilies struct {
+	prefix string
+	byName map[string]*promFamily
+}
 
-func newPromFamilies() *promFamilies { return &promFamilies{byName: map[string]*promFamily{}} }
+func newPromFamilies() *promFamilies { return newPromFamiliesFor(promPrefix) }
+
+func newPromFamiliesFor(prefix string) *promFamilies {
+	return &promFamilies{prefix: prefix, byName: map[string]*promFamily{}}
+}
 
 // add records one series. A name already taken by the other kind, or a series
 // with the labels it already holds, is dropped: two engines' own keys can land
@@ -334,7 +345,7 @@ func (f *promFamilies) add(name string, kind promKind, help string, labels []pro
 	if math.IsNaN(value) || math.IsInf(value, 0) || name == "" {
 		return
 	}
-	name = promPrefix + name
+	name = f.prefix + name
 	family := f.byName[name]
 	if family == nil {
 		family = &promFamily{help: help, kind: kind, seen: map[string]bool{}}

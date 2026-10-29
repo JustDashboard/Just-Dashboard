@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/agent"
@@ -22,6 +23,10 @@ import (
 // (no Docker socket, no systemd) degrades to a clear error on its own routes
 // instead of preventing the dashboard from starting.
 type Server struct {
+	// deployOpenAPI is the description of the deployment API, read off the
+	// router Routes returns the first time it is asked for (deploy_openapi.go).
+	deployOpenAPI atomic.Pointer[deployOpenAPISource]
+
 	Cfg         *config.Config
 	Log         *slog.Logger
 	Store       *store.Store
@@ -66,6 +71,10 @@ type Server struct {
 
 	// The icons deployed websites declare, read once an hour per project.
 	favicons faviconCache
+
+	// What the deployments' scrape read that costs a Docker call per
+	// environment, kept for a minute between scrapes (deployment_metrics_export.go).
+	deployScrape scrapeCache
 
 	// mapSources holds the server map's last answer from every source it
 	// reads (map_sources.go), so an open map costs the server little.
@@ -256,6 +265,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// going red, and the daemon keeps none of it. A host with no Docker
 	// simply never connects, which is a steady state rather than an error.
 	s.modules.dockerEvents.Start(ctx)
+	// And the deployments' share of it is written down as it arrives, so the
+	// feed a project page draws reaches past the last restart of this process.
+	s.modules.deployEvents.Follow(ctx, s.modules.dockerEvents)
 	// Interface counters are sampled from boot for the same reason: the
 	// traffic chart for three this morning exists only if something was
 	// reading the counters at three.
