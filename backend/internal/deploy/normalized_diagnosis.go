@@ -215,6 +215,16 @@ func candidateStartFailure(err error) (string, string) {
 		return "runtime_port_in_use", message + "; free it or publish another port"
 	case strings.Contains(text, "No such image"):
 		return "image_missing", "the release's image is no longer on this server; deploy again to rebuild it"
+	case strings.Contains(text, "could not select device driver") || strings.Contains(text, "nvidia-container-cli") ||
+		strings.Contains(text, "unknown or invalid runtime name: nvidia"):
+		return "runtime_gpu_unavailable", "Docker on this server could not give the container the GPUs the plan asks for: the NVIDIA driver or the NVIDIA Container Toolkit is missing or not working; install them, or remove the GPU request"
+	case strings.Contains(text, "rlimit"):
+		return "runtime_ulimit_refused", "the kernel refused a process limit the plan sets: it is above what this server allows a container (for nofile, its fs.nr_open); lower it"
+	case strings.Contains(strings.ToLower(text), "sysctl"):
+		return "runtime_sysctl_refused", "a kernel parameter the plan sets was refused: this kernel does not have it, or it is not the container's to set; remove it or correct its name"
+	case strings.Contains(text, "unable to find user") || strings.Contains(text, "unable to find group") ||
+		strings.Contains(text, "no matching entries in passwd file") || strings.Contains(text, "no matching entries in group file"):
+		return "runtime_user_unknown", "the image has no user or group by the name the plan runs it as; use a number such as 1000:1000, or a name the image defines"
 	case strings.Contains(text, "invalid mount") || strings.Contains(text, "bind source path does not exist") ||
 		strings.Contains(text, "mount denied") || strings.Contains(text, "invalid volume specification"):
 		return "mount_invalid", "a mount could not be created: its host path is missing or not allowed"

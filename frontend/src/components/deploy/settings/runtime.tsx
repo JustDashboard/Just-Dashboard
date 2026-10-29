@@ -105,6 +105,16 @@ import {
   windowWords,
   withStrategy,
 } from "@/components/deploy/canary-model"
+import {
+  DEFAULT_TMPFS_MB,
+  gpusWords,
+  readOnlyStartingPaths,
+  runtimeFlagsDraftOf,
+  runtimeFlagsLine,
+  runtimeFlagsOf,
+  type FlagsRefusal,
+  type RuntimeFlagsDraft,
+} from "@/components/deploy/runtime-flags-model"
 
 /**
  * How the release runs once it exists: the image and command, where it
@@ -119,7 +129,7 @@ import {
  * port or the host network cannot run two releases side by side, and
  * blue/green on such a plan used to be offered here and then refused at start.
  *
- * Two forms, two saves: Runtime (seven sections, one PUT) and Health
+ * Two forms, two saves: Runtime (its sections, one PUT) and Health
  * checks. Each keeps its own draft keyed on its own saved value, so saving
  * one no longer restarts the other.
  *
@@ -134,7 +144,8 @@ type RuntimePlan = DeploymentConfiguration["runtime"]
 /**
  * The Runtime form's draft: the plan, with its three lists held as the text
  * the operator types — one entry per line — so a half-typed line survives a
- * visit to another page, and the traffic replay's terms as typed.
+ * visit to another page, and the traffic replay's terms, the sleep terms and
+ * the process flags as typed.
  */
 type RuntimeDraft = RuntimePlan & {
   commandText: string
@@ -142,6 +153,7 @@ type RuntimeDraft = RuntimePlan & {
   devicesText: string
   replayDraft: ReplayDraft
   sleepDraft: SleepDraft
+  flagsDraft: RuntimeFlagsDraft
 }
 
 function linesOf(text: string) {
@@ -169,6 +181,13 @@ function runtimeDraftOf(saved: RuntimePlan): RuntimeDraft {
   delete runtime.sleep
   // Skew protection is set beside the rollback terms, which save it.
   delete runtime.skewProtection
+  // The process flags are held as typed, in flagsDraft alone.
+  delete runtime.user
+  delete runtime.readOnlyRootfs
+  delete runtime.tmpfs
+  delete runtime.ulimits
+  delete runtime.sysctls
+  delete runtime.gpus
   return {
     ...runtime,
     commandText: (runtime.command ?? []).join("\n"),
@@ -176,9 +195,11 @@ function runtimeDraftOf(saved: RuntimePlan): RuntimeDraft {
     devicesText: (runtime.devices ?? []).join("\n"),
     replayDraft: replayDraftOf(saved.replay),
     sleepDraft: sleepDraftOf(saved.sleep),
+    flagsDraft: runtimeFlagsDraftOf(saved),
   }
 }
 
+/** The draft as the plan saves it; the flags' lines were read by `runtimeFlagsOf` first. */
 function runtimePlanOf(draft: RuntimeDraft): RuntimePlan {
   const plan: RuntimePlan & Partial<RuntimeDraft> = {
     ...draft,
@@ -187,12 +208,14 @@ function runtimePlanOf(draft: RuntimeDraft): RuntimePlan {
     devices: linesOf(draft.devicesText),
     replay: replayPlanOf(draft.replayDraft),
     sleep: sleepPlanOf(draft.sleepDraft),
+    ...runtimeFlagsOf(draft.flagsDraft).plan,
   }
   delete plan.commandText
   delete plan.capabilitiesText
   delete plan.devicesText
   delete plan.replayDraft
   delete plan.sleepDraft
+  delete plan.flagsDraft
   return plan
 }
 
@@ -236,9 +259,36 @@ const RUNTIME_FIELD_IDS: Record<string, string> = {
   "runtime.maxRequestBodyMb": "runtime-max-body",
   "runtime.capabilities": "runtime-capabilities",
   "runtime.devices": "runtime-devices",
+  "runtime.user": "runtime-user",
+  "runtime.readOnlyRootfs": "runtime-read-only",
+  "runtime.tmpfs": "runtime-tmpfs",
+  "runtime.ulimits": "runtime-ulimits",
+  "runtime.sysctls": "runtime-sysctls",
+  "runtime.gpus": "runtime-gpus",
+  "runtime.gpus.mode": "runtime-gpus",
+  "runtime.gpus.count": "runtime-gpu-count",
+  "runtime.gpus.deviceIds": "runtime-gpu-devices",
   ...REPLAY_FIELD_IDS,
   ...SLEEP_FIELD_IDS,
 }
+
+/** The same ids by the flags draft's own fields, for a line the form cannot read. */
+const FLAGS_DRAFT_FIELD_IDS: Record<FlagsRefusal["field"], string> = {
+  user: "runtime-user",
+  tmpfsText: "runtime-tmpfs",
+  ulimitsText: "runtime-ulimits",
+  sysctlsText: "runtime-sysctls",
+  gpuCount: "runtime-gpu-count",
+  gpuDevices: "runtime-gpu-devices",
+}
+
+/** The GPU choice's segments. */
+const GPU_MODES: { value: RuntimeFlagsDraft["gpuMode"]; label: string }[] = [
+  { value: "none", label: "None" },
+  { value: "all", label: "Every GPU" },
+  { value: "count", label: "A number" },
+  { value: "devices", label: "Named" },
+]
 
 /** Which section head a refused field belongs to, so that head says "Not saved". */
 const FIELD_SECTION: Record<string, string> = {
@@ -261,6 +311,14 @@ const FIELD_SECTION: Record<string, string> = {
   "runtime-drain": "shutdown",
   "runtime-capabilities": "access",
   "runtime-devices": "access",
+  "runtime-gpus": "access",
+  "runtime-gpu-count": "access",
+  "runtime-gpu-devices": "access",
+  "runtime-user": "process",
+  "runtime-read-only": "process",
+  "runtime-tmpfs": "process",
+  "runtime-ulimits": "process",
+  "runtime-sysctls": "process",
   ...Object.fromEntries(Object.values(REPLAY_FIELD_IDS).map((id) => [id, "replay"])),
   ...Object.fromEntries(Object.values(SLEEP_FIELD_IDS).map((id) => [id, "sleep"])),
 }
@@ -379,9 +437,10 @@ function statuses(...items: React.ReactNode[]) {
 }
 
 /**
- * The Runtime form: seven section heads — the image and command, where it
+ * The Runtime form: its section heads — the image and command, where it
  * listens, what it may use, how releases replace each other, what a release
- * is replayed before its cutover, how it is stopped, what it can reach — and
+ * is replayed before its cutover, what it does while nobody visits, how it is
+ * stopped, who it runs as and where it may write, what it can reach — and
  * one save, because one PUT writes all of it.
  */
 function RuntimeForm({
@@ -405,6 +464,7 @@ function RuntimeForm({
   const [error, setError] = useState<string>()
   const [fieldError, setFieldError] = useState<{ id: string; message: string }>()
   const [accessOpen, setAccessOpen] = useState(false)
+  const [limitsOpen, setLimitsOpen] = useState(false)
   // The switch is on while there is a host port, and stays on while the
   // operator clears the field to type another: bound to the value alone, an
   // emptied field turned the switch off and unmounted the input being typed in.
@@ -446,6 +506,17 @@ function RuntimeForm({
   const replicasFail = replicas > 1 && Boolean(replicasRefused)
   const portMark = portProduct(port)
   const web = deployment.profile === "web" || deployment.profile === "static"
+  const compose = method === "compose" || method === "legacy_compose"
+  const flags = runtime.flagsDraft
+  const patchFlags = (fields: Partial<RuntimeFlagsDraft>) =>
+    draft.set((prev) => ({ ...prev, flagsDraft: { ...prev.flagsDraft, ...fields } }))
+  const flagsRead = runtimeFlagsOf(flags)
+  // Two sections share the draft: the GPUs are Container access's.
+  const savedFlags = runtimeFlagsDraftOf(configuration.runtime)
+  const flagsChanged = (fields: (keyof RuntimeFlagsDraft)[]) =>
+    fields.some((field) => flags[field] !== savedFlags[field])
+  const flagsLine = flagsRead.plan && runtimeFlagsLine(flagsRead.plan)
+  const gpus = flagsRead.plan?.gpus
 
   const submit = async () => {
     setError(undefined)
@@ -467,6 +538,13 @@ function RuntimeForm({
       setFieldError({
         id: SLEEP_DRAFT_FIELD_IDS[sleepRefused.field],
         message: sleepRefused.message,
+      })
+      return false
+    }
+    if (flagsRead.refusal) {
+      setFieldError({
+        id: FLAGS_DRAFT_FIELD_IDS[flagsRead.refusal.field],
+        message: flagsRead.refusal.message,
       })
       return false
     }
@@ -494,16 +572,14 @@ function RuntimeForm({
         devicesText: linesOf(prev.devicesText).join("\n"),
         replayDraft: replayDraftOf(replayPlanOf(prev.replayDraft)),
         sleepDraft: sleepDraftOf(sleepPlanOf(prev.sleepDraft)),
+        flagsDraft: runtimeFlagsDraftOf(runtimeFlagsOf(prev.flagsDraft).plan ?? {}),
       }))
       return true
     } catch (caught) {
-      // A refused prefix is named by its place in the list; the field is the list.
-      const field =
-        caught instanceof ApiError && caught.field?.startsWith("runtime.replay.paths[")
-          ? "runtime.replay.paths"
-          : caught instanceof ApiError
-            ? caught.field
-            : undefined
+      // An entry of a list — a refused prefix, a writable path, a limit, a
+      // kernel parameter, a GPU — is named by its place in it; the field is
+      // the list.
+      const field = caught instanceof ApiError ? caught.field?.replace(/\[\d+\]/g, "") : undefined
       if (caught instanceof ApiError && field && RUNTIME_FIELD_IDS[field]) {
         setFieldError({ id: RUNTIME_FIELD_IDS[field], message: caught.message })
       } else if (caught instanceof ApiError && (caught.status === 422 || caught.status === 400)) {
@@ -525,6 +601,7 @@ function RuntimeForm({
   // here — so the fold latches open and does not snap shut again the moment
   // the next submit clears the error.
   const accessRefused = Boolean(errorFor("runtime-capabilities") || errorFor("runtime-devices"))
+  const limitsRefused = Boolean(errorFor("runtime-ulimits") || errorFor("runtime-sysctls"))
 
   const image = runtime.image?.trim()
 
@@ -1198,19 +1275,172 @@ function RuntimeForm({
         </FieldRow>
       </SettingSection>
 
+      {/* Who the process is and where it may write: the user, a read-only
+          root with the paths kept writable in memory, and behind the fold the
+          kernel's limits and parameters it starts with. A Compose stack's
+          file says these per service, so it gets the sentence and no fields. */}
+      <SettingSection
+        id="process"
+        title="Inside the container"
+        state={
+          flagsLine ? (
+            <span key={flagsLine} className="block animate-rise truncate" title={flagsLine}>
+              {flagsLine}
+            </span>
+          ) : undefined
+        }
+        status={settingStatus({
+          dirty: flagsChanged([
+            "user",
+            "readOnlyRootfs",
+            "tmpfsText",
+            "ulimitsText",
+            "sysctlsText",
+          ]),
+          refused: refusedIn("process"),
+        })}
+      >
+        {compose ? (
+          <FormNote>
+            A Compose stack sets its user, read-only root, tmpfs, ulimits, sysctls and GPUs per
+            service in its own file.
+          </FormNote>
+        ) : (
+          <>
+            <Field
+              label="Run as"
+              htmlFor="runtime-user"
+              info="The user the application's processes run as: a number with an optional group, such as 1000:1000, or a name the image defines. Empty runs the image's own user. What it writes into a volume belongs to it, and release tasks run as it too."
+              error={errorFor("runtime-user")}
+            >
+              <InputGroup className="sm:w-72">
+                <InputGroupInput
+                  id="runtime-user"
+                  value={flags.user}
+                  readOnly={!canEdit}
+                  aria-invalid={Boolean(errorFor("runtime-user"))}
+                  className="font-mono"
+                  placeholder="the image's user"
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => patchFlags({ user: event.target.value })}
+                />
+              </InputGroup>
+            </Field>
+            <OptionList>
+              <OptionRow
+                title="Read-only root filesystem"
+                hint="The application can write only to its volumes and to the paths kept writable below; a write anywhere else fails."
+                checked={flags.readOnlyRootfs}
+                onCheckedChange={(on) =>
+                  patchFlags({
+                    readOnlyRootfs: on,
+                    // Turned on with nowhere named, it starts from /tmp — and,
+                    // for a static site, where nginx writes — so the switch
+                    // alone is a plan the server saves.
+                    tmpfsText:
+                      on && !flags.tmpfsText.trim()
+                        ? readOnlyStartingPaths(method, configuration.build.outputDirectory).join(
+                            "\n",
+                          )
+                        : flags.tmpfsText,
+                  })
+                }
+                disabled={!canEdit}
+              >
+                <Field
+                  label="Writable paths"
+                  htmlFor="runtime-tmpfs"
+                  info={`One absolute path per line, optionally with its size: /tmp 128 MiB. Each is kept in memory, ${DEFAULT_TMPFS_MB} MiB unless it says, counts against the memory limit, and is empty again when the container restarts. Empty is /tmp alone.`}
+                  error={errorFor("runtime-tmpfs")}
+                >
+                  <Textarea
+                    id="runtime-tmpfs"
+                    value={flags.tmpfsText}
+                    onChange={(event) => patchFlags({ tmpfsText: event.target.value })}
+                    readOnly={!canEdit}
+                    aria-invalid={Boolean(errorFor("runtime-tmpfs"))}
+                    placeholder={"/tmp\n/var/cache/app 32 MiB"}
+                    className="min-h-20 font-mono sm:text-xs"
+                  />
+                </Field>
+              </OptionRow>
+            </OptionList>
+            {/* The field a refusal can name is behind the switch while it is off. */}
+            {!flags.readOnlyRootfs &&
+              (errorFor("runtime-tmpfs") || errorFor("runtime-read-only")) && (
+                <FormNote tone="danger" role="alert" className="animate-rise">
+                  {errorFor("runtime-tmpfs") || errorFor("runtime-read-only")}
+                </FormNote>
+              )}
+            {flags.readOnlyRootfs && errorFor("runtime-read-only") && (
+              <FormNote tone="danger" role="alert" className="animate-rise">
+                {errorFor("runtime-read-only")}
+              </FormNote>
+            )}
+            <Disclosure
+              quiet
+              summary="Ulimits and kernel parameters"
+              facts={`${plural(flagsRead.plan?.ulimits?.length ?? 0, "ulimit")} · ${plural(flagsRead.plan?.sysctls?.length ?? 0, "kernel parameter")}`}
+              open={limitsOpen || limitsRefused}
+              onOpenChange={setLimitsOpen}
+            >
+              <FieldRow>
+                <Field
+                  label="Ulimits"
+                  htmlFor="runtime-ulimits"
+                  info="The kernel limits each process starts with, one per line as name=soft:hard, or name=value for both: nofile, nproc, memlock, stack, core and the rest of Docker's names. -1 or unlimited is no limit where the kernel allows one; nofile stops at 1048576."
+                  error={errorFor("runtime-ulimits")}
+                >
+                  <Textarea
+                    id="runtime-ulimits"
+                    value={flags.ulimitsText}
+                    onChange={(event) => patchFlags({ ulimitsText: event.target.value })}
+                    readOnly={!canEdit}
+                    aria-invalid={Boolean(errorFor("runtime-ulimits"))}
+                    placeholder={"nofile=65536:65536\nmemlock=unlimited"}
+                    className="min-h-20 font-mono sm:text-xs"
+                  />
+                </Field>
+                <Field
+                  label="Kernel parameters"
+                  htmlFor="runtime-sysctls"
+                  info="sysctls, one per line as name=value, set in the container's own namespaces: net.*, fs.mqueue.* and the System V IPC limits (kernel.shmmax, kernel.sem…). Anything else is the server's and is refused, as net.* is on the host network."
+                  error={errorFor("runtime-sysctls")}
+                >
+                  <Textarea
+                    id="runtime-sysctls"
+                    value={flags.sysctlsText}
+                    onChange={(event) => patchFlags({ sysctlsText: event.target.value })}
+                    readOnly={!canEdit}
+                    aria-invalid={Boolean(errorFor("runtime-sysctls"))}
+                    placeholder={"net.core.somaxconn=1024\nnet.ipv4.tcp_keepalive_time=600"}
+                    className="min-h-20 font-mono sm:text-xs"
+                  />
+                </Field>
+              </FieldRow>
+            </Disclosure>
+          </>
+        )}
+      </SettingSection>
+
       <SettingSection
         id="access"
         title="Container access"
         status={statuses(
           runtime.privileged ? (
             <Status key="privileged" tone="danger" label="Privileged" className="animate-rise" />
+          ) : runtime.hostNetwork ? (
+            <Status key="host" tone="warning" label="Host network" className="animate-rise" />
           ) : (
-            runtime.hostNetwork && (
-              <Status key="host" tone="warning" label="Host network" className="animate-rise" />
+            gpus && (
+              <Status key="gpus" tone="warning" label={gpusWords(gpus)} className="animate-rise" />
             )
           ),
           settingStatus({
-            dirty: draft.changed(["privileged", "hostNetwork", "capabilitiesText", "devicesText"]),
+            dirty:
+              draft.changed(["privileged", "hostNetwork", "capabilitiesText", "devicesText"]) ||
+              flagsChanged(["gpuMode", "gpuCount", "gpuDevices", "gpuPreviews"]),
             refused: refusedIn("access"),
           }),
         )}
@@ -1281,6 +1511,83 @@ function RuntimeForm({
             </Field>
           </FieldRow>
         </Disclosure>
+        {/* The server's GPUs are a device of the host's, so they sit with the
+            other ways out of the container; a Compose file asks for its own. */}
+        {!compose && (
+          <Field
+            label="GPUs"
+            info="NVIDIA GPUs through Docker's --gpus, with the gpu capability. The server needs the NVIDIA driver and the NVIDIA Container Toolkit; preflight says when Docker lists no nvidia runtime, and a start Docker refuses fails as GPUs not available. Every container of the release — each replica, a canary — gets the same."
+            error={errorFor("runtime-gpus")}
+          >
+            <Segments
+              id="runtime-gpus"
+              label="GPUs"
+              value={flags.gpuMode}
+              options={GPU_MODES}
+              disabled={!canEdit}
+              onChange={(gpuMode) => patchFlags({ gpuMode })}
+            />
+            {flags.gpuMode !== "none" && (
+              <div className="animate-rise space-y-3 pt-2">
+                {flags.gpuMode === "count" && (
+                  <Field
+                    label="How many"
+                    htmlFor="runtime-gpu-count"
+                    error={errorFor("runtime-gpu-count")}
+                  >
+                    <InputGroup className="sm:w-40">
+                      <InputGroupInput
+                        id="runtime-gpu-count"
+                        type="number"
+                        min={1}
+                        max={64}
+                        value={flags.gpuCount}
+                        readOnly={!canEdit}
+                        aria-invalid={Boolean(errorFor("runtime-gpu-count"))}
+                        className="font-mono"
+                        onChange={(event) => patchFlags({ gpuCount: event.target.value })}
+                      />
+                      <InputGroupAddon align="inline-end">
+                        <InputGroupText>GPUs</InputGroupText>
+                      </InputGroupAddon>
+                    </InputGroup>
+                  </Field>
+                )}
+                {flags.gpuMode === "devices" && (
+                  <Field
+                    label="Which"
+                    htmlFor="runtime-gpu-devices"
+                    info="Indexes or UUIDs as nvidia-smi -L lists them, separated by commas."
+                    error={errorFor("runtime-gpu-devices")}
+                  >
+                    <InputGroup className="sm:w-96">
+                      <InputGroupInput
+                        id="runtime-gpu-devices"
+                        value={flags.gpuDevices}
+                        readOnly={!canEdit}
+                        aria-invalid={Boolean(errorFor("runtime-gpu-devices"))}
+                        className="font-mono"
+                        placeholder="0, 1"
+                        autoComplete="off"
+                        spellCheck={false}
+                        onChange={(event) => patchFlags({ gpuDevices: event.target.value })}
+                      />
+                    </InputGroup>
+                  </Field>
+                )}
+                <OptionList>
+                  <OptionRow
+                    title="Pull request previews get them too"
+                    hint="Off, a preview of this environment runs without GPUs: it runs a branch nobody has deployed yet."
+                    checked={flags.gpuPreviews}
+                    onCheckedChange={(gpuPreviews) => patchFlags({ gpuPreviews })}
+                    disabled={!canEdit}
+                  />
+                </OptionList>
+              </div>
+            )}
+          </Field>
+        )}
       </SettingSection>
     </SettingForm>
   )

@@ -146,7 +146,7 @@ A change that weakens any of these has to say so explicitly.
    deployment the key reaches and leaves a draft that is the key's. Because a host-level setting or a
    saved credential sent somewhere new would hand the key what the session-only routes keep from it,
    the handlers hold what the key writes (`hostAuthority`, `keySourceGuard`, `keyReferenceGuard`): no
-   privileged container, host network, capability, device, host path, host-shell release task,
+   privileged container, host network, capability, device, GPU, host path, host-shell release task,
    folder on the server or Compose file, in a plan it commits or an environment it changes — and an
    environment that already has one, or whose variables a person pointed at a saved credential, is
    changed (configuration and source) by a person only, though the key may still deploy it and set its

@@ -162,6 +162,12 @@ func compareRuntimeSnapshots(fromSnapshot, toSnapshot runtimeReleaseSnapshot, fr
 	field("privileged", boolLabel(fromSnapshot.Plan.Privileged), boolLabel(toSnapshot.Plan.Privileged))
 	field("capabilities", strings.Join(fromSnapshot.Plan.Capabilities, ", "), strings.Join(toSnapshot.Plan.Capabilities, ", "))
 	field("devices", strings.Join(fromSnapshot.Plan.Devices, ", "), strings.Join(toSnapshot.Plan.Devices, ", "))
+	field("user", fromSnapshot.Plan.User, toSnapshot.Plan.User)
+	field("read-only root", readOnlyRootLabel(fromSnapshot.Plan), readOnlyRootLabel(toSnapshot.Plan))
+	field("writable paths", writablePathsLabel(fromSnapshot.Plan), writablePathsLabel(toSnapshot.Plan))
+	field("ulimits", ulimitsLabel(fromSnapshot.Plan.Ulimits), ulimitsLabel(toSnapshot.Plan.Ulimits))
+	field("sysctls", sysctlsLabel(fromSnapshot.Plan.Sysctls), sysctlsLabel(toSnapshot.Plan.Sysctls))
+	field("gpus", gpusLabel(fromSnapshot.Plan.GPUs), gpusLabel(toSnapshot.Plan.GPUs))
 	field("expected downtime", boolLabel(fromDowntime), boolLabel(toDowntime))
 
 	detail.Variables = diffNamedValues(
