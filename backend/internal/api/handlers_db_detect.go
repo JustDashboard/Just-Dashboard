@@ -1658,6 +1658,16 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 			{Path: postgresFirstBootScript, Content: []byte(postgresFirstBoot(req.AutoExplain))},
 		}
 	}
+	// MongoDB 8 refuses to start on Linux 6.19 to 7.0.13 unless glibc keeps
+	// rseq (database_mongo_kernel.go). Not a choice to put to the operator:
+	// without it the container restarts for ever.
+	kernelMitigation := ""
+	if req.Engine == "mongodb" {
+		if kernel := s.hostKernel(ctx); mongoKernelNeedsMitigation(kernel, version.id) {
+			applyMongoKernelMitigation(&spec, kernel)
+			kernelMitigation = mongoKernelRecord(map[string]string{mongoKernelLabel: kernel})
+		}
+	}
 	created, err := s.modules.docker.Create(ctx, spec, nil)
 	if err != nil {
 		return httpx.BadRequest("could not start %s: %v", tmpl.label, err)
@@ -1677,6 +1687,9 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	}
 	if tmpl.initdb {
 		detail["statements"], detail["autoExplain"] = true, req.AutoExplain
+	}
+	if kernelMitigation != "" {
+		detail["kernelMitigation"] = kernelMitigation
 	}
 	// The container is up before the engine is, but the firewall rule can go
 	// in now: nothing answers on the port until the engine does, and the
@@ -1705,6 +1718,9 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	}
 	if ferr != nil {
 		resp["firewallError"] = ferr.Error()
+	}
+	if kernelMitigation != "" {
+		resp["kernelMitigation"] = kernelMitigation
 	}
 	httpx.JSON(w, http.StatusAccepted, resp)
 	return nil

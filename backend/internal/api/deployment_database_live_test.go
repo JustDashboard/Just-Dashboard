@@ -26,7 +26,6 @@ func TestLiveDeploymentDatabaseConnection(t *testing.T) {
 	if os.Getenv("JD_DEPLOY_LIVE") != "1" {
 		t.Skip("set JD_DEPLOY_LIVE=1 on a Docker host")
 	}
-	t.Run("mongodb-kernel-probe", probeMongoKernelVariants)
 	for _, engine := range []string{"postgres", "mysql", "mariadb", "redis", "mongodb"} {
 		t.Run(engine, func(t *testing.T) {
 			s, router := dbTestRouter(t)
@@ -37,15 +36,17 @@ func TestLiveDeploymentDatabaseConnection(t *testing.T) {
 			name := fmt.Sprintf("jd-redesign-%s-%d", engine, time.Now().UnixNano())
 			probe := name + "-probe"
 			blocker := name + "-ip-holder"
+			// Each container goes with its anonymous volumes (the MongoDB image
+			// declares two); a named one, the database's data, is removed apart.
 			t.Cleanup(func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
-				_ = s.modules.docker.RemoveContainer(ctx, probe, true, false)
-				_ = s.modules.docker.RemoveContainer(ctx, blocker, true, false)
+				_ = s.modules.docker.RemoveContainer(ctx, probe, true, true)
+				_ = s.modules.docker.RemoveContainer(ctx, blocker, true, true)
 				if err := s.modules.deployDatabases.RemoveRuntimeNetworks(ctx, environmentID); err != nil {
 					t.Errorf("network cleanup: %v", err)
 				}
-				_ = s.modules.docker.RemoveContainer(ctx, name, true, false)
+				_ = s.modules.docker.RemoveContainer(ctx, name, true, true)
 				if err := s.modules.docker.RemoveVolume(ctx, name+"-data", false); err != nil {
 					t.Errorf("test volume cleanup: %v", err)
 				}
@@ -55,9 +56,13 @@ func TestLiveDeploymentDatabaseConnection(t *testing.T) {
 			if created.Code != http.StatusAccepted {
 				t.Fatalf("provision failed: HTTP %d: %s", created.Code, created.Body)
 			}
+			if engine == "mongodb" {
+				assertMongoKernelMitigation(t, s, created.Body.Bytes(), name)
+			}
 			// The container is created and started by now, with its image already local, so
-			// this budget is the engine's own first start and nothing else.
-			budget := connectionBudget(engine)
+			// this budget is the engine's own first start and nothing else: seconds for
+			// every engine here, MongoDB's two servers included.
+			const budget = 2 * time.Minute
 			waitStarted := time.Now()
 			deadline := waitStarted.Add(budget)
 			var conn dbConnection
@@ -80,14 +85,16 @@ func TestLiveDeploymentDatabaseConnection(t *testing.T) {
 				} else {
 					problem = fmt.Sprintf("the last adopt answered HTTP %d: %s", adopted.Code, clip(adopted.Body.String(), 400))
 					if engine == "mongodb" {
-						// Not a slow start: the server refuses to run here and the
-						// container restarts for ever, so waiting out the budget would
-						// only fail later with the same words in its log. It fails
-						// rather than skips: a required live fixture that does not run
-						// is a failure of the live job by design.
+						// Provisioning gave the server what it needs to start on
+						// this kernel; if it still refuses, that stopped working,
+						// and waiting out the budget would only fail later with the
+						// same words in its log. It fails rather than skips: a
+						// required live fixture that does not run is a failure of
+						// the live job by design.
 						tail, _ := fixtureLogTail(s.modules.docker, name, 5)
 						if refusal := mongoKernelRefusal(tail); refusal != "" {
-							t.Fatalf("mongodb: this host's kernel (%s) is one the MongoDB image refuses to start on (MongoDB SERVER-121912), so there is no server to connect to and waiting longer cannot help: %s", hostKernelRelease(), clip(refusal, 300))
+							t.Fatalf("mongodb: MongoDB refused to start on this host's kernel (Linux %s, MongoDB %s) with the environment provisioning gave it (%s), so the mitigation in database_mongo_kernel.go no longer lets it start: %s",
+								s.hostKernel(t.Context()), deploy.MongoKernelTicket, fixtureTunables(s.modules.docker, name), clip(refusal, 300))
 						}
 					}
 				}
@@ -197,7 +204,7 @@ func TestLiveDeploymentDatabaseConnection(t *testing.T) {
 			if err != nil {
 				t.Fatal("could not capture replacement fixture")
 			}
-			if err := s.modules.docker.RemoveContainer(ctx, name, true, false); err != nil {
+			if err := s.modules.docker.RemoveContainer(ctx, name, true, true); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := s.modules.docker.Create(ctx, dockerx.ContainerSpec{Name: blocker, Image: "caddy:2-alpine", Entrypoint: []string{"sleep"}, Command: []string{"300"}, Start: true, Pull: "missing"}, nil); err != nil {
@@ -322,18 +329,8 @@ func TestLiveDeploymentDatabaseConnection(t *testing.T) {
 			t.Logf("%s: authenticated before and after replacement at a different IP using the same client container and logical URL on port %s", engine, strconv.Itoa(provisionTemplates[engine].port))
 		})
 	}
-}
-
-// connectionBudget is how long an engine has, once its container is started, to
-// answer a sign-in. MongoDB's image starts a temporary server on loopback to run
-// its init scripts, shuts it down and only then starts the one that listens on the
-// container's address, so a first start on a slow shared runner gets more room
-// than the engines that are ready in seconds.
-func connectionBudget(engine string) time.Duration {
-	if engine == "mongodb" {
-		return 5 * time.Minute
-	}
-	return 2 * time.Minute
+	// After the engines, so the MongoDB image is already here.
+	t.Run("mongodb-kernel-mitigation", liveMongoKernelMitigation)
 }
 
 // pullEngineImage makes the engine's image local before the fixture creates
@@ -433,12 +430,44 @@ func mongoKernelRefusal(lines []string) string {
 	return ""
 }
 
-func hostKernelRelease() string {
-	release, err := os.ReadFile("/proc/sys/kernel/osrelease")
-	if err != nil {
-		return "unknown"
+// assertMongoKernelMitigation holds the provision route to what this kernel
+// asks of MongoDB 8: on Linux 6.19 to 7.0.13 the container is started with
+// GLIBC_TUNABLES handing rseq to glibc and labelled with the kernel, and the
+// reply says so; on any other kernel neither is there.
+func assertMongoKernelMitigation(t *testing.T, s *Server, reply []byte, name string) {
+	t.Helper()
+	kernel := s.hostKernel(t.Context())
+	want := mongoKernelNeedsMitigation(kernel, "8.0")
+	var answered struct {
+		KernelMitigation string `json:"kernelMitigation"`
 	}
-	return strings.TrimSpace(string(release))
+	if err := json.Unmarshal(reply, &answered); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	observed, err := s.modules.docker.Inspect(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tunables := envMap(observed.Env)[deploy.MongoKernelTunables]
+	_, labelled := observed.Labels[mongoKernelLabel]
+	if want != (answered.KernelMitigation != "") || want != deploy.MongoKernelMitigated(tunables) || want != labelled {
+		t.Fatalf("mongodb on Linux %s (mitigation needed: %t): the reply said %q, the container's %s is %q, labelled %t",
+			kernel, want, answered.KernelMitigation, deploy.MongoKernelTunables, tunables, labelled)
+	}
+	t.Logf("mongodb: Linux %s, mitigation needed %t, container started with %s=%q", kernel, want, deploy.MongoKernelTunables, tunables)
+}
+
+// fixtureTunables is a fixture container's GLIBC_TUNABLES, for a failure message.
+func fixtureTunables(docker *dockerx.Client, name string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	observed, err := docker.Inspect(ctx, name)
+	if err != nil {
+		return "could not be inspected: " + err.Error()
+	}
+	return deploy.MongoKernelTunables + "=" + envMap(observed.Env)[deploy.MongoKernelTunables]
 }
 
 // TestMongoKernelRefusal pins the line a MongoDB 8.0 container logged on a GitHub

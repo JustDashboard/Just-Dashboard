@@ -277,6 +277,42 @@ tag floats only within that line's patch releases; Timescale is pinned to one re
   maintained on the day of the refresh (`TestProvisionCatalogueDefaultsWereMaintainedWhenItWasRefreshed`),
   and no offered tag floats across release lines. Existing servers on any release keep working: the
   list decides only what can be started.
+- **MongoDB 8 and the kernel.** MongoDB 8 is built with Google's tcmalloc, which keeps per-CPU caches
+  through rseq; the official image sets `GLIBC_TUNABLES=glibc.pthread.rseq=0` so glibc leaves rseq to it.
+  Linux 6.19's rseq rework broke what tcmalloc relied on and the kernel's fix arrived in 7.0.14, so on
+  the kernels between, mongod exits at once with *MongoDB cannot start: Linux kernel versions 6.19 and
+  newer has a known incompatibility with this version of MongoDB* (MongoDB SERVER-121912), and with
+  `unless-stopped` the container restarts for ever. MongoDB 8.0.30's own fix applies only on 7.0.14 and
+  later. Handing rseq back to glibc is what starts it: on a GitHub runner with Linux `7.0.0-1017-azure`,
+  `mongo:8.0` (8.0.34) refused as shipped and with `rseq=0` set explicitly, started with `rseq=1` (mongod
+  then warns that tcmalloc without rseq costs performance), and `mongo:7.0` and `mongo:6.0`, on the
+  older tcmalloc that does not use rseq, started unchanged. `deploy/host_kernel.go` holds the facts
+  (`MongoKernelAffected` for [6.19, 7.0.14), `MongoReleaseAffected` for 8 and later, `MongoKernelMitigated`
+  reading the last `glibc.pthread.rseq` in the colon list); the kernel is `sysinfo.KernelRelease` (uname,
+  which inside the dashboard's container is the host's, the kernel every container here runs on).
+  `database_mongo_kernel.go` applies them. **Provisioning does it without asking**: on such a kernel an
+  8.0 request is created with the tunable and the label `io.just-dashboard.mongo-kernel-mitigation=<kernel>`,
+  and the `202` reply and the `database.server.provision` audit carry `kernelMitigation`, the sentence the
+  connection's summary then says from the label (`container.kernelMitigation`): on, why, its cost, and
+  that 7.0.14 does not need it. Every later recreate keeps both, since `SpecOf` carries the environment
+  and labels. 7.0 and 6.0 are started as they are. **A server that already exists** — made before this,
+  or by hand — is offered the fix where it is drawn: the fleet's `kernelProblem` (`mongoKernelProblem`)
+  is set for a MongoDB 8 container here that is not running and whose environment lacks the tunable
+  (its release is the image's `MONGO_VERSION`, else its tag), with the alert *MongoDB cannot start on
+  this kernel; apply the mitigation*, a sentence, and `fixable`. A running server is never told, so a
+  MongoDB release that learns to start on these kernels is left alone. `POST
+  /databases/{id}/kernel-mitigation` (`system.admin` + `destructive`, audited
+  `database.server.kernel_mitigation` with the kernel, release, tunables, old and new container ids, or
+  the refusal) recreates it through `dockerx.Recreate` from its own `SpecOf` with the tunable merged into
+  any other glibc tunables and the label added — same name, volumes, port and restart policy, the old
+  container parked and put back if the new one cannot be created — and refuses with `409` a container
+  that does not need it (another kernel, another release, already set) or that compose owns, whose
+  `kernelProblem` instead says to add the variable to the service and redeploy. A protected connection
+  lets it through, as it does an access change. Docker's own alert, `container_down`, adds the same
+  reason to what it says of such a container (`mongoKernelAlertLine`, from the listing's image).
+  `TestProvisionStartsMongoDB8WithWhatThisKernelNeeds`, `TestMongoKernelProblemIsOnlyMongoDB8WithoutTheTunable`,
+  `TestApplyingTheMitigationKeepsTheRestOfTheEnvironment` and `TestContainerDownSaysWhenItIsMongoDBOnThisKernel`
+  hold it, and the live fixture below runs both paths on whatever kernel the runner has.
 - **The full template is built here, never pulled.** No published image carries pgvector, PostGIS,
   pg_cron, pg_partman, pgaudit, hypopg and pg_repack on the official image's layout, so
   `backend/internal/api/recipes/postgres-full/Dockerfile` (embedded in the binary) builds one: the
@@ -2990,6 +3026,7 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/{id}/power` | `service.control` | by content: `stop`, `restart` | `database.power.<action>` | open |
 | `GET` | `/databases/{id}/resources` | read | — | — | — |
 | `PUT` | `/databases/{id}/resources` | `system.admin` | by content: a lifted limit | `database.resources.change` | open |
+| `POST` | `/databases/{id}/kernel-mitigation` | `system.admin` + `destructive` | yes | `database.server.kernel_mitigation` | open |
 | `GET` | `/databases/{id}/schemas` | read | — | — | — |
 | `GET` | `/databases/{id}/stats` | read | — | — | — |
 | `GET` | `/databases/{id}/url` | `system.admin` | — | `database.connection.reveal` † | — |
@@ -3335,7 +3372,8 @@ a retrieval or geospatial schema creates on its first migration, which the offic
 Quick setup leaves out the full template until its image has been built from Add a database.
 Deployment setup preselects one when detection read that extension from the schema. `mongodb` is refused
 before any pull on a CPU without AVX (x86-64) or ARMv8.2 atomics (arm64), where MongoDB 5 and later die
-with an illegal instruction. The URL read also takes `format` and `database`; see [deployment database
+with an illegal instruction, and on Linux 6.19 up to 7.0.13 its 8.0 release is started with
+`GLIBC_TUNABLES=glibc.pthread.rseq=1` (*MongoDB 8 and the kernel*, under the provisioning catalogue). The URL read also takes `format` and `database`; see [deployment database
 networks](../deployments/database-networks.md). `/adopt` signs in before it saves, so the caller's retry
 loop is what waits for the engine. It is idempotent by driver, address, database and login user: a
 matching connection gets that row back, and when the container's password differs the row is re-sealed in
@@ -3365,13 +3403,20 @@ provisions five of the templates (PostgreSQL, MySQL, MariaDB, Redis and MongoDB)
 authenticates from separate application containers, replaces each database at a different IP, and
 authenticates from the same client container using its unchanged URL after reconciliation. It verifies
 loopback-only publication, network ownership and cleanup, then removes its own
-containers/volumes/networks. Each image is pulled, and the pull timed in the log, before anything is
-created; the engine then has two minutes (MongoDB five) from its container starting to accept a
-sign-in, and a failure reports the adopt route's last reply with the container's state and last log
-lines. MongoDB 8 refuses to start on Linux 6.19 and newer (MongoDB SERVER-121912). Provisioning checks
-the CPU (`deploy.MongoCPUUnsupported`) but not the kernel, so on such a host it starts a server that
-the `unless-stopped` policy restarts for ever; the fixture's MongoDB subtest fails at once with the
-engine's own line and the kernel release when it sees that, instead of waiting out its budget.
+containers/volumes/networks, each container with its anonymous volumes. Each image is pulled, and the
+pull timed in the log, before anything is created; the engine then has two minutes from its container
+starting to accept a sign-in, and a failure reports the adopt route's last reply with the container's
+state and last log lines. The MongoDB subtest holds provisioning to *MongoDB 8 and the kernel*: on Linux
+6.19 to 7.0.13 the container must carry the tunable and the label and the reply must say so, and on any
+other kernel none of the three is there. If MongoDB still logs its kernel refusal, the subtest fails at
+once with that line, the kernel and the container's `GLIBC_TUNABLES`, because the mitigation has stopped
+working and waiting cannot help. Then `mongodb-kernel-mitigation` makes a MongoDB 8 server as
+provisioning did before it knew of the kernel (the template's image, environment, port and named
+volume, no tunable) and saves it as a connection. On a kernel MongoDB 8 refuses it restarts for ever;
+on any other the subtest stops it and has the dashboard read its kernel as `7.0.0-1017-azure`. Either
+way the fleet must offer the mitigation, `POST /databases/{id}/kernel-mitigation` must bring the server
+up within two minutes on the same volume with the tunable, the label and its restart policy, and the
+fleet must then offer nothing.
 
 ## Proxy
 

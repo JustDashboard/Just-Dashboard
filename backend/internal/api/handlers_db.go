@@ -102,6 +102,10 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 				r.Method(http.MethodDelete, "/{id}", s.handle(s.handleDBConnDelete))
 				r.Method(http.MethodPut, "/{id}/access", s.handle(s.handleDBAccessUpdate))
 				r.Method(http.MethodPut, "/{id}/tls", s.handle(s.handleDBTLSUpdate))
+				// What MongoDB 8 needs to start on this kernel, put into its
+				// container's environment by recreating it, as the access
+				// change recreates it with another binding.
+				r.Method(http.MethodPost, "/{id}/kernel-mitigation", s.handle(s.handleDBKernelMitigation))
 			})
 		})
 		// Read surface: available to any authenticated role, including readonly.
