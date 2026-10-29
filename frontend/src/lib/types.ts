@@ -7940,8 +7940,46 @@ export type DeploymentLifecycle = {
   reason?: string
   /** Whether the event stream is connected, so an empty feed can explain itself. */
   watching: boolean
+  /** When this process connected to the stream; the record itself reaches back to `recordSince`. */
   since?: string
+  /**
+   * The oldest event the dashboard keeps for any deployment: how far back the
+   * feed can see. The record survives a restart of the dashboard; absent until
+   * the first event has been kept.
+   */
+  recordSince?: string
+  /** How long an event is kept. */
+  retentionDays: number
   events: DockerEvent[]
+}
+
+/** The figure over one span of time ending now (`deploy/availability.go`). */
+export type AvailabilityWindow = {
+  /** "24h", "7d" or "30d". */
+  window: string
+  seconds: number
+  /** Live-release time inside the window the record covers: what `ratio` is over. 0 means no figure. */
+  observedSeconds: number
+  downSeconds: number
+  incidents: number
+  /** 1 - down/observed, 0..1; absent while nothing was observed. */
+  ratio?: number
+  /** How much of the window the event record reaches back over. */
+  coverageSeconds: number
+}
+
+/** How much of the last day, week and month a deployment's live release was up. */
+export type DeploymentAvailability = {
+  status: "available" | "unavailable"
+  reason?: string
+  observedAt: string
+  /** When the event record began, for any deployment. */
+  recordSince?: string
+  /** The number of the release live now. */
+  liveRelease?: number
+  /** Whether the record says the live release is down at this moment. */
+  down: boolean
+  windows: AvailabilityWindow[]
 }
 
 /*

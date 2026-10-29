@@ -28,9 +28,10 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   table admitted to that very route (below); for every other key the rule is unchanged.
 - **A scoped API key** (`api_tokens.scope`, minted with `scope: "metrics.read"` on `POST /tokens` or
   from Databases → Metrics export) holds one capability and nothing else. `Authenticate` refuses it
-  on every group with `403 key_scope`; `AuthenticateScoped` admits it for
-  `GET /api/v1/metrics/databases` alone, which sits outside the `/databases` tree for that reason and
-  also refuses a browser session (`httpx.RequireToken`, `403 token_required`).
+  on every group with `403 key_scope`; `AuthenticateScoped` admits it for the two scrapes alone,
+  `GET /api/v1/metrics/databases` and `GET /api/v1/metrics/deployments`, which sit outside the
+  `/databases` and `/deploy` trees for that reason and also refuse a browser session
+  (`httpx.RequireToken`, `403 token_required`).
 - **An MCP key** (`api_tokens.scope = 'mcp'`, minted on `POST /tokens/mcp` or from Databases → MCP
   server) narrows *where* a key goes rather than what its role may do. `Authenticate` and
   `AuthenticateScoped` both refuse it with `403 key_scope`, so it opens no route but
