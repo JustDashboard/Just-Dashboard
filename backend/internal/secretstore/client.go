@@ -52,8 +52,9 @@ type secretValue struct {
 type session interface {
 	// readPath reads every key at a path, at its current version.
 	readPath(ctx context.Context, path string) (map[string]secretValue, error)
-	// readVersion reads one key at one version.
-	readVersion(ctx context.Context, path, key string, version int) (secretValue, error)
+	// readVersion reads one key at one version, in the store's own form of a
+	// version (a number, a version id or a staging label).
+	readVersion(ctx context.Context, path, key, version string) (secretValue, error)
 	// identity says who the store took the connection to be, for Test.
 	identity(ctx context.Context) (string, error)
 	// close gives back what signing in obtained, where the store lets a
@@ -88,15 +89,27 @@ func httpClient(settings Settings) (*http.Client, error) {
 	}, nil
 }
 
-// exchange sends one request and reads the answer, bounded.
+// exchange sends one JSON request and reads the answer, bounded.
 func exchange(ctx context.Context, client *http.Client, method, address string, headers map[string]string, body any) (int, []byte, error) {
-	var reader io.Reader
+	var encoded []byte
 	if body != nil {
-		encoded, err := json.Marshal(body)
-		if err != nil {
+		var err error
+		if encoded, err = json.Marshal(body); err != nil {
 			return 0, nil, err
 		}
-		reader = bytes.NewReader(encoded)
+	}
+	return exchangeBytes(ctx, client, method, address, headers, encoded, "application/json", nil)
+}
+
+// exchangeBytes sends one request with a body already encoded — JSON, a
+// form, or a signed payload whose bytes must be exactly what was hashed —
+// and reads the answer, bounded. prepare, if given, sees the request before
+// it is sent, which is where a signer puts its headers.
+func exchangeBytes(ctx context.Context, client *http.Client, method, address string, headers map[string]string, body []byte,
+	contentType string, prepare func(*http.Request) error) (int, []byte, error) {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
 	}
 	request, err := http.NewRequestWithContext(ctx, method, address, reader)
 	if err != nil {
@@ -105,10 +118,15 @@ func exchange(ctx context.Context, client *http.Client, method, address string, 
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("User-Agent", "Just-Dashboard")
 	if body != nil {
-		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Content-Type", contentType)
 	}
 	for name, value := range headers {
 		request.Header.Set(name, value)
+	}
+	if prepare != nil {
+		if err := prepare(request); err != nil {
+			return 0, nil, err
+		}
 	}
 	response, err := client.Do(request)
 	if err != nil {
@@ -147,18 +165,53 @@ func hostOf(raw string) string {
 }
 
 // answerMessage reads the store's own words out of an error answer: Vault's
-// and OpenBao's errors list, Infisical's message, Doppler's messages. What
-// is not JSON is quoted as text, cut short.
+// and OpenBao's errors list, Infisical's message, Doppler's messages, AWS's
+// __type and Message, Key Vault's error code and message, Entra's error and
+// error_description. What is not JSON is quoted as text, cut short.
 func answerMessage(status int, raw []byte) string {
 	var shaped struct {
-		Errors   []string        `json:"errors"`
-		Messages []string        `json:"messages"`
-		Message  json.RawMessage `json:"message"`
-		Error    string          `json:"error"`
+		Errors      []string        `json:"errors"`
+		Messages    []string        `json:"messages"`
+		Message     json.RawMessage `json:"message"`
+		Error       json.RawMessage `json:"error"`
+		Description string          `json:"error_description"`
+		AWSType     string          `json:"__type"`
+		AWSMessage  string          `json:"Message"`
 	}
 	text := ""
 	if json.Unmarshal(raw, &shaped) == nil {
+		var errorText string
+		var errorObject struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		}
 		switch {
+		case json.Unmarshal(shaped.Error, &errorText) == nil:
+		case json.Unmarshal(shaped.Error, &errorObject) == nil:
+		}
+		switch {
+		case shaped.AWSType != "":
+			// Secrets Manager: {"__type":"ResourceNotFoundException","Message":"…"};
+			// the type is sometimes namespaced ("com.amazonaws.…#Name").
+			text = shaped.AWSType[strings.LastIndex(shaped.AWSType, "#")+1:]
+			var message string
+			_ = json.Unmarshal(shaped.Message, &message)
+			if message = firstNonEmpty(shaped.AWSMessage, message); message != "" {
+				text += ": " + message
+			}
+		case errorObject.Code != "" || errorObject.Message != "":
+			// Key Vault: {"error":{"code":"SecretNotFound","message":"…"}}.
+			// Its messages end in a help link, which is not the answer.
+			message, _, _ := strings.Cut(errorObject.Message, " For help resolving this issue")
+			text = strings.TrimSuffix(errorObject.Code+": "+message, ": ")
+		case errorText != "" && shaped.Description != "":
+			// Entra: {"error":"invalid_client","error_description":"AADSTS7000215: …
+			// Trace ID: … Correlation ID: … Timestamp: …"}. The ids are
+			// Microsoft's to look up, not the operator's.
+			description, _, _ := strings.Cut(shaped.Description, " Trace ID:")
+			description, _, _ = strings.Cut(description, "\r\n")
+			description, _, _ = strings.Cut(description, "\n")
+			text = errorText + ": " + strings.TrimSpace(description)
 		case len(shaped.Errors) > 0:
 			text = strings.Join(shaped.Errors, "; ")
 		case len(shaped.Messages) > 0:
@@ -181,8 +234,8 @@ func answerMessage(status int, raw []byte) string {
 					text = strings.Join(parts, "; ")
 				}
 			}
-		case shaped.Error != "":
-			text = shaped.Error
+		case errorText != "":
+			text = errorText
 		}
 	} else {
 		text = string(raw)
@@ -203,8 +256,9 @@ func cleanText(text string) string {
 	return strings.TrimSpace(out)
 }
 
-// openSession signs in to a store with its connection's credentials.
-func openSession(ctx context.Context, item *row) (session, error) {
+// openSession signs in to a store with its connection's credentials. tokens
+// is where a sign-in that outlives one run keeps its token (Azure's).
+func openSession(ctx context.Context, item *row, tokens *tokenCache) (session, error) {
 	if item.openErr != nil {
 		return nil, item.openErr
 	}
@@ -219,6 +273,10 @@ func openSession(ctx context.Context, item *row) (session, error) {
 		return openInfisical(ctx, item, client)
 	case KindDoppler:
 		return &dopplerSession{base: item.Address, token: item.credentials["token"], client: client}, nil
+	case KindAWS:
+		return openAWS(item, client), nil
+	case KindAzure:
+		return openAzure(ctx, item, client, tokens)
 	}
 	return nil, fmt.Errorf("unknown store kind %q", item.Kind)
 }
@@ -305,10 +363,10 @@ type kvAnswer struct {
 	} `json:"data"`
 }
 
-func (s *vaultSession) read(ctx context.Context, path string, version int) (map[string]secretValue, error) {
+func (s *vaultSession) read(ctx context.Context, path, version string) (map[string]secretValue, error) {
 	address := s.base + "/v1/" + escapePath(s.mount) + "/data/" + escapePath(path)
-	if version > 0 {
-		address += "?version=" + strconv.Itoa(version)
+	if version != "" {
+		address += "?version=" + url.QueryEscape(version)
 	}
 	status, raw, err := exchange(ctx, s.client, http.MethodGet, address, s.headers(true), nil)
 	if err != nil {
@@ -343,17 +401,17 @@ func (s *vaultSession) read(ctx context.Context, path string, version int) (map[
 }
 
 func (s *vaultSession) readPath(ctx context.Context, path string) (map[string]secretValue, error) {
-	return s.read(ctx, path, 0)
+	return s.read(ctx, path, "")
 }
 
-func (s *vaultSession) readVersion(ctx context.Context, path, key string, version int) (secretValue, error) {
+func (s *vaultSession) readVersion(ctx context.Context, path, key, version string) (secretValue, error) {
 	values, err := s.read(ctx, path, version)
 	if err != nil {
 		return secretValue{}, err
 	}
 	value, ok := values[key]
 	if !ok {
-		return secretValue{}, fmt.Errorf("version %d of %s/%s has no key %s", version, s.mount, path, key)
+		return secretValue{}, fmt.Errorf("version %s of %s/%s has no key %s", version, s.mount, path, key)
 	}
 	return value, nil
 }
@@ -467,9 +525,9 @@ func (s *infisicalSession) readPath(ctx context.Context, path string) (map[strin
 	return out, nil
 }
 
-func (s *infisicalSession) readVersion(ctx context.Context, path, key string, version int) (secretValue, error) {
+func (s *infisicalSession) readVersion(ctx context.Context, path, key, version string) (secretValue, error) {
 	query := s.query(path)
-	query.Set("version", strconv.Itoa(version))
+	query.Set("version", version)
 	status, raw, err := exchange(ctx, s.client, http.MethodGet, s.base+"/api/v3/secrets/raw/"+url.PathEscape(key)+"?"+query.Encode(),
 		map[string]string{"Authorization": "Bearer " + s.token}, nil)
 	if err != nil {
@@ -539,7 +597,7 @@ func (s *dopplerSession) readPath(ctx context.Context, _ string) (map[string]sec
 	return out, nil
 }
 
-func (s *dopplerSession) readVersion(context.Context, string, string, int) (secretValue, error) {
+func (s *dopplerSession) readVersion(context.Context, string, string, string) (secretValue, error) {
 	return secretValue{}, errors.New("Doppler does not serve earlier versions of a secret")
 }
 

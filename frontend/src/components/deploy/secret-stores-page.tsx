@@ -31,12 +31,14 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { SecretStoreMark } from "@/components/deploy/secret-store-picker"
 import {
+  AZURE_CLOUDS,
   STORE_KINDS,
   credentialFields,
   storeAddressProblem,
   storeHealth,
   storeKind,
   storeReference,
+  storeSettingsProblem,
   validStoreName,
 } from "@/components/deploy/secret-stores"
 
@@ -56,7 +58,12 @@ function emptyDraft(kind: SecretStoreKind): Draft {
     kind,
     name: "",
     address: "",
-    settings: kind === "vault" || kind === "openbao" ? { auth: "token", mount: "secret" } : {},
+    settings:
+      kind === "vault" || kind === "openbao"
+        ? { auth: "token", mount: "secret" }
+        : kind === "azure"
+          ? { cloud: "public" }
+          : {},
     allowPreviews: false,
     credentials: {},
   }
@@ -73,7 +80,10 @@ function draftOf(store: SecretStore): Draft {
   }
 }
 
-/** What a store reads, in a phrase: the mount or the project and environment. */
+/**
+ * What a store reads, in a phrase: the mount, the project and environment,
+ * the region, or the tenant — and how it signs in.
+ */
 function storeWhere(store: Pick<SecretStore, "kind" | "settings">) {
   const { settings } = store
   if (store.kind === "vault" || store.kind === "openbao") {
@@ -83,14 +93,23 @@ function storeWhere(store: Pick<SecretStore, "kind" | "settings">) {
     return parts.join(" · ")
   }
   if (store.kind === "infisical") return `${settings.environment ?? ""} · machine identity`
+  if (store.kind === "aws") return `${settings.region ?? ""} · access key`
+  if (store.kind === "azure") {
+    const parts = [`tenant ${settings.tenantId ?? ""}`]
+    const cloud = AZURE_CLOUDS.find((option) => option.value === settings.cloud)
+    if (cloud && cloud.value !== "public") parts.push(cloud.label)
+    parts.push("client secret")
+    return parts.join(" · ")
+  }
   return "service token"
 }
 
 /**
- * Secret stores: the Vault, OpenBao, Infisical and Doppler connections that
- * deployment variables read as `${{store.NAME/path#KEY}}`. A card per store
- * says where it is, how it signs in, who reads it and how the last test or
- * run's read went — in amber, in the store's own words, when it refused.
+ * Secret stores: the Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager
+ * and Azure Key Vault connections that deployment variables read as
+ * `${{store.NAME/path#KEY}}`. A card per store says where it is, how it signs
+ * in, who reads it and how the last test or run's read went — in amber, in
+ * the store's own words, when it refused.
  */
 export function SecretStoresPage() {
   const { can } = useAuth()
@@ -302,16 +321,12 @@ export function SecretStoresPage() {
 function ready(draft: Draft) {
   if (!validStoreName(draft.name.trim())) return false
   const info = storeKind(draft.kind)
-  if (!draft.address.trim() && !info.defaultAddress) return false
+  if (!draft.address.trim() && !info.defaultAddress && !info.addressOptional) return false
   if (draft.address.trim() && storeAddressProblem(draft.address)) return false
-  if (
-    draft.kind === "infisical" &&
-    (!draft.settings.project?.trim() || !draft.settings.environment?.trim())
-  )
-    return false
+  if (storeSettingsProblem(draft.kind, draft.settings)) return false
   if (draft.credentials) {
-    return credentialFields(draft.kind, draft.settings.auth).every((field) =>
-      draft.credentials?.[field.name]?.trim(),
+    return credentialFields(draft.kind, draft.settings.auth).every(
+      (field) => field.optional || draft.credentials?.[field.name]?.trim(),
     )
   }
   return true
@@ -331,9 +346,10 @@ function StoreCard({
   onEdit?: () => void
 }) {
   const health = storeHealth(store)
-  let host = store.address
+  const endpoint = store.endpoint || store.address
+  let host = endpoint
   try {
-    host = new URL(store.address).host
+    host = new URL(endpoint).host
   } catch {
     // Shown as typed.
   }
@@ -399,6 +415,9 @@ function StoreForm({
   const problem = storeAddressProblem(draft.address)
   const name = draft.name.trim()
   const editing = Boolean(draft.id)
+  // The two hosted kinds derive where they are from a region or a vault
+  // name; the address only overrides it, so it is asked for after them.
+  const derived = Boolean(info.addressOptional)
   return (
     <div className="flex flex-col gap-6">
       {!editing && (
@@ -448,7 +467,7 @@ function StoreForm({
             value={draft.name}
             disabled={editing}
             onChange={(event) => patch({ name: event.target.value.toLowerCase() })}
-            placeholder={draft.kind === "doppler" ? "doppler" : `${draft.kind}-prod`}
+            placeholder={info.namePlaceholder}
             spellCheck={false}
             className="font-mono text-body"
           />
@@ -457,19 +476,93 @@ function StoreForm({
           <FormNote className="animate-rise">
             Variables read it as{" "}
             <span className="font-mono text-foreground/90">
-              {storeReference({
-                store: name,
-                path:
-                  draft.kind === "doppler" ? "" : draft.kind === "infisical" ? "folder" : "path",
-                key: "KEY",
-              })}
+              {storeReference({ store: name, ...info.sample })}
             </span>
+            {info.keyOptional &&
+              (info.sample.key
+                ? "; without #KEY, the whole secret."
+                : "; a field of a JSON value as #KEY.")}
           </FormNote>
         )}
+        {draft.kind === "aws" && (
+          <Field
+            label="Region"
+            htmlFor="store-region"
+            hint="Where the secrets are, such as eu-west-1."
+          >
+            <Input
+              id="store-region"
+              value={draft.settings.region ?? ""}
+              onChange={(event) => setting({ region: event.target.value.trim().toLowerCase() })}
+              placeholder="us-east-1"
+              spellCheck={false}
+              className="font-mono text-body"
+            />
+          </Field>
+        )}
+        {draft.kind === "azure" && (
+          <>
+            <FieldRow>
+              <Field
+                label="Vault name"
+                htmlFor="store-vault-name"
+                hint="Becomes NAME.vault.azure.net."
+              >
+                <Input
+                  id="store-vault-name"
+                  value={draft.settings.vaultName ?? ""}
+                  onChange={(event) => setting({ vaultName: event.target.value.trim() })}
+                  placeholder="my-vault"
+                  spellCheck={false}
+                  className="font-mono text-body"
+                />
+              </Field>
+              <Field
+                label="Tenant ID"
+                htmlFor="store-tenant"
+                hint="Entra ID → Overview → Tenant ID."
+              >
+                <Input
+                  id="store-tenant"
+                  value={draft.settings.tenantId ?? ""}
+                  onChange={(event) => setting({ tenantId: event.target.value.trim() })}
+                  spellCheck={false}
+                  className="font-mono text-body"
+                />
+              </Field>
+            </FieldRow>
+            <Field label="Cloud" htmlFor="store-cloud">
+              <ToggleGroup
+                id="store-cloud"
+                type="single"
+                variant="outline"
+                aria-label="Azure cloud"
+                value={draft.settings.cloud ?? "public"}
+                onValueChange={(next) => {
+                  if (next) setting({ cloud: next as SecretStoreSettings["cloud"] })
+                }}
+                className="w-full sm:w-auto"
+              >
+                {AZURE_CLOUDS.map((option) => (
+                  <ToggleGroupItem
+                    key={option.value}
+                    value={option.value}
+                    className="h-11 flex-1 sm:h-9 sm:flex-none"
+                  >
+                    {option.label}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </Field>
+          </>
+        )}
         <Field
-          label="Address"
+          label={derived ? "Endpoint" : "Address"}
           htmlFor="store-address"
-          hint={info.defaultAddress ? `Empty for ${info.defaultAddress}.` : undefined}
+          hint={
+            info.addressHint ??
+            (info.defaultAddress ? `Empty for ${info.defaultAddress}.` : undefined)
+          }
         >
           <Input
             id="store-address"
@@ -538,7 +631,7 @@ function StoreForm({
             </Field>
           </FieldRow>
         )}
-        {draft.kind !== "doppler" && (
+        {draft.kind !== "doppler" && !derived && (
           <Field
             label="Certificate authority"
             htmlFor="store-ca"
@@ -602,6 +695,7 @@ function StoreForm({
                 key={field.name}
                 label={field.label}
                 htmlFor={`store-credential-${field.name}`}
+                hint={field.optional ? "Optional." : undefined}
               >
                 <Input
                   id={`store-credential-${field.name}`}
@@ -704,12 +798,12 @@ function StoreTest({
     <FormSection title="Test">
       <FieldRow>
         {kind !== "doppler" && (
-          <Field label="Path" htmlFor="store-test-path" hint={info.pathHint}>
+          <Field label={info.pathLabel} htmlFor="store-test-path" hint={info.pathHint}>
             <Input
               id="store-test-path"
               value={path}
               onChange={(event) => setPath(event.target.value)}
-              placeholder={kind === "infisical" ? "backend" : "apps/web"}
+              placeholder={info.pathPlaceholder}
               spellCheck={false}
               className="font-mono text-body"
             />
@@ -718,13 +812,17 @@ function StoreTest({
         <Field
           label="Key"
           htmlFor="store-test-key"
-          hint="Optional: read it too. The value is not shown."
+          hint={
+            info.keyOptional
+              ? "Optional: a field of a JSON value. The value is not shown."
+              : "Optional: read it too. The value is not shown."
+          }
         >
           <Input
             id="store-test-key"
             value={key}
             onChange={(event) => setKey(event.target.value)}
-            placeholder="DATABASE_URL"
+            placeholder={info.keyOptional ? "whole secret" : "DATABASE_URL"}
             spellCheck={false}
             className="font-mono text-body"
           />
