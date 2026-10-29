@@ -1,6 +1,6 @@
 # Template and recipe review, 2026-09-22
 
-The shipped catalogue contains **102 definitions**: **97 offered**, of which **95 can deploy** — 69 single images through the image runtime and 26 multi-service templates through the Compose release path (20 added 2026-10-27 and listed in their own table below; the second batch of twenty one-click templates, fourteen single images and six stacks, added 2026-10-28, has its own table further down). The two Minecraft definitions remain preview-only. Five retired definitions stay resolvable for existing deployments and recovery; new drafts, preflight and commit refuse them.
+The shipped catalogue contains **122 definitions**: **117 offered**, of which **115 can deploy** — 80 single images through the image runtime and 35 multi-service templates through the Compose release path. The first 62 are in the table below; the 20 multi-service templates added 2026-10-27 and the second batch of 20 added 2026-10-28 are each listed in their own table further down. The two Minecraft definitions remain preview-only. `backend/internal/blueprint/catalogue_counts.go` declares these three counts (built in, deployable, Compose) and `catalogue_counts_test.go` fails when the shipped definitions disagree, so a template cannot join or leave the catalogue without the numbers being bumped on purpose. Five retired definitions stay resolvable for existing deployments and recovery; new drafts, preflight and commit refuse them. A third batch of twenty (fourteen single images and six stacks, 2026-10-28) is listed in its own table as well.
 
 This table records the current definitions and the automated configuration checks. Fresh runtime results are recorded in the companion review report; a rendered plan is not proof that an image started or that first sign-in succeeded.
 
@@ -73,7 +73,7 @@ Required inputs exclude supplied defaults. `domain` is filled by the hostname su
 | [wallabag](../../../backend/internal/blueprint/builtin/wallabag.json) | Retired | Existing deployments only | unavailable | domain (suggested) |
 | [whoami](../../../backend/internal/blueprint/builtin/whoami.json) | Yes | Yes | open | None |
 
-Among the 55 deployable single-image definitions, access kinds are: 18 setup, 13 open, 12 credentials, seven client and five token. Four require an administrator email (Directus, NocoDB, Open WebUI and pgAdmin), and Mongo Express requires a database connection. The remaining definitions can render from defaults plus an available suggested domain.
+Among the 55 deployable single-image definitions of this table, access kinds are: 18 setup, 13 open, 12 credentials, seven client and five token. Four require an administrator email (Directus, NocoDB, Open WebUI and pgAdmin), and Mongo Express requires a database connection. The remaining definitions can render from defaults plus an available suggested domain.
 
 ## Multi-service templates (2026-10-27)
 
@@ -104,7 +104,36 @@ Each runs as one Compose stack: one public service behind the domain, the others
 
 Access kinds among them: 12 setup and eight credentials. Directus, authentik and Planka require an administrator e-mail; every other required input is the suggested domain. Umami (it creates `admin`/`umami` for everybody, with no variable to change it) and Outline (no sign-in without an external OIDC, Slack or Google provider or SMTP) were reviewed and not added; Immich was left for a later pass.
 
-## One-click templates, second batch (2026-10-28)
+## Second batch (2026-10-28)
+
+Twenty more applications that both Coolify and Dokploy offer and this catalogue did not: nine run as Compose stacks (one public service behind the domain, the database or queue on a private network with nothing published and no route out) and eleven as single images. Every one was started live from its fixture inputs with generated secrets and answered its own readiness checks: the single images through `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks`, the stacks through `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks`, which also requires every service healthy and only the public port published, on loopback.
+
+| Definition | Profile | Offered | Deployable | First access | Required inputs without defaults |
+| --- | --- | --- | --- | --- | --- |
+| [activepieces](../../../backend/internal/blueprint/builtin/activepieces.json) | compose (+PostgreSQL/pgvector, Valkey) | Yes | Yes | setup | domain (suggested) |
+| [anythingllm](../../../backend/internal/blueprint/builtin/anythingllm.json) | web | Yes | Yes | setup | None |
+| [appsmith](../../../backend/internal/blueprint/builtin/appsmith.json) | web | Yes | Yes | setup | None |
+| [apprise-api](../../../backend/internal/blueprint/builtin/apprise-api.json) | web | Yes | Yes | open | None |
+| [budibase](../../../backend/internal/blueprint/builtin/budibase.json) | web | Yes | Yes | credentials | admin-email |
+| [chroma](../../../backend/internal/blueprint/builtin/chroma.json) | database | Yes | Yes | open (internal port only) | None |
+| [documenso](../../../backend/internal/blueprint/builtin/documenso.json) | compose (+PostgreSQL) | Yes | Yes | setup | domain (suggested) |
+| [duplicati](../../../backend/internal/blueprint/builtin/duplicati.json) | web | Yes | Yes | token | domain (suggested) |
+| [flowise](../../../backend/internal/blueprint/builtin/flowise.json) | compose (+PostgreSQL) | Yes | Yes | setup | domain (suggested) |
+| [glitchtip](../../../backend/internal/blueprint/builtin/glitchtip.json) | compose (+PostgreSQL, Valkey) | Yes | Yes | setup | domain (suggested) |
+| [goatcounter](../../../backend/internal/blueprint/builtin/goatcounter.json) | web | Yes | Yes | setup | None |
+| [grist](../../../backend/internal/blueprint/builtin/grist.json) | web | Yes | Yes | setup | domain (suggested) |
+| [infisical](../../../backend/internal/blueprint/builtin/infisical.json) | compose (+PostgreSQL, Valkey) | Yes | Yes | setup | domain (suggested) |
+| [langflow](../../../backend/internal/blueprint/builtin/langflow.json) | compose (+PostgreSQL) | Yes | Yes | credentials | None |
+| [librechat](../../../backend/internal/blueprint/builtin/librechat.json) | compose (+MongoDB) | Yes | Yes | setup | domain (suggested) |
+| [litellm](../../../backend/internal/blueprint/builtin/litellm.json) | compose (+PostgreSQL) | Yes | Yes | credentials | None |
+| [lobe-chat](../../../backend/internal/blueprint/builtin/lobe-chat.json) | web | Yes | Yes | token | None |
+| [rallly](../../../backend/internal/blueprint/builtin/rallly.json) | compose (+PostgreSQL) | Yes | Yes | open | domain (suggested) |
+| [sftpgo](../../../backend/internal/blueprint/builtin/sftpgo.json) | web | Yes | Yes | credentials | None |
+| [wakapi](../../../backend/internal/blueprint/builtin/wakapi.json) | web | Yes | Yes | setup | domain (suggested) |
+
+Access kinds among them: 11 setup, four credentials, three open and two token. Budibase is the only one that requires an administrator e-mail (it creates the account from it on the first start); every other required input is the suggested domain. Three "open" entries are open for different reasons and say so on their cards: Chroma's 1.x server has no authentication, so its port is internal-only and it is for applications on this host; Rallly works as a guest and its accounts need SMTP for the sign-in code; Apprise API has none and is meant for the deployment's own password protection. Two from the planned list were replaced: **Strapi** has no official image since v3 (Strapi 5 is built per project), so it gave way to Apprise API; **Formbricks** 6 refuses to start without SpiceDB, Formbricks Hub and Cube beside PostgreSQL and Valkey — its own compose file is eight services and a bootstrap script mounted from the host, which a template cannot carry — so it gave way to Infisical. Garage (needs a configuration file, which runtime materialization does not write) and SeaweedFS (its only authentication is a JSON file the template cannot write) were passed over on the way to Apprise API, and Baby Buddy (a fixed admin/admin first login the image gives no variable for) on the way to Infisical. LobeChat is pinned to the last 1.x release, the last with the client-side access code; LobeHub 2.x refuses `ACCESS_CODE` and needs a database. Documenso starts without a signing certificate and says so: completing a document needs a `.p12` pasted into `NEXT_PRIVATE_SIGNING_LOCAL_FILE_CONTENTS`. Flowise was planned as a single image on SQLite, but the 3.1.4 image's SQLite session store fails on start (`connect-sqlite3`: `this.db.exec is not a function`, reproduced with no environment at all), so it runs on PostgreSQL as a stack, which is upstream's production recommendation anyway. LobeChat needs 1 GB: Node sizes its heap from the container limit and the 1.x server runs out of memory at 512 MB.
+
+## One-click templates, third batch (2026-10-28)
 
 Twenty more templates present in both Coolify's and Dokploy's catalogues: fourteen single images and six stacks. Every single image was started by `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks` and every stack by `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks`, with the same requirements as the tables above. Two images whose registry publishes no release tag (Excalidraw, BentoPDF) are pinned by content digest.
 

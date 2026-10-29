@@ -1,0 +1,92 @@
+{
+  "id": "chroma",
+  "version": "1.0.0",
+  "name": "Chroma",
+  "category": "database",
+  "profile": "database",
+  "description": "An embedding database for retrieval-augmented applications: collections of vectors with their documents and metadata, written and queried over HTTP by the Chroma client libraries. Reachable only by other containers on this host; everything it stores lives in one directory on the data volume.",
+  "iconId": "database",
+  "docsUrl": "https://docs.trychroma.com/guides/deploy/docker",
+  "access": {
+    "kind": "open",
+    "note": "Chroma's single-node server has no authentication of its own: the token providers of the older Python server are gone from the 1.x Rust server, and there is no password to generate. Its port is therefore never published to the host. Other deployments on this host's Docker network reach it at http://<container>:8000, and every one of them can read, write and delete every collection — put it behind an application, never behind a domain."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://github.com/chroma-core/chroma",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "chromadb/chroma:1.5.9",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8000,
+      "protocol": "tcp",
+      "purpose": "The Chroma HTTP API, for clients on this host's Docker network",
+      "exposure": "internal",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/data",
+      "purpose": "Collections, vectors, documents and the SQLite catalogue",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 1024,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Heartbeat answers",
+      "kind": "command",
+      "phase": "readiness",
+      "required": true,
+      "command": [
+        "bash",
+        "-c",
+        "exec 3<>/dev/tcp/127.0.0.1/8000 && printf 'GET /api/v2/heartbeat HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -q ' 200 '"
+      ],
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "ANONYMIZED_TELEMETRY",
+        "value": "false"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Chroma migrates its SQLite catalogue on start and does not migrate back; the image has no curl, so the readiness check speaks HTTP through bash alone.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:390926b81294f0c4c7a2c062fdb62f6f980e700e9e314ae806d7bcbf53276447"
+    }
+  ]
+}

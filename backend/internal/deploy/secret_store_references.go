@@ -16,9 +16,10 @@ import (
 )
 
 // A store reference reads a value an external secret manager holds —
-// Vault, OpenBao, Infisical or Doppler — through a connection saved under
-// Deployments → Secret stores: ${{store.NAME/path#KEY}}, or with a version
-// pinned, ${{store.NAME/path#KEY@4}}.
+// Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager or Azure Key Vault
+// — through a connection saved under Deployments → Secret stores:
+// ${{store.NAME/path#KEY}}, or with a version pinned, ${{store.NAME/path#KEY@4}};
+// a whole Secrets Manager or Key Vault secret is ${{store.NAME/secret-name}}.
 //
 // It resolves the way every other reference does, at the variable boundary
 // a run opens, and is read fresh for each run: the release keeps the
@@ -265,7 +266,7 @@ func (s *PlanningStore) ResolveRunSecretStores(ctx context.Context, run EngineRu
 		target := reference.String()
 		out = append(out, StoreRead{
 			Reference: target, Store: reference.Store, Location: reference.Location(),
-			Version: reads[target].Version, Pinned: reference.Version > 0, Variables: holders[target],
+			Version: reads[target].Version, Pinned: reference.Version != "", Variables: holders[target],
 		})
 	}
 	return out, nil

@@ -3858,9 +3858,12 @@ export type LogDrain = {
  * A connection to an external secret manager that deployment variables read
  * as `${{store.NAME/path#KEY}}`. Vault and OpenBao share the KV version 2
  * API; Infisical signs in with a Universal Auth machine identity; Doppler
- * with a service token.
+ * with a service token; AWS Secrets Manager with an access key pair (SigV4);
+ * Azure Key Vault with an application's client credentials. The last two
+ * keep whole secrets, read as `${{store.NAME/secret-name}}` or, for a field
+ * of a JSON value, `${{store.NAME/secret-name#KEY}}`.
  */
-export type SecretStoreKind = "vault" | "openbao" | "infisical" | "doppler"
+export type SecretStoreKind = "vault" | "openbao" | "infisical" | "doppler" | "aws" | "azure"
 
 export type SecretStoreSettings = {
   /** Vault and OpenBao: where the KV version 2 engine is mounted ("secret"). */
@@ -3871,6 +3874,14 @@ export type SecretStoreSettings = {
   /** Infisical: the project id and environment slug a reference reads in. */
   project?: string
   environment?: string
+  /** AWS: the region the Secrets Manager endpoint is derived from. */
+  region?: string
+  /** Azure: the vault's name (its host), the tenant signed in to, the cloud. */
+  vaultName?: string
+  tenantId?: string
+  cloud?: "public" | "usgov" | "china"
+  /** Azure: a sign-in authority other than the cloud's own. */
+  authority?: string
   /** A PEM certificate authority for a self-hosted store's TLS. */
   caCert?: string
 }
@@ -3895,6 +3906,8 @@ export type SecretStore = {
   name: string
   kind: SecretStoreKind
   address: string
+  /** Where the store is reached: the address, or what the region or vault name derives. */
+  endpoint: string
   settings: SecretStoreSettings
   /** The credentials that are set, by name; their values are sealed and never read back. */
   credentialNames: string[]
@@ -7007,6 +7020,23 @@ export type DbFleetEntry = DbConnection & {
    * backup job run that dumped it, whichever is later. Absent for never.
    */
   lastBackup?: string
+  /** A MongoDB 8 server that cannot start on this kernel as it is. Absent otherwise. */
+  kernelProblem?: DbKernelProblem
+}
+
+/**
+ * MongoDB 8 on Linux 6.19 to 7.0.13, which it refuses to start on without
+ * `GLIBC_TUNABLES=glibc.pthread.rseq=1` (MongoDB SERVER-121912).
+ */
+export type DbKernelProblem = {
+  /** The alert, in a few words. */
+  message: string
+  /** What applying it does, or where the compose file has to say it. */
+  detail: string
+  kernel: string
+  release: string
+  /** `POST /databases/{id}/kernel-mitigation` applies it. */
+  fixable: boolean
 }
 
 export type DbFleet = {
