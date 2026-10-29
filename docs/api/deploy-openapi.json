@@ -456,6 +456,73 @@
         "title": "accesslog.Visitor",
         "type": "object"
       },
+      "api.DataCopyComparison": {
+        "properties": {
+          "copyError": {
+            "type": "string"
+          },
+          "copyId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "database": {
+            "type": "string"
+          },
+          "liveError": {
+            "type": "string"
+          },
+          "readAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/api.DataCopyTable"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "title": "api.DataCopyComparison",
+        "type": "object"
+      },
+      "api.DataCopyTable": {
+        "properties": {
+          "copyRows": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "estimated": {
+            "type": "boolean"
+          },
+          "liveRows": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "only": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "title": "api.DataCopyTable",
+        "type": "object"
+      },
       "api.archivedDeployment": {
         "properties": {
           "archivedAt": {
@@ -784,6 +851,26 @@
         "title": "api.blueprintRenderRequest",
         "type": "object"
       },
+      "api.dataCopyExtendRequest": {
+        "properties": {
+          "hours": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "api.dataCopyExtendRequest",
+        "type": "object"
+      },
+      "api.dataCopyRequest": {
+        "properties": {
+          "afterRunId": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "api.dataCopyRequest",
+        "type": "object"
+      },
       "api.databaseAddress": {
         "properties": {
           "connectionId": {
@@ -950,6 +1037,17 @@
           },
           "reason": {
             "type": "string"
+          },
+          "recordSince": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retentionDays": {
+            "format": "int64",
+            "type": "integer"
           },
           "since": {
             "format": "date-time",
@@ -1667,9 +1765,16 @@
       },
       "api.promotionRequest": {
         "properties": {
+          "preview": {
+            "format": "int64",
+            "type": "integer"
+          },
           "releaseId": {
             "format": "int64",
             "type": "integer"
+          },
+          "source": {
+            "type": "string"
           }
         },
         "title": "api.promotionRequest",
@@ -1929,6 +2034,9 @@
               "array",
               "null"
             ]
+          },
+          "endpoint": {
+            "type": "string"
           },
           "id": {
             "format": "int64",
@@ -3378,6 +3486,7 @@
               "start_candidate",
               "verify_readiness",
               "verify_smoke",
+              "replay_traffic",
               "activate",
               "retire_previous",
               "record_release",
@@ -3405,6 +3514,83 @@
           }
         },
         "title": "deploy.ActiveWork",
+        "type": "object"
+      },
+      "deploy.Availability": {
+        "properties": {
+          "down": {
+            "type": "boolean"
+          },
+          "liveRelease": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "observedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "recordSince": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.AvailabilityWindow"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "deploy.Availability",
+        "type": "object"
+      },
+      "deploy.AvailabilityWindow": {
+        "properties": {
+          "coverageSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "downSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "incidents": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "observedSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ratio": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "window": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.AvailabilityWindow",
         "type": "object"
       },
       "deploy.BackupJob": {
@@ -4163,6 +4349,7 @@
               "start_candidate",
               "verify_readiness",
               "verify_smoke",
+              "replay_traffic",
               "activate",
               "retire_previous",
               "record_release",
@@ -4190,6 +4377,154 @@
           }
         },
         "title": "deploy.CurrentStep",
+        "type": "object"
+      },
+      "deploy.DataCopy": {
+        "properties": {
+          "afterRunId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "connectionId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "container": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "database": {
+            "type": "string"
+          },
+          "endedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "engine": {
+            "type": "string"
+          },
+          "environmentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "host": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "projectId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "readyAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "recoveredTo": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "releaseId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "releaseNumber": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "restoreMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "source": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/deploy.DataCopySource"
+              }
+            ]
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.DataCopy",
+        "type": "object"
+      },
+      "deploy.DataCopyEligibility": {
+        "properties": {
+          "eligible": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.DataCopyEligibility",
+        "type": "object"
+      },
+      "deploy.DataCopySource": {
+        "properties": {
+          "archiveId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "backupJobId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "backupRunId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.DataCopySource",
         "type": "object"
       },
       "deploy.DependencyObservation": {
@@ -8933,6 +9268,76 @@
         "title": "deploy.PreviewApproval",
         "type": "object"
       },
+      "deploy.PreviewPromotion": {
+        "properties": {
+          "endedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "environmentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "releaseNumber": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "requestedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "runId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "runNumber": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sourceRevision": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.PreviewPromotion",
+        "type": "object"
+      },
+      "deploy.PreviewPromotionView": {
+        "properties": {
+          "approvalState": {
+            "type": "string"
+          },
+          "approvedBy": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "fork": {
+            "type": "boolean"
+          },
+          "headRepository": {
+            "type": "string"
+          },
+          "number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.PreviewPromotionView",
+        "type": "object"
+      },
       "deploy.PreviewRef": {
         "properties": {
           "address": {
@@ -9001,6 +9406,16 @@
           "projectId": {
             "format": "int64",
             "type": "integer"
+          },
+          "promotion": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.PreviewPromotion"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "providerRef": {
             "type": "string"
@@ -9117,6 +9532,28 @@
         "title": "deploy.Project",
         "type": "object"
       },
+      "deploy.PromotedPreview": {
+        "properties": {
+          "approvedBy": {
+            "type": "string"
+          },
+          "headRepository": {
+            "type": "string"
+          },
+          "number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.PromotedPreview",
+        "type": "object"
+      },
       "deploy.PromotionBlocker": {
         "properties": {
           "code": {
@@ -9186,6 +9623,19 @@
           "imageSizeBytes": {
             "format": "int64",
             "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "preview": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.PreviewPromotionView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "release": {
             "allOf": [
@@ -9397,6 +9847,25 @@
             "format": "date-time",
             "type": "string"
           },
+          "dataCopy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.DataCopyEligibility"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dataPoints": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.ReleaseDataPoint"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "environmentId": {
             "format": "int64",
             "type": "integer"
@@ -9553,6 +10022,13 @@
               "null"
             ]
           },
+          "dataPoints": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/deploy.ReleaseDataPointComparison"
+              }
+            ]
+          },
           "detail": {
             "allOf": [
               {
@@ -9570,6 +10046,75 @@
           }
         },
         "title": "deploy.ReleaseComparison",
+        "type": "object"
+      },
+      "deploy.ReleaseDataPoint": {
+        "properties": {
+          "archiveId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "backupJobId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "backupRunId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "connectionId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "engine": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "recordedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "title": "deploy.ReleaseDataPoint",
+        "type": "object"
+      },
+      "deploy.ReleaseDataPointComparison": {
+        "properties": {
+          "from": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.ReleaseDataPoint"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "to": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.ReleaseDataPoint"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "deploy.ReleaseDataPointComparison",
         "type": "object"
       },
       "deploy.ReleaseDetailComparison": {
@@ -9721,6 +10266,16 @@
           "imageId": {
             "type": "string"
           },
+          "preview": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.PromotedPreview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "releaseId": {
             "format": "int64",
             "type": "integer"
@@ -9732,6 +10287,9 @@
           "runId": {
             "format": "int64",
             "type": "integer"
+          },
+          "sourceKind": {
+            "type": "string"
           },
           "sourceRevision": {
             "type": "string"
@@ -9919,6 +10477,38 @@
           }
         },
         "title": "deploy.RemoveManagedRequest",
+        "type": "object"
+      },
+      "deploy.ReplayPlan": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "latencyFactor": {
+            "type": "number"
+          },
+          "maxStatusDrift": {
+            "type": "number"
+          },
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "requests": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "timeoutSeconds": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "deploy.ReplayPlan",
         "type": "object"
       },
       "deploy.RequestWindow": {
@@ -10538,6 +11128,7 @@
               "start_candidate",
               "verify_readiness",
               "verify_smoke",
+              "replay_traffic",
               "activate",
               "retire_previous",
               "record_release",
@@ -10803,6 +11394,16 @@
           },
           "protocol": {
             "type": "string"
+          },
+          "replay": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.ReplayPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "responseHeaders": {
             "items": {
@@ -11923,7 +12524,13 @@
               "null"
             ]
           },
+          "requested": {
+            "type": "boolean"
+          },
           "service": {
+            "type": "string"
+          },
+          "signal": {
             "type": "string"
           },
           "source": {
@@ -13037,7 +13644,13 @@
           "authMount": {
             "type": "string"
           },
+          "authority": {
+            "type": "string"
+          },
           "caCert": {
+            "type": "string"
+          },
+          "cloud": {
             "type": "string"
           },
           "environment": {
@@ -13050,6 +13663,15 @@
             "type": "string"
           },
           "project": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "vaultName": {
             "type": "string"
           }
         },
@@ -16066,6 +16688,54 @@
         "x-deploy-key": "refused (key_scope): archiving a deployment is done in the dashboard or with an ordinary key"
       }
     },
+    "/deploy/{id}/availability": {
+      "get": {
+        "operationId": "deploymentAvailability",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/deploy.Availability"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Read how much of the last day, week and month the production release was running and healthy, from the persisted container events.",
+        "tags": [
+          "fleet"
+        ],
+        "x-deploy-key": "allowed"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ]
+    },
     "/deploy/{id}/commits": {
       "get": {
         "operationId": "deployCommits",
@@ -16639,6 +17309,363 @@
         ],
         "x-deploy-key": "allowed"
       }
+    },
+    "/deploy/{id}/environments/{env}/data-copies": {
+      "get": {
+        "operationId": "deploymentDataCopies",
+        "parameters": [
+          {
+            "description": "Only copies the rollback run asked for.",
+            "in": "query",
+            "name": "run",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only copies as of this release.",
+            "in": "query",
+            "name": "release",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/deploy.DataCopy"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "List the side copies of the environment's linked databases restored as of a release: what each is of, its state and until when it is kept; never its sign-in.",
+        "tags": [
+          "releases"
+        ],
+        "x-deploy-key": "allowed"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ]
+    },
+    "/deploy/{id}/environments/{env}/data-copies/{copy}": {
+      "delete": {
+        "operationId": "deploymentDataCopyRemove",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/deploy.DataCopy"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Remove a side copy now, with its container, volume and network.",
+        "tags": [
+          "releases"
+        ],
+        "x-deploy-key": "refused (session_required): a copy of a release's data is a second copy of production's data, and its address carries a password: it is asked for, read and removed in the dashboard"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The copy.",
+          "in": "path",
+          "name": "copy",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/deploy/{id}/environments/{env}/data-copies/{copy}/comparison": {
+      "get": {
+        "operationId": "deploymentDataCopyComparison",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.DataCopyComparison"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Compare a side copy with the live database: tables and row counts side by side.",
+        "tags": [
+          "releases"
+        ],
+        "x-deploy-key": "refused (session_required): a copy of a release's data is a second copy of production's data, and its address carries a password: it is asked for, read and removed in the dashboard"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The copy.",
+          "in": "path",
+          "name": "copy",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/deploy/{id}/environments/{env}/data-copies/{copy}/extend": {
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The copy.",
+          "in": "path",
+          "name": "copy",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "deploymentDataCopyExtend",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/api.dataCopyExtendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/deploy.DataCopy"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Keep a side copy for more hours.",
+        "tags": [
+          "releases"
+        ],
+        "x-deploy-key": "refused (session_required): a copy of a release's data is a second copy of production's data, and its address carries a password: it is asked for, read and removed in the dashboard"
+      }
+    },
+    "/deploy/{id}/environments/{env}/data-copies/{copy}/url": {
+      "get": {
+        "operationId": "deploymentDataCopyURL",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Assembled by the handler; these are its properties.",
+                  "properties": {
+                    "database": {
+                      "type": "string"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "port": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "user": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Reveal a side copy's connection details, audited.",
+        "tags": [
+          "releases"
+        ],
+        "x-deploy-key": "refused (session_required): a copy of a release's data is a second copy of production's data, and its address carries a password: it is asked for, read and removed in the dashboard"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The copy.",
+          "in": "path",
+          "name": "copy",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
     },
     "/deploy/{id}/environments/{env}/database-addresses": {
       "get": {
@@ -17645,6 +18672,85 @@
           }
         }
       ]
+    },
+    "/deploy/{id}/environments/{env}/releases/{release}/data-copies": {
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The release's id.",
+          "in": "path",
+          "name": "release",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ],
+      "post": {
+        "description": "The copy is for comparing or restoring from; production never runs against it.",
+        "operationId": "deploymentDataCopyCreate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/api.dataCopyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/deploy.DataCopy"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Restore each linked database as it stood when the release went live into a side copy on the deployment's network, kept two hours.",
+        "tags": [
+          "releases"
+        ],
+        "x-deploy-key": "refused (session_required): a copy of a release's data is a second copy of production's data, and its address carries a password: it is asked for, read and removed in the dashboard"
+      }
     },
     "/deploy/{id}/environments/{env}/releases/{release}/pin": {
       "parameters": [
