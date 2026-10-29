@@ -344,6 +344,8 @@ func (s *Server) Start(ctx context.Context) error {
 	// removed whether or not anybody has the page open.
 	s.modules.dataCopies.Start(ctx)
 	s.modules.previewBranches.Start(ctx)
+	// Scans run one at a time behind the engine, never inside a run.
+	s.startImageScans(ctx)
 	s.modules.deployGit.Start(ctx)
 	s.modules.previewReconciler.Start(ctx)
 	s.modules.deployDatabases.Start(ctx)

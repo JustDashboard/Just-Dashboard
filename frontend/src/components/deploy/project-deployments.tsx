@@ -10,6 +10,7 @@ import {
   Globe,
   Pin,
   RotateCounterClockwise,
+  ShieldOff,
 } from "@/components/icons"
 import { get, post, put } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
@@ -26,6 +27,7 @@ import type {
   DeploymentRunSettingsDrift,
   DeploymentRunState,
   DeploymentRunsPage,
+  ImageScanReading,
 } from "@/lib/types"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
@@ -76,6 +78,7 @@ import { RunStrip } from "@/components/deploy/run-marks"
 import { releaseVerbs, runVerbs, type RunVerbKey } from "@/components/deploy/run-verbs"
 import { DataCopiesPanel, RestoreDataDialog, useDataCopies } from "@/components/deploy/data-copies"
 import { dataPointTag } from "@/components/deploy/data-rollback-model"
+import { badgeOf } from "@/components/deploy/vulnerabilities-model"
 
 type StatusFilter = "all" | "ready" | "failed" | "cancelled"
 
@@ -299,6 +302,21 @@ export function ProjectDeployments() {
   }, [project.runs, older])
 
   const environmentRuns = allRuns.filter((run) => run.environmentId === selectedEnv)
+  // Each release's latest scan, marked on its row when it found something at
+  // or above the environment's floor. Previews are not scanned.
+  const scans = usePoll(
+    (signal) =>
+      get<ImageScanReading>(
+        `/deploy/${project.projectId}/environments/${project.environmentId}/vulnerabilities`,
+        undefined,
+        signal,
+      ),
+    60000,
+    [project.projectId, project.environmentId],
+    { enabled: project.normalized && !project.archived && project.environmentId > 0 },
+  )
+  const scanOf = (release?: DeploymentRelease) =>
+    release ? scans.data?.releases.find((badge) => badge.releaseId === release.id) : undefined
   // The newest run, when it can be retried, is the one a fix was saved for.
   // Its drift counts what no plan revision does — a variable given another
   // scope — and says whether the source itself moved; older rows go by the
@@ -670,6 +688,7 @@ export function ProjectDeployments() {
                                     </Tag>
                                   )}
                                   {release && release.id === warmReleaseId && <Tag>Warm</Tag>}
+                                  <ScanMark badge={badgeOf(scanOf(release))} />
                                   {/* Provenance, fixed with the release: the
                                       image was staging's — or for staging, a
                                       pull request preview's — not built here. */}
@@ -904,4 +923,18 @@ function PromotionTag({ promotion }: { promotion: DeploymentPromotion }) {
     )
   }
   return <Tag icon={ArrowCircleUp}>From staging #{promotion.releaseNumber}</Tag>
+}
+
+/**
+ * A release's scan on its row: a shield and what can be done about what it
+ * found — "2 fixable" — with the counts in its title. A state that will
+ * change with the next day's scan, so a `Status`, never a tag.
+ */
+function ScanMark({ badge }: { badge?: ReturnType<typeof badgeOf> }) {
+  if (!badge) return null
+  return (
+    <span title={badge.title} aria-label={`Vulnerabilities: ${badge.title}`}>
+      <Status tone={badge.tone} icon={ShieldOff} label={badge.label} />
+    </span>
+  )
 }
