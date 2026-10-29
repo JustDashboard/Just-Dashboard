@@ -3644,6 +3644,21 @@ export type DeploymentOperations = {
     reason?: string
     items: DeploymentDependencyItem[]
   }
+  /** The tailnet address and who may open it, for a release that is tailnet-only. */
+  tailnet?: DeploymentTailnetAddress
+}
+
+/** A tailnet-only environment as its live release and its address record have it. */
+export type DeploymentTailnetAddress = {
+  url?: string
+  port?: number
+  /** The mapping is in place for the live release. */
+  published: boolean
+  /** Who may open it; empty is everyone on the tailnet. */
+  allow: string[]
+  /** The proxy that asks who every visitor is, for a release that names them. */
+  gate?: "nginx" | "caddy"
+  gateRunning?: boolean
 }
 
 export type ReleaseFieldChange = {
@@ -5455,6 +5470,12 @@ export type DeploymentConfiguration = {
     interceptErrors?: boolean
     /** Strict-Transport-Security on every HTTPS answer; absent sends none. */
     hsts?: DeploymentRouteHSTS
+    /**
+     * Published on this host's tailnet and nowhere else, as a preview is: no
+     * public domain and no public certificate. Absent is an ordinary
+     * environment.
+     */
+    tailnet?: DeploymentRouteTailnet
     /** Recorded requests replayed against the candidate before the cutover; absent is off. */
     replay?: ReplayPlan
     mounts?: {
@@ -5521,6 +5542,17 @@ export type DeploymentPlannedDomain = {
 }
 
 export type DeploymentRedirectCode = 301 | 302 | 307 | 308
+
+/**
+ * A tailnet-only publication. `allow`, when it names anybody, is who may open
+ * it — Tailscale logins (alice@example.com, compared without case) and ACL
+ * tags (tag:ci, compared exactly) — and the proxy then asks the dashboard
+ * about every request; empty lets everyone on the tailnet in. Previews
+ * inherit it with the rest of the plan.
+ */
+export type DeploymentRouteTailnet = {
+  allow?: string[]
+}
 
 /**
  * Sign-in in front of a deployment's public route: a Proxy site's single
@@ -8009,6 +8041,8 @@ export type RequestEntry = {
   /** Absent where the format carries no duration — nginx's stock `combined` does not. */
   durationMs?: number
   tls?: boolean
+  /** The Tailscale login (or a tagged machine's tags) a tailnet gate admitted. */
+  user?: string
 }
 
 export type RequestFacet = {

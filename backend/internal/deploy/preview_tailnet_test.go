@@ -24,8 +24,10 @@ type tailnetPublisherFake struct {
 	withdraws    []int
 	publishErr   error
 	failUpstream int
-	withdrawErr  error
-	servedErr    error
+	// failNext fails the next publish alone, whatever it maps to.
+	failNext    bool
+	withdrawErr error
+	servedErr   error
 	// onServed runs at every status read, for a test that needs something
 	// to happen between the sweep's two readings.
 	onServed func()
@@ -39,6 +41,10 @@ func (f *tailnetPublisherFake) PublishTailnet(_ context.Context, port, upstream,
 		return "", f.publishErr
 	}
 	if f.failUpstream != 0 && upstream == f.failUpstream {
+		return "", fmt.Errorf("serve refused 127.0.0.1:%d", upstream)
+	}
+	if f.failNext {
+		f.failNext = false
 		return "", fmt.Errorf("serve refused 127.0.0.1:%d", upstream)
 	}
 	if f.served == nil {
@@ -623,7 +629,7 @@ func TestPublishPreviewAddressWithdrawsAMappingItCouldNotRecord(t *testing.T) {
 	executor := &NormalizedStepExecutor{store: f.runs, tailnet: publisher}
 	// The environment has no address row, so the record cannot land.
 	evidence, failure := executor.publishPreviewAddress(context.Background(), StepExecution{Output: discardStepOutput{}}, environmentID,
-		PreviewAddress{Kind: previewAddressTailnet, Port: 21000}, ReleaseRuntime{Port: 32101})
+		PreviewAddress{Kind: previewAddressTailnet, Port: 21000}, 32101)
 	if evidence != nil || failure == nil || failure.ErrorCode != "tailnet_publish_failed" || !strings.Contains(failure.ErrorMessage, "could not be recorded") {
 		t.Fatalf("publish = %#v, %#v", evidence, failure)
 	}

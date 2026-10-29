@@ -58,6 +58,8 @@ type HostObservation struct {
 	Domains       []DomainObservation     `json:"domains"`
 	Firewall      FirewallObservation     `json:"firewall"`
 	Dependencies  []DependencyObservation `json:"dependencies"`
+	// Tailnet is this host on its tailnet, for a plan published there alone.
+	Tailnet *TailnetObservation `json:"tailnet,omitempty"`
 	// ReplacesRuntime says a live release is being replaced, so the data a
 	// plan keeps already exists; only a first release starts it empty.
 	ReplacesRuntime bool `json:"replacesRuntime,omitempty"`
@@ -147,6 +149,39 @@ type ObservationRequest struct {
 	DatabaseExtensions []string
 	// ReleaseTaskTools are the programs host release tasks run.
 	ReleaseTaskTools []string
+	// Tailnet asks about this host's tailnet, for a tailnet-only plan;
+	// EnvironmentID, when the environment exists, whose address it has.
+	Tailnet       bool
+	EnvironmentID int64
+}
+
+// TailnetObservation is what preflight says about the address a tailnet-only
+// environment will have (tailnet-apps.md).
+type TailnetObservation struct {
+	// Usable is a running Tailscale with a MagicDNS name; Detail says why
+	// not, in a sentence for the operator.
+	Usable   bool   `json:"usable"`
+	Hostname string `json:"hostname,omitempty"`
+	// HTTPS is the tailnet issuing certificates, which decides whether
+	// tailscale serve answers https:// or http:// on the port.
+	HTTPS  bool   `json:"https"`
+	Detail string `json:"detail,omitempty"`
+	// URL and Port are the environment's address when it already has one;
+	// NextPort is the port its first publish would take now.
+	URL      string `json:"url,omitempty"`
+	Port     int    `json:"port,omitempty"`
+	NextPort int    `json:"nextPort,omitempty"`
+	// Gate is the proxy that would check who opens it: nginx, or caddy for
+	// the dashboard's loopback Caddy, which GateRunning says is up.
+	Gate        string `json:"gate,omitempty"`
+	GateRunning bool   `json:"gateRunning,omitempty"`
+}
+
+// PreflightTailnet observes the tailnet for preflight. Read-only: it asks
+// tailscaled what this node is and what it serves, and the address table
+// what the environment holds; nothing is published or started.
+type PreflightTailnet interface {
+	ObserveTailnet(ctx context.Context, environmentID int64) TailnetObservation
 }
 
 // PreflightObserver is intentionally read-only. A test double can prove
@@ -163,8 +198,14 @@ type HostPreflightObserver struct {
 	proxy      PlanningProxy
 	firewall   PlanningFirewall
 	resources  PlanningDependencies
+	tailnet    PreflightTailnet
 	volumeRoot string
 	tunnel     TunnelObserver
+}
+
+func (o *HostPreflightObserver) WithTailnet(tailnet PreflightTailnet) *HostPreflightObserver {
+	o.tailnet = tailnet
+	return o
 }
 
 type PlanningFirewall interface {
@@ -222,6 +263,12 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 		Facilities: map[string]FacilityObservation{}, Paths: []PathObservation{}, Ports: []PortObservation{},
 		Domains: []DomainObservation{}, Dependencies: []DependencyObservation{}, OS: runtime.GOOS, Architecture: runtime.GOARCH,
 		ReplacesRuntime: request.ExistingRuntimeID != "",
+	}
+	if request.Tailnet && o.tailnet != nil {
+		tailnetCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		tailnet := o.tailnet.ObserveTailnet(tailnetCtx, request.EnvironmentID)
+		cancel()
+		observation.Tailnet = &tailnet
 	}
 	if request.NeedsGit {
 		observation.Facilities["git"] = FacilityObservation{Available: hostexec.Available("git")}
@@ -615,6 +662,7 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 	request.Ports = uniquePorts(request.Ports)
 	request.ReleaseTaskTools = releaseTaskHostTools(configuration.Build.ReleaseTasks)
 	request.NeedsFirewall = publicRuntimeBind(configuration.Runtime) && len(request.Ports) > 0
+	request.Tailnet = configuration.Runtime.Tailnet != nil
 	return request
 }
 
@@ -1045,6 +1093,7 @@ func preflightFindings(
 	findings = append(findings, readinessPreflightFindings(draft, configuration)...)
 	findings = append(findings, replayFindings(configuration, observation)...)
 	findings = withoutSupersededHostFindings(append(findings, networkFindings(draft, configuration)...))
+	findings = append(findings, tailnetFindings(configuration, observation.Tailnet)...)
 	persistentStorage := len(configuration.Runtime.Mounts)
 	if detection.Compose != nil {
 		for _, service := range detection.Compose.Services {

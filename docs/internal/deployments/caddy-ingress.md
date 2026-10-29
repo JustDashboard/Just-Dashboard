@@ -15,6 +15,14 @@ also provisions missing Certbot dependencies for the existing host nginx/standal
 The dashboard's own private Caddy, network allowlist, authentication and private backend/frontend
 publications are unchanged. The new public ingress serves deployment hostnames only.
 
+A tailnet-only deployment that names who may open it is never served here: this container's network
+is its own, where neither tailscaled's loopback forward nor the dashboard's loopback API reaches. Its
+gate is a second Caddy the dashboard starts for that alone, `just-dashboard-tailnet`, on the host's
+network with every site bound to `127.0.0.1` and nothing published
+([tailnet-only deployments](tailnet-apps.md#the-gate)). It shares this file's route machinery — the
+snapshot and restore (driver `tailnet-caddy`), the write, validate and reload, the request record — but
+not discovery, provisioning or the reconcile pass, and its admin API is a socket in its own volume.
+
 A host whose Caddy publishes 80 and 443 on one address rather than every address, or an isolated
 acceptance stack whose ingress is published on loopback, names the container instead:
 `JD_INGRESS_CONTAINER` (`proxysvc.NewWithIngressContainer`). That container — inspected by name alone,

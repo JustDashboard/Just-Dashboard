@@ -27,6 +27,9 @@ const (
 	ingressContainer      = "just-dashboard-ingress"
 	ingressLabel          = "com.just-dashboard.ingress"
 	deploymentImagePrefix = "just-dashboard/deployment-"
+	// tailnetGateLabel marks the loopback-only Caddy that gates tailnet-only
+	// deployments, and its two volumes (proxysvc/tailnet_gate.go).
+	tailnetGateLabel = "com.just-dashboard.tailnet-gate"
 )
 
 // The public Caddy the first deployment provisions. Its routes are the
@@ -62,6 +65,9 @@ type Teardown struct {
 	RemovePath       func(path string) error
 	WithdrawPreviews func(ctx context.Context) (int, error)
 	RemoveIngressDir func() error
+	// RemoveTailnetGateDir removes the tailnet gate's Caddyfile once the
+	// gate itself is gone.
+	RemoveTailnetGateDir func() error
 }
 
 // Item is one thing that goes, by the name an operator knows it by.
@@ -80,12 +86,15 @@ type Owned struct {
 	Paths      []Item `json:"paths"`
 	Images     []Item `json:"images"`
 	Ingress    *Item  `json:"ingress,omitempty"`
+	// TailnetGate is the Caddy in front of the tailnet-only deployments that
+	// name their visitors: theirs alone, so it goes with them.
+	TailnetGate *Item `json:"tailnetGate,omitempty"`
 }
 
 // Empty is whether there is nothing to remove.
 func (o Owned) Empty() bool {
 	return len(o.Containers)+len(o.Routes)+len(o.Networks)+len(o.Volumes)+len(o.Paths)+len(o.Images) == 0 &&
-		o.Ingress == nil
+		o.Ingress == nil && o.TailnetGate == nil
 }
 
 // Inventory works out what the deployments own: by label for what Docker can
@@ -129,6 +138,10 @@ func (t Teardown) Inventory(ctx context.Context) (Owned, error) {
 			owned.Ingress = &Item{ID: c.ID, Name: c.Name}
 			continue
 		}
+		if c.Labels[tailnetGateLabel] == "true" {
+			owned.TailnetGate = &Item{ID: c.ID, Name: c.Name}
+			continue
+		}
 		if c.Labels[managedLabel] != "true" && !recorded[c.ID] {
 			continue
 		}
@@ -165,7 +178,7 @@ func (t Teardown) Inventory(ctx context.Context) (Owned, error) {
 		}
 	}
 	for _, v := range volumes {
-		if v.Labels[managedLabel] == "true" || projects[v.Labels[composeProjectLabel]] || recordedVolumes[v.Name] {
+		if v.Labels[managedLabel] == "true" || projects[v.Labels[composeProjectLabel]] || recordedVolumes[v.Name] || v.Labels[tailnetGateLabel] == "true" {
 			owned.Volumes = append(owned.Volumes, Item{ID: v.Name, Name: v.Name})
 		}
 	}
@@ -247,6 +260,19 @@ func (t Teardown) Remove(ctx context.Context, owned Owned, out io.Writer) []stri
 			if t.RemoveIngressDir != nil {
 				if err := t.RemoveIngressDir(); err != nil {
 					fail("the ingress Caddyfile", err)
+				}
+			}
+		}
+	}
+
+	if owned.TailnetGate != nil {
+		if err := t.Docker.RemoveContainer(ctx, owned.TailnetGate.ID, true, false); err != nil && !gone(err) {
+			fail("container "+owned.TailnetGate.Name, err)
+		} else {
+			fmt.Fprintf(out, "removed container %s\n", owned.TailnetGate.Name)
+			if t.RemoveTailnetGateDir != nil {
+				if err := t.RemoveTailnetGateDir(); err != nil {
+					fail("the tailnet gate's Caddyfile", err)
 				}
 			}
 		}

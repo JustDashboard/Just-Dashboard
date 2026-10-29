@@ -68,6 +68,9 @@ type NormalizedStepExecutor struct {
 	// reachability check after a publish, replaced in tests.
 	tailnet      TailnetPublisher
 	tailnetProbe func(context.Context, string) error
+	// tailnetCheck is the dashboard's API on loopback, which a tailnet
+	// gate asks about every request (tailnet_apps.go).
+	tailnetCheck string
 
 	// hostMemory reads available and total memory in bytes, for the warm
 	// release's memory floor; nil reads /proc/meminfo.
@@ -434,6 +437,7 @@ func (e *NormalizedStepExecutor) analyzePlan(
 		Configuration: configuration, Evidence: plan.BuildEvidence,
 		BuildVariables: buildScopedNames(plan.Variables),
 		ProxySite:      deploymentRouteName(execution.Run.EnvironmentID),
+		EnvironmentID:  execution.Run.EnvironmentID,
 	}
 	live, liveErr := e.store.LiveRelease(ctx, execution.Run.EnvironmentID)
 	if liveErr == nil {

@@ -35,6 +35,7 @@ import type {
   DeploymentPageName,
   DeploymentRedirectCode,
   DeploymentRouteHSTS,
+  DeploymentTailnetAddress,
   Exposure,
   ForwardAuthProvider,
 } from "@/lib/types"
@@ -64,7 +65,8 @@ import {
 } from "@/components/ui/input-group"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { HttpsToggle } from "@/components/deploy/https-toggle"
-import { CertificateStatus, ROUTE_LABEL, ROUTE_TONE } from "@/components/deploy/vocabulary"
+import { Tag } from "@/components/tag"
+import { CertificateStatus, ROUTE_LABEL, ROUTE_TONE, hostOf } from "@/components/deploy/vocabulary"
 import {
   SettingForm,
   SettingSection,
@@ -91,6 +93,13 @@ import {
   signInConflicts,
   withPreload,
 } from "@/components/deploy/settings/route-access"
+import {
+  readTailnetEntry,
+  tailnetAccessState,
+  tailnetBlockers,
+  tailnetRuntime,
+  tailnetSwitchClears,
+} from "@/components/deploy/settings/tailnet-access"
 import {
   ERROR_PAGES,
   errorPagesState,
@@ -155,7 +164,12 @@ export function DomainsSettings({
     <SettingsPage state={state}>
       {(configuration) => (
         <>
-          <DomainsForm configuration={configuration} save={state.save} />
+          {/* A tailnet-only environment has no public route, so it has no
+              domains, and none of the rules below can be saved beside it. */}
+          {!configuration.runtime.tailnet && (
+            <DomainsForm configuration={configuration} save={state.save} />
+          )}
+          <TailnetForm configuration={configuration} save={state.save} />
           {/* Rules for a route that does not exist yet would be a form with
               nothing to act on; one already saved stays editable. */}
           {(configuration.domains.length > 0 ||
@@ -181,6 +195,293 @@ export function DomainsSettings({
         </>
       )}
     </SettingsPage>
+  )
+}
+
+type TailnetDraft = { on: boolean; allow: string[] }
+
+/**
+ * Tailnet only — the environment answers on this server's tailnet address
+ * and nowhere else, the way a pull request preview does: tailscale serve
+ * maps one port of the tailnet to it, with the tailnet's own certificate and
+ * no public domain. Beside the public domains, because it is the other answer
+ * to the question the page asks: where does this environment answer.
+ *
+ * Who may open it is the list under the switch, Tailscale logins and tags,
+ * each read as the server reads it before it is added. Empty is the whole
+ * tailnet. A list puts a gate in front of the application that asks the
+ * dashboard about every request, and the dashboard asks tailscaled.
+ *
+ * Turning it on takes away, with the same save, what only a public route
+ * has — the domains, the sign-in, the address list, the headers — and says
+ * so before the save, rather than leaving the server to refuse it one field
+ * at a time.
+ */
+function TailnetForm({
+  configuration,
+  save,
+}: {
+  configuration: DeploymentEnvironmentConfiguration
+  save: ReturnType<typeof useConfiguration>["save"]
+}) {
+  const { can } = useAuth()
+  const project = useProject()
+  // A preview's plan is a copy of the environment it previews: its list is
+  // set there, and a change here would be undone at the next head.
+  const preview = Boolean(configuration.runtime.previewIsolation)
+  const canAdmin = can("system.admin") && !preview
+  const savedTailnet = configuration.runtime.tailnet
+  const saved: TailnetDraft = { on: Boolean(savedTailnet), allow: savedTailnet?.allow ?? [] }
+  const draft = useSettingDraft(`deploy.${project.projectId}.settings.tailnet`, saved)
+  const value = draft.value
+  const [saving, setSaving] = useState(false)
+  const [refusal, setRefusal] = useState<string>()
+  const live = project.operations?.tailnet
+  const clears = value.on && !savedTailnet ? tailnetSwitchClears(configuration) : []
+  const blockers = value.on ? tailnetBlockers(configuration.runtime) : []
+
+  const onSave = async () => {
+    setSaving(true)
+    setRefusal(undefined)
+    try {
+      await save({
+        ...(value.on ? { domains: [] } : {}),
+        runtime: (latest) => tailnetRuntime(latest.runtime, value.on ? value.allow : undefined),
+      })
+      return true
+    } catch (error) {
+      if (error instanceof ApiError && error.field?.startsWith("runtime.tailnet")) {
+        setRefusal(error.message)
+      } else {
+        notify.error("Could not save the tailnet setting", error)
+      }
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <SettingForm
+      name="Tailnet"
+      onSave={onSave}
+      dirty={draft.dirty}
+      changes={draft.changes}
+      saving={saving}
+      canEdit={canAdmin}
+      onDiscard={() => {
+        setRefusal(undefined)
+        draft.discard()
+      }}
+    >
+      <SettingSection
+        title="Tailnet"
+        state={tailnetAccessState(value.on ? { allow: value.allow } : undefined)}
+        status={settingStatus({ dirty: draft.dirty, refused: Boolean(refusal) })}
+      >
+        <OptionList>
+          <OptionRow
+            title="Tailnet only"
+            hint="Answers on this server's tailnet address and nowhere else, as pull request previews do: no public domain, no public certificate, and only devices on your tailnet reach it."
+            checked={value.on}
+            disabled={!canAdmin}
+            onCheckedChange={(on) => draft.set({ ...value, on })}
+          >
+            {value.on && (
+              <div className="flex flex-col gap-4">
+                <TailnetAddress live={live} saved={Boolean(savedTailnet)} />
+                <TailnetAllowField
+                  values={value.allow}
+                  onChange={(allow) => draft.set({ ...value, allow })}
+                  disabled={!canAdmin}
+                />
+                <FormNote>
+                  {value.allow.length > 0
+                    ? "Every request is checked first: the dashboard asks Tailscale who holds the address it came from, and anyone not listed is answered 403. The application is told X-Tailnet-Login and X-Tailnet-User, and never what the visitor sent."
+                    : "The tailnet is the fence: everyone on it can open the application, as with a preview. List logins or tags to admit only them."}
+                </FormNote>
+                {preview && (
+                  <FormNote>A preview takes this from the environment it previews.</FormNote>
+                )}
+                {clears.length > 0 && (
+                  <FormNote tone="warning">
+                    Saving also takes away {clears.join(", ")}: a tailnet-only environment has no
+                    public route.
+                  </FormNote>
+                )}
+                {blockers.map((blocker) => (
+                  <FormNote key={blocker} tone="warning">
+                    It cannot be tailnet-only while {blocker}. Change that under{" "}
+                    <Link
+                      href={`/deploy/${project.projectId}/settings/runtime`}
+                      className="underline underline-offset-4"
+                    >
+                      Runtime
+                    </Link>{" "}
+                    first.
+                  </FormNote>
+                ))}
+                {refusal && (
+                  <FormNote role="alert" tone="danger">
+                    {refusal}
+                  </FormNote>
+                )}
+              </div>
+            )}
+          </OptionRow>
+        </OptionList>
+      </SettingSection>
+    </SettingForm>
+  )
+}
+
+/**
+ * The address the environment has on the tailnet, as its live release has
+ * it: a link with Tailscale's mark, or that it gets one on the next
+ * deployment — the port is chosen then and kept.
+ */
+function TailnetAddress({
+  live,
+  saved,
+}: {
+  live: DeploymentTailnetAddress | undefined
+  saved: boolean
+}) {
+  const host = live?.url ? hostOf(live.url) : undefined
+  const [tone, label]: [DotTone, string] = !saved
+    ? ["notice", "Not saved yet"]
+    : !host
+      ? ["notice", "Gets its address on the next deployment"]
+      : live?.published
+        ? ["running", "Published on the tailnet"]
+        : ["warning", "Not reachable · redeploy"]
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <ProductLogo size="sm" id="tailscale" fallback={Globe} />
+      <div className="min-w-0 space-y-1">
+        {host ? (
+          <a
+            href={live?.url}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open ${host}`}
+            className="flex max-w-full min-w-0 items-center gap-1.5 rounded-sm font-mono text-sm font-medium focus-ring hover:underline"
+          >
+            <span className="truncate">{host}</span>
+            <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+          </a>
+        ) : (
+          <p className="text-sm font-medium text-muted-foreground">Address on the tailnet</p>
+        )}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+          <Status key={label} tone={tone} label={label} className="animate-rise" />
+          {live?.gate && live.allow.length > 0 && (
+            <span className="text-muted-foreground">
+              {live.gate === "caddy"
+                ? "Checked by the dashboard's own Caddy on loopback"
+                : "Checked by this server's nginx"}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Who may open the environment: Tailscale logins and tags, each read the
+ * way the server reads it as it is typed, so an entry that would be refused
+ * never reaches the list. A login is kept in lower case, since providers do
+ * not agree on one; a tag as written, since the tailnet's policy compares
+ * tags exactly.
+ */
+function TailnetAllowField({
+  values,
+  onChange,
+  disabled,
+}: {
+  values: string[]
+  onChange: (values: string[]) => void
+  disabled: boolean
+}) {
+  const [typed, setTyped] = useState("")
+  const [problem, setProblem] = useState<string>()
+  const add = () => {
+    const read = readTailnetEntry(typed, values)
+    if ("error" in read) {
+      setProblem(read.error)
+      return
+    }
+    onChange([...values, read.entry])
+    setTyped("")
+    setProblem(undefined)
+  }
+  return (
+    <Field
+      label="Who may open it"
+      htmlFor="tailnet-allow"
+      hint="Tailscale logins and tags. Empty lets everyone on the tailnet in."
+      info="A login is the account a person signs in to Tailscale with, alice@example.com or alice@github. A tag is a machine's ACL tag, tag:ci; a tagged machine is admitted by its tags alone."
+      error={problem}
+    >
+      <div className="space-y-2">
+        {values.length > 0 && (
+          <ul aria-label="Admitted on the tailnet" className="flex flex-wrap items-center gap-1.5">
+            {values.map((value) => (
+              <li key={value}>
+                <Tag mono className="gap-1.5 pr-0.5">
+                  {value}
+                  {!disabled && (
+                    <IconAction
+                      type="button"
+                      label={`Remove ${value}`}
+                      size="icon-xs"
+                      className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
+                      onClick={() => onChange(values.filter((entry) => entry !== value))}
+                    >
+                      <Trash />
+                    </IconAction>
+                  )}
+                </Tag>
+              </li>
+            ))}
+          </ul>
+        )}
+        {!disabled && (
+          <div className="flex items-center gap-2">
+            <Input
+              id="tailnet-allow"
+              value={typed}
+              onChange={(event) => {
+                setTyped(event.target.value)
+                setProblem(undefined)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  add()
+                }
+              }}
+              placeholder="alice@example.com or tag:ci"
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={Boolean(problem)}
+              className="font-mono text-xs"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={add}
+              disabled={!typed.trim()}
+              aria-label="Add to who may open it"
+            >
+              <Plus className="size-3.5" />
+            </Button>
+          </div>
+        )}
+      </div>
+    </Field>
   )
 }
 
