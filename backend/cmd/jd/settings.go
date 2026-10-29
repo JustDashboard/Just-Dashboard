@@ -28,6 +28,7 @@ type configurationView struct {
 		Strategy     string   `json:"strategy"`
 		MemoryMB     int64    `json:"memoryMb"`
 		CPUs         float64  `json:"cpus"`
+		Replicas     int      `json:"replicas"`
 	} `json:"runtime"`
 	Domains []struct {
 		Hostname string `json:"hostname"`
@@ -120,6 +121,9 @@ func (a *app) configGet(args []string) error {
 	}
 	if view.Runtime.Strategy != "" {
 		runtime = append(runtime, strings.ReplaceAll(view.Runtime.Strategy, "_", " "))
+	}
+	if view.Runtime.Replicas > 1 {
+		runtime = append(runtime, fmt.Sprintf("%d replicas", view.Runtime.Replicas))
 	}
 	if view.Runtime.MemoryMB != 0 {
 		runtime = append(runtime, fmt.Sprintf("%d MiB", view.Runtime.MemoryMB))

@@ -1121,7 +1121,12 @@ function ReleaseCell({
       label={service.liveRelease ? "Live" : "Other release"}
     />
   )
-  const facts = [release && `#${release.number}`, why].filter(Boolean).join(" · ")
+  // A replicated release's containers are one release; the card says which.
+  const replica =
+    service.replica && service.replicas
+      ? `replica ${service.replica} of ${service.replicas}`
+      : undefined
+  const facts = [release && `#${release.number}`, replica, why].filter(Boolean).join(" · ")
   const line = facts && (
     <span className="numeric truncate text-hint text-muted-foreground">{facts}</span>
   )

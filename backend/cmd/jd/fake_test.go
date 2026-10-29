@@ -142,7 +142,7 @@ func (f *fakeDashboard) serve(w http.ResponseWriter, r *http.Request) {
 		w.Write(fakeOpenAPIYAML)
 	case route == "GET "+env+"/configuration":
 		f.write(w, 200, map[string]any{"revision": f.revision, "build": map[string]any{"method": "image"},
-			"runtime":   map[string]any{"image": "nginx:1.27-alpine", "internalPort": 80, "strategy": "stop_first"},
+			"runtime":   map[string]any{"image": "nginx:1.27-alpine", "internalPort": 80, "strategy": "stop_first", "replicas": 2},
 			"variables": f.variableList(), "domains": []any{}, "checks": []any{}, "dependencies": []any{},
 			"source": map[string]any{"kind": "image", "image": "nginx:1.27-alpine"}, "pending": map[string]any{"pending": true}})
 	case route == "PUT "+env+"/configuration":

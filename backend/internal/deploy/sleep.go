@@ -118,6 +118,8 @@ func sleepRefusal(c PlanConfiguration) string {
 		return "a host-network application is reached at the host's own port, not through the proxy's route, so no request could wake it"
 	case c.Runtime.Tailnet != nil:
 		return "a tailnet-only environment is reached through tailscale serve, not through the proxy's route, so no request could wake it"
+	case c.Runtime.EffectiveReplicas() > 1:
+		return fmt.Sprintf("a wake starts one container and holds the request for it, and this release runs %d replicas; sleeping is offered for a single-container release", c.Runtime.EffectiveReplicas())
 	case len(servedDomains(c.Domains)) == 0:
 		return "only a request through the proxy's route wakes a sleeping application, and no domain serves this one; add a domain it serves"
 	}

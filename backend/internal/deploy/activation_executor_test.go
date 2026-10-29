@@ -248,9 +248,10 @@ func TestWildcardRuntimeBindingsUseLoopbackForChecksAndProxy(t *testing.T) {
 	if got := runtimeCheckHost("::"); got != "::1" {
 		t.Fatalf("IPv6 check host = %q", got)
 	}
-	route := deploymentRoute(7, []PlannedDomain{{Hostname: "app.example.test"}}, "0.0.0.0", 32123)
-	if route.Upstream != "http://127.0.0.1:32123" {
-		t.Fatalf("wildcard proxy upstream = %q", route.Upstream)
+	route := deploymentRoute(7, []PlannedDomain{{Hostname: "app.example.test"}},
+		runtimeUpstreams(ReleaseRuntime{Kind: "container", RuntimeID: "runtime", Host: "0.0.0.0", Port: 32123}))
+	if route.PrimaryUpstream() != "http://127.0.0.1:32123" || len(route.Servers()) != 1 {
+		t.Fatalf("wildcard proxy upstream = %q", route.Servers())
 	}
 	target := targetForRuntime(ReleaseRuntime{Kind: "container", RuntimeID: "runtime", Host: "::", Port: 32123}, runtimeReleaseSnapshot{})
 	if target.Host != "::1" {

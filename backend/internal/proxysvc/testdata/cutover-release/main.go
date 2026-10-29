@@ -24,9 +24,15 @@ func main() {
 	if id == "" {
 		id = "unknown"
 	}
+	// Which of a release's replicas answered, for the test of a release
+	// that runs several; the body stays the release's alone.
+	replica := os.Getenv("JD_REPLICA")
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
+		if replica != "" {
+			w.Header().Set("X-Replica", replica)
+		}
 		io.WriteString(w, id)
 	})
 	// A long streamed response is the case a reload is most likely to cut:

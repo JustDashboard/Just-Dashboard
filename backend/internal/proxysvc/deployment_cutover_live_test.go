@@ -80,25 +80,31 @@ func TestLiveCutoverTrafficContinuity(t *testing.T) {
 		}
 		transitions = parsed
 	}
+	// A release of one container is the route it always was, one proxy_pass;
+	// a release of two replicas is an upstream block, and has to move between
+	// releases as cleanly, and keep serving when one of its replicas dies.
+	t.Run("one container", func(t *testing.T) { cutoverContinuity(t, transitions, 1) })
+	t.Run("two replicas", func(t *testing.T) { cutoverContinuity(t, transitions, 2) })
+}
 
+func cutoverContinuity(t *testing.T, transitions, replicas int) {
 	stamp := strconv.FormatInt(time.Now().UnixNano(), 10)
 	network := liveCutoverNetwork(t, stamp)
 	root := liveCutoverRoot(t)
 	binary := buildCutoverRelease(t)
-	blue := startCutoverRelease(t, network, binary, "blue", stamp)
-	green := startCutoverRelease(t, network, binary, "green", stamp)
+	blue := startCutoverReplicas(t, network, binary, "blue", stamp, replicas)
+	green := startCutoverReplicas(t, network, binary, "green", stamp, replicas)
 	proxy := liveCutoverNginx(t, root, network, stamp)
 	endpoint := proxy.endpoint
 
 	service := New(root, "")
-	route := func(release cutoverRelease) DeploymentRoute {
-		return DeploymentRoute{
-			Name:     cutoverRouteName,
-			Domains:  []string{cutoverDomain},
-			Upstream: "http://" + net.JoinHostPort(release.name, "8080"),
+	route := func(release []cutoverRelease) DeploymentRoute {
+		route := DeploymentRoute{Name: cutoverRouteName, Domains: []string{cutoverDomain}}
+		for _, replica := range release {
+			route.Upstreams = append(route.Upstreams, "http://"+net.JoinHostPort(replica.name, "8080"))
 		}
+		return route
 	}
-
 	ctx := t.Context()
 	first, err := service.ApplyDeploymentRoute(ctx, route(blue))
 	if err != nil {
@@ -164,13 +170,24 @@ func TestLiveCutoverTrafficContinuity(t *testing.T) {
 	traffic.socket.report(t, "new WebSocket")
 	t.Logf("completed %d transitions in %s; slowest activation %s", observed, elapsed.Round(time.Millisecond), slowest.Round(time.Millisecond))
 
+	if replicas > 1 {
+		// The last transition's release is the one live: every replica of it
+		// answers, and a replica that dies costs no request.
+		live, color := blue, "blue"
+		if transitions%2 == 1 {
+			live, color = green, "green"
+		}
+		cutoverReplicaLoss(t, endpoint, live, color)
+	}
+
 	// An unrelated site sharing the same nginx must be untouched by a hundred
 	// deployment reloads.
 	if body, status, err := cutoverGet(endpoint, cutoverNeighbour, "/", 5*time.Second); err != nil || status != http.StatusOK || body != "neighbour" {
 		t.Fatalf("unrelated site changed across %d reloads: %q status %d err %v", transitions, body, status, err)
 	}
 
-	writeCutoverEvidence(t, cutoverEvidence{
+	writeCutoverEvidence(t, replicas, cutoverEvidence{
+		Replicas:           replicas,
 		Transitions:        observed,
 		Duration:           elapsed.Round(time.Millisecond).String(),
 		SlowestActivation:  slowest.Round(time.Millisecond).String(),
@@ -192,6 +209,100 @@ func TestLiveCutoverTrafficContinuity(t *testing.T) {
 type cutoverRelease struct {
 	id   string
 	name string
+}
+
+// startCutoverReplicas starts one release as replicas, each its own
+// container answering with the release's id and saying which replica it is.
+func startCutoverReplicas(t *testing.T, network, binary, id, stamp string, replicas int) []cutoverRelease {
+	t.Helper()
+	if replicas == 1 {
+		return []cutoverRelease{startCutoverRelease(t, network, binary, id, stamp)}
+	}
+	out := make([]cutoverRelease, 0, replicas)
+	for replica := 1; replica <= replicas; replica++ {
+		out = append(out, startCutoverContainer(t, network, binary, id, stamp+"-"+strconv.Itoa(replica), strconv.Itoa(replica)))
+	}
+	return out
+}
+
+// cutoverReplicaLoss asks the live release's route for every replica, then
+// kills one of them under steady traffic: nginx passes each request the dead
+// replica cannot take to the one that is left, so a visitor loses nothing.
+// Only short requests run here — a streamed answer or a WebSocket a replica
+// was serving when it died ends with it, on any proxy.
+func cutoverReplicaLoss(t *testing.T, endpoint string, live []cutoverRelease, color string) {
+	t.Helper()
+	answered := map[string]int{}
+	client := &http.Client{Timeout: 5 * time.Second}
+	ask := func() (string, string, error) {
+		request, _ := http.NewRequest("GET", endpoint+"/", nil)
+		request.Host = cutoverDomain
+		response, err := client.Do(request)
+		if err != nil {
+			return "", "", err
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			return "", "", err
+		}
+		if response.StatusCode != http.StatusOK {
+			return "", "", fmt.Errorf("status %d", response.StatusCode)
+		}
+		return strings.TrimSpace(string(body)), response.Header.Get("X-Replica"), nil
+	}
+	for index := 0; index < 60; index++ {
+		body, replica, err := ask()
+		if err != nil || body != color {
+			t.Fatalf("live release %s answered %q, %v", color, body, err)
+		}
+		answered[replica]++
+	}
+	if len(answered) != len(live) {
+		t.Fatalf("the route did not share requests between %d replicas: %v", len(live), answered)
+	}
+	t.Logf("%s's replicas answered %v", color, answered)
+
+	loss := &cutoverCounter{}
+	stop := make(chan struct{})
+	var wait sync.WaitGroup
+	for worker := 0; worker < 4; worker++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-time.After(20 * time.Millisecond):
+				}
+				if body, _, err := ask(); err != nil {
+					loss.fail("request error: %v", err)
+				} else if body != color {
+					loss.fail("unexpected body %q", body)
+				} else {
+					loss.ok()
+				}
+			}
+		}()
+	}
+	time.Sleep(2 * time.Second)
+	dead := live[len(live)-1]
+	if out, err := exec.Command("docker", "kill", "--signal", "SIGKILL", dead.name).CombinedOutput(); err != nil {
+		t.Fatalf("kill replica %s: %v: %s", dead.name, err, out)
+	}
+	// Past the ten seconds a failed replica is set aside for, so nginx tries
+	// the dead one again and passes over it again.
+	time.Sleep(14 * time.Second)
+	close(stop)
+	wait.Wait()
+	loss.report(t, "replica loss")
+	survivor := live[0].name[strings.LastIndex(live[0].name, "-")+1:]
+	for index := 0; index < 20; index++ {
+		if body, replica, err := ask(); err != nil || body != color || replica != survivor {
+			t.Fatalf("after replica %s died the route answered %q from replica %q, %v", dead.name, body, replica, err)
+		}
+	}
 }
 
 // buildCutoverRelease compiles the fixture release server as a static binary.
@@ -224,11 +335,17 @@ func buildCutoverRelease(t *testing.T) string {
 
 func startCutoverRelease(t *testing.T, network, binary, id, stamp string) cutoverRelease {
 	t.Helper()
+	return startCutoverContainer(t, network, binary, id, stamp, "")
+}
+
+func startCutoverContainer(t *testing.T, network, binary, id, stamp, replica string) cutoverRelease {
+	t.Helper()
 	name := "jd-cutover-" + id + "-" + stamp
 	args := []string{
 		"run", "--detach", "--name", name,
 		"--network", network,
 		"--env", "JD_RELEASE_ID=" + id,
+		"--env", "JD_REPLICA=" + replica,
 		"--volume", binary + ":/srv/release:ro",
 		"alpine:3.20", "/srv/release",
 	}
@@ -611,6 +728,7 @@ func (s *cutoverSockets) close(t *testing.T) {
 }
 
 type cutoverEvidence struct {
+	Replicas           int    `json:"replicas"`
 	Transitions        int    `json:"transitions"`
 	Duration           string `json:"duration"`
 	SlowestActivation  string `json:"slowestActivation"`
@@ -627,11 +745,16 @@ type cutoverEvidence struct {
 
 // writeCutoverEvidence records the measured run where the audit keeps its other
 // evidence, so a claim about cutover loss can be checked against numbers.
-func writeCutoverEvidence(t *testing.T, evidence cutoverEvidence) {
+func writeCutoverEvidence(t *testing.T, replicas int, evidence cutoverEvidence) {
 	t.Helper()
 	path := os.Getenv("JD_CUTOVER_EVIDENCE")
 	if path == "" {
 		return
+	}
+	// The replicated run's numbers beside the one-container run's, not
+	// over them.
+	if replicas > 1 {
+		path = strings.TrimSuffix(path, ".json") + "-" + strconv.Itoa(replicas) + "-replicas.json"
 	}
 	body, err := json.MarshalIndent(evidence, "", "  ")
 	if err != nil {
