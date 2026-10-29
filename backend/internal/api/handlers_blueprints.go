@@ -64,11 +64,7 @@ func (s *Server) handleBlueprintGet(w http.ResponseWriter, r *http.Request) erro
 		return mapBlueprintError(err)
 	}
 	supported, reason := blueprint.DeploymentSupport(found)
-	httpx.JSON(w, http.StatusOK, struct {
-		*blueprint.Blueprint
-		DeploymentSupported bool   `json:"deploymentSupported"`
-		UnavailableReason   string `json:"unavailableReason,omitempty"`
-	}{Blueprint: found, DeploymentSupported: supported, UnavailableReason: reason})
+	httpx.JSON(w, http.StatusOK, blueprintDetail{Blueprint: found, DeploymentSupported: supported, UnavailableReason: reason})
 	return nil
 }
 
@@ -119,4 +115,11 @@ func (s *Server) handleBlueprintRender(w http.ResponseWriter, r *http.Request) e
 	}
 	httpx.JSON(w, http.StatusOK, plan)
 	return nil
+}
+
+// blueprintDetail is a blueprint with whether this install can deploy it.
+type blueprintDetail struct {
+	*blueprint.Blueprint
+	DeploymentSupported bool   `json:"deploymentSupported"`
+	UnavailableReason   string `json:"unavailableReason,omitempty"`
 }

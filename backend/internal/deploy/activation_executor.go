@@ -776,12 +776,20 @@ func (e *NormalizedStepExecutor) activate(
 		}
 		evidence.Tailnet = published
 	}
-	if _, err := e.store.ActivateCandidate(ctx, execution.Run.ID, execution.ClaimToken, release.Release.ID); err != nil {
+	activated, err := e.store.ActivateCandidate(ctx, execution.Run.ID, execution.ClaimToken, release.Release.ID)
+	if err != nil {
 		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
 		evidence.Recovery = &recovery
 		return StepResult{State: StepFailed, ErrorCode: "activation_commit_failed", ErrorMessage: "the release pointer could not be committed", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 	}
 	_ = stepLog(execution, "status", fmt.Sprintf("Activated immutable release #%d", release.Release.Number))
+	// Where each linked database stands at this moment is what "roll back
+	// to this release" can later bring its data back to.
+	activatedAt := time.Now().UTC()
+	if activated != nil && activated.ActivatedAt != nil {
+		activatedAt = *activated.ActivatedAt
+	}
+	e.recordDataPoints(ctx, execution, release.Release, activatedAt)
 	return StepResult{State: StepPassed, Evidence: mustJSON(evidence)}
 }
 

@@ -27,7 +27,9 @@ for the host to run. `backend/cmd/jd` is the `jd` command line (standard library
 routes with an API key — normally a deploy key — keeps its URL and key in the user config directory (0600), and is
 built into the image beside the dashboard, installed to `/usr/local/bin/jd` by `install.sh` and `manage.sh install-cli`,
 and served at `GET /api/v1/cli/jd` (README, "The jd command line"; the key's boundary is in
-[`../security/invariants.md`](../security/invariants.md)). The packages under
+[`../security/invariants.md`](../security/invariants.md)). `jd openapi` prints the deployment API's OpenAPI
+description, which `api/deploy_openapi.go` generates from the router and is committed as `docs/api/deploy-openapi.json`
+([`../backend/deploy-api.md`](../backend/deploy-api.md)). The packages under
 `backend/internal/` are:
 
 | Package | Responsibility | Detailed reference |

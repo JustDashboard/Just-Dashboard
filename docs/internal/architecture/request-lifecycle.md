@@ -58,8 +58,8 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   reason, and anything unlisted — including any route added later until it is given a line — answers
   `403 key_scope`. A refusal is audited as `auth.deploy_key.refused` with the key, because it happens
   before the group's audit middleware. Reveals, saved credentials, the GitHub-speaking pull-request
-  verbs, preview approval, the typed-phrase removals, the warm-release and rehearsal terms and a
-  route's pages stay session-only for it. A key narrowed to
+  verbs, preview approval, the typed-phrase removals, the warm-release and rehearsal terms, a copy of a
+  release's data and a route's pages stay session-only for it. A key narrowed to
   chosen deployments (`api_token_deployments`, read with the key on every request) reaches only
   routes whose `{id}` it was given and whose `{env}` belongs to that deployment, and none marked
   `every` (server shared variables, fleet-wide reads); `GET /deploy/` lists only its deployments. A
