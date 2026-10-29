@@ -288,6 +288,8 @@ var deployOperations = map[string]deployOperation{
 	"GET /deploy/{id}/environments/{env}/data-copies/{copy}/comparison":   {Tag: "releases", Summary: "Compare a side copy with the live database: tables and row counts side by side.", Response: (*DataCopyComparison)(nil)},
 	"POST /deploy/{id}/environments/{env}/rollback-watch/keep":            {Tag: "releases", Summary: "Keep the new release now and retire the warm one.", Response: (*deploy.RollbackWatch)(nil)},
 	"PUT /deploy/{id}/environments/{env}/rollback-policy":                 {Tag: "releases", Summary: "Set the terms a release is kept warm and rolled back on after a deploy.", Request: deploy.RollbackPolicy{}, Response: deploy.RollbackPolicy{}},
+	"GET /deploy/{id}/environments/{env}/sleep":                           {Tag: "releases", Summary: "Read an environment's sleep: whether its live release sleeps when idle, whether it is asleep now, since when and why, and the last seven days of it.", Response: deploy.SleepStatus{}, Note: "The terms are runtime.sleep in the configuration; a change goes live with the next release."},
+	"POST /deploy/{id}/environments/{env}/sleep/wake":                     {Tag: "releases", Summary: "Wake a sleeping environment now: start its live release's container and wait for its readiness checks.", Response: shape{"outcome": deploy.WakeOutcome{}, "sleep": deploy.SleepStatus{}}, Note: "Answers 409 not_asleep when there is nothing asleep to wake."},
 
 	// Runs.
 	"POST /deploy/{id}/run":                      {Tag: "runs", Summary: "Queue a deploy of a legacy project.", Response: shape{"started": false, "project": "", "runId": int64(0), "state": deploy.RunState("")}, Status: http.StatusAccepted},
@@ -303,6 +305,9 @@ var deployOperations = map[string]deployOperation{
 	"GET /deploy/{id}/runs/{run}/settings-drift": {Tag: "runs", Summary: "Read what differed between a run's settings and the environment's at the time.", Response: (*deploy.RunSettingsDrift)(nil)},
 	"GET /deploy/{id}/runs/{run}/diagnosis":      {Tag: "runs", Summary: "Read the kept diagnosis of a failed run.", Response: shape{"diagnosis": (*runDiagnosisView)(nil)}},
 	"POST /deploy/{id}/runs/{run}/diagnosis":     {Tag: "runs", Summary: "Ask the configured model to diagnose a failed run, or to diagnose it again.", Request: diagnoseRequest{}, Response: shape{"diagnosis": (*runDiagnosisView)(nil)}},
+	"POST /deploy/{id}/assistant": {Tag: "runs", Summary: "Ask the deployment operator about an environment, or answer the reads it asked for.", Request: operatorRequest{}, Content: "application/x-ndjson",
+		Query: []openapiQuery{{Name: "environment", Type: "integer", Description: "Staging's environment id; production when absent."}},
+		Note:  "A session's route. The answer streams one JSON object a line: start, thinking, text, ran (what each allowed read read), proposal (an action whose card the person may press; nothing has run), done (with the reads waiting for a decision) or error."},
 
 	// Variables.
 	"GET /deploy/{id}/environments/{env}/variables":                  {Tag: "variables", Summary: "List an environment's variables: name, sensitivity, scopes, the value's digest and whether it awaits a deploy; never a value.", Response: []deploy.DeploymentVariable(nil)},
