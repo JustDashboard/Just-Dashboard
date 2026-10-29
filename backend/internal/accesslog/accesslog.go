@@ -20,6 +20,7 @@ package accesslog
 import (
 	"encoding/json"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -60,6 +61,13 @@ type Entry struct {
 	// and records it: Caddy's `log_append release`, nginx's `rel=`. Empty
 	// for a route serving one release, which needs no saying.
 	Release string `json:"release,omitempty"`
+	// TraceID and SpanID are the W3C trace context the ingress sent the
+	// application in its traceparent header, and ParentSpanID the span of
+	// the client's that it continued, when the client sent one. A route
+	// rendered before the ingress injected one has none.
+	TraceID      string `json:"traceId,omitempty"`
+	SpanID       string `json:"spanId,omitempty"`
+	ParentSpanID string `json:"parentSpanId,omitempty"`
 	// User is who the route's tailnet gate admitted: the Tailscale login,
 	// or a tagged machine's tags, the dashboard answered the proxy with
 	// (tailnet-apps.md). Empty on every other route, and on a request the
@@ -174,6 +182,10 @@ type caddyLine struct {
 	Status   int      `json:"status"`
 	// Release is the field a canary route appends to each entry.
 	Release string `json:"release"`
+	// What the route's log_append adds: the trace context it sent upstream.
+	TraceID      string `json:"trace_id"`
+	SpanID       string `json:"span_id"`
+	ParentSpanID string `json:"parent_span_id"`
 	// TailnetLogin is the field the tailnet gate's log_append adds.
 	TailnetLogin string `json:"tailnet_login"`
 }
@@ -208,7 +220,28 @@ func parseCaddy(line string) (Entry, bool) {
 	if raw.Duration != nil {
 		entry.duration, entry.timed = *raw.Duration*1000, true
 	}
+	entry.setTrace(raw.TraceID, raw.SpanID, raw.ParentSpanID)
 	return entry, true
+}
+
+var (
+	traceIDRe = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	spanIDRe  = regexp.MustCompile(`^[0-9a-f]{16}$`)
+)
+
+// setTrace keeps a trace context only when it is one: 32 and 16 lowercase
+// hex characters, not all zeros, which W3C trace context forbids. Anything
+// else — a field an operator's own log format reused, a placeholder Caddy
+// left unreplaced — is no context rather than a wrong one.
+func (e *Entry) setTrace(trace, span, parent string) {
+	if !traceIDRe.MatchString(trace) || !spanIDRe.MatchString(span) ||
+		strings.Trim(trace, "0") == "" || strings.Trim(span, "0") == "" {
+		return
+	}
+	e.TraceID, e.SpanID = trace, span
+	if spanIDRe.MatchString(parent) && strings.Trim(parent, "0") != "" {
+		e.ParentSpanID = parent
+	}
 }
 
 // caddyTime reads either spelling of Caddy's timestamp. The default format is
@@ -335,6 +368,8 @@ func parseCombined(line string) (Entry, bool) {
 // this does not know, or one written `-`, is left alone rather than failing
 // the line, because the line up to it is still a served request.
 func readTrailing(entry *Entry, rest string) {
+	var trace, span, parent string
+	defer func() { entry.setTrace(trace, span, parent) }()
 	for _, field := range strings.Fields(rest) {
 		key, value, ok := strings.Cut(field, "=")
 		if !ok || value == "" || value == "-" {
@@ -352,6 +387,14 @@ func readTrailing(entry *Entry, rest string) {
 			if entry.Host == "" {
 				entry.Host = value
 			}
+		// The trace context a deployment route's log_format records: what
+		// the ingress sent the application as its traceparent.
+		case "trace":
+			trace = value
+		case "span":
+			span = value
+		case "parent":
+			parent = value
 		case "tl":
 			// The tailnet gate's login, which nginx writes escaped as
 			// \xHH where it is not printable ASCII.

@@ -19,6 +19,9 @@ type Record struct {
 	Project     string
 	Environment string
 	Stream      string
+	// Release is the number of the release live in the environment when
+	// the record was read; a span carries it.
+	Release int64
 	// Output.
 	ContainerID   string
 	ContainerName string
@@ -42,6 +45,15 @@ type Request struct {
 	RemoteIP   string  `json:"remoteIp,omitempty"`
 	UserAgent  string  `json:"userAgent,omitempty"`
 	Referer    string  `json:"referer,omitempty"`
+	TLS        bool    `json:"-"`
+	// TraceID and SpanID are the request's trace context — what the ingress
+	// sent the application, or ids made here for a route that sent none —
+	// so a request's log line and its span name each other.
+	TraceID      string `json:"traceId,omitempty"`
+	SpanID       string `json:"spanId,omitempty"`
+	ParentSpanID string `json:"-"`
+	// ClientClass is accesslog.ClientClass: browser, bot, scanner, client.
+	ClientClass string `json:"clientClass,omitempty"`
 }
 
 // Level is the record's severity in the words every log service shares:
@@ -205,12 +217,16 @@ func doubleAttribute(key string, value float64) otlpAttribute {
 }
 
 type otlpLogRecord struct {
-	TimeUnixNano         string          `json:"timeUnixNano"`
-	ObservedTimeUnixNano string          `json:"observedTimeUnixNano"`
-	SeverityNumber       int             `json:"severityNumber,omitempty"`
-	SeverityText         string          `json:"severityText,omitempty"`
-	Body                 otlpValue       `json:"body"`
-	Attributes           []otlpAttribute `json:"attributes"`
+	TimeUnixNano         string `json:"timeUnixNano"`
+	ObservedTimeUnixNano string `json:"observedTimeUnixNano"`
+	// A request's line carries its span's ids, which is what lets a log
+	// service open the trace from the line. OTLP's JSON spells them in hex.
+	TraceID        string          `json:"traceId,omitempty"`
+	SpanID         string          `json:"spanId,omitempty"`
+	SeverityNumber int             `json:"severityNumber,omitempty"`
+	SeverityText   string          `json:"severityText,omitempty"`
+	Body           otlpValue       `json:"body"`
+	Attributes     []otlpAttribute `json:"attributes"`
 }
 
 var otlpSeverity = map[string]int{"debug": 5, "info": 9, "warn": 13, "error": 17}
@@ -271,11 +287,15 @@ func encodeOTLP(records []Record, hostName string) (Encoded, error) {
 				attributes = append(attributes, doubleAttribute("http.server.request.duration", request.DurationMs/1000))
 			}
 		}
-		grouped[key] = append(grouped[key], otlpLogRecord{
+		logRecord := otlpLogRecord{
 			TimeUnixNano: strconv.FormatInt(record.At.UnixNano(), 10), ObservedTimeUnixNano: observed,
 			SeverityNumber: otlpSeverity[level], SeverityText: strings.ToUpper(level),
 			Body: otlpValue{StringValue: &body}, Attributes: attributes,
-		})
+		}
+		if record.Request != nil {
+			logRecord.TraceID, logRecord.SpanID = record.Request.TraceID, record.Request.SpanID
+		}
+		grouped[key] = append(grouped[key], logRecord)
 	}
 	type scopeLogs struct {
 		Scope      map[string]string `json:"scope"`

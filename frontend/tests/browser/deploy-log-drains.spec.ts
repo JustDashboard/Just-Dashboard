@@ -166,3 +166,42 @@ test("plain http without a header is allowed and says the records travel in the 
   await expect(sheet.getByText(/cross the network unencrypted/)).toBeVisible()
   await expect(sheet.getByRole("button", { name: "Add drain" })).toBeEnabled()
 })
+
+test("an OpenTelemetry drain exports traces with a link to open one, and Loki offers no traces", async ({
+  page,
+}) => {
+  const writes = await withDrains(page, [])
+  await page.goto("/deploy/drains")
+  await page.getByRole("button", { name: "Add OpenTelemetry" }).click()
+  const sheet = page.getByRole("dialog", { name: "Add drain" })
+  await sheet.getByLabel("Name", { exact: true }).fill("Tempo")
+  await sheet.getByLabel("Endpoint", { exact: true }).fill("http://127.0.0.1:4318")
+  await sheet.getByRole("switch", { name: "Container output" }).click()
+  await sheet.getByRole("switch", { name: "Requests" }).click()
+  await sheet.getByRole("switch", { name: "Traces" }).click()
+  const link = sheet.getByLabel("Trace link")
+  await link.fill("https://grafana.example.test/explore")
+  await expect(sheet.getByText("Put {traceId} where the trace's id goes.")).toBeVisible()
+  const save = sheet.getByRole("button", { name: "Add drain" })
+  await expect(save).toBeDisabled()
+  await link.fill("https://grafana.example.test/explore?traceId={traceId}")
+  await save.click()
+  await expect.poll(() => writes.length).toBe(1)
+  expect(writes[0].body).toEqual({
+    name: "Tempo",
+    kind: "otlp",
+    endpoint: "http://127.0.0.1:4318",
+    enabled: true,
+    streams: ["traces"],
+    traceUrl: "https://grafana.example.test/explore?traceId={traceId}",
+    projects: [],
+    headers: [],
+  })
+
+  // Loki and JSON lines take logs alone, so their drains offer no traces.
+  await page.getByRole("button", { name: "Add OpenTelemetry" }).click()
+  const next = page.getByRole("dialog", { name: "Add drain" })
+  await expect(next.getByRole("switch", { name: "Traces" })).toHaveCount(1)
+  await next.getByRole("button", { name: /Grafana Loki/ }).click()
+  await expect(next.getByRole("switch", { name: "Traces" })).toHaveCount(0)
+})

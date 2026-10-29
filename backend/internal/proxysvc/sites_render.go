@@ -199,6 +199,16 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		l.add("}")
 		wrote = true
 	}
+	if spec.dropsCookies() {
+		if wrote {
+			l.blank()
+		}
+		l.add("# The dashboard is reached by this name too, on another port, and a")
+		l.add("# browser sends a cookie to every port of its name: these take the")
+		l.add("# dashboard's session out of what the application is sent.")
+		nginxDropCookieMaps(l, spec.varIdent(), spec.dropCookies)
+		wrote = true
+	}
 	if spec.Kind == "proxy" && spec.Pool != nil {
 		if wrote {
 			l.blank()
@@ -210,18 +220,29 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		l.blank()
 		renderSplit(l, spec)
 	}
+	if spec.Trace {
+		if wrote {
+			l.blank()
+		}
+		renderNginxTraceMaps(l, spec)
+		wrote = true
+	}
 	if spec.AccessLog && spec.timedLog() {
 		if wrote {
 			l.blank()
 		}
 		l.add("# nginx's combined format with the time taken added, which is what")
 		l.add("# the dashboard's traffic pages read latency from.")
+		format := timedLogFormat
 		if spec.Pool != nil && spec.Split != nil {
 			l.add("# rel= is the release that answered, while the route is split.")
-			l.add("log_format %s %s;", spec.logFormatName(), splitLogFormat(spec))
-		} else {
-			l.add("log_format %s %s;", spec.logFormatName(), timedLogFormat)
+			format = splitLogFormat(spec)
 		}
+		if spec.Trace {
+			// The trace context the application was sent, after the rest.
+			format = strings.TrimSuffix(format, "'") + nginxTraceLogFields(spec) + "'"
+		}
+		l.add("log_format %s %s;", spec.logFormatName(), format)
 		wrote = true
 	}
 	if spec.Maintenance != nil {
@@ -699,6 +720,12 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	if loc.WebSockets {
 		l.add("        proxy_set_header Upgrade    $http_upgrade;")
 		l.add("        proxy_set_header Connection $%s;", spec.connectionVar())
+	}
+	if spec.dropsCookies() {
+		l.add("        proxy_set_header Cookie     $%s;", spec.cookieVar())
+	}
+	if spec.Trace {
+		renderNginxTraceHeader(l, spec)
 	}
 	renderRequestHeaders(l, spec)
 	renderClientCertHeaders(l, spec)

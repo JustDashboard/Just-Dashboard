@@ -13851,6 +13851,9 @@
               "null"
             ]
           },
+          "traceUrl": {
+            "type": "string"
+          },
           "updatedAt": {
             "format": "date-time",
             "type": "string"
@@ -13955,6 +13958,9 @@
               "array",
               "null"
             ]
+          },
+          "traceUrl": {
+            "type": "string"
           }
         },
         "title": "logdrain.Write",
@@ -14664,9 +14670,9 @@
         "type": "http"
       },
       "session": {
-        "description": "A signed-in browser session. Every request that is not a GET also carries the X-JD-CSRF: 1 header.",
+        "description": "A signed-in browser session: __Host-jd_session, or jd_session on a dashboard served over plain HTTP on loopback. Every request that is not a GET also carries the X-JD-CSRF: 1 header.",
         "in": "cookie",
-        "name": "vpsd_session",
+        "name": "__Host-jd_session",
         "type": "apiKey"
       },
       "webhookSignature": {
@@ -14678,7 +14684,7 @@
     }
   },
   "info": {
-    "description": "Generated from the dashboard's own router and the Go types its handlers decode and encode, and checked against both by its tests, so it describes exactly what this build serves. Every route is under /api/v1/deploy and takes one of three credentials: the browser session (the vpsd_session cookie, with the X-JD-CSRF: 1 header on every request that is not a GET), an API key as a bearer token, or a deploy key as a bearer token, which reaches only the routes marked deployKey; x-deploy-key on each operation says what a deploy key gets there and why. A property is present in an answer whenever its Go field has no omitempty, and may be left out of a request, where it is its zero value; a property that is a pointer, list or map in Go may be null. Secrets are marked writeOnly: they are accepted by a write and read back by no route. Every refusal is the Error envelope under default.",
+    "description": "Generated from the dashboard's own router and the Go types its handlers decode and encode, and checked against both by its tests, so it describes exactly what this build serves. Every route is under /api/v1/deploy and takes one of three credentials: the browser session (the __Host-jd_session cookie, jd_session on a dashboard served over plain HTTP on loopback, with the X-JD-CSRF: 1 header on every request that is not a GET), an API key as a bearer token, or a deploy key as a bearer token, which reaches only the routes marked deployKey; x-deploy-key on each operation says what a deploy key gets there and why. A property is present in an answer whenever its Go field has no omitempty, and may be left out of a request, where it is its zero value; a property that is a pointer, list or map in Go may be null. Secrets are marked writeOnly: they are accepted by a write and read back by no route. Every refusal is the Error envelope under default.",
     "license": {
       "identifier": "AGPL-3.0-only",
       "name": "AGPL-3.0-only"

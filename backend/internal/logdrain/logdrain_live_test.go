@@ -71,7 +71,9 @@ func TestLiveDrainsDeliverToLokiTheCollectorAndVector(t *testing.T) {
 		if err := os.Chmod(dir, 0o777); err != nil {
 			t.Fatal(err)
 		}
-		config := "receivers:\n  otlp:\n    protocols:\n      http:\n        endpoint: 0.0.0.0:4318\nexporters:\n  file:\n    path: /out/logs.json\nservice:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      exporters: [file]\n"
+		// Logs and traces each to a file of their own.
+		config := "receivers:\n  otlp:\n    protocols:\n      http:\n        endpoint: 0.0.0.0:4318\nexporters:\n  file:\n    path: /out/logs.json\n  file/traces:\n    path: /out/traces.json\n" +
+			"service:\n  pipelines:\n    logs:\n      receivers: [otlp]\n      exporters: [file]\n    traces:\n      receivers: [otlp]\n      exporters: [file/traces]\n"
 		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(config), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -101,6 +103,58 @@ func TestLiveDrainsDeliverToLokiTheCollectorAndVector(t *testing.T) {
 			`"severityNumber":17`, `"payment declined`, `"http.response.status_code"`, `"intValue":"502"`, `"client.address"`} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("the collector wrote no %s in:\n%s", want, text)
+			}
+		}
+
+		// The traces stream: the same request as a span, on /v1/traces with
+		// the drain's header, under the trace the ingress sent.
+		spans := []Record{{At: now, ProjectID: 7, Project: "shop-live", Environment: "production", Release: 12, Stream: StreamTraces,
+			Request: &Request{Method: "POST", Path: "/checkout/1041", Status: 502, Size: 31, DurationMs: 12.5, Timed: true,
+				RemoteIP: "203.0.113.9", UserAgent: "curl/8", ClientClass: "bot",
+				TraceID: "4bf92f3577b34da6a3ce929d0e0e4736", SpanID: "a3ce929d0e0e4736", ParentSpanID: "00f067aa0ba902b7"}}}
+		if err := deliverSpans(ctx, client, base, []Header{{Name: "Authorization", Value: "Bearer live"}}, spans, "web-live"); err != nil {
+			t.Fatal(err)
+		}
+		var traced []byte
+		for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+			if traced, _ = os.ReadFile(filepath.Join(dir, "traces.json")); len(traced) > 0 {
+				break
+			}
+		}
+		var exported struct {
+			ResourceSpans []struct {
+				Resource struct {
+					Attributes []struct {
+						Key   string            `json:"key"`
+						Value map[string]string `json:"value"`
+					} `json:"attributes"`
+				} `json:"resource"`
+				ScopeSpans []struct {
+					Spans []struct {
+						TraceID      string `json:"traceId"`
+						SpanID       string `json:"spanId"`
+						ParentSpanID string `json:"parentSpanId"`
+						Name         string `json:"name"`
+						Kind         int    `json:"kind"`
+						Status       struct {
+							Code int `json:"code"`
+						} `json:"status"`
+					} `json:"spans"`
+				} `json:"scopeSpans"`
+			} `json:"resourceSpans"`
+		}
+		if err := json.Unmarshal([]byte(strings.SplitN(strings.TrimSpace(string(traced)), "\n", 2)[0]), &exported); err != nil ||
+			len(exported.ResourceSpans) != 1 || len(exported.ResourceSpans[0].ScopeSpans) != 1 {
+			t.Fatalf("the collector wrote these traces (%v):\n%s", err, traced)
+		}
+		got := exported.ResourceSpans[0].ScopeSpans[0].Spans[0]
+		if got.TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" || got.SpanID != "a3ce929d0e0e4736" || got.ParentSpanID != "00f067aa0ba902b7" ||
+			got.Name != "POST /checkout/{id}" || got.Kind != 2 || got.Status.Code != 2 {
+			t.Fatalf("the collector received the span as %+v", got)
+		}
+		for _, want := range []string{`"service.version"`, `"12"`, `"http.route"`, `"just_dashboard.client.class"`, `"bot"`, `"http.server.request.duration"`} {
+			if !strings.Contains(string(traced), want) {
+				t.Fatalf("the span has no %s in:\n%s", want, traced)
 			}
 		}
 	})
