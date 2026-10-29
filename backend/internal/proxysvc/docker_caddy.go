@@ -375,8 +375,12 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 			return "", errors.New("invalid Caddy deployment upstream")
 		}
 		directive = "reverse_proxy " + strconv.Quote(upstream)
+		block := caddyDropCookies("    ", route.DropCookies)
 		if route.InterceptErrors {
-			directive += renderCaddyInterceptErrors(route.ErrorPages)
+			block += renderCaddyInterceptErrors(route.ErrorPages)
+		}
+		if block != "" {
+			directive += " {\n" + block + "  }"
 		}
 	}
 	tlsDirective := ""
@@ -446,7 +450,7 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 	gateDirective := ""
 	if route.ForwardAuth != nil {
 		var err error
-		if gateDirective, err = renderCaddyForwardAuth(*route.ForwardAuth); err != nil {
+		if gateDirective, err = renderCaddyForwardAuth(*route.ForwardAuth, route.DropCookies...); err != nil {
 			return "", err
 		}
 	}
@@ -466,6 +470,10 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 	if pages != "" {
 		maintenance, errorPages = renderCaddyMaintenance(route.Maintenance, pages), renderCaddyErrorPages(route.ErrorPages, pages)
 	}
+	trace := ""
+	if route.Trace && route.Name != "" && upstream != "" {
+		trace = caddyTraceDirectives
+	}
 	// The edge rules come after the fence and before maintenance, the
 	// order nginx decides them in (deployment_edge.go).
 	crowdSec := ""
@@ -473,7 +481,7 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		crowdSec = dockerCaddyCrowdSecFile
 	}
 	edge := renderCaddyEdgeRules(route, crowdSec)
-	handling := fence + edge + maintenance + authDirective + gateDirective + bodyDirective + "  " + directive + "\n"
+	handling := trace + fence + edge + maintenance + authDirective + gateDirective + bodyDirective + "  " + directive + "\n"
 	if fence != "" || edge != "" || maintenance != "" || route.ForwardAuth != nil {
 		handling = "  route {\n" + indentCaddy(handling) + "  }\n"
 	}
@@ -545,7 +553,9 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 // The two headers are removed from what the visitor sent before the check.
 // Caddy 2.11's forward_auth drops them itself when the server sends none;
 // removing them first holds whichever Caddy the operator's ingress runs.
-func renderCaddyForwardAuth(gate SiteForwardAuth) (string, error) {
+// drop are cookies the check is not sent, as the application is not: the
+// dashboard's own on a route that serves the dashboard's name.
+func renderCaddyForwardAuth(gate SiteForwardAuth, drop ...string) (string, error) {
 	verify, err := url.Parse(gate.Verify)
 	if err != nil {
 		return "", err
@@ -581,6 +591,7 @@ func renderCaddyForwardAuth(gate SiteForwardAuth) (string, error) {
 	out.WriteString("    header_up Host {upstream_hostport}\n")
 	out.WriteString("    header_up X-Original-URL {scheme}://{hostport}{uri}\n")
 	out.WriteString("    header_up X-Original-Method {method}\n")
+	out.WriteString(caddyDropCookies("    ", drop))
 	out.WriteString("    copy_headers " + strings.Join(copies, " ") + "\n")
 	out.WriteString("    @signin status 401\n")
 	out.WriteString("    handle_response @signin {\n")
@@ -656,12 +667,10 @@ func renderCaddyInterceptErrors(codes []int) string {
 	for _, code := range sorted {
 		list = append(list, strconv.Itoa(code))
 	}
-	return " {\n" +
-		"    @jd_error status " + strings.Join(list, " ") + "\n" +
+	return "    @jd_error status " + strings.Join(list, " ") + "\n" +
 		"    handle_response @jd_error {\n" +
 		"      error \"the application's error page was replaced\" {rp.status_code}\n" +
-		"    }\n" +
-		"  }"
+		"    }\n"
 }
 
 // indentCaddy moves every line of a block one level in.
@@ -837,6 +846,12 @@ func (c *dockerCaddy) routeContent(ctx context.Context, route DeploymentRoute) (
 	if err != nil {
 		return "", nil, err
 	}
+	// The trace is recorded with log_append, which Caddy has had since 2.8;
+	// an operator's older ingress serves the route without one rather than
+	// refusing the whole Caddyfile.
+	if rendered.Trace && !c.recordsTraces(ctx) {
+		rendered.Trace = false
+	}
 	content, err := renderDockerCaddyRoute(rendered, target.upstream())
 	if err != nil {
 		return "", nil, err
@@ -958,6 +973,7 @@ func (c *dockerCaddy) domainClaimed(ctx context.Context, domain, ownContent stri
 }
 
 func (s *Service) applyDockerCaddyRoute(ctx context.Context, c *dockerCaddy, route DeploymentRoute) (DeploymentRouteResult, error) {
+	route = s.onDashboardName(route)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	snapshot, err := c.snapshot(ctx, route.Name)

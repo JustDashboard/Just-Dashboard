@@ -341,8 +341,9 @@ func TestTheDeployOpenAPIDescriptionCarriesShapesNotValues(t *testing.T) {
 		}
 	}
 	walk(document, "#")
-	// The one vpsd_ in the document is the session cookie's name.
-	if strings.Count(string(doc.JSON), "vpsd_") != strings.Count(string(doc.JSON), "vpsd_session") {
+	// API keys begin vpsd_, and the session cookie no longer does: the
+	// document names none.
+	if strings.Contains(string(doc.JSON), "vpsd_") {
 		t.Error("the description mentions a key")
 	}
 	// Every line of the write-only table matched a field of a type the

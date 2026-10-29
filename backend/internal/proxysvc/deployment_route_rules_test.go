@@ -245,6 +245,9 @@ func TestLiveDockerCaddyServesRouteRules(t *testing.T) {
 		Redirects:       []HostRedirect{{From: "www.rules.example.test", To: "rules.example.test"}},
 		ResponseHeaders: []HeaderValue{{Name: "X-Robots-Tag", Value: "noindex"}},
 		AllowFrom:       []string{"203.0.113.7"},
+		// Traced as activation renders it, so the trace's directives are
+		// checked inside the route block a fence puts the handling in.
+		AccessLog: true, Trace: true,
 	}
 	if result, err := service.applyDockerCaddyRoute(ctx, edge, route); err != nil || !result.Verified {
 		t.Fatalf("apply=%+v error=%v; fixture log: %s", result, err, docker("logs", id))

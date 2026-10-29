@@ -300,6 +300,10 @@ func (s *Server) initModules() {
 	if s.Cfg.IngressContainer != "" {
 		s.modules.proxy = proxysvc.NewWithIngressContainer(s.Cfg.NginxDir, s.Cfg.CaddyFile, s.Cfg.IngressContainer)
 	}
+	// A deployment route on the name this dashboard is reached by is sent
+	// the dashboard's session cookie, whatever port either is on; the route
+	// takes it out of what the application is sent.
+	s.modules.proxy.WithDashboardHost(s.Cfg.Site)
 	// A deployment route's rate limit and edge rules count the visitor, so
 	// behind a proxy this dashboard trusts they read the address it forwards.
 	trusted := make([]string, 0, len(s.Cfg.TrustedProxies))

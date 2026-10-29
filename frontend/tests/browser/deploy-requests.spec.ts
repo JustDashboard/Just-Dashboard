@@ -352,6 +352,51 @@ test.describe("a deployment's traffic", () => {
     await page.getByRole("button", { name: "Colour" }).click()
   })
 
+  test("an opened request names the trace the ingress sent, and opens it where a drain exports it", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    const trace = "4bf92f3577b34da6a3ce929d0e0e4736"
+    await page.route("**/api/v1/deploy/7/requests?**", (route) => {
+      const url = new URL(route.request().url())
+      const body = deploymentRequests(url)
+      body.entries = body.entries.map((entry, index) =>
+        index === 0 ? { ...entry, traceId: trace, spanId: "a3ce929d0e0e4736" } : entry,
+      )
+      return json(route, body)
+    })
+    await page.route("**/api/v1/deploy/log-drains", (route) =>
+      json(route, [
+        {
+          id: 3,
+          name: "Tempo",
+          kind: "otlp",
+          endpoint: "http://127.0.0.1:4318",
+          enabled: true,
+          streams: ["traces"],
+          projects: [],
+          traceUrl: "https://grafana.example.test/explore?traceId={traceId}",
+          headerNames: [],
+          createdAt: now,
+          updatedAt: now,
+          status: { shipped: 0, dropped: 0, batches: 0, queued: 0 },
+        },
+      ]),
+    )
+    await page.goto("/deploy/7/logs")
+    await page.getByText("/api/checkout").first().click()
+    await expect(page.getByText(trace, { exact: true })).toBeVisible()
+    await expect(page.getByRole("link", { name: "Open in Tempo" })).toHaveAttribute(
+      "href",
+      `https://grafana.example.test/explore?traceId=${trace}`,
+    )
+    // One row is open at a time, and a request the ingress sent no trace
+    // with has no trace to name.
+    await page.getByText("/api/items").first().click()
+    await expect(page.getByText("curl/8.5.0").last()).toBeVisible()
+    await expect(page.getByRole("link", { name: "Open in Tempo" })).toHaveCount(0)
+  })
+
   test("narrowing to a status family is one press, and the chips carry their counts", async ({
     page,
   }) => {

@@ -333,7 +333,7 @@ const edgeCrowdSecRule = "crowdsec"
 // The decision is _rules: _edge is the Cloudflare lock's (site_realip.go).
 func (spec *SiteSpec) edgeDecisionVar() string { return spec.varIdent() + "_rules" }
 func (spec *SiteSpec) edgeFenceVar() string    { return spec.varIdent() + "_fence" }
-func (spec *SiteSpec) edgeCrowdVar() string { return spec.varIdent() + "_crowdsec" }
+func (spec *SiteSpec) edgeCrowdVar() string    { return spec.varIdent() + "_crowdsec" }
 func (spec *SiteSpec) edgeRuleVar(index int, part string) string {
 	name := spec.varIdent() + "_e" + strconv.Itoa(index+1)
 	if part != "" {

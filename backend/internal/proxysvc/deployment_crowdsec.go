@@ -64,7 +64,9 @@ func (s *Service) TrustedProxies() []string {
 	return slices.Clone(s.trustedProxies)
 }
 
-func (s *Service) nginxCrowdSecList() string { return filepath.Join(s.nginxDir, "jd-edge", "crowdsec.conf") }
+func (s *Service) nginxCrowdSecList() string {
+	return filepath.Join(s.nginxDir, "jd-edge", "crowdsec.conf")
+}
 
 // CrowdSecBan is one of the engine's decisions as the list reads it.
 type CrowdSecBan struct {

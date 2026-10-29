@@ -66,6 +66,9 @@ type Service struct {
 	// is how a test keeps its own gate apart from a real one.
 	tailnetGateName   string
 	tailnetGateSource string
+	// dashboardHost is the name the dashboard itself is reached by, set once
+	// before the service is used (WithDashboardHost).
+	dashboardHost string
 
 	// nginx has no way to test a config fragment in isolation, so validation
 	// has to put the candidate where nginx expects it and take it away again.
