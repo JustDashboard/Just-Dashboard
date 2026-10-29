@@ -120,6 +120,10 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/notifications/options":              keyEvery,
 	"GET /deploy/notifications/{channel}/deliveries": keyEvery,
 	"GET /deploy/log-drains":                         keyEvery,
+	// Right-sizing is a read of the deployments' own container history;
+	// the list is narrowed to the key's deployments by the handler, and
+	// applying a suggestion is the configuration PUT below.
+	"GET /deploy/sizing": keyOpen,
 
 	// One deployment, read: what an ordinary key reads, less the legacy list
 	// that prints part of each value.
@@ -164,6 +168,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/{id}/environments/{env}/variables":                     keyOpen, // names and digests, never values
 	"GET /deploy/{id}/environments/{env}/pending":                       keyOpen,
 	"GET /deploy/{id}/environments/{env}/configuration":                 keyOpen,
+	"GET /deploy/{id}/environments/{env}/sizing":                        keyOpen,
 	"GET /deploy/{id}/environments/{env}/triggers":                      keyOpen,
 	"GET /deploy/{id}/environments/{env}/git-watch":                     keyOpen,
 	"GET /deploy/{id}/environments/{env}/database-links":                keyOpen,

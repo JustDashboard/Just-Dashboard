@@ -13,6 +13,10 @@
 - [`data-aware-rollback.md`](data-aware-rollback.md) — where each linked database stood when a release went live, a side copy of it restored on the deployment's network for a bounded time, the comparison with the live database, the restore-in-place hand-off and the sweeps.
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
   logs, the request readings, container lifecycle events, and the three container-output fixes.
+- [`right-sizing.md`](right-sizing.md) — the memory and CPU limits each environment should have, read
+  from its retained container samples (percentiles, headroom, throttling and OOM kills, verdicts, the
+  apply through the configuration PUT), and the capacity forecast: days until each disk is full and the
+  fastest-growing deployment volumes.
 - [`log-drains.md`](log-drains.md) — copying deployments' container output and requests to OpenTelemetry
   (OTLP), Loki or a JSON-lines endpoint: formats, severity, sealed headers, delivery, retries and status.
 - [`secret-stores.md`](secret-stores.md) — Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager and Azure
