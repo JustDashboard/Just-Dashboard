@@ -96,8 +96,9 @@ A change that weakens any of these has to say so explicitly.
    (`POST …/promote`, which also takes a pull request preview's approved image into staging for an
    administrator, the role the key carries; approving the commit stays a session's), the warm
    release's instant rollback and keep (`POST …/rollback-watch/rollback`,
-   `…/keep`) and the maintenance switch (`PUT …/maintenance`) — are the deploy key's as well, with
-   their reads (`GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/maintenance`,
+   `…/keep`), a canary's promote and abort (`POST …/canary/promote`, `…/canary/abort`) and the
+   maintenance switch (`PUT …/maintenance`) — are the deploy key's as well, with their reads
+   (`GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/canary`, `…/maintenance`,
    `…/pages/{page}`, which is what every visitor is shown, `…/rehearsal`, the terms alone, and
    `…/data-copies`, what each copy is of and until when, never its sign-in). It
    holds the administrator role (narrowed to its owner's now, like every key), and where it

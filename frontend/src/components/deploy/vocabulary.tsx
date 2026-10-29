@@ -1425,7 +1425,10 @@ export const RELEASE_GROUPS = [
   // authority, and a progress line that reads "Release" throughout looks stuck.
   { label: "Certificate", keys: ["provision_certificate"] },
   { label: "Start", keys: ["start_candidate"] },
-  { label: "Verify", keys: ["verify_readiness", "verify_smoke", "replay_traffic"] },
+  // The traffic replay and a canary are the candidate verified against
+  // real traffic before the cutover — recorded requests replayed, then a
+  // share of the live route's beside the live release: the last of Verify.
+  { label: "Verify", keys: ["verify_readiness", "verify_smoke", "replay_traffic", "canary"] },
   { label: "Route", keys: ["activate", "retire_previous", "record_release", "notify"] },
 ] as const
 
@@ -1530,6 +1533,7 @@ const STEP_LABELS: Record<string, string> = {
   verify_readiness: "Readiness checks",
   verify_smoke: "Smoke checks",
   replay_traffic: "Traffic replay",
+  canary: "Canary",
   activate: "Switch traffic",
   retire_previous: "Retire previous release",
   record_release: "Record release",

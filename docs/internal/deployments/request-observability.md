@@ -101,6 +101,13 @@ operator already owned; adding a bind mount would mean recreating their running 
 on a log. Reads go through one `docker exec` per read (`caddyReadScript` in
 `deployment_access_log.go`), the same mechanism route files already use.
 
+While a canary shares a route between two releases, each answer also says which release gave it, by
+the release's id: Caddy's entry carries `"release"` from the route's `log_append release <id>`, and
+nginx's timed line ends ` rel=<id>`. `accesslog.Entry.Release` reads either and `Filter.Release`
+keeps one release's requests, which is what the canary's side-by-side reading is made of
+([canary releases](canary-and-replicas.md#canary-releases)). A route serving one release records
+none.
+
 A tailnet address — a preview's, or a tailnet-only environment's — is recorded by its front, and one
 that names who may open it by its tailnet gate ([tailnet-only deployments](tailnet-apps.md#the-gate)):
 on host nginx in the same file, in the timed format with the tailnet address as `$remote_addr` and, on

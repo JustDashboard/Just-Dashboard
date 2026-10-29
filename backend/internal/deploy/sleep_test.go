@@ -38,6 +38,9 @@ func TestSleepPlanValidation(t *testing.T) {
 		"host networking":          func(c *PlanConfiguration) { c.Runtime.HostNetwork = true },
 		"tailnet only":             func(c *PlanConfiguration) { c.Runtime.Tailnet = &RouteTailnet{} },
 		"replicas":                 func(c *PlanConfiguration) { c.Runtime.Replicas = 2 },
+		"a canary": func(c *PlanConfiguration) {
+			c.Runtime.Strategy, c.Runtime.Canary = StrategyCanary, &CanaryTerms{Percent: 10, DurationSeconds: 300}
+		},
 		"no served domain": func(c *PlanConfiguration) {
 			c.Domains = []PlannedDomain{{Hostname: "www.example.test", RedirectTo: "example.test"}}
 		},

@@ -100,6 +100,11 @@ func (e *NormalizedStepExecutor) CleanupCancelledRun(
 	if release.Release.State != "candidate" {
 		return mustJSON(map[string]any{"completed": true, "reason": "release is not active or candidate"}), nil
 	}
+	// A candidate in a canary is on the route beside the live release; it
+	// comes off it before it is removed.
+	if err := e.endCanaryForCancellation(cleanupCtx, run); err != nil {
+		return mustJSON(map[string]any{"completed": false, "action": "end_canary"}), err
+	}
 	runtime, runtimeErr := e.store.RuntimeForRelease(cleanupCtx, release.Release.ID)
 	if runtimeErr == nil {
 		recovery := e.stopCandidateAndRestore(cleanupCtx, execution, release.Release, *runtime, snapshot.Plan, nil)
@@ -443,7 +448,7 @@ func (e *NormalizedStepExecutor) startCandidate(
 
 func validateRuntimeActivationStrategy(snapshot runtimeReleaseSnapshot) error {
 	plan := snapshot.Plan
-	if plan.Strategy != StrategyBlueGreen {
+	if !plan.Strategy.startsBeside() {
 		return nil
 	}
 	if snapshot.Compose != nil || plan.HostPort != 0 || len(plan.Ports) != 0 || plan.HostNetwork {
@@ -846,7 +851,7 @@ func (e *NormalizedStepExecutor) activate(
 // of the strategy: blue/green moves traffic, stop-first has already stopped
 // the previous release and now points visitors at the new one.
 func ungatedCutoverLine(strategy ReleaseStrategy, number int64) string {
-	if strategy == StrategyBlueGreen {
+	if strategy.startsBeside() {
 		return fmt.Sprintf("Moving traffic to release #%d without a readiness check: the plan has none, so the candidate was started and never asked whether it answers. Add one under Settings → Runtime → Health checks to gate the next cutover.", number)
 	}
 	return fmt.Sprintf("Release #%d goes live without a readiness check: the plan has none, so it was started and never asked whether it answers before visitors reach it. Add one under Settings → Runtime → Health checks to gate the next release.", number)
@@ -1000,7 +1005,7 @@ func (e *NormalizedStepExecutor) stopCandidateAndRestore(
 	}
 	previous := e.restorePrevious(recoveryCtx, execution, release, plan)
 	if previous == nil {
-		recovery.RuntimeRestored = release.PredecessorReleaseID == 0 || plan.Strategy == StrategyBlueGreen
+		recovery.RuntimeRestored = release.PredecessorReleaseID == 0 || plan.Strategy.startsBeside()
 	} else {
 		recovery.RuntimeRestored = previous.RuntimeRestored
 	}
@@ -1049,7 +1054,7 @@ func (e *NormalizedStepExecutor) restorePrevious(
 }
 
 func recoveryComplete(recovery recoveryEvidence, plan RuntimePlanConfig, release Release) bool {
-	runtimeOK := recovery.RuntimeRestored || release.PredecessorReleaseID == 0 || plan.Strategy == StrategyBlueGreen
+	runtimeOK := recovery.RuntimeRestored || release.PredecessorReleaseID == 0 || plan.Strategy.startsBeside()
 	return recovery.CandidateStopped && recovery.RouteRestored && runtimeOK && recovery.TailnetRestored
 }
 
@@ -1107,7 +1112,7 @@ func (e *NormalizedStepExecutor) retirePredecessor(
 			case <-timer.C:
 			}
 		}
-		if allowWarm && snapshot.Plan.Strategy == StrategyBlueGreen {
+		if allowWarm && snapshot.Plan.Strategy.startsBeside() {
 			watch, why := e.keepWarm(retireCtx, execution, release.Release, snapshot, *previous, e.cutoverMoment(retireCtx, execution.Run.ID))
 			if watch != nil {
 				_ = stepLog(execution, "status", warmKeptLine(*watch))

@@ -453,8 +453,9 @@ func (s *Server) initModules() {
 		// A release's Cloudflare Tunnel names are routed as it goes live.
 		WithTunnelRouter(s.tunnelRouter())
 	if s.modules.requests != nil {
-		// The traffic replay reads the same held record the Logs page and
-		// the rollback watch read, so what it replays is what the page shows.
+		// The traffic replay and a canary's two releases read the same held
+		// record the Logs page and the rollback watch read, so what they
+		// replay and judge is what the page shows.
 		normalizedExecutor.WithRequestRecord(s.modules.requests)
 	}
 	s.modules.deployExecutor = normalizedExecutor

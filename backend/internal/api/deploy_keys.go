@@ -162,6 +162,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/{id}/environments":                                     keyOpen,
 	"GET /deploy/{id}/environments/{env}/promotion":                     keyOpen,
 	"GET /deploy/{id}/environments/{env}/rollback-watch":                keyOpen,
+	"GET /deploy/{id}/environments/{env}/canary":                        keyOpen,
 	"GET /deploy/{id}/environments/{env}/maintenance":                   keyOpen,
 	"GET /deploy/{id}/environments/{env}/sleep":                         keyOpen,
 	"GET /deploy/{id}/environments/{env}/pages/{page}":                  keyOpen, // what every visitor is shown
@@ -203,6 +204,10 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	// retires a container nothing routes to.
 	"POST /deploy/{id}/environments/{env}/rollback-watch/rollback": keyOpen,
 	"POST /deploy/{id}/environments/{env}/rollback-watch/keep":     keyOpen,
+	// A canary's decision is the cutover a deploy makes, or not making it:
+	// a key that may deploy and promote may promote or abort one.
+	"POST /deploy/{id}/environments/{env}/canary/promote": keyOpen,
+	"POST /deploy/{id}/environments/{env}/canary/abort":   keyOpen,
 	// The maintenance switch takes the application from its visitors as
 	// stopping it does, and is behind the same gate. Who is let past is the
 	// configuration's (runtime.maintenance.bypassFrom), which the key writes

@@ -723,8 +723,11 @@ func TestReplayTrafficSitsBetweenTheChecksAndTheCutoverAndResumesAfterARestart(t
 				at = index
 			}
 		}
-		if at <= 0 || at+1 >= len(keys) || keys[at-1] != StepVerifySmoke || keys[at+1] != StepActivate {
-			t.Fatalf("a %s's replay is not between the smoke checks and the cutover: %v", name, keys)
+		// The canary comes after it and right before the cutover: a replay
+		// is done before anything routes to the candidate, and a canary is
+		// the candidate's first real traffic.
+		if at <= 0 || at+2 >= len(keys) || keys[at-1] != StepVerifySmoke || keys[at+1] != StepCanary || keys[at+2] != StepActivate {
+			t.Fatalf("a %s's replay is not between the smoke checks and the canary before the cutover: %v", name, keys)
 		}
 	}
 	if !validStepKey(StepReplayTraffic) || stepLabel(StepReplayTraffic, OperationDeploy) != "Traffic replay" {

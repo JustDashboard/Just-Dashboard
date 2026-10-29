@@ -118,6 +118,7 @@ var stepLabels = map[StepKey]string{
 	StepVerifyReadiness:      "Readiness checks",
 	StepVerifySmoke:          "Smoke checks",
 	StepReplayTraffic:        "Traffic replay",
+	StepCanary:               "Canary",
 	StepActivate:             "Switch traffic",
 	StepRetirePrevious:       "Retire previous release",
 	StepRecordRelease:        "Record release",

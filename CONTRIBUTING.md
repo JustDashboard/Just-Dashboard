@@ -646,6 +646,18 @@ to the contribution terms above, including the additional licence grant to the p
   ingress (`JD_INGRESS_CONTAINER`, on a loopback port), cuts over to a broken release of two only after
   both pass readiness, and requires the automatic rollback to resume both of the first release's paused
   containers and remove both of the second's ([replicas](docs/internal/deployments/canary-and-replicas.md)).
+  Changes to canary releases — the strategy and its terms, the `canary` step, how a route is split
+  between two releases or records which one answered (`deploy/canary*.go`, `proxysvc/sites_split.go`,
+  `renderCaddyCanary`, `accesslog`'s `Release`) — also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveCanaryAbortsAFailingReleaseAndPromotesAHealthyOne -count=1 -v`,
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveCanarySplitsTheRouteOnNginx -count=1 -v`
+  and `TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun`, whose matrix now includes the step. The
+  first runs a real engine behind its own loopback Caddy ingress: a canary that answers 500 to its share
+  is aborted on the side-by-side reading with the live release's same container serving everything, and
+  a healthy one is promoted at the end of its window with the dashboard restarted in the middle of it;
+  the second splits a real nginx route 30%, reads `rel=` from its access log and moves in and out of the
+  canary under traffic without losing a request
+  ([canary releases](docs/internal/deployments/canary-and-replicas.md#canary-releases)).
 - Changes to the warm-release window, instant rollback or the rollback watcher (`deploy/rollback_*.go`,
   `api/handlers_deploy_rollback_watch.go`) also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveMetricGatedRollbackSwitchesBackToTheWarmRelease -count=1 -v`.

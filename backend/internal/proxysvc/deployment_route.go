@@ -30,11 +30,14 @@ type DeploymentRoute struct {
 	// several. It is kept so a route built or decoded with it means what it
 	// did; Servers is what the renderers read, and a route sets one or the
 	// other.
-	Upstream   string `json:"upstream"`
-	TLS        bool   `json:"tls,omitempty"`
-	CertPath   string `json:"certPath,omitempty"`
-	KeyPath    string `json:"keyPath,omitempty"`
-	ForceHTTPS bool   `json:"forceHttps,omitempty"`
+	Upstream string `json:"upstream"`
+	// Canary, while a candidate release is tried beside the live one, sends
+	// a share of the route's requests to the candidate's servers.
+	Canary     *DeploymentCanary `json:"canary,omitempty"`
+	TLS        bool              `json:"tls,omitempty"`
+	CertPath   string            `json:"certPath,omitempty"`
+	KeyPath    string            `json:"keyPath,omitempty"`
+	ForceHTTPS bool              `json:"forceHttps,omitempty"`
 	// BasicAuth puts a password in front of the route. Each entry is a user
 	// and a bcrypt hash, which is what both proxies read.
 	BasicAuth []BasicAuthUser `json:"basicAuth,omitempty"`
@@ -123,6 +126,51 @@ type DeploymentRoute struct {
 // MaxDeploymentUpstreams is the most servers a route shares requests
 // between: a release's replicas are at most eight.
 const MaxDeploymentUpstreams = 8
+
+// DeploymentCanary is a candidate release sharing a route with the live
+// one. Percent of the requests, each given one release at random, go to
+// Upstreams, the candidate's replicas; the rest to the route's own servers.
+// Every answer is recorded with the release that gave it — Live or
+// Candidate, the releases' ids — so the two can be read apart while they
+// share the route.
+type DeploymentCanary struct {
+	Percent   int      `json:"percent"`
+	Upstreams []string `json:"upstreams"`
+	Live      string   `json:"live"`
+	Candidate string   `json:"candidate"`
+}
+
+// validateDeploymentCanary holds a canary to what both renderers write.
+func validateDeploymentCanary(route DeploymentRoute) error {
+	canary := route.Canary
+	if canary == nil {
+		return nil
+	}
+	if canary.Percent < 1 || canary.Percent > 99 {
+		return errors.New("a canary takes between 1 and 99 percent of the route's requests")
+	}
+	if len(canary.Upstreams) == 0 || len(canary.Upstreams) > MaxDeploymentUpstreams {
+		return fmt.Errorf("a canary is between 1 and %d servers", MaxDeploymentUpstreams)
+	}
+	live := route.Servers()
+	if len(live) == 0 {
+		return errors.New("a canary shares a route that already serves a release")
+	}
+	seen := map[string]bool{}
+	for _, upstream := range live {
+		seen[upstream] = true
+	}
+	for _, upstream := range canary.Upstreams {
+		if upstream == "" || seen[upstream] {
+			return fmt.Errorf("%q cannot serve the canary and the live release at once", upstream)
+		}
+		seen[upstream] = true
+	}
+	if !splitLabelRe.MatchString(canary.Live) || !splitLabelRe.MatchString(canary.Candidate) || canary.Live == canary.Candidate {
+		return errors.New("a canary's two releases need different names of letters, digits, dashes or underscores")
+	}
+	return nil
+}
 
 // Servers are the addresses the route forwards to, in order: Upstreams, or
 // the one Upstream of a route built before replicas.
@@ -288,6 +336,9 @@ func NormalizeAccessEntry(raw string) (string, error) {
 // beyond its names: the redirects, the headers and the allowed addresses.
 func validateDeploymentRules(route DeploymentRoute) error {
 	if err := validateDeploymentServers(route); err != nil {
+		return err
+	}
+	if err := validateDeploymentCanary(route); err != nil {
 		return err
 	}
 	if err := validateHostRedirects(route.Domains, route.Redirects); err != nil {
@@ -859,8 +910,13 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 		deployment:    true,
 		dropCookies:   append([]string(nil), route.DropCookies...),
 	}
-	if pool := deploymentPool(route.Servers()); pool != nil {
+	if pool := deploymentPool(route.Servers(), route.Canary != nil); pool != nil {
 		spec.Upstream, spec.Pool = "", pool
+	}
+	if canary := route.Canary; canary != nil && spec.Pool != nil {
+		if candidate := deploymentPool(canary.Upstreams, true); candidate != nil {
+			spec.Split = &SiteSplit{Percent: canary.Percent, Servers: candidate.Servers, Live: canary.Live, Candidate: canary.Candidate}
+		}
 	}
 	if route.TLS {
 		// Each name on the scheme its domain chose: the plain ones get a
@@ -931,7 +987,8 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 
 // deploymentPool is a replicated release's servers as an nginx upstream
 // block, or nil for a release of one container, which keeps the route it
-// always had: proxy_pass to the one address, with no upstream block.
+// always had: proxy_pass to the one address, with no upstream block —
+// unless always, for a canary, whose two releases are a pool each.
 //
 // Least connections rather than round robin, because a route carries
 // WebSockets and long streamed answers: a replica holding them is not the
@@ -946,8 +1003,8 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 // replica that takes longer is not there, and the visitor's request is
 // better passed on than held. No keepalive, as before: each request is a
 // fresh upstream connection.
-func deploymentPool(servers []string) *SitePool {
-	if len(servers) < 2 {
+func deploymentPool(servers []string, always bool) *SitePool {
+	if len(servers) == 0 || (len(servers) < 2 && !always) {
 		return nil
 	}
 	pool := &SitePool{Method: "least_conn", ConnectTimeout: 2, Servers: make([]PoolServer, 0, len(servers))}

@@ -95,6 +95,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/environments/{env}/triggers", s.handle(s.handleDeploymentTriggers))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/git-watch", s.handle(s.handleDeploymentGitWatch))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/rollback-watch", s.handle(s.handleDeploymentRollbackWatch))
+		r.Method(http.MethodGet, "/{id}/environments/{env}/canary", s.handle(s.handleDeploymentCanary))
 		s.mountDeploymentSleepReads(r)
 		r.Method(http.MethodGet, "/{id}/environments/{env}/rehearsal", s.handle(s.handleDeploymentRehearsal))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/vulnerabilities", s.handle(s.handleDeploymentImageScans))
@@ -127,6 +128,12 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// Keeping the new release only removes a container nothing routes
 			// to; it is the same control a deploy is.
 			r.Method(http.MethodPost, "/{id}/environments/{env}/rollback-watch/keep", s.handle(s.handleDeploymentKeepRelease))
+			// A canary is decided by the control a deploy is: promoting it is
+			// the cutover the deploy would have made, and aborting it removes
+			// a candidate with only its share of the traffic, the live release
+			// untouched.
+			r.Method(http.MethodPost, "/{id}/environments/{env}/canary/promote", s.handle(s.handleDeploymentCanaryPromote))
+			r.Method(http.MethodPost, "/{id}/environments/{env}/canary/abort", s.handle(s.handleDeploymentCanaryAbort))
 			s.mountDeploymentSleepWake(r)
 			// Asking about a failure takes what asking the SQL editor's
 			// assistant takes: it spends the install's model budget.

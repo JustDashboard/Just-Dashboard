@@ -59,6 +59,7 @@ import { ReleasePipeline } from "@/components/deploy/run-pipeline"
 import { RunDetails, initialStep } from "@/components/deploy/run-steps"
 import { RunHeader } from "@/components/deploy/run-header"
 import { RunFailure, RunReady } from "@/components/deploy/run-outcome"
+import { RunCanary } from "@/components/deploy/run-canary"
 import { RunDiagnosis } from "@/components/deploy/run-diagnosis"
 import { useRunStream } from "@/components/deploy/run-stream"
 import { useProjectNavScope } from "@/components/deploy/project-shell"
@@ -627,6 +628,20 @@ export function RunPage() {
           )}
         </div>
       )}
+
+      {/* A canary is drawn while its step runs and stays as its outcome;
+          a plan without one skips the step and draws nothing. */}
+      {!legacy &&
+        attempts.some(
+          (step) => step.key === "canary" && step.state !== "skipped" && step.state !== "pending",
+        ) && (
+          <RunCanary
+            projectId={projectId}
+            environmentId={run.environmentId}
+            runId={run.id}
+            active={attempts.some((step) => step.key === "canary" && step.state === "running")}
+          />
+        )}
 
       {run.cancelRequested && active ? (
         <Notice tone="warning" icon={Warning} title="Cancellation requested">

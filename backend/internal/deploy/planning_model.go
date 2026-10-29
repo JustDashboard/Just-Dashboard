@@ -640,6 +640,10 @@ type RuntimePlanConfig struct {
 	// stateless release has more than one (replicaRefusal), and the limits
 	// above are each container's own.
 	Replicas int `json:"replicas,omitempty"`
+	// Canary is the trial a canary-strategy plan's candidate gets before the
+	// cutover: its share of the requests, for how long, and whether it is
+	// promoted on its own when it compares well (canary.go).
+	Canary *CanaryTerms `json:"canary,omitempty"`
 	// MaxRequestBodyMB is the largest request body the managed route lets
 	// through, in megabytes. Zero is DefaultMaxRequestBodyMB.
 	MaxRequestBodyMB int `json:"maxRequestBodyMb,omitempty"`
@@ -1641,6 +1645,9 @@ func (c PlanConfiguration) Validate() error {
 	if err := validateReplicas(c.Build.Method, c.Runtime); err != nil {
 		return err
 	}
+	if err := validateCanary(c); err != nil {
+		return err
+	}
 	if err := validateReplayPlan(c.Runtime.Replay); err != nil {
 		return err
 	}
@@ -2285,7 +2292,7 @@ func validBuildMethod(method BuildMethod) bool {
 }
 
 func validStrategy(strategy ReleaseStrategy) bool {
-	return strategy == StrategyBlueGreen || strategy == StrategyStopFirst
+	return strategy == StrategyBlueGreen || strategy == StrategyStopFirst || strategy == StrategyCanary
 }
 
 func validOwnership(ownership OwnershipMode) bool {

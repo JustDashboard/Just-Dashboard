@@ -41,6 +41,7 @@ export function sleepBlocker({
   compose,
   hostNetwork,
   replicas = 1,
+  canary = false,
   blockingCheck,
 }: {
   servesDomain: boolean
@@ -48,10 +49,14 @@ export function sleepBlocker({
   hostNetwork: boolean
   /** The release's replicas: a wake starts and holds the request for one. */
   replicas?: number
+  /** The plan releases as a canary, which puts a second release on the route. */
+  canary?: boolean
   blockingCheck?: { name: string; kind: string }
 }) {
   if (compose)
     return "A Compose stack is several containers that start in an order of their own; sleeping stops one container, so it is offered for a single-container release."
+  if (canary)
+    return "A canary puts a second release on the route beside the live one, and a wake starts one container and holds the request for it; sleeping is offered for a blue / green or stop-first release."
   if (replicas > 1)
     return `A wake starts one container and holds the request for it, and this release runs ${replicas} replicas; sleeping is offered for a single-container release.`
   if (hostNetwork)

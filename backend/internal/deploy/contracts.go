@@ -67,7 +67,19 @@ type ReleaseStrategy string
 const (
 	StrategyBlueGreen ReleaseStrategy = "blue_green"
 	StrategyStopFirst ReleaseStrategy = "stop_first"
+	// StrategyCanary is blue/green with a trial between the checks and the
+	// cutover: the candidate takes a share of the live route's requests for
+	// a window, beside the live release, and is promoted or aborted on how
+	// it compares (canary.go).
+	StrategyCanary ReleaseStrategy = "canary"
 )
+
+// startsBeside says whether the strategy starts the candidate beside the
+// live release rather than after stopping it: blue/green, and a canary,
+// which is blue/green with a trial in the middle.
+func (s ReleaseStrategy) startsBeside() bool {
+	return s == StrategyBlueGreen || s == StrategyCanary
+}
 
 type Operation string
 
@@ -218,11 +230,16 @@ const (
 	StepVerifyReadiness      StepKey = "verify_readiness"
 	StepVerifySmoke          StepKey = "verify_smoke"
 	StepReplayTraffic        StepKey = "replay_traffic"
-	StepActivate             StepKey = "activate"
-	StepRetirePrevious       StepKey = "retire_previous"
-	StepRecordRelease        StepKey = "record_release"
-	StepNotify               StepKey = "notify"
-	StepLegacyPipeline       StepKey = "legacy_pipeline"
+	// StepCanary holds a canary plan's candidate on a share of the live
+	// route's requests for its window and decides from the comparison, or
+	// from the operator, whether the cutover that follows happens at all.
+	// Every other plan skips it.
+	StepCanary         StepKey = "canary"
+	StepActivate       StepKey = "activate"
+	StepRetirePrevious StepKey = "retire_previous"
+	StepRecordRelease  StepKey = "record_release"
+	StepNotify         StepKey = "notify"
+	StepLegacyPipeline StepKey = "legacy_pipeline"
 )
 
 // The backup gate runs before release tasks: a migration must never change a
@@ -237,7 +254,7 @@ var DefaultStepKeys = []StepKey{
 	StepResolveSource, StepAcquireSource, StepAnalyzePlan, StepPrepareContext,
 	StepBuildArtifact, StepRenderRuntime, StepBackupGate, StepRehearseMigration, StepReleaseTask,
 	StepProvisionCertificate, StepStartCandidate, StepVerifyReadiness, StepVerifySmoke,
-	StepReplayTraffic, StepActivate, StepRetirePrevious, StepRecordRelease, StepNotify,
+	StepReplayTraffic, StepCanary, StepActivate, StepRetirePrevious, StepRecordRelease, StepNotify,
 }
 
 type StepState string

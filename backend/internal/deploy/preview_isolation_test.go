@@ -145,7 +145,9 @@ func TestPreviewNumbersAreScopedToTheirTrigger(t *testing.T) {
 
 func TestPreviewPlansReplaceAllProductionStorageAndOmitHostReleaseTasks(t *testing.T) {
 	f := newAutomationFixture(t)
-	runtime := RuntimePlanConfig{Strategy: StrategyStopFirst, InternalPort: 8080, HostPort: 8080, Ports: []PublishedPort{{HostPort: 2222, ContainerPort: 2222}}, Mounts: []RuntimeMount{
+	// Production releases as a canary; a preview with storage is replaced
+	// stop-first and keeps no canary terms.
+	runtime := RuntimePlanConfig{Strategy: StrategyCanary, Canary: &CanaryTerms{Percent: 10, DurationSeconds: 300}, InternalPort: 8080, HostPort: 8080, Ports: []PublishedPort{{HostPort: 2222, ContainerPort: 2222}}, Mounts: []RuntimeMount{
 		{Source: "production-data", Target: "/data", Ownership: OwnershipManaged},
 		{Source: "/srv/production-secrets", Target: "/config", ReadOnly: true, Ownership: OwnershipLinked},
 	}}
@@ -190,6 +192,9 @@ func TestPreviewPlansReplaceAllProductionStorageAndOmitHostReleaseTasks(t *testi
 	}
 	if len(build.ReleaseTasks) != 0 || len(build.Secrets) != 0 || strings.Contains(runtimeRaw, "production") {
 		t.Fatalf("production inputs inherited: %s %s", buildRaw, runtimeRaw)
+	}
+	if runtime.Strategy != StrategyStopFirst || runtime.Canary != nil {
+		t.Fatalf("a preview with storage kept %s and canary terms %+v", runtime.Strategy, runtime.Canary)
 	}
 	// A preview never pins a host port: the production plan's published SSH
 	// port would collide with production itself.

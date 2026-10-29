@@ -234,6 +234,10 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		renderPool(l, spec)
 		wrote = true
 	}
+	if spec.Kind == "proxy" && spec.Pool != nil && spec.Split != nil {
+		l.blank()
+		renderSplit(l, spec)
+	}
 	if spec.Trace {
 		if wrote {
 			l.blank()
@@ -250,6 +254,10 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		// The trace context the application was sent, and the edge rule that
 		// decided the request, after the rest.
 		format := strings.TrimSuffix(timedLogFormat, "'")
+		if spec.Pool != nil && spec.Split != nil {
+			l.add("# rel= is the release that answered, while the route is split.")
+			format = strings.TrimSuffix(splitLogFormat(spec), "'")
+		}
 		if spec.Trace {
 			format += nginxTraceLogFields(spec)
 		}
@@ -733,7 +741,7 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	} else {
 		l.add("        proxy_pass %s;", proxyPassTarget(loc.renderedPath(), loc.renderedUpstream()))
 	}
-	if spec.Pool != nil && loc.Upstream == spec.poolUpstream() {
+	if spec.Pool != nil && loc.Upstream == spec.mainUpstream() {
 		renderPoolLocation(l, loc, spec)
 	}
 	l.add("        proxy_http_version 1.1;")

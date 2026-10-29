@@ -115,11 +115,14 @@ type Engine struct {
 	config     EngineConfig
 	log        *slog.Logger
 
-	mu       sync.Mutex
-	started  bool
-	stop     context.CancelFunc
-	wake     chan struct{}
-	running  map[int64]context.CancelCauseFunc
+	mu      sync.Mutex
+	started bool
+	stop    context.CancelFunc
+	wake    chan struct{}
+	running map[int64]context.CancelCauseFunc
+	// waiting are the runs inside a resumable wait, which Shutdown ends
+	// rather than waits out.
+	waiting  map[int64]bool
 	workerWG sync.WaitGroup
 	loopWG   sync.WaitGroup
 
@@ -144,8 +147,20 @@ func NewEngine(
 		store: store, executor: executor, reconciler: reconciler,
 		config: config.normalized(), log: log,
 		wake: make(chan struct{}, 1), running: make(map[int64]context.CancelCauseFunc),
+		waiting: map[int64]bool{},
 	}
 }
+
+// errEngineStopping is how Shutdown ends a step that only waits — a
+// canary's window — instead of waiting out the rest of it. The step is left
+// running and the lease given up at once, so the next process reclaims the
+// run straight away and the reconciler resumes the step where it was.
+var errEngineStopping = errors.New("the deployment engine is stopping")
+
+// resumableWaits are the steps that hold a run without doing work the
+// engine would have to see finished, and that the reconciler resumes after a
+// restart: a canary holds its window, and its state is rows and a route.
+var resumableWaits = map[StepKey]bool{StepCanary: true}
 
 // Start reconciles every expired claim before the scheduler is allowed to
 // claim fresh work. Startup either establishes a recovery decision for old
@@ -177,12 +192,19 @@ func (e *Engine) Start(ctx context.Context) error {
 
 // Shutdown stops new claims and waits for currently executing adapters. It
 // does not cancel them: activation and restoration must reach a converged
-// state. A user cancellation goes through Cancel and remains explicit.
+// state. A user cancellation goes through Cancel and remains explicit. A run
+// inside a resumable wait is the exception: it is stopped where it is, for
+// the next process to resume.
 func (e *Engine) Shutdown(ctx context.Context) error {
 	e.mu.Lock()
 	stop := e.stop
 	e.stop = nil
 	e.started = false
+	for runID := range e.waiting {
+		if cancel := e.running[runID]; cancel != nil {
+			cancel(errEngineStopping)
+		}
+	}
 	e.mu.Unlock()
 	if stop != nil {
 		stop()
@@ -381,12 +403,23 @@ func (e *Engine) execute(ctx context.Context, lease QueueLease) error {
 			ctx: ctx, store: e.store, runID: lease.RunID, stepID: stepPtr.ID,
 			claimToken: lease.Token,
 		}
+		if resumableWaits[key] {
+			e.mu.Lock()
+			e.waiting[lease.RunID] = true
+			e.mu.Unlock()
+		}
 		result := e.executor.Execute(ctx, StepExecution{
 			Run: *run, Step: *stepPtr, ClaimToken: lease.Token, Output: output,
 		})
+		e.mu.Lock()
+		delete(e.waiting, lease.RunID)
+		e.mu.Unlock()
 		if ctx.Err() != nil {
 			if errors.Is(context.Cause(ctx), ErrLeaseLost) {
 				return ErrLeaseLost
+			}
+			if errors.Is(context.Cause(ctx), errEngineStopping) {
+				return e.store.surrenderLease(context.Background(), lease.RunID, lease.Token)
 			}
 			if result.State != StepCancelled {
 				result.State = StepCancelled
