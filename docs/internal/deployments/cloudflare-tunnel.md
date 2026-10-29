@@ -42,7 +42,8 @@ label so a changed token is noticed without reading the environment back. Docker
 environment in its configuration, so root on the host can read it with `docker inspect`, as it can
 read the sealing key; nothing below root can.
 
-`DELETE /proxy/tunnel` removes the connector and forgets the token. The tunnel, its routes and the
+`DELETE /proxy/tunnel` removes the connector and forgets the token; the `just-dashboard-tunnel` network
+stays, with the ingress on it, for the next connection. The tunnel, its routes and the
 records made for it stay at Cloudflare for their owner to remove there: a tunnel another server also runs
 a connector for is not this dashboard's to delete, and a removed record would take the name off the
 internet even if the operator meant to reconnect at once.
