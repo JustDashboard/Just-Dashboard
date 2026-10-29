@@ -111,6 +111,7 @@ free.
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Migrations rehearsed on a throwaway copy of the database, restored from its backup, before production
 - Real recent requests replayed against a new release before traffic moves, so a page it broke stops it
+- Sleep when idle: an app nobody visits is stopped, and the next visitor's request starts it and gets the page after a pause
 - Each release remembers where its database stood when it went live: bring that data back into a side copy to compare or restore from
 - Variables per environment, plus shared ones defined once for the server or a project
 - Variables read from HashiCorp Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager or Azure Key Vault, fresh for each run

@@ -635,6 +635,19 @@ to the contribution terms above, including the additional licence grant to the p
   every page, its own container gone and the record holding only the test's requests (the replay never
   passes through the ingress); then a release that answers like the first and goes live. It numbers
   its environment far from any other and removes its containers.
+- Changes to scale-to-zero (`deploy/sleep.go`, `deploy/sleep_wake.go`, `proxysvc/deployment_sleep.go`,
+  `runtime.sleep`, or a route's wake) also run, as root on a Docker host,
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run 'TestLiveDeploymentRouteWakesOnNginx|TestLiveDockerCaddyRouteWakes' -count=1 -v`
+  — a real `traefik/whoami` behind the host's real nginx (a private prefix, its workers reading the
+  test's folder) and behind a real `caddy:2-alpine`, with a wake socket of the test's: the first request
+  after a stop is answered by the application, a POST through the switch keeps its body, a visitor
+  without the route's password wakes nothing, a wake still starting is the waking page and nothing to
+  wake is the route's 502 — and
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveSleepingDeploymentWakesOnTheFirstRequest -count=1 -v`,
+  the whole feature against a Caddy ingress of its own on a loopback port (`JD_INGRESS_CONTAINER`) with
+  the real engine, sleeper and wake socket: the idle pass stops the container without removing it, the
+  next request through the ingress is answered by the application, the audit and the lifecycle feed say
+  why, and Wake now wakes it again. Both remove what they created.
 - Changes to the engine, its reconciler or run persistence also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun -count=1 -v`.
   It builds `internal/deploy/testdata/engine-host`, SIGKILLs that real second process inside every

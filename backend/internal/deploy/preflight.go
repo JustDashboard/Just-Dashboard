@@ -1079,6 +1079,7 @@ func preflightFindings(
 	}
 	findings = append(findings, readinessPreflightFindings(draft, configuration)...)
 	findings = append(findings, replayFindings(configuration, observation)...)
+	findings = append(findings, sleepFindings(configuration, observation)...)
 	findings = withoutSupersededHostFindings(append(findings, networkFindings(draft, configuration)...))
 	findings = append(findings, tailnetFindings(configuration, observation.Tailnet)...)
 	persistentStorage := len(configuration.Runtime.Mounts)

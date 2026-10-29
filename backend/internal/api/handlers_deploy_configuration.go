@@ -397,6 +397,9 @@ func (s *Server) handleDeploymentConfigurationSave(w http.ResponseWriter, r *htt
 			return refuseForDeployKey("a deploy key cannot change whether a deployment is tailnet-only or who on the tailnet may open it")
 		}
 	}
+	if err := s.refuseSleepWithContainerSchedules(r.Context(), projectID, environmentID, request.Runtime); err != nil {
+		return err
+	}
 	configuration, err := s.modules.deployPlanning.SaveEnvironmentConfiguration(
 		r.Context(), projectID, environmentID, request,
 	)
