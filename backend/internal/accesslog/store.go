@@ -599,7 +599,7 @@ func (r *record) feed(line string) {
 	}
 	e.Method, e.Path, e.Host = r.share(e.Method), r.share(e.Path), r.share(e.Host)
 	e.Proto, e.RemoteIP = r.share(e.Proto), r.share(e.RemoteIP)
-	e.UserAgent, e.Referer = r.share(e.UserAgent), r.share(e.Referer)
+	e.UserAgent, e.Referer, e.User = r.share(e.UserAgent), r.share(e.Referer), r.share(e.User)
 	e.Seq = r.nextSeq
 	r.nextSeq++
 	top := e.at

@@ -82,7 +82,9 @@ carries production's allowed addresses, response headers, HSTS and sign-in as th
 route stays open and every preview's asks the auth server first, so work in progress is seen only by
 people who sign in. The auth server has to answer for the preview names too (Authelia's session cookie
 domain, for instance, covering the preview pattern's parent). A tailnet-only address does not pass
-through the proxy and is not gated; the tailnet is its fence.
+through the public route's sign-in; the tailnet is its fence — unless the environment it previews is
+tailnet-only and names who may open it, in which case the preview's copy of the plan names the same
+logins and tags and its address is gated the same way ([tailnet-only deployments](tailnet-apps.md)).
 
 ## Previews from the dashboard
 
@@ -327,7 +329,11 @@ one row per preview environment (`kind`, `port`, `upstream_port`, `url`, `publis
 `UNIQUE(kind, port)`); `AllocatePreviewAddress` takes the lowest free port in **21000–21999** that
 tailscaled is not already serving (`ServedTailnetPorts` is passed in as the exclusion) and answers
 `ErrPreviewAddressExhausted` (`409 preview_address_exhausted`) when the range is full. A non-preview
-environment is refused with `ErrPreviewIsolation`.
+environment is refused with `ErrPreviewIsolation`. An environment that is not a preview gets a row of
+the same table, from the same range, only when its plan is tailnet-only (`AllocateTailnetAddress`,
+[tailnet-only deployments](tailnet-apps.md)); everything below — the publish, the restore, the
+withdrawals and the startup sweep — treats its row as it treats a preview's, and when its plan names
+who may open it the mapping points at its tailnet gate on loopback rather than at the container.
 
 Publishing is a step of activation (`activation_executor.go`): after the route is verified and before
 `ActivateCandidate` moves the release pointer, so a mapping that cannot be made never leaves a live

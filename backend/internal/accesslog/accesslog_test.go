@@ -581,3 +581,21 @@ func TestPagesOnlyFilterKeepsTheReadingsHonest(t *testing.T) {
 		t.Fatalf("pages-only: total %d scanned %d rows %d", result.Summary.Total, result.Summary.Scanned, len(result.Entries))
 	}
 }
+
+// A tailnet gate's record names who it let in: nginx's tl= field after the
+// timed format, Caddy's tailnet_login field from the gate's log_append.
+func TestParseReadsTheTailnetLoginTheGateAdmitted(t *testing.T) {
+	nginx := `100.101.102.103 - - [19/Sep/2026:05:47:57 +0000] "GET /a HTTP/1.1" 200 12 "-" "curl/8" rt=0.004 urt="0.003" host=box.tail1234.ts.net tl=alice@example.com`
+	entry, ok := Parse(nginx)
+	if !ok || entry.User != "alice@example.com" || entry.RemoteIP != "100.101.102.103" {
+		t.Fatalf("nginx = %+v %v", entry, ok)
+	}
+	refused := `100.70.0.1 - - [19/Sep/2026:05:47:57 +0000] "GET /a HTTP/1.1" 403 12 "-" "curl/8" rt=0.004 urt="0.003" host=box.tail1234.ts.net tl=-`
+	if entry, ok := Parse(refused); !ok || entry.User != "" {
+		t.Fatalf("a refused request = %+v %v", entry, ok)
+	}
+	caddy := `{"level":"info","ts":1793245892.69,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"127.0.0.1","client_ip":"100.64.0.9","proto":"HTTP/1.1","method":"GET","host":"box.tail1234.ts.net:21003","uri":"/","headers":{}},"duration":0.002,"size":5,"status":200,"tailnet_login":"tag:ci"}`
+	if entry, ok := Parse(caddy); !ok || entry.User != "tag:ci" || entry.RemoteIP != "100.64.0.9" {
+		t.Fatalf("caddy = %+v %v", entry, ok)
+	}
+}

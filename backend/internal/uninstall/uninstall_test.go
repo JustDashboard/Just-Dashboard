@@ -574,3 +574,40 @@ func TestStartClosesARunWithNoSibling(t *testing.T) {
 		t.Fatalf("record = %+v", got)
 	}
 }
+
+// The Caddy in front of tailnet-only deployments is the deployments' too: a
+// wipe takes it, its two volumes and its Caddyfile, and nothing else of the
+// operator's that happens to run Caddy.
+func TestTeardownTakesTheTailnetGate(t *testing.T) {
+	docker := hostWithDeployments()
+	gate := map[string]string{tailnetGateLabel: "true"}
+	docker.containers = append(docker.containers,
+		dockerx.Container{ID: "gate", Name: "just-dashboard-tailnet", Labels: gate},
+		dockerx.Container{ID: "theirs", Name: "my-caddy", Labels: map[string]string{}})
+	docker.volumes = append(docker.volumes,
+		dockerx.Volume{Name: "just-dashboard-tailnet-config", Labels: gate},
+		dockerx.Volume{Name: "just-dashboard-tailnet-data", Labels: gate})
+	removedDir := false
+	teardown := Teardown{Docker: docker, Targets: targets, OwnProject: "just-dashboard",
+		RemoveTailnetGateDir: func() error { removedDir = true; return nil }}
+	owned, err := teardown.Inventory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owned.TailnetGate == nil || owned.TailnetGate.ID != "gate" {
+		t.Fatalf("gate = %+v", owned.TailnetGate)
+	}
+	var out bytes.Buffer
+	if warnings := teardown.Remove(context.Background(), owned, &out); len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	got := strings.Join(docker.removed, " ")
+	for _, want := range []string{"container:gate", "volume:just-dashboard-tailnet-config", "volume:just-dashboard-tailnet-data"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("%s was not done:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "container:theirs") || !removedDir {
+		t.Fatalf("removed %s, dir %v", got, removedDir)
+	}
+}
