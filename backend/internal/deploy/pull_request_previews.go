@@ -242,13 +242,16 @@ func (s *AutomationStore) OpenPreviewTargets(ctx context.Context) ([]PreviewTarg
 // previewRefColumns and previewRefFrom are the one reading of a preview row
 // every PreviewRef list shares. The approval row is the one for the revision
 // the preview is configured at, the address row is what the executor
-// published on the tailnet, and the run is the environment's newest.
+// published on the tailnet, the run is the environment's newest, and the
+// promotion is the project's newest run that took this preview's image.
 const previewRefColumns = `p.id,p.trigger_id,e.project_id,p.provider_ref,p.environment_id,e.slug,p.state,p.updated_at,COALESCE(q.status,''),COALESCE(q.reason,''),
 p.origin,p.title,p.head_revision,p.variables_copied_revision,e.live_release_id,
 COALESCE(json_extract(s.identity_json,'$.revision'),''),COALESCE(a.state,''),COALESCE(a.event_json,''),
 COALESCE(x.kind,''),COALESCE(x.url,''),COALESCE(x.port,0),COALESCE(x.upstream_port,0),COALESCE(x.published,0),
 COALESCE((SELECT d.config_json FROM deploy_dependencies d WHERE d.environment_id=e.id AND d.kind='domain' ORDER BY d.id LIMIT 1),''),
-COALESCE(r.id,0),COALESCE(r.run_number,0),COALESCE(r.state,''),COALESCE(r.operation,''),COALESCE(r.requested_at,0),COALESCE(r.ended_at,0)`
+COALESCE(r.id,0),COALESCE(r.run_number,0),COALESCE(r.state,''),COALESCE(r.operation,''),COALESCE(r.requested_at,0),COALESCE(r.ended_at,0),
+COALESCE(m.id,0),COALESCE(m.run_number,0),COALESCE(m.state,''),COALESCE(m.environment_id,0),COALESCE(m.requested_at,0),COALESCE(m.ended_at,0),
+COALESCE(CAST(json_extract(m.metadata_json,'$.promotion.releaseNumber') AS INTEGER),0),COALESCE(json_extract(m.metadata_json,'$.promotion.sourceRevision'),'')`
 
 const previewRefFrom = ` FROM deploy_preview_refs p
 JOIN deploy_environments e ON e.id=p.environment_id
@@ -257,7 +260,10 @@ LEFT JOIN deploy_preview_quarantines q ON q.environment_id=e.id
 LEFT JOIN deploy_sources s ON s.environment_id=e.id AND s.revision=e.desired_revision
 LEFT JOIN deploy_preview_approvals a ON a.trigger_id=p.trigger_id AND a.provider_ref=p.provider_ref AND a.revision=json_extract(s.identity_json,'$.revision')
 LEFT JOIN deploy_preview_addresses x ON x.environment_id=e.id
-LEFT JOIN deploy_runs r ON r.id=(SELECT n.id FROM deploy_runs n WHERE n.environment_id=e.id ORDER BY n.requested_at DESC,n.id DESC LIMIT 1) `
+LEFT JOIN deploy_runs r ON r.id=(SELECT n.id FROM deploy_runs n WHERE n.environment_id=e.id ORDER BY n.requested_at DESC,n.id DESC LIMIT 1)
+LEFT JOIN deploy_runs m ON m.id=(SELECT n.id FROM deploy_runs n WHERE n.project_id=e.project_id AND n.operation='promote'
+  AND json_extract(n.metadata_json,'$.promotion.sourceKind')='preview'
+  AND CAST(json_extract(n.metadata_json,'$.promotion.environmentId') AS INTEGER)=e.id ORDER BY n.requested_at DESC,n.id DESC LIMIT 1) `
 
 func (s *AutomationStore) previewRefs(ctx context.Context, clause string, args ...any) ([]PreviewRef, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+previewRefColumns+previewRefFrom+clause, args...)
@@ -279,7 +285,8 @@ func (s *AutomationStore) previewRefs(ctx context.Context, clause string, args .
 func scanPreviewRef(row interface{ Scan(...any) error }) (*PreviewRef, error) {
 	var p PreviewRef
 	var run RecentRun
-	var updated, requested, ended int64
+	var promotion PreviewPromotion
+	var updated, requested, ended, promotionRequested, promotionEnded int64
 	var approvalEvent, addressKind, addressURL, domainConfig string
 	var addressPort, upstreamPort, published int
 	if err := row.Scan(&p.ID, &p.TriggerID, &p.ProjectID, &p.ProviderRef, &p.EnvironmentID, &p.EnvironmentSlug, &p.State, &updated, &p.IsolationStatus, &p.IsolationReason,
@@ -287,8 +294,15 @@ func scanPreviewRef(row interface{ Scan(...any) error }) (*PreviewRef, error) {
 		&p.Revision, &p.ApprovalState, &approvalEvent,
 		&addressKind, &addressURL, &addressPort, &upstreamPort, &published,
 		&domainConfig,
-		&run.ID, &run.RunNumber, &run.State, &run.Operation, &requested, &ended); err != nil {
+		&run.ID, &run.RunNumber, &run.State, &run.Operation, &requested, &ended,
+		&promotion.RunID, &promotion.RunNumber, &promotion.State, &promotion.EnvironmentID, &promotionRequested, &promotionEnded,
+		&promotion.ReleaseNumber, &promotion.SourceRevision); err != nil {
 		return nil, err
+	}
+	if promotion.RunID != 0 {
+		promotion.RequestedAt = unixTime(promotionRequested)
+		promotion.EndedAt = unixTimePtr(promotionEnded)
+		p.Promotion = &promotion
 	}
 	p.UpdatedAt = unixTime(updated)
 	p.Number, _ = strconv.Atoi(p.ProviderRef)

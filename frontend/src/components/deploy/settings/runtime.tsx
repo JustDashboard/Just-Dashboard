@@ -54,6 +54,17 @@ import {
 } from "@/components/deploy/settings/limit-field"
 import { SettingPicture } from "@/components/deploy/settings/setting-picture"
 import { RollbackWatchForm } from "@/components/deploy/settings/rollback-watch"
+import {
+  REPLAY_DRAFT_FIELD_IDS,
+  REPLAY_FIELD_IDS,
+  ReplaySection,
+} from "@/components/deploy/settings/replay"
+import {
+  replayDraftOf,
+  replayPlanOf,
+  replayRefusal,
+  type ReplayDraft,
+} from "@/components/deploy/replay-model"
 import { Segments } from "@/components/deploy/settings/segments"
 import {
   DEFAULT_GRACE_SECONDS,
@@ -83,7 +94,7 @@ import {
  * port or the host network cannot run two releases side by side, and
  * blue/green on such a plan used to be offered here and then refused at start.
  *
- * Two forms, two saves: Runtime (six sections, one PUT) and Health
+ * Two forms, two saves: Runtime (seven sections, one PUT) and Health
  * checks. Each keeps its own draft keyed on its own saved value, so saving
  * one no longer restarts the other.
  *
@@ -98,12 +109,13 @@ type RuntimePlan = DeploymentConfiguration["runtime"]
 /**
  * The Runtime form's draft: the plan, with its three lists held as the text
  * the operator types — one entry per line — so a half-typed line survives a
- * visit to another page.
+ * visit to another page, and the traffic replay's terms as typed.
  */
 type RuntimeDraft = RuntimePlan & {
   commandText: string
   capabilitiesText: string
   devicesText: string
+  replayDraft: ReplayDraft
 }
 
 function linesOf(text: string) {
@@ -127,11 +139,13 @@ function runtimeDraftOf(saved: RuntimePlan): RuntimeDraft {
   delete runtime.maintenance
   delete runtime.errorPages
   delete runtime.interceptErrors
+  delete runtime.replay
   return {
     ...runtime,
     commandText: (runtime.command ?? []).join("\n"),
     capabilitiesText: (runtime.capabilities ?? []).join("\n"),
     devicesText: (runtime.devices ?? []).join("\n"),
+    replayDraft: replayDraftOf(saved.replay),
   }
 }
 
@@ -141,10 +155,12 @@ function runtimePlanOf(draft: RuntimeDraft): RuntimePlan {
     command: linesOf(draft.commandText),
     capabilities: linesOf(draft.capabilitiesText),
     devices: linesOf(draft.devicesText),
+    replay: replayPlanOf(draft.replayDraft),
   }
   delete plan.commandText
   delete plan.capabilitiesText
   delete plan.devicesText
+  delete plan.replayDraft
   return plan
 }
 
@@ -184,6 +200,7 @@ const RUNTIME_FIELD_IDS: Record<string, string> = {
   "runtime.maxRequestBodyMb": "runtime-max-body",
   "runtime.capabilities": "runtime-capabilities",
   "runtime.devices": "runtime-devices",
+  ...REPLAY_FIELD_IDS,
 }
 
 /** Which section head a refused field belongs to, so that head says "Not saved". */
@@ -204,6 +221,7 @@ const FIELD_SECTION: Record<string, string> = {
   "runtime-drain": "shutdown",
   "runtime-capabilities": "access",
   "runtime-devices": "access",
+  ...Object.fromEntries(Object.values(REPLAY_FIELD_IDS).map((id) => [id, "replay"])),
 }
 
 function clampPort(value: string) {
@@ -297,9 +315,10 @@ function statuses(...items: React.ReactNode[]) {
 }
 
 /**
- * The Runtime form: six section heads — the image and command, where it
- * listens, what it may use, how releases replace each other, how it is
- * stopped, what it can reach — and one save, because one PUT writes all of it.
+ * The Runtime form: seven section heads — the image and command, where it
+ * listens, what it may use, how releases replace each other, what a release
+ * is replayed before its cutover, how it is stopped, what it can reach — and
+ * one save, because one PUT writes all of it.
  */
 function RuntimeForm({
   projectId,
@@ -347,12 +366,21 @@ function RuntimeForm({
   const blueGreen = runtime.strategy === "blue_green"
   const failsNext = blueGreen && Boolean(refusal)
   const portMark = portProduct(port)
+  const web = deployment.profile === "web" || deployment.profile === "static"
 
   const submit = async () => {
     setError(undefined)
     setFieldError(undefined)
     if (fixedPort && hostPort === 0) {
       setFieldError({ id: "runtime-host-port", message: "Use a port from 1 to 65535." })
+      return false
+    }
+    const replayRefused = replayRefusal(runtime.replayDraft)
+    if (replayRefused) {
+      setFieldError({
+        id: REPLAY_DRAFT_FIELD_IDS[replayRefused.field],
+        message: replayRefused.message,
+      })
       return false
     }
     setSaving(true)
@@ -376,11 +404,19 @@ function RuntimeForm({
         commandText: linesOf(prev.commandText).join("\n"),
         capabilitiesText: linesOf(prev.capabilitiesText).join("\n"),
         devicesText: linesOf(prev.devicesText).join("\n"),
+        replayDraft: replayDraftOf(replayPlanOf(prev.replayDraft)),
       }))
       return true
     } catch (caught) {
-      if (caught instanceof ApiError && caught.field && RUNTIME_FIELD_IDS[caught.field]) {
-        setFieldError({ id: RUNTIME_FIELD_IDS[caught.field], message: caught.message })
+      // A refused prefix is named by its place in the list; the field is the list.
+      const field =
+        caught instanceof ApiError && caught.field?.startsWith("runtime.replay.paths[")
+          ? "runtime.replay.paths"
+          : caught instanceof ApiError
+            ? caught.field
+            : undefined
+      if (caught instanceof ApiError && field && RUNTIME_FIELD_IDS[field]) {
+        setFieldError({ id: RUNTIME_FIELD_IDS[field], message: caught.message })
       } else if (caught instanceof ApiError && (caught.status === 422 || caught.status === 400)) {
         // The plan's own refusals — a credential in argv, a path outside the
         // source — name no field, so they are the form's sentence, not a toast.
@@ -789,6 +825,26 @@ function RuntimeForm({
           </Select>
         </Field>
       </SettingSection>
+
+      {/* A gate on the release, beside how releases replace each other: a
+          worker or a game server has no requests to replay, so it is drawn
+          only where there is traffic, or where a plan already turned it on. */}
+      {(web || runtime.replayDraft.enabled) && (
+        <ReplaySection
+          draft={runtime.replayDraft}
+          onChange={(fields) =>
+            draft.set((prev) => ({ ...prev, replayDraft: { ...prev.replayDraft, ...fields } }))
+          }
+          canEdit={canEdit}
+          errorFor={errorFor}
+          servesDomain={configuration.domains.some((domain) => !domain.redirectTo)}
+          stopFirst={runtime.strategy === "stop_first"}
+          status={settingStatus({
+            dirty: draft.changed(["replayDraft"]),
+            refused: refusedIn("replay"),
+          })}
+        />
+      )}
 
       {/* A head that says what the three fields add up to, since the defaults
           are not on any of them: the server stops a container with SIGTERM and

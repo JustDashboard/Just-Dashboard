@@ -12,6 +12,7 @@ import {
   Layers,
 } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
+import { promotionOrigin } from "@/lib/pull-requests"
 import type {
   DeploymentDomainRoute,
   DeploymentEngineRun,
@@ -35,6 +36,7 @@ import {
   formatDuration,
   hostOf,
   runDurationSeconds,
+  runPromotion,
   type ProjectState,
 } from "@/components/deploy/vocabulary"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
@@ -244,12 +246,16 @@ export function ProjectWiring({
                 {!liveRelease ? (
                   <span>The first deployment records it here</span>
                 ) : liveRun ? (
-                  <span className="numeric">
-                    {liveRun.operation === "rollback"
-                      ? "rolled back"
-                      : liveRun.operation === "promote"
-                        ? "promoted from staging"
-                        : "released"}{" "}
+                  <span className="numeric" data-slot="live-release-origin">
+                    {liveRun.operation === "rollback" ? (
+                      "rolled back"
+                    ) : liveRun.operation === "promote" ? (
+                      <PromotedFrom
+                        origin={promotionOrigin(liveRelease.promotion ?? runPromotion(liveRun))}
+                      />
+                    ) : (
+                      "released"
+                    )}{" "}
                     in {formatDuration(runDurationSeconds(liveRun))}
                   </span>
                 ) : (
@@ -405,5 +411,19 @@ export function ProjectWiring({
         </li>
       </ol>
     </div>
+  )
+}
+
+/**
+ * Where a promoted live release came from: staging, or — for staging's own —
+ * the pull request whose preview built the image, at its commit.
+ */
+function PromotedFrom({ origin }: { origin: ReturnType<typeof promotionOrigin> }) {
+  if (origin?.kind !== "preview") return <>promoted from staging</>
+  return (
+    <>
+      promoted from {origin.from}
+      {origin.sha && <span className="font-mono"> ({origin.sha})</span>}
+    </>
   )
 }

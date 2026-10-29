@@ -52,6 +52,7 @@ type Kind = RecoveryTarget["kind"]
 export function RestorePitr({
   archive,
   covers,
+  moment: initialMoment,
   points,
   onStarted,
   onRunning,
@@ -60,6 +61,8 @@ export function RestorePitr({
   archive: PitrArchive
   /** What the archive covers. */
   covers: WalWindow
+  /** A moment to open on, handed over from elsewhere — a release's recorded data point. */
+  moment?: string
   points: PitrRestorePoint[]
   onStarted: (job: Job) => void
   onRunning: (jobId: string) => void
@@ -67,8 +70,8 @@ export function RestorePitr({
 }) {
   const { id, conn, engine } = useDatabase()
   const ids = useId()
-  const [kind, setKind] = useState<Kind>("latest")
-  const [moment, setMoment] = useState(() => toLocalInput(covers.to))
+  const [kind, setKind] = useState<Kind>(initialMoment ? "time" : "latest")
+  const [moment, setMoment] = useState(() => toLocalInput(initialMoment ?? covers.to))
   const [point, setPoint] = useState(points[0]?.name ?? "")
   const [plan, setPlan] = useState<{ plan?: PitrRestorePlan; error?: string }>({})
   const [busy, setBusy] = useState(false)

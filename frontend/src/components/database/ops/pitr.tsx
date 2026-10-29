@@ -2,7 +2,7 @@
 
 import { useCallback, useId, useMemo, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useConfirm } from "@/components/confirm-dialog"
 import { sectionHref } from "@/components/database/engine"
 import {
@@ -89,7 +89,7 @@ const COMMANDS_FROM = 640
 
 type Asking =
   | { kind: "setup" }
-  | { kind: "restore"; archive: PitrArchive; covers: WalWindow }
+  | { kind: "restore"; archive: PitrArchive; covers: WalWindow; moment?: string }
   | { kind: "point" }
   | { kind: "schedule"; archive: PitrArchive }
   | { kind: "off"; archive: PitrArchive }
@@ -178,6 +178,17 @@ export function PointInTimeRecovery({ jobs }: { jobs: BackupJob[] }) {
   const archive = data?.archive
   const health = data ? archiveHealth(data) : undefined
   const recoverable = Boolean(data?.window.from)
+
+  // ?recover=<moment> is how a deployment's data-aware rollback hands the
+  // reader here ("Restore in place to this point"): the recovery dialog opens
+  // once, on a moment, at the point the release recorded. Who may not recover
+  // is not asked, and the page reads as it always does.
+  const recoverAt = useSearchParams().get("recover") ?? undefined
+  const [handedOver, setHandedOver] = useState(false)
+  if (!handedOver && recoverAt && data && archive && recoverable && mayAdmin && !busy) {
+    setHandedOver(true)
+    setAsking({ kind: "restore", archive, covers: data.window, moment: recoverAt })
+  }
 
   const start = async (path: string, body: unknown, method: "POST" | "DELETE" = "POST") => {
     try {
@@ -494,6 +505,7 @@ export function PointInTimeRecovery({ jobs }: { jobs: BackupJob[] }) {
         <RestorePitr
           archive={asking.archive}
           covers={asking.covers}
+          moment={asking.moment}
           points={asking.archive.id === archive?.id ? data.restorePoints : []}
           onStarted={watch}
           onRunning={watch}

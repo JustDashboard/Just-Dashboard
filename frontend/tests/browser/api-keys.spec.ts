@@ -239,6 +239,10 @@ test("an administrator makes a deploy key for chosen deployments and is shown ho
     "href",
     "/api/v1/cli/jd",
   )
+  const openapi = secret.getByRole("link", { name: "OpenAPI description" })
+  await expect(openapi).toHaveAttribute("href", "/api/v1/deploy/openapi.json")
+  // Following it must not leave the dialog that shows the secret once.
+  await expect(openapi).toHaveAttribute("target", "_blank")
   expect(calls).toEqual([
     {
       method: "POST",
