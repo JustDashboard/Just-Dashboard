@@ -218,12 +218,22 @@ A change that weakens any of these has to say so explicitly.
    ([Stream mode](../backend/remote-desktop.md#stream-mode)). Nothing is sent on them without a
    stream negotiated over the bridge's WebSocket, which is behind the dashboard's session, and no
    block is published on a server off a tailnet.
+   A game server's port is published on loopback like every other deployment publication; publishing
+   it on every interface, so players can join, is the operator's explicit choice of bind address under
+   the deployment's Runtime settings, warned about in preflight (`game_loopback_only`, `public_bind`)
+   and held to the firewall review, and admitting it through the firewall is the Firewall page's own
+   audited rule route ([game servers](../deployments/game-servers.md#ports-and-binds)).
    A database's port published from its Network page — on one of the host's own addresses, on every
    interface kept to a list, or to anywhere — is not the dashboard's socket either: it is the operator's
    explicit choice, in the destructive group and audited as `database.access.change`. A list is kept by
    the network module's gateway table, whose prerouting drop runs before Docker's translation, never by
    a host firewall rule that a published port's traffic does not meet
    ([databases](../backend/databases-proxy-platform.md)).
+   Scale to zero's wake ([sleep when idle](../deployments/scale-to-zero.md#the-wake-socket)) binds no
+   address at all: the proxy asks over a Unix socket beside host nginx's sites or inside the Docker Caddy
+   ingress's own `/config` volume, and the dashboard answers only a peer whose process is nginx or Caddy
+   (`SO_PEERCRED`). What it does — start an application asleep by design — is what any visitor's request
+   to the domain does.
    `GET /security/boundary` reports both halves as observed — a dashboard socket other than Caddy's
    on a routable address, no Caddy on the configured port, or a preview port that is funnelled or
    serves anything but a loopback upstream is a broken boundary on the Security overview — but the
@@ -240,7 +250,12 @@ A change that weakens any of these has to say so explicitly.
    no "run this string" kind, and adding one would be adding a second request-defined shell by another
    name. No blueprint may ship a default credential, publish a database port, declare a stateful workload
    without persistence, download without https plus a size limit and a checksum or declared version
-   source, name an uncontained path, or take privilege without a written reason. A multi-service
+   source, name an uncontained path, or take privilege without a written reason. An install-time file
+   is written only inside a volume the definition declares, with generated secrets as references the
+   helper fills, and a download is deployable only when a checksum pins it: both are written by a
+   short-lived helper container that mounts that one volume (the release's own image for a file, a
+   digest-pinned fetch image for a download), never by a host shell or into a host path, and fetched
+   bytes are hashed by the dashboard and refused on a mismatch before anything starts. A multi-service
    (Compose) template publishes exactly one port — its public service's, on loopback — keeps every other
    service on private networks the ingress never joins (`internal: true`, with no route out unless the
    service declares egress), takes no privilege, device, host
@@ -264,6 +279,14 @@ A change that weakens any of these has to say so explicitly.
     changing the scope and unlinking are session-only in the browser (an API key is refused) and root-only at
     the terminal, the heartbeat is a fixed field set that names nothing on the machine below `operate`, and
     the installer never handles a link credential. See [account link](../backend/account-link.md).
+13. The deployment operator reads only with the person's leave and runs nothing itself. Its reads are a
+    closed set of tools held to their own fields and bounds (`assistant.OperatorCalls`; a call to
+    anything else refuses the whole answer), each run only after the person allows that call, with the
+    person's own role and masked by the run diagnosis's masker. Its actions are proposals: the server
+    checks one and the page draws a card, and only the person's press runs it — as the request the
+    project's own button makes to that action's existing route, under that route's capability,
+    confirmation and audit. There is no shell, no command the model writes and no other path from an
+    answer to the host, and the route is a session's. See [the deployment operator](../deployments/operator.md).
 
 ## Invariant 2: what two-factor still guarantees
 

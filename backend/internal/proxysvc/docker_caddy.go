@@ -33,6 +33,9 @@ const dockerCaddyAccessRoot = dockerCaddyRoot + "/access"
 
 type dockerCaddy struct {
 	ID, Name, Source, Identity string
+	// ConfigSource is where the ingress's /config is on the host, which is
+	// where the dashboard's wake socket goes (deployment_sleep.go).
+	ConfigSource string
 	// StartedAt is when the container last started, as Docker reports it,
 	// so the overview can say how long the ingress has been up.
 	StartedAt string
@@ -167,6 +170,7 @@ func dockerCaddyFrom(c ingressContainer) (*dockerCaddy, error) {
 		return nil, fmt.Errorf("Caddy container %s needs a persisted Caddyfile, /config and /data before deployments can share it", found.Name)
 	}
 	found.Identity = routeDigest(found.Source + "\x00" + storage["/config"] + "\x00" + storage["/data"])
+	found.ConfigSource = storage["/config"]
 	return &found, nil
 }
 
@@ -368,7 +372,7 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 		if pages, err = dockerCaddyPagesDir(route.Name); err != nil {
 			return "", err
 		}
-	} else if len(route.ErrorPages) > 0 || route.InterceptErrors {
+	} else if len(route.ErrorPages) > 0 || route.InterceptErrors || route.Sleep != nil {
 		return "", errors.New("a route's pages are kept under its name")
 	}
 	directive := `respond "Deployment is preparing" 503`
@@ -393,6 +397,12 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 		}
 		if block != "" {
 			out += " {\n" + block + "  }"
+		}
+		if route.Sleep != nil {
+			// A stopped container's address answers nothing at all, and
+			// Caddy waits three seconds for it by default before the wake
+			// is asked; a running one answers in well under a millisecond.
+			out = withCaddyDialTimeout(out)
 		}
 		return out
 	}
@@ -489,15 +499,21 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 		fence = "  @outside not remote_ip " + strings.Join(route.AllowFrom, " ") + "\n" +
 			"  respond @outside \"Forbidden\" 403\n"
 	}
-	maintenance, errorPages := "", ""
+	maintenance, errorPages, sleep := "", "", ""
 	if pages != "" {
-		maintenance, errorPages = renderCaddyMaintenance(route.Maintenance, pages), renderCaddyErrorPages(route.ErrorPages, pages)
+		wake := ""
+		if route.Sleep != nil && len(servers) > 0 {
+			// After every check, so only a request the route would hand to
+			// the application can wake it.
+			sleep, wake = renderCaddySleep(route, pages), renderCaddyWakeErrors(route, pages)
+		}
+		maintenance, errorPages = renderCaddyMaintenance(route.Maintenance, pages), renderCaddyErrorPages(route.ErrorPages, pages, wake)
 	}
 	trace := ""
 	if route.Trace && route.Name != "" && len(servers) > 0 {
 		trace = caddyTraceDirectives
 	}
-	handling := trace + fence + maintenance + authDirective + gateDirective + bodyDirective + "  " + directive + "\n"
+	handling := trace + fence + maintenance + authDirective + gateDirective + bodyDirective + sleep + "  " + directive + "\n"
 	if fence != "" || maintenance != "" || route.ForwardAuth != nil || route.Canary != nil {
 		handling = "  route {\n" + indentCaddy(handling) + "  }\n"
 	}
@@ -655,16 +671,22 @@ func renderCaddyMaintenance(m DeploymentMaintenance, pages string) string {
 // renderCaddyErrorPages answers the route's chosen codes with its own pages.
 // A file served while Caddy handles an error keeps the error's status, so a
 // 502 is still a 502. Every other error keeps Caddy's own answer.
-func renderCaddyErrorPages(codes []int, pages string) string {
+//
+// wake, when the route's application may sleep, comes first: the
+// application not answering is woken before any page is chosen for it.
+func renderCaddyErrorPages(codes []int, pages, wake string) string {
 	if len(codes) == 0 {
-		return ""
+		if wake == "" {
+			return ""
+		}
+		return "  handle_errors {\n" + wake + "  }\n"
 	}
 	sorted := slices.Sorted(slices.Values(codes))
 	list := make([]string, 0, len(sorted))
 	for _, code := range sorted {
 		list = append(list, strconv.Itoa(code))
 	}
-	return "  handle_errors {\n" +
+	return "  handle_errors {\n" + wake +
 		"    @jd_page expression `{err.status_code} in [" + strings.Join(list, ", ") + "]`\n" +
 		"    handle @jd_page {\n" +
 		"      root * " + pages + "\n" +

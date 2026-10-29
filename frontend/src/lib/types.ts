@@ -3501,6 +3501,24 @@ export type GamePlayers = {
   observedAt: string
 }
 
+/**
+ * Where a game server's players connect, read from the live release: the
+ * port and protocol, the bind address, and what the host firewall does with
+ * it. `firewall` is "admits" (an allow rule matches), "drops" (on, refusing
+ * by default, nothing matches), "off", "open" (accepts by default) or
+ * "unknown" with a reason.
+ */
+export type GameReach = {
+  port: number
+  /** One number on both for a server that signals over TCP and plays over UDP. */
+  protocol: "tcp" | "udp" | "tcp+udp"
+  bind: string
+  public: boolean
+  firewall: "admits" | "drops" | "off" | "open" | "unknown"
+  reason?: string
+  editable?: boolean
+}
+
 export type GameOverview = {
   status: "available" | "unavailable"
   reason?: string
@@ -3510,6 +3528,9 @@ export type GameOverview = {
   address?: string
   players?: GamePlayers
   console: boolean
+  /** Why the game has no console of its own (Bedrock has no RCON). */
+  consoleReason?: string
+  reach?: GameReach
   files: BlueprintConfigFile[]
 }
 
@@ -3749,6 +3770,8 @@ export type DeploymentSummary = {
   pendingChanges: boolean
   /** The live release's runtime was stopped on purpose and waits for Start. */
   stopped?: boolean
+  /** When the live release was put to sleep, while it is asleep by design and the next request wakes it. */
+  asleepSince?: string
   /** Services in the live release's runtime: one, or a Compose stack's count. */
   serviceCount?: number
   lastRun?: DeploymentEngineRun
@@ -5532,6 +5555,8 @@ export type DeploymentConfiguration = {
     tailnet?: DeploymentRouteTailnet
     /** Recorded requests replayed against the candidate before the cutover; absent is off. */
     replay?: ReplayPlan
+    /** The container is stopped while nobody visits and the next request starts it; absent is off. */
+    sleep?: SleepPlan
     mounts?: {
       source: string
       target: string
@@ -5823,6 +5848,66 @@ export type RehearsalReport = {
  * environment's domains are sent to the candidate and its answers compared
  * with the live release's. An absent number is the server's default.
  */
+/**
+ * A plan's scale-to-zero terms (`deploy/sleep.go`): the live release's
+ * container is stopped once its route has served no request for the idle
+ * minutes, and the next request is held while it starts again. An absent
+ * number is the server's default.
+ */
+export type SleepPlan = {
+  enabled: boolean
+  /** Minutes without a request before it sleeps; absent is 15, 5 to 1440. */
+  idleMinutes?: number
+  /** How long a wake waits for the readiness checks; absent is 60 seconds, 5 to 600. */
+  wakeTimeoutSeconds?: number
+}
+
+/** One stretch an environment spent asleep. */
+export type SleepSpan = {
+  id: number
+  environmentId: number
+  releaseId: number
+  containerId?: string
+  idleMinutes: number
+  reason: string
+  lastRequestAt?: string
+  sleptAt: string
+  /** Absent while it is asleep now. */
+  wokeAt?: string
+  /** request, manual (Wake now), run, or repair (found started outside a wake). */
+  wakeTrigger?: string
+  /** The host a request asked for, the run, or who pressed Wake now. */
+  wakeDetail?: string
+  wakeSeconds?: number
+  wakeError?: string
+}
+
+/** GET …/environments/{env}/sleep. */
+export type SleepStatus = {
+  /** The live release's terms, the ones in force. */
+  enabled: boolean
+  idleMinutes: number
+  wakeTimeoutSeconds: number
+  holdSeconds: number
+  state: "off" | "awake" | "asleep" | "waking"
+  since?: string
+  reason?: string
+  lastRequestAt?: string
+  sleepsAt?: string
+  switch?: { driver: string; ready: boolean; on: boolean; since?: string }
+  /** The last seven days, newest first. */
+  recent: SleepSpan[]
+  asleepSeconds: number
+}
+
+/** What a wake came to. */
+export type WakeOutcome = {
+  status: number
+  upstream?: string
+  reason: string
+  seconds?: number
+}
+
 export type ReplayPlan = {
   enabled: boolean
   /** Distinct requests replayed, newest first; absent is 50, at most 500. */

@@ -31,6 +31,8 @@ anything only one container can hold refuses them, with the reason in words:
 | a writable mount | replicas would write to it at the same time |
 | a tailnet-only publication (`runtime.tailnet`) | tailscale serve, or the environment's tailnet gate, maps one port of the tailnet address to one container's loopback port |
 
+Scale to zero (`runtime.sleep`) refuses a plan of more than one replica in turn (`sleepRefusal`): a wake starts one container and holds the waiting request for it.
+
 A read-only mount is shared without harm. `PlanConfiguration.Validate` refuses such a plan on
 `runtime.replicas` (so a draft, a settings save, `jd config set` and a blueprint are all refused the same
 way, and the Runtime settings put the sentence under the control), and preflight's

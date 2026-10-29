@@ -39,6 +39,9 @@ type DeploymentSummary struct {
 	// by a stop operation. It is a distinct fact from Health: a stopped
 	// runtime has no health outcome to report at all.
 	Stopped bool `json:"stopped"`
+	// AsleepSince is when the live release was put to sleep, while it is
+	// asleep by design (sleep.go): stopped, and started by the next request.
+	AsleepSince *time.Time `json:"asleepSince,omitempty"`
 	// ServiceCount is the number of Compose services the live release's
 	// runtime snapshot recorded, or 1 for any release that is not a Compose
 	// build (a single container or static bundle is one service). It is 0
@@ -231,6 +234,8 @@ func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, p
 		       COALESCE(build.method, 'none'), COALESCE(build.config_json, '{}'),
 		       COALESCE(runtime.config_json, '{}'), COALESCE(live_runtime.port, 0),
 		       COALESCE(live_runtime.state, ''),
+		       COALESCE((SELECT sleep.slept_at FROM deploy_sleep_spans sleep
+		                  WHERE sleep.environment_id = e.id AND sleep.woke_at = 0), 0),
 		       COALESCE(NULLIF((
 		         SELECT d.resource_id FROM deploy_dependencies d
 		          WHERE d.environment_id = e.id AND d.kind = 'domain'
@@ -262,18 +267,23 @@ func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, p
 		var updated int64
 		var expectedDowntime, livePort int
 		var identityJSON, buildJSON, runtimeJSON, liveRuntimeState string
+		var asleepSince int64
 		if err := rows.Scan(
 			&summary.ID, &summary.Name, &summary.Profile, &updated,
 			&summary.EnvironmentID, &summary.EnvironmentName, &summary.EnvironmentKind,
 			&summary.DesiredRevision, &summary.LiveReleaseID, &summary.Strategy,
 			&expectedDowntime, &summary.LivePlanRevision, &summary.SourceKind,
 			&identityJSON, &summary.BuildMethod, &buildJSON, &runtimeJSON, &livePort, &liveRuntimeState,
-			&summary.Endpoint,
+			&asleepSince, &summary.Endpoint,
 		); err != nil {
 			return nil, err
 		}
 		summary.ExpectedDowntime = expectedDowntime != 0
 		summary.Stopped = liveRuntimeState == "stopped"
+		if asleepSince > 0 {
+			since := time.Unix(asleepSince, 0).UTC()
+			summary.AsleepSince = &since
+		}
 		summary.UpdatedAt = unixTime(updated)
 		if updated == 0 {
 			summary.UpdatedAt = time.Time{}

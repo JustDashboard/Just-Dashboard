@@ -26,7 +26,7 @@ import (
 
 // DeploymentPages are the pages a deployment's route can serve, by the name
 // its file carries.
-var DeploymentPages = []string{"maintenance", "404", "502", "503", "504"}
+var DeploymentPages = []string{"maintenance", "404", "502", "503", "504", "waking"}
 
 // ErrMaintenanceUnready refuses to turn on maintenance for a route that has
 // no check to read the switch: none is live, or it was written before the
@@ -56,6 +56,9 @@ func deploymentPageNames(route DeploymentRoute) []string {
 	pages := []string{"maintenance"}
 	for _, code := range slices.Sorted(slices.Values(route.ErrorPages)) {
 		pages = append(pages, strconv.Itoa(code))
+	}
+	if route.Sleep != nil {
+		pages = append(pages, "waking")
 	}
 	return pages
 }

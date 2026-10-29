@@ -293,7 +293,7 @@ func (o *DockerRuntimeOwner) StartCandidate(
 	if request.Snapshot.Compose != nil {
 		return o.startCompose(ctx, request, emit)
 	}
-	return o.startContainer(ctx, request)
+	return o.startContainer(ctx, request, emit)
 }
 
 // runtimePortMappings publishes the routed port on the leased or fixed host
@@ -305,9 +305,13 @@ func runtimePortMappings(plan RuntimePlanConfig, host string, port int) []docker
 		return ports
 	}
 	if plan.InternalPort > 0 && port > 0 {
-		ports = append(ports, dockerx.PortMapping{
-			HostIP: host, HostPort: port, ContainerPort: plan.InternalPort, Protocol: "tcp",
-		})
+		// A UDP primary is a fixed publication on the plan's bind address,
+		// never a leased loopback port: validation allows nothing else.
+		for _, protocol := range plan.publishedProtocols() {
+			ports = append(ports, dockerx.PortMapping{
+				HostIP: host, HostPort: port, ContainerPort: plan.InternalPort, Protocol: protocol,
+			})
+		}
 	}
 	for _, published := range plan.Ports {
 		ports = append(ports, dockerx.PortMapping{
@@ -356,12 +360,19 @@ func runtimeMountSpecs(plan RuntimePlanConfig) []dockerx.MountSpec {
 func (o *DockerRuntimeOwner) startContainer(
 	ctx context.Context,
 	request CandidateRuntimeRequest,
+	emit func(BuildLog) error,
 ) (StartedRuntime, error) {
 	image := immutableRuntimeImage(request.Snapshot.Image)
 	if image == "" {
 		return StartedRuntime{}, fmt.Errorf("%w: candidate has no immutable image", ErrArtifactMissing)
 	}
 	plan := request.Snapshot.Plan
+	// Install files and pinned artifacts are in the volume before the
+	// container that reads them exists, written by helpers that mount only
+	// that volume (runtime_seeds.go).
+	if err := materializeSeeds(ctx, o.client, request, image, emit); err != nil {
+		return StartedRuntime{}, err
+	}
 	environment, variableNames := containerRuntimeEnvironment(plan, request.RuntimeVariables)
 	environment = append(environment, withdrawnProxyTrust(request.Snapshot, request.RuntimeVariables)...)
 	environment = append(environment, webConcurrencyEnvironment(request.Snapshot, request.RuntimeVariables)...)
@@ -416,7 +427,7 @@ func (o *DockerRuntimeOwner) startContainer(
 			return StartedRuntime{}, err
 		}
 		for _, binding := range result.Ports {
-			if binding.ContainerPort == plan.InternalPort && binding.Protocol == "tcp" {
+			if binding.ContainerPort == plan.InternalPort && binding.Protocol == plan.effectiveProtocol() {
 				host, port = binding.HostIP, binding.HostPort
 				break
 			}

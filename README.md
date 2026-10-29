@@ -98,6 +98,8 @@ free.
 
 - Deploy from a repository, an image, a Compose stack or **117 reviewed templates**, 35 of them
   multi-service stacks — an application with its own database, cache or worker
+- Minecraft Java and Bedrock servers with their console, players and settings file, kept on
+  loopback until you open the port and its firewall rule
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
 - Push to deploy, plus pull-request previews only your tailnet can reach — Compose stacks too, every
   service isolated on the preview's own network and storage
@@ -112,6 +114,7 @@ free.
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Migrations rehearsed on a throwaway copy of the database, restored from its backup, before production
 - Real recent requests replayed against a new release before traffic moves, so a page it broke stops it
+- Sleep when idle: an app nobody visits is stopped, and the next visitor's request starts it and gets the page after a pause
 - Each release remembers where its database stood when it went live: bring that data back into a side copy to compare or restore from
 - Variables per environment, plus shared ones defined once for the server or a project
 - Variables read from HashiCorp Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager or Azure Key Vault, fresh for each run
@@ -121,6 +124,9 @@ free.
 - A maintenance page switched on at once, without a deploy, and the app's own error pages
 - Build logs, runtime, console, request logs and traffic alerts per project
 - A failed run named from its own output, and on request explained by your own model, secrets masked
+- Diagnose: ask your own model what is wrong with a deployment; it reads runs, logs, usage, events,
+  alerts, firewall rules and pending updates only as you allow each read, and proposes a restart,
+  rollback or maintenance that runs only when you press it
 - Request insights that count real visitors apart from bots, with their devices and pages
 - Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,
   e-mail and webhooks

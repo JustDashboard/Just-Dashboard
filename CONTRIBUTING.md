@@ -304,7 +304,14 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks -count=1 -v -timeout 2h`.
   Each sweep uses unique volume names. Startup/readiness is separate from first-use account setup;
   the [template matrix](docs/audits/2026-09-22-deploy-new/template-matrix.md) records which templates
-  generate credentials, require setup, have no application login, or remain unavailable.
+  generate credentials, require setup, have no application login, or remain unavailable. The two
+  Minecraft templates start with their seeded `server.properties` and answer their protocol checks
+  (`JD_BLUEPRINT_ONLY=minecraft-java,minecraft-bedrock`); the Java server downloads its build and
+  generates a world on the first start, so give it several minutes. Changes to install-time files,
+  pinned artifacts or the helper that writes them (`deploy/runtime_seeds.go`, `dockerx/volumeseed.go`)
+  also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveReleaseSeedsAreWrittenIntoTheVolumeBeforeStart -count=1 -v`,
+  which needs the local `postgres:17-alpine` image and network access to GitHub's raw file host, and
+  removes its volume and helpers ([game servers](docs/internal/deployments/game-servers.md#tests)).
 - Multi-service (Compose) templates have a sweep of their own. It saves each template's source the way
   the new-project page does (the server's render of the definition), resolves and pulls every service
   image through the Compose build step, starts the stack through the runtime owner with generated
@@ -653,6 +660,19 @@ to the contribution terms above, including the additional licence grant to the p
   every page, its own container gone and the record holding only the test's requests (the replay never
   passes through the ingress); then a release that answers like the first and goes live. It numbers
   its environment far from any other and removes its containers.
+- Changes to scale-to-zero (`deploy/sleep.go`, `deploy/sleep_wake.go`, `proxysvc/deployment_sleep.go`,
+  `runtime.sleep`, or a route's wake) also run, as root on a Docker host,
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run 'TestLiveDeploymentRouteWakesOnNginx|TestLiveDockerCaddyRouteWakes' -count=1 -v`
+  — a real `traefik/whoami` behind the host's real nginx (a private prefix, its workers reading the
+  test's folder) and behind a real `caddy:2-alpine`, with a wake socket of the test's: the first request
+  after a stop is answered by the application, a POST through the switch keeps its body, a visitor
+  without the route's password wakes nothing, a wake still starting is the waking page and nothing to
+  wake is the route's 502 — and
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveSleepingDeploymentWakesOnTheFirstRequest -count=1 -v`,
+  the whole feature against a Caddy ingress of its own on a loopback port (`JD_INGRESS_CONTAINER`) with
+  the real engine, sleeper and wake socket: the idle pass stops the container without removing it, the
+  next request through the ingress is answered by the application, the audit and the lifecycle feed say
+  why, and Wake now wakes it again. Both remove what they created.
 - Changes to the engine, its reconciler or run persistence also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun -count=1 -v`.
   It builds `internal/deploy/testdata/engine-host`, SIGKILLs that real second process inside every

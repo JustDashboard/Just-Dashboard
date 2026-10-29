@@ -23,6 +23,8 @@ export function checkTarget(check: Check) {
   }
   if (config.path) return `GET ${config.path}${config.acceptAnyAnswer ? " (any answer)" : ""}`
   if (check.kind === "docker_health") return "the image's HEALTHCHECK"
+  if (check.kind === "game_handshake") return `a Minecraft status handshake on ${config.port}`
+  if (check.kind === "udp_probe") return `an answered datagram on ${config.port}/udp`
   if (config.command?.length) return config.command.join(" ")
   if (config.port) return `a connection on ${config.port}`
   return check.kind

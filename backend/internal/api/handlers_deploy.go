@@ -96,6 +96,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/environments/{env}/git-watch", s.handle(s.handleDeploymentGitWatch))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/rollback-watch", s.handle(s.handleDeploymentRollbackWatch))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/canary", s.handle(s.handleDeploymentCanary))
+		s.mountDeploymentSleepReads(r)
 		r.Method(http.MethodGet, "/{id}/environments/{env}/rehearsal", s.handle(s.handleDeploymentRehearsal))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/database-links", s.handle(s.handleDeploymentDatabaseLinks))
 		// The copies of a release's data an environment holds: what they are
@@ -132,9 +133,14 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// untouched.
 			r.Method(http.MethodPost, "/{id}/environments/{env}/canary/promote", s.handle(s.handleDeploymentCanaryPromote))
 			r.Method(http.MethodPost, "/{id}/environments/{env}/canary/abort", s.handle(s.handleDeploymentCanaryAbort))
+			s.mountDeploymentSleepWake(r)
 			// Asking about a failure takes what asking the SQL editor's
 			// assistant takes: it spends the install's model budget.
 			r.Method(http.MethodPost, "/{id}/runs/{run}/diagnosis", s.handle(s.handleDeploymentRunDiagnose))
+			// The operator reads with the person's leave a call at a time and
+			// proposes actions their press runs, so it is a session's: there
+			// is nobody to ask behind a key.
+			r.With(httpx.RequireSession).Method(http.MethodPost, "/{id}/assistant", s.handle(s.handleDeploymentOperator))
 			// Merging and commenting speak on GitHub as the dashboard's own
 			// account, which is why an API token may not: the same rule as
 			// the Git page's write routes, with the session requirement the
