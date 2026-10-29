@@ -49,6 +49,7 @@ import { Insights } from "@/components/deploy/insights"
 import { Availability } from "@/components/deploy/availability"
 import { RunRow } from "@/components/deploy/run-row"
 import { UsageTiles } from "@/components/deploy/usage-tiles"
+import { RightSizeCard } from "@/components/deploy/right-size"
 import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
 import { ReleaseWatch, useReleaseWatch } from "@/components/deploy/release-watch"
 
@@ -253,6 +254,20 @@ export function ProjectOverview() {
       </PanelBody>
     </Panel>,
   ])
+
+  // What its limits should be, from the history of what it used: under the
+  // readings it is drawn from, and above what shipped. The card draws nothing
+  // for a Compose stack, whose file keeps its limits, or a legacy project.
+  if (project.normalized && !project.archived)
+    blocks.push([
+      "right-size",
+      <RightSizeCard
+        key="right-size"
+        projectId={project.projectId}
+        environmentId={project.environmentId}
+        onApplied={project.refresh}
+      />,
+    ])
 
   if (access)
     blocks.push([

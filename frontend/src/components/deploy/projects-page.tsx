@@ -51,6 +51,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { ArchivedProjects } from "@/components/deploy/archived-projects"
+import { FleetRightSize } from "@/components/deploy/right-size"
 import { ProjectCard, ProjectRow, runClock, stageOf } from "@/components/deploy/fleet-card"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { MiniReleasePath } from "@/components/deploy/run-pipeline"
@@ -468,6 +469,10 @@ function Fleet() {
               )}
             </div>
           )}
+
+          {/* After the projects: the limits worth changing are a question
+              about the fleet once its state has been read. */}
+          {deployments.length > 0 && <FleetRightSize />}
         </div>
       )}
       {dialog}

@@ -1365,6 +1365,99 @@
         "title": "api.envSetRequest",
         "type": "object"
       },
+      "api.environmentSizing": {
+        "properties": {
+          "apply": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/metrics.SizingApply"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cpu": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/metrics.CPUSizing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "environmentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "environmentKind": {
+            "type": "string"
+          },
+          "environmentName": {
+            "type": "string"
+          },
+          "memory": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/metrics.MemorySizing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offBy": {
+            "type": "number"
+          },
+          "oom": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/api.sizingOOMs"
+              }
+            ]
+          },
+          "pending": {
+            "type": "boolean"
+          },
+          "projectId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "projectName": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "too_tight",
+              "oversized",
+              "unlimited",
+              "right",
+              "insufficient_history"
+            ],
+            "type": "string"
+          },
+          "window": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/metrics.SizingWindow"
+              }
+            ]
+          }
+        },
+        "title": "api.environmentSizing",
+        "type": "object"
+      },
       "api.fleetPullRequestCounts": {
         "properties": {
           "open": {
@@ -1377,6 +1470,31 @@
           }
         },
         "title": "api.fleetPullRequestCounts",
+        "type": "object"
+      },
+      "api.fleetSizing": {
+        "properties": {
+          "environments": {
+            "items": {
+              "$ref": "#/components/schemas/api.environmentSizing"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "retentionSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "title": "api.fleetSizing",
         "type": "object"
       },
       "api.gameConsoleRequest": {
@@ -2102,6 +2220,26 @@
           }
         },
         "title": "api.sitePageWrite",
+        "type": "object"
+      },
+      "api.sizingOOMs": {
+        "properties": {
+          "kills": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "since": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "watching": {
+            "type": "boolean"
+          }
+        },
+        "title": "api.sizingOOMs",
         "type": "object"
       },
       "api.stagingCreateRequest": {
@@ -13223,6 +13361,55 @@
         "title": "logdrain.Write",
         "type": "object"
       },
+      "metrics.CPUSizing": {
+        "properties": {
+          "limit": {
+            "type": "number"
+          },
+          "liveLimit": {
+            "type": "number"
+          },
+          "offBy": {
+            "type": "number"
+          },
+          "p95": {
+            "type": "number"
+          },
+          "peak": {
+            "type": "number"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "suggested": {
+            "type": "number"
+          },
+          "throttledShare": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "verdict": {
+            "enum": [
+              "too_tight",
+              "oversized",
+              "unlimited",
+              "right",
+              "insufficient_history"
+            ],
+            "type": "string"
+          }
+        },
+        "title": "metrics.CPUSizing",
+        "type": "object"
+      },
       "metrics.ContainerIdentityHistory": {
         "properties": {
           "earliest": {
@@ -13319,6 +13506,56 @@
           }
         },
         "title": "metrics.ContainerIdentitySeries",
+        "type": "object"
+      },
+      "metrics.MemorySizing": {
+        "properties": {
+          "limitMb": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "liveLimitMb": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "offBy": {
+            "type": "number"
+          },
+          "oomKills": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "p95Mb": {
+            "type": "number"
+          },
+          "peakMb": {
+            "type": "number"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "suggestedMb": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "verdict": {
+            "enum": [
+              "too_tight",
+              "oversized",
+              "unlimited",
+              "right",
+              "insufficient_history"
+            ],
+            "type": "string"
+          }
+        },
+        "title": "metrics.MemorySizing",
         "type": "object"
       },
       "metrics.Point": {
@@ -13563,6 +13800,65 @@
           }
         },
         "title": "metrics.Series",
+        "type": "object"
+      },
+      "metrics.SizingApply": {
+        "properties": {
+          "cpus": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "memoryMb": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "title": "metrics.SizingApply",
+        "type": "object"
+      },
+      "metrics.SizingWindow": {
+        "properties": {
+          "containers": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "coveredSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "from": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "intervalSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "neededSeconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "samples": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "to": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "metrics.SizingWindow",
         "type": "object"
       },
       "proxysvc.MaintenanceSwitch": {
@@ -16222,6 +16518,42 @@
           }
         }
       ]
+    },
+    "/deploy/sizing": {
+      "get": {
+        "operationId": "deploymentFleetSizing",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.fleetSizing"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Read every environment's right-sizing verdict from its recorded usage, the ones most off first; a narrowed deploy key sees its own deployments.",
+        "tags": [
+          "fleet"
+        ],
+        "x-deploy-key": "allowed"
+      }
     },
     "/deploy/traffic": {
       "get": {
@@ -19544,6 +19876,64 @@
           "description": "The schedule's id.",
           "in": "path",
           "name": "schedule",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ]
+    },
+    "/deploy/{id}/environments/{env}/sizing": {
+      "get": {
+        "operationId": "deploymentSizing",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.environmentSizing"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Read the memory and CPU limits an environment should have from its recorded usage: p95, peak, the live limit, OOM kills and throttling, and the verdict.",
+        "tags": [
+          "fleet"
+        ],
+        "x-deploy-key": "allowed"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The environment's id.",
+          "in": "path",
+          "name": "env",
           "required": true,
           "schema": {
             "format": "int64",

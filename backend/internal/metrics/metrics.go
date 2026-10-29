@@ -302,6 +302,31 @@ type ContainerSampler interface {
 	SampleAll(ctx context.Context) ([]dockerx.ContainerStats, error)
 }
 
+// VolumeSize is one named volume's size at a moment.
+type VolumeSize struct {
+	Name string
+	Size int64
+}
+
+// VolumeSampler names the volumes worth keeping a size history of, and reads
+// their sizes. Which volumes those are is the deployments' to say (the ones a
+// deployment owns), so the recorder is handed the answer rather than asking
+// Docker for every volume on the host.
+type VolumeSampler interface {
+	SampleVolumes(ctx context.Context) ([]VolumeSize, error)
+}
+
+// VolumeSamplerFunc adapts a function to VolumeSampler.
+type VolumeSamplerFunc func(ctx context.Context) ([]VolumeSize, error)
+
+func (f VolumeSamplerFunc) SampleVolumes(ctx context.Context) ([]VolumeSize, error) { return f(ctx) }
+
+// VolumeInterval is how often volume sizes are sampled. A volume is measured
+// by Docker's disk walk, which takes seconds on a busy host and is shared with
+// the Docker pages through a cache, and a size history wants its shape over
+// days rather than its every quarter minute.
+const VolumeInterval = 15 * time.Minute
+
 // Recorder samples the host and answers questions about the past.
 type Recorder struct {
 	db        *sql.DB
@@ -318,6 +343,11 @@ type Recorder struct {
 	// containers is nil on a host with no Docker socket, which is the whole
 	// of the handling that case needs.
 	containers ContainerSampler
+	// volumes is nil until WithVolumes; it runs on a loop of its own every
+	// volumeEvery, so a slow disk walk never delays a host sample.
+	volumes     VolumeSampler
+	volumeEvery time.Duration
+	volumeQuiet bool
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -325,6 +355,14 @@ type Recorder struct {
 	// Whether the last container sample failed, so a host without Docker says
 	// so once instead of every interval for as long as it runs.
 	dockerQuiet bool
+
+	// sizing holds right-sizing reads for sizingCacheTTL: a week of one
+	// environment's samples is a fifth of a second to fold, a fleet is that
+	// many times over, and a 95th percentile of a week does not move in five
+	// minutes. The judgement on top is redone on every request, so a limit
+	// saved a moment ago is judged at once.
+	sizingMu    sync.Mutex
+	sizingCache map[string]sizingCached
 }
 
 // New builds a recorder. An interval or retention outside the supported band
@@ -353,6 +391,21 @@ func New(st *store.Store, log *slog.Logger, interval, retention time.Duration) *
 func (r *Recorder) WithContainers(sampler ContainerSampler) *Recorder {
 	r.containers = sampler
 	return r
+}
+
+// WithVolumes attaches the volume-size history, sampled every VolumeInterval.
+func (r *Recorder) WithVolumes(sampler VolumeSampler) *Recorder {
+	r.volumes, r.volumeEvery = sampler, VolumeInterval
+	return r
+}
+
+// VolumeSampling is how often volume sizes are recorded, or zero when they
+// are not.
+func (r *Recorder) VolumeSampling() time.Duration {
+	if r.volumes == nil || !r.Enabled() {
+		return 0
+	}
+	return r.volumeEvery
 }
 
 // Enabled reports whether history is being recorded at all.
@@ -411,6 +464,18 @@ func (r *Recorder) Stop() {
 
 func (r *Recorder) loop(ctx context.Context, done chan struct{}) {
 	defer close(done)
+	// Volumes on a loop of their own: the disk walk behind a volume's size can
+	// take minutes on a cold cache, and the host's fifteen-second record must
+	// not wait on it. Deferred after close(done), so it is waited for first.
+	var volumes sync.WaitGroup
+	defer volumes.Wait()
+	if r.volumes != nil {
+		volumes.Add(1)
+		go func() {
+			defer volumes.Done()
+			r.volumeLoop(ctx)
+		}()
+	}
 	t := time.NewTicker(r.interval)
 	defer t.Stop()
 	lastPrune := time.Now()
@@ -448,6 +513,72 @@ func (r *Recorder) sample(ctx context.Context) error {
 	// instead of scattering across a few hundred milliseconds.
 	r.recordContainers(ctx, snap.TS)
 	return nil
+}
+
+// volumeLoop records the volumes' sizes now and then every volumeEvery.
+func (r *Recorder) volumeLoop(ctx context.Context) {
+	t := time.NewTicker(r.volumeEvery)
+	defer t.Stop()
+	for {
+		r.recordVolumes(ctx, time.Now())
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// recordVolumes stores one row per volume the sampler names. Like the
+// containers' record it logs a failure once rather than returning it: a host
+// without Docker still records everything else.
+func (r *Recorder) recordVolumes(ctx context.Context, at time.Time) {
+	if r.volumes == nil {
+		return
+	}
+	readCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	sizes, err := r.volumes.SampleVolumes(readCtx)
+	if err != nil {
+		if !r.volumeQuiet && ctx.Err() == nil {
+			r.volumeQuiet = true
+			r.log.Info("not recording volume sizes", "error", err)
+		}
+		return
+	}
+	r.volumeQuiet = false
+	if err := r.writeVolumes(ctx, at, sizes); err != nil && ctx.Err() == nil {
+		r.log.Warn("volume size write failed", "error", err)
+	}
+}
+
+func (r *Recorder) writeVolumes(ctx context.Context, at time.Time, sizes []VolumeSize) error {
+	if len(sizes) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO metric_volume_samples (ts, name, size_bytes) VALUES (?,?,?)
+		ON CONFLICT(name, ts) DO UPDATE SET size_bytes = excluded.size_bytes`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, v := range sizes {
+		// Docker reports -1 for a size its walk did not reach; that is no
+		// measurement, not an empty volume.
+		if v.Name == "" || v.Size < 0 {
+			continue
+		}
+		if _, err := stmt.ExecContext(ctx, at.Unix(), v.Name, v.Size); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // recordMounts stores one row per real filesystem. The snapshot has already
@@ -603,8 +734,8 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 		INSERT INTO metric_container_samples
 		  (ts, name, cpu_percent, mem_bytes, mem_limit, mem_percent, net_rx, net_tx, pids,
 		   block_read, block_write, container_id, size_rw, network_available, block_available,
-		   mem_limited, cpu_total, sample_time)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		   mem_limited, cpu_total, sample_time, cpu_periods, cpu_throttled)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(name, ts) DO UPDATE SET
 		  cpu_percent = excluded.cpu_percent,
 		  mem_bytes   = excluded.mem_bytes,
@@ -621,7 +752,9 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 		  block_available = excluded.block_available,
 		  mem_limited = excluded.mem_limited,
 		  cpu_total = excluded.cpu_total,
-		  sample_time = excluded.sample_time`)
+		  sample_time = excluded.sample_time,
+		  cpu_periods = excluded.cpu_periods,
+		  cpu_throttled = excluded.cpu_throttled`)
 	if err != nil {
 		return err
 	}
@@ -635,12 +768,19 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 		if !st.TS.IsZero() {
 			observed = st.TS
 		}
+		// A container with no CPU quota has no scheduler periods to count;
+		// NULL, not zero, so it never reads as a limit it was never under.
+		var periods, throttled *int64
+		if st.CPUPeriods > 0 {
+			p, th := int64(st.CPUPeriods), int64(st.CPUThrottledPeriods)
+			periods, throttled = &p, &th
+		}
 		if _, err := stmt.ExecContext(ctx, observed.Unix(), st.Name, st.CPUPercent,
 			int64(st.MemUsage), int64(st.MemLimit), st.MemPercent,
 			int64(st.NetRx), int64(st.NetTx), int64(st.PIDs),
 			int64(st.BlockRead), int64(st.BlockWrite), st.ID, st.SizeRw,
 			st.NetworkAvailable, st.BlockAvailable, st.MemLimited, int64(st.CPUTotal),
-			float64(observed.UnixNano())/1e9); err != nil {
+			float64(observed.UnixNano())/1e9, periods, throttled); err != nil {
 			return err
 		}
 	}
@@ -790,6 +930,9 @@ func (r *Recorder) prune(ctx context.Context) error {
 		return err
 	}
 	if _, err := r.db.ExecContext(ctx, `DELETE FROM metric_container_samples WHERE ts < ?`, cutoff); err != nil {
+		return err
+	}
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM metric_volume_samples WHERE ts < ?`, cutoff); err != nil {
 		return err
 	}
 	_, err := r.db.ExecContext(ctx, `DELETE FROM metric_mount_samples WHERE ts < ?`, cutoff)

@@ -20,6 +20,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/githubapp"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logdrain"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/secretstore"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/version"
@@ -128,6 +129,7 @@ var openapiEnums = map[reflect.Type][]string{
 	reflect.TypeOf(deploy.TriggerKind("")):         {"manual", "git_push", "legacy_hook", "generic_hook", "github", "gitlab", "bitbucket", "gitea", "api", "schedule", "preview", "rollback", "migration", "auto_rollback"},
 	reflect.TypeOf(deploy.RunState("")):            {"requested", "validating", "queued", "preparing", "running", "verifying", "activating", "failed_activation", "restoring_previous", "cancelling", "succeeded", "failed", "cancelled", "rolled_back", "superseded"},
 	reflect.TypeOf(deploy.StepKey("")):             {"resolve_source", "acquire_source", "analyze_plan", "prepare_context", "build_artifact", "render_runtime", "release_task", "backup_gate", "rehearse_migration", "provision_certificate", "start_candidate", "verify_readiness", "verify_smoke", "replay_traffic", "activate", "retire_previous", "record_release", "notify", "legacy_pipeline"},
+	reflect.TypeOf(metrics.Verdict("")):            {"too_tight", "oversized", "unlimited", "right", "insufficient_history"},
 	reflect.TypeOf(deploy.StepState("")):           {"pending", "blocked", "running", "passed", "warning", "failed", "skipped", "cancelled", "unavailable"},
 	reflect.TypeOf(deploy.CheckKind("")):           {"http", "tcp", "docker_health", "command", "public_route", "dns", "tls", "game_handshake", "backup_freshness"},
 	reflect.TypeOf(deploy.EventType("")):           {"run.state", "step.state", "step.log", "step.evidence", "queue.position", "finding", "artifact", "heartbeat", "resync"},
@@ -200,23 +202,25 @@ var deployOperations = map[string]deployOperation{
 	"POST /deploy/{id}/removal-plan": {Tag: "fleet", Summary: "Plan the removal of a deployment's managed resources: what would be removed, what is kept, and what has to be confirmed.", Response: (*deploy.RemovalPlan)(nil)},
 	"POST /deploy/{id}/remove-managed": {Tag: "fleet", Summary: "Remove a deployment's managed resources as planned, with the typed confirmation.", Request: deploy.RemoveManagedRequest{}, Response: (*deploy.RemovalExecution)(nil),
 		Note: "Destructive. A removal that stopped part-way answers with its error status and the execution so far, under error and execution."},
-	"POST /deploy/{id}/duplicate":       {Tag: "fleet", Summary: "Duplicate a deployment into a new draft under another name.", Request: deploymentDuplicateRequest{}, Response: (*deploy.Draft)(nil), Status: http.StatusCreated},
-	"POST /deploy/{id}/rotate-secret":   {Tag: "fleet", Summary: "Issue a new secret for a legacy project's deploy hook, returned once.", Response: shape{"secret": ""}},
-	"GET /deploy/{id}/env":              {Tag: "fleet", Summary: "List a legacy project's variables, each value masked to its first and last characters.", Response: []deploy.EnvVar(nil)},
-	"PUT /deploy/{id}/env":              {Tag: "fleet", Summary: "Set one legacy project variable.", Request: envSetRequest{}, Status: http.StatusNoContent},
-	"GET /deploy/{id}/env/reveal":       {Tag: "fleet", Summary: "Reveal a legacy project's variables with their values; audited.", Response: []deploy.EnvVar(nil)},
-	"DELETE /deploy/{id}/env/{key}":     {Tag: "fleet", Summary: "Remove one legacy project variable.", Status: http.StatusNoContent},
-	"GET /deploy/{id}/commits":          {Tag: "fleet", Summary: "List the recent commits of a legacy project's checkout.", Query: []openapiQuery{queryLimit}, Response: []deploy.Commit(nil)},
-	"GET /deploy/{id}/insights":         {Tag: "fleet", Summary: "Read a deployment's insights over the last days: run outcomes and durations, and what its route served.", Query: []openapiQuery{{"days", "integer", "How many days back to read."}}, Response: (*deploy.DeploymentInsights)(nil)},
-	"GET /deploy/{id}/availability":     {Tag: "fleet", Summary: "Read how much of the last day, week and month the production release was running and healthy, from the persisted container events.", Response: deploy.Availability{}},
-	"GET /deploy/{id}/operations":       {Tag: "fleet", Summary: "Read the operations summary of a deployment: its releases, pending changes and recent work.", Response: (*deploy.OperationsSummary)(nil)},
-	"GET /deploy/{id}/lifecycle":        {Tag: "fleet", Summary: "List a deployment's container lifecycle events, newest first.", Query: []openapiQuery{queryLimit}, Response: deploymentLifecycle{}},
-	"GET /deploy/{id}/lifecycle/stream": {Tag: "fleet", Summary: "Follow a deployment's container lifecycle events over a WebSocket.", Stream: true},
-	"GET /deploy/{id}/favicon":          {Tag: "fleet", Summary: "Serve the favicon of the deployed site, fetched through the dashboard and cached.", Content: "image/*"},
-	"GET /deploy/{id}/preview-frame":    {Tag: "fleet", Summary: "Serve the HTML page that frames the deployed site for the dashboard's preview.", Content: "text/html"},
-	"POST /deploy/import/preview":       {Tag: "fleet", Summary: "Inspect a folder, checkout, container or stack on this server as a source to adopt, without changing it.", Request: deploy.DraftSourceConfig{}, Response: (*deploy.ImportPreview)(nil)},
-	"POST /deploy/import/adopt":         {Tag: "fleet", Summary: "Adopt an existing workload on this server as a deployment by committing its import draft.", Request: importAdoptRequest{}, Response: (*deploy.DraftCommitResult)(nil), Status: http.StatusCreated, Note: "Answers 200 when the draft was already committed."},
-	"GET /deploy/pull-requests":         {Tag: "fleet", Summary: "Count the open pull requests and previews of every deployment.", Response: shape{"projects": map[string]fleetPullRequestCounts(nil)}},
+	"POST /deploy/{id}/duplicate":                {Tag: "fleet", Summary: "Duplicate a deployment into a new draft under another name.", Request: deploymentDuplicateRequest{}, Response: (*deploy.Draft)(nil), Status: http.StatusCreated},
+	"POST /deploy/{id}/rotate-secret":            {Tag: "fleet", Summary: "Issue a new secret for a legacy project's deploy hook, returned once.", Response: shape{"secret": ""}},
+	"GET /deploy/{id}/env":                       {Tag: "fleet", Summary: "List a legacy project's variables, each value masked to its first and last characters.", Response: []deploy.EnvVar(nil)},
+	"PUT /deploy/{id}/env":                       {Tag: "fleet", Summary: "Set one legacy project variable.", Request: envSetRequest{}, Status: http.StatusNoContent},
+	"GET /deploy/{id}/env/reveal":                {Tag: "fleet", Summary: "Reveal a legacy project's variables with their values; audited.", Response: []deploy.EnvVar(nil)},
+	"DELETE /deploy/{id}/env/{key}":              {Tag: "fleet", Summary: "Remove one legacy project variable.", Status: http.StatusNoContent},
+	"GET /deploy/{id}/commits":                   {Tag: "fleet", Summary: "List the recent commits of a legacy project's checkout.", Query: []openapiQuery{queryLimit}, Response: []deploy.Commit(nil)},
+	"GET /deploy/{id}/insights":                  {Tag: "fleet", Summary: "Read a deployment's insights over the last days: run outcomes and durations, and what its route served.", Query: []openapiQuery{{"days", "integer", "How many days back to read."}}, Response: (*deploy.DeploymentInsights)(nil)},
+	"GET /deploy/{id}/availability":              {Tag: "fleet", Summary: "Read how much of the last day, week and month the production release was running and healthy, from the persisted container events.", Response: deploy.Availability{}},
+	"GET /deploy/sizing":                         {Tag: "fleet", Summary: "Read every environment's right-sizing verdict from its recorded usage, the ones most off first; a narrowed deploy key sees its own deployments.", Response: fleetSizing{}},
+	"GET /deploy/{id}/environments/{env}/sizing": {Tag: "fleet", Summary: "Read the memory and CPU limits an environment should have from its recorded usage: p95, peak, the live limit, OOM kills and throttling, and the verdict.", Response: (*environmentSizing)(nil)},
+	"GET /deploy/{id}/operations":                {Tag: "fleet", Summary: "Read the operations summary of a deployment: its releases, pending changes and recent work.", Response: (*deploy.OperationsSummary)(nil)},
+	"GET /deploy/{id}/lifecycle":                 {Tag: "fleet", Summary: "List a deployment's container lifecycle events, newest first.", Query: []openapiQuery{queryLimit}, Response: deploymentLifecycle{}},
+	"GET /deploy/{id}/lifecycle/stream":          {Tag: "fleet", Summary: "Follow a deployment's container lifecycle events over a WebSocket.", Stream: true},
+	"GET /deploy/{id}/favicon":                   {Tag: "fleet", Summary: "Serve the favicon of the deployed site, fetched through the dashboard and cached.", Content: "image/*"},
+	"GET /deploy/{id}/preview-frame":             {Tag: "fleet", Summary: "Serve the HTML page that frames the deployed site for the dashboard's preview.", Content: "text/html"},
+	"POST /deploy/import/preview":                {Tag: "fleet", Summary: "Inspect a folder, checkout, container or stack on this server as a source to adopt, without changing it.", Request: deploy.DraftSourceConfig{}, Response: (*deploy.ImportPreview)(nil)},
+	"POST /deploy/import/adopt":                  {Tag: "fleet", Summary: "Adopt an existing workload on this server as a deployment by committing its import draft.", Request: importAdoptRequest{}, Response: (*deploy.DraftCommitResult)(nil), Status: http.StatusCreated, Note: "Answers 200 when the draft was already committed."},
+	"GET /deploy/pull-requests":                  {Tag: "fleet", Summary: "Count the open pull requests and previews of every deployment.", Response: shape{"projects": map[string]fleetPullRequestCounts(nil)}},
 
 	// This description.
 	"GET /deploy/openapi.json": {Tag: "keys", Summary: "Serve this description of the deployment API as OpenAPI 3.1 JSON.", Content: "application/json", Note: "Static: generated from the router and the handlers' types the first time it is asked for. Any signed-in account and any key reads it, a deploy key included."},
