@@ -698,6 +698,14 @@ func (e *NormalizedStepExecutor) activate(
 			}
 			routeValue.CertPath, routeValue.KeyPath = certPath, keyPath
 		}
+		if snapshot.Plan.SkewProtection {
+			pinned := e.activationPin(ctx, execution.Run, release.Release, snapshot.Plan)
+			e.withSkew(ctx, &routeValue, release.Release.EnvironmentID, release.Release.ID, pinned)
+			if pinned != nil {
+				_ = stepLog(execution, "status", fmt.Sprintf("Visitors release #%d answered first stay on it while it is kept; everyone else gets release #%d",
+					e.releaseNumber(ctx, pinned.ReleaseID), release.Release.Number))
+			}
+		}
 		route = &routeValue
 		applied, applyErr := e.proxy.ApplyDeploymentRoute(ctx, routeValue)
 		appliedRoute = &applied
@@ -929,6 +937,12 @@ func (e *NormalizedStepExecutor) stopCandidateAndRestore(
 	recovery := recoveryEvidence{CandidateStopped: stopErr == nil, Stop: &stop, RouteRestored: route == nil}
 	if route != nil && e.proxy != nil {
 		recovery.RouteRestored = e.proxy.RestoreDeploymentRoute(recoveryCtx, route.Snapshot) == nil
+		// The route put back may still send a canary's visitors to this
+		// candidate by their cookie; the live release's own route sends
+		// them nowhere it is not.
+		if recovery.RouteRestored && plan.SkewProtection && release.PredecessorReleaseID != 0 {
+			recovery.RouteRestored = e.restoreLiveRoute(recoveryCtx, release.PredecessorReleaseID) == nil
+		}
 	}
 	previous := e.restorePrevious(recoveryCtx, execution, release, plan)
 	if previous == nil {
@@ -1053,6 +1067,7 @@ func (e *NormalizedStepExecutor) retirePredecessor(
 			warmNote = map[string]any{"kept": false, "reason": why}
 			_ = stepLog(execution, "status", "Not keeping the previous release warm: "+why)
 		}
+		e.unpinPredecessor(retireCtx, execution, release.Release, snapshot)
 		variables, variablesErr := e.runtimeVariablesForRelease(retireCtx, predecessorID, *previous)
 		if variablesErr != nil {
 			return runtimeStepFailure(variablesErr, "retire_variables_unavailable", "the prior Compose release variables could not be opened", nil)
@@ -1080,12 +1095,16 @@ func (e *NormalizedStepExecutor) retirePredecessor(
 // warmKeptLine is the transcript's account of a window opening.
 func warmKeptLine(watch RollbackWatch) string {
 	until := watch.ExpiresAt.UTC().Format("15:04:05 UTC")
-	if !watch.Policy.Automatic {
-		return fmt.Sprintf("Kept release #%d warm (paused) until %s, so it can be switched back to instantly",
-			watch.WarmReleaseNum, until)
+	how := "paused"
+	if watch.WarmRunning {
+		how = "running for the visitors it answered first"
 	}
-	return fmt.Sprintf("Kept release #%d warm (paused) until %s: if release #%d's 5xx share passes the previous release's by %.1f points or its p95 reaches %.4g× it, over at least %d requests, traffic goes back to it automatically",
-		watch.WarmReleaseNum, until, watch.ReleaseNumber, watch.Policy.ErrorRateMargin, watch.Policy.LatencyFactor, watch.Policy.MinRequests)
+	if !watch.Policy.Automatic {
+		return fmt.Sprintf("Kept release #%d warm (%s) until %s, so it can be switched back to instantly",
+			watch.WarmReleaseNum, how, until)
+	}
+	return fmt.Sprintf("Kept release #%d warm (%s) until %s: if release #%d's 5xx share passes the previous release's by %.1f points or its p95 reaches %.4g× it, over at least %d requests, traffic goes back to it automatically",
+		watch.WarmReleaseNum, how, until, watch.ReleaseNumber, watch.Policy.ErrorRateMargin, watch.Policy.LatencyFactor, watch.Policy.MinRequests)
 }
 
 func (e *NormalizedStepExecutor) removePreview(ctx context.Context, execution StepExecution) StepResult {

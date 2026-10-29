@@ -107,6 +107,12 @@ type watchWindow struct {
 	EndMessage        string     `json:"endMessage"`
 	EndedAt           *time.Time `json:"endedAt"`
 	RollbackRunID     int64      `json:"rollbackRunId"`
+	// WarmRunning is a warm release skew protection keeps running for the
+	// visitors it answered first; WarmServed what it answered since.
+	WarmRunning bool `json:"warmRunning"`
+	WarmServed  *struct {
+		Requests int `json:"requests"`
+	} `json:"warmServed"`
 }
 
 // keep ends the warm release's window now: the new release stays, and the
@@ -433,7 +439,15 @@ func watchWords(watch rollbackWatch, err error) string {
 	v := watch.Watch
 	switch v.State {
 	case "watching":
-		return fmt.Sprintf("watching release #%d, warm #%d, until %s (%s)", v.ReleaseNumber, v.WarmReleaseNumber,
+		warm := fmt.Sprintf("warm #%d", v.WarmReleaseNumber)
+		if v.WarmRunning {
+			served := 0
+			if v.WarmServed != nil {
+				served = v.WarmServed.Requests
+			}
+			warm += fmt.Sprintf(" running for its visitors (%d requests)", served)
+		}
+		return fmt.Sprintf("watching release #%d, %s, until %s (%s)", v.ReleaseNumber, warm,
 			v.ExpiresAt.Local().Format("15:04:05"), terms)
 	default:
 		words := fmt.Sprintf("%s release #%d", strings.ReplaceAll(v.State, "_", " "), v.ReleaseNumber)

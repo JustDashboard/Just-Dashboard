@@ -1,8 +1,10 @@
-# Replicas and canary releases
+# Replicas, canary releases and skew protection
 
-Two ways a route shares its requests between more than one container: [replicas](#replicas), several
-containers of one release, and [canary releases](#canary-releases), a candidate release taking a share
-of the live release's requests beside it before it is promoted or aborted.
+Three ways a route shares its requests between more than one container: [replicas](#replicas), several
+containers of one release; [canary releases](#canary-releases), a candidate release taking a share
+of the live release's requests beside it before it is promoted or aborted; and
+[skew protection](#skew-protection), the release a visitor was first answered by still answering them
+after a cutover, for as long as it is kept warm.
 
 ## Replicas
 
@@ -196,7 +198,7 @@ On nginx (`SiteSplit`, `proxysvc/sites_split.go`) each release is an upstream bl
 least-connections balancing and passive health — and `split_clients "${request_id}"` gives each request
 one of the two releases at random, by the release's id, which a `map` turns into the block
 `proxy_pass` names. The access log's timed format gains `rel=$…_release`. On the Docker Caddy ingress
-(`renderCaddyCanary`) the matcher `vars_regexp {http.request.uuid}` names the candidate's run of the 256
+(`caddyReleases`) the matcher `vars_regexp {http.request.uuid}` names the candidate's run of the 256
 two-hex-digit prefixes of Caddy's per-request version-4 UUID (`canaryUUIDPattern`, the share to within
 one 256th), and two `handle` blocks each carry `log_append release <id>` and their own `reverse_proxy`.
 
@@ -248,3 +250,104 @@ protection's work, not the split's.
 - During the trial the route serves the live release's frozen rules; the candidate's own domains,
   headers and sign-in apply from its cutover.
 - A trial is per environment and per run; a second deploy queues behind the run holding one.
+
+## Skew protection
+
+A page loaded from one release asks for its scripts, styles and data afterwards. Cut over in between,
+and those requests reach the next release, which may not have the files the page names — the
+`ChunkLoadError` of every single-page application deployed blue/green. Skew protection keeps each
+visitor on the release that first answered them while that release is still kept.
+
+### The plan
+
+`runtime.skewProtection` (`deploy/skew.go`), off by default. `validateSkewProtection` refuses it, on the
+field, for a stop-first plan (the previous release is stopped before the next starts), a Compose build (a
+stack is never kept warm) and a plan with no domain that serves the application (the cookie is the
+public route's). A preview clears it, as it is never kept warm (`preview_isolation.go`). Preflight says
+what it does (`skew_protection`). The UI sets it beside the warm window it lives in — *Keep each visitor
+on the release that answered them* under *After a release goes live* on Runtime settings — though it is
+the plan's: that form saves it as a one-field change of the latest plan, and the Runtime form neither
+holds nor writes it (`runtimeDraftOf`).
+
+### The cookie
+
+Every answer to a visitor whose `jd_release` cookie does not name a release the route serves sets
+`jd_release=<release id>; Path=/; Max-Age=<window>; HttpOnly; SameSite=Lax`, with `Secure` on an HTTPS
+answer; an answer to one whose cookie already names its release sets nothing. The lifetime is the
+environment's warm window (`RollbackPolicy.WindowSeconds`, 30 s to an hour, `MaxReleaseCookieAge`). A
+cookie naming a release that is gone — removed, rolled back, or a value nobody set — is ignored: the
+request is answered as a fresh visitor's and the cookie replaced. The cookie is the release's id, which
+the run page and the API already show, and carries nothing a visitor could use to reach anything else:
+the route serves only the releases it names.
+
+### The route
+
+`DeploymentRoute.Skew` (`proxysvc/deployment_route.go`) is the live release's label, the cookie's age
+and `Pinned`, the releases still answering the visitors whose cookie names them — the warm release after
+a cutover. On nginx (`SiteSplit`, `sites_split.go`) each pinned release is an upstream block of its own
+(`<route>_release_<id>`), a `map $cookie_jd_release` picks the release from the cookie when it names one
+the route serves and from the draw otherwise (the live release, or a canary's `split_clients`), a second
+`map` turns it into the block `proxy_pass` names, and a third writes the `Set-Cookie` value — empty, and
+so not sent, when the cookie already names the release; `$scheme` decides `Secure`. On the Docker Caddy
+ingress (`caddyReleases`) each release the route serves is a `header_regexp Cookie` matcher with its own
+`handle` and `reverse_proxy`, checked first, and the fresh-visitor branches add the cookie with a
+deferred `header +Set-Cookie`. Every branch records its release (`rel=` on nginx, `log_append release` on
+Caddy), so the request record says which release answered each request. The route matches every path,
+so assets follow the cookie as pages do.
+
+With a canary, the cookie holds a visitor drawn for either release on it: the share becomes a share of
+new visitors rather than of requests. A promoted trial waits for the cutover on a route that keeps the
+candidate's visitors on it (`promotionRoute`), so nobody it answered is sent back to the live release for
+the moment before the cutover.
+
+### The cutover and the warm window
+
+`activate` writes the candidate's route keeping the live release for its visitors
+(`activationPin`: the live release's own containers, and never for a rollback, which does not keep a
+visitor on the release being rolled away from). `retire_previous` then keeps it warm as usual — terms,
+preview, Compose and the memory floor all apply — except that it is **not paused**: it is still serving.
+The window records `warm_running` and the watcher knows the difference: it resumes rather than pauses a
+running warm release a Docker restart left paused, judges the new release on the requests it answered
+(`Filter.Release`) rather than all of the route's, and records what the warm release answered since the
+cutover (`warm_served_json`, `RollbackWatch.WarmServed`), which the window's read, the Overview panel
+("release #N answered … of its visitors' requests") and `jd status` show. A release that is not kept
+warm — terms off, too little memory — is taken off the route after its drain and before it is stopped
+(`unpinPredecessor`), so its visitors are answered by the new release from then on.
+
+Every end of a window takes the warm release off the route before its container goes: `closeWarmWindow`
+rewrites the live route without it (a route that cannot be written leaves the window `closing`, retried
+by the watcher, rather than removing a container visitors are still sent to), and a warm release that
+fails to resume or its readiness check during an instant rollback is dropped from the route first
+(`dropWarmPin`). An instant rollback writes the warm release's own route keeping nobody, so the
+rolled-back release's visitors are answered by the warm one and told so; one abandoned puts the route back
+keeping the warm release, which it leaves running. A failed cutover's recovery re-applies the live
+release's own route after restoring the prior one, which may have kept a promoted candidate's visitors
+(`stopCandidateAndRestore`).
+
+### Verification
+
+- `TestLiveSkewProtectionKeepsAVisitorOnTheirRelease` (`internal/api`, `JD_DEPLOY_LIVE=1`, as root) runs a
+  real engine and its own loopback Caddy ingress: release A sets the cookie (HttpOnly, Lax, the window's
+  Max-Age, no Secure on plain HTTP) and does not repeat it; after the cutover to B, A's container is
+  running and unpaused, a visitor with A's cookie is answered by A for pages and `/_next/static/…`, a
+  fresh visitor and a stale cookie get B and B's cookie, the window's read counts A's answers apart from
+  B's; after the window A is removed and its visitor gets B and B's cookie.
+- `TestLiveSkewProtectionPinsAVisitorOnNginx` (`internal/proxysvc`) does the same on a real nginx through
+  the cutover harness, with the cutover itself under fast, streamed and WebSocket traffic losing nothing,
+  and the access log's `rel=` naming each answer's release.
+- `skew_test.go` covers the refusals, the running warm release through its window and its end, the
+  watcher's split reading, an instant rollback keeping nobody, and a release not kept warm taken off the
+  route before it is stopped; `deployment_route_skew_test.go` renders both proxies (validated with
+  `nginx -t` and `caddy validate`).
+
+### Limits
+
+- The first release that turns it on starts setting cookies; the cutover after it is the first one that
+  keeps anybody.
+- A visitor is kept only while the previous release is: through its drain, and through the warm window
+  when it is kept warm. Turning keep warm off leaves only the drain.
+- A warm release kept running costs its CPU as well as its memory, and its schedulers and consumers keep
+  running for the window — the reason a plain warm release is paused. Turn it on for releases whose
+  visitors load pages, not for workers.
+- A warm release whose container dies is taken off the route on the watcher's next pass (10 s); its
+  visitors' requests fail until then.

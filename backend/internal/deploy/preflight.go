@@ -986,6 +986,9 @@ func preflightFindings(
 	if item, ok := canaryFinding(configuration); ok {
 		findings = append(findings, item)
 	}
+	if item, ok := skewFinding(configuration); ok {
+		findings = append(findings, item)
+	}
 	if item, ok := replicasFinding(configuration.Build.Method, configuration.Runtime); ok {
 		findings = append(findings, item)
 	}

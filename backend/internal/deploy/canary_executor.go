@@ -290,6 +290,25 @@ func (e *NormalizedStepExecutor) canaryRoute(ctx context.Context, parties *canar
 		Percent: percent, Upstreams: runtimeUpstreams(*parties.runtime),
 		Live: parties.liveReleaseLabel, Candidate: parties.candidateLabel,
 	}
+	// With skew protection the candidate's plan asks for, a visitor drawn
+	// for either release stays on it: the share is of new visitors, not of
+	// requests.
+	if route.Skew == nil && parties.snapshot.Plan.SkewProtection {
+		e.withSkew(ctx, &route, parties.live.Release.EnvironmentID, parties.live.Release.ID, nil)
+	}
+	return route, nil
+}
+
+// promotionRoute is the route a promoted trial waits for the cutover on: the
+// live release alone, beside — with skew protection — the candidate for the
+// visitors it answered during the trial, so none of them is sent back to the
+// release they left for the moment before the cutover.
+func (e *NormalizedStepExecutor) promotionRoute(ctx context.Context, parties *canaryParties) (proxysvc.DeploymentRoute, error) {
+	route, err := e.liveOnlyRoute(ctx, parties)
+	if err != nil || !skewPins(EngineRun{}, parties.snapshot.Plan) {
+		return route, err
+	}
+	e.withSkew(ctx, &route, parties.live.Release.EnvironmentID, parties.live.Release.ID, parties.runtime)
 	return route, nil
 }
 
@@ -308,6 +327,10 @@ func (e *NormalizedStepExecutor) liveOnlyRoute(ctx context.Context, parties *can
 			return route, err
 		}
 		route.CertPath, route.KeyPath = certPath, keyPath
+	}
+	if parties.liveSnapshot.Plan.SkewProtection {
+		e.withSkew(ctx, &route, parties.live.Release.EnvironmentID, parties.live.Release.ID,
+			e.warmPin(ctx, parties.live.Release.EnvironmentID, parties.live.Release.ID))
 	}
 	return route, nil
 }
@@ -349,10 +372,13 @@ func (e *NormalizedStepExecutor) candidateDown(ctx context.Context, runtime Rele
 // to the live release alone first, so the cutover that follows is the
 // ordinary one — from a route that names one release to one that names the
 // other — and a failed cutover restores a route without a canary in it.
+// With skew protection the candidate keeps the visitors it answered on that
+// route (promotionRoute), and a failed cutover's recovery takes them off it
+// with the candidate (stopCandidateAndRestore).
 func (e *NormalizedStepExecutor) promoteCanary(ctx context.Context, execution StepExecution, parties *canaryParties, window CanaryWindow, reason, message string) StepResult {
 	settle, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 	defer cancel()
-	route, err := e.liveOnlyRoute(settle, parties)
+	route, err := e.promotionRoute(settle, parties)
 	if err == nil {
 		_, err = e.proxy.ApplyDeploymentRoute(settle, route)
 	}
@@ -415,12 +441,22 @@ func (e *NormalizedStepExecutor) endCanaryForCancellation(ctx context.Context, r
 	if errors.Is(err, ErrNoCanary) {
 		return nil
 	}
-	if err != nil || !window.Open() {
+	if err != nil {
 		return err
+	}
+	// A promoted trial waits for the cutover on a route that, with skew
+	// protection, still sends the candidate the visitors it answered; that
+	// comes off too.
+	held := window.State == CanaryPromoted
+	if !window.Open() && !held {
+		return nil
 	}
 	release, snapshot, err := e.releaseSnapshotForRun(ctx, run.ID)
 	if err != nil {
 		return err
+	}
+	if held && !snapshot.Plan.SkewProtection {
+		return nil
 	}
 	parties, failure := e.canaryParties(ctx, run, release, snapshot)
 	if failure != nil {
@@ -434,6 +470,9 @@ func (e *NormalizedStepExecutor) endCanaryForCancellation(ctx context.Context, r
 		if err != nil {
 			return err
 		}
+	}
+	if held {
+		return nil
 	}
 	return e.store.closeCanary(ctx, window.ID, CanaryAborted, CanaryEndCancelled,
 		fmt.Sprintf("The run was cancelled during release #%d's canary, so it was removed and release #%d kept every request.", window.ReleaseNumber, window.LiveReleaseNum))

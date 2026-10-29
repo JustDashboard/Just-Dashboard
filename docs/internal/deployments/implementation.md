@@ -1031,7 +1031,11 @@ only renderer/executor/validation authority for their feature.
   both releases are the runtime owner's own containers rather than Compose stacks and the host still has
   `max(256 MB, a tenth of its memory)` available (a canary's promotion is that cutover too) — records a window (`deploy_rollback_watches`, state
   `watching`) and the predecessor's runtime `warm` in one leased transaction and only then `docker
-  pause`s it, every replica of it. A replicated warm release is one state (`warmStateOf`): any replica
+  pause`s it, every replica of it. With skew protection on (`runtime.skewProtection`,
+  [skew protection](canary-and-replicas.md#skew-protection)) it is kept **running** instead, since the
+  route still sends it the visitors it answered first: the window records `warm_running`, the watcher
+  resumes rather than pauses it, judges the new release on its own answers and counts the warm one's
+  (`warm_served_json`), and every end of the window takes it off the route before it is removed. A replicated warm release is one state (`warmStateOf`): any replica
   gone is the release gone (`warm_lost`), one a Docker restart brought back running is paused again, and
   resuming or removing it is every replica (`warmEach`). Paused rather than running:
   the old release must not keep running schedulers, consumers or writes against a schema the new release

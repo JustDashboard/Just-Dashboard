@@ -184,6 +184,9 @@ func createIsolatedPreviewPlansTx(ctx context.Context, tx *sql.Tx, sourceID int6
 	// A preview is one container whatever production runs: it is for
 	// looking at a branch, not for carrying production's traffic.
 	runtime.Replicas = 0
+	// Nor is a preview ever kept warm, so there is no release to keep its
+	// visitors on.
+	runtime.SkewProtection = false
 	for index := range runtime.Mounts {
 		mount := &runtime.Mounts[index]
 		mount.Source, mount.Ownership = previewVolumeName(environmentID, mount.Target), OwnershipManaged

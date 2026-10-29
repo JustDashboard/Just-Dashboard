@@ -638,6 +638,9 @@ type RuntimePlanConfig struct {
 	// cutover: its share of the requests, for how long, and whether it is
 	// promoted on its own when it compares well (canary.go).
 	Canary *CanaryTerms `json:"canary,omitempty"`
+	// SkewProtection keeps each visitor on the release that first answered
+	// them while it is kept warm, by the jd_release cookie (skew.go).
+	SkewProtection bool `json:"skewProtection,omitempty"`
 	// MaxRequestBodyMB is the largest request body the managed route lets
 	// through, in megabytes. Zero is DefaultMaxRequestBodyMB.
 	MaxRequestBodyMB int `json:"maxRequestBodyMb,omitempty"`
@@ -1539,6 +1542,9 @@ func (c PlanConfiguration) Validate() error {
 		return err
 	}
 	if err := validateCanary(c); err != nil {
+		return err
+	}
+	if err := validateSkewProtection(c); err != nil {
 		return err
 	}
 	if err := validateReplayPlan(c.Runtime.Replay); err != nil {

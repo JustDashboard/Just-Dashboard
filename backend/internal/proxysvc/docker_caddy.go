@@ -385,12 +385,31 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 	if len(servers) > 0 {
 		directive = proxy(servers)
 	}
-	if canary := route.Canary; canary != nil && len(servers) > 0 {
-		candidate, err := caddyUpstreams(canary.Upstreams)
-		if err != nil || len(candidate) == 0 {
-			return "", errors.New("invalid Caddy canary upstream")
+	// A route that picks between releases — a canary, skew protection's
+	// cookie — is written per scheme, since the cookie is Secure only on the
+	// HTTPS names.
+	directiveFor := func(bool) string { return directive }
+	if (route.Canary != nil || route.Skew != nil) && len(servers) > 0 {
+		releases := caddyReleases{live: proxy(servers), recorded: route.AccessLog}
+		if canary := route.Canary; canary != nil {
+			candidate, err := caddyUpstreams(canary.Upstreams)
+			if err != nil || len(candidate) == 0 {
+				return "", errors.New("invalid Caddy canary upstream")
+			}
+			releases.canary, releases.candidate = canary, proxy(candidate)
+			releases.liveLabel = canary.Live
 		}
-		directive = renderCaddyCanary(*canary, proxy(candidate), proxy(servers), route.AccessLog)
+		if skew := route.Skew; skew != nil {
+			releases.skew, releases.liveLabel = skew, skew.Release
+			for _, pinned := range skew.Pinned {
+				upstreams, err := caddyUpstreams(pinned.Upstreams)
+				if err != nil || len(upstreams) == 0 {
+					return "", errors.New("invalid Caddy pinned release upstream")
+				}
+				releases.pinned = append(releases.pinned, proxy(upstreams))
+			}
+		}
+		directiveFor = releases.render
 	}
 	tlsDirective := ""
 	if servesExplicitCertificate(route) {
@@ -479,9 +498,12 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 	if pages != "" {
 		maintenance, errorPages = renderCaddyMaintenance(route.Maintenance, pages), renderCaddyErrorPages(route.ErrorPages, pages)
 	}
-	handling := fence + maintenance + authDirective + gateDirective + bodyDirective + "  " + directive + "\n"
-	if fence != "" || maintenance != "" || route.ForwardAuth != nil || route.Canary != nil {
-		handling = "  route {\n" + indentCaddy(handling) + "  }\n"
+	handlingFor := func(https bool) string {
+		handling := fence + maintenance + authDirective + gateDirective + bodyDirective + "  " + directiveFor(https) + "\n"
+		if fence != "" || maintenance != "" || route.ForwardAuth != nil || route.Canary != nil || route.Skew != nil {
+			handling = "  route {\n" + indentCaddy(handling) + "  }\n"
+		}
+		return handling
 	}
 	// The names served over HTTPS are one site block and the names served
 	// over plain HTTP another, the same handling in each: Caddy refuses a
@@ -499,7 +521,7 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 				addresses[index] = "http://" + addresses[index]
 			}
 		}
-		return strings.Join(addresses, ", ") + " {\n" + content + logDirective + headerDirective(https) + handling + errorPages + "}\n"
+		return strings.Join(addresses, ", ") + " {\n" + content + logDirective + headerDirective(https) + handlingFor(https) + errorPages + "}\n"
 	}
 	tlsServed, plainServed := route.servedByScheme()
 	out := "# Managed by Just Dashboard\n"
@@ -676,32 +698,73 @@ func caddyUpstreams(upstreams []string) ([]string, error) {
 	return servers, nil
 }
 
-// renderCaddyCanary splits a route between two releases. Each request is
-// given one at random from its own {http.request.uuid} — Caddy draws a
-// version-4 UUID per request, so its first two hex digits are 256 equal
-// buckets and the candidate's share is the run of buckets the matcher names
-// (canaryUUIDPattern) — and each release keeps its own replicas, balancing
-// and passive health in a handle of its own. A route whose answers are
-// recorded says which release gave each one (log_append), which is what the
-// canary's side-by-side reading is read from.
+// caddyReleases is a route that picks between releases on the Caddy
+// ingress: the live release, a canary's candidate, and with skew protection
+// the releases still answering the visitors they answered first.
 //
-// Caddy 2.11's weighted_round_robin would share the requests too, but over
-// the two releases' containers as one pool, losing least connections between
-// a release's own replicas, and its record would name a container address
-// rather than a release.
-func renderCaddyCanary(canary DeploymentCanary, candidate, live string, recorded bool) string {
-	branch := func(release, proxy string) string {
+// A canary gives each request a release at random from its own
+// {http.request.uuid} — Caddy draws a version-4 UUID per request, so its
+// first two hex digits are 256 equal buckets and the candidate's share is the
+// run of buckets the matcher names (canaryUUIDPattern) — and each release
+// keeps its own replicas, balancing and passive health in a handle of its
+// own. Caddy 2.11's weighted_round_robin would share the requests too, but
+// over the two releases' containers as one pool, losing least connections
+// between a release's own replicas, and its record would name a container
+// address rather than a release.
+//
+// Skew protection routes first by the jd_release cookie: a request whose
+// cookie names a release the route serves is answered by it, unchanged, and
+// every other one is drawn as above and told its release in a cookie of the
+// warm window's lifetime, Secure on the HTTPS names. A route whose answers
+// are recorded says which release gave each one (log_append).
+type caddyReleases struct {
+	live      string
+	liveLabel string
+	canary    *DeploymentCanary
+	candidate string
+	skew      *DeploymentSkew
+	pinned    []string
+	recorded  bool
+}
+
+func (r caddyReleases) render(secure bool) string {
+	branch := func(release, proxy string, cookie bool) string {
 		out := ""
-		if recorded {
+		if r.recorded {
 			out += "    log_append release " + release + "\n"
+		}
+		if cookie && r.skew != nil {
+			value := ReleaseCookie + "=" + release + "; Path=/; Max-Age=" + strconv.Itoa(r.skew.MaxAge) + "; HttpOnly; SameSite=Lax"
+			if secure {
+				value += "; Secure"
+			}
+			out += "    header {\n      +Set-Cookie " + strconv.Quote(value) + "\n      defer\n    }\n"
 		}
 		// The proxy was written for the handling's depth; inside a handle
 		// every line of it is two spaces further in.
 		return out + "    " + strings.ReplaceAll(proxy, "\n", "\n  ") + "\n"
 	}
-	return "@jd_canary vars_regexp {http.request.uuid} " + canaryUUIDPattern(canary.Percent) + "\n" +
-		"  handle @jd_canary {\n" + branch(canary.Candidate, candidate) + "  }\n" +
-		"  handle {\n" + branch(canary.Live, live) + "  }"
+	out := []string{}
+	if skew := r.skew; skew != nil {
+		pinned := func(release, proxy string) {
+			matcher := "@jd_release_" + release
+			out = append(out, matcher+" header_regexp Cookie `(?:^|;\\s*)"+ReleaseCookie+"="+release+"(?:;|$)`\n"+
+				"  handle "+matcher+" {\n"+branch(release, proxy, false)+"  }")
+		}
+		for index, release := range skew.Pinned {
+			pinned(release.Release, r.pinned[index])
+		}
+		if r.canary != nil {
+			pinned(r.canary.Candidate, r.candidate)
+		}
+		pinned(r.liveLabel, r.live)
+	}
+	if canary := r.canary; canary != nil {
+		out = append(out, "@jd_canary vars_regexp {http.request.uuid} "+canaryUUIDPattern(canary.Percent)+"\n"+
+			"  handle @jd_canary {\n"+branch(canary.Candidate, r.candidate, true)+"  }")
+	}
+	out = append(out, "handle {\n"+branch(r.liveLabel, r.live, true)+"  }")
+	return strings.Join(out, "\n  ")
 }
 
 // canaryUUIDPattern matches the share of UUIDs whose first two hex digits
@@ -963,6 +1026,24 @@ func (c *dockerCaddy) routeContent(ctx context.Context, route DeploymentRoute) (
 			resolved.Upstreams = append(resolved.Upstreams, target.upstream())
 		}
 		rendered.Canary = &resolved
+	}
+	// So are the releases skew protection keeps for their visitors.
+	if skew := route.Skew; skew != nil {
+		resolved := *skew
+		resolved.Pinned = nil
+		for _, pinned := range skew.Pinned {
+			found := DeploymentPinned{Release: pinned.Release}
+			for _, server := range pinned.Upstreams {
+				target, err := c.target(ctx, server)
+				if err != nil {
+					return "", nil, err
+				}
+				targets = append(targets, target)
+				found.Upstreams = append(found.Upstreams, target.upstream())
+			}
+			resolved.Pinned = append(resolved.Pinned, found)
+		}
+		rendered.Skew = &resolved
 	}
 	content, err := renderDockerCaddyRoute(rendered, upstreams...)
 	if err != nil {

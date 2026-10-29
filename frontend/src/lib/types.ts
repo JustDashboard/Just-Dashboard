@@ -4183,6 +4183,13 @@ export type RollbackWatch = {
   createdAt: string
   releaseNumber: number
   warmReleaseNumber: number
+  /**
+   * The warm release is kept running, not paused, because skew protection
+   * still sends it the visitors it answered first.
+   */
+  warmRunning?: boolean
+  /** What the running warm release answered since the cutover. */
+  warmServed?: RollbackReading
 }
 
 export type RollbackWatchResponse = {
@@ -5279,6 +5286,11 @@ export type DeploymentConfiguration = {
     restartPolicy?: DeploymentRestartPolicy
     /** Containers of each release side by side behind the route, 2 to 8; empty is one. */
     replicas?: number
+    /**
+     * Keeps each visitor on the release that first answered them while it is
+     * kept warm, by the jd_release cookie. The rollback terms' to edit.
+     */
+    skewProtection?: boolean
     /** The signal that asks the container to stop; empty is the image's own, SIGTERM. */
     stopSignal?: string
     /** Seconds the container has to exit after that signal before it is killed; empty is 10. */

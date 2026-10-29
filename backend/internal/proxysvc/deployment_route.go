@@ -32,11 +32,14 @@ type DeploymentRoute struct {
 	Upstream string `json:"upstream"`
 	// Canary, while a candidate release is tried beside the live one, sends
 	// a share of the route's requests to the candidate's servers.
-	Canary     *DeploymentCanary `json:"canary,omitempty"`
-	TLS        bool              `json:"tls,omitempty"`
-	CertPath   string            `json:"certPath,omitempty"`
-	KeyPath    string            `json:"keyPath,omitempty"`
-	ForceHTTPS bool              `json:"forceHttps,omitempty"`
+	Canary *DeploymentCanary `json:"canary,omitempty"`
+	// Skew keeps each visitor on the release that first answered them, by
+	// a cookie, while that release is still served.
+	Skew       *DeploymentSkew `json:"skew,omitempty"`
+	TLS        bool            `json:"tls,omitempty"`
+	CertPath   string          `json:"certPath,omitempty"`
+	KeyPath    string          `json:"keyPath,omitempty"`
+	ForceHTTPS bool            `json:"forceHttps,omitempty"`
 	// BasicAuth puts a password in front of the route. Each entry is a user
 	// and a bcrypt hash, which is what both proxies read.
 	BasicAuth []BasicAuthUser `json:"basicAuth,omitempty"`
@@ -108,6 +111,69 @@ type DeploymentCanary struct {
 	Upstreams []string `json:"upstreams"`
 	Live      string   `json:"live"`
 	Candidate string   `json:"candidate"`
+}
+
+// DeploymentSkew is skew protection on a route: a visitor's first answer
+// sets the jd_release cookie to the release that gave it, and a later
+// request whose cookie names a release the route still serves — the live
+// one, a canary's candidate, or one of Pinned — is answered by that
+// release. Release is the live release's label; MaxAge the cookie's
+// lifetime in seconds, the warm window's.
+type DeploymentSkew struct {
+	Release string             `json:"release"`
+	Pinned  []DeploymentPinned `json:"pinned,omitempty"`
+	MaxAge  int                `json:"maxAge"`
+}
+
+// DeploymentPinned is a release still answering the visitors it answered
+// first: the warm release after a cutover, by its label and its servers.
+type DeploymentPinned struct {
+	Release   string   `json:"release"`
+	Upstreams []string `json:"upstreams"`
+}
+
+// validateDeploymentSkew holds skew protection to what both renderers write.
+func validateDeploymentSkew(route DeploymentRoute) error {
+	skew := route.Skew
+	if skew == nil {
+		return nil
+	}
+	if skew.MaxAge < 1 || skew.MaxAge > MaxReleaseCookieAge {
+		return fmt.Errorf("the release cookie lasts between 1 and %d seconds", MaxReleaseCookieAge)
+	}
+	if !splitLabelRe.MatchString(skew.Release) {
+		return errors.New("the live release needs a name of letters, digits, dashes or underscores")
+	}
+	if route.Canary != nil && route.Canary.Live != skew.Release {
+		return errors.New("a canary and skew protection name the same live release")
+	}
+	labels := map[string]bool{skew.Release: true}
+	servers := map[string]bool{}
+	for _, upstream := range route.Servers() {
+		servers[upstream] = true
+	}
+	if route.Canary != nil {
+		labels[route.Canary.Candidate] = true
+		for _, upstream := range route.Canary.Upstreams {
+			servers[upstream] = true
+		}
+	}
+	for _, pinned := range skew.Pinned {
+		if !splitLabelRe.MatchString(pinned.Release) || labels[pinned.Release] {
+			return errors.New("each release kept for its visitors needs a name of its own")
+		}
+		labels[pinned.Release] = true
+		if len(pinned.Upstreams) == 0 || len(pinned.Upstreams) > MaxDeploymentUpstreams {
+			return fmt.Errorf("a release kept for its visitors is between 1 and %d servers", MaxDeploymentUpstreams)
+		}
+		for _, upstream := range pinned.Upstreams {
+			if upstream == "" || servers[upstream] {
+				return fmt.Errorf("%q cannot serve two releases at once", upstream)
+			}
+			servers[upstream] = true
+		}
+	}
+	return nil
 }
 
 // validateDeploymentCanary holds a canary to what both renderers write.
@@ -309,6 +375,9 @@ func validateDeploymentRules(route DeploymentRoute) error {
 		return err
 	}
 	if err := validateDeploymentCanary(route); err != nil {
+		return err
+	}
+	if err := validateDeploymentSkew(route); err != nil {
 		return err
 	}
 	if err := validateHostRedirects(route.Domains, route.Redirects); err != nil {
@@ -826,13 +895,25 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 		HostRedirects: append([]HostRedirect(nil), route.Redirects...),
 		deployment:    true,
 	}
-	if pool := deploymentPool(route.Servers(), route.Canary != nil); pool != nil {
+	if pool := deploymentPool(route.Servers(), route.Canary != nil || route.Skew != nil); pool != nil {
 		spec.Upstream, spec.Pool = "", pool
 	}
-	if canary := route.Canary; canary != nil && spec.Pool != nil {
-		if candidate := deploymentPool(canary.Upstreams, true); candidate != nil {
-			spec.Split = &SiteSplit{Percent: canary.Percent, Servers: candidate.Servers, Live: canary.Live, Candidate: canary.Candidate}
+	if spec.Pool != nil && (route.Canary != nil || route.Skew != nil) {
+		split := &SiteSplit{}
+		if canary := route.Canary; canary != nil {
+			if candidate := deploymentPool(canary.Upstreams, true); candidate != nil {
+				split.Percent, split.Servers, split.Live, split.Candidate = canary.Percent, candidate.Servers, canary.Live, canary.Candidate
+			}
 		}
+		if skew := route.Skew; skew != nil {
+			split.Live, split.CookieMaxAge = skew.Release, skew.MaxAge
+			for _, pinned := range skew.Pinned {
+				if servers := deploymentPool(pinned.Upstreams, true); servers != nil {
+					split.Pinned = append(split.Pinned, SitePinned{Release: pinned.Release, Servers: servers.Servers})
+				}
+			}
+		}
+		spec.Split = split
 	}
 	if route.TLS {
 		// Each name on the scheme its domain chose: the plain ones get a

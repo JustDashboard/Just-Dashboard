@@ -103,6 +103,8 @@ free.
 - Up to eight replicas of a stateless release behind one route, cut over and rolled back together
 - Canary releases: a new release takes a share of the requests beside the live one, read side by side,
   and is removed if it does worse or promoted when it does not
+- Skew protection: a visitor stays on the release that first answered them for the warm window after a
+  cutover, so a page loaded before it never asks the new release for scripts it does not have
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Migrations rehearsed on a throwaway copy of the database, restored from its backup, before production

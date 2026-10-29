@@ -234,12 +234,18 @@ func (e *NormalizedStepExecutor) keepWarm(
 		return nil, fmt.Sprintf("the host had %d MB available, below the %d MB a warm release may not take",
 			available>>20, warmMemoryFloor(total)>>20)
 	}
+	// With skew protection the route still sends the previous release the
+	// visitors it answered first, so it is kept running, not paused.
+	running := skewPins(execution.Run, snapshot.Plan) && len(snapshot.Domains) > 0
 	watch, err := e.store.recordWarmRelease(ctx, execution.Run, execution.ClaimToken, warmReleaseInput{
 		ReleaseID: release.ID, WarmReleaseID: previous.ReleaseID, WarmRuntimeID: previous.RuntimeID,
-		Policy: policy, CutoverAt: cutoverAt,
+		Policy: policy, CutoverAt: cutoverAt, Running: running,
 	})
 	if err != nil {
 		return nil, "the window could not be recorded: " + err.Error()
+	}
+	if running {
+		return watch, ""
 	}
 	// The window is recorded first: a process killed right here leaves a
 	// running container the watcher pauses or removes, never one nobody
@@ -331,6 +337,14 @@ func (e *NormalizedStepExecutor) closeWarmWindow(ctx context.Context, watch Roll
 		if liveErr == nil && live.Release.ID == watch.WarmReleaseID {
 			return fmt.Errorf("%w: the warm release is live", ErrInvalidPlan)
 		}
+		// A release kept running for its visitors is taken off the route
+		// before it goes; until the route says so it stays, and the window
+		// stays closing for the watcher to try again.
+		if watch.WarmRunning && liveErr == nil {
+			if err := e.applyLiveRoute(closeCtx, live.Release.ID, false); err != nil {
+				return fmt.Errorf("release #%d's visitors could not be moved to the live release: %w", watch.WarmReleaseNum, err)
+			}
+		}
 		if err := e.removeWarmRuntime(closeCtx, *runtime); err != nil {
 			return err
 		}
@@ -338,6 +352,14 @@ func (e *NormalizedStepExecutor) closeWarmWindow(ctx context.Context, watch Roll
 		return err
 	}
 	return e.store.finishCloseRollbackWatch(closeCtx, watch)
+}
+
+// dropWarmPin takes a warm release kept running for its visitors off the
+// live route, before it is removed.
+func (e *NormalizedStepExecutor) dropWarmPin(ctx context.Context, watch RollbackWatch) {
+	if watch.WarmRunning {
+		_ = e.applyLiveRoute(ctx, watch.ReleaseID, false)
+	}
 }
 
 // removeWarmRuntime stops and removes a warm container. It is resumed first
@@ -395,13 +417,19 @@ func (e *NormalizedStepExecutor) resumeWarmRelease(ctx context.Context, executio
 	}
 	if err := warmer.ResumeRuntime(ctx, *runtime); err != nil {
 		cleanup := context.WithoutCancel(ctx)
+		e.dropWarmPin(cleanup, *watch)
 		_ = e.removeWarmRuntime(cleanup, *runtime)
 		message := fmt.Sprintf("Release #%d's warm container could not be resumed, so release #%d keeps serving.", watch.WarmReleaseNum, watch.ReleaseNumber)
 		_ = e.store.failRollbackWatch(cleanup, *watch, execution.Run.ID, message)
 		return StepResult{State: StepFailed, ErrorCode: "warm_release_lost", ErrorMessage: message}
 	}
-	_ = stepLog(execution, "status", fmt.Sprintf("Resumed release #%d's warm %s, paused since the cutover to release #%d",
-		watch.WarmReleaseNum, warmContainersLabel(*runtime), watch.ReleaseNumber))
+	if watch.WarmRunning {
+		_ = stepLog(execution, "status", fmt.Sprintf("Release #%d's warm %s kept running since the cutover to release #%d, for the visitors it answered first",
+			watch.WarmReleaseNum, warmContainersLabel(*runtime), watch.ReleaseNumber))
+	} else {
+		_ = stepLog(execution, "status", fmt.Sprintf("Resumed release #%d's warm %s, paused since the cutover to release #%d",
+			watch.WarmReleaseNum, warmContainersLabel(*runtime), watch.ReleaseNumber))
+	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{
 		"releaseId": watch.WarmReleaseID, "runtime": runtime, "target": targetForRuntime(*runtime, snapshot),
 		"watchId": watch.ID, "resumed": true,
@@ -468,6 +496,7 @@ func (e *NormalizedStepExecutor) verifyWarmRelease(ctx context.Context, executio
 	evidence := checkStepEvidence{Phase: "readiness", Outcome: outcome, Checks: checks}
 	if requiredCheckFailed(checks) {
 		cleanup := context.WithoutCancel(ctx)
+		e.dropWarmPin(cleanup, *watch)
 		_ = e.removeWarmRuntime(cleanup, *runtime)
 		message := fmt.Sprintf("Release #%d failed its readiness check after resuming, so release #%d keeps serving. %s",
 			watch.WarmReleaseNum, watch.ReleaseNumber, checkFailureMessage("readiness", outcome, checks...))
@@ -487,7 +516,9 @@ func (e *NormalizedStepExecutor) verifyWarmRelease(ctx context.Context, executio
 func (e *NormalizedStepExecutor) abandonInstantRollback(ctx context.Context, watch RollbackWatch, runID int64) {
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancel()
-	if runtime, err := e.store.RuntimeForRelease(cleanup, watch.WarmReleaseID); err == nil {
+	// One kept running for skew protection goes back to serving its own
+	// visitors, which the route put back still sends it.
+	if runtime, err := e.store.RuntimeForRelease(cleanup, watch.WarmReleaseID); err == nil && !watch.WarmRunning {
 		if warmer, ok := e.runtime.(RuntimeWarmer); ok {
 			_ = warmer.PauseRuntime(cleanup, *runtime)
 		}
@@ -551,6 +582,12 @@ func (e *NormalizedStepExecutor) activateWarmRelease(ctx context.Context, execut
 				return fail("certificate_unavailable", "No existing certificate covers every HTTPS domain.", nil)
 			}
 			value.CertPath, value.KeyPath = certPath, keyPath
+		}
+		// The release rolled away from keeps nobody: its visitors' cookie
+		// no longer names a release the route serves, so they are answered
+		// by the warm release and told so.
+		if snapshot.Plan.SkewProtection {
+			e.withSkew(ctx, &value, release.Release.EnvironmentID, release.Release.ID, nil)
 		}
 		route = &value
 		result, applyErr := e.proxy.ApplyDeploymentRoute(ctx, value)
@@ -693,8 +730,16 @@ func (e *NormalizedStepExecutor) settleRollbackWatch(ctx context.Context, watch 
 }
 
 // restoreLiveRoute applies the route of the release the pointer names, so a
-// route an interrupted rollback moved can never outlive the rollback.
+// route an interrupted rollback moved can never outlive the rollback. A
+// release its window keeps running for skew protection is kept on it.
 func (e *NormalizedStepExecutor) restoreLiveRoute(ctx context.Context, releaseID int64) error {
+	return e.applyLiveRoute(ctx, releaseID, true)
+}
+
+// applyLiveRoute applies a release's own route; with pinned, beside the
+// warm release an open window keeps running for its visitors, and without,
+// beside nothing.
+func (e *NormalizedStepExecutor) applyLiveRoute(ctx context.Context, releaseID int64, pinned bool) error {
 	release, snapshot, err := e.releaseSnapshot(ctx, releaseID)
 	if err != nil {
 		return err
@@ -717,6 +762,13 @@ func (e *NormalizedStepExecutor) restoreLiveRoute(ctx context.Context, releaseID
 			}
 			route.CertPath, route.KeyPath = certPath, keyPath
 		}
+	}
+	if snapshot.Plan.SkewProtection {
+		var pin *ReleaseRuntime
+		if pinned {
+			pin = e.warmPin(ctx, release.Release.EnvironmentID, releaseID)
+		}
+		e.withSkew(ctx, &route, release.Release.EnvironmentID, releaseID, pin)
 	}
 	_, err = e.proxy.ApplyDeploymentRoute(ctx, route)
 	return err

@@ -549,7 +549,7 @@ to the contribution terms above, including the additional licence grant to the p
   containers and remove both of the second's ([replicas](docs/internal/deployments/canary-and-replicas.md)).
   Changes to canary releases — the strategy and its terms, the `canary` step, how a route is split
   between two releases or records which one answered (`deploy/canary*.go`, `proxysvc/sites_split.go`,
-  `renderCaddyCanary`, `accesslog`'s `Release`) — also run
+  `caddyReleases`, `accesslog`'s `Release`) — also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveCanaryAbortsAFailingReleaseAndPromotesAHealthyOne -count=1 -v`,
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveCanarySplitsTheRouteOnNginx -count=1 -v`
   and `TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun`, whose matrix now includes the step. The
@@ -559,6 +559,14 @@ to the contribution terms above, including the additional licence grant to the p
   the second splits a real nginx route 30%, reads `rel=` from its access log and moves in and out of the
   canary under traffic without losing a request
   ([canary releases](docs/internal/deployments/canary-and-replicas.md#canary-releases)).
+  Changes to skew protection — the `jd_release` cookie, a route keeping a warm release for its visitors,
+  the warm release kept running and taken off the route (`deploy/skew.go`, `SiteSplit`, `caddyReleases`,
+  `DeploymentSkew`) — also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveSkewProtectionKeepsAVisitorOnTheirRelease -count=1 -v`
+  and `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveSkewProtectionPinsAVisitorOnNginx -count=1 -v`:
+  a visitor with the previous release's cookie stays on it after a cutover, a fresh one gets the new
+  release, and after the window both do, through a real Caddy and a real nginx
+  ([skew protection](docs/internal/deployments/canary-and-replicas.md#skew-protection)).
 - Changes to the warm-release window, instant rollback or the rollback watcher (`deploy/rollback_*.go`,
   `api/handlers_deploy_rollback_watch.go`) also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveMetricGatedRollbackSwitchesBackToTheWarmRelease -count=1 -v`.

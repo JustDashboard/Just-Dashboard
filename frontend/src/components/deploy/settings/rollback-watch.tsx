@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { get, put } from "@/lib/api"
+import { ApiError, get, put } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -13,7 +13,11 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "@/components/ui/input-group"
-import { DEFAULT_ROLLBACK_POLICY, policyLine } from "@/components/deploy/rollback-watch-model"
+import {
+  DEFAULT_ROLLBACK_POLICY,
+  policyLine,
+  skewLine,
+} from "@/components/deploy/rollback-watch-model"
 import { useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import {
   SettingForm,
@@ -29,10 +33,13 @@ type PolicyDraft = {
   errorRateMargin: string
   latencyFactor: string
   minRequests: string
+  /** The plan's `runtime.skewProtection`, saved with the plan. */
+  skewProtection: boolean
 }
 
-function draftOf(policy: RollbackPolicy): PolicyDraft {
+function draftOf(policy: RollbackPolicy, skewProtection: boolean): PolicyDraft {
   return {
+    skewProtection,
     keepWarm: policy.keepWarm,
     automatic: policy.automatic,
     windowMinutes: String(Math.max(1, Math.round(policy.windowSeconds / 60))),
@@ -40,6 +47,10 @@ function draftOf(policy: RollbackPolicy): PolicyDraft {
     latencyFactor: String(policy.latencyFactor),
     minRequests: String(policy.minRequests),
   }
+}
+
+function settingDigestOf(draft: PolicyDraft) {
+  return JSON.stringify(draft)
 }
 
 /** The bounds the server holds the terms to (`validateRollbackPolicy`). */
@@ -72,16 +83,29 @@ function policyOf(draft: PolicyDraft): RollbackPolicy | string {
  * the page's save bar, since the terms are saved apart from the plan; they
  * apply from the next cutover, so a window already open keeps the terms it
  * opened with.
+ *
+ * Skew protection is the plan's (`runtime.skewProtection`) but is set here,
+ * beside the warm window it lives in: it keeps the warm release running for
+ * the visitors it answered first, for as long as the window lasts. It goes
+ * out as the plan's own save, changing that one field of the latest copy.
  */
 export function RollbackWatchForm({
   projectId,
   environmentId,
   blueGreen,
+  skew,
 }: {
   projectId: number
   environmentId: number
   /** Whether the saved plan releases blue/green, the only kind kept warm. */
   blueGreen: boolean
+  skew: {
+    /** The saved plan's switch. */
+    saved: boolean
+    /** Why the plan cannot have it, when it cannot. */
+    refusal?: string
+    save: (on: boolean) => Promise<void>
+  }
 }) {
   const { can } = useAuth()
   const canEdit = can("system.admin")
@@ -94,7 +118,7 @@ export function RollbackWatchForm({
   const saved = read.data?.policy ?? DEFAULT_ROLLBACK_POLICY
   const draft = useSettingDraft<PolicyDraft>(
     `deploy.${projectId}.settings.rollback`,
-    draftOf(saved),
+    draftOf(saved, skew.saved),
   )
   const value = draft.value
   const patch = (next: Partial<PolicyDraft>) => draft.set({ ...value, ...next })
@@ -113,10 +137,19 @@ export function RollbackWatchForm({
     setSaving(true)
     setError(undefined)
     try {
-      await put(`${base}/rollback-policy`, parsed)
+      if (value.skewProtection !== skew.saved) await skew.save(value.skewProtection)
+      const policyDirty =
+        settingDigestOf({ ...value, skewProtection: false }) !==
+        settingDigestOf(draftOf(saved, false))
+      if (policyDirty) await put(`${base}/rollback-policy`, parsed)
       read.refresh()
       return true
     } catch (failure) {
+      // A plan refusal names the switch, and is the form's sentence.
+      if (failure instanceof ApiError && failure.field === "runtime.skewProtection") {
+        setError(failure.message)
+        return false
+      }
       notify.error("Could not save the rollback terms", failure)
       setError(failure instanceof Error ? failure.message : String(failure))
       return false
@@ -168,6 +201,9 @@ export function RollbackWatchForm({
             className="block animate-rise"
           >
             {typeof parsed === "string" ? parsed : policyLine(parsed)}
+            {typeof parsed !== "string" && skewLine(value.skewProtection, parsed) && (
+              <> {skewLine(value.skewProtection, parsed)}</>
+            )}
           </span>
         }
         status={settingStatus({ dirty: draft.dirty })}
@@ -223,7 +259,25 @@ export function RollbackWatchForm({
               </Field>
             </FieldRow>
           </OptionRow>
+          <OptionRow
+            title="Keep each visitor on the release that answered them"
+            hint="Skew protection. Each visitor's first answer sets a jd_release cookie naming the release that gave it. After a cutover the previous release stays running rather than paused and keeps answering the visitors whose cookie names it — pages, scripts and styles alike — until the window ends, so a page loaded before the cutover never asks the new release for files it does not have. Everyone else, and everyone after the window, gets the new release."
+            checked={value.skewProtection}
+            onCheckedChange={(skewProtection) => patch({ skewProtection })}
+            disabled={!canEdit || (Boolean(skew.refusal) && !value.skewProtection)}
+          />
         </OptionList>
+        {skew.refusal && value.skewProtection && (
+          <FormNote tone="warning" className="animate-rise">
+            Skew protection will be refused on the next save: {skew.refusal}.
+          </FormNote>
+        )}
+        {value.skewProtection && !skew.refusal && !value.keepWarm && (
+          <FormNote className="animate-rise">
+            With the previous release not kept warm, its visitors stay on it only while it drains,
+            then move to the new release.
+          </FormNote>
+        )}
         {!blueGreen && value.keepWarm && (
           <FormNote className="animate-rise">
             Only a blue / green release is kept warm. This environment releases stop first, so the

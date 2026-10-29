@@ -1877,6 +1877,11 @@ var addedColumns = []struct{ table, column, spec string }{
 	// before it name only the account, as they always did.
 	{"audit_log", "key_id", "INTEGER NOT NULL DEFAULT 0"},
 	{"audit_log", "key_name", "TEXT NOT NULL DEFAULT ''"},
+	// Skew protection keeps a window's warm release running rather than
+	// paused, and the watcher reads how many requests it still answers. A
+	// window opened before either is a paused one that served nobody.
+	{"deploy_rollback_watches", "warm_running", "INTEGER NOT NULL DEFAULT 0"},
+	{"deploy_rollback_watches", "warm_served_json", "TEXT NOT NULL DEFAULT 'null'"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on
