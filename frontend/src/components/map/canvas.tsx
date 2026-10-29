@@ -1,27 +1,24 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   MiniMap,
   ReactFlow,
-  useNodesState,
   useReactFlow,
   useStore,
   useStoreApi,
   type Edge,
   type Node,
+  type NodeChange,
   type Viewport,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import {
-  ChevronDown,
   Cross,
-  Eye,
-  EyeOff,
   Fullscreen,
   FullscreenClose,
-  Linked,
   Minus,
   Plus,
   RefreshClockwise,
@@ -30,6 +27,7 @@ import {
   SidebarRightClose,
   SidebarRightOpen,
   Trash,
+  Warning,
 } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/page"
@@ -45,838 +43,613 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useConfirm } from "@/components/confirm-dialog"
-import { FormFact } from "@/components/form"
-import { WireHost } from "@/components/deploy/wire"
-import { Saved, fitPadding } from "@/components/database/diagram/chrome"
-import { useMediaQuery } from "@/hooks/use-mobile"
-import { post } from "@/lib/api"
+import { Saved } from "@/components/database/diagram/chrome"
 import { plural, relativeTime } from "@/lib/format"
+import { isArranged, kindOf, type MapDocument, type Point } from "@/lib/server-map"
 import {
-  BRANCHES,
-  branchId,
-  census,
-  followersOf,
-  freeSpot,
-  isArranged,
-  isFolded,
-  kindOfItem,
-  layoutMap,
-  linksOf,
-  searchMap,
-  shelfId,
-  toggleFold,
-  type KindDef,
-  type Laid,
-  type LaidNode,
-  type MapDocument,
-  type Point,
-  type Rect,
-} from "@/lib/server-map"
+  FRAME,
+  SYSTEM_KINDS,
+  detectSystems,
+  layoutAtlas,
+  neighbours,
+  searchNodes,
+  searchSystems,
+  settle,
+  systemTitle,
+  type Placed,
+  type Settled,
+  type System,
+  type SystemNode,
+} from "@/lib/server-systems"
 import { notify } from "@/lib/toast"
-import type { Board } from "@/lib/boards"
-import type { Capability, ServerMap } from "@/lib/types"
+import type { ServerMap } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { KIND_GLYPH } from "@/components/map/marks"
-import { VIA_LABEL, edgeTypes } from "@/components/map/edges"
-import { MapActionsContext, nodeTypes, type MapActions } from "@/components/map/nodes"
+import { edgeTypes, type WireData } from "@/components/map/edges"
 import { MapInspector } from "@/components/map/inspector"
 import type { MemoryStatus } from "@/components/map/memory"
+import {
+  nodeTypes,
+  type FaceData,
+  type FrameData,
+  type NodeState,
+  type Port,
+  type StackData,
+} from "@/components/map/nodes"
+import { SystemRail, censusLine } from "@/components/map/rail"
 
-const ZOOM = { min: 0.12, max: 2 }
+const ZOOM = { min: 0.06, max: 2 }
+/** A system flown to fills the canvas, but a small one is not blown up past its own size. */
+const FLY = { padding: 0.04, maxZoom: 1 }
 
 /**
- * The zoom a box's words stop being read at. Below `near` a thing drops its
- * second line, below `mid` its mark too, and is its name and its dot; the
- * switch is one attribute on the canvas that CSS reads, so zooming
- * re-renders no box.
+ * The distance the canvas is read at. Near, every word; mid, a box is its
+ * mark, its name and its state; far, each system is its name across its
+ * frame. One attribute CSS reads, so zooming re-renders no box.
  */
 function zoomBucket(zoom: number): "near" | "mid" | "far" {
-  if (zoom < 0.35) return "far"
-  if (zoom < 0.75) return "mid"
+  if (zoom < 0.28) return "far"
+  if (zoom < 0.62) return "mid"
   return "near"
 }
 
+/** The size a name is held at, in whole pixels so a zoom lays the names out a few times, not every frame. */
+function nameFloor(zoom: number) {
+  return Math.min(24, Math.round(10.5 / Math.max(zoom, 0.05)))
+}
+
+type Seat = { system: System; placed: Placed; origin: Point }
+
 /**
- * How much a name in a box is grown so it reads on the screen at 11px however
- * far out the map is, from the `size` it is set in — a thing's 14px name, a
- * shelf's 10px eyebrow (`NAME` and `SHELF` in nodes.tsx) — up to the `most`
- * a line of its box holds; past that it shrinks with the rest. Grown in steps
- * of a twelfth of a doubling, so a zoom lays the names out again a few times
- * rather than on every frame, each step too small to see.
+ * A box's data, one object per box per state, so a click re-renders only the
+ * boxes it lit or dimmed: React Flow redraws a node whose data changed. Keyed
+ * by the laid-out node, so a new reading lets the old ones go.
  */
-function heldScale(zoom: number, size: number, most: number) {
-  const wanted = Math.min(most, Math.max(1, 11 / size / Math.max(zoom, 0.01)))
-  return Math.round(2 ** (Math.round(Math.log2(wanted) * 12) / 12) * 1000) / 1000
-}
-
-type Drag = {
-  id: string
-  start: Point
-  followers: Map<string, Point>
+const faceCache = new WeakMap<SystemNode, Map<string, FaceData>>()
+function faceData(node: SystemNode, state: NodeState, ports: Port[], sides: FaceData["sides"]) {
+  const key = `${state ?? ""}|${sides.in ? 1 : 0}${sides.out ? 1 : 0}|${ports.map((p) => `${p.id}@${Math.round(p.left)}`).join(",")}`
+  let per = faceCache.get(node)
+  if (!per) {
+    per = new Map()
+    faceCache.set(node, per)
+  }
+  let data = per.get(key)
+  if (!data) {
+    data = { node, state, ports, sides }
+    per.set(key, data)
+  }
+  return data
 }
 
 /**
- * The map's canvas: pans, zooms and drags like the ER diagram it is built
- * beside, and remembers what the reader arranged.
+ * The map's canvas: every system's diagram in its own frame, side by side,
+ * with the rail of systems down its left and the inspector down its right.
  *
- * What it adds is the tree. Dragging a branch takes its shelves with it,
- * dragging the server takes the whole map, and a shelf carries its things as
- * its children; holding Alt drags one box alone. A thing dragged off its
- * shelf stays where it is put, hanging from its shelf by a dashed line, and
- * dropped back on its shelf it returns to its place in the grid.
- *
- * Choosing a thing lights the branch it hangs from and, where the server
- * knows them, its links to the rest of the map — the project a domain routes
- * to, the database a project is bound to, the volume a container mounts —
- * and steps everything else back; the inspector beside the canvas says each
- * one in words.
+ * Choosing a box lights what it is wired to inside its system, draws those
+ * lines in the brand's blue with how each is known written on them, and steps
+ * the rest of the system back. A box can be dragged where the reader wants
+ * it; the place is kept against the account, inside its system, so a
+ * reading that adds a container lays that one out and moves nothing else.
  */
 export function MapCanvas({
   map,
-  kinds,
-  byDefault,
   doc,
   status,
   updatedAt,
   update,
   reset,
   refresh,
-  can,
   full,
   onFullscreen,
+  initialSystem,
 }: {
   map: ServerMap
-  kinds: KindDef[]
-  byDefault: ReadonlySet<string>
   doc: MapDocument
   status: MemoryStatus
   updatedAt?: string
   update: (next: Partial<MapDocument> | ((doc: MapDocument) => MapDocument)) => void
   reset: () => Promise<void>
   refresh: () => void
-  can: (capability: Capability) => boolean
   full: boolean
   onFullscreen: () => void
+  /** A system asked for by the address (`?system=`), flown to on arrival. */
+  initialSystem?: string
 }) {
-  const router = useRouter()
   const flow = useReactFlow()
+  const router = useRouter()
   const { confirm, dialog } = useConfirm()
-  const searchRef = useRef<HTMLInputElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
-  const [selected, setSelected] = useState<string | null>(null)
-  // A box the reader points at from the inspector, ringed on the canvas.
-  const [hovered, setHovered] = useState<string | null>(null)
-  // The shelf a thing being dragged belongs to, and whether letting go now
-  // would put it back.
-  const [home, setHome] = useState<{ shelf: string; over: boolean } | null>(null)
-  const [query, setQuery] = useState("")
-  const wide = useMediaQuery("(min-width: 1024px)")
-  const [inspectorOpen, setInspectorOpen] = useState(true)
+  const searchRef = useRef<HTMLInputElement>(null)
   const zoom = useStore((s) => zoomBucket(s.transform[2]))
-  // Zoomed out, names are held to the screen by growing them against the
-  // zoom; the factors are written straight onto the canvas as the view moves,
-  // so they follow a zoom without React drawing anything. The names with
-  // open ground round them are scaled on every frame (`--map-unzoom`, no
-  // layout); the names in boxes are cut short inside them, so they are laid
-  // out again, and only when their step changes (`--map-name`, `--map-label`).
+
+  // Names with open ground round them — a system's title across its frame
+  // from far out, a line's label — are held to the screen against the zoom,
+  // written straight onto the canvas so a zoom draws no React.
   const store = useStoreApi()
   useEffect(() => {
-    const written = new Map<string, string>()
-    const write = (canvas: HTMLElement, name: string, value: string) => {
-      if (written.get(name) === value) return
-      written.set(name, value)
-      canvas.style.setProperty(name, value)
-    }
+    let floor = ""
     const apply = (z: number) => {
       const canvas = canvasRef.current
       if (!canvas) return
       canvas.style.setProperty("--map-unzoom", String(1 / Math.max(z, 0.05)))
-      write(canvas, "--map-name", String(heldScale(z, 14, 4)))
-      write(canvas, "--map-label", String(heldScale(z, 10, 5)))
+      const next = `${nameFloor(z)}px`
+      if (next !== floor) {
+        floor = next
+        canvas.style.setProperty("--map-name-floor", next)
+      }
     }
     apply(store.getState().transform[2])
     return store.subscribe((state) => apply(state.transform[2]))
   }, [store])
 
-  const laid = useMemo(
-    () => layoutMap({ map, kinds, doc, byDefault }),
-    // The viewport and the two switches are in the document too, and none
-    // of them moves a box.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [map, kinds, byDefault, doc.positions, doc.collapsed, doc.opened, doc.expanded],
-  )
-
-  const counts = useMemo(() => census(map, kinds), [map, kinds])
-  const branchCounts = useMemo(() => {
-    const out = new Map<string, { things: number; down: number }>()
-    for (const kind of map.kinds) {
-      const def = kinds.find((k) => k.key === kind.key)
-      if (!def) continue
-      const held = out.get(def.branch) ?? { things: 0, down: 0 }
-      held.things += Math.max(kind.total, kind.items.length)
-      held.down += kind.items.filter((item) => item.tone === "danger").length
-      out.set(def.branch, held)
+  const systems = useMemo(() => detectSystems(map), [map])
+  const placed = useMemo(() => layoutAtlas(systems), [systems])
+  const seats = useMemo(() => {
+    const out = new Map<string, Seat>()
+    for (const p of placed) {
+      const origin = { x: p.x + FRAME.pad, y: p.y + FRAME.head + FRAME.pad }
+      for (const n of p.system.nodes) out.set(n.id, { system: p.system, placed: p, origin })
     }
     return out
-  }, [map, kinds])
+  }, [placed])
+  const bySystem = useMemo(() => new Map(placed.map((p) => [p.system.id, p])), [placed])
 
-  const readings = useMemo(() => new Map(map.kinds.map((k) => [k.key, k])), [map.kinds])
-  const base = useMemo(
-    () => toFlowNodes(laid, { readings, branchCounts, counts, hostname: map.host.hostname }),
-    [laid, readings, branchCounts, counts, map.host.hostname],
+  // Where the reader dragged boxes: the document's, with the drag in hand laid
+  // over it so a box moves at the pointer's pace and is saved once, when it
+  // is let go.
+  const [dragging, setDragging] = useState<Record<string, Point> | null>(null)
+  const draggingRef = useRef<Record<string, Point> | null>(null)
+  const positions = dragging ?? doc.positions
+  const settled = useMemo(() => {
+    const out = new Map<string, Settled>()
+    for (const p of placed) out.set(p.system.id, settle(p.system, positions))
+    return out
+  }, [placed, positions])
+
+  const [chosen, setChosen] = useState<string | null>(null)
+  const [focus, setFocus] = useState<string | null>(initialSystem ?? doc.focus ?? null)
+  const [hovered, setHovered] = useState<string | null>(null)
+  const [query, setQuery] = useState("")
+  const [inspectorOpen, setInspectorOpen] = useState(true)
+  const inspecting = inspectorOpen
+
+  const chosenSeat = chosen ? seats.get(chosen) : undefined
+  const chosenNode = chosenSeat?.system.nodes.find((n) => n.id === chosen)
+  const focusSystem = focus ? bySystem.get(focus)?.system : undefined
+  const lit = useMemo(
+    () => (chosenSeat && chosen ? neighbours(chosenSeat.system, chosen) : null),
+    [chosenSeat, chosen],
   )
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(base)
-  const drag = useRef<Drag | null>(null)
+  const kept = useMemo(() => searchSystems(systems, query), [systems, query])
+  const hits = useMemo(() => {
+    if (!query.trim()) return null
+    const out = new Set<string>()
+    for (const s of systems) for (const id of searchNodes(s, query)) out.add(id)
+    return out
+  }, [systems, query])
 
-  // A new reading or a new arrangement lays the canvas out again — but never
-  // under a drag, which would snap the box out of the reader's hand.
-  const pending = useRef<Node[] | null>(null)
-  useEffect(() => {
-    if (drag.current) pending.current = base
-    else setNodes(base)
-  }, [base, setNodes])
+  const frameRect = useCallback(
+    (id: string) => {
+      const p = bySystem.get(id)
+      const s = settled.get(id)
+      if (!p || !s) return null
+      return {
+        x: p.x + s.minX,
+        y: p.y + s.minY,
+        width: Math.max(p.width, s.maxX - s.minX + FRAME.pad * 2),
+        height: Math.max(p.height, s.maxY - s.minY + FRAME.head + FRAME.pad * 2),
+      }
+    },
+    [bySystem, settled],
+  )
 
+  const flyTo = useCallback(
+    (id: string, duration = 450) => {
+      void flow.fitView({ ...FLY, nodes: [{ id: `frame:${id}` }], duration })
+    },
+    [flow],
+  )
+  const showAll = useCallback(() => {
+    setFocus(null)
+    setChosen(null)
+    update({ focus: undefined })
+    void flow.fitView({ padding: 0.06, duration: 450 })
+  }, [flow, update])
+  const focusOn = useCallback(
+    (id: string) => {
+      setFocus(id)
+      setChosen(null)
+      update({ focus: id })
+      flyTo(id)
+    },
+    [flyTo, update],
+  )
+
+  // The first view: the system the address or the last visit named, else
+  // where the reader left the canvas, else every system at once.
   const restored = useRef(false)
   useEffect(() => {
-    if (restored.current) return
+    if (restored.current || placed.length === 0) return
     restored.current = true
     window.setTimeout(() => {
-      if (doc.viewport) void flow.setViewport(doc.viewport)
-      // The first view takes in the whole server down to the zoom its names
-      // stop being held at (`heldScale`); a bigger one opens on its middle.
-      else void flow.fitView({ padding: fitPadding(doc.minimap), maxZoom: 0.9, minZoom: 0.2 })
+      const wanted = initialSystem ?? doc.focus
+      if (wanted && bySystem.has(wanted)) flyTo(wanted, 0)
+      else if (doc.viewport) void flow.setViewport(doc.viewport)
+      else void flow.fitView({ padding: 0.06 })
     }, 0)
-  }, [doc.viewport, doc.minimap, flow])
+  }, [placed.length, initialSystem, doc.focus, doc.viewport, bySystem, flyTo, flow])
 
-  const links = useMemo(
-    () => (selected && doc.connections ? linksOf(map, selected) : []),
-    [selected, doc.connections, map],
-  )
-  const related = useMemo(() => {
-    if (!selected) return null
-    const ids = new Set<string>([selected])
-    // A shelf chosen lights what is on it; nothing on the map links to a
-    // shelf as such.
-    if (selected.startsWith("shelf:")) {
-      for (const item of map.kinds.find((k) => shelfId(k.key) === selected)?.items ?? []) {
-        ids.add(item.id)
-      }
-      return ids
-    }
-    for (const link of linksOf(map, selected)) {
-      ids.add(link.from)
-      ids.add(link.to)
-    }
-    return ids
-  }, [selected, map])
-  const matches = useMemo(() => searchMap(map, query), [map, query])
-
-  // What stays lit while something is chosen or searched: the things
-  // themselves, and the shelves and branches they hang from, so the reader
-  // can still see where each one lives.
-  // A box chosen outranks the search that found it: following a link from the
-  // inspector must light the new box, not the words still in the search.
-  const lit = useMemo(() => {
-    const things = related ?? matches
-    if (!things) return null
-    const out = new Set(things)
-    for (const node of laid.nodes) {
-      if (node.type === "item" && things.has(node.id)) {
-        out.add(shelfId(node.kind.key))
-        out.add(branchId(node.kind.branch))
-      }
-      if (node.type === "shelf" && things.has(node.id)) out.add(branchId(node.kind.branch))
-    }
-    out.add("server")
-    return out
-  }, [matches, related, laid.nodes])
-
-  // The data each node draws, kept as the same object while nothing it
-  // draws has changed (`flaggedData`), so a click re-renders the boxes it
-  // changes and not the other three hundred.
-  const shown = useMemo(
-    () =>
-      nodes.map((node) => {
-        const data = flaggedData(node.data as Record<string, unknown>, {
-          dimmed: lit ? !lit.has(node.id) : false,
-          selected: node.id === selected,
-          related: related ? related.has(node.id) && node.id !== selected : false,
-          hovered: node.id === hovered,
-          home: home?.shelf === node.id ? (home.over ? "over" : "away") : undefined,
+  const nodes = useMemo(() => {
+    const out: Node[] = []
+    for (const p of placed) {
+      const sid = p.system.id
+      const s = settled.get(sid)!
+      const rect = frameRect(sid)!
+      const origin = { x: p.x + FRAME.pad, y: p.y + FRAME.head + FRAME.pad }
+      const dimmed = kept !== null && !kept.has(sid)
+      out.push({
+        id: `frame:${sid}`,
+        type: "systemFrame",
+        position: { x: rect.x, y: rect.y },
+        width: rect.width,
+        height: rect.height,
+        measured: { width: rect.width, height: rect.height },
+        draggable: false,
+        selectable: false,
+        zIndex: 0,
+        data: {
+          kind: p.system.kind,
+          title: systemTitle(p.system),
+          anchor: p.system.anchor,
+          anchorKind: p.system.anchorKind,
+          census: censusLine(p.system),
+          chosen: focus === sid,
+          dimmed,
+        } satisfies FrameData,
+      })
+      for (const f of s.frames) {
+        out.push({
+          id: f.id,
+          type: "stackFrame",
+          position: { x: origin.x + f.x, y: origin.y + f.y },
+          width: f.width,
+          height: f.height,
+          measured: { width: f.width, height: f.height },
+          draggable: false,
+          selectable: false,
+          zIndex: 0,
+          data: {
+            frame: f,
+            // Stepped back with the rest unless it, or one of its containers, is lit.
+            dimmed:
+              lit !== null &&
+              chosenSeat?.system.id === sid &&
+              !lit.has(f.id) &&
+              !s.nodes.some((n) => n.frame === f.itemId && lit.has(n.id)),
+          } satisfies StackData,
         })
-        return data === node.data ? node : { ...node, data }
-      }),
-    [nodes, lit, selected, related, hovered, home],
-  )
+      }
+      const sides = new Map<string, { in: boolean; out: boolean }>()
+      for (const e of p.system.edges) {
+        if (e.shape !== "flow") continue
+        sides.set(e.source, { in: sides.get(e.source)?.in ?? false, out: true })
+        sides.set(e.target, { in: true, out: sides.get(e.target)?.out ?? false })
+      }
+      const at = new Map(s.nodes.map((n) => [n.id, n]))
+      for (const n of s.nodes) {
+        const ports: Port[] = s.nodes
+          .filter((sat) => sat.host === n.id)
+          .map((sat) => ({
+            id: sat.id,
+            label: sat.port ?? "",
+            left: Math.min(n.width - 14, Math.max(14, sat.x + sat.width / 2 - n.x)),
+          }))
+        let state: NodeState
+        if (chosen === n.id) state = "chosen"
+        else if (hovered === n.id || hits?.has(n.id)) state = "hit"
+        else if (lit && chosenSeat?.system.id === sid) state = lit.has(n.id) ? "lit" : "dim"
+        else if (dimmed) state = "dim"
+        out.push({
+          id: n.id,
+          type: n.face,
+          position: { x: origin.x + n.x, y: origin.y + n.y },
+          width: n.width,
+          height: n.height,
+          measured: { width: n.width, height: n.height },
+          zIndex: 2,
+          data: faceData(at.get(n.id)!, state, ports, sides.get(n.id) ?? { in: false, out: false }),
+        })
+      }
+    }
+    return out
+  }, [placed, settled, frameRect, kept, focus, lit, chosenSeat, chosen, hovered, hits])
 
   const edges = useMemo(() => {
-    const at = absolutePositions(nodes)
-    const out: Edge[] = laid.edges.map((edge) => {
-      const side = edge.tier === "away" ? sideBetween(at, edge.source, edge.target) : edge.side
-      return {
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        type: "branch",
-        sourceHandle: side === "right" ? "sr" : "sl",
-        targetHandle: side === "right" ? "tl" : "tr",
-        data: {
-          tier: edge.tier,
-          lit: lit ? lit.has(edge.source) && lit.has(edge.target) && Boolean(selected) : false,
-          dimmed: lit ? !(lit.has(edge.source) && lit.has(edge.target)) : false,
-        },
-        selectable: false,
-        focusable: false,
+    const out: Edge[] = []
+    for (const p of placed) {
+      const sid = p.system.id
+      const inSystem = chosenSeat?.system.id === sid
+      const byId = new Map(p.system.nodes.map((n) => [n.id, n]))
+      for (const e of p.system.edges) {
+        const on = inSystem && chosen !== null && (e.source === chosen || e.target === chosen)
+        const s = byId.get(e.source)
+        const t = byId.get(e.target)
+        out.push({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          type: "wire",
+          sourceHandle: e.shape === "sub" ? `sub:${e.target}` : e.shape === "down" ? "down" : "out",
+          targetHandle: e.shape === "flow" ? "in" : "up",
+          zIndex: 1,
+          selectable: false,
+          data: {
+            via: e.via,
+            also: e.also,
+            shape: e.shape,
+            lit: on,
+            dimmed: (inSystem && lit !== null && !on) || (kept !== null && !kept.has(sid)),
+            // A stack's frame stands in for its containers; it carries while they run.
+            carries: (s?.item.tone ?? "ok") === "ok" && (t?.item.tone ?? "ok") === "ok",
+          } satisfies WireData,
+        })
       }
-    })
-    for (const link of links) {
-      if (!at.has(link.from) || !at.has(link.to)) continue
-      const handles = relationHandles(at, link.from, link.to)
-      out.push({
-        id: `r:${link.from}:${link.to}:${link.via}`,
-        source: link.from,
-        target: link.to,
-        type: "relation",
-        ...handles,
-        data: { via: link.via, label: VIA_LABEL[link.via] ?? link.via },
-        // Over the shelves' ground and under the boxes on them, so a link
-        // never strikes through the name of a thing it passes.
-        zIndex: 1,
-        selectable: false,
-        focusable: false,
-      })
     }
     return out
-  }, [laid.edges, links, nodes, lit, selected])
+  }, [placed, chosenSeat, chosen, lit, kept])
 
-  // A thing chosen from the search or the inspector is brought into view
-  // with what it is wired to: its branch and shelf unfolded and, where it
-  // sat behind "+N more", its shelf opened. The view moves once the layout
-  // has drawn it (`framing`, read when the nodes change).
-  const framing = useRef<string | null>(null)
-  const frame = useCallback(
-    (id: string, drawn: Node[]) => {
-      const around = new Set([id])
-      for (const link of linksOf(map, id)) around.add(link.from === id ? link.to : link.from)
-      const ids = [...around].filter((one) => drawn.some((n) => n.id === one))
-      window.requestAnimationFrame(
-        () =>
-          void flow.fitView({
-            nodes: ids.map((one) => ({ id: one })),
-            padding: 0.3,
-            duration: 400,
-            maxZoom: 1,
-          }),
-      )
-    },
-    [map, flow],
-  )
-  const reveal = useCallback(
-    (id: string) => {
-      setSelected(id)
-      const drawn = flow.getNodes()
-      if (drawn.some((n) => n.id === id)) {
-        frame(id, drawn)
-        return
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      let next: Record<string, Point> | null = null
+      for (const c of changes) {
+        if (c.type !== "position" || !c.position) continue
+        const seat = seats.get(c.id)
+        if (!seat) continue
+        next ??= { ...(draggingRef.current ?? doc.positions) }
+        next[c.id] = { x: c.position.x - seat.origin.x, y: c.position.y - seat.origin.y }
       }
-      const isShelf = id.startsWith("shelf:")
-      const def = kinds.find((k) => k.key === (isShelf ? id.slice(6) : kindOfItem(map, id)))
-      if (!def) return
-      framing.current = id
-      update((d) => {
-        let next = d
-        const branch = branchId(def.branch)
-        const shelf = shelfId(def.key)
-        if (isFolded(next, branch, byDefault)) next = toggleFold(next, branch, byDefault)
-        if (isShelf) return next
-        if (isFolded(next, shelf, byDefault)) next = toggleFold(next, shelf, byDefault)
-        if (!next.expanded.includes(shelf)) next = { ...next, expanded: [...next.expanded, shelf] }
-        return next
-      })
-    },
-    [flow, frame, kinds, map, update, byDefault],
-  )
-  useEffect(() => {
-    const id = framing.current
-    if (!id || !nodes.some((n) => n.id === id)) return
-    framing.current = null
-    frame(id, nodes)
-  }, [nodes, frame])
-
-  const choose = useCallback(
-    (id: string | null) => {
-      setSelected((current) => (current === id ? null : id))
-      if (id && !wide) setInspectorOpen(true)
-    },
-    [wide],
-  )
-
-  const add = useCallback(
-    async (kind: KindDef) => {
-      const action = kind.add
-      if (!action) return
-      if (action.create === "drawing") {
-        try {
-          const drawing = await post<Board>("/boards/", { name: "Untitled drawing" })
-          router.push(`/excalidraw/${drawing.id}`)
-        } catch (err) {
-          notify.error("Could not make the drawing", err)
-        }
-        return
-      }
-      if (kind.key === "terminals") {
-        const home = readings.get("terminals")?.facts?.find((f) => f.label === "home")?.value
-        router.push(home ? `/terminal?cwd=${encodeURIComponent(home)}` : "/terminal")
-        return
-      }
-      if (action.href) router.push(action.href)
-    },
-    [router, readings],
-  )
-
-  const canAdd = useCallback(
-    (kind: KindDef) => Boolean(kind.add && can(kind.add.capability)),
-    [can],
-  )
-
-  const actions = useMemo<MapActions>(
-    () => ({
-      toggleFold: (id) => update((d) => toggleFold(d, id, byDefault)),
-      expand: (kind) =>
-        update((d) => {
-          const id = shelfId(kind)
-          return {
-            ...d,
-            expanded: d.expanded.includes(id)
-              ? d.expanded.filter((e) => e !== id)
-              : [...d.expanded, id],
-          }
-        }),
-      add: (kind) => void add(kind),
-      open: (href) => router.push(href),
-      can: canAdd,
-      returnToShelf: (id) =>
-        update((d) => {
-          const positions = { ...d.positions }
-          delete positions[id]
-          return { ...d, positions }
-        }),
-    }),
-    [update, byDefault, add, router, canAdd],
-  )
-
-  const onNodeDragStart = useCallback(
-    (event: MouseEvent | TouchEvent, node: Node) => {
-      const followers = new Map<string, Point>()
-      if (!event.altKey) {
-        const ids = new Set(followersOf(laid, node.id))
-        for (const n of flow.getNodes()) if (ids.has(n.id)) followers.set(n.id, n.position)
-      }
-      drag.current = { id: node.id, start: node.position, followers }
-      const laidNode = laid.nodes.find((n) => n.id === node.id)
-      if (laidNode?.type === "item") setHome({ shelf: shelfId(laidNode.kind.key), over: true })
-    },
-    [laid, flow],
-  )
-
-  const onNodeDrag = useCallback(
-    (_: MouseEvent | TouchEvent, node: Node) => {
-      const held = drag.current
-      if (home && held?.id === node.id) {
-        // Whether letting go here would put the thing back on its shelf,
-        // said by the shelf as it changes, not on every frame.
-        const over = isOverShelf(flow.getNodes(), node, home.shelf)
-        if (over !== home.over) setHome({ shelf: home.shelf, over })
-      }
-      if (!held || held.id !== node.id || held.followers.size === 0) return
-      const dx = node.position.x - held.start.x
-      const dy = node.position.y - held.start.y
-      setNodes((list) =>
-        list.map((n) => {
-          const from = held.followers.get(n.id)
-          return from ? { ...n, position: { x: from.x + dx, y: from.y + dy } } : n
-        }),
-      )
-    },
-    [setNodes, home, flow],
-  )
-
-  const onNodeDragStop = useCallback(
-    (_: MouseEvent | TouchEvent, node: Node, dragged: Node[]) => {
-      const held = drag.current
-      drag.current = null
-      setHome(null)
-      const current = flow.getNodes()
-      const byId = new Map(current.map((n) => [n.id, n]))
-      const set: Record<string, Point> = {}
-      const unset = new Set<string>()
-      for (const moved of dragged.length > 0 ? dragged : [node]) {
-        const laidNode = laid.nodes.find((n) => n.id === moved.id)
-        if (!laidNode) continue
-        if (laidNode.type === "item") {
-          const shelf = byId.get(shelfId(laidNode.kind.key))
-          const absolute = moved.parentId
-            ? {
-                x: (byId.get(moved.parentId)?.position.x ?? 0) + moved.position.x,
-                y: (byId.get(moved.parentId)?.position.y ?? 0) + moved.position.y,
-              }
-            : moved.position
-          const centre = {
-            x: absolute.x + laidNode.width / 2,
-            y: absolute.y + laidNode.height / 2,
-          }
-          const onShelf = shelf && inside(centre, shelf)
-          if (onShelf) {
-            unset.add(moved.id)
-            continue
-          }
-          // Off its shelf, it lands on clear ground: let go over another
-          // shelf, it slides to the nearest place that covers nothing.
-          set[moved.id] = freeSpot(
-            { ...absolute, width: laidNode.width, height: laidNode.height },
-            obstacles(current, moved.id),
-          )
-          continue
-        }
-        set[moved.id] = moved.position
-      }
-      if (held && held.id === node.id) {
-        for (const id of held.followers.keys()) {
-          const follower = byId.get(id)
-          if (follower) set[id] = follower.position
-        }
-      }
-      update((d) => {
-        const positions = { ...d.positions, ...set }
-        for (const id of unset) delete positions[id]
-        return { ...d, positions }
-      })
-      // A thing dropped back on its shelf, or a drop the layout does not
-      // change, is put where the layout says.
-      if (pending.current) {
-        setNodes(pending.current)
-        pending.current = null
-      } else if (unset.size > 0) {
-        setNodes(base)
-      }
-      // A box that slid off the shelf it was let go over is drawn where it
-      // landed now, not after the save comes round.
-      const slid = Object.entries(set).filter(([id]) => byId.get(id)?.parentId === undefined)
-      if (slid.length > 0) {
-        setNodes((list) =>
-          list.map((n) => {
-            const at = set[n.id]
-            return at && !n.parentId ? { ...n, position: at } : n
-          }),
-        )
+      if (next) {
+        draggingRef.current = next
+        setDragging(next)
       }
     },
-    [flow, laid.nodes, update, setNodes, base],
+    [seats, doc.positions],
   )
+  const onNodeDragStop = useCallback(() => {
+    const moved = draggingRef.current
+    draggingRef.current = null
+    setDragging(null)
+    if (moved) update((d) => ({ ...d, positions: moved }))
+  }, [update])
 
-  const tidy = () => {
+  const tidy = useCallback(() => {
     const before = doc.positions
     update((d) => ({ ...d, positions: {} }))
-    window.setTimeout(
-      () => void flow.fitView({ padding: fitPadding(doc.minimap), duration: 300, maxZoom: 0.9 }),
-      50,
-    )
     notify.success("Laid out again", {
-      description: "Every box is back in its place on the tree.",
+      description: "Every box is back where its system puts it.",
       action: { label: "Undo", onClick: () => update((d) => ({ ...d, positions: before })) },
     })
-  }
+  }, [doc.positions, update])
 
-  const foldAll = (fold: boolean) =>
-    update((d) => ({
-      ...d,
-      collapsed: fold
-        ? BRANCHES.map((b) => branchId(b.key)).filter((id) => laid.nodes.some((n) => n.id === id))
-        : [],
-      opened: fold ? [] : [...byDefault],
-    }))
-
-  const forget = () =>
+  const forget = useCallback(() => {
     confirm({
       title: "Forget this layout",
       confirmLabel: "Forget layout",
-      subject: {
-        mark: <WireHost size="sm" />,
-        name: map.host.hostname || "This server",
-        facts: (
-          <>
-            <FormFact label="Placed">{Object.keys(doc.positions).length}</FormFact>
-            <FormFact label="Folded">{doc.collapsed.length}</FormFact>
-            <FormFact label="Opened">{doc.expanded.length}</FormFact>
-          </>
-        ),
-      },
       description: (
         <p>
-          Where you put each box, and which branches and shelves you folded or opened, are thrown
-          away. Your map is laid out fresh; nobody else&rsquo;s changes, and nothing on the server
-          does.
+          Where you put each box, and the system you were last reading, are thrown away. Your map is
+          laid out fresh; nobody else&rsquo;s changes, and nothing on the server does.
         </p>
       ),
       action: async () => {
         await reset()
-        setSelected(null)
-        window.setTimeout(
-          () => void flow.fitView({ padding: fitPadding(doc.minimap), duration: 300 }),
-          50,
-        )
+        setChosen(null)
+        setFocus(null)
+        window.setTimeout(() => void flow.fitView({ padding: 0.06, duration: 300 }), 0)
       },
     })
+  }, [confirm, reset, flow])
 
-  const addable = kinds.filter((kind) => kind.add && can(kind.add.capability))
+  const choose = useCallback(
+    (id: string) => {
+      const seat = seats.get(id)
+      if (!seat) return
+      setChosen(id)
+      setFocus(seat.system.id)
+    },
+    [seats],
+  )
+  const frameNode = useCallback(
+    (id: string) => {
+      const seat = seats.get(id)
+      if (!seat) return
+      const ids = [...neighbours(seat.system, id)]
+      void flow.fitView({
+        nodes: ids.map((n) => ({ id: n })),
+        padding: 0.25,
+        duration: 400,
+        maxZoom: 1.1,
+      })
+    },
+    [flow, seats],
+  )
 
-  const onKey = (e: KeyboardEvent | React.KeyboardEvent) => {
+  const onKey = (e: React.KeyboardEvent) => {
     const target = e.target as HTMLElement
-    const typing =
-      target.tagName === "INPUT" ||
-      target.tagName === "TEXTAREA" ||
-      target.isContentEditable ||
-      target.closest("[role=dialog],[role=menu]") !== null
-    if (e.key === "Escape") {
-      if (typing) return
-      setSelected(null)
-      setQuery("")
-      return
-    }
-    if (typing || e.metaKey || e.ctrlKey || e.altKey) return
-    if (e.key === "f") void flow.fitView({ padding: fitPadding(doc.minimap), duration: 300 })
-    else if (e.key === "/") {
+    if (target.closest("input, textarea, [role=menu], [role=dialog]")) return
+    if (e.key === "/") {
       e.preventDefault()
       searchRef.current?.focus()
-    } else if (e.key === "i") setInspectorOpen((open) => !open)
-    else if (e.key === "Enter" && selected) {
-      const href = itemHref(map, selected)
-      if (href) router.push(href)
+    } else if (e.key === "f") {
+      if (focus) flyTo(focus)
+      else void flow.fitView({ padding: 0.06, duration: 300 })
+    } else if (e.key === "i") {
+      setInspectorOpen((open) => !open)
+    } else if (e.key === "Enter" && chosenNode) {
+      router.push(chosenNode.item.href)
+    } else if (e.key === "Escape") {
+      if (chosen) setChosen(null)
+      else if (query) setQuery("")
     }
   }
 
-  // The map is the whole page, so its keys are heard while the keyboard is
-  // nowhere in particular as well as inside it: a press in the inspector
-  // that redraws the inspector leaves the focus on the page's body, and
-  // Escape must still let the chosen box go. Anywhere else on the page —
-  // the sidebar, a menu — the keys are that control's.
-  const keys = useRef(onKey)
-  useEffect(() => {
-    keys.current = onKey
-  })
-  useEffect(() => {
-    const listen = (e: KeyboardEvent) => {
-      if (document.activeElement === document.body || document.activeElement === null) {
-        keys.current(e)
-      }
-    }
-    window.addEventListener("keydown", listen)
-    return () => window.removeEventListener("keydown", listen)
-  }, [])
-
-  const inspecting = inspectorOpen && (wide || selected !== null)
-  const hits = matches?.size ?? null
+  const things = systems.reduce((n, s) => n + s.nodes.filter((x) => x.kind !== "logs").length, 0)
+  const unread = map.kinds.filter((k) => SYSTEM_KINDS.has(k.key) && k.state === "unread")
 
   return (
-    <MapActionsContext.Provider value={actions}>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col" onKeyDown={onKey}>
-        <PaneHeader className="min-h-11 flex-wrap gap-x-1.5 gap-y-1">
-          <SearchInput
-            ref={searchRef}
-            dense
-            value={query}
-            onChange={(e) => {
-              // Typing asks a new question: what was chosen lets go, so the
-              // search's own answer is what lights.
-              setQuery(e.target.value)
-              setSelected(null)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && matches && matches.size > 0) {
-                const first = matches.values().next().value as string
-                reveal(first)
-              }
-              if (e.key === "Escape") {
-                setQuery("")
-                ;(e.target as HTMLInputElement).blur()
-              }
-            }}
-            placeholder="Find anything on the server"
-            aria-label="Find anything on the server"
-            containerClassName="w-60 sm:w-64"
-            trailing={
-              query ? (
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label="Clear the search"
-                  onClick={() => setQuery("")}
-                >
-                  <Cross />
-                </Button>
-              ) : undefined
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col" onKeyDown={onKey}>
+      <PaneHeader className="min-h-11 flex-wrap gap-x-1.5 gap-y-1">
+        <SearchInput
+          ref={searchRef}
+          dense
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            setChosen(null)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && hits && hits.size > 0) {
+              const first = hits.values().next().value as string
+              choose(first)
+              frameNode(first)
             }
-          />
-          {hits !== null && (
-            <span aria-live="polite" className="numeric text-hint text-muted-foreground">
-              {hits === 0 ? "no match" : plural(hits, "match", "matches")}
-            </span>
-          )}
-          <span className="ml-1 hidden items-center gap-1.5 text-hint text-muted-foreground md:flex">
-            <span className="numeric text-foreground">{counts.things.toLocaleString("en-US")}</span>
-            things
-            {counts.down > 0 && (
-              <>
-                <span aria-hidden>·</span>
-                <span className="numeric text-destructive">{counts.down} down</span>
-              </>
-            )}
-            <span aria-hidden>·</span>
-            <span title={map.checkedAt}>read {relativeTime(map.checkedAt)}</span>
-          </span>
-
-          <span className="flex-1" />
-
-          <Saved status={status} updatedAt={updatedAt} arranged={isArranged(doc)} />
-
-          {addable.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="xs" className="h-7">
-                  <Plus />
-                  Add
-                  <ChevronDown className="size-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="max-h-[70svh] w-60 overflow-y-auto">
-                {BRANCHES.map((branch) => {
-                  const here = addable.filter((kind) => kind.branch === branch.key)
-                  if (here.length === 0) return null
-                  return (
-                    <div key={branch.key}>
-                      <DropdownMenuLabel>{branch.label}</DropdownMenuLabel>
-                      {here.map((kind) => {
-                        const Glyph = KIND_GLYPH[kind.key]
-                        return (
-                          <DropdownMenuItem key={kind.key} onSelect={() => void add(kind)}>
-                            {Glyph && <Glyph />}
-                            {kind.add?.label}
-                          </DropdownMenuItem>
-                        )
-                      })}
-                    </div>
-                  )
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-
-          <IconAction
-            label="Tidy up: put every box back on the tree"
-            className="size-7"
-            onClick={tidy}
-            disabled={Object.keys(doc.positions).length === 0}
-          >
-            <RotateCounterClockwise />
-          </IconAction>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="xs" variant="ghost" className="h-7" aria-label="Map options">
-                <SettingsSliders />
-                <span className="max-md:sr-only">Options</span>
+            if (e.key === "Escape") {
+              setQuery("")
+              ;(e.target as HTMLInputElement).blur()
+            }
+          }}
+          placeholder="Find a system or anything in one"
+          aria-label="Find a system or anything in one"
+          containerClassName="w-60 sm:w-72"
+          trailing={
+            query ? (
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Clear the search"
+                onClick={() => setQuery("")}
+              >
+                <Cross />
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuLabel>Canvas</DropdownMenuLabel>
-              <DropdownMenuCheckboxItem
-                checked={doc.connections}
-                onCheckedChange={(v) => update({ connections: v })}
-              >
-                Draw what the chosen box is wired to
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                checked={doc.minimap}
-                onCheckedChange={(v) => update({ minimap: v })}
-              >
-                Minimap
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => foldAll(true)}>
-                <EyeOff />
-                Fold every branch
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => foldAll(false)}>
-                <Eye />
-                Unfold everything
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={refresh}>
-                <RefreshClockwise />
-                Read the server again
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" disabled={!isArranged(doc)} onSelect={forget}>
-                <Trash />
-                Forget this layout…
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            ) : undefined
+          }
+        />
+        {hits !== null && (
+          <span aria-live="polite" className="numeric text-hint text-muted-foreground">
+            {hits.size === 0 ? "no match" : plural(hits.size, "match", "matches")}
+          </span>
+        )}
+        <span className="ml-1 hidden items-center gap-1.5 text-hint text-muted-foreground md:flex">
+          <span className="numeric text-foreground">{systems.length}</span>
+          {systems.length === 1 ? "system" : "systems"}
+          <span aria-hidden>·</span>
+          <span className="numeric text-foreground">{things.toLocaleString("en-US")}</span>
+          things
+          <span aria-hidden>·</span>
+          <span title={map.checkedAt}>read {relativeTime(map.checkedAt)}</span>
+        </span>
 
-          <IconAction
-            label={inspecting ? "Hide the inspector (I)" : "Show the inspector (I)"}
-            aria-pressed={inspecting}
-            className="size-7"
-            onClick={() => setInspectorOpen((open) => !open)}
-          >
-            {inspecting ? <SidebarRightClose /> : <SidebarRightOpen />}
-          </IconAction>
-          <IconAction
-            label={full ? "Leave full screen" : "Full screen"}
-            aria-pressed={full}
-            className="size-7"
-            onClick={onFullscreen}
-          >
-            {full ? <FullscreenClose /> : <Fullscreen />}
-          </IconAction>
-        </PaneHeader>
+        <span className="flex-1" />
 
-        <div
-          className={cn(
-            "grid min-h-0 flex-1",
-            inspecting
-              ? "grid-cols-1 max-lg:grid-rows-[minmax(0,1fr)_minmax(0,45%)] lg:grid-cols-[minmax(0,1fr)_20rem]"
-              : "grid-cols-1",
-          )}
+        <Saved status={status} updatedAt={updatedAt} arranged={isArranged(doc)} />
+
+        <IconAction
+          label="Tidy up: put every box back where its system puts it"
+          className="size-7"
+          onClick={tidy}
+          disabled={Object.keys(doc.positions).length === 0}
         >
-          <div
-            ref={canvasRef}
-            data-zoom={zoom}
-            data-slot="server-map"
-            className="group/map relative min-h-0 min-w-0"
-          >
+          <RotateCounterClockwise />
+        </IconAction>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="xs" variant="ghost" className="h-7" aria-label="Map options">
+              <SettingsSliders />
+              <span className="max-md:sr-only">Options</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-64">
+            <DropdownMenuLabel>Canvas</DropdownMenuLabel>
+            <DropdownMenuCheckboxItem
+              checked={doc.minimap}
+              onCheckedChange={(v) => update({ minimap: v })}
+            >
+              Minimap
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuItem onSelect={refresh}>
+              <RefreshClockwise />
+              Read the server again
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={!isArranged(doc) && !doc.focus}
+              onSelect={forget}
+            >
+              <Trash />
+              Forget this layout…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <IconAction
+          label={inspecting ? "Hide the inspector (I)" : "Show the inspector (I)"}
+          aria-pressed={inspecting}
+          className="size-7"
+          onClick={() => setInspectorOpen((open) => !open)}
+        >
+          {inspecting ? <SidebarRightClose /> : <SidebarRightOpen />}
+        </IconAction>
+        <IconAction
+          label={full ? "Leave full screen" : "Full screen"}
+          aria-pressed={full}
+          className="size-7"
+          onClick={onFullscreen}
+        >
+          {full ? <FullscreenClose /> : <Fullscreen />}
+        </IconAction>
+      </PaneHeader>
+
+      <div
+        className={cn(
+          "grid min-h-0 flex-1",
+          inspecting
+            ? "grid-cols-1 max-lg:grid-rows-[minmax(0,1fr)_minmax(0,45%)] lg:grid-cols-[15rem_minmax(0,1fr)_20rem]"
+            : "grid-cols-1 lg:grid-cols-[15rem_minmax(0,1fr)]",
+        )}
+      >
+        <SystemRail systems={systems} focus={focus} kept={kept} onFocus={focusOn} onAll={showAll} />
+        <div
+          ref={canvasRef}
+          data-zoom={zoom}
+          data-slot="server-map"
+          className="group/map relative min-h-0 min-w-0"
+        >
+          {systems.length === 0 ? (
+            <EmptyMap />
+          ) : (
             <ReactFlow
-              nodes={shown}
+              nodes={nodes}
               edges={edges}
               onNodesChange={onNodesChange}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               onNodeClick={(_, n) => {
-                // The server is what the inspector shows with nothing chosen:
-                // choosing it would only step every other box back.
-                if (n.type === "server") setSelected(null)
-                else if (n.type === "item" || n.type === "shelf") choose(n.id)
+                if (n.type === "systemFrame") focusOn(n.id.slice("frame:".length))
+                else if (n.type !== "stackFrame") choose(n.id)
               }}
               onNodeDoubleClick={(_, n) => {
-                const href = n.type === "item" ? itemHref(map, n.id) : undefined
+                if (n.type === "systemFrame") {
+                  const s = bySystem.get(n.id.slice("frame:".length))?.system
+                  if (s && s.kind !== "loose") router.push(s.anchor.href)
+                  return
+                }
+                const href = (n.data as Partial<FaceData>).node?.item.href
                 if (href) router.push(href)
               }}
-              onNodeDragStart={onNodeDragStart}
-              onNodeDrag={onNodeDrag}
               onNodeDragStop={onNodeDragStop}
-              onPaneClick={() => setSelected(null)}
+              onPaneClick={() => setChosen(null)}
               onMoveEnd={(event, viewport: Viewport) => {
-                // A null event is the canvas moving itself (the first fit, a
-                // pan to a search hit), not something to keep.
                 if (event && restored.current) update({ viewport })
               }}
               minZoom={ZOOM.min}
@@ -884,13 +657,11 @@ export function MapCanvas({
               proOptions={{ hideAttribution: true }}
               nodesConnectable={false}
               elementsSelectable
-              // Most of a big server is off screen at any zoom that reads:
-              // what is not seen is not drawn.
               onlyRenderVisibleElements
               deleteKeyCode={null}
               selectionKeyCode={null}
-              multiSelectionKeyCode="Shift"
-              aria-label="Map of the server"
+              multiSelectionKeyCode={null}
+              aria-label="Map of the server's systems"
             >
               {doc.minimap && (
                 <MiniMap
@@ -904,98 +675,55 @@ export function MapCanvas({
                 />
               )}
             </ReactFlow>
+          )}
+          {systems.length > 0 && (
             <ZoomButtons
-              onFit={() => void flow.fitView({ padding: fitPadding(doc.minimap), duration: 300 })}
-            />
-            {/* Links are a thing's own; a shelf chosen lights its things instead. */}
-            {selected && !selected.startsWith("shelf:") && (
-              <div className="pointer-events-none absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-2">
-                <span className="pointer-events-auto flex items-center gap-2 rounded-md border border-hairline bg-popover px-2.5 py-1 text-hint text-muted-foreground shadow-sm">
-                  <Linked className="size-3.5" />
-                  {links.length > 0
-                    ? `${plural(links.length, "link")} drawn`
-                    : doc.connections
-                      ? "Nothing on the map is wired to it"
-                      : "Links are switched off"}
-                  <button
-                    type="button"
-                    className="rounded-sm px-1 text-foreground focus-ring hover:bg-accent"
-                    onClick={() => setSelected(null)}
-                  >
-                    Clear
-                  </button>
-                </span>
-              </div>
-            )}
-          </div>
-
-          {inspecting && (
-            <MapInspector
-              map={map}
-              kinds={kinds}
-              selected={selected}
-              onChoose={reveal}
-              onHover={setHovered}
-              onFrame={(id) => frame(id, flow.getNodes())}
-              onClose={() => setInspectorOpen(false)}
-              onReturn={actions.returnToShelf}
-              placed={(id) => doc.positions[id] !== undefined}
-              onAdd={(kind) => void add(kind)}
-              canAdd={canAdd}
-              folded={(id) => isFolded(doc, id, byDefault)}
+              onFit={() =>
+                focus ? flyTo(focus) : void flow.fitView({ padding: 0.06, duration: 300 })
+              }
+              onAll={showAll}
             />
           )}
+          {unread.length > 0 && (
+            <div className="pointer-events-none absolute top-3 left-3 max-w-[min(28rem,80%)] space-y-1">
+              {unread.map((k) => (
+                <p
+                  key={k.key}
+                  className="pointer-events-auto flex items-start gap-2 rounded-md border border-hairline bg-popover px-2.5 py-1.5 text-hint text-muted-foreground shadow-sm"
+                >
+                  <Warning className="mt-0.5 size-3.5 shrink-0 text-warning" />
+                  <span>
+                    <span className="text-foreground">{kindOf(k.key)?.label ?? k.key}s</span> not
+                    read{k.reason ? `: ${k.reason}` : ""}
+                  </span>
+                </p>
+              ))}
+            </div>
+          )}
         </div>
+
+        {inspecting && (
+          <MapInspector
+            systems={systems}
+            system={chosenSeat?.system ?? focusSystem}
+            node={chosenNode}
+            onChoose={(id) => {
+              choose(id)
+              frameNode(id)
+            }}
+            onHover={setHovered}
+            onFocus={focusOn}
+            onFrame={frameNode}
+            onClose={() => setInspectorOpen(false)}
+          />
+        )}
       </div>
       {dialog}
-    </MapActionsContext.Provider>
+    </div>
   )
 }
 
-/**
- * A node's data with the chosen box's flags laid over it, as one object per
- * data and flags, made once. React Flow re-renders a node whose data changed;
- * held here, the same base and the same flags are the same object, so a click
- * re-renders the boxes it lit or dimmed and leaves the rest alone. Keyed by
- * the base object, so a new reading lets the old ones go.
- */
-const flagged = new WeakMap<object, Map<string, Record<string, unknown>>>()
-
-function flaggedData(
-  base: Record<string, unknown>,
-  flags: {
-    dimmed: boolean
-    selected: boolean
-    related: boolean
-    hovered: boolean
-    home?: "away" | "over"
-  },
-) {
-  if (!flags.dimmed && !flags.selected && !flags.related && !flags.hovered && !flags.home) {
-    return base
-  }
-  const key = [
-    flags.dimmed ? 1 : 0,
-    flags.selected ? 1 : 0,
-    flags.related ? 1 : 0,
-    flags.hovered ? 1 : 0,
-    flags.home ?? "",
-  ].join("")
-  let variants = flagged.get(base)
-  if (!variants) {
-    variants = new Map()
-    flagged.set(base, variants)
-  }
-  let data = variants.get(key)
-  if (!data) {
-    data = { ...base, ...flags }
-    variants.set(key, data)
-  }
-  return data
-}
-
-/** Zoom controls of the product's own, as the ER diagram draws them. */
-function ZoomButtons({ onFit }: { onFit: () => void }) {
+function ZoomButtons({ onFit, onAll }: { onFit: () => void; onAll: () => void }) {
   const flow = useReactFlow()
   return (
     <div className="absolute bottom-3 left-3 flex items-center gap-0.5 rounded-md border border-hairline bg-popover p-0.5">
@@ -1016,179 +744,37 @@ function ZoomButtons({ onFit }: { onFit: () => void }) {
       <Button size="xs" variant="ghost" className="h-7 px-2 text-hint" onClick={onFit}>
         Fit
       </Button>
+      <Button size="xs" variant="ghost" className="h-7 px-2 text-hint" onClick={onAll}>
+        All
+      </Button>
+    </div>
+  )
+}
+
+/** A server with nothing the map draws yet: the way to put the first thing on it. */
+function EmptyMap() {
+  return (
+    <div className="flex h-full items-center justify-center p-8">
+      <div className="max-w-sm text-center">
+        <p className="text-title font-semibold">Nothing to draw yet</p>
+        <p className="mt-1.5 text-body text-muted-foreground">
+          A deployment, a Compose stack or a container shows up here as its own diagram, wired to
+          its domains, databases, volumes and backups.
+        </p>
+        <Button size="sm" asChild className="mt-4">
+          <Link href="/deploy/new">Deploy a project</Link>
+        </Button>
+      </div>
     </div>
   )
 }
 
 function minimapColor(node: Node) {
-  const tone = (node.data as { item?: { tone?: string } }).item?.tone
+  if (node.type === "systemFrame") return "color-mix(in oklab, var(--color-muted) 55%, transparent)"
+  if (node.type === "stackFrame") return "transparent"
+  const tone = (node.data as Partial<FaceData>).node?.item.tone
   if (tone === "danger") return "var(--color-destructive)"
   if (tone === "warning") return "var(--color-warning)"
-  if (node.type === "server") return "var(--color-chart-1)"
-  if (node.type === "shelf") return "color-mix(in oklab, var(--color-muted) 60%, transparent)"
+  if (node.type === "hero") return "var(--color-chart-1)"
   return "color-mix(in oklab, var(--color-muted-foreground) 55%, var(--color-muted))"
-}
-
-/** Whether a dragged thing's middle is over its own shelf. */
-function isOverShelf(nodes: Node[], dragged: Node, shelf: string) {
-  const byId = new Map(nodes.map((n) => [n.id, n]))
-  const home = byId.get(shelf)
-  if (!home) return false
-  const parent = dragged.parentId ? byId.get(dragged.parentId) : undefined
-  const centre = {
-    x: (parent?.position.x ?? 0) + dragged.position.x + (dragged.measured?.width ?? 0) / 2,
-    y: (parent?.position.y ?? 0) + dragged.position.y + (dragged.measured?.height ?? 0) / 2,
-  }
-  return inside(centre, home)
-}
-
-/**
- * Everything a box let go of must not cover: the server, the branches, the
- * shelves (which carry their own things) and the other things placed by hand.
- */
-function obstacles(nodes: Node[], except: string): Rect[] {
-  return nodes
-    .filter((n) => n.id !== except && !n.parentId)
-    .map((n) => ({ x: n.position.x, y: n.position.y, width: n.width ?? 0, height: n.height ?? 0 }))
-}
-
-function inside(point: Point, node: Node) {
-  const width = node.width ?? 0
-  const height = node.height ?? 0
-  return (
-    point.x >= node.position.x &&
-    point.x <= node.position.x + width &&
-    point.y >= node.position.y &&
-    point.y <= node.position.y + height
-  )
-}
-
-/** Every node's absolute place: a child's position is its shelf's plus its own. */
-function absolutePositions(nodes: Node[]) {
-  const byId = new Map(nodes.map((n) => [n.id, n]))
-  const out = new Map<string, { x: number; w: number }>()
-  for (const node of nodes) {
-    const parent = node.parentId ? byId.get(node.parentId) : undefined
-    out.set(node.id, {
-      x: (parent?.position.x ?? 0) + node.position.x,
-      w: node.width ?? 0,
-    })
-  }
-  return out
-}
-
-/** Which side a line leaves from: towards wherever the other end is. */
-function sideBetween(at: Map<string, { x: number; w: number }>, from: string, to: string) {
-  const a = at.get(from)
-  const b = at.get(to)
-  if (!a || !b) return "right" as const
-  return a.x + a.w / 2 <= b.x + b.w / 2 ? ("right" as const) : ("left" as const)
-}
-
-/**
- * Where a link leaves and arrives: across the gap between two boxes side by
- * side, and round the left of a column for two boxes stacked in one, where a
- * line between their facing sides would cut through the column.
- */
-function relationHandles(at: Map<string, { x: number; w: number }>, from: string, to: string) {
-  const a = at.get(from)
-  const b = at.get(to)
-  if (a && b && Math.abs(a.x - b.x) < Math.max(a.w, b.w)) {
-    return { sourceHandle: "sl", targetHandle: "tl" }
-  }
-  return sideBetween(at, from, to) === "right"
-    ? { sourceHandle: "sr", targetHandle: "tl" }
-    : { sourceHandle: "sl", targetHandle: "tr" }
-}
-
-function itemHref(map: ServerMap, id: string) {
-  for (const kind of map.kinds) {
-    const item = kind.items.find((one) => one.id === id)
-    if (item) return item.href
-  }
-  return undefined
-}
-
-/** The layout as React Flow's nodes, with the data each box draws. */
-function toFlowNodes(
-  laid: Laid,
-  ctx: {
-    readings: Map<string, ServerMap["kinds"][number]>
-    branchCounts: Map<string, { things: number; down: number }>
-    counts: { things: number; down: number }
-    hostname: string
-  },
-): Node[] {
-  return laid.nodes.map((node: LaidNode) => {
-    // Every box's size is the layout's, so it is handed over as already
-    // measured: React Flow keeps a node's handles — where its lines attach —
-    // only while the node says it has been measured, and a reading or a click
-    // that hands it fresh nodes without that drops every line on the canvas.
-    const size = { width: node.width, height: node.height }
-    const common = {
-      id: node.id,
-      type: node.type,
-      position: node.position,
-      ...size,
-      measured: size,
-      style: size,
-    }
-    switch (node.type) {
-      case "server":
-        return {
-          ...common,
-          data: { things: ctx.counts.things, down: ctx.counts.down, hostname: ctx.hostname },
-          zIndex: 2,
-        }
-      case "branch": {
-        const counted = ctx.branchCounts.get(node.branch.key) ?? { things: 0, down: 0 }
-        return {
-          ...common,
-          selectable: false,
-          data: {
-            branch: node.branch,
-            folded: node.folded,
-            things: counted.things,
-            down: counted.down,
-            shelves: node.kinds.length,
-          },
-        }
-      }
-      case "shelf": {
-        const reading = ctx.readings.get(node.kind.key)
-        return {
-          ...common,
-          data: {
-            kind: node.kind,
-            reading,
-            folded: node.folded,
-            expanded: node.expanded,
-            drawn: reading?.items.length ?? 0,
-          },
-        }
-      }
-      case "item":
-        return {
-          ...common,
-          parentId: node.parentId,
-          data: {
-            item: node.item,
-            kind: node.kind.key,
-            card: node.kind.face === "card",
-            away: !node.parentId,
-          },
-          // A box placed by hand sits over whatever it was put on, the next
-          // shelf's boxes included.
-          zIndex: node.parentId ? 2 : 3,
-        }
-      default:
-        return {
-          ...common,
-          parentId: node.parentId,
-          draggable: false,
-          selectable: false,
-          data: { kind: node.kind, count: node.count },
-        }
-    }
-  })
 }

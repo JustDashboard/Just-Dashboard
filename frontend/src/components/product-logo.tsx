@@ -1165,7 +1165,8 @@ export function ProductLogo({
    * the product's file, which stands in where it does not load.
    */
   favicon?: string
-  size?: "sm" | "md"
+  /** `lg` is the server map's: a system's own mark at the head of its diagram. */
+  size?: "sm" | "md" | "lg"
   /**
    * The glyph for a thing that is no product — a volume, a network — so it
    * still takes the tile and lines up with the rows that have a logo.
@@ -1183,7 +1184,7 @@ export function ProductLogo({
       aria-hidden="true"
       className={cn(
         "flex shrink-0 items-center justify-center rounded-lg border border-hairline bg-background",
-        size === "sm" ? "size-8" : "size-10",
+        size === "sm" ? "size-8" : size === "lg" ? "size-12 rounded-xl" : "size-10",
         className,
       )}
     >
@@ -1196,11 +1197,14 @@ export function ProductLogo({
         <img
           src={src}
           alt=""
-          className={cn("object-contain", size === "sm" ? "size-4.5" : "size-6")}
+          className={cn(
+            "object-contain",
+            size === "sm" ? "size-4.5" : size === "lg" ? "size-7" : "size-6",
+          )}
           onError={() => setFailed((paths) => [...paths, src])}
         />
       ) : (
-        <Fallback className="size-4 text-muted-foreground" />
+        <Fallback className={cn("text-muted-foreground", size === "lg" ? "size-5.5" : "size-4")} />
       )}
     </span>
   )
