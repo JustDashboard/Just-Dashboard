@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +30,8 @@ func TestLiveDeploymentDatabaseConnection(t *testing.T) {
 		t.Run(engine, func(t *testing.T) {
 			s, router := dbTestRouter(t)
 			s.modules.docker = dockerx.New("unix:///var/run/docker.sock")
+			// Before anything is created, so a registry failure leaves nothing to clean up.
+			pullEngineImage(t, s.modules.docker, engine)
 			projectID, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
 			name := fmt.Sprintf("jd-redesign-%s-%d", engine, time.Now().UnixNano())
 			probe := name + "-probe"
@@ -51,8 +54,13 @@ func TestLiveDeploymentDatabaseConnection(t *testing.T) {
 			if created.Code != http.StatusAccepted {
 				t.Fatalf("provision failed: HTTP %d: %s", created.Code, created.Body)
 			}
-			deadline := time.Now().Add(2 * time.Minute)
+			// The container is created and started by now, with its image already local, so
+			// this budget is the engine's own first start and nothing else.
+			budget := connectionBudget(engine)
+			waitStarted := time.Now()
+			deadline := waitStarted.Add(budget)
 			var conn dbConnection
+			var problem string
 			for {
 				adopted := do(t, router, http.MethodPost, "/databases/adopt", fmt.Sprintf(`{"container":%q}`, name))
 				if adopted.Code >= 200 && adopted.Code < 300 {
@@ -67,12 +75,16 @@ func TestLiveDeploymentDatabaseConnection(t *testing.T) {
 					if health.OK {
 						break
 					}
+					problem = fmt.Sprintf("adopted as connection %d, but its ping answered HTTP %d: %s", conn.ID, ping.Code, clip(ping.Body.String(), 400))
+				} else {
+					problem = fmt.Sprintf("the last adopt answered HTTP %d: %s", adopted.Code, clip(adopted.Body.String(), 400))
 				}
 				if time.Now().After(deadline) {
-					t.Fatalf("database did not accept connections; last adopt status %d", adopted.Code)
+					t.Fatalf("%s did not accept connections within %s; %s\n%s", engine, budget, problem, describeFixtureContainer(s.modules.docker, name))
 				}
 				time.Sleep(time.Second)
 			}
+			t.Logf("%s: accepted connections %s after its container started (budget %s)", engine, time.Since(waitStarted).Round(time.Millisecond), budget)
 			revealed := do(t, router, http.MethodGet, pathf("/databases/%d/url", conn.ID)+"?target=container", "")
 			if revealed.Code != http.StatusOK {
 				t.Fatalf("application URL unavailable: HTTP %d", revealed.Code)
@@ -298,4 +310,82 @@ func TestLiveDeploymentDatabaseConnection(t *testing.T) {
 			t.Logf("%s: authenticated before and after replacement at a different IP using the same client container and logical URL on port %s", engine, strconv.Itoa(provisionTemplates[engine].port))
 		})
 	}
+}
+
+// connectionBudget is how long an engine has, once its container is started, to
+// answer a sign-in. MongoDB's image starts a temporary server on loopback to run
+// its init scripts, shuts it down and only then starts the one that listens on the
+// container's address, so a first start on a slow shared runner gets more room
+// than the engines that are ready in seconds.
+func connectionBudget(engine string) time.Duration {
+	if engine == "mongodb" {
+		return 5 * time.Minute
+	}
+	return 2 * time.Minute
+}
+
+// pullEngineImage makes the engine's image local before the fixture creates
+// anything, and logs what that took. The provision route pulls a missing image
+// itself, inside its own request and before the connection wait begins, so a
+// pull never counted against connectionBudget; doing it here keeps a slow or
+// refused registry from reading as a database that would not start, and puts the
+// pull's duration in the log beside the connection wait's.
+func pullEngineImage(t *testing.T, docker *dockerx.Client, engine string) {
+	t.Helper()
+	image := provisionTemplates[engine].image
+	if docker.ImagePresent(t.Context(), image) {
+		t.Logf("%s: image %s already present, nothing to pull", engine, image)
+		return
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
+	defer cancel()
+	started := time.Now()
+	progress := make(chan dockerx.PullProgress, 16)
+	go func() {
+		for range progress {
+		}
+	}()
+	err := docker.PullImage(ctx, dockerx.ImageRef(image), progress)
+	close(progress)
+	took := time.Since(started).Round(time.Millisecond)
+	if err != nil {
+		t.Fatalf("%s: pulling %s failed after %s: %v", engine, image, took, err)
+	}
+	t.Logf("%s: pulled %s in %s", engine, image, took)
+}
+
+// clip is text short enough for a failure message: a response body, or one of
+// MongoDB's JSON log lines, which run to a kilobyte each.
+func clip(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if len(text) > limit {
+		return strings.ToValidUTF8(text[:limit], "") + "..."
+	}
+	return text
+}
+
+// describeFixtureContainer says what became of the engine's container, for a
+// failure message. The adopt route answers 400 both for a container that is not
+// running and for one it cannot connect to, so the reply alone cannot tell an
+// engine that crashed from one that is only slow; the state and the last log
+// lines can.
+func describeFixtureContainer(docker *dockerx.Client, name string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	observed, err := docker.Inspect(ctx, name)
+	if err != nil {
+		return fmt.Sprintf("container %s: could not be inspected: %v", name, err)
+	}
+	out := fmt.Sprintf("container %s: state %q, exit code %d, restarts %d, oom-killed %t, engine error %q",
+		name, observed.State, observed.ExitCode, observed.RestartNum, observed.OOMKilled, observed.Error)
+	lines, closer, err := docker.Logs(ctx, name, dockerx.LogOptions{Tail: "20"})
+	if err != nil {
+		return out + fmt.Sprintf("; logs unavailable: %v", err)
+	}
+	defer closer.Close()
+	var tail []string
+	for line := range lines {
+		tail = append(tail, clip(line.Text, 300))
+	}
+	return out + "\nlast log lines:\n" + strings.Join(tail, "\n")
 }

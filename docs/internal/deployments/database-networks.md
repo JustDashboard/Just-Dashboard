@@ -134,7 +134,10 @@ No hosted-provider account or live provider credentials are required by the loca
   replaces each database with the original persistent volume and a different IP, reconciles, then
   restarts the same client with its unchanged URL and authenticates again. It checks loopback publication,
   cleanup ordering and refusal to adopt a foreign network. This establishes DNS reconnection, not a
-  continuous application traffic test.
+  continuous application traffic test. Each engine's image is pulled, and the pull timed in the log,
+  before anything is created; the engine then has two minutes (MongoDB five) from its container
+  starting to accept a sign-in, and a failure reports the adopt route's last reply with the
+  container's state and last log lines.
 - `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`
   checks the merged network configuration with the real Compose parser.
 - Browser coverage checks that new and existing database selection saves a logical reference without

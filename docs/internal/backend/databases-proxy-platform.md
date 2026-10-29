@@ -3365,7 +3365,10 @@ provisions five of the templates (PostgreSQL, MySQL, MariaDB, Redis and MongoDB)
 authenticates from separate application containers, replaces each database at a different IP, and
 authenticates from the same client container using its unchanged URL after reconciliation. It verifies
 loopback-only publication, network ownership and cleanup, then removes its own
-containers/volumes/networks.
+containers/volumes/networks. Each image is pulled, and the pull timed in the log, before anything is
+created; the engine then has two minutes (MongoDB five) from its container starting to accept a
+sign-in, and a failure reports the adopt route's last reply with the container's state and last log
+lines.
 
 ## Proxy
 

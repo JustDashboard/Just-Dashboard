@@ -469,8 +469,12 @@ to the contribution terms above, including the additional licence grant to the p
   on a Docker host. It provisions five of the templates (PostgreSQL, MySQL, MariaDB, Redis and
   MongoDB), reaches each from separate application containers,
   replaces databases at a different IP, reconnects the same clients using their original URLs,
-  verifies ownership/removal, and cleans up its own containers, volumes and networks. Compose network
-  integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
+  verifies ownership/removal, and cleans up its own containers, volumes and networks. It pulls each
+  engine's image before creating anything and logs how long that took, so a slow registry reads as a
+  pull rather than as a database that never answers; each engine then has two minutes (MongoDB, whose
+  image restarts its server after initialising, five) from its container starting to accept a sign-in,
+  and a failure reports the adopt route's last reply with the container's state and last log lines.
+  Compose network integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
 - Changes to server TLS for the databases the dashboard starts (`api/database_tls*.go`, `internal/dbtls`,
   `dbx/servertls.go`) also run
   `JD_DB_TLS_LIVE=1 go test ./internal/api -run TestLiveDatabaseServerTLS -count=1 -v` on a Docker host
