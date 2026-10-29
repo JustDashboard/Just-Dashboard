@@ -57,6 +57,46 @@ client addresses. Host nginx routes have always written `/var/log/nginx/<route>.
 this driver was silent. See
 [`request-observability.md`](request-observability.md).
 
+## Replicas
+
+A release of several replicas ([replicas](canary-and-replicas.md)) is one `reverse_proxy` naming every
+replica's container address, in replica order, with a block of its own:
+
+```
+reverse_proxy "http://172.18.0.5:3000" "http://172.18.0.6:3000" {
+  lb_policy least_conn
+  lb_try_duration 5s
+  fail_duration 10s
+  max_fails 1
+  transport http {
+    dial_timeout 2s
+  }
+}
+```
+
+Least connections, as on nginx, because a route carries WebSockets and long streamed answers. Health is
+passive, as on nginx: `fail_duration` turns failure counting on, so a replica Caddy fails to reach is set
+aside for ten seconds; for five seconds a request is tried on another replica — any request whose
+connection failed, since none of it reached the application, and otherwise only a GET, Caddy's own
+`lb_retry_match` default, so a POST that reached a dying replica is never carried out twice. Caddy
+reaches a replica at its container address, where one that died answers nothing rather than refusing, so
+it gets two seconds to connect, not Caddy's three. The route's intercepted error pages
+(`@jd_error`/`handle_response`) are in the same block, since Caddy takes one per directive. A release of
+one container keeps the bare `reverse_proxy "<address>"` it always had.
+
+The route records one target comment per replica, and the lifecycle worker locates each by container
+identity: Caddy is joined to every network a replica that is there is on, and every address that moved
+is rewritten in one pass (`replaceProxiedUpstreams`), because a daemon restart can hand two replicas each
+other's addresses. A replica that is gone or stopped keeps its old address — Caddy passes over it, and
+Docker's restart policy usually brings it back — so one dead replica never leaves the others unrepaired;
+a route none of whose replicas is found is left for the next activation, as a one-container route
+always was. The inventory lists every replica's address as the route's upstreams.
+
+`JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyBalancesReplicas -count=1 -v`
+puts three replicas behind a real Caddy and checks the requests are shared, the inventory lists three
+upstreams, a replica killed under steady traffic costs no request, and a Caddy taken off the replicas'
+network is repaired by one maintenance pass while a replica is dead.
+
 ## Request body limit
 
 A managed route carries the plan's `runtime.maxRequestBodyMb` as `request_body { max_size <N>MB }` when
@@ -229,7 +269,8 @@ release's route is rendered again from the lineage's current files at activation
 
 The application remains published on loopback. Proxy resolves that publication to a running Docker
 container and an internal network address, then connects Caddy to that network. Managed route comments
-persist the exact candidate container ID, network, internal port and address. The lifecycle worker checks
+persist the exact candidate container ID, network, internal port and address — one comment per replica
+for a release that runs several. The lifecycle worker checks
 every 30 seconds and repairs a lost Caddy network attachment or changed candidate address; the same pass
 adds the access-log block to a managed route written before request recording existed, so an upgrade
 turns recording on for every existing deployment within a tick rather than at its next deploy. It never

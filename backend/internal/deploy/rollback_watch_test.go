@@ -211,8 +211,8 @@ func (p *routingProxy) ApplyDeploymentRoute(_ context.Context, route proxysvc.De
 		p.failNext = nil
 		return proxysvc.DeploymentRouteResult{Recovered: true}, err
 	}
-	p.upstream = route.Upstream
-	p.applied = append(p.applied, route.Upstream)
+	p.upstream = route.PrimaryUpstream()
+	p.applied = append(p.applied, route.PrimaryUpstream())
 	return proxysvc.DeploymentRouteResult{Applied: true, Verified: true}, nil
 }
 

@@ -30,6 +30,11 @@ type SitePool struct {
 	RetryOn []string `json:"retryOn,omitempty"`
 	// Tries caps the servers one request may try; 0 is no cap.
 	Tries int `json:"tries,omitempty"`
+	// ConnectTimeout is how many seconds a server has to accept a connection
+	// before the request is passed to the next; 0 is nginx's sixty, which a
+	// server that has stopped accepting holds every request it is given for.
+	// It is written only where the site sets no timeout of its own.
+	ConnectTimeout int `json:"connectTimeout,omitempty"`
 }
 
 // PoolServer is one server of a pool. Zero values are nginx's defaults:
@@ -133,6 +138,9 @@ func validatePool(spec *SiteSpec) error {
 	}
 	if pool.Tries < 0 || pool.Tries > 100 {
 		return fmt.Errorf("tries must be between 0 and 100")
+	}
+	if pool.ConnectTimeout < 0 || pool.ConnectTimeout > 60 {
+		return fmt.Errorf("the connect timeout must be between 1 and 60 seconds")
 	}
 	seen := map[string]bool{}
 	for _, cond := range pool.RetryOn {
@@ -241,6 +249,11 @@ func renderPoolLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	}
 	if pool.Tries > 0 {
 		l.add("        proxy_next_upstream_tries %d;", pool.Tries)
+	}
+	if pool.ConnectTimeout > 0 && spec.ProxyTimeout == 0 && loc.Timeout == 0 {
+		l.add("        # A server that does not accept a connection in time is passed")
+		l.add("        # over for the next, rather than holding the request a minute.")
+		l.add("        proxy_connect_timeout %ds;", pool.ConnectTimeout)
 	}
 	// nginx closes an upstream connection after each request unless the
 	// Connection header it sends is cleared; with WebSockets the site's

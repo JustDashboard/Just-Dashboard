@@ -656,6 +656,8 @@ function CheckRow({ check }: { check: Json }) {
       <span className="min-w-0 font-medium">{String(check.name)}</span>
       {text(check.kind) && <Tag>{String(check.kind)}</Tag>}
       {check.required === true && <Tag>required</Tag>}
+      {/* Which of a replicated release's containers was asked. */}
+      {typeof check.replica === "number" && check.replica > 0 && <Tag>replica {check.replica}</Tag>}
       <span className="numeric ml-auto text-hint text-muted-foreground">
         {plural(attempts.length, "attempt")}
         {typeof last?.statusCode === "number" && ` · ${last.statusCode}`}

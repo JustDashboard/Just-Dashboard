@@ -39,6 +39,7 @@ import {
 } from "@/components/deploy/vocabulary"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { serviceProduct } from "@/components/deploy/service-product"
+import { replicaReading } from "@/components/deploy/replicas-model"
 
 /** How many of the environment's runs the release node's strip draws. */
 const STRIP = 14
@@ -123,6 +124,9 @@ export function ProjectWiring({
       ? runtime.services.filter((service) => service.liveRelease)
       : undefined
   const running = services?.filter((service) => service.state === "running") ?? []
+  // A replicated release is read as its replicas, against the count it was
+  // started with, so a replica Docker no longer lists is still one missing.
+  const replicas = replicaReading(services)
   const host = url && hostOf(url)
   const git = deployment.sourceKind === "git" || deployment.sourceKind === "local"
   const reading = watch && autoDeployReading(watch)
@@ -132,9 +136,13 @@ export function ProjectWiring({
     ? "danger"
     : running.length === 0
       ? "stopped"
-      : running.length === services?.length
-        ? "running"
-        : "warning"
+      : replicas
+        ? replicas.healthy === replicas.total
+          ? "running"
+          : "warning"
+        : running.length === services?.length
+          ? "running"
+          : "warning"
   const SourceGlyph =
     deployment.sourceKind === "compose"
       ? Layers
@@ -302,6 +310,10 @@ export function ProjectWiring({
               services ? (
                 services.length === 0 ? (
                   <span className="text-muted-foreground">No containers</span>
+                ) : replicas ? (
+                  <span className="numeric">
+                    {replicas.healthy} of {replicas.total} replicas healthy
+                  </span>
                 ) : (
                   <span className="numeric">
                     {running.length} of {services.length}{" "}

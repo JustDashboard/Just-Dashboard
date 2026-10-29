@@ -181,6 +181,9 @@ func createIsolatedPreviewPlansTx(ctx context.Context, tx *sql.Tx, sourceID int6
 	}
 	build.ReleaseTasks, build.Secrets = nil, nil
 	runtime.PreviewIsolation, runtime.HostPort, runtime.Ports, runtime.BindAddress = true, 0, nil, "127.0.0.1"
+	// A preview is one container whatever production runs: it is for
+	// looking at a branch, not for carrying production's traffic.
+	runtime.Replicas = 0
 	for index := range runtime.Mounts {
 		mount := &runtime.Mounts[index]
 		mount.Source, mount.Ownership = previewVolumeName(environmentID, mount.Target), OwnershipManaged

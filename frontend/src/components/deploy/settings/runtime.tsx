@@ -69,6 +69,12 @@ import {
   savedChecks,
   type Check,
 } from "@/components/deploy/settings/health-checks"
+import {
+  MAX_REPLICAS,
+  effectiveReplicas,
+  replicaRefusal,
+  withReplicas,
+} from "@/components/deploy/replicas-model"
 
 /**
  * How the release runs once it exists: the image and command, where it
@@ -174,6 +180,7 @@ const RUNTIME_FIELD_IDS: Record<string, string> = {
   "runtime.hostPort": "runtime-host-port",
   "runtime.bindAddress": "runtime-bind",
   "runtime.strategy": "runtime-strategy",
+  "runtime.replicas": "runtime-replicas",
   "runtime.memoryMb": "runtime-memory",
   "runtime.cpus": "runtime-cpus",
   "runtime.pidsLimit": "runtime-pids",
@@ -198,6 +205,7 @@ const FIELD_SECTION: Record<string, string> = {
   "runtime-cpus": "resources",
   "runtime-pids": "resources",
   "runtime-strategy": "releases",
+  "runtime-replicas": "releases",
   "runtime-restart": "releases",
   "runtime-stop-signal": "shutdown",
   "runtime-grace": "shutdown",
@@ -346,6 +354,11 @@ function RuntimeForm({
   const refusal = blueGreenRefusal(runtime, deployment.profile, method)
   const blueGreen = runtime.strategy === "blue_green"
   const failsNext = blueGreen && Boolean(refusal)
+  const replicas = effectiveReplicas(runtime)
+  const replicasRefused = replicaRefusal(runtime, method)
+  // Saved with replicas, then given something only one container can hold:
+  // the server refuses the save, so the page says so before it is pressed.
+  const replicasFail = replicas > 1 && Boolean(replicasRefused)
   const portMark = portProduct(port)
 
   const submit = async () => {
@@ -704,8 +717,9 @@ function RuntimeForm({
         </FieldRow>
       </SettingSection>
 
-      {/* No state line: it said the restart policy back ("restarts unless
-          stopped") over the select that already says it. */}
+      {/* A state line only for replicas past one, the answer that is not the
+          expected one: it used to say the restart policy back ("restarts
+          unless stopped") over the select that already says it. */}
       <SettingSection
         id="releases"
         title="Releases"
@@ -719,10 +733,17 @@ function RuntimeForm({
             />
           ),
           settingStatus({
-            dirty: draft.changed(["strategy", "restartPolicy"]),
+            dirty: draft.changed(["strategy", "replicas", "restartPolicy"]),
             refused: refusedIn("releases"),
           }),
         )}
+        state={
+          replicas > 1 ? (
+            <span key={replicas} className="numeric block animate-rise">
+              {replicas} replicas of each release
+            </span>
+          ) : undefined
+        }
       >
         <Field label="Release strategy" error={errorFor("runtime-strategy")}>
           <ChoiceGrid id="runtime-strategy" columns={2} role="group" aria-label="Release strategy">
@@ -761,6 +782,40 @@ function RuntimeForm({
           {refusal && (
             <FormNote tone={failsNext ? "warning" : "default"} className="animate-rise">
               Blue / green is unavailable: {refusal}.
+            </FormNote>
+          )}
+        </Field>
+        <Field
+          label="Replicas"
+          info="Containers of each release that run side by side on this server, sharing the route's requests: the one with the fewest open connections gets the next. A cutover waits until every replica passes the readiness check, and a replica that stops answering is passed over for ten seconds. Each has the limits above of its own."
+          error={errorFor("runtime-replicas")}
+        >
+          <Segments
+            id="runtime-replicas"
+            label="Replicas"
+            value={String(replicas)}
+            options={Array.from({ length: MAX_REPLICAS }, (_, index) => ({
+              value: String(index + 1),
+              label: String(index + 1),
+              mono: true,
+              // One is always on offer: it is the way out of a refusal.
+              disabled: index > 0 && Boolean(replicasRefused),
+            }))}
+            disabled={!canEdit}
+            onChange={(value) => draft.set((prev) => withReplicas(prev, Number(value)))}
+          />
+          {replicasRefused && (
+            <FormNote tone={replicasFail ? "warning" : "default"} className="animate-rise">
+              {replicasFail ? "Will not save: " : "One replica only: "}
+              {replicasRefused}.
+            </FormNote>
+          )}
+          {!replicasRefused && replicas > 1 && memory > 0 && (
+            <FormNote className="animate-rise">
+              <span className="numeric">
+                {replicas} × {memory} MB = {replicas * memory} MB for the release
+              </span>
+              {blueGreen && ", twice that while a cutover runs both releases"}.
             </FormNote>
           )}
         </Field>

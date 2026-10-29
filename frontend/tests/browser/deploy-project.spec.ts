@@ -165,6 +165,44 @@ test("runtime services link to the exact Docker containers and stacks", async ({
   await expect(page).toHaveURL(/\/docker\/stacks\/jd-e12$/)
 })
 
+test("a replicated release reads as its replicas on the overview and the runtime page", async ({
+  page,
+}, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  const replica = (index: number, state: string, health: string) => ({
+    containerId: `replica${index}`.padEnd(12, "0"),
+    name: index === 1 ? "jd-e12-r20" : `jd-e12-r20-${index}`,
+    releaseId: 20,
+    liveRelease: true,
+    state,
+    health,
+    imageId: "sha256:abc",
+    replica: index,
+    replicas: 3,
+  })
+  const runtime: DeploymentRuntimeServices = {
+    status: "available",
+    observedAt: now,
+    services: [
+      replica(1, "running", "healthy"),
+      replica(2, "running", "unhealthy"),
+      replica(3, "running", "healthy"),
+    ],
+  }
+  await mockProject(page, { normalized: true, runtime })
+  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/.*\/stats\/stream/, () => {})
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/deploy/7")
+  const wiring = page.getByRole("list", { name: "How the project is wired" })
+  await expect(wiring.getByText("2 of 3 replicas healthy")).toBeVisible()
+  await wiring.screenshot({ path: testInfo.outputPath("replicas-overview-1280.png") })
+
+  await page.goto("/deploy/7/runtime")
+  const list = page.getByRole("list", { name: "Runtime services" })
+  await expect(list.getByText("#2 · replica 2 of 3")).toBeVisible()
+  await expect(list.getByText(/replica \d of 3/)).toHaveCount(3)
+})
+
 test("runtime evidence distinguishes unavailable Docker from an empty managed inventory", async ({
   page,
 }) => {

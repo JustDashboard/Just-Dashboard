@@ -16,7 +16,10 @@ only renderer/executor/validation authority for their feature.
   needs.
 - The only activation strategies are `blue_green` for an eligible proxy-owned stateless HTTP service and
   `stop_first` for Compose, fixed-port, game and exclusive-storage workloads. A failed candidate cannot
-  replace the live release; ambiguous cutover evidence restores or stops for operator recovery.
+  replace the live release; ambiguous cutover evidence restores or stops for operator recovery. Either
+  strategy can run a stateless release as `runtime.replicas` containers (1–8) behind one route
+  ([replicas](canary-and-replicas.md)); everything below that speaks of a release's container means
+  every one of them.
 - Events commit before publish and are monotonically sequenced per run. Reconnect resumes after a sequence;
   compacted history begins with a `resync` snapshot, and a slow subscriber is disconnected rather than
   allowed to stall execution. Streams replay all retained history in pages of at most 5,000 stored
@@ -933,9 +936,11 @@ only renderer/executor/validation authority for their feature.
   the first answer below 500 other than 400 and 421 (what host allowlists answer); explicit
   expected-status lists retain exact-status, no-redirect behavior, and a check cannot set both.
 - Blue/green is limited to stateless proxy-owned HTTP candidates without fixed ports, host networking or
-  writable mounts; dynamic candidate ports are loopback-leased. Fixed-port, Compose, game and exclusive
-  writable-storage plans are honest `stop_first` deployments and advertise expected downtime. A route
-  moves only after the plan's required readiness/smoke checks pass — and a plan with none is cut over
+  writable mounts; dynamic candidate ports are loopback-leased, one per replica. Fixed-port, Compose,
+  game and exclusive writable-storage plans are honest `stop_first` deployments, advertise expected
+  downtime and run one container per release (`replicaRefusal`). A route moves only after the plan's
+  required readiness/smoke checks pass on every replica of the candidate (one that fails removes the
+  whole candidate) — and a plan with none is cut over
   to ungated: `verify_readiness` is skipped (`disabled`, with the reason in its evidence and a
   transcript line saying the candidate counts as ready because it started), and `activate` records
   `readinessGated: false` and writes, in the strategy's words, that traffic moved (or the release went
@@ -959,7 +964,9 @@ only renderer/executor/validation authority for their feature.
   target. Apply/reload/verification failure restores, reloads and verifies that exact snapshot before a
   run may report recovery. The snapshot content is held only for compensation; persisted activation
   evidence carries its digest, not the configuration bytes. The rendered nginx route proxies each
-  request over a fresh upstream connection (no `upstream` block, so no upstream keepalive): under
+  request over a fresh upstream connection (no `upstream` block for one container, and a replicated
+  release's `upstream` block — `least_conn`, passive health, a 2-second connect timeout — carries no
+  `keepalive`, so no upstream keepalive either way): under
   sustained traffic in the high hundreds of requests a second the proxy's side of every closed
   connection sits in TIME_WAIT, its ephemeral ports run out after roughly half a minute, and every
   proxied request answers 502 until they drain. The cutover continuity test throttles its own
@@ -972,9 +979,12 @@ only renderer/executor/validation authority for their feature.
 - Metric-gated rollback keeps the release a blue/green cutover replaced **warm** instead of removing
   it (`deploy/rollback_watch.go`, `rollback_executor.go`, `rollback_watcher.go`). `retire_previous`
   drains it as before, then — when the environment's terms allow, the environment is not a preview,
-  both releases are single containers and the host still has `max(256 MB, a tenth of its memory)`
-  available — records a window (`deploy_rollback_watches`, state `watching`) and the predecessor's
-  runtime `warm` in one leased transaction and only then `docker pause`s it. Paused rather than running:
+  both releases are the runtime owner's own containers rather than Compose stacks and the host still has
+  `max(256 MB, a tenth of its memory)` available — records a window (`deploy_rollback_watches`, state
+  `watching`) and the predecessor's runtime `warm` in one leased transaction and only then `docker
+  pause`s it, every replica of it. A replicated warm release is one state (`warmStateOf`): any replica
+  gone is the release gone (`warm_lost`), one a Docker restart brought back running is paused again, and
+  resuming or removing it is every replica (`warmEach`). Paused rather than running:
   the old release must not keep running schedulers, consumers or writes against a schema the new release
   may have migrated, and a frozen process costs memory and nothing else; Docker counts it as not
   running, so "exactly one release running" still holds. The step's evidence says `warm.kept` with the

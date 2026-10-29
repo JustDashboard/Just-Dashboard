@@ -46,6 +46,54 @@ func parseDockerCaddyTarget(content string) (dockerCaddyTarget, bool) {
 	return parseDockerCaddyTargetLine(content, dockerCaddyTargetPrefix)
 }
 
+// parseDockerCaddyTargets reads every application target a route records:
+// one per replica of the release it serves. A route written before replicas
+// records one. Any line that does not read is the whole answer's failure, so
+// a damaged route is left alone rather than half repaired.
+func parseDockerCaddyTargets(content string) ([]dockerCaddyTarget, bool) {
+	if !strings.HasPrefix(content, "# Managed by Just Dashboard\n") {
+		return nil, false
+	}
+	var targets []dockerCaddyTarget
+	for _, line := range strings.Split(content, "\n") {
+		if !strings.HasPrefix(line, dockerCaddyTargetPrefix) {
+			continue
+		}
+		target, ok := parseDockerCaddyTargetLine("# Managed by Just Dashboard\n"+line, dockerCaddyTargetPrefix)
+		if !ok {
+			return nil, false
+		}
+		targets = append(targets, target)
+	}
+	return targets, len(targets) > 0
+}
+
+// replaceProxiedUpstreams points a route's reverse_proxy lines at its
+// targets' new addresses. Every such line: a route whose names are served
+// over both schemes proxies to the application from two site blocks. The
+// addresses are swapped in one pass, because a daemon restart can hand two
+// replicas each other's addresses, and one at a time the second swap would
+// undo the first.
+func replaceProxiedUpstreams(content string, from, to []dockerCaddyTarget) string {
+	pairs := []string{}
+	for index := range from {
+		if from[index] != to[index] {
+			pairs = append(pairs, strconv.Quote(from[index].upstream()), strconv.Quote(to[index].upstream()))
+		}
+	}
+	if len(pairs) == 0 {
+		return content
+	}
+	replacer := strings.NewReplacer(pairs...)
+	lines := strings.SplitAfter(content, "\n")
+	for index, line := range lines {
+		if strings.HasPrefix(strings.TrimLeft(line, " "), "reverse_proxy ") {
+			lines[index] = replacer.Replace(line)
+		}
+	}
+	return strings.Join(lines, "")
+}
+
 // parseDockerCaddyAuthTarget reads the auth server a route signs in through,
 // for a route that has one Caddy reaches over a container network.
 func parseDockerCaddyAuthTarget(content string) (dockerCaddyTarget, bool) {
@@ -123,11 +171,29 @@ func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, b
 		if servesCopy {
 			serves[name] = certificate.served
 		}
-		target, ok := parseDockerCaddyTarget(snapshot.Content)
+		targets, ok := parseDockerCaddyTargets(snapshot.Content)
 		if !ok {
 			continue
 		}
-		next, found, connected := c.locateTarget(target, containers)
+		// Every replica's container is located where it is now. One that is
+		// gone or stopped keeps the address it had — Caddy passes over it,
+		// and Docker's restart policy may bring it back — while the others
+		// are repaired, so one dead replica never leaves the rest
+		// unreachable. A route none of whose containers is found is left for
+		// the next activation, as a one-container route always was.
+		nexts := make([]dockerCaddyTarget, len(targets))
+		present := make([]bool, len(targets))
+		found, connected, moved := false, true, false
+		for index, target := range targets {
+			next, here, attached := c.locateTarget(target, containers)
+			nexts[index], present[index] = target, here
+			if !here {
+				continue
+			}
+			nexts[index] = next
+			found, connected = true, connected && attached
+			moved = moved || next != target
+		}
 		// The auth server a route signs in through is repaired the same way:
 		// a Caddy recreated without its network would refuse every visitor.
 		// One that is gone is left for the next activation to report.
@@ -143,25 +209,33 @@ func (c *dockerCaddy) reconcileRoutes(ctx context.Context, record func(string, b
 		// through the same write, reload and restore a repair takes, so an
 		// upgrade turns recording on for every managed route within a tick.
 		unrecorded := !hasAccessLog(snapshot.Content)
-		if !found || (connected && next == target && !unrecorded && !authRepair && !certificate.changed()) {
+		if !found || (connected && !moved && !unrecorded && !authRepair && !certificate.changed()) {
 			continue
 		}
 		if err := c.configurationSynced(ctx); err != nil {
 			return refreshed, err
 		}
 		var repairErr error
-		if !connected || next != target {
-			_, repairErr = c.connectTarget(ctx, next)
+		if !connected || moved {
+			for index, next := range nexts {
+				if !present[index] {
+					continue
+				}
+				if _, repairErr = c.connectTarget(ctx, next); repairErr != nil {
+					break
+				}
+			}
 		}
 		if repairErr == nil && authRepair {
 			_, repairErr = c.connectTarget(ctx, nextAuth)
 		}
-		// Every occurrence: a route whose names are served over both
-		// schemes proxies to the application from two site blocks.
 		content, rewrite := snapshot.Content, false
-		if repairErr == nil && next != target {
-			content = strings.ReplaceAll(content, "reverse_proxy "+strconv.Quote(target.upstream()), "reverse_proxy "+strconv.Quote(next.upstream()))
-			content = strings.Replace(content, target.metadata(), next.metadata(), 1)
+		if repairErr == nil && moved {
+			content = replaceProxiedUpstreams(content, targets, nexts)
+			for index, target := range targets {
+				// A target's line names its container, so no two are alike.
+				content = strings.Replace(content, target.metadata(), nexts[index].metadata(), 1)
+			}
 			rewrite = true
 		}
 		if repairErr == nil && authRepair && nextAuth != auth {

@@ -2192,6 +2192,8 @@ export async function mockProject(
     rollbackWatch?: RollbackWatch | null
     /** The environment's migration rehearsal terms; off unless given. */
     rehearsal?: RehearsalPolicy
+    /** Fields laid over the saved runtime plan, such as no mounts for a stateless one. */
+    runtimePlan?: Partial<DeploymentConfiguration["runtime"]>
   } = {},
 ) {
   const showcase = Boolean(options.showcase)
@@ -2312,6 +2314,8 @@ export async function mockProject(
         checks: [],
         domains: [{ hostname: "api.example.test", https: true, ownership: "managed" }],
       }
+  if (options.runtimePlan)
+    normalizedConfiguration.runtime = { ...normalizedConfiguration.runtime, ...options.runtimePlan }
   const configurationBody = () => ({
     ...normalizedConfiguration,
     revision: configurationRevision,

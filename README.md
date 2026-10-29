@@ -100,6 +100,7 @@ free.
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
 - Push to deploy, plus pull-request previews only your tailnet can reach
 - Immutable releases, one-click rollback and health-gated cutover
+- Up to eight replicas of a stateless release behind one route, cut over and rolled back together
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
 - A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
 - Migrations rehearsed on a throwaway copy of the database, restored from its backup, before production

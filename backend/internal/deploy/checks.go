@@ -194,6 +194,10 @@ type CheckEvidence struct {
 	Attempts    []CheckAttemptEvidence `json:"attempts"`
 	StartedAt   time.Time              `json:"startedAt"`
 	CompletedAt time.Time              `json:"completedAt"`
+	// Replica is which of a replicated release's containers the check
+	// asked, from 1; zero for a release of one container and for a check of
+	// the public route, which asks whichever replica the proxy picks.
+	Replica int `json:"replica,omitempty"`
 }
 
 type ContainerCheckBackend interface {

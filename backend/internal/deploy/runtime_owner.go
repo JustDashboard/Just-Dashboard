@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -30,7 +31,10 @@ type CandidateRuntimeRequest struct {
 	Host             string
 	Port             int
 	PortLeaseToken   string
-	Networks         []string
+	// ReplicaPorts are the loopback ports leased for the release's second
+	// and later replicas, in order; Port is the first replica's.
+	ReplicaPorts []int
+	Networks     []string
 }
 
 type StartedRuntime struct {
@@ -120,6 +124,10 @@ type dockerReleaseRuntimeMetadata struct {
 	PrimaryContainerID string   `json:"primaryContainerId,omitempty"`
 	ContainerIDs       []string `json:"containerIds,omitempty"`
 	VariableNames      []string `json:"variableNames"`
+	// Replicas are a replicated release's containers, first replica first,
+	// each with its own loopback publication. A release of one container
+	// records none and is its RuntimeID, as it always was.
+	Replicas []runtimeReplica `json:"replicas,omitempty"`
 }
 
 // DockerRuntimeOwner is the only deployment adapter allowed to own runtime
@@ -361,7 +369,6 @@ func (o *DockerRuntimeOwner) startContainer(
 	for _, device := range plan.Devices {
 		devices = append(devices, dockerx.DeviceSpec{Host: device, Container: device, Permissions: "rwm"})
 	}
-	ports := runtimePortMappings(plan, request.Host, request.Port)
 	labels := releaseRuntimeLabels(request)
 	networks := append([]string(nil), request.Networks...)
 	if plan.PreviewIsolation {
@@ -372,42 +379,82 @@ func (o *DockerRuntimeOwner) startContainer(
 		networks = append([]string{network}, networks...)
 		labels = append(labels, dockerx.LabelSpec{Name: "io.just-dashboard.preview", Value: "true"})
 	}
-	name := fmt.Sprintf("jd-e%d-r%d", request.Release.EnvironmentID, request.Release.Number)
 	stopSignal := plan.StopSignal
 	if stopSignal == "" {
 		stopSignal = "SIGTERM"
 	}
-	result, err := o.client.Create(ctx, dockerx.ContainerSpec{
-		Name: name, Image: image, Command: append([]string(nil), plan.Command...), Env: environment,
-		Ports: ports, Mounts: mounts, Devices: devices, Labels: labels, Networks: networks,
-		NetworkMode:   map[bool]string{true: "host"}[plan.HostNetwork],
-		RestartPolicy: plan.EffectiveRestartPolicy(), Logging: dockerx.CappedLogging(), StopSignal: stopSignal,
-		Limits:     dockerx.ResourceLimits{MemoryMB: plan.MemoryMB, CPUs: plan.CPUs, PidsLimit: plan.PidsLimit},
-		Privileged: plan.Privileged, CapAdd: append([]string(nil), plan.Capabilities...), Init: true,
-		Pull: "missing", Start: true,
-	}, nil)
-	if err != nil {
-		return StartedRuntime{}, err
+	count := plan.EffectiveReplicas()
+	if count > 1 && len(request.ReplicaPorts) != count-1 && plan.InternalPort > 0 {
+		return StartedRuntime{}, fmt.Errorf("%w: %d replicas need %d more candidate ports", ErrInvalidPlan, count, count-1)
 	}
-	for _, binding := range result.Ports {
-		if binding.ContainerPort == plan.InternalPort && binding.Protocol == "tcp" {
-			request.Host, request.Port = binding.HostIP, binding.HostPort
-			break
+	// Every replica is the same container from the same frozen snapshot,
+	// apart from its name, its loopback port and the label saying which one
+	// it is; each has the plan's limits of its own.
+	replicas := make([]runtimeReplica, 0, count)
+	for index := 1; index <= count; index++ {
+		host, port := request.Host, request.Port
+		if index > 1 && plan.InternalPort > 0 {
+			port = request.ReplicaPorts[index-2]
 		}
+		result, err := o.client.Create(ctx, dockerx.ContainerSpec{
+			Name:  replicaContainerName(request.Release.EnvironmentID, request.Release.Number, index),
+			Image: image, Command: append([]string(nil), plan.Command...), Env: environment,
+			Ports: runtimePortMappings(plan, host, port), Mounts: mounts, Devices: devices,
+			Labels: append(append([]dockerx.LabelSpec(nil), labels...), replicaLabels(index, count)...), Networks: networks,
+			NetworkMode:   map[bool]string{true: "host"}[plan.HostNetwork],
+			RestartPolicy: plan.EffectiveRestartPolicy(), Logging: dockerx.CappedLogging(), StopSignal: stopSignal,
+			Limits:     dockerx.ResourceLimits{MemoryMB: plan.MemoryMB, CPUs: plan.CPUs, PidsLimit: plan.PidsLimit},
+			Privileged: plan.Privileged, CapAdd: append([]string(nil), plan.Capabilities...), Init: true,
+			Pull: "missing", Start: true,
+		}, nil)
+		if err != nil {
+			// A release is all of its replicas or none: the ones already
+			// started are removed, so a failed start leaves nothing behind
+			// for the compensation that follows to miss.
+			o.removeReplicas(ctx, replicas)
+			return StartedRuntime{}, err
+		}
+		for _, binding := range result.Ports {
+			if binding.ContainerPort == plan.InternalPort && binding.Protocol == "tcp" {
+				host, port = binding.HostIP, binding.HostPort
+				break
+			}
+		}
+		replicas = append(replicas, runtimeReplica{Index: index, ContainerID: result.ID, Name: result.Name, Host: host, Port: port})
 	}
+	primary := replicas[0]
 	metadata := dockerReleaseRuntimeMetadata{
 		Version: 1, Strategy: string(plan.Strategy), Image: image,
 		ImageDigest: request.Snapshot.Image.Digest, ConfigDigest: request.Snapshot.Image.ConfigDigest,
-		PortLeaseToken: request.PortLeaseToken, PrimaryContainerID: result.ID,
+		PortLeaseToken: request.PortLeaseToken, PrimaryContainerID: primary.ContainerID,
 		VariableNames: variableNames,
+	}
+	if count > 1 {
+		metadata.Replicas = replicas
+		for _, replica := range replicas {
+			metadata.ContainerIDs = append(metadata.ContainerIDs, replica.ContainerID)
+		}
 	}
 	return StartedRuntime{
 		Input: ReleaseRuntimeInput{
-			ReleaseID: request.Release.ID, Kind: "container", RuntimeID: result.ID, Name: result.Name,
-			Host: request.Host, Port: request.Port, Metadata: mustJSON(metadata),
+			ReleaseID: request.Release.ID, Kind: "container", RuntimeID: primary.ContainerID, Name: primary.Name,
+			Host: primary.Host, Port: primary.Port, Metadata: mustJSON(metadata),
 		},
-		Target: CheckTarget{ContainerID: result.ID, Host: runtimeCheckHost(request.Host), Port: request.Port},
+		Target: CheckTarget{ContainerID: primary.ContainerID, Host: runtimeCheckHost(primary.Host), Port: primary.Port},
 	}, nil
+}
+
+// removeReplicas force-removes the replicas a failed start had already
+// created, bounded and detached from the request that failed.
+func (o *DockerRuntimeOwner) removeReplicas(ctx context.Context, replicas []runtimeReplica) {
+	if len(replicas) == 0 {
+		return
+	}
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	for _, replica := range replicas {
+		_ = o.client.RemoveContainer(cleanup, replica.ContainerID, true, false)
+	}
 }
 
 func (o *DockerRuntimeOwner) startCompose(
@@ -634,35 +681,22 @@ func (o *DockerRuntimeOwner) StartExisting(
 			return err
 		}
 		if runtime.Kind == "container" && len(networks) > 0 {
-			detail, err := o.client.Inspect(ctx, runtime.RuntimeID)
-			if err != nil {
-				return err
-			}
-			if detail.Labels["io.just-dashboard.managed"] != "true" || detail.Labels["io.just-dashboard.environment-id"] != strconv.FormatInt(runtime.EnvironmentID, 10) {
-				return fmt.Errorf("%w: runtime network ownership changed", ErrInvalidPlan)
-			}
-			for _, name := range networks {
-				attached := false
-				for _, endpoint := range detail.NetworkList {
-					if endpoint.Name == name {
-						attached = true
-					}
-				}
-				if !attached {
-					if err := o.client.ConnectNetwork(ctx, name, runtime.RuntimeID, nil); err != nil {
-						return err
-					}
+			for _, id := range runtimeContainerIDs(runtime) {
+				if err := o.attachRuntimeNetworks(ctx, runtime.EnvironmentID, id, networks); err != nil {
+					return err
 				}
 			}
 		}
 	}
 	switch runtime.Kind {
 	case "container":
-		err := o.client.Lifecycle(ctx, runtime.RuntimeID, dockerx.ActionStart, nil)
-		if errdefs.IsNotModified(err) {
-			return nil
+		// Every replica, so a release that comes back comes back whole.
+		for _, id := range runtimeContainerIDs(runtime) {
+			if err := o.client.Lifecycle(ctx, id, dockerx.ActionStart, nil); err != nil && !errdefs.IsNotModified(err) {
+				return err
+			}
 		}
-		return err
+		return nil
 	case "compose":
 		metadata, err := decodeDockerRuntimeMetadata(runtime.Metadata)
 		if err != nil {
@@ -696,23 +730,24 @@ func (o *DockerRuntimeOwner) Stop(
 	var err error
 	switch runtime.Kind {
 	case "container":
-		err = o.client.Lifecycle(ctx, runtime.RuntimeID, dockerx.ActionStop, &grace)
-		if errdefs.IsNotFound(err) {
-			evidence.Removed = remove
-			err = nil
-			break
+		// A replicated release's containers are stopped together, each given
+		// the whole grace period, so stopping eight takes as long as one.
+		ids := runtimeContainerIDs(runtime)
+		results := make([]containerStop, len(ids))
+		var wait sync.WaitGroup
+		for index, id := range ids {
+			wait.Add(1)
+			go func() {
+				defer wait.Done()
+				results[index] = o.stopContainer(ctx, id, grace, remove)
+			}()
 		}
-		if err == nil {
-			if detail, inspectErr := o.client.Inspect(ctx, runtime.RuntimeID); inspectErr == nil {
-				evidence.Forced = detail.ExitCode == 137
-			}
-		}
-		if err == nil && remove {
-			err = o.client.RemoveContainer(ctx, runtime.RuntimeID, false, false)
-			if errdefs.IsNotFound(err) {
-				err = nil
-			}
-			evidence.Removed = err == nil
+		wait.Wait()
+		evidence.Removed = remove
+		for _, result := range results {
+			evidence.Forced = evidence.Forced || result.forced
+			evidence.Removed = evidence.Removed && result.removed
+			err = errors.Join(err, result.err)
 		}
 	case "compose":
 		metadata, decodeErr := decodeDockerRuntimeMetadata(runtime.Metadata)
@@ -741,6 +776,63 @@ func (o *DockerRuntimeOwner) Stop(
 	}
 	evidence.CompletedAt = time.Now().UTC()
 	return evidence, err
+}
+
+// containerStop is what stopping one container of a release found.
+type containerStop struct {
+	forced, removed bool
+	err             error
+}
+
+// stopContainer stops one container with the plan's grace and, when asked,
+// removes it. A container already gone is stopped and removed: a candidate
+// that crashed must not turn its own cleanup into an error.
+func (o *DockerRuntimeOwner) stopContainer(ctx context.Context, id string, grace int, remove bool) containerStop {
+	err := o.client.Lifecycle(ctx, id, dockerx.ActionStop, &grace)
+	if errdefs.IsNotFound(err) {
+		return containerStop{removed: remove}
+	}
+	if err != nil {
+		return containerStop{err: err}
+	}
+	result := containerStop{}
+	if detail, inspectErr := o.client.Inspect(ctx, id); inspectErr == nil {
+		result.forced = detail.ExitCode == 137
+	}
+	if remove {
+		err = o.client.RemoveContainer(ctx, id, false, false)
+		if errdefs.IsNotFound(err) {
+			err = nil
+		}
+		result.removed, result.err = err == nil, err
+	}
+	return result
+}
+
+// attachRuntimeNetworks joins one of the release's containers to the
+// networks it must reach, after checking it is still this environment's.
+func (o *DockerRuntimeOwner) attachRuntimeNetworks(ctx context.Context, environmentID int64, id string, networks []string) error {
+	detail, err := o.client.Inspect(ctx, id)
+	if err != nil {
+		return err
+	}
+	if detail.Labels["io.just-dashboard.managed"] != "true" || detail.Labels["io.just-dashboard.environment-id"] != strconv.FormatInt(environmentID, 10) {
+		return fmt.Errorf("%w: runtime network ownership changed", ErrInvalidPlan)
+	}
+	for _, name := range networks {
+		attached := false
+		for _, endpoint := range detail.NetworkList {
+			if endpoint.Name == name {
+				attached = true
+			}
+		}
+		if !attached {
+			if err := o.client.ConnectNetwork(ctx, name, id, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func runtimeGrace(plan RuntimePlanConfig) int {
