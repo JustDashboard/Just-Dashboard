@@ -123,7 +123,9 @@ and `tests/browser/deploy-data-rollback.spec.ts`. Live, as root:
 `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDataCopy -count=1 -v`
 ([CONTRIBUTING](../../../CONTRIBUTING.md)).
 
-Not verified: MySQL and MariaDB copies live (the restore is the rehearsal's, verified on MariaDB; the
-password change for those engines is not exercised live), a copy of a server that requires TLS with
-`verify-full` (the comparison dials the copy by address), PITR into S3, and copies of databases near
-the size limits.
+`TestLiveDataCopyRestoresAMariaDBDump` runs the same against MariaDB (the copy's password set with
+`ALTER USER`, the comparison through the MySQL readers in the driver's own connection form).
+
+Not verified: MySQL 8 itself (the same client restore and `ALTER USER`), a copy of a server that
+requires TLS with `verify-full` (the comparison dials the copy by its address), PITR into S3, and
+copies of databases near the size limits.

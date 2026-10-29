@@ -300,3 +300,30 @@ func TestDataCopiesInterruptedByARestartEndFailed(t *testing.T) {
 func windowFrom(from time.Time) dbx.WALWindow {
 	return dbx.WALWindow{From: &from}
 }
+
+// This process reaches a copy at its address with the copy's sign-in, in
+// the form the saved connection is in: MySQL's driver form keeps its tcp()
+// and options, a URL keeps its options.
+func TestACopyIsDialledInTheSavedConnectionsForm(t *testing.T) {
+	secret := dataCopySecret{User: "app", Password: "made-for-the-copy"}
+	for _, test := range []struct {
+		driver      dbx.Driver
+		saved, want string
+	}{
+		{dbx.DriverMySQL, "app:production@tcp(127.0.0.1:3307)/app?parseTime=true", "app:made-for-the-copy@tcp(172.19.0.4:3306)/app?parseTime=true"},
+		{dbx.DriverPostgres, "postgres://app:production@127.0.0.1:5435/app?sslmode=disable", "postgres://app:made-for-the-copy@172.19.0.4:5432/app?sslmode=disable"},
+	} {
+		info, err := dbx.ParseDSN(test.driver, test.saved)
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := 5432
+		if test.driver == dbx.DriverMySQL {
+			port = 3306
+		}
+		got, err := copyDSN(test.driver, test.saved, info, "172.19.0.4", port, secret)
+		if err != nil || got != test.want {
+			t.Errorf("%s: %q, %v; want %q", test.driver, got, err, test.want)
+		}
+	}
+}

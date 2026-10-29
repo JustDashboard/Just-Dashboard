@@ -457,7 +457,8 @@ to the contribution terms above, including the additional licence grant to the p
   comparison route — and a rehearsal-labelled container must stay off that network across a
   reconcile. The sweep at start keeps the copy while its lifetime runs; once it ends its owner removes
   it, leaving nothing with its label. A rollback to the first release that asks for the copy too finds
-  it restored after the rollback succeeded. With `JD_TEST_WALG`,
+  it restored after the rollback succeeded. `TestLiveDataCopyRestoresAMariaDBDump` does the same
+  against MariaDB (`mariadb:11.8`, pulled once). With `JD_TEST_WALG`,
   `TestLiveDataCopyRecoversTheMomentAReleaseWentLive` does the same from a point-in-time archive, the
   copy recovered to the moment the first release went live. Changes to the shared restore path also
   run the migration rehearsal family above, both ways.

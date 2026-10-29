@@ -23,6 +23,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/docker/docker/errdefs"
+	"github.com/go-sql-driver/mysql"
 )
 
 // The Databases owner's side of data-aware rollback (deploy/data_rollback.go).
@@ -608,6 +609,17 @@ func dataCopyURL(ctx context.Context, s *Server, made *madeCopy, host, password 
 // string — its driver options and TLS as the dashboard reads them — at the
 // copy's address on the deployment's network and with the copy's sign-in.
 func copyDSN(driver dbx.Driver, saved string, info *dbx.ConnInfo, address string, port int, secret dataCopySecret) (string, error) {
+	if driver == dbx.DriverMySQL && !strings.Contains(saved, "://") {
+		// The driver's own form, through its own writer: a URL would lose
+		// the address's tcp() the driver reads, and its options with it.
+		config, err := mysql.ParseDSN(saved)
+		if err != nil {
+			return "", err
+		}
+		config.Net, config.Addr = "tcp", net.JoinHostPort(address, strconv.Itoa(port))
+		config.User, config.Passwd = secret.User, secret.Password
+		return config.FormatDSN(), nil
+	}
 	dsn, err := applicationConnectionURL(driver, saved, info, address, strconv.Itoa(port))
 	if err != nil {
 		return "", err
