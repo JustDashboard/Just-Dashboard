@@ -307,6 +307,10 @@ func (s *Server) initModules() {
 	if s.Cfg.IngressContainer != "" {
 		s.modules.proxy = proxysvc.NewWithIngressContainer(s.Cfg.NginxDir, s.Cfg.CaddyFile, s.Cfg.IngressContainer)
 	}
+	// A deployment route on the name this dashboard is reached by is sent
+	// the dashboard's session cookie, whatever port either is on; the route
+	// takes it out of what the application is sent.
+	s.modules.proxy.WithDashboardHost(s.Cfg.Site)
 	s.modules.requests = accesslog.NewStore(s.openRequestRecord)
 	s.modules.logDrains = logdrain.NewStore(s.Store, s.Sealer)
 	s.modules.dbs = dbx.NewManager()

@@ -23,6 +23,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/secretstore"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/sessioncookie"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/version"
 	"github.com/go-chi/chi/v5"
 )
@@ -648,7 +649,7 @@ func buildDeployOpenAPI(root chi.Routes) *openapiDocument {
 			"version": version.Version,
 			"summary": "The deployment routes of a Just Dashboard, as its router mounts them.",
 			"description": "Generated from the dashboard's own router and the Go types its handlers decode and encode, and checked against both by its tests, so it describes exactly what this build serves. " +
-				"Every route is under /api/v1/deploy and takes one of three credentials: the browser session (the " + httpx.SessionCookie + " cookie, with the X-JD-CSRF: 1 header on every request that is not a GET), " +
+				"Every route is under /api/v1/deploy and takes one of three credentials: the browser session (the " + httpx.SessionCookie + " cookie, " + sessioncookie.PlainName + " on a dashboard served over plain HTTP on loopback, with the X-JD-CSRF: 1 header on every request that is not a GET), " +
 				"an API key as a bearer token, or a deploy key as a bearer token, which reaches only the routes marked deployKey; x-deploy-key on each operation says what a deploy key gets there and why. " +
 				"A property is present in an answer whenever its Go field has no omitempty, and may be left out of a request, where it is its zero value; a property that is a pointer, list or map in Go may be null. " +
 				"Secrets are marked writeOnly: they are accepted by a write and read back by no route. Every refusal is the Error envelope under default.",
@@ -679,7 +680,7 @@ func buildDeployOpenAPI(root chi.Routes) *openapiDocument {
 			},
 			"securitySchemes": map[string]any{
 				"session": map[string]any{"type": "apiKey", "in": "cookie", "name": httpx.SessionCookie,
-					"description": "A signed-in browser session. Every request that is not a GET also carries the X-JD-CSRF: 1 header."},
+					"description": "A signed-in browser session: " + httpx.SessionCookie + ", or " + sessioncookie.PlainName + " on a dashboard served over plain HTTP on loopback. Every request that is not a GET also carries the X-JD-CSRF: 1 header."},
 				"apiKey": map[string]any{"type": "http", "scheme": "bearer",
 					"description": "An API key made under Account → API keys, sent as Authorization: Bearer. It holds its owner's role and reaches every route that does not require a session."},
 				"deployKey": map[string]any{"type": "http", "scheme": "bearer",

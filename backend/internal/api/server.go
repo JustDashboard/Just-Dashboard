@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -353,10 +354,13 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 // startDeployEngine puts tailscale's serve config and the preview address
-// table in agreement, then starts the engine — in that order. A restart may
-// have left a served port whose preview is gone, or a preview recorded as
-// reachable that nothing serves, and both are put right before any preview
-// page reads the record. The engine comes second because a run it resumes at
+// table in agreement, moves every address still mapped straight to its
+// container behind its front, then starts the engine — in that order. A
+// restart may have left a served port whose preview is gone, or a preview
+// recorded as reachable that nothing serves, and both are put right before
+// any preview page reads the record; an address published before every
+// address had a front stops being sent the dashboard's session cookie now,
+// not at its next release. The engine comes last because a run it resumes at
 // boot may publish a preview the moment it starts, and a sweep still reading
 // the config would take that fresh mapping for a dead one.
 func (s *Server) startDeployEngine(ctx context.Context) error {
@@ -368,6 +372,20 @@ func (s *Server) startDeployEngine(ctx context.Context) error {
 	}
 	if err != nil {
 		s.Log.Warn("tailnet preview addresses need attention", "error", err)
+	}
+	frontCtx, frontCancel := context.WithTimeout(ctx, 2*time.Minute)
+	fronting, err := s.modules.deployExecutor.FrontTailnetAddresses(frontCtx)
+	frontCancel()
+	for _, environmentID := range fronting.Fronted {
+		s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.tailnet.fronted", Target: strconv.FormatInt(environmentID, 10), Success: true,
+			Detail: "the tailnet address now reaches the application through the dashboard's front, which keeps the dashboard's session cookie from it"})
+	}
+	for environmentID, reason := range fronting.Failed {
+		s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.tailnet.fronted", Target: strconv.FormatInt(environmentID, 10), Success: false, Detail: reason})
+		s.Log.Warn("a tailnet address is still mapped straight to its container", "environment", environmentID, "reason", reason)
+	}
+	if err != nil {
+		s.Log.Warn("tailnet addresses could not be moved behind their front", "error", err)
 	}
 	return s.modules.deployEngine.Start(ctx)
 }

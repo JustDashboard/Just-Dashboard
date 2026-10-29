@@ -16,6 +16,7 @@ import type {
   DeploymentRequests,
   DeploymentRuntimeService,
   DockerEvent,
+  LogDrain,
   NotificationChannel,
   RequestEntry,
   TrafficAlert,
@@ -58,6 +59,7 @@ import {
 } from "@/components/deploy/logs-model"
 import { serviceProduct } from "@/components/deploy/service-product"
 import { AddAlertSheet } from "@/components/deploy/add-alert-sheet"
+import { traceLinkFor } from "@/components/deploy/log-drains"
 import { failingTone } from "@/components/deploy/fleet"
 import { ChannelNames, toldBy } from "@/components/deploy/settings/traffic-alerts"
 import { WrapDot } from "@/components/deploy/request-marks"
@@ -264,6 +266,14 @@ export function ProjectLogs() {
   )
   // Traffic alerts watch production's route; staging's readings carry none.
   const staging = project.environment === "staging"
+  // The drains name where a request's trace opens, when one exports this
+  // project's traces to a service with a link. Read once: drains change on
+  // their own page.
+  const drains = usePoll<LogDrain[]>(
+    (signal) => get<LogDrain[]>("/deploy/log-drains", undefined, signal),
+    0,
+    [],
+  )
   const alerts = usePoll<TrafficAlertList>(
     (signal) => get<TrafficAlertList>(`/deploy/${project.projectId}/alerts`, undefined, signal),
     30000,
@@ -411,6 +421,7 @@ export function ProjectLogs() {
                 ? () => openOutput(answer.container, entry.time)
                 : undefined
             }}
+            traceLink={(traceId) => traceLinkFor(drains.data, project.projectId, traceId)}
             renderInline={(entry, window) => (
               <RequestLines entry={entry} window={window} answering={answering(entry)} />
             )}

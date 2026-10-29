@@ -108,6 +108,7 @@ export function RequestsWorkspace({
   routed,
   onEventsAround,
   outputFor,
+  traceLink,
   renderInline,
   afterInsights,
   scope,
@@ -146,6 +147,8 @@ export function RequestsWorkspace({
    * request — for a request whose container is still there to read.
    */
   outputFor?: (entry: RequestEntry) => (() => void) | undefined
+  /** Where a request's trace opens, from the log drain that exports it. */
+  traceLink?: (traceId: string | undefined) => { href: string; label: string } | undefined
   /**
    * What the record's owner knows about one request that the record does
    * not, drawn in the opened row under its verbs: the lines a deployment's
@@ -373,6 +376,7 @@ export function RequestsWorkspace({
             blockUnavailable={blocks.unavailable}
             onEventsAround={onEventsAround}
             outputFor={outputFor}
+            traceLink={traceLink}
             renderInline={renderInline && ((entry) => renderInline(entry, data))}
             leading={
               <ClassChips
