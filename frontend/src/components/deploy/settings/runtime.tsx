@@ -943,6 +943,7 @@ function RuntimeForm({
             servesDomain: configuration.domains.some((domain) => !domain.redirectTo),
             compose: method === "compose" || method === "legacy_compose",
             hostNetwork: Boolean(runtime.hostNetwork),
+            replicas,
             blockingCheck: configuration.checks.find(
               (check) =>
                 check.phase === "readiness" &&
