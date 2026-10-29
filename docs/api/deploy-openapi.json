@@ -10944,8 +10944,21 @@
             "format": "int64",
             "type": "integer"
           },
+          "warmRunning": {
+            "type": "boolean"
+          },
           "warmRuntimeId": {
             "type": "string"
+          },
+          "warmServed": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.RollbackReading"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "title": "deploy.RollbackWatch",
@@ -11596,6 +11609,9 @@
           },
           "restartPolicy": {
             "type": "string"
+          },
+          "skewProtection": {
+            "type": "boolean"
           },
           "stopSignal": {
             "type": "string"
