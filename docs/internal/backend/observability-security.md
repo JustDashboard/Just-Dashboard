@@ -121,7 +121,7 @@ rule. Source: `api/host_alerts.go` (rules, the pass, `stepHostAlert`, history), 
 `components/metrics/alerts-page.tsx` over `lib/host-alerts.ts`, with the parts it shares with the
 proxy's page in `components/alerts/alert-parts.tsx`.
 
-- **Six kinds, a closed vocabulary** (`hostAlertSpecs`). `cpu_high` and `memory_high` take a line
+- **Seven kinds, a closed vocabulary** (`hostAlertSpecs`). `cpu_high` and `memory_high` take a line
   (default 90%, 10–100) and a window (CPU 10 min, memory 5 — the OOM killer does not wait ten; 1–1440):
   the **mean of the recorded samples** in `metric_samples` over the window, with its peak, so a spike
   inside a quiet window is a high peak and not an alert (Netdata's stock CPU alarm averages ten minutes
@@ -132,8 +132,8 @@ proxy's page in `components/alerts/alert-parts.tsx`.
   bytes for memory). `disk_filling` (default 90%, 10–99) reads the recorder's newest
   `metric_mount_samples` batch and fires a mount on its space **or** its inodes, since a filesystem out
   of inodes reports free space and refuses to create a file; a mount missing from the newest batch has
-  been unmounted and leaves. `container_down` (minutes 2, 1–1440), `backup_failed` and
-  `image_vulnerable` are below.
+  been unmounted and leaves. `container_down` (minutes 2, 1–1440), `backup_failed`, `image_vulnerable`
+  and `tunnel_down` (minutes 2, 1–1440) are below.
 - **One pass a minute** (`hostAlerts.Start` from `Server.Start`, clock, observer and deliverer fields
   for tests); each source is read once a pass and only when an enabled rule needs it. CPU, memory and
   disk are queries of what the recorder already keeps; with `JD_METRICS_RETENTION=0` those rules are
@@ -176,6 +176,13 @@ proxy's page in `components/alerts/alert-parts.tsx`.
   its subject where it was; an environment that stops scanning, or whose release is replaced by one
   scanned clean, is told it is over. The scans are the deployments'
   ([image vulnerabilities](../deployments/image-vulnerabilities.md)); the rule only reads them.
+- **The Cloudflare Tunnel is down** (`tunnel_down`, `tunnelAlertReading`) when its connector container
+  is not running, or is running and its metrics say it holds no connection to Cloudflare's edge; the
+  detail carries cloudflared's own words where it said why (the manager's last reading,
+  [Cloudflare Tunnel](../deployments/cloudflare-tunnel.md)). One subject, `tunnel:<id>`, linking to
+  Proxy › Tunnel; with no tunnel connected the rule is unjudged rather than quiet. It holds two passes
+  and the rule's minutes, as a container does, because a connector reconnects by itself after a blip of
+  the edge.
 - **Hold and state** (`stepHostAlert`, one pure function). A subject is told once when it has been over
   the line for its kind's passes and minutes — one pass for CPU, memory (their window is the hold) and
   backups, two for disks, two and the rule's minutes for containers — and once when it comes back,

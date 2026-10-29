@@ -1339,6 +1339,7 @@ func mapCron(tab procs.Crontab, job procs.CronJob) mapItem {
 var alertKindLabel = map[string]string{
 	"cpu_high": "CPU high", "memory_high": "Memory high", "disk_filling": "Disk filling",
 	"container_down": "Container down", "backup_failed": "Backup failed", "image_vulnerable": "Vulnerable base image",
+	"tunnel_down":   "Tunnel down",
 	"cert_expiring": "Certificate expiring", "cert_expired": "Certificate expired",
 	"renewal_failed": "Renewal failed", "served_drift": "Served certificate differs",
 	"engine_down": "Proxy down", "upstream_down": "Upstream down",

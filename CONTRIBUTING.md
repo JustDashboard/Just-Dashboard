@@ -402,11 +402,15 @@ to the contribution terms above, including the additional licence grant to the p
   (the wildcard served by a real `caddy:2-alpine`, then renewed and refreshed; needs the plugin above)
   and `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyRefreshesRenewedCertificateCopies -count=1 -v`
   (the renewal refresh on a real Caddy with no authority involved).
-  Changes to how a deployment route renders its redirects, response headers, allowed addresses, HSTS
-  or a domain's own scheme also
+  Changes to how a deployment route renders its redirects, response headers, allowed addresses, HSTS,
+  a domain's own scheme, edge rules or the CrowdSec list also
   run `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules -count=1 -v`,
   which asks a real Caddy what it answers for each, a route serving one name over HTTPS and another
-  over plain HTTP with HSTS included, and
+  over plain HTTP with HSTS included, a blocked path, a user agent's status, an allow ahead of a
+  block, a ban and its lifting, and the rule names in the request record; edge rules and rate limits
+  also run `go test ./internal/proxysvc -run TestLiveDeploymentRouteEdgeRulesOnNginx` on the host's
+  nginx alone (429 with Retry-After past the limit, 200 within it;
+  [edge rules](docs/internal/deployments/edge-rules.md#tests)); and
   `go test ./internal/proxysvc -run TestLiveDeploymentRouteMixedTLSOnNginx`, which asks the host's
   nginx the same. Changes to a route's sign-in, how Caddy reaches the
   auth server, or the maintenance pass that repairs that network also run
@@ -434,7 +438,14 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesMaintenanceAndErrorPages -count=1 -v`
   and `go test ./internal/proxysvc -run TestLiveDeploymentRouteMaintenanceOnNginx`, which switch a real
   Caddy's and the host nginx's route by its file and ask each what a visitor, an address let past and a
-  stopped application get.
+  stopped application get. Changes to Cloudflare Tunnel (`internal/cftunnel`, `proxysvc/tunnel_origin.go`,
+  `deploy/tunnel.go`) also run, as root on a Docker host,
+  `JD_DEPLOY_LIVE=1 go test ./internal/cftunnel -run TestLiveConnectorReportsCloudflaredsOwnFailure -count=1 -v`,
+  which starts the pinned cloudflared with a well-formed token for a tunnel that does not exist and checks
+  that the dashboard reads its failure in cloudflared's own words (it needs outbound access to Cloudflare's
+  edge, and a real tunnel needs a Cloudflare account, which no test has), and
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesATunnelNamePlainToItsConnector -count=1 -v`,
+  which asks a real Caddy for a tunnel's name from the tunnel's network alone, as the connector does.
   This uses locked application fixtures and checks served build values, private install credentials,
   SvelteKit adapters, HTML/Containerfile defaults and Go command/version behavior, plus the catalogue's
   own starters: Astro, Nuxt, React Router, FastAPI (unpinned requirements, server auto-installed), a

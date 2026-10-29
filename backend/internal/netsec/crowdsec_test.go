@@ -299,3 +299,21 @@ func TestDeleteDecision(t *testing.T) {
 		t.Fatalf("ran %v for an invalid id", h.calls)
 	}
 }
+
+// The deployment routes' ban list reads the decisions alone, with a limit of
+// its own past the page's cap, and nothing at all where there is no cscli.
+func TestCrowdSecBansReadsOnlyTheDecisions(t *testing.T) {
+	h := newCscliHost(t, true)
+	h.replies["cscli decisions list -o json --limit 10000"] = testdata(t, "crowdsec-decisions.json")
+	installed, decisions, err := New().CrowdSecBans(t.Context(), 20000)
+	if err != nil || !installed || len(decisions) == 0 {
+		t.Fatalf("bans = %v %v %v", installed, decisions, err)
+	}
+	if len(h.calls) != 1 {
+		t.Fatalf("read more than the decisions: %v", h.calls)
+	}
+	absent := newCscliHost(t, false)
+	if installed, decisions, err := New().CrowdSecBans(t.Context(), 100); installed || decisions != nil || err != nil || len(absent.calls) != 0 {
+		t.Fatalf("without cscli = %v %v %v %v", installed, decisions, err, absent.calls)
+	}
+}

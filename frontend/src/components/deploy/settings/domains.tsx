@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
@@ -76,6 +76,7 @@ import {
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import { OwnershipSelect } from "@/components/deploy/settings/mounts"
 import { useProject } from "@/components/deploy/project-context"
+import { EdgeRulesForm } from "@/components/deploy/settings/edge-rules"
 import {
   HSTS_DEFAULT_MAX_AGE,
   HSTS_MAX_AGES,
@@ -178,6 +179,12 @@ export function DomainsSettings({
             Boolean(configuration.runtime.forwardAuth) ||
             Boolean(configuration.runtime.hsts)) && (
             <RouteRulesForm configuration={configuration} save={state.save} />
+          )}
+          {(configuration.domains.length > 0 ||
+            Boolean(configuration.runtime.edgeRules?.length) ||
+            Boolean(configuration.runtime.rateLimit) ||
+            Boolean(configuration.runtime.crowdSec)) && (
+            <EdgeRulesForm configuration={configuration} save={state.save} />
           )}
           {(configuration.domains.length > 0 ||
             Boolean(configuration.runtime.maintenance) ||
@@ -775,10 +782,14 @@ function DomainRow({
   // row still asks for what the route serves. Turn HTTPS on or off and the
   // live answer is about to stop being true, so the row says what the next
   // deployment does instead of contradicting its own toggle.
-  const httpsChanging = Boolean(route) && domain.https !== route?.https
-  const liveCertificate = route && !unsaved && !httpsChanging ? route : undefined
+  // A name served through Cloudflare Tunnel has no certificate here at all:
+  // Cloudflare's edge terminates its HTTPS, and the route serves it plain to
+  // the connector, so the live certificate readings say nothing about it.
+  const tunnel = Boolean(domain.tunnel)
+  const httpsChanging = !tunnel && Boolean(route) && domain.https !== route?.https
+  const liveCertificate = route && !unsaved && !httpsChanging && !tunnel ? route : undefined
 
-  const issuer = issuerProduct(liveCertificate?.certificateIssuer)
+  const issuer = tunnel ? "cloudflare" : issuerProduct(liveCertificate?.certificateIssuer)
 
   const setProtection = (next: Partial<NonNullable<DomainValue["protection"]>>) =>
     protection && onChange({ protection: { ...protection, ...next } })
@@ -826,8 +837,12 @@ function DomainRow({
               plain-HTTP visitors on, a plain one is served as asked, whatever
               the other names on the route do — so the row says which. */}
           {!domain.redirectTo && (
-            <span key={scheme} className="animate-rise text-muted-foreground">
-              {domain.https ? "Plain HTTP is redirected to HTTPS" : "Plain HTTP, no redirect"}
+            <span key={tunnel ? "tunnel" : scheme} className="animate-rise text-muted-foreground">
+              {tunnel
+                ? "Through Cloudflare Tunnel · HTTPS at Cloudflare's edge"
+                : domain.https
+                  ? "Plain HTTP is redirected to HTTPS"
+                  : "Plain HTTP, no redirect"}
             </span>
           )}
           {/* The issuer is the row's mark, so the line carries the state and the
@@ -864,24 +879,33 @@ function DomainRow({
         <ToggleGroup
           type="multiple"
           variant="outline"
-          value={[domain.https && "https", protection && "password"].filter(
+          value={[domain.https && "https", protection && "password", tunnel && "tunnel"].filter(
             (value): value is string => Boolean(value),
           )}
-          onValueChange={(values) =>
+          onValueChange={(values) => {
+            // Through the tunnel is HTTPS by definition — Cloudflare's edge
+            // answers the visitor — so turning it on turns HTTPS on with it.
+            const through = values.includes("tunnel")
             onChange({
-              https: values.includes("https"),
+              https: through || values.includes("https"),
               protection: values.includes("password")
                 ? (protection ?? { username: "", password: "" })
                 : undefined,
+              tunnel: through || undefined,
             })
-          }
+          }}
           disabled={!canAdmin}
           className="shrink-0"
         >
           <ToggleGroupItem
             value="https"
             aria-label={`HTTPS on ${host}`}
-            className="h-11 gap-1.5 text-body data-[state=off]:text-muted-foreground sm:h-9"
+            // Held on, not greyed out: the name is HTTPS, at Cloudflare's edge.
+            disabled={tunnel}
+            className={cn(
+              "h-11 gap-1.5 text-body data-[state=off]:text-muted-foreground sm:h-9",
+              tunnel && canAdmin && "disabled:cursor-default disabled:opacity-100",
+            )}
           >
             <LockClosed
               className={cn(
@@ -904,6 +928,21 @@ function DomainRow({
             />
             Password
           </ToggleGroupItem>
+          {/* A wildcard is not routed through a tunnel: each name is a route
+              and a record of its own at Cloudflare. */}
+          {(tunnel || !host.startsWith("*.")) && (
+            <ToggleGroupItem
+              value="tunnel"
+              aria-label={`Cloudflare Tunnel on ${host}`}
+              className="h-11 gap-1.5 text-body data-[state=off]:text-muted-foreground sm:h-9"
+            >
+              <ProductGlyph
+                id="cloudflare"
+                className={cn("transition-opacity", !tunnel && "opacity-50 grayscale")}
+              />
+              Tunnel
+            </ToggleGroupItem>
+          )}
         </ToggleGroup>
         <OwnershipSelect
           value={domain.ownership}
@@ -1041,6 +1080,13 @@ function certificateReading(suggestion: DeploymentHostnameSuggestion): {
   return { tone: "warning", label: "HTTPS unavailable" }
 }
 
+/** The tunnel's answer for a typed name: routed through it on the deploy, or not. */
+function tunnelReading(suggestion: DeploymentHostnameSuggestion): { tone: DotTone; label: string } {
+  return suggestion.covered
+    ? { tone: "running", label: "Through the tunnel" }
+    : { tone: "warning", label: "Tunnel unavailable" }
+}
+
 /** The challenge a certificate would be issued over, as the product that answers it. */
 const METHOD_PRODUCT: Partial<
   Record<NonNullable<DeploymentHostnameSuggestion["certificateMethod"]>, string>
@@ -1084,6 +1130,7 @@ function AddDomainPanel({
 }) {
   const [hostname, setHostname] = useSessionState("deploy.settings.domains.add.hostname", "")
   const [https, setHttps] = useSessionState("deploy.settings.domains.add.https", true)
+  const [tunnel, setTunnel] = useSessionState("deploy.settings.domains.add.tunnel", false)
   const [guarded, setGuarded] = useState(false)
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
@@ -1094,34 +1141,54 @@ function AddDomainPanel({
   const reset = () => {
     setHostname("")
     setHttps(true)
+    setTunnel(false)
     setGuarded(false)
     setUsername("")
     setPassword("")
     setSuggestion(undefined)
   }
 
-  const check = async () => {
+  // The newest question asked. Leaving the field asks one and the tunnel
+  // switch, pressed straight after, asks another; only the newest answer is
+  // the sheet's, whichever arrives last.
+  const asked = useRef(0)
+  const check = async (through = tunnel) => {
     const value = hostname.trim().toLowerCase()
     if (!value) return
+    const question = ++asked.current
     setChecking(true)
     try {
-      setSuggestion(
-        await get<DeploymentHostnameSuggestion>("/deploy/hostname", { hostname: value }),
-      )
+      const answer = await get<DeploymentHostnameSuggestion>("/deploy/hostname", {
+        hostname: value,
+        ...(through ? { tunnel: "1" } : {}),
+      })
+      if (question === asked.current) setSuggestion(answer)
     } catch {
       // The saved answer stays on screen; the deploy itself is what settles this.
     } finally {
-      setChecking(false)
+      if (question === asked.current) setChecking(false)
     }
   }
 
   const typed = hostname.trim().toLowerCase()
-  const matches = suggestion?.hostname.toLowerCase() === typed
-  const answer = https && matches && suggestion ? certificateReading(suggestion) : undefined
-  const method = matches ? suggestion?.certificateMethod : undefined
+  // An answer is this sheet's only while it was asked the question the sheet
+  // now asks: a tunnel's answer says nothing about a certificate here, and
+  // the certificate's says nothing about a tunnel.
+  const matches =
+    suggestion?.hostname.toLowerCase() === typed && (suggestion.method === "tunnel") === tunnel
+  const answer =
+    matches && suggestion
+      ? tunnel
+        ? tunnelReading(suggestion)
+        : https
+          ? certificateReading(suggestion)
+          : undefined
+      : undefined
+  const method = matches && !tunnel ? suggestion?.certificateMethod : undefined
   const glyph = method ? METHOD_PRODUCT[method] : undefined
-  const ordered = https && suggestion && !suggestion.covered ? method : undefined
-  const record = matches && suggestion?.address ? `A  ${typed}  →  ${suggestion.address}` : ""
+  const ordered = https && !tunnel && suggestion && !suggestion.covered ? method : undefined
+  const record =
+    matches && !tunnel && suggestion?.address ? `A  ${typed}  →  ${suggestion.address}` : ""
   const incomplete = guarded && (!username.trim() || password.length < 8)
 
   const add = async () => {
@@ -1130,8 +1197,9 @@ function AddDomainPanel({
     try {
       await onAdd({
         hostname: typed,
-        https,
+        https: https || tunnel,
         ownership: "managed",
+        ...(tunnel ? { tunnel: true } : {}),
         ...(guarded ? { protection: { username: username.trim(), password } } : {}),
       })
       reset()
@@ -1174,7 +1242,11 @@ function AddDomainPanel({
         <Field
           label="Hostname"
           htmlFor="add-domain-hostname"
-          info="Point a DNS record for the name at this server first. Check reads where it points and whether a certificate can be issued for it."
+          info={
+            tunnel
+              ? "The name's zone must be on Cloudflare. Its route and CNAME to the tunnel are set as the release goes live, with the Cloudflare credentials saved under Certificates."
+              : "Point a DNS record for the name at this server first. Check reads where it points and whether a certificate can be issued for it."
+          }
           // Once checked, what the check found is the Status at the label's
           // edge, the method under the field and the record under that — the
           // server's sentence would be all three again.
@@ -1212,7 +1284,7 @@ function AddDomainPanel({
               className="font-mono"
             />
             <InputGroupAddon align="inline-end" className="gap-0 p-0">
-              <HttpsToggle checked={https} onChange={setHttps} />
+              {!tunnel && <HttpsToggle checked={https} onChange={setHttps} />}
               <InputGroupButton
                 aria-label="Check this hostname"
                 pending={checking}
@@ -1255,7 +1327,21 @@ function AddDomainPanel({
           </div>
         )}
 
-        {https && matches && suggestion && !suggestion.covered && !method && (
+        {tunnel && matches && suggestion && (
+          <p
+            key={suggestion.detail}
+            className="animate-rise text-hint leading-relaxed text-muted-foreground"
+          >
+            {suggestion.detail}{" "}
+            {!suggestion.covered && !typed.startsWith("*.") && (
+              <Link href="/proxy/tunnel" className="text-foreground underline underline-offset-4">
+                Open Cloudflare Tunnel
+              </Link>
+            )}
+          </p>
+        )}
+
+        {https && !tunnel && matches && suggestion && !suggestion.covered && !method && (
           <Notice
             tone="warning"
             icon={Warning}
@@ -1267,6 +1353,15 @@ function AddDomainPanel({
         )}
 
         <OptionList>
+          <OptionRow
+            title="Serve through Cloudflare Tunnel"
+            hint="Cloudflare's edge answers the name and HTTPS, and the connector on this host brings the requests here: no record points at this server and no port is opened."
+            checked={tunnel}
+            onCheckedChange={(next) => {
+              setTunnel(next)
+              void check(next)
+            }}
+          />
           <OptionRow
             title="Ask visitors for a password"
             checked={guarded}

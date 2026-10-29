@@ -234,6 +234,12 @@ A change that weakens any of these has to say so explicitly.
    ingress's own `/config` volume, and the dashboard answers only a peer whose process is nginx or Caddy
    (`SO_PEERCRED`). What it does — start an application asleep by design — is what any visitor's request
    to the domain does.
+   A Cloudflare Tunnel's connector binds nothing at all: cloudflared runs as the managed container
+   `just-dashboard-cloudflared` (never a process on the host) with no published port, dials out to
+   Cloudflare's edge, and reaches the proxy over a Docker network only it and the ingress share; its
+   metrics answer on that network alone. Its token is sealed with `auth.Sealer` as it arrives, never
+   returned or logged, and handed to the container through the `docker` client's environment, never its
+   argv ([Cloudflare Tunnel](../deployments/cloudflare-tunnel.md)).
    `GET /security/boundary` reports both halves as observed — a dashboard socket other than Caddy's
    on a routable address, no Caddy on the configured port, or a preview port that is funnelled or
    serves anything but a loopback upstream is a broken boundary on the Security overview — but the
