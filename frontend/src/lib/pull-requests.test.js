@@ -1,17 +1,26 @@
 import { describe, expect, test } from "bun:test"
 import {
+  branchPlan,
+  branchReading,
+  branchSource,
   canPromotePreview,
   canTest,
   cleanupFailed,
+  composeServiceLines,
   heldReason,
+  parseMaskedColumns,
+  previewBlocker,
   previewHeld,
   previewOutOfDate,
   previewPromotionStatus,
+  previewServiceReading,
+  previewServices,
   previewStatus,
   promotionOrigin,
   previewURL,
   pullChecksTone,
   pullOfPreview,
+  shownBranches,
   unavailableReason,
 } from "./pull-requests"
 
@@ -263,6 +272,124 @@ describe("a preview's pull request as the row draws one", () => {
   })
 })
 
+describe("Compose previews", () => {
+  const running = { running: true, detail: "" }
+  const facts = (over = {}) => ({
+    compose: false,
+    localCheckout: false,
+    internalPort: 3000,
+    tailnet: running,
+    ...over,
+  })
+  const stack = { public: "web", services: [], refusals: [] }
+
+  test("a Compose stack is previewed unless it needs what no preview gets", () => {
+    expect(previewBlocker(facts({ compose: true, composePreview: stack }))).toBeUndefined()
+    expect(
+      previewBlocker(
+        facts({
+          compose: true,
+          composePreview: { ...stack, refusals: ["service web mounts the Docker socket"] },
+        }),
+      ),
+    ).toBe(
+      "A preview isolates every service of the stack, and service web mounts the Docker socket, which no preview gets.",
+    )
+    // A compatibility deployment carries no facts: it has no release engine.
+    expect(previewBlocker(facts({ compose: true }))).toContain("compatibility Compose")
+  })
+  test("the blockers keep the route's order", () => {
+    expect(previewBlocker(undefined)).toBeUndefined()
+    expect(previewBlocker(facts({ localCheckout: true, internalPort: 0 }))).toContain(
+      "local checkout",
+    )
+    expect(previewBlocker(facts({ internalPort: 0 }))).toBe(
+      "The runtime plan has no port to publish.",
+    )
+    expect(previewBlocker(facts({ tailnet: { running: false, detail: "" } }))).toBe(
+      "Tailscale is not running on this host.",
+    )
+  })
+  test("each service says where it answers and what it does not get", () => {
+    expect(
+      composeServiceLines({
+        name: "web",
+        public: true,
+        ports: ["80:3000"],
+        volumes: ["/uploads"],
+        checkout: ["/etc/nginx.conf"],
+        leftOut: ["/etc/localtime"],
+      }),
+    ).toEqual([
+      "Answers the preview's route and tailnet address, on loopback only",
+      "Publishes none of production's ports (80:3000)",
+      "/uploads starts empty, on a volume of its own",
+      "/etc/nginx.conf read from this commit, read-only",
+      "/etc/localtime from this server left out",
+    ])
+    expect(
+      composeServiceLines({
+        name: "db",
+        public: false,
+        ports: [],
+        volumes: ["/a", "/b"],
+        checkout: [],
+        leftOut: [],
+      }),
+    ).toEqual([
+      "Reached only by the stack's own services",
+      "/a, /b start empty, on a volume of its own",
+    ])
+  })
+  test("a service reads its health where it has a check, else whether it runs", () => {
+    expect(previewServiceReading({ state: "running", health: "healthy" })).toEqual({
+      tone: "running",
+      label: "Healthy",
+    })
+    expect(previewServiceReading({ state: "running", health: "unavailable" }).label).toBe("Running")
+    expect(previewServiceReading({ state: "running", health: "starting" }).tone).toBe("warning")
+    expect(previewServiceReading({ state: "running", health: "unhealthy" }).tone).toBe("danger")
+    expect(previewServiceReading({ state: "exited", health: "", exitCode: 1 }).label).toBe(
+      "Exited 1",
+    )
+    expect(previewServiceReading({ state: "exited", health: "", oomKilled: true }).label).toBe(
+      "Out of memory",
+    )
+    expect(previewServiceReading({ state: "created", health: "" })).toEqual({
+      tone: "stopped",
+      label: "Created",
+    })
+  })
+  test("the row lists the live release's services, the public one first", () => {
+    const service = (name, over = {}) => ({
+      containerId: name,
+      name: `jd-e9-${name}-1`,
+      service: name,
+      releaseId: 4,
+      liveRelease: true,
+      state: "running",
+      health: "unavailable",
+      imageId: "sha256:x",
+      ...over,
+    })
+    const built = preview({
+      services: {
+        status: "available",
+        observedAt: "2026-10-29T10:00:00Z",
+        services: [service("db"), service("web"), service("old", { liveRelease: false })],
+      },
+    })
+    expect(previewServices(built, "web").map((item) => [item.name, item.public])).toEqual([
+      ["web", true],
+      ["db", false],
+    ])
+    expect(previewServices(preview(), "web")).toEqual([])
+    expect(
+      previewServices(preview({ services: { status: "unavailable", services: [] } }), "web"),
+    ).toEqual([])
+  })
+})
+
 describe("promoting a preview into staging", () => {
   const live = (over = {}) =>
     preview({
@@ -341,5 +468,61 @@ describe("where a promoted release came from", () => {
   })
   test("nothing for a release that was built", () => {
     expect(promotionOrigin(undefined)).toBeUndefined()
+  })
+})
+
+describe("database branches", () => {
+  const branch = (over = {}) => ({
+    id: 3,
+    environmentId: 9,
+    connectionId: 11,
+    name: "orders-db",
+    engine: "postgres",
+    mode: "branch",
+    maskedColumns: [],
+    state: "ready",
+    source: { kind: "dump", backupRunId: 42, takenAt: "2026-10-29T08:00:00Z" },
+    createdAt: "2026-10-29T08:01:00Z",
+    ...over,
+  })
+  test("a branch's state reads as one word", () => {
+    expect(branchReading(branch()).label).toBe("Ready")
+    expect(branchReading(branch({ state: "restoring" })).tone).toBe("notice")
+    expect(branchReading(branch({ state: "failed" })).tone).toBe("danger")
+    expect(branchReading(branch({ state: "removed" })).label).toBe("Removed")
+  })
+  test("where its data came from is said in words", () => {
+    const when = (iso) => `at ${iso}`
+    expect(branchSource(branch(), when)).toBe("from the backup of at 2026-10-29T08:00:00Z (run 42)")
+    expect(
+      branchSource(branch({ source: { kind: "pitr" }, recoveredTo: "2026-10-29T08:05:00Z" }), when),
+    ).toBe("recovered to at 2026-10-29T08:05:00Z from its archive")
+    expect(branchSource(branch({ source: { kind: "" } }), when)).toBeUndefined()
+  })
+  test("a removed branch is not shown under its preview", () => {
+    expect(
+      shownBranches(preview({ branches: [branch(), branch({ id: 4, state: "removed" })] })).map(
+        (item) => item.id,
+      ),
+    ).toEqual([3])
+    expect(shownBranches(undefined)).toEqual([])
+  })
+  test("the dialog says what a preview gets, and that a fork gets nothing", () => {
+    const policies = [
+      { connectionId: 11, name: "orders-db", mode: "masked", maskedColumns: ["users.email"] },
+      { connectionId: 12, name: "cache", mode: "none", maskedColumns: [] },
+    ]
+    expect(branchPlan(policies, false)).toBe(
+      "orders-db gets a branch restored from its newest backup, with users.email masked. A variable copied from production that references it reads the branch.",
+    )
+    expect(branchPlan(policies, true)).toContain("never gets a database branch")
+    expect(branchPlan([policies[1]], false)).toBeUndefined()
+    expect(branchPlan(undefined, false)).toBeUndefined()
+  })
+  test("masked columns are read one a line or between commas", () => {
+    expect(parseMaskedColumns(" users.email\nusers.phone, users.email,,\n")).toEqual([
+      "users.email",
+      "users.phone",
+    ])
   })
 })

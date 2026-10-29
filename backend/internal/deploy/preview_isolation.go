@@ -160,8 +160,17 @@ func createIsolatedPreviewPlansTx(ctx context.Context, tx *sql.Tx, sourceID int6
 		return ErrInvalidPlan
 	}
 	build.Method = BuildMethod(method)
-	if build.Method == BuildCompose || runtime.HostNetwork || runtime.Privileged || len(runtime.Capabilities) > 0 || len(runtime.Devices) > 0 {
-		return fmt.Errorf("%w: previews currently require a container build without host access", ErrPreviewIsolation)
+	if build.Method == BuildLegacyCompose || runtime.HostNetwork || runtime.Privileged || len(runtime.Capabilities) > 0 || len(runtime.Devices) > 0 {
+		return fmt.Errorf("%w: previews require a release build without host access", ErrPreviewIsolation)
+	}
+	if build.Method == BuildCompose {
+		// Every service of the stack is isolated the way one container is;
+		// one that needs the server itself cannot be, so the stack is refused
+		// here, before an environment exists, and again at start from what
+		// Compose resolves (dockerx.ComposePreviewOverride).
+		if err := composePreviewRefusal(build, evidence); err != nil {
+			return err
+		}
 	}
 	var quarantined int
 	if sourceID == environmentID {
@@ -188,7 +197,8 @@ func createIsolatedPreviewPlansTx(ctx context.Context, tx *sql.Tx, sourceID int6
 		mount := &runtime.Mounts[index]
 		mount.Source, mount.Ownership = previewVolumeName(environmentID, mount.Target), OwnershipManaged
 	}
-	if len(runtime.Mounts) > 0 {
+	// One Compose project per environment cannot run two releases at once.
+	if len(runtime.Mounts) > 0 || build.Method == BuildCompose {
 		runtime.Strategy = StrategyStopFirst
 	}
 	// A preview has no live release of its own traffic to try a canary
@@ -256,7 +266,7 @@ func copyPreviewChecksTx(ctx context.Context, tx *sql.Tx, sourceID, environmentI
 }
 
 func validatePreviewPlan(environmentID int64, build BuildPlanConfig, runtime RuntimePlanConfig) error {
-	if !runtime.PreviewIsolation || build.Method == BuildCompose || len(build.ReleaseTasks) > 0 ||
+	if !runtime.PreviewIsolation || build.Method == BuildLegacyCompose || len(build.ReleaseTasks) > 0 ||
 		runtime.Privileged || runtime.HostNetwork || len(runtime.Devices) > 0 || len(runtime.Capabilities) > 0 || runtime.HostPort != 0 || len(runtime.Ports) != 0 || runtime.BindAddress != "127.0.0.1" {
 		return ErrPreviewIsolation
 	}

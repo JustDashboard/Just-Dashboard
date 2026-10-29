@@ -849,7 +849,9 @@ only renderer/executor/validation authority for their feature.
   Docker's own unlimited default. Validation bounds them (16 MiB–4 TiB, 0.01–1024 CPUs, 16–1,048,576
   processes); preflight warns when a limit exceeds the host's available memory or CPU count; the Docker
   runtime owner passes them to container creation and release comparison labels them. Compose services keep
-  the limits their files declare.
+  the limits their files declare. What they should be is [right-sizing](right-sizing.md)'s read of the
+  environment's retained container samples (`GET …/environments/{env}/sizing`, `GET /deploy/sizing`);
+  applying its suggestion is this plan's ordinary configuration save, applied with the next release.
 - A failed readiness or smoke gate first asks the runtime owner to diagnose the candidate: container
   state, exit code, OOM flag, restart count and a bounded log tail (200 lines, 32 KiB, most recent kept).
   The tail is written to the run transcript after redaction of every runtime variable value; step
@@ -1433,8 +1435,9 @@ only renderer/executor/validation authority for their feature.
   `POST …/rollback-watch/rollback` and `…/keep`, `PUT …/maintenance` (who is let past is the
   configuration's `runtime.maintenance.bypassFrom`, applied by the next release), with the reads
   `GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/maintenance`,
-  `…/pages/{page}`, `…/rehearsal` and `…/data-copies` (what each copy is of and until when, never its
-  sign-in); `GET /deploy/secret-stores`, an ordinary key's read, answers it
+  `…/pages/{page}`, `…/rehearsal`, `…/data-copies` (what each copy is of and until when, never its
+  sign-in) and `…/sizing`, and the fleet's `GET /deploy/sizing` narrowed to the key's deployments;
+  `GET /deploy/secret-stores`, an ordinary key's read, answers it
   `key_scope`, since the list carries each connection's address and sign-in fields and every
   deployment's variables that read a store, and the key cannot point a variable at one. Its writes are
   held to what a person in a session could not be refused: a generate or rotate answers it without
@@ -1500,7 +1503,15 @@ only renderer/executor/validation authority for their feature.
   refuses it afterward without any extra check, and the trigger's next delivery for that pull request
   inserts an independent new `pending` row at its own revision — a rejection does not follow it. They start without
   inherited variables, linked databases or release tasks; container mounts become fresh preview volumes on
-  a dedicated bridge. Compose and host-access plans currently fail closed. PR close retires only owned
+  a dedicated bridge. A Compose stack is isolated service by service — every service on the preview's
+  bridge alone, its mounts on preview volumes (a read-only file of the commit itself excepted), no secret,
+  fixed name or published port but the public service's loopback one — and a stack whose service needs the
+  server itself, a compatibility Compose plan and other host-access plans fail closed ([Compose
+  previews](preview-isolation.md#compose-previews)). An environment can give its previews a
+  [database branch](preview-isolation.md#database-branches) of a database it links — the preview's own
+  copy, restored from the newest backup through the rehearsal's `prepareCopy` onto the preview's database
+  network with a password made for it, chosen columns masked in their shape, never for a fork, removed with
+  the preview — and the preview's `${{database.N…}}` resolves to it. PR close retires only owned
   resources and archives after successful cleanup. Reopening waits for cleanup and a new approval
   generation; closing cancels queued/build work. Startup quarantines older unsafe previews, stops owned
   containers without deleting data, withdraws routes, and blocks old releases from activation. Failed
@@ -1522,7 +1533,11 @@ only renderer/executor/validation authority for their feature.
   identity cached two minutes, listings 30 s, four gh subprocesses at a time). `GET /deploy/{id}/pull-requests`
   answers `{repository, host, available, reason?, identity?, checkoutPath?, pulls[] (each with its
   preview), previews[], production {environmentId, automatic, intervalSeconds, awaitingFirstDeployment},
-  tailnet, compose, localCheckout, internalPort, releaseTasks}` — `reason` is one of `not_github`,
+  tailnet, compose, composePreview?, databaseBranches, localCheckout, internalPort, releaseTasks}` —
+  `databaseBranches` are the databases production gives its previews a branch of, each preview carries its
+  `branches`, `composePreview` is a
+  Compose project's `{public, services[], refusals[]}` and a live Compose preview carries its `services`
+  as Docker reports them — `reason` is one of `not_github`,
   `sign_in_required`, `app_not_installed`, `not_installed`; `previews` lists the open ones and a closed
   one only while its newest `preview_remove` run has not succeeded; a read GitHub refuses answers an
   error (`429 github_rate_limited` for a quota refusal — a 429, or a 403 or gh's text saying rate limit,
@@ -1801,8 +1816,8 @@ only renderer/executor/validation authority for their feature.
   states before the press what the stack does by itself: only the public service is reachable, the
   rest publish nothing on a network with no route out, each deploy stops the stack first, shared
   passwords are generated here, and a backup is a file copy of a running database rather than a dump.
-  Compose previews stay refused (`preview_isolation.go`); a template is not a Git source, so it is
-  never offered one. `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
+  A template is not a Git source, so it is never offered a pull-request preview, though a Compose
+  stack from a Git source is ([Compose previews](preview-isolation.md#compose-previews)). `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
   through the real build step and runtime owner and requires every check to pass, every service's
   healthcheck to report healthy, and only the public port to be published, on loopback.
 - **How the first sign-in works**, declared rather than described. Every definition carries an
