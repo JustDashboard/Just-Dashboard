@@ -37,6 +37,7 @@ Getting started
   login URL --key KEY           Check a key against the dashboard and remember both (--key - reads stdin)
   logout                        Forget the stored URL and key
   version                       Print jd's version
+  openapi [--yaml]              Print the dashboard's OpenAPI description of the deployment API
 
 Deployments
   deployments [ls]              List deployments with their health and last run
@@ -49,7 +50,8 @@ Deployments
   keep APP                      Keep the new release now and retire the warm one
   canary promote|abort APP      Promote a canary release now, or abort it (the live release keeps everything)
   canary status APP             The canary's window and the two releases' requests, 5xx share and p95
-  promote APP [--wait]          Promote staging's live release to production (--release ID for another)
+  promote APP [--wait]          Promote staging's live release to production (--release ID for another,
+                                --from-preview N for PR N's preview into staging)
   maintenance APP on|off        Switch the maintenance page at once (--bypass CIDR,... for who is let past)
   status APP                    Environments, live release, rollback watch, maintenance and rehearsal
   create --name N --image IMG [--port P]  Create a deployment from an image, through a draft
@@ -190,6 +192,8 @@ func (a *app) dispatch(command string, pre, rest, words []string) error {
 		return a.login(words)
 	case "logout":
 		return a.logout(words)
+	case "openapi":
+		return a.openapi(words)
 	case "deployments", "deployment", "ls":
 		return a.deployments(words)
 	case "deploy":

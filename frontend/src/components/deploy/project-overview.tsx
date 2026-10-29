@@ -117,6 +117,7 @@ export function ProjectOverview() {
     projectName: record.name,
     info: pullRequests.data,
     refresh: pullRequests.refresh,
+    stagingId: project.archived ? undefined : project.staging?.id,
   })
   const runs = project.runs.filter((run) => run.environmentId === project.environmentId)
   // The run in flight is the page's first block; it is not listed a second
