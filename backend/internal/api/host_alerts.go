@@ -39,6 +39,10 @@ const (
 	hostAlertDiskFilling   = "disk_filling"
 	hostAlertContainerDown = "container_down"
 	hostAlertBackupFailed  = "backup_failed"
+	// A live release whose image has a fixable vulnerability at or above
+	// its environment's floor, built on a base whose tag now names a newer
+	// image (deploy/image_scan.go).
+	hostAlertImageVulnerable = "image_vulnerable"
 	// hostAlertTunnelDown is the Cloudflare Tunnel's connector not running,
 	// or running with no connection to Cloudflare's edge: every name routed
 	// through it unreachable.
@@ -52,6 +56,7 @@ const (
 
 var hostAlertKinds = []string{
 	hostAlertCPUHigh, hostAlertMemoryHigh, hostAlertDiskFilling, hostAlertContainerDown, hostAlertBackupFailed,
+	hostAlertImageVulnerable,
 	hostAlertTunnelDown,
 }
 
@@ -82,6 +87,9 @@ var hostAlertSpecs = map[string]hostAlertSpec{
 	hostAlertContainerDown: {minutes: 2, minMinutes: 1, maxMinutes: 1440, passes: 2, hold: true},
 	// A failed run is a fact; one reading of it is the whole of it.
 	hostAlertBackupFailed: {passes: 1},
+	// So is a scan: it is read once a day, and the next reading of it is
+	// the next scan's.
+	hostAlertImageVulnerable: {passes: 1},
 	// A connector reconnects on its own after a blip of the edge, so two
 	// minutes down, read twice, before anybody is told.
 	hostAlertTunnelDown: {minutes: 2, minMinutes: 1, maxMinutes: 1440, passes: 2, hold: true},
@@ -626,6 +634,13 @@ func hostAlertPage(kind, subject string) string {
 			return "/backups/" + id
 		}
 		return "/backups"
+	case hostAlertImageVulnerable:
+		// The project's overview carries the panel; which environment the
+		// page reads is the reader's own choice, kept in their session.
+		if project, _, ok := imageAlertSubjectIDs(subject); ok {
+			return "/deploy/" + project + "#vulnerabilities"
+		}
+		return "/deploy"
 	case hostAlertTunnelDown:
 		return "/proxy/tunnel"
 	}
@@ -639,14 +654,17 @@ var hostAlertTestDetail = map[string]string{
 	hostAlertDiskFilling:   "93% of / is used (186.0 GB of 200.0 GB); the line is 90%.",
 	hostAlertContainerDown: "It exited with code 1.",
 	hostAlertBackupFailed:  "The run of nightly that started 2026-10-25 03:00 UTC failed: upload refused.",
-	hostAlertTunnelDown:    "The connector holds no connection to Cloudflare's edge. cloudflared said: Unauthorized: Invalid tunnel secret.",
+	hostAlertImageVulnerable: "Release 12 has 1 critical and 2 high findings with a fix (zlib 1.2.12-r0, fixed in 1.2.12-r2), " +
+		"and node:22-alpine now names a newer image than the one it was built on. Rebuild it from the project's overview.",
+	hostAlertTunnelDown: "The connector holds no connection to Cloudflare's edge. cloudflared said: Unauthorized: Invalid tunnel secret.",
 }
 
 var hostAlertTestLabel = map[string]string{
-	hostAlertDiskFilling:   "/",
-	hostAlertContainerDown: "example-api-1",
-	hostAlertBackupFailed:  "nightly",
-	hostAlertTunnelDown:    "production-tunnel",
+	hostAlertDiskFilling:     "/",
+	hostAlertContainerDown:   "example-api-1",
+	hostAlertBackupFailed:    "nightly",
+	hostAlertImageVulnerable: "shop · production",
+	hostAlertTunnelDown:      "production-tunnel",
 }
 
 // testState is what a test message is about: the rule's kind as it would

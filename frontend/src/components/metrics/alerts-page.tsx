@@ -18,6 +18,7 @@ import {
   Play,
   Plus,
   RefreshClockwise,
+  ShieldOff,
   StopCircle,
   Trash,
   type Icon,
@@ -97,6 +98,7 @@ const KIND_ICON: Record<HostAlertKind, Icon> = {
   disk_filling: Database,
   container_down: StopCircle,
   backup_failed: Archive,
+  image_vulnerable: ShieldOff,
   tunnel_down: CloudUpload,
 }
 
@@ -122,6 +124,7 @@ const AREAS: Area[] = [
     kinds: ["container_down"],
   },
   { key: "backups", title: "Backups", fallback: Archive, kinds: ["backup_failed"] },
+  { key: "deployments", title: "Deployments", fallback: ShieldOff, kinds: ["image_vulnerable"] },
   {
     key: "tunnel",
     title: "Cloudflare Tunnel",
@@ -1032,6 +1035,12 @@ function RuleForm({
         <FormNote>
           A job a database alert already follows for failed backups is left to that rule, so one
           failure is told once.
+        </FormNote>
+      )}
+      {kind === "image_vulnerable" && (
+        <FormNote>
+          Each environment&apos;s scan terms decide what counts: scanning off means nothing is told
+          for it, and its severity floor is the line. Set them on the project&apos;s overview.
         </FormNote>
       )}
       {!metrics && readsMetrics(kind) && (

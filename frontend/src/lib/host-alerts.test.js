@@ -24,6 +24,10 @@ describe("host alerts", () => {
       "exits, keeps restarting or turns unhealthy for 2 h",
     )
     expect(describeHostAlert("backup_failed", {})).toBe("the latest run of a backup job fails")
+    expect(describeHostAlert("image_vulnerable", {})).toBe(
+      "a live release's image has a fixable vulnerability and a newer base to rebuild on",
+    )
+    expect(hostAlertFields("image_vulnerable")).toEqual({ threshold: false, minutes: false })
     expect(describeHostAlert("tunnel_down", {})).toBe(
       "holds no connection to Cloudflare's edge for 2 min",
     )

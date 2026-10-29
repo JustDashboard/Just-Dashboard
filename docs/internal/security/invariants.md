@@ -293,6 +293,18 @@ A change that weakens any of these has to say so explicitly.
     confirmation and audit. There is no shell, no command the model writes and no other path from an
     answer to the host, and the route is a session's. See [the deployment operator](../deployments/operator.md).
 
+14. A vulnerability scanner reads an image; it never reaches the host. `imagescan.ScanSpec` runs Trivy
+    with **no network** (`NetworkMode: none`), no capabilities, a read-only root, no new privileges and
+    as nobody (65534), and mounts only the image's `docker save` archive and the database volume
+    read-only plus its own report and scratch folders — never the Docker socket, a host path of the
+    operator's or a credential. What needs a network is done by the dashboard itself, not the scanner:
+    the database is fetched over https from its registry, checked against the digest its manifest
+    names, repacked so that only `db/trivy.db` and `db/metadata.json` reach the volume, and copied in
+    through a container that is created and never started; a base image is pulled by the daemon, by
+    digest, as a build pulls it. The scanner image is pinned by tag and index digest. Scanning changes
+    nothing a release runs: a rebuild is offered as the runs route's own `force_build`, gated and
+    audited as any build is. See [image vulnerabilities](../deployments/image-vulnerabilities.md).
+
 ## Invariant 2: what two-factor still guarantees
 
 Two-factor used to be unconditional, and the reasoning was sound for the install the product was first

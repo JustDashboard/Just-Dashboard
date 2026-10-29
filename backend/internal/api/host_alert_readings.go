@@ -12,6 +12,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/imagescan"
 )
 
 // The host alerts' readings: each kind's source read once a pass, and only
@@ -77,6 +78,11 @@ func (s *Server) observeHostAlerts(ctx context.Context, rules []hostAlertRule, n
 			leftToDB, jobsErr = databaseBackupRules(ctx, s.Store.DB)
 		}
 	}
+	var scans []deploy.LiveImageScan
+	var scansErr error
+	if uses[hostAlertImageVulnerable] {
+		scans, scansErr = s.modules.deployRuns.LiveImageScans(ctx)
+	}
 	server := alerts.machine(ctx)
 
 	out := map[int64]hostAlertReading{}
@@ -126,6 +132,12 @@ func (s *Server) observeHostAlerts(ctx context.Context, rules []hostAlertRule, n
 				continue
 			}
 			out[rule.ID] = backupAlertReading(jobs, leftToDB, now)
+		case hostAlertImageVulnerable:
+			if scansErr != nil {
+				out[rule.ID] = unjudgedHostAlert("The deployments' image scans could not be read.")
+				continue
+			}
+			out[rule.ID] = imageAlertReading(scans)
 		}
 	}
 	return out
@@ -645,4 +657,114 @@ func backupAlertReading(jobs []dbAlertJob, leftToDB func(dbAlertJob) bool, now t
 		}
 	}
 	return reading
+}
+
+// --- image scans ---------------------------------------------------------------
+
+// imageAlertSubject is one environment's subject: its project and itself,
+// because the page a message links to is the project's.
+func imageAlertSubject(projectID, environmentID int64) string {
+	return fmt.Sprintf("env:%d:%d", projectID, environmentID)
+}
+
+func imageAlertSubjectIDs(subject string) (string, string, bool) {
+	rest, ok := strings.CutPrefix(subject, "env:")
+	if !ok {
+		return "", "", false
+	}
+	project, environment, ok := strings.Cut(rest, ":")
+	if !ok {
+		return "", "", false
+	}
+	if _, err := strconv.ParseInt(project, 10, 64); err != nil {
+		return "", "", false
+	}
+	if _, err := strconv.ParseInt(environment, 10, 64); err != nil {
+		return "", "", false
+	}
+	return project, environment, true
+}
+
+// imageAlertReading judges every scanning environment by its live release's
+// latest scan: firing when the scan found a fixable vulnerability at or above
+// the environment's floor and a base the release was pinned on has a newer
+// image under its tag. A scan that has not run, is running, or failed keeps
+// its subject where it was — a scanner that could not read the image has not
+// found it fixed. An environment no longer scanned, or whose live release
+// went, leaves the reading and is told it is over.
+func imageAlertReading(scans []deploy.LiveImageScan) hostAlertReading {
+	reading := newHostAlertReading()
+	for _, live := range scans {
+		subject := imageAlertSubject(live.ProjectID, live.EnvironmentID)
+		label := live.ProjectName + " · " + live.EnvironmentName
+		scan := live.Scan
+		if scan == nil || scan.State != deploy.ImageScanScanned {
+			reading.Unknown[subject] = true
+			continue
+		}
+		if scan.Vulnerable() {
+			reading.Firing = append(reading.Firing, hostAlertFinding{Subject: subject, Label: label, Detail: imageAlertDetail(*scan)})
+			continue
+		}
+		reading.Labels[subject] = label
+		reading.Now[subject] = imageAlertClear(*scan)
+	}
+	return reading
+}
+
+// imageAlertDetail says what was found, the worst fix first, and which base
+// moved.
+func imageAlertDetail(scan deploy.ImageScan) string {
+	counts := scan.Summary.FixableCounts
+	parts := []string{}
+	for _, part := range []struct {
+		count int
+		word  string
+		floor string
+	}{
+		{counts.Critical, "critical", "CRITICAL"}, {counts.High, "high", "HIGH"},
+		{counts.Medium, "medium", "MEDIUM"}, {counts.Low, "low", "LOW"},
+	} {
+		if part.count > 0 && imagescanAtLeast(part.floor, scan.Floor) {
+			parts = append(parts, fmt.Sprintf("%d %s", part.count, part.word))
+		}
+	}
+	found := strings.Join(parts, " and ")
+	if len(parts) > 2 {
+		found = strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
+	}
+	detail := fmt.Sprintf("Release %d has %s %s with a fix", scan.ReleaseNumber, found, findingWord(counts.AtLeast(scan.Floor)))
+	if len(scan.Summary.Fixable) > 0 {
+		worst := scan.Summary.Fixable[0]
+		detail += fmt.Sprintf(" (%s in %s %s, fixed in %s)", worst.ID, worst.Package, worst.Installed, worst.Fixed)
+	}
+	for _, update := range scan.BaseUpdates {
+		if update.State == "outdated" {
+			detail += ", and " + update.Reference + " now names a newer image than the one it was built on."
+			break
+		}
+	}
+	if scan.Rebuildable {
+		detail += " Rebuild it from the project's overview to pick that image up."
+	} else {
+		detail += " Check its source again and deploy to pick that image up."
+	}
+	return detail
+}
+
+// imageAlertClear is what a recovery message quotes.
+func imageAlertClear(scan deploy.ImageScan) string {
+	if !scan.Summary.FixableAtLeast(scan.Floor) {
+		return fmt.Sprintf("Release %d has no %s or worse finding with a fix.", scan.ReleaseNumber, strings.ToLower(scan.Floor))
+	}
+	return fmt.Sprintf("Release %d is built on the image each of its bases names now.", scan.ReleaseNumber)
+}
+
+func imagescanAtLeast(severity, floor string) bool { return imagescan.AtLeast(severity, floor) }
+
+func findingWord(count int) string {
+	if count == 1 {
+		return "finding"
+	}
+	return "findings"
 }

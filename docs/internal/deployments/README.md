@@ -19,6 +19,10 @@
   records, health in cloudflared's own words and the Tunnel down alert.
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
   logs, the request readings, container lifecycle events, and the three container-output fixes.
+- [`image-vulnerabilities.md`](image-vulnerabilities.md) — each release's image and the bases it was
+  pinned on, scanned by Trivy offline after the build and daily: the database fetched and checked by the
+  dashboard, what is kept per release, the newer-base check, the terms, the `image_vulnerable` alert and
+  the one-click rebuild through the runs route.
 - [`right-sizing.md`](right-sizing.md) — the memory and CPU limits each environment should have, read
   from its retained container samples (percentiles, headroom, throttling and OOM kills, verdicts, the
   apply through the configuration PUT), and the capacity forecast: days until each disk is full and the
