@@ -138,10 +138,11 @@ deployment section on General carries the GitHub commit-status switch. `/deploy/
 (`components/deploy/log-drains-page.tsx`, its sentences in `log-drains.ts`) lists the log drains with
 each one's reach and delivery health, and adds or edits one in a side panel: format, endpoint, sealed
 headers, streams and projects. `/deploy/secret-stores` (`components/deploy/secret-stores-page.tsx`, its
-sentences and the reference grammar in `secret-stores.ts`) lists the Vault, OpenBao, Infisical and Doppler
-connections: each card the product's mark, the name, the host with the mount, namespace and sign-in (or the
-Infisical environment), the newest test or run's read in the store's own words (amber when it failed), and
-who reads it. The side panel takes the store, the name (shown as the reference it is read as, fixed once
+sentences and the reference grammar in `secret-stores.ts`) lists the Vault, OpenBao, Infisical, Doppler, AWS
+Secrets Manager and Azure Key Vault connections: each card the product's mark, the name, the endpoint (derived
+from the region or the vault name for the last two) with the mount, namespace and sign-in (or the Infisical
+environment, the region, the tenant), the newest test or run's read in the store's own words (amber when it
+failed), and who reads it. The side panel takes the store, the name (shown as the reference it is read as, fixed once
 saved), the address, the kind's settings, an optional CA, the sealed credentials and whether previews may read
 it; an edit adds Test with an optional path and key, which shows the version found and never the value. An
 environment variable's editor, with *Reference* on, offers the connected stores with path, key and an

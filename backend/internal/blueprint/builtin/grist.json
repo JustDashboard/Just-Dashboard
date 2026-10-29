@@ -1,0 +1,119 @@
+{
+  "id": "grist",
+  "version": "1.0.0",
+  "name": "Grist",
+  "category": "http",
+  "profile": "web",
+  "description": "A relational spreadsheet: documents with linked tables, Python formulas, custom layouts and access rules, edited in the browser and stored as SQLite files on the persist volume. One container, with Grist's sandbox for formulas built in.",
+  "iconId": "chart",
+  "docsUrl": "https://support.getgrist.com/self-managed/",
+  "access": {
+    "kind": "setup",
+    "note": "A fresh install opens on Grist's quick-setup page, where the first visitor chooses the administrator's e-mail and how people sign in. Open the address yourself the moment the deployment is ready, because until that is done anyone who reaches it can claim the installation. The admin panel at /admin also accepts the generated boot key from the Variables tab."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://github.com/gristlabs/grist-core",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "gristlabs/grist:1.7.21",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Grist builds share links, sign-in redirects and its API address from this, so it cannot be left blank."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8484,
+      "protocol": "tcp",
+      "purpose": "The spreadsheet, its API and the admin panel",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "persist",
+      "target": "/persist",
+      "purpose": "Every document as a SQLite file, plus the home database of users, workspaces and sharing",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 1024,
+    "minMemoryMb": 512
+  },
+  "checks": [
+    {
+      "name": "Status endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/status",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "APP_HOME_URL",
+        "value": "https://{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "GRIST_ALLOW_AUTOMATIC_VERSION_CHECKING",
+        "value": "false"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Grist migrates its home database on start and each document the first time it is opened; a downgrade needs the backup.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "grist.example.test"
+      },
+      "digest": "sha256:f5d1351a5ea938090f4b3dcca259aae2da51cc11373ab281ae5c901f80d1c5fb"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "session-secret",
+      "variable": "GRIST_SESSION_SECRET",
+      "label": "Session secret",
+      "length": 48,
+      "description": "Signs session cookies; changing it signs everybody out."
+    },
+    {
+      "name": "boot-key",
+      "variable": "GRIST_BOOT_KEY",
+      "label": "Boot key",
+      "length": 32,
+      "description": "Signs in to the admin panel at /admin as the installation administrator."
+    }
+  ]
+}

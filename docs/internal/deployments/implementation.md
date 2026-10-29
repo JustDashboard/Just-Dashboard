@@ -1226,8 +1226,9 @@ only renderer/executor/validation authority for their feature.
   Audited as `deploy.shared_variable.{create,update,reveal,delete}` with the scope and never the value. A
   project's shared variables go with the project when it is purged.
 - Store references (`deploy/secret_store_references.go`, connections in `internal/secretstore`, table
-  `deploy_secret_stores`) read a value from Vault, OpenBao, Infisical or Doppler as
-  `${{store.NAME/path#KEY}}` (`@N` pins a version). They resolve through the same graph, as secret
+  `deploy_secret_stores`) read a value from Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager or Azure
+  Key Vault as `${{store.NAME/path#KEY}}` (`@N` pins a version; for the last two the path is the secret's
+  name, the key is optional and the version is the store's own id or staging label). They resolve through the same graph, as secret
   literals, and only from a secret variable. A run reads every store it references at its first step
   (`resolve_source`, a rollback's `render_runtime`, a restart's `start_candidate`; never a stop's),
   fresh, keeps the values in memory for its own later steps, and fails as `secret_store_unreadable` in the
@@ -1666,8 +1667,11 @@ only renderer/executor/validation authority for their feature.
   next to a routed primary (Gitea's SSH, Syncthing's sync protocol) becomes an additional
   `runtime.ports[]` publication on its own number (see published ports below) instead of silently
   replacing the routed port; the primary always stays the one the proxy and the checks reach. The
-  catalogue ships 82 reviewed definitions, 77 of them offered (see "how the first sign-in works"
-  below for the five that are retired; 20 are the multi-service templates of the next item), every
+  catalogue ships 102 reviewed definitions, 97 of them offered (see "how the first sign-in works"
+  below for the five that are retired; 29 are the multi-service templates of the next item). The
+  three counts the competitive report quotes — built in, deployable, Compose — are constants in
+  `blueprint/catalogue_counts.go`, and `catalogue_counts_test.go` fails when the shipped
+  definitions disagree, so they are bumped deliberately in the change that adds a template. Every
   image reference resolved against its registry (`docker manifest inspect`) and every deployable one
   started live: `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks` renders each single-image
   definition from its fixture inputs, pulls the image, starts it through the real runtime

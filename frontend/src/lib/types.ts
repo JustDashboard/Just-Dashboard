@@ -3860,9 +3860,12 @@ export type LogDrain = {
  * A connection to an external secret manager that deployment variables read
  * as `${{store.NAME/path#KEY}}`. Vault and OpenBao share the KV version 2
  * API; Infisical signs in with a Universal Auth machine identity; Doppler
- * with a service token.
+ * with a service token; AWS Secrets Manager with an access key pair (SigV4);
+ * Azure Key Vault with an application's client credentials. The last two
+ * keep whole secrets, read as `${{store.NAME/secret-name}}` or, for a field
+ * of a JSON value, `${{store.NAME/secret-name#KEY}}`.
  */
-export type SecretStoreKind = "vault" | "openbao" | "infisical" | "doppler"
+export type SecretStoreKind = "vault" | "openbao" | "infisical" | "doppler" | "aws" | "azure"
 
 export type SecretStoreSettings = {
   /** Vault and OpenBao: where the KV version 2 engine is mounted ("secret"). */
@@ -3873,6 +3876,14 @@ export type SecretStoreSettings = {
   /** Infisical: the project id and environment slug a reference reads in. */
   project?: string
   environment?: string
+  /** AWS: the region the Secrets Manager endpoint is derived from. */
+  region?: string
+  /** Azure: the vault's name (its host), the tenant signed in to, the cloud. */
+  vaultName?: string
+  tenantId?: string
+  cloud?: "public" | "usgov" | "china"
+  /** Azure: a sign-in authority other than the cloud's own. */
+  authority?: string
   /** A PEM certificate authority for a self-hosted store's TLS. */
   caCert?: string
 }
@@ -3897,6 +3908,8 @@ export type SecretStore = {
   name: string
   kind: SecretStoreKind
   address: string
+  /** Where the store is reached: the address, or what the region or vault name derives. */
+  endpoint: string
   settings: SecretStoreSettings
   /** The credentials that are set, by name; their values are sealed and never read back. */
   credentialNames: string[]

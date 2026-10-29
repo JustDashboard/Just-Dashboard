@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/secretstore/secretstoretest"
 )
 
 // fakeKV answers the KV version 2 read and the token lookup Vault and
@@ -174,5 +175,87 @@ func TestSecretStoreRoutesAreAdministeredAuditedAndNeverEchoACredential(t *testi
 	}
 	if strings.Contains(audits, token) || strings.Contains(audits, "s.wrong") || strings.Contains(audits, "fixture-db-password") {
 		t.Fatalf("audit log holds a credential or a value:\n%s", audits)
+	}
+}
+
+// The two hosted kinds through the API: an AWS connection takes its region
+// and key pair, an Azure one its vault name, tenant and application; each
+// answers with its derived endpoint and the names of its credentials, Test
+// speaks in the service's words, and the audit entries record the kind and
+// the sign-in fields without a key or a secret.
+func TestSecretStoreRoutesTakeSecretsManagerAndKeyVaultConnections(t *testing.T) {
+	s := testServer(t)
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "cloud-admin", auth.RoleAdmin)}
+	aws := &secretstoretest.AWS{Region: "eu-west-1", AccessKeyID: "AKIAFIXTUREKEY", SecretAccessKey: "fixture-secret-access-key",
+		Secrets: map[string][]secretstoretest.AWSVersion{"apps/web": {{ID: "22222222-2222-4222-8222-222222222222", Stages: []string{"AWSCURRENT"}, String: `{"DATABASE_URL":"postgres://app:aws-db-password@db/app"}`}}}}
+	awsServer := httptest.NewServer(aws)
+	defer awsServer.Close()
+	azure := &secretstoretest.Azure{TenantID: "0a1b2c3d-0000-4000-8000-000000000001", ClientID: "9f8e7d6c-0000-4000-8000-000000000002", ClientSecret: "fixture-client-secret",
+		Secrets: map[string][]secretstoretest.AzureVersion{"database-url": {{ID: "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2", Value: "postgres://app:kv-db-password@db/app"}}}}
+	azureServer := httptest.NewServer(azure)
+	defer azureServer.Close()
+
+	path := "/api/v1/deploy/secret-stores"
+	created := admin.do(http.MethodPost, path, fmt.Sprintf(`{"name":"aws","kind":"aws","address":%q,"settings":{"region":"eu-west-1"},
+		"credentials":{"accessKeyId":%q,"secretAccessKey":%q}}`, awsServer.URL, aws.AccessKeyID, aws.SecretAccessKey), nil)
+	if created.Code != http.StatusCreated || strings.Contains(created.Body.String(), aws.SecretAccessKey) ||
+		!strings.Contains(created.Body.String(), `"credentialNames":["accessKeyId","secretAccessKey"]`) || !strings.Contains(created.Body.String(), fmt.Sprintf(`"endpoint":%q`, awsServer.URL)) {
+		t.Fatalf("create aws = %d %s", created.Code, created.Body.String())
+	}
+	var store struct {
+		ID int64 `json:"id"`
+	}
+	_ = json.Unmarshal(created.Body.Bytes(), &store)
+	tested := admin.do(http.MethodPost, fmt.Sprintf("%s/%d/test", path, store.ID), `{"path":"apps/web","key":"DATABASE_URL"}`, nil)
+	if tested.Code != http.StatusOK || !strings.Contains(tested.Body.String(), `"ok":true`) ||
+		!strings.Contains(tested.Body.String(), "Signed in to Secrets Manager in eu-west-1; the first secret listed is apps/web; found apps/web#DATABASE_URL, version 22222222-2222-4222-8222-222222222222") ||
+		strings.Contains(tested.Body.String(), "aws-db-password") {
+		t.Fatalf("test aws = %d %s", tested.Code, tested.Body.String())
+	}
+	if response := admin.do(http.MethodPost, path, `{"name":"aws-bad","kind":"aws","settings":{"region":"us east"},"credentials":{"accessKeyId":"a","secretAccessKey":"b"}}`, nil); response.Code != http.StatusBadRequest ||
+		!strings.Contains(response.Body.String(), "AWS region") {
+		t.Fatalf("a region that is not = %d %s", response.Code, response.Body.String())
+	}
+	if response := admin.do(http.MethodPost, path, `{"name":"aws-derived","kind":"aws","settings":{"region":"us-east-1"},"credentials":{"accessKeyId":"a","secretAccessKey":"b"}}`, nil); response.Code != http.StatusCreated ||
+		!strings.Contains(response.Body.String(), `"endpoint":"https://secretsmanager.us-east-1.amazonaws.com"`) || !strings.Contains(response.Body.String(), `"address":""`) {
+		t.Fatalf("a derived endpoint = %d %s", response.Code, response.Body.String())
+	}
+
+	created = admin.do(http.MethodPost, path, fmt.Sprintf(`{"name":"kv","kind":"azure","address":%q,"settings":{"vaultName":"jdtest","tenantId":%q,"authority":%q},
+		"credentials":{"clientId":%q,"clientSecret":%q}}`, azureServer.URL, azure.TenantID, azureServer.URL, azure.ClientID, azure.ClientSecret), nil)
+	if created.Code != http.StatusCreated || strings.Contains(created.Body.String(), azure.ClientSecret) ||
+		!strings.Contains(created.Body.String(), `"credentialNames":["clientId","clientSecret"]`) || !strings.Contains(created.Body.String(), `"cloud":"public"`) {
+		t.Fatalf("create azure = %d %s", created.Code, created.Body.String())
+	}
+	_ = json.Unmarshal(created.Body.Bytes(), &store)
+	tested = admin.do(http.MethodPost, fmt.Sprintf("%s/%d/test", path, store.ID), `{"path":"database-url"}`, nil)
+	if tested.Code != http.StatusOK || !strings.Contains(tested.Body.String(), `"ok":true`) ||
+		!strings.Contains(tested.Body.String(), "found database-url, version b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2") || strings.Contains(tested.Body.String(), "kv-db-password") {
+		t.Fatalf("test azure = %d %s", tested.Code, tested.Body.String())
+	}
+	if response := admin.do(http.MethodPost, path, `{"name":"kv-bad","kind":"azure","settings":{"vaultName":"my.vault","tenantId":"t"},"credentials":{"clientId":"a","clientSecret":"b"}}`, nil); response.Code != http.StatusBadRequest ||
+		!strings.Contains(response.Body.String(), "Key Vault name") {
+		t.Fatalf("a vault name that is not = %d %s", response.Code, response.Body.String())
+	}
+
+	var audits string
+	if err := s.Store.DB.QueryRow(`
+		SELECT COALESCE(group_concat(action || ' ' || target || ' ' || success || ' ' || detail, char(10)), '')
+		  FROM audit_log WHERE action LIKE 'deploy.secret_store.%'`).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"deploy.secret_store.create aws 1", `"kind":"aws"`, `"signInFields":["accessKeyId","secretAccessKey"]`, `"address":"https://secretsmanager.us-east-1.amazonaws.com"`,
+		"deploy.secret_store.create kv 1", `"kind":"azure"`, `"signInFields":["clientId","clientSecret"]`,
+		"deploy.secret_store.test aws 1", `"probe":"apps/web#DATABASE_URL"`, "deploy.secret_store.test kv 1", `"probe":"database-url"`,
+	} {
+		if !strings.Contains(audits, want) {
+			t.Errorf("audit log lacks %q:\n%s", want, audits)
+		}
+	}
+	for _, never := range []string{aws.SecretAccessKey, azure.ClientSecret, "aws-db-password", "kv-db-password"} {
+		if strings.Contains(audits, never) {
+			t.Fatalf("audit log holds a credential or a value:\n%s", audits)
+		}
 	}
 }
