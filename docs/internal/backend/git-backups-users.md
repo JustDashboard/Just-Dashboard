@@ -205,7 +205,10 @@ archiving a volume it promised would be quiet. The manifest records `pausedConta
 bounded before persistence.
 
 New runs persist an immutable manifest of resolved sources, exclusions, destination and SHA-256 artifact
-digest. Each source has a separate `source-0001`, `source-0002`, etc. archive root, so identically named
+digest, and since 0.8.2 its origin (this install's random identity, the host name, the job and the
+run), the archive's size and which sources are Docker volumes; the same manifest is written beside the
+archive at the destination (see [Importing what a destination holds](#importing-what-a-destination-holds)).
+Each source has a separate `source-0001`, `source-0002`, etc. archive root, so identically named
 Docker volume directories restore without overwriting one another. Listing and restore verify the
 artifact digest and use the run's original destination even after job edits. Legacy runs remain readable
 but cannot prove deployment coverage. Jobs may explicitly select SQLite files for native `VACUUM INTO`
@@ -233,15 +236,17 @@ destination restores retain destructive capability and ordinary confirmation. Se
 [`../deployments/restore-verification.md`](../deployments/restore-verification.md) for the checker contract
 and supported consistency protocols.
 
-Retention deletes the artifacts beyond the keep count or older than the keep age (`pruneCandidates`)
-and their run rows, but never the newest successful artifact — a job whose schedule quietly stopped
+Retention deletes the artifacts beyond the keep count or older than the keep age (`pruneCandidates`),
+the manifests beside them and their run rows, but never an imported job's or run's, and never the newest
+successful artifact — a job whose schedule quietly stopped
 firing must not age its last good backup away — and skips an artifact while archive listing or restore
 holds a read reference; deletion reserves an exclusive lease against new readers.
 Active or cleanup-pending recovery records also block pruning and job deletion. Cross-device local moves
 fall back from rename to copy. Deleting a job deliberately leaves its existing artifacts alone.
 
 Archive listing is bounded and does not extract. Restore requires a successful artifact, downloads remote
-objects into private staging, refuses `/`, and uses ordinary confirmation. The API resolves the
+objects into private staging (an imported run's from the destination it was imported from, or from the
+copy the import kept here while that still proves its digest), refuses `/`, and uses ordinary confirmation. The API resolves the
 destination through `files.Resolve`; extraction uses `safepath` for every directory, regular file, and
 symlink, refusing traversal and unsafe link targets. `restoreRequest` also takes `paths` — archive
 entries (`source-0001/etc`, one file) that narrow the restore to themselves and what lies under them —
@@ -251,7 +256,13 @@ again so a root restriction added since the backup still holds; it needs a compl
 legacy archive can only be restored into a directory. A recorded source may be an individual file or
 a directory: extraction uses the archive entry's type, restores a file's bytes at its original path,
 and creates missing parents as needed. An existing directory at a file's path is an error, and a
-filtered-out source is not created. Database dumps are never
+filtered-out source is not created. A source the manifest records as a Docker volume is restored into
+that volume's directory on this host, which the Docker owner (`backupVolumeProvisioner`) creates with the
+volume's recorded labels when it does not exist, after the archive has been fetched and proved and before
+a byte is written; without Docker such a restore is refused rather than made as a bare directory Docker
+would not know. `GET /backups/runs/{runID}/restore-plan` answers, from the manifest alone, where each
+source would go and what the restore would make (`creates: "volume"` or `"directory"`) or overwrite, and
+the restore dialog shows it before its confirmation. Database dumps are never
 written to disk by an in-place restore; they go back through the Databases owner as before.
 `GET /backups/runs/{runID}/download` streams the verified artifact (`Runner.OpenArtifact`: the local
 file, or a private download of a remote one, checksum proven first, decrypted when the run was
@@ -309,8 +320,8 @@ would sign in with the dashboard's own environment. Every command runs the image
 `rclone` stage of `backend/Dockerfile`, a pinned release checked against its published SHA-256 sums) with
 a private `0600` configuration written for that command alone, a private cache directory, `HOME` and
 `TMPDIR` in the same temporary directory, and no environment from the dashboard, so no `RCLONE_*`
-variable reaches it. `copyto` uploads and restores, `deletefile` prunes, and the test runs `mkdir`,
-`rcat` and `deletefile` on a probe.
+variable reaches it. `copyto` uploads and restores, `deletefile` prunes, the test runs `mkdir`,
+`rcat` and `deletefile` on a probe, and a catalogue lists the folder with `lsjson` and reads with `cat`.
 
 ## Archive encryption
 
@@ -340,7 +351,9 @@ where they are and a key that went with the job would leave them unreadable, and
 plan the operator keeps somewhere safe should be one file. A read never makes a key: an encrypted run on
 an install with no key answers `409 archive_key_unavailable` (`ErrNoArchiveKey`), and one sealed to
 another key answers the same code by name (`ErrArchiveKey`), checked against the manifest's recipient
-before anything is decrypted and again by age itself. The secret half is never written to a run log,
+before anything is decrypted and again by age itself. Both are a `KeyError` naming the key the manifest
+records, in the message and as the error's `resource`, so the operator knows which exported file to
+bring. A key exported elsewhere can be imported (`POST /backups/key/import`, below). The secret half is never written to a run log,
 the audit trail or the process log; the public half appears in manifests, the key's status and the
 export's audit entry, and a run log says only that the archive was encrypted.
 
@@ -373,6 +386,13 @@ left) answers the key as an age identity file, `just-dashboard-backup-key.txt`, 
 no-store`, with its creation time, its public key and the command that opens an archive in its comment
 lines; it records `exportedAt` and is audited as `backup.key.export` with the public key as the target.
 The page confirms it with an ordinary confirmation. Job create and update audits carry `encrypt`.
+`POST /backups/key/import` (`system.admin`) takes such a file, or its `AGE-SECRET-KEY-1` line, seals it
+and keeps it (`keyring.go`): on a server that holds no key yet it becomes this install's own, with the
+creation time the file records and marked exported, because a copy is already off the machine — so a
+moved or rebuilt server keeps sealing to one key; on one that holds a key it joins
+`backups.archive-keys.imported`, which only opens what was sealed to it. The answer says which
+(`became`: `own`, `opens` or `held`); it is audited as `backup.key.import` with the public key as the
+target, and `GET /backups/key` lists the imported keys by their public halves.
 
 **Recovering without the dashboard.** With the exported file, on any machine with `age`:
 
@@ -399,6 +419,89 @@ that the age format itself opens; `backup_encryption_test.go` the defaults, olde
 roles and audits and the decrypted download; `backup_encryption_live_test.go` a PostgreSQL and a MariaDB
 dump restored from an encrypted archive; `encryption_live_test.go` a bucket; and
 `backup-encryption.spec.ts` the page.
+
+## Importing what a destination holds
+
+The job and run rows live in the store of the server that took the backup, so a fresh server — a
+migration, or a rebuild after the old one was lost — starts with none. Every run since 0.8.2 therefore
+writes its manifest beside its archive, at the archive's name plus `.manifest.json` (`sidecar.go`), on
+every kind of destination. It holds the archive's name, digest and size, its origin (`backups.install-id`,
+a random value made once per install, the host name, the job's id and name, the run's id and start), how
+many paths, volumes, dumps and snapshots it covers, and the run's manifest. An encrypted archive's
+manifest is sealed to the same key, because its paths, database names and paused containers say what
+the archive holds: who took it, when, its size, digest, counts and the public key that opens it stay
+readable. A manifest that cannot be written is the run log's to say, not a failed run: the archive is
+whole and restores on its own server. The archive cannot carry its own manifest (the digest is over its
+bytes), so archives written before 0.8.2 have nothing beside them; they are listed by what their names
+say (job, job id, run id, start) and their size, and are not imported, because there is nothing to
+prove them against — download them, and open them with `tar` (and `age` with the exported key).
+
+`POST /backups/catalogue` (`system.admin`, audited `backup.catalogue`) reads a destination: one of this
+server's jobs' (`{"jobId": N}`, its sealed keys used where they are) or one entered with its keys
+(`targetKind`, `target`, `secrets`), which are used for the request and kept only with an imported job.
+A local directory is resolved through `files.Resolve`. It lists only where the runner writes — the
+directory, the bucket's prefix (S3 `ListObjectsV2` with a delimiter), the SFTP directory over one session,
+the rclone folder with `lsjson` — up to 20 000 objects, and reads the manifest beside each of up to
+2 000 archives, eight at a time, each bounded to 1 MiB. Archives this server wrote and still has a run of
+are left out and counted (`ours`); one written here whose record is gone (its job deleted, or the server
+restored from an older copy of its data) is listed with `thisServer`. The rest are grouped by install
+(by host name) and by job, newest first, each with `kinds` (`paths`, `volume`, `dump`, `snapshot`), size,
+start, whether it is sealed and to which key, whether a key this server holds opens it (`openable`, or
+`needsKey`), whether it can be imported, why not (`problem`), and the run it was imported as. An SFTP
+server entered for the first time is pinned in memory to the key it presented and the catalogue answers
+it (`hostKey`, `hostKeyFingerprint`) to be compared and sent back with the import; a different key at the
+address is refused as for a job.
+
+`POST /backups/import` (`system.admin`, audited `backup.import` with the runs and jobs it made) adopts
+archives from the same destination body: by their keys, or every archive of one install's job
+(`originId`, `originJobId`). Each archive's manifest is read again from the destination — never taken
+from the request — opened (a sealed one needs its key here, and is refused naming it), checked against
+what the readable half says, and the archive is fetched whole and hashed as it streams: a size or
+digest that does not match its manifest is refused as `422 archive_digest_mismatch`, and nothing is
+recorded for it. Only proved archives are recorded, oldest first, as **imported runs** (`imported = 1`,
+trigger `import`, the origin's start time, the destination's key as the artifact, the manifest as it was
+written) under an **imported job** per origin job and destination: named after the job and the host it
+ran on, holding the destination as this server reaches it with its keys sealed, the recorded sources for
+display, the recovery check the origin had (validated), and nothing it would run. `copyTo` (a directory,
+through `files.Resolve`) keeps a copy of each archive here as it is hashed, recorded as the run's
+`local_copy`; reads prefer it while it exists and proves its digest, and fall back to the destination's
+object otherwise. Importing an archive twice adopts it once (`already imported as run N`); `importMu`
+serialises imports. The answer lists what was skipped and why; an import that recorded nothing answers
+its first refusal. The digest proves an archive is the one its manifest describes and arrived whole; it
+does not prove who wrote the pair, since anyone who can write to the destination can write both — which
+is why import is an administrator's act and restoring from it is confirmed like any other restore.
+
+An imported job (`backup_jobs.imported`, `origin_json`; runs `backup_runs.imported`, `local_copy`, all
+additive) never runs, is never scheduled and is never edited: `Runner.Execute`, the scheduler,
+`PUT /backups/{id}`, `/enabled`, `/run` and `/database-dumps` refuse it (`409 backup_job_imported`).
+Retention never prunes it or any imported run — those archives are another server's to keep — and a job
+of this server's own writing to the same place prunes only its own. Deleting an imported job drops the
+records and leaves the archives. It is left out of the coverage report (its sources are paths on another
+server), the backup alerts, the host's event timeline, linked-account summaries and
+`LastDatabaseDumps`/`LatestDatabaseDump` (its connection ids are the other server's), and the map marks
+it imported. Its runs list, restore into a directory or in place, download, and verify-restore exactly as
+this server's own, through `Runner.localArtifact`. A dump in an imported run is restored by where it lies
+in the archive: `POST /backups/runs/{runID}/restore-database` takes `dump` (its archive path) and the
+`connectionId` of a saved connection here of the same engine (`Runner.RestoreDatabaseDump`); without
+`dump` an imported run is refused.
+
+On `/backups`, **Import…** (and **Import from a destination…** on an empty page) opens the dialog
+(`components/backups/import-dialog.tsx`, its words and grouping in the unit-tested `import-model.ts`):
+the places this server's jobs write, each once with a bucket's prefix telling two apart, as choices, or
+another destination typed in; then the catalogue by server and job, each archive with where it stands,
+**Import all N** for a job's history or **Import** for one, the keys sealed archives need with
+**Import a key…** in place (`KeyImport` in `backup-key.tsx`, also behind **Import key…** on the Backup key
+panel, which lists imported keys), and *Keep a copy of each archive on this server*. An imported job's
+card and identity line say where it came from instead of when it next runs, it sorts after this
+server's jobs, its only verbs are Test destination and Remove imported job, and its runs' inspector says
+which server, job and run each was and where it is read from. The restore dialog's in-place mode reads
+the restore plan and says, per source, what it overwrites and what it makes. `import_test.go` covers the
+manifest beside every archive, a sidecar that disagrees with itself, the catalogue's grouping and older
+archives, an import and restore on a fresh store, the digest refusal, a sealed archive before and after
+its key, key adoption, a volume made again with its labels, the kept copy and its fallback, retention,
+records this server lost, and SFTP; `backup_import_test.go` the routes, roles, audits and refusals;
+`backup-import.spec.ts` the page; and `TestLiveImportedBackupRestoresOnAFreshServer` a volume and a path
+moved through S3 between two stores.
 
 ## Host users and SSH keys
 

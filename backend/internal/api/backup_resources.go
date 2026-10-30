@@ -81,8 +81,16 @@ type backupResourceReport struct {
 
 // backupResources asks each owner what it has and folds the job list over
 // the answers. Owners that cannot answer are reported, not treated as empty.
-func (s *Server) backupResources(ctx context.Context, jobs []*backups.Job) backupResourceReport {
+func (s *Server) backupResources(ctx context.Context, all []*backups.Job) backupResourceReport {
 	report := backupResourceReport{Resources: []backupResource{}, Unavailable: map[string]string{}}
+	// An imported job's sources are paths on the server it came from; that
+	// one of them is also a path here protects nothing here.
+	jobs := make([]*backups.Job, 0, len(all))
+	for _, job := range all {
+		if !job.Imported {
+			jobs = append(jobs, job)
+		}
+	}
 	add := func(res backupResource) {
 		if res.Suggest.Name == "" {
 			res.Suggest.Name = res.Name

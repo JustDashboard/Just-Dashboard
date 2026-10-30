@@ -13,7 +13,6 @@ import (
 	"hash"
 	"io"
 	"os"
-	"strings"
 	"time"
 
 	"filippo.io/age"
@@ -85,6 +84,9 @@ type ArchiveKey struct {
 	// still keeps that only this key opens.
 	EncryptingJobs    int `json:"encryptingJobs"`
 	EncryptedArchives int `json:"encryptedArchives"`
+	// Imported are the keys brought from other servers to open the archives
+	// they sealed; nothing new is sealed to them.
+	Imported []ImportedKey `json:"imported,omitempty"`
 }
 
 func (s *Store) storedArchiveKey(ctx context.Context) (*storedArchiveKey, error) {
@@ -173,10 +175,21 @@ func (s *Store) ArchiveKeyStatus(ctx context.Context) (*ArchiveKey, error) {
 	if err := s.st.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM backup_jobs WHERE encrypt = 1`).Scan(&status.EncryptingJobs); err != nil {
 		return nil, err
 	}
+	// The archives sealed to this key, whichever server wrote them: an
+	// imported run sealed to another key depends on that one instead.
 	err = s.st.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM backup_runs WHERE status = ? AND artifact != ''
-		AND json_extract(manifest_json, '$.encryption.format') IS NOT NULL`, string(StatusSuccess)).Scan(&status.EncryptedArchives)
+		AND json_extract(manifest_json, '$.encryption.format') IS NOT NULL
+		AND (? = '' OR json_extract(manifest_json, '$.encryption.recipient') = ?)`,
+		string(StatusSuccess), status.Recipient, status.Recipient).Scan(&status.EncryptedArchives)
 	if err != nil {
 		return nil, err
+	}
+	imported, err := s.importedKeys(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, key := range imported {
+		status.Imported = append(status.Imported, ImportedKey{Recipient: key.Recipient, ImportedAt: key.ImportedAt})
 	}
 	return status, nil
 }
@@ -296,8 +309,9 @@ func (a ArchiveFile) entries() (*tar.Reader, func(), error) {
 }
 
 // archiveFile pairs a verified artifact with the key its manifest says it was
-// sealed to. A key that is not this install's is refused here, by name,
-// rather than as a decryption failure halfway into a restore.
+// sealed to: this install's own, or one imported from the server that wrote
+// it. A key this server does not hold is refused here, naming the key, rather
+// than as a decryption failure halfway into a restore.
 func (r *Runner) archiveFile(ctx context.Context, run *Run, path string) (ArchiveFile, error) {
 	file := ArchiveFile{Path: path}
 	if run.Manifest == nil || run.Manifest.Encryption == nil {
@@ -307,12 +321,9 @@ func (r *Runner) archiveFile(ctx context.Context, run *Run, path string) (Archiv
 	if encryption.Format != archiveFormatAge {
 		return file, fmt.Errorf("archive encryption %q is not one this dashboard reads", encryption.Format)
 	}
-	identity, _, err := r.store.archiveIdentity(ctx, false)
+	identity, err := r.store.identityFor(ctx, encryption.Recipient)
 	if err != nil {
 		return file, err
-	}
-	if identity.Recipient().String() != strings.TrimSpace(encryption.Recipient) {
-		return file, ErrArchiveKey
 	}
 	file.identity = identity
 	return file, nil

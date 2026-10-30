@@ -117,7 +117,7 @@ export function JobCard({
       href={`/backups/${job.id}`}
       busy={working}
       index={index}
-      className={cn(!job.enabled && job.schedule && "opacity-80")}
+      className={cn(((!job.enabled && job.schedule) || job.imported) && "opacity-80")}
       leading={
         <span ref={mark} className="flex">
           <JobMark products={products} project={project} ring="ring-choice-surface" />
@@ -195,6 +195,7 @@ function useCardWidth() {
  * settings — so the words and colours are this card's rather than a copy.
  */
 export function LastRun({ job }: { job: BackupJob }) {
+  if (job.imported) return <Status state="stopped" label="imported" />
   if (!job.enabled && job.schedule) return <Status state="stopped" label="paused" />
   if (!job.lastRun) return <span className="text-xs text-muted-foreground">never run</span>
   const { status, startedAt } = job.lastRun
@@ -235,8 +236,17 @@ export function RunStrip({ runs }: { runs: BackupRun[] | undefined }) {
 }
 
 export function nextLabel(job: BackupJob): string {
+  if (job.imported) return importedFrom(job)
   if (!job.schedule) return "runs by hand"
   if (!job.enabled) return `paused · ${scheduleLabel(job.schedule).toLowerCase()}`
   const next = job.nextRun ? `next ${relativeTime(job.nextRun)}` : "not scheduled"
   return `${next} · ${scheduleLabel(job.schedule).toLowerCase()}`
+}
+
+/** Where an imported job came from, in the place a job's schedule is said. */
+export function importedFrom(job: BackupJob): string {
+  const origin = job.origin
+  if (!origin) return "imported"
+  if (origin.thisServer) return `imported back · job ${origin.jobName}`
+  return `imported from ${origin.host || "another server"} · job ${origin.jobName}`
 }

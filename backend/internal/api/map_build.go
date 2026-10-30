@@ -1332,6 +1332,9 @@ func mapBackup(j *backups.Job, now time.Time) mapItem {
 		item.Product = "backblaze"
 	}
 	switch {
+	case j.Imported:
+		// Another server's archives, read where they are; it never runs here.
+		item.Tone, item.State = mapIdle, "imported"
 	case j.LastRun != nil && j.LastRun.Status == backups.StatusRunning:
 		item.Tone, item.State = mapWarning, "backing up"
 	case j.LastRun != nil && j.LastRun.Status == backups.StatusFailed:

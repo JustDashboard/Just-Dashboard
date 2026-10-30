@@ -239,7 +239,8 @@ free.
 - Scheduled backups to disk, S3, Backblaze B2, an SFTP server or Google Drive, OneDrive, Dropbox, WebDAV
   and the other services rclone speaks, encrypted on the way out, and native database dumps
 - A coverage map of everything that is *not* backed up yet
-- Single-file and in-place restore
+- Single-file and in-place restore, on this server or a fresh one: import what a destination holds and
+  restore it there, its Docker volumes made again
 
 </td>
 </tr>

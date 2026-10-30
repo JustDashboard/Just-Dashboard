@@ -450,26 +450,37 @@ func (r *RcloneRemote) render() string {
 // configuration in a private file that exists only for the command, and
 // nothing from the dashboard's own environment that rclone would read.
 func rcloneRun(ctx context.Context, secrets *TargetSecrets, stdin io.Reader, args ...string) (string, error) {
+	var stdout bytes.Buffer
+	if err := rcloneStream(ctx, secrets, stdin, &stdout, args...); err != nil {
+		return "", err
+	}
+	return stdout.String(), nil
+}
+
+// rcloneStream is rcloneRun with what the command prints going to stdout as
+// it is printed: an archive read with cat is hashed on the way through rather
+// than held in memory.
+func rcloneStream(ctx context.Context, secrets *TargetSecrets, stdin io.Reader, stdout io.Writer, args ...string) error {
 	if secrets == nil || strings.TrimSpace(secrets.RcloneConfig) == "" {
-		return "", errors.New("the rclone destination has no saved configuration")
+		return errors.New("the rclone destination has no saved configuration")
 	}
 	remote, err := ParseRcloneRemote(secrets.RcloneConfig)
 	if err != nil {
-		return "", err
+		return err
 	}
 	// The binary must be this server's own: a host fallback would run in
 	// another mount namespace, where the configuration file below is absent.
 	if _, err := exec.LookPath("rclone"); err != nil {
-		return "", errors.New("rclone is not installed beside the dashboard")
+		return errors.New("rclone is not installed beside the dashboard")
 	}
 	dir, err := os.MkdirTemp("", "jd-rclone-*")
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer os.RemoveAll(dir)
 	config := filepath.Join(dir, "rclone.conf")
 	if err := os.WriteFile(config, []byte(remote.render()), 0o600); err != nil {
-		return "", err
+		return err
 	}
 	argv := append([]string{
 		"--config", config, "--cache-dir", filepath.Join(dir, "cache"),
@@ -479,8 +490,8 @@ func rcloneRun(ctx context.Context, secrets *TargetSecrets, stdin io.Reader, arg
 	command := hostexec.Command(ctx, "rclone", argv...)
 	command.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "TMPDIR=" + dir}
 	command.Stdin = stdin
-	var stdout, stderr bytes.Buffer
-	command.Stdout, command.Stderr = &stdout, &limitedBuffer{buf: &stderr, limit: 16 << 10}
+	var stderr bytes.Buffer
+	command.Stdout, command.Stderr = stdout, &limitedBuffer{buf: &stderr, limit: 16 << 10}
 	if err := command.Run(); err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if lines := strings.Split(message, "\n"); len(lines) > 3 {
@@ -489,9 +500,9 @@ func rcloneRun(ctx context.Context, secrets *TargetSecrets, stdin io.Reader, arg
 		if message == "" {
 			message = err.Error()
 		}
-		return "", fmt.Errorf("rclone: %s", message)
+		return fmt.Errorf("rclone: %s", message)
 	}
-	return stdout.String(), nil
+	return nil
 }
 
 type limitedBuffer struct {

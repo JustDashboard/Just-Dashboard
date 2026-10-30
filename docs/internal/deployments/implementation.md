@@ -783,7 +783,7 @@ only renderer/executor/validation authority for their feature.
   without the archive, the WAL-G tool volume holding its key, or the recovery settings; anything else
   is restored from the newest native dump a backup job made of that connection
   (`backups.Store.LatestDatabaseDump`, `Runner.ExtractDatabaseDump`, the same extraction
-  `RestoreDatabase` uses): `pg_restore --no-owner --no-privileges --exit-on-error`, `psql -f` or
+  `RestoreDatabase` uses; never an imported run's, whose connection ids are another server's): `pg_restore --no-owner --no-privileges --exit-on-error`, `psql -f` or
   `mysql`, with the application's role made first when it is not the superuser. MySQL and MariaDB
   restore from dumps only; any other engine is reported as not supported. The tasks then run through
   the same release-task runtime as for real (`runImageReleaseTask` with `Rehearsal`), in the release

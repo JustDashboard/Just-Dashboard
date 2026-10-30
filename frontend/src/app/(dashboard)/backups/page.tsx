@@ -2,11 +2,11 @@
 
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { forgetMemoryState, useMemoryState, useSessionState } from "@/lib/view-state"
 import { useSearchParams } from "next/navigation"
-import { Archive, Plus } from "@/components/icons"
+import { Archive, CloudDownload, Plus } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import type {
@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button"
 import { JobDialog, type JobPrefill } from "@/components/backups/job-form"
 import { CoveragePanel, type CoverageFilter } from "@/components/backups/coverage"
 import { BackupKeyPanel } from "@/components/backups/backup-key"
+import { ImportDialog } from "@/components/backups/import-dialog"
 import { JobCard } from "@/components/backups/job-card"
 import { ProtectionMap } from "@/components/backups/protection-map"
 import { jobProducts, jobProject } from "@/components/backups/marks"
@@ -59,6 +60,13 @@ import { useJobVerbs } from "@/components/backups/job-verbs"
  * jobs (by what they cover) and where they write, which is why the page polls
  * the container list: a volume's coverage names the containers that mount it,
  * and it is their images that say what it holds.
+ *
+ * **Import from a destination** reads what a bucket, directory, SFTP server or
+ * rclone remote holds that this server did not write and takes it on as
+ * imported jobs (`backups/import-dialog`): the way a fresh server, or one
+ * rebuilt after a loss, gets back what its predecessor protected. An imported
+ * job is a card like any other, saying where it came from instead of when it
+ * next runs, and it sits after this server's own.
  */
 export default function BackupsPage() {
   const { can } = useAuth()
@@ -158,6 +166,8 @@ export default function BackupsPage() {
     coverage.refresh()
   }
 
+  const [importOpen, setImportOpen] = useState(false)
+
   const verbsFor = useJobVerbs({
     confirm,
     refresh,
@@ -199,10 +209,16 @@ export default function BackupsPage() {
             description="A job archives directories, native database dumps and consistent SQLite snapshots on a schedule, to this server or to a bucket. Start from what the server has below, or write one from scratch."
             action={
               admin && (
-                <Button size="sm" onClick={() => setForm({})}>
-                  <Plus className="size-4" />
-                  New backup
-                </Button>
+                <span className="flex flex-wrap items-center justify-center gap-2">
+                  <Button size="sm" onClick={() => setForm({})}>
+                    <Plus className="size-4" />
+                    New backup
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
+                    <CloudDownload className="size-4" />
+                    Import from a destination…
+                  </Button>
+                </span>
               )
             }
           />
@@ -219,6 +235,12 @@ export default function BackupsPage() {
                     {archives > 0 && ` · ${bytes(stored)} in ${plural(archives, "archive")}`}
                   </span>
                   <WorkspaceHelp compact />
+                  {admin && (
+                    <Button size="sm" variant="ghost" onClick={() => setImportOpen(true)}>
+                      <CloudDownload className="size-4" />
+                      Import…
+                    </Button>
+                  )}
                   {admin && (
                     <Button size="sm" onClick={() => setForm({})}>
                       <Plus className="size-4" />
@@ -247,7 +269,11 @@ export default function BackupsPage() {
         )}
         {jobs.loading && !jobs.data && <LoadingRows rows={3} />}
 
-        <BackupKeyPanel encrypting={list.some((job) => job.encrypt)} confirm={confirm} />
+        <BackupKeyPanel
+          encrypting={list.some((job) => job.encrypt)}
+          importing={list.some((job) => job.imported)}
+          confirm={confirm}
+        />
 
         {coverage.error && <ErrorState error={coverage.error} onRetry={coverage.refresh} />}
         <CoveragePanel
@@ -275,6 +301,9 @@ export default function BackupsPage() {
             onDone={refresh}
           />
         )}
+        {importOpen && admin && (
+          <ImportDialog jobs={list} onOpenChange={setImportOpen} onImported={refresh} />
+        )}
         {dialog}
       </Page>
     </Workspace>
@@ -293,8 +322,9 @@ function prefillFor(res: BackupResource): JobPrefill {
   }
 }
 
-/** The order the cards are read in: a failure, then a job gone quiet, then the rest by what runs next, paused last. */
+/** The order the cards are read in: a failure, then a job gone quiet, then the rest by what runs next, paused last, imported after. */
 function rank(job: BackupJob) {
+  if (job.imported) return 4
   if (job.lastRun?.status === "failed") return 0
   if (!job.enabled && job.schedule) return 3
   return 2
