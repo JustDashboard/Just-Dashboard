@@ -33,6 +33,8 @@ data/
 *.db-wal
 *.db-shm
 frontend/shot*.mjs
+# What frontend/scripts/record-*.ts write by default.
+frontend/*-recording/
 frontend/playwright-report/
 frontend/test-results/
 

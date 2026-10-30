@@ -6018,10 +6018,10 @@ unless the changelog's newest release is the version named. Do it last before th
 
 A release is cut on its patch branch (`patch/0.7.2`) and reaches installs when that branch is merged into
 `main`. The GitHub release follows on its own: `.github/workflows/release.yml` runs after Verify passes on
-a push to `main`, reads `latest` from the changelog, and when that push changed it and no release
-`v<latest>` exists, tags that
+a push to `main`, reads `latest` from the changelog, and when no release `v<latest>` exists, tags that
 commit and publishes the release with the version's `CHANGELOG.md` section as its notes. The version
-comes from the changelog, never from the branch name, so a merge without a bump publishes nothing.
+comes from the changelog, never from the branch name, so a merge whose version is already released
+publishes nothing.
 Nothing is tagged by hand; a manual run of the workflow on `main` retries a failed publish.
 
 A changelog entry is written for the person deciding whether to upgrade a root-equivalent panel on their

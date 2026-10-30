@@ -21,7 +21,7 @@ enrolled one (`JD_REQUIRE_2FA` decides whether enrolling is compulsory; it is no
 scripts/test-changed.sh              # the checks, specs and Go tests the diff reaches
 
 # backend/
-go test ./internal/gitx -run TestBranchParse -v
+go test ./internal/gitx -run TestBranchesReportMergedGoneAndRemoteHalves -v
 go run ./cmd/server                  # needs JD_MASTER_KEY and a writable JD_DATA_DIR
 
 # frontend/
@@ -77,7 +77,7 @@ Extend these when you touch the matching surface: security — `httpx/confirm_te
 because a rule tested in its own package says nothing about which group the route was mounted in),
 `api/handlers_logs_test.go` (`TestAuthLogsNeedAnAdministrator`: every `/logs` route that reads a
 source refuses login and sudo records to a non-administrator);
-product *claims* — `dockerx/diagnose_test.go`, `netsec/posture_test.go`, `proxysvc/tlsscan_test.go`;
+product *claims* — `dockerx/exposure_test.go`, `netsec/exposure_test.go`, `proxysvc/tlsscan_test.go`;
 nginx rendering **including the parse back** — `proxysvc/sites_test.go`, since anything the renderer
 emits and the parser cannot read is a field silently dropped on the next save.
 

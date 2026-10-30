@@ -30,6 +30,8 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
   quotes, a 100-column print width, and trailing commas. Comments explain why, not what.
 - Commit messages are imperative sentences describing intent, without conventional-commit prefixes.
   Do not change repository or global Git configuration or user identity.
+- Binary evidence (screenshots, video, traces) goes on a `pr-assets/*` branch and is linked by commit
+  SHA, never into `docs/audits/`.
 - **Every change, however small, goes through its own branch and pull request.** Start a new branch
   from the branch that is currently checked out (the active branch — a release branch such as
   `patch/0.7.0`, not `main`, unless `main` is what is checked out), commit the change there, push it,
@@ -103,7 +105,8 @@ explicitly rather than silently changing the contract.
 
 - Never edit `CHANGELOG.md` directly. Add release notes to
   `backend/internal/selfupdate/changelog.json`, then run `scripts/release.sh <version>`.
-- Do not create Git tags or GitHub releases by hand. Once Verify passes on a merge into `main` that
-  bumps the version, `.github/workflows/release.yml` tags it `v<version>` and publishes the release.
-- Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before changing licence headers or adding dependencies. The
-  project is AGPL-3.0 with an additional contributor grant to the owner.
+- Do not create Git tags or GitHub releases by hand. Once Verify passes on a push to `main` whose version
+  has no release yet, `.github/workflows/release.yml` tags it `v<version>` and publishes the release.
+- Read the licence sections of [`CONTRIBUTING.md`](CONTRIBUTING.md) before adding dependencies. The
+  project is AGPL-3.0 with an additional contributor grant to the owner, and its source files carry no
+  licence headers.

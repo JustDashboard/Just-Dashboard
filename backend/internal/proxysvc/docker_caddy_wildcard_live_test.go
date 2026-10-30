@@ -99,7 +99,9 @@ func TestLiveDockerCaddyServesAWildcardProvedOverDNS01(t *testing.T) {
 	wildcardApp, previewApp := app("wildcard application"), app("preview application")
 	defer hostexec.Command(context.Background(), "docker", "rm", "-f", "-v", wildcardApp).Run()
 	defer hostexec.Command(context.Background(), "docker", "rm", "-f", "-v", previewApp).Run()
-	upstream := func(id string) string { return "http://127.0.0.1:" + strings.TrimPrefix(docker("port", id, "80/tcp"), "127.0.0.1:") }
+	upstream := func(id string) string {
+		return "http://127.0.0.1:" + strings.TrimPrefix(docker("port", id, "80/tcp"), "127.0.0.1:")
+	}
 	transcript := func(stream, line string) { t.Logf("  %s | %s", stream, line) }
 
 	names := []string{"*.preview.jd-live.test", "preview.jd-live.test"}
