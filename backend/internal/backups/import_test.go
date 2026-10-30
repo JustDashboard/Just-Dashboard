@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"filippo.io/age"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
@@ -628,5 +629,55 @@ func TestArchivesThisServerWroteButNoLongerRecordsCanBeTakenBack(t *testing.T) {
 	result, err := a.runner.Import(ctx, ImportRequest{Destination: dirDestination(destination), Keys: []string{run.Artifact}})
 	if err != nil || len(result.Jobs) != 1 || result.Jobs[0].Name != "Deleted later (imported)" || !result.Jobs[0].Origin.ThisServer {
 		t.Fatalf("import = %+v, %v", result, err)
+	}
+}
+
+// Over SFTP, a destination just entered is read with the server pinned to
+// the key it presented, which the catalogue answers so it can be compared and
+// which the imported job keeps; another key at the same address is refused.
+func TestAnSFTPDestinationsCatalogueImportsAndRestoresThroughOneSession(t *testing.T) {
+	ctx := t.Context()
+	host := testHostSigner(t)
+	sftpServer := newTestSFTPServer(t, host, nil)
+	a, b := newServer(t, "ac"), newServer(t, "bc")
+	source := t.TempDir()
+	writeTree(t, source, "over sftp")
+	target := sftpServer.job(t).Target
+	secrets := &TargetSecrets{Password: "correct horse"}
+	job, err := a.store.Create(ctx, &Job{Name: "Remote", Sources: []string{source}, TargetKind: TargetSFTP, Target: target}, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := a.run(t, job)
+
+	noted := func(context.Context, ssh.PublicKey) error { return nil }
+	entered := Destination{Kind: TargetSFTP, Target: target, Secrets: secrets, Pin: noted}
+	catalogue, err := b.runner.Catalogue(ctx, entered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if catalogue.HostKeyFingerprint != ssh.FingerprintSHA256(host.PublicKey()) || len(catalogue.Origins) != 1 ||
+		catalogue.Origins[0].Jobs[0].Archives[0].Key != run.Artifact || !catalogue.Origins[0].Jobs[0].Archives[0].Importable {
+		t.Fatalf("catalogue = %+v", catalogue)
+	}
+	pinned := entered
+	pinned.Target.HostKey = catalogue.HostKey
+	result, err := b.runner.Import(ctx, ImportRequest{Destination: pinned, Keys: []string{run.Artifact}})
+	if err != nil || len(result.Runs) != 1 || result.Jobs[0].Target.HostKeyFingerprint != catalogue.HostKeyFingerprint {
+		t.Fatalf("import = %+v, %v", result, err)
+	}
+	restoreTo := t.TempDir()
+	if _, err := b.runner.Restore(ctx, result.Runs[0].ID, restoreTo); err != nil {
+		t.Fatal(err)
+	}
+	if note, err := os.ReadFile(filepath.Join(restoreTo, "source-0001", "notes.txt")); err != nil || string(note) != "over sftp" {
+		t.Fatalf("restored = %q, %v", note, err)
+	}
+
+	impostor := newTestSFTPServer(t, testHostSigner(t), nil)
+	moved := pinned
+	moved.Target.Port = impostor.job(t).Target.Port
+	if _, err := b.runner.Catalogue(ctx, moved); !errors.Is(err, ErrHostKeyChanged) {
+		t.Fatalf("a server presenting another key was read: %v", err)
 	}
 }

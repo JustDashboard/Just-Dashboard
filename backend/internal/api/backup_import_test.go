@@ -38,6 +38,9 @@ func backupServerWithRoots(t *testing.T, roots ...string) *Server {
 	cfg := &config.Config{
 		Addr: "127.0.0.1:8080", DataDir: t.TempDir(), AllowedCIDRs: []*net.IPNet{loopback},
 		SessionTTL: time.Hour, IdleTTL: time.Minute, FileRoots: roots, LogRoots: []string{t.TempDir()},
+		// The live import test makes and reads volumes; the others never
+		// reach Docker, and a host without it answers them as unavailable.
+		DockerHost: "unix:///var/run/docker.sock",
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := auth.NewService(st, sealer, cfg.SessionTTL, cfg.IdleTTL, cfg.Require2FA)
