@@ -6204,8 +6204,8 @@ so it is built around the moment the page watching it loses its API.
   `JD_DATA_DIR`, the backups and the checkout's `.env` stay, with a copy of the `.env` written to
   `JD_DATA_DIR/install.env`. `wipe` also removes the deployments and deletes `JD_DATA_DIR`, the proxy's
   two Compose volumes (its CA) and every copy of the `.env` in the checkout (`.env`, `.env.jd-previous`,
-  `.env.jd-tmp`, `.env.backup.*`). `deleteBackups` deletes `JD_BACKUP_DIR` too and is honoured only with a
-  wipe. Neither mode touches databases the dashboard provisioned, proxy sites and their `jd-*` files,
+  `.env.jd-port-previous-*`, `.env.jd-tmp`, `.env.backup.*`). `deleteBackups` deletes `JD_BACKUP_DIR` too
+  and is honoured only with a wipe. Neither mode touches databases the dashboard provisioned, proxy sites and their `jd-*` files,
   certificates, the network module's `/etc/just-dashboard/network` and its boot units (the docs promise a
   reinstall finds them), SSH and fail2ban drop-ins, Linux accounts, or the checkout itself.
 - **The work is split across two processes, in the order the stack can lose them.** `Service.Begin`
