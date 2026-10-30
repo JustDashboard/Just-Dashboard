@@ -263,6 +263,14 @@ to the contribution terms above, including the additional licence grant to the p
   and changes to a recipe's base images
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRecipeBaseCatalogueRunsOnAmd64AndArm64 -count=1 -v`,
   which resolves (without pulling) every catalogue image and requires it for amd64 and arm64.
+  Changes to the Railpack build method (`deploy/build_railpack.go`, `detect_railpack.go`,
+  `preflight_railpack.go`, or the BuildKit frontend option and executable tmpfs in `dockerx`) also run,
+  as root, `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRailpackBuildsAndServesWithoutARecipe -count=1 -v`.
+  It pulls the pinned Railpack image and, through BuildKit, the builder and runtime images and the
+  language releases its plans name, builds a Node app and a Python app with Railpack through the real
+  planner container and frontend, serves each and requires its answer, has an empty
+  repository refused at the planner, and removes its images, containers and the Railpack image when it
+  pulled it (BuildKit's cache is left, as every build's is).
   Changes to build-failure diagnosis (the BuildKit reader in `dockerx`, the collector or the signature
   table) also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBuildFailureIsNamedFromBuildKit -count=1 -v`,
   which builds an npm project whose lockfile matches package.json but leaves out a package a locked
