@@ -17,6 +17,7 @@ import (
 
 	"github.com/distribution/reference"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/blueprint"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/tailnetgate"
 )
@@ -149,6 +150,12 @@ type DraftSourceConfig struct {
 	// fields. They are the only thing that varies between two deployments of
 	// the same reviewed blueprint version.
 	BlueprintInputs map[string]string `json:"blueprintInputs,omitempty"`
+	// BlueprintDefinition is a template added on this dashboard, frozen into
+	// the source when it is saved (PlanningStore.WithUserTemplate): the
+	// definition this deployment renders from on every later run, whatever
+	// becomes of the stored template. A built-in has none; it is re-resolved
+	// from the catalogue the binary ships.
+	BlueprintDefinition json.RawMessage `json:"blueprintDefinition,omitempty"`
 }
 
 type SourceIdentity struct {
@@ -1179,6 +1186,15 @@ func (c DraftSourceConfig) Validate() error {
 		}
 	case SourceModeBlueprint:
 		allowed = sourceFieldSet("blueprintId", "blueprintVersion", "blueprintInputs")
+		if blueprint.IsUserID(c.BlueprintID) {
+			// A template added here deploys from the definition saved with
+			// the source, never from one a client chose to send, which is
+			// why the saves replace it from the store before this runs.
+			allowed["blueprintDefinition"] = true
+			if len(c.BlueprintDefinition) == 0 || len(c.BlueprintDefinition) > blueprint.MaxUserTemplateBytes {
+				return fmt.Errorf("%w: the template %s is not saved with this source; choose it again", ErrInvalidSource, c.BlueprintID)
+			}
+		}
 		if c.Kind == SourceCompose {
 			// A Compose template stores the document rendered from it
 			// (WithTemplateDocuments), which every release then runs.
@@ -1231,6 +1247,7 @@ func (c DraftSourceConfig) firstUnexpectedField(allowed map[string]bool) string 
 		{"platform", c.Platform != ""}, {"composeFiles", len(c.ComposeFiles) != 0}, {"resourceId", c.ResourceID != ""},
 		{"blueprintId", c.BlueprintID != ""}, {"blueprintVersion", c.BlueprintVersion != ""},
 		{"blueprintInputs", len(c.BlueprintInputs) != 0},
+		{"blueprintDefinition", len(c.BlueprintDefinition) != 0},
 	}
 	for _, field := range present {
 		if field.set && !allowed[field.name] {
