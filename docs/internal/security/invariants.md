@@ -271,7 +271,13 @@ A change that weakens any of these has to say so explicitly.
    `{{variable.…}}`) that render as interpolations of the deployment's sealed variables, so its document
    holds no value; commands and healthchecks are argv that are never templated, so neither an
    operator's input nor a secret reaches a process list or a shell. The stored document is the server's
-   own render of a shipped version, never one a client sent under a template's name.
+   own render of a shipped version or of a template added on this dashboard, never one a client sent
+   under a template's name. A template added on this dashboard is held to every one of these rules when
+   it is saved, and to more: its id is in the `user-` namespace no built-in may use, so it can never
+   stand in for a reviewed definition; it may take no privilege, host network, capability, device or
+   Docker socket, since only a reviewed built-in may reach the host; and a source that names it is
+   saved with the server's stored copy frozen in, never a definition the client sent. A template made
+   from a deployment never opens a secret's value: each becomes an input the next deployment answers.
 10. The game console is not a shell. `gameserver.ValidateCommand` refuses anything carrying a shell
     metacharacter, newline or NUL, the command reaches Docker exec as separate argv elements, and player
     actions come from a closed set with the account name validated before interpolation. The same

@@ -81,6 +81,9 @@ var sessionOnlyBefore = []string{
 	// A domain's DNS record: read and written in a zone outside this server
 	// with the saved DNS credentials, in a session.
 	"GET /deploy/{id}/domains/{domain}/dns-record", "POST /deploy/{id}/domains/{domain}/dns-record",
+	// The catalogue's own templates: written on a draft's terms, in a session.
+	"POST /deploy/templates", "POST /deploy/templates/from-deployment", "POST /deploy/templates/import",
+	"PUT /deploy/templates/{template}", "DELETE /deploy/templates/{template}",
 }
 
 // keyBench is a server with an administrator, a session, and the three kinds

@@ -97,6 +97,10 @@ func loadCatalog() {
 			catalogErr = fmt.Errorf("builtin/%s: %w", entry.Name(), parseErr)
 			return
 		}
+		if IsUserID(parsed.ID) {
+			catalogErr = fmt.Errorf("builtin/%s: %q is the namespace of templates added on a dashboard, which a built-in cannot use", entry.Name(), UserPrefix)
+			return
+		}
 		expected := parsed.ID + ".json"
 		if entry.Name() != expected {
 			catalogErr = fmt.Errorf("builtin/%s declares id %q; the file must be named %s", entry.Name(), parsed.ID, expected)
@@ -182,6 +186,9 @@ type Summary struct {
 	// footprint, and Services lists what the stack runs.
 	SourceKind string           `json:"sourceKind"`
 	Services   []ServiceSummary `json:"services,omitempty"`
+	// Origin is "builtin" for a definition shipped with the dashboard and
+	// "user" for one added on it (user.go), which is read from the id.
+	Origin string `json:"origin"`
 }
 
 // ServiceSummary is one service of a Compose template as the picker lists it.
@@ -211,6 +218,10 @@ func Summarize(blueprint *Blueprint) Summary {
 		}
 	}
 	summary.SourceKind = "blueprint"
+	summary.Origin = OriginBuiltIn
+	if IsUserID(blueprint.ID) {
+		summary.Origin = OriginUser
+	}
 	if blueprint.IsCompose() {
 		summary.SourceKind = "compose"
 		summary.MemoryMB = 0
