@@ -1,0 +1,130 @@
+{
+  "id": "gitlab",
+  "version": "1.0.0",
+  "name": "GitLab",
+  "category": "tool",
+  "profile": "web",
+  "description": "GitLab Community Edition: Git hosting with merge requests, issues, CI/CD, a container and package registry and a wiki, all in the one Omnibus image. It is heavy — at least 4 GB of memory and several minutes for the first start — and the CI runners that execute pipelines are registered separately.",
+  "iconId": "git",
+  "docsUrl": "https://docs.gitlab.com/install/docker/installation/",
+  "access": {
+    "kind": "credentials",
+    "username": "root",
+    "secretVariable": "GITLAB_ROOT_PASSWORD",
+    "note": "GitLab creates its administrator on the first start: sign in as root with the generated GITLAB_ROOT_PASSWORD from the Variables tab. It is read only on that first start, so change the password inside GitLab afterwards, and turn off open sign-up under Admin → Settings → General if you do not want it. Git over SSH listens on port 22 inside the container and is not published; clone over HTTPS."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://gitlab.com/gitlab-org/gitlab-foss",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "gitlab/gitlab-ce:19.5.3-ce.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "GitLab's external URL: clone URLs, links and the registry are built from it."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 80,
+      "protocol": "tcp",
+      "purpose": "The web interface, the API and Git over HTTPS",
+      "exposure": "proxy",
+      "primary": true
+    },
+    {
+      "name": "ssh",
+      "internal": 22,
+      "protocol": "tcp",
+      "purpose": "Git over SSH, not published",
+      "exposure": "internal"
+    }
+  ],
+  "volumes": [
+    {
+      "name": "config",
+      "target": "/etc/gitlab",
+      "purpose": "gitlab.rb and the secrets GitLab generates",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "logs",
+      "target": "/var/log/gitlab",
+      "purpose": "Logs of every GitLab service",
+      "data": true,
+      "backup": false
+    },
+    {
+      "name": "data",
+      "target": "/var/opt/gitlab",
+      "purpose": "Repositories, the bundled PostgreSQL and Redis, uploads and artifacts",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 6144,
+    "minMemoryMb": 4096
+  },
+  "checks": [
+    {
+      "name": "Sign-in page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/users/sign_in",
+      "timeoutSeconds": 900
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "GITLAB_OMNIBUS_CONFIG",
+        "value": "external_url 'https://{{input.domain}}'; nginx['listen_port'] = 80; nginx['listen_https'] = false; letsencrypt['enable'] = false; prometheus_monitoring['enable'] = false; puma['worker_processes'] = 2; sidekiq['concurrency'] = 10"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "GitLab must be upgraded along its documented upgrade path, one required stop at a time; take a backup with gitlab-backup and keep /etc/gitlab/gitlab-secrets.json beside it.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "gitlab.example.test"
+      },
+      "digest": "sha256:828161b43a5ebc5e9812b1a978bdf3c77801c16951177067e400d7d47d8d6335"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "root-password",
+      "variable": "GITLAB_ROOT_PASSWORD",
+      "label": "Administrator password",
+      "length": 32,
+      "description": "The first password of the root account."
+    }
+  ]
+}

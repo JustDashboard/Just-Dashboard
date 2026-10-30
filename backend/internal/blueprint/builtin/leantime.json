@@ -1,0 +1,264 @@
+{
+  "id": "leantime",
+  "version": "1.0.0",
+  "name": "Leantime",
+  "category": "http",
+  "profile": "compose",
+  "description": "Project management for people who are not project managers: tasks on kanban, list or timeline views, milestones, goals, ideas boards, timesheets and retrospectives. Runs Leantime with MariaDB; only Leantime is behind the domain.",
+  "iconId": "kanban",
+  "docsUrl": "https://docs.leantime.io/installation/docker",
+  "access": {
+    "kind": "setup",
+    "path": "/install",
+    "note": "A new Leantime asks the first visitor to install it: https://<domain>/install creates the database tables and the administrator. Open it yourself right after deploying, because whoever finishes it first owns the instance."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/Leantime/leantime",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Leantime builds links in notifications and invitations from this address."
+    }
+  ],
+  "secrets": [
+    {
+      "name": "session-password",
+      "variable": "LEAN_SESSION_PASSWORD",
+      "label": "Session secret",
+      "length": 48,
+      "description": "Signs sessions; changing it signs everybody out."
+    },
+    {
+      "name": "db-password",
+      "variable": "LEANTIME_DB_PASSWORD",
+      "label": "Database password",
+      "length": 40,
+      "description": "Generated here and given only to the services that sign in to the database."
+    },
+    {
+      "name": "db-root-password",
+      "variable": "LEANTIME_DB_ROOT_PASSWORD",
+      "label": "Database root password",
+      "length": 40,
+      "description": "MariaDB's root password; nothing in the stack signs in with it."
+    }
+  ],
+  "services": [
+    {
+      "name": "leantime",
+      "role": "app",
+      "purpose": "Leantime on PHP and nginx, behind the domain",
+      "image": {
+        "reference": "leantime/leantime:3.12.0",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "LEAN_APP_URL",
+          "value": "{{variable.LEAN_APP_URL}}"
+        },
+        {
+          "name": "LEAN_DB_HOST",
+          "value": "db"
+        },
+        {
+          "name": "LEAN_DB_PORT",
+          "value": "3306"
+        },
+        {
+          "name": "LEAN_DB_USER",
+          "value": "leantime"
+        },
+        {
+          "name": "LEAN_DB_DATABASE",
+          "value": "leantime"
+        },
+        {
+          "name": "LEAN_DB_PASSWORD",
+          "value": "{{secret.db-password}}"
+        },
+        {
+          "name": "LEAN_SESSION_PASSWORD",
+          "value": "{{secret.session-password}}"
+        },
+        {
+          "name": "LEAN_SESSION_SECURE",
+          "value": "true"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 8080,
+          "protocol": "tcp",
+          "purpose": "The web interface and the API",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "public-userfiles",
+          "target": "/var/www/html/public/userfiles",
+          "purpose": "Avatars and public uploads",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "userfiles",
+          "target": "/var/www/html/userfiles",
+          "purpose": "Task attachments and private files",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "plugins",
+          "target": "/var/www/html/app/Plugins",
+          "purpose": "Installed plugins",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fs",
+          "-o",
+          "/dev/null",
+          "http://127.0.0.1:8080/"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 30,
+        "startPeriodSeconds": 60
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "MariaDB, holding every project, task and timesheet",
+      "image": {
+        "reference": "mariadb:11.8.9",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "MARIADB_DATABASE",
+          "value": "leantime"
+        },
+        {
+          "name": "MARIADB_USER",
+          "value": "leantime"
+        },
+        {
+          "name": "MARIADB_PASSWORD",
+          "value": "{{secret.db-password}}"
+        },
+        {
+          "name": "MARIADB_ROOT_PASSWORD",
+          "value": "{{secret.db-root-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "mysql",
+          "internal": 3306,
+          "protocol": "tcp",
+          "purpose": "SQL connections from Leantime",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/var/lib/mysql",
+          "purpose": "Every table Leantime keeps",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "healthcheck.sh",
+          "--connect",
+          "--innodb_initialized"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 12,
+        "startPeriodSeconds": 30
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Installer or sign-in page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "port": "http",
+      "timeoutSeconds": 300
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "LEAN_APP_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "Leantime asks for a database update on the first visit after a newer image; take a backup before moving to it."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "projects.example.test"
+      },
+      "digest": "sha256:e3f5f6c48870d23d9971b9d6343da961d9eeca1d80229eca2f888e2eed708e9e"
+    }
+  ]
+}

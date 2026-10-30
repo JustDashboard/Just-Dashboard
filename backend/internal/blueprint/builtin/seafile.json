@@ -1,0 +1,359 @@
+{
+  "id": "seafile",
+  "version": "1.0.0",
+  "name": "Seafile",
+  "category": "http",
+  "profile": "compose",
+  "description": "File sync and share: libraries synced by the desktop and mobile clients, sharing links, versioning, per-library encryption and online preview. Runs Seafile Server (its web interface, file server and nginx in one image) with MariaDB and Valkey; only Seafile is behind the domain.",
+  "iconId": "file",
+  "docsUrl": "https://manual.seafile.com/latest/setup/setup_ce_by_docker/",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "INIT_SEAFILE_ADMIN_EMAIL",
+    "secretVariable": "INIT_SEAFILE_ADMIN_PASSWORD",
+    "note": "Seafile creates its administrator from the environment on the first start: sign in with the administrator e-mail chosen here and the generated INIT_SEAFILE_ADMIN_PASSWORD from the Variables tab. It is applied only on that first start, so change the password inside Seafile afterwards."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/haiwen/seafile-server",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Seafile builds every share link and the file server address from this hostname."
+    },
+    {
+      "name": "admin-email",
+      "kind": "text",
+      "label": "Administrator e-mail",
+      "required": true,
+      "default": "admin@example.com",
+      "variable": "INIT_SEAFILE_ADMIN_EMAIL",
+      "description": "The administrator's sign-in e-mail.",
+      "pattern": "^[^@\\s]+@[^@\\s]+$"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "admin-password",
+      "variable": "INIT_SEAFILE_ADMIN_PASSWORD",
+      "label": "Administrator password",
+      "length": 32,
+      "description": "The first password of the administrator."
+    },
+    {
+      "name": "jwt-key",
+      "variable": "JWT_PRIVATE_KEY",
+      "label": "JWT signing key",
+      "length": 48,
+      "description": "Signs tokens between Seafile's components."
+    },
+    {
+      "name": "db-password",
+      "variable": "SEAFILE_DB_PASSWORD",
+      "label": "Database password",
+      "length": 40,
+      "description": "The password Seafile creates its database user with."
+    },
+    {
+      "name": "db-root-password",
+      "variable": "SEAFILE_DB_ROOT_PASSWORD",
+      "label": "Database root password",
+      "length": 40,
+      "description": "MariaDB's root password, which Seafile uses once to create its databases."
+    }
+  ],
+  "services": [
+    {
+      "name": "seafile",
+      "role": "app",
+      "purpose": "Seafile Server and its web interface, behind the domain",
+      "image": {
+        "reference": "seafileltd/seafile-mc:13.0.28",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "SEAFILE_MYSQL_DB_HOST",
+          "value": "db"
+        },
+        {
+          "name": "SEAFILE_MYSQL_DB_PORT",
+          "value": "3306"
+        },
+        {
+          "name": "SEAFILE_MYSQL_DB_USER",
+          "value": "seafile"
+        },
+        {
+          "name": "SEAFILE_MYSQL_DB_PASSWORD",
+          "value": "{{secret.db-password}}"
+        },
+        {
+          "name": "INIT_SEAFILE_MYSQL_ROOT_PASSWORD",
+          "value": "{{secret.db-root-password}}"
+        },
+        {
+          "name": "SEAFILE_MYSQL_DB_CCNET_DB_NAME",
+          "value": "ccnet_db"
+        },
+        {
+          "name": "SEAFILE_MYSQL_DB_SEAFILE_DB_NAME",
+          "value": "seafile_db"
+        },
+        {
+          "name": "SEAFILE_MYSQL_DB_SEAHUB_DB_NAME",
+          "value": "seahub_db"
+        },
+        {
+          "name": "TIME_ZONE",
+          "value": "Etc/UTC"
+        },
+        {
+          "name": "INIT_SEAFILE_ADMIN_EMAIL",
+          "value": "{{variable.INIT_SEAFILE_ADMIN_EMAIL}}"
+        },
+        {
+          "name": "INIT_SEAFILE_ADMIN_PASSWORD",
+          "value": "{{secret.admin-password}}"
+        },
+        {
+          "name": "SEAFILE_SERVER_HOSTNAME",
+          "value": "{{variable.SEAFILE_SERVER_HOSTNAME}}"
+        },
+        {
+          "name": "SEAFILE_SERVER_PROTOCOL",
+          "value": "https"
+        },
+        {
+          "name": "SITE_ROOT",
+          "value": "/"
+        },
+        {
+          "name": "NON_ROOT",
+          "value": "false"
+        },
+        {
+          "name": "JWT_PRIVATE_KEY",
+          "value": "{{secret.jwt-key}}"
+        },
+        {
+          "name": "SEAFILE_LOG_TO_STDOUT",
+          "value": "true"
+        },
+        {
+          "name": "ENABLE_GO_FILESERVER",
+          "value": "true"
+        },
+        {
+          "name": "ENABLE_SEADOC",
+          "value": "false"
+        },
+        {
+          "name": "ENABLE_NOTIFICATION_SERVER",
+          "value": "false"
+        },
+        {
+          "name": "ENABLE_SEAFILE_AI",
+          "value": "false"
+        },
+        {
+          "name": "CACHE_PROVIDER",
+          "value": "redis"
+        },
+        {
+          "name": "REDIS_HOST",
+          "value": "cache"
+        },
+        {
+          "name": "REDIS_PORT",
+          "value": "6379"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 80,
+          "protocol": "tcp",
+          "purpose": "The web interface, the file server and the sync API",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "data",
+          "target": "/shared",
+          "purpose": "Every library's blocks, the configuration and logs",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 2048,
+        "minMemoryMb": 1024
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fs",
+          "http://127.0.0.1/api2/ping/"
+        ],
+        "intervalSeconds": 15,
+        "timeoutSeconds": 10,
+        "retries": 30,
+        "startPeriodSeconds": 180
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        },
+        {
+          "service": "cache",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "MariaDB, holding Seafile's three databases, which Seafile creates on its first start",
+      "image": {
+        "reference": "mariadb:11.8.9",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "MARIADB_ROOT_PASSWORD",
+          "value": "{{secret.db-root-password}}"
+        },
+        {
+          "name": "MARIADB_AUTO_UPGRADE",
+          "value": "1"
+        }
+      ],
+      "ports": [
+        {
+          "name": "mysql",
+          "internal": 3306,
+          "protocol": "tcp",
+          "purpose": "SQL connections from Seafile",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/var/lib/mysql",
+          "purpose": "The ccnet, seafile and seahub databases",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "healthcheck.sh",
+          "--connect",
+          "--innodb_initialized"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 12,
+        "startPeriodSeconds": 30
+      }
+    },
+    {
+      "name": "cache",
+      "role": "cache",
+      "purpose": "Valkey, Seafile's cache",
+      "image": {
+        "reference": "valkey/valkey:9.0.6-alpine",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "ports": [
+        {
+          "name": "redis",
+          "internal": 6379,
+          "protocol": "tcp",
+          "purpose": "Redis protocol from Seafile",
+          "exposure": "internal"
+        }
+      ],
+      "resources": {
+        "memoryMb": 256,
+        "minMemoryMb": 64
+      },
+      "healthcheck": {
+        "test": [
+          "valkey-cli",
+          "ping"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 5
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Ping endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api2/ping/",
+      "port": "http",
+      "timeoutSeconds": 900
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "SEAFILE_SERVER_HOSTNAME",
+        "value": "{{input.domain}}"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "Seafile upgrades its databases on start within a major version; a new major version has its own upgrade notes. Take a backup first."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "files.example.test"
+      },
+      "digest": "sha256:196ab3f5e19430c39c384372cbc57b395ffa7afb36cbc51ef752712d523b0fd7"
+    }
+  ]
+}

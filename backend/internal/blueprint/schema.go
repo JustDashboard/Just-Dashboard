@@ -212,6 +212,12 @@ type Port struct {
 	// "internal" (never published).
 	Exposure string `json:"exposure"`
 	Primary  bool   `json:"primary,omitempty"`
+	// HostInput names the number input whose value is the host port a
+	// direct port is published on. Without one a direct port is published on
+	// its own number, as every built-in's is; with one, a template saved from
+	// a deployment keeps the publication that deployment chose as an answer
+	// the next deployment gives, instead of writing this server's port in.
+	HostInput string `json:"hostInput,omitempty"`
 }
 
 type Volume struct {
@@ -474,6 +480,17 @@ var ErrUnknownField = errors.New("blueprint contains an unsupported field")
 // uses a field this dashboard version does not understand is refused rather
 // than silently rendered without it.
 func Parse(raw []byte) (*Blueprint, error) {
+	parsed, err := decodeDefinition(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := Validate(parsed); err != nil {
+		return nil, err
+	}
+	return parsed, nil
+}
+
+func decodeDefinition(raw []byte) (*Blueprint, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var parsed Blueprint
@@ -482,9 +499,6 @@ func Parse(raw []byte) (*Blueprint, error) {
 	}
 	if decoder.Decode(&struct{}{}) != io.EOF {
 		return nil, fmt.Errorf("%w: trailing data after the blueprint object", ErrUnknownField)
-	}
-	if err := Validate(&parsed); err != nil {
-		return nil, err
 	}
 	return &parsed, nil
 }

@@ -111,6 +111,10 @@ type DomainObservation struct {
 	CertificateRefusal     string `json:"certificateRefusal,omitempty"`
 	Conflict               bool   `json:"conflict"`
 	Detail                 string `json:"detail,omitempty"`
+	// Record is, for a name the lookup says does not reach where it
+	// should, the record it needs and whether saved credentials can write
+	// it (preflight_dns_record.go).
+	Record *DNSRecordObservation `json:"record,omitempty"`
 }
 
 type FirewallObservation struct {
@@ -220,6 +224,7 @@ type HostPreflightObserver struct {
 	tailnet    PreflightTailnet
 	volumeRoot string
 	tunnel     TunnelObserver
+	dnsRecords DNSRecordObserver
 }
 
 func (o *HostPreflightObserver) WithTailnet(tailnet PreflightTailnet) *HostPreflightObserver {
@@ -413,6 +418,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 				} else {
 					domain.Detail = check.Summary
 				}
+				domain.Record = o.observeDNSRecord(ctx, planned, check.PointsHere, check.BehindProxy)
 				domains[index] = domain
 			}()
 		}
@@ -908,6 +914,9 @@ func preflightFindings(
 			// This server's public address, and a certificate for it, say
 			// nothing about a name Cloudflare serves through the tunnel.
 			findings = append(findings, tunnelFindings(planned, observation, field)...)
+			if item, ok := dnsRecordFinding(planned, domainEvidence[planned.Hostname].Record, field); ok {
+				findings = append(findings, item)
+			}
 			continue
 		}
 		if !ok {
@@ -969,6 +978,9 @@ func preflightFindings(
 				"Domain does not resolve to this host", strings.Join(observed.Addresses, ", "),
 				"The public route and HTTP certificate challenge will not reach this server.",
 				"Update DNS or explicitly accept the delayed cutover.", "proxy", field))
+		}
+		if item, ok := dnsRecordFinding(planned, observed.Record, field); ok {
+			findings = append(findings, item)
 		}
 		if planned.HTTPS && observed.CertificateRefusal != "" {
 			item := finding("certificate_wildcard_unavailable", PreflightBlocked,

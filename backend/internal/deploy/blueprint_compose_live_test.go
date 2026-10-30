@@ -28,11 +28,7 @@ func TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks(t *testing.T) {
 	if os.Getenv("JD_DEPLOY_LIVE") != "1" {
 		t.Skip("set JD_DEPLOY_LIVE=1 to pull and start every multi-service template")
 	}
-	client := liveC4Docker(t)
-	backend := NewDockerArtifactBackend(client)
-	builder := NewArtifactBuilder(backend)
-	owner := NewDockerRuntimeOwner(client)
-	checks := NewCheckRunner(client)
+	harness := newLiveComposeHarness(t)
 	definitions, err := blueprint.Catalog()
 	if err != nil {
 		t.Fatal(err)
@@ -45,119 +41,148 @@ func TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks(t *testing.T) {
 		}
 		ran++
 		t.Run(definition.ID, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 25*time.Minute)
-			defer cancel()
-			started := time.Now()
-			stamp := time.Now().UnixNano()
-			source, err := DraftSourceConfig{
+			harness.startsAndAnswersItsOwnChecks(t, definition, DraftSourceConfig{
 				Kind: SourceCompose, Mode: SourceModeBlueprint, BlueprintID: definition.ID,
 				BlueprintVersion: definition.Version, BlueprintInputs: definition.Fixtures[0].Inputs,
-			}.WithTemplateDocuments()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := source.validateForNewDeployment(); err != nil {
-				t.Fatal(err)
-			}
-			plan, err := RenderBlueprintPlan(source, definition.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			root := t.TempDir()
-			if err := writeComposeDocuments(root, source.ComposeFiles); err != nil {
-				t.Fatal(err)
-			}
-			cached := map[string]bool{}
-			for _, service := range definition.Services {
-				_, err := liveDockerOutput(ctx, "image", "inspect", service.Image.Reference)
-				cached[service.Image.Reference] = err == nil
-			}
-			built, err := builder.Build(ctx, root, fmt.Sprintf("jd-live-template-%d:release", stamp),
-				plan.Configuration.Build, PreparedBuild{}, nil, nil, "", plan.Detection.Source, plan.Detection.Compose, nil)
-			if built.Compose != nil {
-				liveComposeTemplateImages(t, built.Compose, cached)
-			}
-			if err != nil {
-				t.Fatalf("resolve and pull the stack's images: %v", err)
-			}
-			variables := map[string]string{}
-			for _, variable := range plan.Configuration.Variables {
-				switch {
-				case variable.Generate > 0:
-					value, err := generatedSecretValue(variable.Generate, variable.GenerateFormat)
-					if err != nil {
-						t.Fatal(err)
-					}
-					variables[variable.Name] = value
-				default:
-					variables[variable.Name] = variable.Value
-				}
-			}
-			project := fmt.Sprintf("jd-e%d", stamp)
-			runtime := plan.Configuration.Runtime
-			var output strings.Builder
-			startedRuntime, err := owner.StartCandidate(ctx, CandidateRuntimeRequest{
-				Run:     EngineRun{ID: stamp, EnvironmentID: stamp},
-				Release: Release{ID: stamp, EnvironmentID: stamp, RunID: stamp, Number: 1},
-				Snapshot: runtimeReleaseSnapshot{
-					Version: 1, Plan: runtime, Compose: built.Compose,
-				},
-				SourceRoot: root, RuntimeVariables: variables, Host: "127.0.0.1",
-			}, func(line BuildLog) error {
-				output.WriteString(line.Text + "\n")
-				return nil
 			})
-			t.Cleanup(func() {
-				cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-				defer cancel()
-				if startedRuntime.Input.RuntimeID != "" {
-					_, _ = owner.Stop(cleanup, runtimeFromInput(startedRuntime.Input), runtime, variables, true, nil)
-				}
-				label := "label=com.docker.compose.project=" + project
-				if ids, err := liveDockerOutput(cleanup, "ps", "-aq", "--filter", label); err == nil && len(strings.Fields(string(ids))) > 0 {
-					_, _ = liveDockerOutput(cleanup, append([]string{"rm", "--force", "--volumes"}, strings.Fields(string(ids))...)...)
-				}
-				if names, err := liveDockerOutput(cleanup, "volume", "ls", "-q", "--filter", label); err == nil && len(strings.Fields(string(names))) > 0 {
-					_, _ = liveDockerOutput(cleanup, append([]string{"volume", "rm", "--force"}, strings.Fields(string(names))...)...)
-				}
-				if names, err := liveDockerOutput(cleanup, "network", "ls", "-q", "--filter", label); err == nil && len(strings.Fields(string(names))) > 0 {
-					_, _ = liveDockerOutput(cleanup, append([]string{"network", "rm"}, strings.Fields(string(names))...)...)
-				}
-			})
-			if err != nil {
-				t.Fatalf("start the stack: %v\n--- compose output ---\n%s%s", err, output.String(), liveComposeTemplateLogs(ctx, project))
-			}
-			// The checks introduce themselves as the proxy does for the
-			// release's domain, which is how an application that builds its
-			// redirects from that domain is asked in production.
-			target := startedRuntime.Target
-			target.OriginalPorts = []int{runtime.InternalPort}
-			for _, domain := range plan.Configuration.Domains {
-				target.PublicURLs = append(target.PublicURLs, "https://"+domain.Hostname)
-			}
-			for _, check := range plan.Configuration.Checks {
-				if check.Phase != "readiness" {
-					continue
-				}
-				if evidence := checks.Run(ctx, check, target); evidence.Outcome != HealthPassed {
-					t.Fatalf("%s: %+v\n%s", check.Name, evidence, liveComposeTemplateLogs(ctx, project))
-				}
-			}
-			published, err := liveComposeTemplateHealth(ctx, project, definition)
-			if err != nil {
-				t.Fatalf("%v\n%s", err, liveComposeTemplateLogs(ctx, project))
-			}
-			services := make([]string, 0, len(definition.Services))
-			for _, service := range definition.Services {
-				services = append(services, service.Name)
-			}
-			t.Logf("%s → %s → every check passed, every service healthy, only %s published (%s, %d MB of limits)",
-				definition.ID, strings.Join(services, ", "), published, time.Since(started).Round(time.Second), plan.Rendered.MemoryMB)
 		})
 	}
 	if ran == 0 {
 		t.Skip("no multi-service template matched JD_BLUEPRINT_ONLY")
 	}
+}
+
+// liveComposeHarness is what the sweep shares across stacks: the build step
+// that resolves and pulls a stack's images, the runtime owner that starts it,
+// and the runner that asks its checks.
+type liveComposeHarness struct {
+	builder *ArtifactBuilder
+	owner   *DockerRuntimeOwner
+	checks  *CheckRunner
+}
+
+func newLiveComposeHarness(t *testing.T) liveComposeHarness {
+	t.Helper()
+	client := liveC4Docker(t)
+	return liveComposeHarness{
+		builder: NewArtifactBuilder(NewDockerArtifactBackend(client)),
+		owner:   NewDockerRuntimeOwner(client), checks: NewCheckRunner(client),
+	}
+}
+
+// startsAndAnswersItsOwnChecks brings one stack up from the source a draft
+// saved for it, as a deployment does, and holds it to its definition: every
+// readiness check passes, every service reports healthy, and only the public
+// service publishes, on loopback. Everything it made is removed afterwards.
+func (h liveComposeHarness) startsAndAnswersItsOwnChecks(t *testing.T, definition *blueprint.Blueprint, saved DraftSourceConfig) {
+	t.Helper()
+	builder, owner, checks := h.builder, h.owner, h.checks
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Minute)
+	defer cancel()
+	started := time.Now()
+	stamp := time.Now().UnixNano()
+	source, err := saved.WithTemplateDocuments()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := source.validateForNewDeployment(); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := RenderBlueprintPlan(source, definition.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := writeComposeDocuments(root, source.ComposeFiles); err != nil {
+		t.Fatal(err)
+	}
+	cached := map[string]bool{}
+	for _, service := range definition.Services {
+		_, err := liveDockerOutput(ctx, "image", "inspect", service.Image.Reference)
+		cached[service.Image.Reference] = err == nil
+	}
+	present := liveImageDigests(ctx)
+	built, err := builder.Build(ctx, root, fmt.Sprintf("jd-live-template-%d:release", stamp),
+		plan.Configuration.Build, PreparedBuild{}, nil, nil, "", plan.Detection.Source, plan.Detection.Compose, nil)
+	if built.Compose != nil {
+		liveComposeTemplateImages(t, built.Compose, cached, present)
+	}
+	if err != nil {
+		t.Fatalf("resolve and pull the stack's images: %v", err)
+	}
+	variables := map[string]string{}
+	for _, variable := range plan.Configuration.Variables {
+		switch {
+		case variable.Generate > 0:
+			value, err := generatedSecretValue(variable.Generate, variable.GenerateFormat)
+			if err != nil {
+				t.Fatal(err)
+			}
+			variables[variable.Name] = value
+		default:
+			variables[variable.Name] = variable.Value
+		}
+	}
+	project := fmt.Sprintf("jd-e%d", stamp)
+	runtime := plan.Configuration.Runtime
+	var output strings.Builder
+	startedRuntime, err := owner.StartCandidate(ctx, CandidateRuntimeRequest{
+		Run:     EngineRun{ID: stamp, EnvironmentID: stamp},
+		Release: Release{ID: stamp, EnvironmentID: stamp, RunID: stamp, Number: 1},
+		Snapshot: runtimeReleaseSnapshot{
+			Version: 1, Plan: runtime, Compose: built.Compose,
+		},
+		SourceRoot: root, RuntimeVariables: variables, Host: "127.0.0.1",
+	}, func(line BuildLog) error {
+		output.WriteString(line.Text + "\n")
+		return nil
+	})
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if startedRuntime.Input.RuntimeID != "" {
+			_, _ = owner.Stop(cleanup, runtimeFromInput(startedRuntime.Input), runtime, variables, true, nil)
+		}
+		label := "label=com.docker.compose.project=" + project
+		if ids, err := liveDockerOutput(cleanup, "ps", "-aq", "--filter", label); err == nil && len(strings.Fields(string(ids))) > 0 {
+			_, _ = liveDockerOutput(cleanup, append([]string{"rm", "--force", "--volumes"}, strings.Fields(string(ids))...)...)
+		}
+		if names, err := liveDockerOutput(cleanup, "volume", "ls", "-q", "--filter", label); err == nil && len(strings.Fields(string(names))) > 0 {
+			_, _ = liveDockerOutput(cleanup, append([]string{"volume", "rm", "--force"}, strings.Fields(string(names))...)...)
+		}
+		if names, err := liveDockerOutput(cleanup, "network", "ls", "-q", "--filter", label); err == nil && len(strings.Fields(string(names))) > 0 {
+			_, _ = liveDockerOutput(cleanup, append([]string{"network", "rm"}, strings.Fields(string(names))...)...)
+		}
+	})
+	if err != nil {
+		t.Fatalf("start the stack: %v\n--- compose output ---\n%s%s", err, output.String(), liveComposeTemplateLogs(ctx, project))
+	}
+	// The checks introduce themselves as the proxy does for the
+	// release's domain, which is how an application that builds its
+	// redirects from that domain is asked in production.
+	target := startedRuntime.Target
+	target.OriginalPorts = []int{runtime.InternalPort}
+	for _, domain := range plan.Configuration.Domains {
+		target.PublicURLs = append(target.PublicURLs, "https://"+domain.Hostname)
+	}
+	for _, check := range plan.Configuration.Checks {
+		if check.Phase != "readiness" {
+			continue
+		}
+		if evidence := checks.Run(ctx, check, target); evidence.Outcome != HealthPassed {
+			t.Fatalf("%s: %+v\n%s", check.Name, evidence, liveComposeTemplateLogs(ctx, project))
+		}
+	}
+	published, err := liveComposeTemplateHealth(ctx, project, definition)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, liveComposeTemplateLogs(ctx, project))
+	}
+	services := make([]string, 0, len(definition.Services))
+	for _, service := range definition.Services {
+		services = append(services, service.Name)
+	}
+	t.Logf("%s → %s → every check passed, every service healthy, only %s published (%s, %d MB of limits)",
+		definition.ID, strings.Join(services, ", "), published, time.Since(started).Round(time.Second), plan.Rendered.MemoryMB)
 }
 
 // liveComposeTemplateHealth waits for every service of the stack to report
@@ -253,24 +278,44 @@ func liveComposeTemplateHealth(ctx context.Context, project string, definition *
 	}
 }
 
-// liveComposeTemplateImages removes, after the test, the exact images the
-// sweep pulled for a stack — each by the digest it was pulled at — and only
-// those whose tag was not already on the host. A full sweep pulls gigabytes,
-// and an image somebody else had cached is not this test's to delete.
-func liveComposeTemplateImages(t *testing.T, resolved *ResolvedComposeSnapshot, cached map[string]bool) {
+// liveComposeTemplateImages removes, after the test, what the sweep pulled
+// for a stack — each image by the digest it was pulled at — and nothing that
+// was on the host before it. An image whose tag was not cached goes whole; a
+// cached tag keeps its image and loses only the digest reference the pull
+// added beside it, which the daemon lists as an untagged image of its own. A
+// full sweep pulls gigabytes, and an image somebody else had cached is not
+// this test's to delete.
+func liveComposeTemplateImages(t *testing.T, resolved *ResolvedComposeSnapshot, cached, present map[string]bool) {
 	t.Helper()
 	for _, service := range resolved.Services {
 		reference := service.Plan.Image
-		if cached[reference] || service.Source != "pull" || !contentDigestRE.MatchString(service.Digest) {
+		if service.Source != "pull" || !contentDigestRE.MatchString(service.Digest) || present[service.Digest] {
 			continue
 		}
-		pinned := service.Reference + "@" + service.Digest
+		remove := []string{"image", "rm", service.Reference + "@" + service.Digest}
+		if !cached[reference] {
+			remove = []string{"image", "rm", "--force", service.Reference + "@" + service.Digest}
+		}
 		t.Cleanup(func() {
 			cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
-			_, _ = liveDockerOutput(cleanup, "image", "rm", "--force", pinned)
+			_, _ = liveDockerOutput(cleanup, remove...)
 		})
 	}
+}
+
+// liveImageDigests is every digest the daemon lists an image under, tagged or
+// not: what was on the host before a stack's images were resolved.
+func liveImageDigests(ctx context.Context) map[string]bool {
+	present := map[string]bool{}
+	raw, err := liveDockerOutput(ctx, "image", "ls", "--all", "--digests", "--no-trunc", "--format", "{{.Digest}}")
+	if err != nil {
+		return present
+	}
+	for _, digest := range strings.Fields(string(raw)) {
+		present[digest] = true
+	}
+	return present
 }
 
 func liveComposeTemplateLogs(ctx context.Context, project string) string {

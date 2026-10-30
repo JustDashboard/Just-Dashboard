@@ -1,0 +1,276 @@
+{
+  "id": "heyform",
+  "version": "1.0.0",
+  "name": "HeyForm",
+  "category": "http",
+  "profile": "compose",
+  "description": "Conversational forms and surveys: build them with a drag-and-drop editor and logic jumps, share a link or embed them, and collect the answers with integrations and webhooks. Runs HeyForm with MongoDB and Valkey; only HeyForm is behind the domain.",
+  "iconId": "file",
+  "docsUrl": "https://docs.heyform.net/open-source/self-hosting",
+  "access": {
+    "kind": "setup",
+    "note": "HeyForm starts with no account: the first visitor signs up and creates the workspace. Open the address yourself right after deploying. Sign-up confirmation and password resets need SMTP settings added as variables."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/heyform/heyform",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Every form link and embed code is built from this address."
+    }
+  ],
+  "secrets": [
+    {
+      "name": "session-key",
+      "variable": "HEYFORM_SESSION_KEY",
+      "label": "Session key",
+      "length": 48,
+      "description": "Signs sessions; changing it signs everybody out."
+    },
+    {
+      "name": "form-key",
+      "variable": "HEYFORM_FORM_ENCRYPTION_KEY",
+      "label": "Form encryption key",
+      "length": 48,
+      "description": "Encrypts form submissions in transit to the browser."
+    },
+    {
+      "name": "db-password",
+      "variable": "HEYFORM_DB_PASSWORD",
+      "label": "Database password",
+      "length": 40,
+      "description": "Generated here and given only to the services that sign in to the database."
+    }
+  ],
+  "services": [
+    {
+      "name": "heyform",
+      "role": "app",
+      "purpose": "The form builder, the published forms and the API, behind the domain",
+      "image": {
+        "reference": "heyform/community-edition:v3.0.5",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "APP_HOMEPAGE_URL",
+          "value": "{{variable.APP_HOMEPAGE_URL}}"
+        },
+        {
+          "name": "SESSION_KEY",
+          "value": "{{secret.session-key}}"
+        },
+        {
+          "name": "FORM_ENCRYPTION_KEY",
+          "value": "{{secret.form-key}}"
+        },
+        {
+          "name": "MONGO_URI",
+          "value": "mongodb://heyform:{{secret.db-password}}@db:27017/heyform?authSource=admin"
+        },
+        {
+          "name": "REDIS_HOST",
+          "value": "cache"
+        },
+        {
+          "name": "REDIS_PORT",
+          "value": "6379"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 9157,
+          "protocol": "tcp",
+          "purpose": "The builder, the forms and the API",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "uploads",
+          "target": "/app/static/upload",
+          "purpose": "Uploaded images and files",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 1024,
+        "minMemoryMb": 512
+      },
+      "healthcheck": {
+        "test": [
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:9157/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 30,
+        "startPeriodSeconds": 60
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        },
+        {
+          "service": "cache",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "MongoDB, holding every form and submission",
+      "image": {
+        "reference": "mongo:8.0.34",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "MONGO_INITDB_ROOT_USERNAME",
+          "value": "heyform"
+        },
+        {
+          "name": "MONGO_INITDB_ROOT_PASSWORD",
+          "value": "{{secret.db-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "mongo",
+          "internal": 27017,
+          "protocol": "tcp",
+          "purpose": "MongoDB connections from HeyForm",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/data/db",
+          "purpose": "Every collection HeyForm keeps",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "configdb",
+          "target": "/data/configdb",
+          "purpose": "MongoDB's own configuration database",
+          "data": true,
+          "backup": false
+        }
+      ],
+      "resources": {
+        "memoryMb": 1024,
+        "minMemoryMb": 512
+      },
+      "healthcheck": {
+        "test": [
+          "mongosh",
+          "--quiet",
+          "--eval",
+          "db.adminCommand('ping').ok"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 10,
+        "retries": 20,
+        "startPeriodSeconds": 30
+      }
+    },
+    {
+      "name": "cache",
+      "role": "cache",
+      "purpose": "Valkey, sessions and the job queue",
+      "image": {
+        "reference": "valkey/valkey:9.0.6-alpine",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "ports": [
+        {
+          "name": "redis",
+          "internal": 6379,
+          "protocol": "tcp",
+          "purpose": "Redis protocol from HeyForm",
+          "exposure": "internal"
+        }
+      ],
+      "resources": {
+        "memoryMb": 256,
+        "minMemoryMb": 64
+      },
+      "healthcheck": {
+        "test": [
+          "valkey-cli",
+          "ping"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 5
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Builder answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "port": "http",
+      "timeoutSeconds": 300
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "APP_HOMEPAGE_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "HeyForm migrates its data on start; take a backup before moving to a newer image."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "forms.example.test"
+      },
+      "digest": "sha256:aa2a91455cd4719604999f3fa60121e1cd5f6b5f49bb1db4a7138c0f2dbcb5b3"
+    }
+  ]
+}

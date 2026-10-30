@@ -38,6 +38,9 @@ type RenderedPort struct {
 	Exposure string `json:"exposure"`
 	Purpose  string `json:"purpose"`
 	Primary  bool   `json:"primary,omitempty"`
+	// HostPort is the host port a direct port's HostInput chose; zero means
+	// the port is published on its own number.
+	HostPort int `json:"hostPort,omitempty"`
 }
 
 type RenderedVolume struct {
@@ -275,10 +278,17 @@ func Render(blueprint *Blueprint, inputs map[string]string) (*Plan, error) {
 			internal = parsed
 		}
 		portsByName[port.Name] = internal
-		plan.Ports = append(plan.Ports, RenderedPort{
+		rendered := RenderedPort{
 			Name: port.Name, Internal: internal, Protocol: strings.ToLower(port.Protocol),
 			Exposure: port.Exposure, Purpose: port.Purpose, Primary: port.Primary,
-		})
+		}
+		if port.HostInput != "" {
+			// resolveInputs held the value to the input's own 1-65535 bounds.
+			if host, convErr := strconv.Atoi(values[port.HostInput]); convErr == nil && host > 0 {
+				rendered.HostPort = host
+			}
+		}
+		plan.Ports = append(plan.Ports, rendered)
 	}
 	for _, volume := range blueprint.Volumes {
 		plan.Volumes = append(plan.Volumes, RenderedVolume{

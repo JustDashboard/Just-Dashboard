@@ -30,7 +30,7 @@ type BlueprintPlan struct {
 // operator's inputs and maps the result onto the normalized plan. It is pure
 // apart from the catalogue read, so preflight can call it without side effects.
 func RenderBlueprintPlan(source DraftSourceConfig, name string) (*BlueprintPlan, error) {
-	definition, err := blueprint.GetVersion(source.BlueprintID, source.BlueprintVersion)
+	definition, err := source.definition()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidSource, err)
 	}
@@ -55,7 +55,7 @@ func RenderBlueprintPlan(source DraftSourceConfig, name string) (*BlueprintPlan,
 		BuildMethod: BuildImage, Confidence: ConfidenceHigh,
 		Evidence: []DetectionEvidence{{
 			Path:   definition.ID + "@" + definition.Version,
-			Reason: "reviewed blueprint shipped with this dashboard",
+			Reason: blueprintOrigin(definition, "reviewed blueprint shipped with this dashboard"),
 		}},
 		NeedsDecision: []string{},
 	}
@@ -96,6 +96,42 @@ func RenderBlueprintPlan(source DraftSourceConfig, name string) (*BlueprintPlan,
 		Summary: blueprint.Summarize(definition), Inputs: definition.Inputs,
 		Automation: rendered.Automation, Files: rendered.Files,
 	}, nil
+}
+
+// definition is the template a source names: a built-in from the catalogue
+// the binary ships, or a template added on this dashboard from the definition
+// frozen into the source when it was saved (DraftSourceConfig's
+// BlueprintDefinition). The namespaces cannot overlap (blueprint.UserPrefix),
+// so a source can name a built-in or an added template and never be read as
+// the other; the frozen definition is parsed and held to every rule again.
+func (c DraftSourceConfig) definition() (*blueprint.Blueprint, error) {
+	if !blueprint.IsUserID(c.BlueprintID) {
+		if len(c.BlueprintDefinition) > 0 {
+			return nil, fmt.Errorf("%w: %s is a built-in and is read from the catalogue, not from the source", ErrInvalidSource, c.BlueprintID)
+		}
+		return blueprint.GetVersion(c.BlueprintID, c.BlueprintVersion)
+	}
+	if len(c.BlueprintDefinition) == 0 {
+		return nil, fmt.Errorf("%w: %s: the template is not saved with this source", blueprint.ErrNotFound, c.BlueprintID)
+	}
+	definition, err := blueprint.ParseUserTemplate(c.BlueprintDefinition)
+	if err != nil {
+		return nil, err
+	}
+	if definition.ID != c.BlueprintID || (c.BlueprintVersion != "" && definition.Version != c.BlueprintVersion) {
+		return nil, fmt.Errorf("%w: the source names %s@%s and holds %s@%s", ErrInvalidSource,
+			c.BlueprintID, c.BlueprintVersion, definition.ID, definition.Version)
+	}
+	return definition, nil
+}
+
+// blueprintOrigin is how detection evidence names where a definition came
+// from: the reviewed catalogue, or this dashboard's own templates.
+func blueprintOrigin(definition *blueprint.Blueprint, builtIn string) string {
+	if blueprint.IsUserID(definition.ID) {
+		return "template added on this dashboard"
+	}
+	return builtIn
 }
 
 // blueprintSourceKindMatches keeps the source kind honest about what a
@@ -154,7 +190,7 @@ func blueprintComposePlan(definition *blueprint.Blueprint, rendered *blueprint.P
 		Name: definition.Name, Profile: ProfileCompose, Confidence: ConfidenceHigh, Port: port,
 		Evidence: []DetectionEvidence{{
 			Path:   definition.ID + "@" + definition.Version,
-			Reason: fmt.Sprintf("reviewed multi-service template shipped with this dashboard: %s", strings.Join(services, ", ")),
+			Reason: fmt.Sprintf("%s: %s", blueprintOrigin(definition, "reviewed multi-service template shipped with this dashboard"), strings.Join(services, ", ")),
 		}},
 	})
 	// The identity names the reviewed definition (Template), the digest of
@@ -286,7 +322,7 @@ func blueprintConfiguration(
 				// firewall.
 				configuration.Runtime.InternalPort = port.Internal
 				configuration.Runtime.Protocol = port.Protocol
-				configuration.Runtime.HostPort = port.Internal
+				configuration.Runtime.HostPort = blueprintHostPort(port)
 				configuration.Runtime.BindAddress = "127.0.0.1"
 				continue
 			}
@@ -294,7 +330,7 @@ func blueprintConfiguration(
 			// to its GUI: the proxy carries the primary port and this one is
 			// published on its own number, as the definition promised.
 			configuration.Runtime.Ports = append(configuration.Runtime.Ports, PublishedPort{
-				HostPort: port.Internal, ContainerPort: port.Internal, Protocol: port.Protocol,
+				HostPort: blueprintHostPort(port), ContainerPort: port.Internal, Protocol: port.Protocol,
 			})
 		case "internal":
 			if configuration.Runtime.InternalPort == 0 {
@@ -357,6 +393,17 @@ func blueprintConfiguration(
 		return configuration.Dependencies[i].ResourceID < configuration.Dependencies[j].ResourceID
 	})
 	return configuration, nil
+}
+
+// blueprintHostPort is where a direct port is published: on its own number,
+// unless the definition takes the number from an input (blueprint.Port's
+// HostInput), which is how a template saved from a deployment keeps that
+// deployment's publication as an answer rather than as this server's port.
+func blueprintHostPort(port blueprint.RenderedPort) int {
+	if port.HostPort > 0 {
+		return port.HostPort
+	}
+	return port.Internal
 }
 
 // blueprintVariables maps a render's variables onto planned ones. A generated
@@ -596,7 +643,7 @@ func (c DraftSourceConfig) ValidateForDeployment() error {
 	if c.Mode != SourceModeBlueprint {
 		return nil
 	}
-	definition, err := blueprint.GetVersion(c.BlueprintID, c.BlueprintVersion)
+	definition, err := c.definition()
 	if c.Kind == SourceCompose {
 		if len(c.ComposeFiles) == 0 {
 			return fmt.Errorf("%w: the template's Compose file has not been rendered; inspect the template again", ErrUnsupportedSource)
@@ -622,7 +669,7 @@ func (c DraftSourceConfig) validateBlueprintSecretInputs() error {
 	if c.Mode != SourceModeBlueprint {
 		return nil
 	}
-	definition, err := blueprint.GetVersion(c.BlueprintID, c.BlueprintVersion)
+	definition, err := c.definition()
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidSource, err)
 	}
@@ -641,7 +688,7 @@ func (c DraftSourceConfig) withoutBlueprintSecretInputs() (DraftSourceConfig, er
 	if c.Mode != SourceModeBlueprint {
 		return c, nil
 	}
-	definition, err := blueprint.GetVersion(c.BlueprintID, c.BlueprintVersion)
+	definition, err := c.definition()
 	if err != nil && c.Kind == SourceCompose {
 		// A template version no longer shipped still runs from its stored
 		// document; its inputs never held a secret, because saving refuses one.
@@ -670,7 +717,7 @@ func (c DraftSourceConfig) validateForNewDeployment() error {
 		return err
 	}
 	if c.Mode == SourceModeBlueprint {
-		definition, err := blueprint.GetVersion(c.BlueprintID, c.BlueprintVersion)
+		definition, err := c.definition()
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrUnsupportedSource, err)
 		}

@@ -58,6 +58,7 @@ import {
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import { DetectionProposalPanel } from "@/components/deploy/settings/detection-proposal"
 import { applyDetectionChanges } from "@/components/deploy/settings/detection-changes"
+import { SaveAsTemplate } from "@/components/deploy/settings/save-as-template"
 
 /**
  * What the project is called, where it is built from, and — for a Git
@@ -146,6 +147,17 @@ export function GeneralSettings({
                   environmentId={environmentId}
                   canEdit={canEdit}
                   onSaved={project.refreshEnvironments}
+                />
+              )}
+              {/* A template runs published images, so a deployment that
+                  builds its own from a repository or a folder here is not
+                  offered one; a Compose stack read from Git is told why in
+                  the dialog, by the server. */}
+              {canEdit && !["git", "local", "import"].includes(deployment.sourceKind) && (
+                <SaveAsTemplate
+                  projectId={projectId}
+                  environmentId={environmentId}
+                  projectName={record.name}
                 />
               )}
             </>
