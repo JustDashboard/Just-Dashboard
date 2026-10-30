@@ -138,6 +138,26 @@ func (a *Authenticator) authenticate(next http.Handler, allowPasswordChange, all
 
 func (a *Authenticator) authenticateWith(next http.Handler, allowPasswordChange, allowScoped bool, gate DeployKeyGate, log *audit.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// An MCP key's generated tool, dispatched by the MCP endpoint: the
+		// key was authenticated there, and it is admitted here only as a
+		// deploy key would be. Every other group, with no gate, refuses it.
+		if delegate, ok := mcpDelegate(r.Context()); ok {
+			if gate == nil {
+				WriteError(w, r, Err(http.StatusForbidden, "key_scope",
+					"an MCP key's tools reach the deployment routes under /api/v1/deploy and nothing else"))
+				return
+			}
+			p := *delegate
+			p.FailureReason = ""
+			if err := gate(r, &p); err != nil {
+				// The MCP call's own entry records the refusal.
+				WriteError(w, r, err)
+				return
+			}
+			p.Scope, p.DeployRoute, p.ViaMCP = "", true, true
+			next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), &p)))
+			return
+		}
 		p, err := a.resolveWithPasswordChange(w, r, allowPasswordChange)
 		if err != nil {
 			WriteError(w, r, err)

@@ -85,6 +85,10 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   -- What an MCP key may do with the deployments: '' nothing, 'read' read
   -- them and their runs, 'deploy' also queue deploys and rollbacks.
   deploy_access TEXT NOT NULL DEFAULT '',
+  -- Whether an MCP key is offered the tools generated from the deployment
+  -- API beside the hand-written ones, under its deploy_access: 0 for every
+  -- key made before they existed, so none gains them with an upgrade.
+  mcp_operations INTEGER NOT NULL DEFAULT 0,
   created_at   INTEGER NOT NULL,
   expires_at   INTEGER NOT NULL DEFAULT 0,
   last_used_at INTEGER NOT NULL DEFAULT 0,
@@ -1904,6 +1908,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	// An MCP key can be given the deployments as well as databases. Every
 	// key made before reaches none of them.
 	{"api_tokens", "deploy_access", "TEXT NOT NULL DEFAULT ''"},
+	// An MCP key can be offered the tools generated from the deployment API.
+	// Every key made before them is not: it keeps the hand-written tools it
+	// had, and its owner turns the generated ones on.
+	{"api_tokens", "mcp_operations", "INTEGER NOT NULL DEFAULT 0"},
 	// A release taken back by an instant rollback says when and why: the
 	// reading that decided it, or the operator who pressed it. Every release
 	// made before was never rolled back this way.

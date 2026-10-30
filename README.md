@@ -188,7 +188,8 @@ free.
 - Alerts when a database goes down, fills its disk, runs low on connections, lags or misses a backup
 - An MCP server for AI clients such as Claude Code, Cursor and VS Code: keys that reach only the
   databases you choose, read-only unless you allow changes, never a protected one, and the
-  deployments only if you allow it, every call audited
+  deployments only if you allow it — every one or the ones you pick — through 113 tools in all,
+  100 tools generated from the deployment API; every call audited
 
 </td>
 </tr>
@@ -525,7 +526,10 @@ Every read takes `--json`. In CI, set `JD_URL` and `JD_KEY` instead of logging i
 For a client in another language, the dashboard describes the whole deployment API as OpenAPI 3.1 at
 `GET /api/v1/deploy/openapi.json` (or `.yaml`; `jd openapi` prints it), generated from its own router
 and types; **Account → API keys** links it beside the `jd` download when a deploy key is made, and the
-repository carries a copy at `docs/api/deploy-openapi.json`.
+repository carries a copy at `docs/api/deploy-openapi.json`. Typed clients generated from it are in
+the repository too: a Go package with no dependencies (`sdk/go`, module
+`github.com/Wayy01/Just-Dashboard/sdk/go`) and a TypeScript module over `fetch` (`sdk/typescript`),
+a call per route and a type per schema, regenerated with the description (see [`sdk/README.md`](sdk/README.md)).
 `--env` picks an environment other than production, `--ca-file` trusts the internal Caddy certificate
 authority, and plain `http://` is refused except to loopback (an SSH tunnel). Exit codes: 0 done (the
 run succeeded), 1 refused or the run failed, 2 usage, 3 not logged in or the key is no longer valid.
@@ -550,6 +554,17 @@ configuration and source are changed in the dashboard. Every
 write is in the audit log under the key's name. See [the security notes](docs/internal/security/invariants.md)
 for the full boundary; a key that can deploy code can still read that deployment's own variables from
 inside it, as in any CI system.
+
+**AI clients.** An MCP key given the deployments (**Databases → MCP server**, every deployment or the
+ones you pick) reaches the same API as tools: six written by hand — list deployments, runs and
+releases, read a run's log, deploy, roll back — and, when *Offer every deployment route as a tool* is
+on for the key (it is for a new key, and off for every key made before it until you turn it on), 100
+tools generated from the deployment API, one per route a deploy key may call, named for its operation
+(`deployment_configuration_save`, `deployment_variable_put`, …): 113 tools in all with the seven
+database tools. *Read* is offered the reads; *Deploy* also the changes, held to your role and to everything above that a deploy key cannot
+do; a destructive route also needs a role that may take destructive actions. Each call goes through
+the dashboard's own routes as the key and is in the audit log twice: as the MCP call and as the
+route's own entry.
 
 ## Linking to just-dashboard.com
 

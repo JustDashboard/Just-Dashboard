@@ -172,6 +172,8 @@ test("replacing an MCP key makes another MCP key for the same databases, at its 
         ],
         // The deployments as the key had them: none.
         deployments: "",
+        deploymentIds: [],
+        operations: false,
       },
     })
   const secret = page.getByRole("dialog", { name: "Your new key" })
@@ -209,6 +211,46 @@ test("an MCP key replaced by an owner who can no longer change a database only r
       ttlDays: 90,
       connections: [{ connectionId: 1, access: "read" }],
       deployments: "",
+      deploymentIds: [],
+      operations: false,
+    })
+})
+
+test("an MCP key narrowed to chosen deployments is replaced by one narrowed to the same", async ({
+  page,
+}) => {
+  const { calls } = await mockKeys(page, "admin", [
+    {
+      id: 8,
+      userId: 1,
+      name: "claude-code",
+      prefix: "vpsd_88cc99dd",
+      role: "admin",
+      scope: "mcp",
+      createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+      revoked: false,
+      connections: [],
+      deployments: "deploy",
+      deploymentIds: [3, 8],
+      operations: true,
+    },
+  ])
+  await page.goto("/account/keys")
+  await action(page, "claude-code", "Replace key")
+  await page
+    .getByRole("dialog", { name: "Replace API key" })
+    .getByRole("button", { name: "Create replacement" })
+    .click()
+  await expect
+    .poll(() => calls[0]?.body)
+    .toEqual({
+      name: "claude-code",
+      role: "admin",
+      ttlDays: 90,
+      connections: [],
+      deployments: "deploy",
+      deploymentIds: [3, 8],
+      operations: true,
     })
 })
 

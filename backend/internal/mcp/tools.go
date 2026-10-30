@@ -46,6 +46,10 @@ const (
 		`and acts on its production environment. list_runs and read_run_log say what a run did and why it failed; list_releases names what a rollback can go back to. ` +
 		`deploy and rollback are offered only when this key may deploy, queue a run as the dashboard's own buttons do and are held to the key owner's role; ` +
 		`a rollback also needs a role that may take destructive actions. Follow a queued run with read_run_log.`
+	apiInstructions = `Beside them, every route of the deployment API that a deploy key may call is a tool named for its operation ` +
+		`(deployment_configuration, deployment_variable_put, deployment_run_create…), taking the route's path and query parameters by name and its JSON body as body: ` +
+		`id is a deployment's id and env an environment's, which list_deployments gives as id and environmentId, and run a run's id, which list_runs gives as id. ` +
+		`They answer with the route's own JSON and are held to everything a deploy key is: a key that reads is offered the reads, one that deploys the changes too.`
 	auditInstructions = `Every call is recorded in the dashboard's audit log.`
 )
 
@@ -59,6 +63,9 @@ func Instructions(o Offer) string {
 	}
 	if o.Deployments {
 		parts = append(parts, deployInstructions)
+		if o.Operations {
+			parts = append(parts, apiInstructions)
+		}
 	}
 	return strings.Join(append(parts, auditInstructions), " ")
 }
@@ -199,7 +206,12 @@ type Offer struct {
 	Query, Write bool
 	// Deployments is a key that may read the deployments, Deploy one that may
 	// also queue a deploy, and Rollback one whose owner may also roll back.
+	// The generated tools follow the same three (Offer.Reaches): reads,
+	// changes, and the routes behind the destructive capability.
 	Deployments, Deploy, Rollback bool
+	// Operations is a key whose owner turned the generated tools on for it;
+	// without it a key is offered the hand-written tools alone.
+	Operations bool
 }
 
 func (o Offer) databases() bool { return o.Databases || !o.Deployments }

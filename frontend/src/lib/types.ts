@@ -6705,10 +6705,16 @@ export type ApiToken = {
   /** What an MCP key may do with the deployments; absent is nothing. */
   deployments?: ApiTokenDeployments
   /**
-   * The deployments a deploy key is limited to. Absent or empty is every
-   * deployment, including the ones made after the key.
+   * The deployments a deploy key, or an MCP key's deployment grant, is
+   * limited to. Absent or empty is every deployment, including the ones made
+   * after the key.
    */
   deploymentIds?: number[]
+  /**
+   * Whether an MCP key is offered the tools generated from the deployment
+   * API under its grant; absent for every key made before them.
+   */
+  operations?: boolean
 }
 
 /** An MCP key's deployment grant: nothing, read them, or also deploy and roll back. */

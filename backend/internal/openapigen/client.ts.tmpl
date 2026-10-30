@@ -1,0 +1,142 @@
+/** Where the API is served under the dashboard's address. */
+export const basePath = "{{BasePath}}"
+
+export interface ClientOptions {
+  /** The dashboard's address, such as https://dash.example.com. basePath is added unless it ends with it. */
+  baseUrl: string
+  /** A deploy key or an API key, sent as a bearer token. */
+  key?: string
+  /** The fetch requests are sent with; the global one when left out. */
+  fetch?: typeof fetch
+  /** Headers sent with every request. */
+  headers?: Record<string, string>
+}
+
+/** What one call may add: headers (such as an Idempotency-Key) and a signal to abort it. */
+export interface RequestOptions {
+  headers?: Record<string, string>
+  signal?: AbortSignal
+}
+
+/**
+ * A refusal or a failure: the status the API answered with and its error envelope,
+ * {"error": {...}}. code is what a caller branches on; message is written to be read.
+ */
+export class ApiError extends Error {
+  /** The HTTP status. */
+  readonly status: number
+  // {{ErrorFields}}
+  /** The answer as it came: the envelope, or the text of one that was not. */
+  readonly body: unknown
+
+  constructor(status: number, body: unknown) {
+    const envelope = errorEnvelope(body)
+    const text = typeof body === "string" ? body.trim().slice(0, 300) : ""
+    super(envelope?.message || text || `HTTP ${status}`)
+    this.name = "ApiError"
+    this.status = status
+    this.body = body
+    // {{ErrorAssign}}
+  }
+}
+
+type ErrorEnvelope = Record<string, unknown> & { code?: string; message?: string }
+
+function errorEnvelope(body: unknown): ErrorEnvelope | undefined {
+  if (typeof body !== "object" || body === null) return undefined
+  const inner = (body as { error?: unknown }).error
+  if (typeof inner !== "object" || inner === null) return undefined
+  const envelope = inner as ErrorEnvelope
+  return typeof envelope.code === "string" ? envelope : undefined
+}
+
+type QueryValue = string | number | boolean | null | undefined
+
+/** One call as the generated functions describe it. */
+export interface Call {
+  method: string
+  path: string
+  query?: object
+  body?: unknown
+  /** How the answer is read: JSON, text, bytes, or not at all. */
+  accept: "json" | "text" | "bytes" | "none"
+  /** A non-JSON answer's media type, sent as Accept. */
+  contentType?: string
+}
+
+/** Escapes one path parameter. */
+export function pathParam(value: string | number): string {
+  return encodeURIComponent(String(value))
+}
+
+/** Calls one dashboard's deployment API. */
+export class Client {
+  readonly baseUrl: string
+  readonly key?: string
+  private readonly fetcher: typeof fetch
+  private readonly headers: Record<string, string>
+
+  constructor(options: ClientOptions) {
+    let base = options.baseUrl.replace(/\/+$/, "")
+    if (!base.endsWith(basePath)) base += basePath
+    this.baseUrl = base
+    this.key = options.key
+    this.fetcher = options.fetch ?? ((input, init) => fetch(input, init))
+    this.headers = options.headers ?? {}
+  }
+
+  /** The address of a path under the API, with its query; a value left out is not sent. */
+  url(path: string, query?: object): string {
+    const params = new URLSearchParams()
+    for (const [name, value] of Object.entries(query ?? {}) as [string, QueryValue][]) {
+      if (value === undefined || value === null) continue
+      params.append(name, String(value))
+    }
+    const search = params.toString()
+    return this.baseUrl + path + (search ? `?${search}` : "")
+  }
+
+  /** A WebSocket route's address: the API's, with ws for http and wss for https. */
+  socketUrl(path: string): string {
+    return this.url(path).replace(/^http(s?):\/\//, "ws$1://")
+  }
+
+  /** Sends one call and reads its answer, or throws an ApiError for a refusal. */
+  async request<T>(call: Call, options?: RequestOptions): Promise<T> {
+    const headers: Record<string, string> = {
+      Accept:
+        call.accept === "json" || call.accept === "none"
+          ? "application/json"
+          : (call.contentType ?? "*/*"),
+      ...this.headers,
+      ...options?.headers,
+    }
+    if (this.key) headers.Authorization = `Bearer ${this.key}`
+    let body: string | undefined
+    if (call.body !== undefined) {
+      headers["Content-Type"] = "application/json"
+      body = JSON.stringify(call.body)
+    }
+    const response = await this.fetcher(this.url(call.path, call.query), {
+      method: call.method,
+      headers,
+      body,
+      signal: options?.signal,
+    })
+    if (response.status >= 300) {
+      const text = await response.text()
+      let parsed: unknown = text
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        // not the envelope: the text is the body
+      }
+      throw new ApiError(response.status, parsed)
+    }
+    if (call.accept === "none" || response.status === 204) return undefined as T
+    if (call.accept === "text") return (await response.text()) as T
+    if (call.accept === "bytes") return (await response.arrayBuffer()) as T
+    const text = await response.text()
+    return (text === "" ? undefined : JSON.parse(text)) as T
+  }
+}

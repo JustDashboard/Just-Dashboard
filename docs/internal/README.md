@@ -92,7 +92,8 @@ strategy, and feature ownership behind those rules.
   arrangement and the tests.
 - [`backend/deploy-api.md`](backend/deploy-api.md) — the deployment API's OpenAPI 3.1 description:
   generated from the router and the handlers' types, served at `GET /deploy/openapi.json`, committed
-  under `docs/api/`, and the tests that keep it honest.
+  under `docs/api/`, the tests that keep it honest, and what is generated from it: the Go and
+  TypeScript clients in `sdk/` and the MCP tools.
 - [`backend/remote-desktop.md`](backend/remote-desktop.md) — Remote Desktop: guacd as a container the
   dashboard owns on loopback, the Guacamole handshake done server-side and the relay, sealed computer
   sign-ins, the session history and the route table; Stream mode's Sunshine pairing and the Moonlight

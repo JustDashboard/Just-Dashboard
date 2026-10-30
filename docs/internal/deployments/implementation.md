@@ -1556,7 +1556,11 @@ only renderer/executor/validation authority for their feature.
   for a client without one — `jd logs --follow` and `jd deploy --wait` poll it. The `jd` program itself
   (`backend/cmd/jd`) is described in the README. Every route of this API is described as OpenAPI 3.1 at
   `GET /deploy/openapi.json` (`.yaml`; `jd openapi`), generated from the router and the handlers' types
-  and kept honest by its tests — see [`../backend/deploy-api.md`](../backend/deploy-api.md).
+  and kept honest by its tests — see [`../backend/deploy-api.md`](../backend/deploy-api.md). Typed
+  clients generated from it (`backend/internal/openapigen`) are committed in `sdk/`: a Go package
+  (`sdk/go`, its own module with no dependencies) and a TypeScript module over `fetch`
+  (`sdk/typescript`), a method or function per operation and a type per schema, held to the
+  description by `TestTheCommittedSDKsAreCurrent` (`JD_UPDATE_SDK=1` rewrites them).
 - Additional automation provider hooks verify each provider's exact raw-body signature before parsing and then fence
   event, repository, ref and delivery identity. The delivery row is reserved before preview or queue side
   effects, while legacy HMAC and scoped generic hooks retain their existing contracts. Environment branch/
@@ -1698,12 +1702,20 @@ only renderer/executor/validation authority for their feature.
   host alert and the overview's Rebuild, which is the runs route's own `force_build` of the live
   commit. See [image vulnerabilities](image-vulnerabilities.md).
 - An AI client reaches the deployments over the MCP endpoint when its key was given them
-  (`api_tokens.deploy_access`: none, `read`, `deploy`): it lists deployments, runs and releases,
-  reads a run's transcript tail (`OrchestrationStore.RunTranscriptTail`, the stored and already
-  masked `step.log` chunks, or a pre-engine run's bounded `deploy_runs.log`), and with `deploy`
-  queues a deploy or a rollback of a production environment through the same enqueue functions and
-  capability checks as the run and rollback routes. Previews, approvals, cancels, retries and
-  settings are not offered. See [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
+  (`api_tokens.deploy_access`: none, `read`, `deploy`; every deployment, or only those chosen in
+  `api_token_deployments`, as a deploy key is narrowed). Six hand-written tools list deployments,
+  runs and releases, read a run's transcript tail (`OrchestrationStore.RunTranscriptTail`, the stored
+  and already masked `step.log` chunks, or a pre-engine run's bounded `deploy_runs.log`), and with
+  `deploy` queue a deploy or a rollback of a production environment through the same enqueue
+  functions and capability checks as the run and rollback routes. Beside them, for a key whose owner
+  turned them on (`api_tokens.mcp_operations`, off for every key made before them), every route the deploy
+  key table opens (`keyOpen`, `keyEvery`) is a tool generated from the OpenAPI description, named for
+  its operationId, and made through the router as the MCP key with the deploy key gate and every
+  handler's deploy key rule applied (`httpx.WithMCPDelegate`, `Principal.ViaMCP`): reads under `read`,
+  changes under `deploy`, the routes behind `s.destructive` only for an owner who may take
+  destructive actions. 100 tools generated, 113 tools in all; previews' approvals, reveals, saved
+  credentials and every other session-only route stay out. See
+  [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters
   managed environment labels at the daemon before inspecting matching containers once each — running
   or stopped, since the set is one environment's (`ListContainersWithLastRun`; the plain labelled

@@ -82,11 +82,34 @@ export function deploymentsWithin(
   return access ?? ""
 }
 
-/** What a key may do with the deployments, as a list row says it. */
-const DEPLOYMENT_WORDS: Record<ApiTokenDeployments, string> = {
-  "": "",
-  read: "reads deployments",
-  deploy: "deploys",
+/**
+ * What a key may do with the deployments, as a list row says it: every one,
+ * or the ones its grant was narrowed to, counted.
+ */
+function deploymentWords(token: Pick<ApiToken, "deployments" | "deploymentIds">): string {
+  const count = token.deploymentIds?.length ?? 0
+  const some = count === 1 ? "1 deployment" : `${count} deployments`
+  switch (token.deployments ?? "") {
+    case "read":
+      return count === 0 ? "reads deployments" : `reads ${some}`
+    case "deploy":
+      return count === 0 ? "deploys" : `deploys ${some}`
+  }
+  return ""
+}
+
+/**
+ * The deployments a key's grant is narrowed to, as the server takes them: none
+ * for every deployment, otherwise the ones chosen in id order. A key given no
+ * deployments is narrowed to none.
+ */
+export function chosenDeployments(
+  access: ApiTokenDeployments,
+  every: boolean,
+  chosen: ReadonlySet<number>,
+): number[] {
+  if (access === "" || every) return []
+  return [...chosen].sort((a, b) => a - b)
 }
 
 /**
@@ -95,13 +118,13 @@ const DEPLOYMENT_WORDS: Record<ApiTokenDeployments, string> = {
  * it, so an id with no name is one the list has not caught up with yet.
  */
 export function grantSummary(
-  token: Pick<ApiToken, "connections" | "deployments">,
+  token: Pick<ApiToken, "connections" | "deployments" | "deploymentIds">,
   nameOf: (id: number) => string | undefined,
 ): string {
   const named = (token.connections ?? [])
     .map((c) => ({ ...c, name: nameOf(c.connectionId) }))
     .filter((c): c is ApiTokenConnection & { name: string } => c.name !== undefined)
-  const deployments = DEPLOYMENT_WORDS[token.deployments ?? ""]
+  const deployments = deploymentWords(token)
   if (named.length === 0) return deployments || "no databases"
   const byAccess = (access: ApiTokenConnection["access"]) =>
     named

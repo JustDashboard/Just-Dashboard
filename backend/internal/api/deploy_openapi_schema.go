@@ -123,6 +123,9 @@ func (s *openapiSchemas) enumerated(t reflect.Type, base map[string]any) map[str
 			list = append(list, v)
 		}
 		base["enum"] = list
+		// The vocabulary's own name, which a generated client gives the type
+		// its constants belong to (deploy.RunState is RunState there too).
+		base["title"] = componentName(t)
 	}
 	return base
 }

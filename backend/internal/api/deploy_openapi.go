@@ -185,6 +185,44 @@ var openapiWriteOnly = map[string]bool{
 	"secretstore.Write.Credentials":          true,
 }
 
+// openapiErrorFields says what each field of httpx.APIError, the envelope
+// every refusal is written in, carries. The fields themselves are read off the
+// type, so one added to it without a line here is a Problem rather than a
+// field the description leaves out.
+var openapiErrorFields = map[string]string{
+	"code":      "unauthorized, forbidden, session_required, key_scope, not_found, bad_request, revision_conflict and the route's own codes: what a client branches on.",
+	"message":   "The refusal in a sentence written to be read.",
+	"phrase":    "On a removal that takes a typed confirmation: the phrase to type.",
+	"field":     "The request field the refusal is about, as a path such as runtime.internalPort or checks[2].kind, when it is about one field rather than the whole request.",
+	"resource":  "What the request was acting on, when the handler names it.",
+	"operation": "What the request was trying to do, when the handler names it.",
+	"reason":    "The likely reason it did not work.",
+	"raw":       "What the subsystem underneath reported, kept for the details rather than the headline.",
+	"retryable": "Whether the same request may succeed if tried again: a timeout or a daemon that was briefly unreachable.",
+}
+
+// openapiErrorProperties is the error envelope's properties, read off
+// httpx.APIError as encoding/json writes it.
+func openapiErrorProperties(schemas *openapiSchemas, problems *[]string) map[string]any {
+	props := map[string]any{}
+	t := reflect.TypeOf(httpx.APIError{})
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if !f.IsExported() || name == "-" || name == "" {
+			continue
+		}
+		field := schemas.schemaOf(f.Type)
+		if description, ok := openapiErrorFields[name]; ok {
+			field["description"] = description
+		} else {
+			*problems = append(*problems, "httpx.APIError."+f.Name+" has no line in openapiErrorFields (deploy_openapi.go): say what it carries")
+		}
+		props[name] = field
+	}
+	return props
+}
+
 // Query parameters several routes share.
 var (
 	queryLimit  = openapiQuery{"limit", "integer", "How many to return at most."}
@@ -520,7 +558,7 @@ func openapiPathParam(pattern, name string) map[string]any {
 		for _, v := range openapiEnums[reflect.TypeOf(gameserver.PlayerAction(""))] {
 			values = append(values, v)
 		}
-		schema, description = map[string]any{"type": "string", "enum": values}, "The moderation action."
+		schema, description = map[string]any{"type": "string", "enum": values, "title": componentName(reflect.TypeOf(gameserver.PlayerAction("")))}, "The moderation action."
 	default:
 		schema, description = map[string]any{"type": "string"}, "The "+name+"."
 	}
@@ -702,13 +740,10 @@ func buildDeployOpenAPI(root chi.Routes) *openapiDocument {
 					"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{
 						"type": "object",
 						"properties": map[string]any{"error": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"code":    map[string]any{"type": "string", "description": "unauthorized, forbidden, session_required, key_scope, not_found, bad_request, revision_conflict and the route's own codes."},
-								"message": map[string]any{"type": "string"},
-								"phrase":  map[string]any{"type": "string", "description": "On a removal that takes a typed confirmation: the phrase to type."},
-							},
-							"required": []any{"code", "message"},
+							"type":       "object",
+							"title":      "Error",
+							"properties": openapiErrorProperties(schemas, &doc.Problems),
+							"required":   []any{"code", "message"},
 						}},
 						"required": []any{"error"},
 					}}},
@@ -749,6 +784,12 @@ func operationObject(schemas *openapiSchemas, id, method, pattern string, op dep
 	security, deployKey := openapiSecurity(method, pattern, middlewares)
 	object["security"] = security
 	object["x-deploy-key"] = deployKey
+	// Behind s.destructive: the destructive capability and its budget, read
+	// off the chain as the security is. A route whose handler decides from
+	// the body (a run's stop or restart) is not marked; its note says so.
+	if isDestructive(middlewares) {
+		object["x-destructive"] = true
+	}
 	if description != "" {
 		object["description"] = description
 	}
@@ -838,6 +879,9 @@ type deployOpenAPISource struct {
 	root chi.Routes
 	once sync.Once
 	doc  *openapiDocument
+	// tools is the MCP tools generated from the same router and description
+	// (handlers_mcp_operations.go), read off them once somebody asks.
+	tools mcpCatalogueSource
 }
 
 func (src *deployOpenAPISource) document() *openapiDocument {

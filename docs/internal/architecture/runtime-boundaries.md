@@ -182,10 +182,13 @@ valid until revoked or expired; creating a replacement does not impersonate anot
 An MCP key's replacement is made on `POST /tokens/mcp` at the old key's role with the databases the
 old key reaches that are neither protected nor forgotten since, each narrowed to `read` where that
 role may not change a database, and the old key's deployment grant, narrowed to `read` where that
-role may not deploy. `PUT /tokens/{id}/connections`
+role may not deploy, with the deployments that grant was narrowed to and the generated tools only if
+the old key had them. `PUT /tokens/{id}/connections`
 (session only, the owner's own active MCP key, `404` for another account's, `409 not_mcp_key` for any
-other key) replaces what a key reaches without a new secret; it is audited as
-`dashboard.token.connections` with the databases by name and the deployment grant. Forgetting a connection removes its grants
+other key) replaces what a key reaches without a new secret — its databases, its deployment grant and
+its chosen deployments and whether it has the generated tools, each kept when left out; it is audited as
+`dashboard.token.connections` with the databases by name, the deployment grant, what it reaches and
+`operations`. Forgetting a connection removes its grants
 with it (`ON DELETE CASCADE`).
 A deploy key (`auth.ScopeDeploy`) is made on `POST /tokens/deploy` (session only, `system.admin`) from
 `{name, ttlDays, deploymentIds}` and always holds the administrator role, which `CreateDeployToken`
@@ -266,7 +269,7 @@ and another SQLite closing its connection afterwards would believe it was the la
 `-wal` and `-shm` the store is still writing through, corrupting the database. Inspect a live store
 read-only: `sqlite3 'file:/var/lib/just-dashboard/vpsd.db?mode=ro'`.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
-`api_tokens`, `api_token_connections` — the databases an MCP key reaches —, `api_token_deployments` — the deployments a deploy key was narrowed to —, `audit_log`, whose `key_id` and `key_name` name the API key behind a request); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`, the statement history's `db_statement_intervals`, `db_statement_shapes` and `db_statement_samples`, point-in-time recovery's `db_wal_archives` — with the destination's keys and the archive's private key sealed — `db_wal_restore_points` and `db_wal_restores`, `db_upgrades`, and `db_tls_ca` and `db_server_tls` for the certificate authority, whose key is sealed, and the certificates issued from it); boards (`boards`, the images placed on them in `board_files`, the install's shape library in `board_library`, and `sticky_boards`, which nothing reads since Stickyboard was removed in 0.8 but which stays so the boards made with it in 0.7.2–0.7.5 survive an update); Remote Desktop (`remote_desktop_computers`, with sealed passwords and the stream bridge's id once paired, and
+`api_tokens`, `api_token_connections` — the databases an MCP key reaches —, `api_token_deployments` — the deployments a deploy key, or an MCP key's deployment grant, was narrowed to —, `audit_log`, whose `key_id` and `key_name` name the API key behind a request); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`, the statement history's `db_statement_intervals`, `db_statement_shapes` and `db_statement_samples`, point-in-time recovery's `db_wal_archives` — with the destination's keys and the archive's private key sealed — `db_wal_restore_points` and `db_wal_restores`, `db_upgrades`, and `db_tls_ca` and `db_server_tls` for the certificate authority, whose key is sealed, and the certificates issued from it); boards (`boards`, the images placed on them in `board_files`, the install's shape library in `board_library`, and `sticky_boards`, which nothing reads since Stickyboard was removed in 0.8 but which stays so the boards made with it in 0.7.2–0.7.5 survive an update); Remote Desktop (`remote_desktop_computers`, with sealed passwords and the stream bridge's id once paired, and
 `remote_desktop_sessions`); backups
 (`backup_jobs`, `backup_runs`, `backup_restore_tests`); legacy deployment compatibility (`deploy_projects`, `deploy_env`,
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,

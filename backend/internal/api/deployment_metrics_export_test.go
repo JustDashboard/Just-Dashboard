@@ -247,7 +247,7 @@ func TestDeploymentMetricsExportAnswersNothingToTheWrongCaller(t *testing.T) {
 	if w := scrapePath(s, http.MethodGet, deploymentMetricsEndpoint, deployKey); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "key_scope") {
 		t.Fatalf("deploy key = %d %s", w.Code, w.Body.String())
 	}
-	_, mcpKey, err := s.Auth.CreateMCPToken(t.Context(), admin, "claude-code", "", time.Hour, nil, auth.DeployRun)
+	_, mcpKey, err := s.Auth.CreateMCPToken(t.Context(), admin, "claude-code", "", time.Hour, nil, auth.DeployRun, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
