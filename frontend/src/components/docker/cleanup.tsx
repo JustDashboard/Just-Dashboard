@@ -11,7 +11,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ROW_BLEED } from "@/components/row-list"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
-import { LoadingRows } from "@/components/state"
+import { ErrorState, LoadingRows } from "@/components/state"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -39,7 +39,7 @@ export function CleanupPanel({
   onDone?: () => void
   className?: string
 }) {
-  const { data, loading, refresh } = usePoll<CleanupPreview>(
+  const { data, error, loading, refresh } = usePoll<CleanupPreview>(
     (signal) => get<CleanupPreview>("/docker/cleanup/preview", undefined, signal),
     120_000,
   )
@@ -137,6 +137,8 @@ export function CleanupPanel({
       <PanelBody flush>
         {loading && !data ? (
           <LoadingRows rows={4} className="py-3" />
+        ) : error && !data ? (
+          <ErrorState error={error} onRetry={refresh} retryable className="my-3" />
         ) : (
           <ul className="divide-y divide-hairline">
             {(data?.categories ?? []).map((category) => (
@@ -150,35 +152,38 @@ export function CleanupPanel({
           </ul>
         )}
       </PanelBody>
-      <PanelFooter>
-        <span className="text-body">
-          {chosen.length === 0 ? (
-            <span className="text-muted-foreground">Nothing selected.</span>
-          ) : (
-            <>
-              <b className="numeric">{bytes(total)}</b>
-              <span className="text-muted-foreground">
-                {" "}
-                from {chosen.length} {chosen.length === 1 ? "category" : "categories"}
-              </span>
-            </>
-          )}
-        </span>
-        <Button
-          size="sm"
-          variant={destroys ? "destructive" : "outline"}
-          className="ml-auto"
-          disabled={busy || chosen.length === 0}
-          onClick={run}
-        >
-          <Trash className="size-3.5" />
-          {chosen.length === 0
-            ? "Reclaim"
-            : destroys
-              ? `Remove · Reclaim ${bytes(total)}`
-              : `Reclaim ${bytes(total)}`}
-        </Button>
-      </PanelFooter>
+      {/* With nothing read there is nothing to reclaim or to have selected. */}
+      {!(error && !data) && (
+        <PanelFooter>
+          <span className="text-body">
+            {!data ? null : chosen.length === 0 ? (
+              <span className="text-muted-foreground">Nothing selected.</span>
+            ) : (
+              <>
+                <b className="numeric">{bytes(total)}</b>
+                <span className="text-muted-foreground">
+                  {" "}
+                  from {chosen.length} {chosen.length === 1 ? "category" : "categories"}
+                </span>
+              </>
+            )}
+          </span>
+          <Button
+            size="sm"
+            variant={destroys ? "destructive" : "outline"}
+            className="ml-auto"
+            disabled={busy || chosen.length === 0}
+            onClick={run}
+          >
+            <Trash className="size-3.5" />
+            {chosen.length === 0
+              ? "Reclaim"
+              : destroys
+                ? `Remove · Reclaim ${bytes(total)}`
+                : `Reclaim ${bytes(total)}`}
+          </Button>
+        </PanelFooter>
+      )}
     </Panel>
   )
 }

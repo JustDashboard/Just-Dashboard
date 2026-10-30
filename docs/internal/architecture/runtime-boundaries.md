@@ -89,8 +89,15 @@ systemd through `jobs.RunDetached`, and a restarted backend adopts them; see
 
 - `Command` runs a binary locally when present, else via `nsenter --target 1`. `CommandOnHost` *always*
   crosses (for tools like `who` that exist in the image but would report on the container).
-  `CommandInDir` and `CommandOnHostInDir` pass `--wd` to nsenter because crossing namespaces silently
-  discards `cmd.Dir`.
+  `CommandInDir` and `CommandOnHostInDir` change directory in a small shell on the far side, because
+  crossing namespaces silently discards `cmd.Dir` and nsenter's `--wd` resolves the path on the wrong side.
+- nsenter runs with `--no-fork`, so the process `exec.Cmd` holds is the host command and a cancelled
+  context reaches it. `--pid` still has nothing to fork for: `/proc/1` is resolved in this process's own
+  PID namespace, so the namespace it joins is the one it is already in. Every command also carries a
+  `WaitDelay` (5 seconds): Wait stops waiting for descendants that keep the output pipe open, and reports
+  `exec.ErrWaitDelay` when the command itself succeeded. Killing one command does not kill what it
+  started; a caller that must stop a whole tree uses `RunGroup`, which clears the delay and signals the
+  process group.
 - `AsOwner(cmd)` drops to the UID/GID owning `cmd.Dir`, so a `git pull` does not leave root-owned files.
 - `CommandOnHostAsUser` enters the host namespace before using `setpriv` to select the trusted account's
   UID/GID and groups, clear capabilities and set no-new-privileges. PM2 uses this path with a minimal
@@ -99,6 +106,9 @@ systemd through `jobs.RunDetached`, and a restarted backend adopts them; see
   to a thread that unshares its filesystem attributes and `setns`es into `/proc/1/ns/mnt`, a thread Go
   then discards rather than reuses. Only `fn` moves; a goroutine it starts is back in the container.
   Where there is no other namespace (a plain install) or it cannot be entered, `fn` runs in place.
+  The runtime cannot discard the process's main thread, so `cmd/server` keeps it on the main goroutine
+  with `runtime.LockOSThread` in `init`. Otherwise `/proc/<pid>/ns/mnt`, which `docker exec` and so the
+  container health check join, can end up as the host's for good.
 - Argv is passed through unchanged and **never** through a shell. Keep it that way ([invariant 6](../security/invariants.md#invariants-that-must-not-regress)).
 
 Local interactive rebase uses Git's editor protocol: `gitx` sets the editor to the current server
@@ -173,6 +183,12 @@ records the greatest consumed 30-second counter; verification conditionally adva
 the session in one transaction, so simultaneous requests cannot reuse a code. Recovery codes are also
 consumed transactionally. An additive schema migration introduces the counter column; resetting TOTP
 clears the counter with the account update.
+Failed sign-ins count in the write itself (`auth.countFailure`, one `UPDATE … RETURNING`), so failures
+arriving together each count, and a lock set while a password was being checked stands. Five wrong
+passwords lock sign-in for fifteen minutes; five wrong codes, authenticator or recovery, lock the second
+factor for fifteen, apart from it (`totp_failed_count`, `totp_locked_until`, additive). A code's verdict
+and its count share one immediate transaction that does not end with the request, so an attempt counts
+even if the client disconnects. `VerifyReauthentication` reads and adds to the same count.
 An account marked `must_change_pw` must finish its required factors before the password-change
 route becomes available, and cannot use feature routes or API tokens until the password is changed.
 API tokens may narrow their creator's role, never widen it, and are demoted with the account.
@@ -210,6 +226,9 @@ trail. No schema change or credential recovery is involved.
 The first admin is created by `cmd/server/main.go` from `JD_BOOTSTRAP_USER`/`JD_BOOTSTRAP_PASSWORD`;
 `must_change_pw` is set only when the password was *generated* there and printed to the log — a
 password the operator chose in the installer is theirs and is not demanded again at first sign-in.
+`install.sh` validates that password with `scripts/password.sh`, the same rule as
+`auth.ValidatePasswordStrength`, and on a fresh install removes it from `.env` and recreates the backend
+after the first health check; nothing reads it again once an account exists, and a kept `.env` is not touched.
 The same holds for `scripts/create-user.sh` and `scripts/reset-password.sh`: a password root typed on
 the host is already chosen. Only an account an admin creates from Account → Users owes a change.
 
@@ -221,7 +240,7 @@ heap had doubled, which left the process at about 155 MB for up to half a minute
 
 Local host-root account recovery uses the same binary's isolated `--admin` mode through
 `scripts/manage.sh`. It opens only an existing store and starts no server or modules. Password resets
-atomically set the new password, clear any owed change and login lockout, and revoke sessions/API
+atomically set the new password, clear any owed change and both lockouts, and revoke sessions/API
 tokens and passkeys while keeping TOTP enrollment, recovery codes and disabled state; account mutations are audited
 as actor `cli`. See [terminal tools](../operations/terminal-tools.md) for commands and the local
 privilege boundary.
@@ -300,7 +319,9 @@ columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract.
 `internal/audit` writes `audit_log` **and** mirrors every entry to the process log, so a trail survives
 the database being tampered with. The row is written with the request's values but not its
 cancellation (bounded at five seconds), so a client that disconnects once its mutation applied still
-leaves the row. An `Entry` records who (user, role, `Actor` = session or token), from
+leaves the row. Fields a request can choose are bounded in both the row and the log line (`Username`
+128 bytes, `Target` 1000, `Path` 2048, `Detail` 4000, `KeyName` 200, cut on a character boundary and
+ending in `…`). An `Entry` records who (user, role, `Actor` = session or token), from
 where, what (action, target, method, path), and how it went. Local root account commands use
 `Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target.
 
@@ -324,6 +345,12 @@ it was registered under and the name its owner gave it; `ON DELETE CASCADE` with
   `dash.example.com` does not sign in at the tailnet name; each is stored with its RP ID and the
   security page says where a passkey made elsewhere works. At an IP address the sign-in and security
   pages say why no passkey is offered instead of offering one that fails.
+- **The page's policy.** `deploy/Caddyfile` sends `publickey-credentials-get=(self)` in its
+  `Permissions-Policy`, and `passkeys.test.js` reads the file to hold it there, since browser specs do
+  not pass through Caddy. Where another proxy forbids the feature, the same pages say so in place of
+  the offer (`policyAllowsPasskeys`). A browser that cannot read its policy refuses with the
+  `NotAllowedError` a closed prompt gives, told apart by the browser's message (`refusedByPolicy`), and
+  only a press of the button reports it: the autofill offer stays quiet.
 - **Ceremonies.** Registration asks for a discoverable credential with user verification required,
   excludes the account's existing ones, and takes no attestation. Sign-in is discoverable (no
   username): the authenticator's user handle — an HMAC of the account id under the install's key, so
@@ -362,3 +389,15 @@ that does not make it a password-and-code session. Enrolment proves its code, wh
 elevation retains its recorded provenance, including unknown legacy provenance. Account session summaries use this distinction and display
 legacy/unknown authentication honestly. Migration and authentication tests cover existing rows and
 password/code/recovery completion; route authorization and per-account enforcement are unchanged.
+
+## Container limits in `docker-compose.yml`
+
+Every service rotates its logs through the shared `x-logging` block (`json-file`, five files of 10 MB).
+The backend stays root and privileged, because managing the host is what it is for. The frontend and the
+proxy run with `no-new-privileges` and every capability dropped, and the proxy keeps `NET_BIND_SERVICE`
+although it never binds below 1024: the `caddy` binary in its image carries that as a file capability, and
+the kernel refuses to exec such a binary without it, so the container restart-loops with
+`caddy: Operation not permitted`. The proxy's healthcheck is `nc -z` on loopback, which it binds in every
+configuration. `up --wait` in the updater and the settings runner now waits for it as well, at the same
+30-second interval as the frontend's, so neither takes longer, and a proxy that never listens now fails
+that step instead of being found later.

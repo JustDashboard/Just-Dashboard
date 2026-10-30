@@ -39,19 +39,20 @@
  * there is more than one file*, redrawn as a heading, because in a commit's
  * diff it is the only thing separating one file from the next.
  */
-export type DiffRow = /** A file's name, where one diff holds several. */
-(
-  | { kind: "heading"; text: string }
-  /** `@@ -1,7 +1,9 @@` — where in the file the next run of lines sits. */
-  | { kind: "hunk"; text: string }
-  /** `rename from` / `rename to`: the one header line that is news. */
-  | { kind: "rename"; text: string }
-  | { kind: "add"; text: string; newNo: number }
-  | { kind: "del"; text: string; oldNo: number }
-  | { kind: "context"; text: string; oldNo: number; newNo: number }
-  /** Anything with no place in either file — the no-newline note, blank tails. */
-  | { kind: "meta"; text: string }
-) & { sourceLine?: number }
+export type DiffRow =
+  /** A file's name, where one diff holds several. */
+  (
+    | { kind: "heading"; text: string }
+    /** `@@ -1,7 +1,9 @@` — where in the file the next run of lines sits. */
+    | { kind: "hunk"; text: string }
+    /** `rename from` / `rename to`: the one header line that is news. */
+    | { kind: "rename"; text: string }
+    | { kind: "add"; text: string; newNo: number }
+    | { kind: "del"; text: string; oldNo: number }
+    | { kind: "context"; text: string; oldNo: number; newNo: number }
+    /** Anything with no place in either file — the no-newline note, blank tails. */
+    | { kind: "meta"; text: string }
+  ) & { sourceLine?: number }
 
 /** `@@ -12,7 +12,9 @@ func thing()` and `@@ -1 +1 @@` alike. */
 const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/

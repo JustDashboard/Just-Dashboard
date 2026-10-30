@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -39,6 +40,15 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/uninstall"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/version"
 )
+
+// init keeps the main thread on the main goroutine for the life of the process.
+//
+// hostexec.InHostMounts and the network namespace helpers move a locked thread
+// into another namespace and let it end with its goroutine. The runtime cannot
+// end the main thread, so a goroutine that happened to be scheduled there would
+// leave it parked in that namespace for good. The process's identity is that
+// thread: /proc/<pid>/ns is what docker exec, and so the health check, joins.
+func init() { runtime.LockOSThread() }
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--network-sqm-check" {

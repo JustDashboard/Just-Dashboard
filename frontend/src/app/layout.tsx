@@ -1,23 +1,14 @@
 import type { Metadata } from "next"
 import { headers } from "next/headers"
-import localFont from "next/font/local"
 import { Toaster } from "@/components/ui/sonner"
 import { AuthProvider } from "@/hooks/use-auth"
 import { themeBootstrapScript } from "@/lib/themes"
+import { sourceSans3 } from "./font"
 import "./globals.css"
 
-/* The UI face is bundled so builds and running servers need no font CDN. */
-const sourceSans3 = localFont({
-  src: [
-    { path: "./fonts/SourceSans3VF-Upright.woff2", weight: "200 900", style: "normal" },
-    { path: "./fonts/SourceSans3VF-Italic.woff2", weight: "200 900", style: "italic" },
-  ],
-  variable: "--font-source-sans-3",
-  display: "swap",
-})
-
+// No title here: each of the pages below names its own tab (`login/layout.tsx`,
+// `welcome/layout.tsx`, and the dashboard's layout from the address).
 export const metadata: Metadata = {
-  title: "Just Dashboard",
   description: "Self-hosted server management",
   robots: { index: false, follow: false },
 }

@@ -34,7 +34,13 @@ export function IdentityDialog(props: IdentityDialogProps) {
   return <IdentityDialogBody key={key} {...props} />
 }
 
-function IdentityDialogBody({ open, onOpenChange, repoPath, identity, onSaved }: IdentityDialogProps) {
+function IdentityDialogBody({
+  open,
+  onOpenChange,
+  repoPath,
+  identity,
+  onSaved,
+}: IdentityDialogProps) {
   const [name, setName] = useState(identity?.name ?? "")
   const [email, setEmail] = useState(identity?.email ?? "")
   const [busy, setBusy] = useState(false)
@@ -44,7 +50,11 @@ function IdentityDialogBody({ open, onOpenChange, repoPath, identity, onSaved }:
     setBusy(true)
     setError(undefined)
     try {
-      await post("/git/identity", { name: name.trim(), email: email.trim() }, { query: { path: repoPath } })
+      await post(
+        "/git/identity",
+        { name: name.trim(), email: email.trim() },
+        { query: { path: repoPath } },
+      )
       notify.success("Commits here are recorded as " + name.trim())
       onSaved()
       onOpenChange(false)

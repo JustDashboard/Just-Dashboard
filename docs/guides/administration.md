@@ -29,7 +29,7 @@ Passwords are entered twice with hidden input and must meet the dashboard's stre
 password a script sets is the one the account signs in with — the dashboard does not ask for another
 at sign-in. An account an admin creates from Account → Users, and a bootstrap password the backend
 generated, are the ones replaced on first sign-in, after any required two-factor step. A reset
-clears failed-login lockout and revokes that account's sessions, API tokens and passkeys, while keeping
+clears failed-login and failed-code lockouts and revokes that account's sessions, API tokens and passkeys, while keeping
 two-factor enrolment, recovery codes, role and disabled state. Account changes are audited as local
 root; `revoke-sessions` leaves API tokens unchanged.
 

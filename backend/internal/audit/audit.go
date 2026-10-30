@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 )
@@ -33,6 +34,17 @@ type Entry struct {
 	KeyName string `json:"keyName,omitempty"`
 }
 
+// The longest a field is kept, in bytes. A username or a path can be whatever
+// a request said, including one that was refused, and every one of them is
+// written twice: to the table and to the process log.
+const (
+	maxUsernameLen = 128
+	maxTargetLen   = 1000
+	maxPathLen     = 2048
+	maxDetailLen   = 4000
+	maxKeyNameLen  = 200
+)
+
 type Logger struct {
 	st  *store.Store
 	log *slog.Logger
@@ -51,6 +63,11 @@ func (l *Logger) Record(ctx context.Context, e Entry) {
 	if e.Actor == "" {
 		e.Actor = "session"
 	}
+	e.Username = truncate(e.Username, maxUsernameLen)
+	e.Target = truncate(e.Target, maxTargetLen)
+	e.Path = truncate(e.Path, maxPathLen)
+	e.Detail = truncate(e.Detail, maxDetailLen)
+	e.KeyName = truncate(e.KeyName, maxKeyNameLen)
 	success := 1
 	if !e.Success {
 		success = 0
@@ -64,7 +81,7 @@ func (l *Logger) Record(ctx context.Context, e Entry) {
 		`INSERT INTO audit_log(ts, user_id, username, role, ip, actor, action, target, method, path, status, success, detail, key_id, key_name)
 		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		e.TS.Unix(), e.UserID, e.Username, e.Role, e.IP, e.Actor, e.Action, e.Target,
-		e.Method, e.Path, e.Status, success, truncate(e.Detail, 4000), e.KeyID, truncate(e.KeyName, 200)); err != nil {
+		e.Method, e.Path, e.Status, success, e.Detail, e.KeyID, e.KeyName); err != nil {
 		l.log.Error("audit write failed", "err", err, "action", e.Action)
 	}
 	attrs := []any{"user", e.Username, "role", e.Role, "ip", e.IP, "actor", e.Actor,
@@ -231,9 +248,13 @@ func nonEmpty(values []string) []string {
 	return out
 }
 
+// truncate cuts on a character boundary, so what is kept stays valid UTF-8.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n] + "…"
 }

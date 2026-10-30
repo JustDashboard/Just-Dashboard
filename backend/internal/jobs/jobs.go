@@ -32,6 +32,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 )
 
 // Status is where a job has got to.
@@ -78,6 +80,10 @@ type Job struct {
 	// Lines is how many have been produced, including any the ring buffer has
 	// already dropped — so a truncated log can say it was truncated.
 	Lines int `json:"lines"`
+	// Capability is what stopping it takes. It rides on the job, and on the
+	// record a detached one leaves, so a dashboard that restarts under an
+	// upgrade still knows.
+	Capability auth.Capability `json:"capability,omitempty"`
 }
 
 // Spec describes a job before it runs.
@@ -86,6 +92,10 @@ type Spec struct {
 	Title     string
 	Target    string
 	StartedBy string
+	// Capability is the one the route that starts this job asks for, and
+	// stopping it asks for the same (api.handleJobCancel). A job that does not
+	// name one takes system.admin to stop.
+	Capability auth.Capability
 	// Timeout bounds the work. It is the only bound: nothing joins these
 	// goroutines and shutdown does not cancel them, for the same reason a
 	// deploy halfway through is worse than one that finishes into a dashboard
@@ -203,7 +213,7 @@ func (m *Manager) start(spec Spec, run Runner, exclusive string) (Job, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), spec.Timeout)
 	e := m.registerLocked(Job{
 		ID: newID(), Kind: spec.Kind, Title: spec.Title, Target: spec.Target,
-		Status: StatusRunning, StartedAt: time.Now().UTC(), StartedBy: spec.StartedBy,
+		Status: StatusRunning, StartedAt: time.Now().UTC(), StartedBy: spec.StartedBy, Capability: spec.Capability,
 	}, cancel, exclusive != "")
 	m.mu.Unlock()
 

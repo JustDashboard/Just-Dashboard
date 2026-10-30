@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netpath"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
@@ -171,7 +172,7 @@ func (s *Service) enqueue(ctx context.Context, run Run, actor, rerunOf string) (
 	if run.Kind == "investigation" {
 		jobKind = "investigation"
 	}
-	job, _ := s.jobs.StartExclusive(JobPrefix+run.ID+".", jobs.Spec{Kind: JobPrefix + run.ID + "." + jobKind, Title: run.Name, Target: run.Scope.Target, StartedBy: actor, Timeout: s.timeout},
+	job, _ := s.jobs.StartExclusive(JobPrefix+run.ID+".", jobs.Spec{Capability: auth.CapSystemAdmin, Kind: JobPrefix + run.ID + "." + jobKind, Title: run.Name, Target: run.Scope.Target, StartedBy: actor, Timeout: s.timeout},
 		func(jobCtx context.Context, out jobs.Emitter) error { <-gate; return s.execute(jobCtx, run, out) })
 	entry.jobID, run.JobID = job.ID, job.ID
 	err := s.store.bindJob(ctx, run.ID, job.ID)

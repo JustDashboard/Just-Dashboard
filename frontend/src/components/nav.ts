@@ -617,3 +617,15 @@ export function navLocation(
   if (personal) return { group: "Account", parents: [], title: personal.title }
   return null
 }
+
+export const APP_NAME = "Just Dashboard"
+
+/**
+ * What the browser's tab says on a page: "Files · Just Dashboard". An address
+ * the nav has no row for takes the section it sits in, and one under no
+ * section takes the product's name alone.
+ */
+export function tabTitle(pathname: string): string {
+  const page = navLocation(pathname)?.title ?? sectionsFor(pathname)[0]?.title
+  return page ? `${page} · ${APP_NAME}` : APP_NAME
+}

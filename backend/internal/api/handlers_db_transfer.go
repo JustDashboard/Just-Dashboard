@@ -1134,8 +1134,8 @@ func (s *Server) runningTransfer(id int64) (jobs.Job, bool) {
 // the load for a second copy of the same thing; a dump of a database being
 // restored is a dump of neither state; a restore into one being dumped pulls
 // the tables out from under the reader.
-func (s *Server) startTransfer(w http.ResponseWriter, r *http.Request, conn *dbConnection, what, title string, run jobs.Runner) error {
-	job, err := s.launchTransfer(r, conn, what, title, run)
+func (s *Server) startTransfer(w http.ResponseWriter, r *http.Request, conn *dbConnection, capability auth.Capability, what, title string, run jobs.Runner) error {
+	job, err := s.launchTransfer(r, conn, capability, what, title, run)
 	if err != nil {
 		return err
 	}
@@ -1145,9 +1145,9 @@ func (s *Server) startTransfer(w http.ResponseWriter, r *http.Request, conn *dbC
 
 // launchTransfer is startTransfer for a caller with something more to say than
 // the job in its answer.
-func (s *Server) launchTransfer(r *http.Request, conn *dbConnection, what, title string, run jobs.Runner) (jobs.Job, error) {
+func (s *Server) launchTransfer(r *http.Request, conn *dbConnection, capability auth.Capability, what, title string, run jobs.Runner) (jobs.Job, error) {
 	spec := jobs.Spec{
-		Kind: transferPrefix(conn.ID) + what, Title: title, Target: conn.Name,
+		Capability: capability, Kind: transferPrefix(conn.ID) + what, Title: title, Target: conn.Name,
 		Timeout: transferTimeout, StartedBy: httpx.MustPrincipal(r).Username(),
 	}
 	job, started := s.modules.jobs.StartExclusive(transferPrefix(conn.ID), spec, run)
@@ -1290,7 +1290,7 @@ func (s *Server) startDBBackup(w http.ResponseWriter, r *http.Request) error {
 	base, by := auditBaseOf(r), httpx.MustPrincipal(r).Username()
 	detail := map[string]any{"database": opts.Database, "contents": dbx.ContentsOf(opts)}
 	httpx.SetAudit(r, "database.backup", conn.Name, detail)
-	return s.startTransfer(w, r, conn, "backup", "Dump "+conn.Name, func(ctx context.Context, out jobs.Emitter) error {
+	return s.startTransfer(w, r, conn, auth.CapServiceControl, "backup", "Dump "+conn.Name, func(ctx context.Context, out jobs.Emitter) error {
 		out.Status("Dumping %s", conn.Name)
 		res, err := s.takeDump(ctx, conn, dsn, opts, note, dbx.DumpOriginDump, by, out)
 		if err != nil {
@@ -1458,7 +1458,7 @@ func (s *Server) startDBRestore(w http.ResponseWriter, r *http.Request) error {
 	if create != "" {
 		title = "Restore into " + create
 	}
-	return s.startTransfer(w, r, conn, "restore", title, func(ctx context.Context, out jobs.Emitter) error {
+	return s.startTransfer(w, r, conn, auth.CapDestructive, "restore", title, func(ctx context.Context, out jobs.Emitter) error {
 		result := transferResult{File: file, Database: shown}
 		output, err := s.runRestore(ctx, conn, dsn, dumpPath, target, create != "", req.DumpFirst, by, out, &result)
 		outcome := map[string]any{"database": shown, "file": file}
@@ -1600,7 +1600,7 @@ func (s *Server) handleDBCopy(w http.ResponseWriter, r *http.Request) error {
 	base := auditBaseOf(r)
 	detail := map[string]any{"from": conn.Database, "to": name, "structureOnly": req.StructureOnly}
 	httpx.SetAudit(r, "database.copy", conn.Name, detail)
-	return s.startTransfer(w, r, conn, "copy", "Copy "+conn.Name+" to "+name, func(ctx context.Context, out jobs.Emitter) error {
+	return s.startTransfer(w, r, conn, auth.CapSystemAdmin, "copy", "Copy "+conn.Name+" to "+name, func(ctx context.Context, out jobs.Emitter) error {
 		err := s.runCopy(ctx, conn, dsn, name, opts, out)
 		s.recordTransfer(base, "database.copy.finish", conn.Name, detail, err)
 		return err
@@ -1695,7 +1695,7 @@ func (s *Server) copyToServer(w http.ResponseWriter, r *http.Request, from *dbCo
 	detail := map[string]any{"from": from.Database, "to": name, "toConnection": to.Name, "structureOnly": req.StructureOnly}
 	httpx.SetAudit(r, "database.copy", from.Name, detail)
 	title := "Copy " + from.Name + " to " + to.Name
-	return s.startTransfer(w, r, from, "copy", title, func(ctx context.Context, out jobs.Emitter) error {
+	return s.startTransfer(w, r, from, auth.CapSystemAdmin, "copy", title, func(ctx context.Context, out jobs.Emitter) error {
 		err := s.runCopyToServer(ctx, from, fromDSN, to, toDSN, source, name, req.StructureOnly, out)
 		s.recordTransfer(base, "database.copy.finish", from.Name, detail, err)
 		return err

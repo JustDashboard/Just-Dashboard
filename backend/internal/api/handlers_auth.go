@@ -179,6 +179,10 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	if err := s.Auth.VerifySecondFactor(r.Context(), p.SessionID, p.UserID(), req.Code); err != nil {
+		if errors.Is(err, auth.ErrSecondFactorLocked) {
+			httpx.SetAudit(r, "auth.2fa.verify", p.Username(), map[string]any{"result": "locked"})
+			return httpx.Err(http.StatusTooManyRequests, "second_factor_locked", err.Error())
+		}
 		httpx.SetAudit(r, "auth.2fa.verify", p.Username(), map[string]any{"result": "rejected"})
 		return httpx.Err(http.StatusUnauthorized, "invalid_code", "invalid verification code")
 	}
@@ -200,7 +204,14 @@ func (s *Server) limitSecondFactor(r *http.Request) error {
 	if p.Elevated && p.User.MustChangePW {
 		return httpx.Err(http.StatusForbidden, "password_change_required", "change your temporary password before continuing")
 	}
-	key := "totp|" + strconv.FormatInt(p.UserID(), 10)
+	return s.spendGuess(r)
+}
+
+// spendGuess takes one guess from the account's budget. A password asked for
+// again from a session is guessed against the same budget as a code, whichever
+// route asks for it, so no form is a way around another.
+func (s *Server) spendGuess(r *http.Request) error {
+	key := "totp|" + strconv.FormatInt(httpx.MustPrincipal(r).UserID(), 10)
 	if !s.loginLim.Allow(key) {
 		return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many verification attempts")
 	}
@@ -218,6 +229,9 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 	p := httpx.MustPrincipal(r)
+	if err := s.spendGuess(r); err != nil {
+		return err
+	}
 	if !s.Auth.VerifyUserPassword(r.Context(), p.UserID(), req.CurrentPassword) {
 		httpx.SetAudit(r, "auth.password.change", p.Username(), map[string]any{"result": "rejected"})
 		return httpx.Err(http.StatusUnauthorized, "invalid_credentials", "current password is incorrect")
@@ -239,8 +253,24 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
+// handleRecoveryCodesRegen replaces the caller's recovery codes. A recovery
+// code passes for the authenticator, so a new set costs what turning the
+// authenticator off costs: the password, which an open session does not hold.
 func (s *Server) handleRecoveryCodesRegen(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
 	p := httpx.MustPrincipal(r)
+	if err := s.spendGuess(r); err != nil {
+		return err
+	}
+	if !s.Auth.VerifyUserPassword(r.Context(), p.UserID(), req.Password) {
+		httpx.SetAudit(r, "auth.2fa.recovery.regenerate", p.Username(), map[string]any{"result": "rejected"})
+		return httpx.Err(http.StatusUnauthorized, "invalid_credentials", "that password is incorrect")
+	}
 	codes, err := s.Auth.RegenerateRecoveryCodes(r.Context(), p.UserID())
 	if err != nil {
 		return httpx.Internal(err)
@@ -264,6 +294,9 @@ func (s *Server) handleDisableTOTP(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	p := httpx.MustPrincipal(r)
+	if err := s.spendGuess(r); err != nil {
+		return err
+	}
 	if !s.Auth.VerifyUserPassword(r.Context(), p.UserID(), req.Password) {
 		httpx.SetAudit(r, "auth.2fa.disable", p.Username(), map[string]any{"result": "rejected"})
 		return httpx.Err(http.StatusUnauthorized, "invalid_credentials", "that password is incorrect")

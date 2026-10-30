@@ -253,23 +253,38 @@ func (s *Service) VerifyReauthentication(ctx context.Context, userID int64, pass
 	if !u.TOTPEnabled {
 		return nil
 	}
+	ctx, cancel := secondFactorContext(ctx)
+	defer cancel()
+	tx, err := s.st.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	var sealed string
-	if err := s.st.DB.QueryRowContext(ctx, `SELECT totp_secret FROM users WHERE id = ? AND totp_enabled = 1`, userID).Scan(&sealed); err != nil {
+	var lockedUntil int64
+	if err := tx.QueryRowContext(ctx, `SELECT totp_secret, totp_locked_until FROM users WHERE id = ? AND totp_enabled = 1`, userID).Scan(&sealed, &lockedUntil); err != nil {
 		return ErrReauthentication
+	}
+	if lockedUntil > time.Now().Unix() {
+		return ErrSecondFactorLocked
 	}
 	step, ok := s.validTOTPStep(sealed, code)
 	if !ok {
-		return ErrReauthentication
+		return countBadCode(ctx, tx, userID, ErrReauthentication)
 	}
-	res, err := s.st.DB.ExecContext(ctx, `UPDATE users SET totp_last_step = ? WHERE id = ? AND totp_enabled = 1 AND totp_secret = ? AND totp_last_step < ?`,
+	res, err := tx.ExecContext(ctx, `UPDATE users SET totp_last_step = ?, totp_failed_count = 0 WHERE id = ? AND totp_enabled = 1 AND totp_secret = ? AND totp_last_step < ?`,
 		step, userID, sealed, step)
 	if err != nil {
 		return err
 	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return ErrReauthentication
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
 	}
-	return nil
+	if n != 1 {
+		return countBadCode(ctx, tx, userID, ErrReauthentication)
+	}
+	return tx.Commit()
 }
 
 // BeginPasskeyRegistration starts registering a passkey for an account, from

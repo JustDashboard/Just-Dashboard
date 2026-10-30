@@ -1678,6 +1678,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Access completion predates factor provenance; old sessions cannot prove a method.
 	{"sessions", "auth_method", "TEXT NOT NULL DEFAULT 'unknown'"},
 	{"users", "totp_last_step", "INTEGER NOT NULL DEFAULT -1"},
+	// Wrong second-factor codes lock the account's second factor as wrong
+	// passwords lock its sign-in, each counted apart.
+	{"users", "totp_failed_count", "INTEGER NOT NULL DEFAULT 0"},
+	{"users", "totp_locked_until", "INTEGER NOT NULL DEFAULT 0"},
 	// An account gained a name to show and a picture beside it. The sign-in
 	// name stays the lower-cased key it always was; the display name is what
 	// the operator typed, case and all.

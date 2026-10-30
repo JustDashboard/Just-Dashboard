@@ -17,9 +17,7 @@ export type ChartConfig = Record<
   {
     label?: React.ReactNode
     icon?: React.ComponentType
-  } & (
-    | { color?: string }
-  )
+  } & { color?: string }
 >
 
 type ChartContextProps = {

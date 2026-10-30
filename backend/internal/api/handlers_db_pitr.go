@@ -399,7 +399,7 @@ func (s *Server) handleDBPITREnable(w http.ResponseWriter, r *http.Request) erro
 	}
 	httpx.SetAudit(r, "database.pitr.enable", srv.name, detail)
 	base := auditBaseOf(r)
-	return s.startPITRJob(w, r, srv, "enable", "Set up point-in-time recovery for "+srv.name, pitrBackupTimeout,
+	return s.startPITRJob(w, r, srv, auth.CapSystemAdmin, "enable", "Set up point-in-time recovery for "+srv.name, pitrBackupTimeout,
 		func(ctx context.Context, out jobs.Emitter) error {
 			err := s.enablePITR(ctx, srv, a, secrets, walLevel, out)
 			s.recordTransfer(base, "database.pitr.enable.finish", srv.name, map[string]any{"archive": a.ID, "location": plan.Location}, err)
@@ -473,7 +473,7 @@ func (s *Server) handleDBPITRDisable(w http.ResponseWriter, r *http.Request) err
 		"archive": a.ID, "location": pitrLocation(a), "deleteArchive": req.DeleteArchive,
 	})
 	base := auditBaseOf(r)
-	return s.startPITRJob(w, r, srv, "disable", "Turn point-in-time recovery off for "+srv.name, pitrBackupTimeout,
+	return s.startPITRJob(w, r, srv, auth.CapDestructive, "disable", "Turn point-in-time recovery off for "+srv.name, pitrBackupTimeout,
 		func(ctx context.Context, out jobs.Emitter) error {
 			err := s.disablePITR(ctx, srv, a, req.DeleteArchive, out)
 			s.recordTransfer(base, "database.pitr.disable.finish", srv.name, map[string]any{"archive": a.ID, "deleteArchive": req.DeleteArchive}, err)
@@ -495,7 +495,7 @@ func (s *Server) handleDBPITRBackup(w http.ResponseWriter, r *http.Request) erro
 	}
 	httpx.SetAudit(r, "database.pitr.backup", srv.name, map[string]any{"archive": a.ID})
 	base := auditBaseOf(r)
-	return s.startPITRJob(w, r, srv, "backup", "Base backup of "+srv.name, pitrBackupTimeout,
+	return s.startPITRJob(w, r, srv, auth.CapServiceControl, "backup", "Base backup of "+srv.name, pitrBackupTimeout,
 		func(ctx context.Context, out jobs.Emitter) error {
 			err := s.runPITRBackup(ctx, srv, a, out)
 			s.recordTransfer(base, "database.pitr.backup.finish", srv.name, map[string]any{"archive": a.ID}, err)
@@ -627,7 +627,7 @@ func (s *Server) handleDBPITRRestore(w http.ResponseWriter, r *http.Request) err
 		"archive": a.ID, "target": req.Target, "backup": backup.Name, "container": name, "port": port,
 	})
 	base, by := auditBaseOf(r), httpx.MustPrincipal(r).Username()
-	return s.startPITRJob(w, r, srv, "restore", "Recover "+srv.name+" into "+name, pitrRestoreTimeout,
+	return s.startPITRJob(w, r, srv, auth.CapSystemAdmin, "restore", "Recover "+srv.name+" into "+name, pitrRestoreTimeout,
 		func(ctx context.Context, out jobs.Emitter) error {
 			restore, err := s.restorePITR(ctx, srv, a, plan, req.Target, by, out)
 			detail := map[string]any{"archive": a.ID, "container": name, "target": req.Target}
@@ -702,7 +702,7 @@ func (s *Server) handleDBPITRSwitch(w http.ResponseWriter, r *http.Request) erro
 		"restore": restore.ID, "copy": restore.Container, "target": restore.Target,
 	})
 	base := auditBaseOf(r)
-	return s.startPITRJob(w, r, srv, "switch", "Switch "+srv.name+" to "+restore.Container, pitrBackupTimeout,
+	return s.startPITRJob(w, r, srv, auth.CapDestructive, "switch", "Switch "+srv.name+" to "+restore.Container, pitrBackupTimeout,
 		func(ctx context.Context, out jobs.Emitter) error {
 			replaced, err := s.switchPITR(ctx, srv, restore, out)
 			if err == nil {
@@ -736,7 +736,7 @@ func (s *Server) handleDBPITRArchiveDelete(w http.ResponseWriter, r *http.Reques
 	}
 	httpx.SetAudit(r, "database.pitr.archive.delete", srv.name, map[string]any{"archive": a.ID, "location": pitrLocation(a)})
 	base := auditBaseOf(r)
-	return s.startPITRJob(w, r, srv, "delete", "Delete an archive of "+srv.name, pitrBackupTimeout,
+	return s.startPITRJob(w, r, srv, auth.CapDestructive, "delete", "Delete an archive of "+srv.name, pitrBackupTimeout,
 		func(ctx context.Context, out jobs.Emitter) error {
 			err := s.deletePITRArchiveContents(ctx, srv, a, out)
 			s.recordTransfer(base, "database.pitr.archive.delete.finish", srv.name, map[string]any{"archive": a.ID}, err)

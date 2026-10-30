@@ -38,6 +38,27 @@ The navigation sidebar is always expanded on desktop: the shell disables desktop
 and Ctrl/Cmd+B does not collapse it. Below `md`, the header opens the mobile sheet and the
 sidebar header closes it; Ctrl/Cmd+B still toggles that sheet.
 
+### When there is no page to show
+
+An address no page claims goes through `(dashboard)/[...missing]` to `(dashboard)/not-found.tsx`, inside
+the shell with the rail still there, and someone signed out is sent to sign in first. It answers HTTP 200:
+the shell draws its splash until the session probe returns, so the server never renders the page that
+throws the 404. `app/not-found.tsx` is the same page without a shell, for what the login and welcome pages
+throw.
+
+A render that throws under `(dashboard)` keeps the shell (`(dashboard)/error.tsx`). One from the dashboard's
+own layout, or the login and welcome pages, takes the window (`app/error.tsx`); one from the root layout
+replaces it (`app/global-error.tsx`), which brings its own document, stylesheet and font and has no inline
+script, because a client component cannot read the CSP nonce. The two share `RenderFailure`, whose way out
+is a full load rather than a router link back into what threw.
+
+### The tab's title
+
+The dashboard's layout renders a React `<title>` from `tabTitle(pathname)` in `components/nav.ts`:
+"Files · Just Dashboard", the section's name for a detail page, the product's alone for an address under no
+section. The root layout declares no title, and `login/` and `welcome/` have small layouts that do. Next's
+metadata writes over `document.title` when it resolves, and beside a second `<title>` it would come first.
+
 ### The rail drills in
 
 **The sidebar shows one list at a time: the list for where you are.** Opening Docker replaces the list

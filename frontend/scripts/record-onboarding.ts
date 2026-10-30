@@ -12,11 +12,13 @@ import { mockOnboarding } from "../tests/browser/onboarding-fixture"
  * proxy the account hid.
  *
  *   bun run build && bun run start --port 43117   # in another terminal
- *   bun scripts/record-onboarding.ts
+ *   bun scripts/record-onboarding.ts [directory]
+ *
+ * The files stay out of the repository: publish them on a pr-assets/* branch.
  */
 
 const baseURL = process.env.JD_BROWSER_BASE_URL ?? "http://127.0.0.1:43117"
-const output = resolve("../docs/audits/2026-10-12-onboarding")
+const output = resolve(process.argv[2] ?? "onboarding-recording")
 const raw = resolve(output, "raw")
 await mkdir(raw, { recursive: true })
 

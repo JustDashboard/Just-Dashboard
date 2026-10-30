@@ -238,7 +238,7 @@ func (s *Server) handleDBUpgradeCheck(w http.ResponseWriter, r *http.Request) er
 	detail := map[string]any{"from": plan.from.id, "to": plan.to.id, "image": plan.to.image}
 	httpx.SetAudit(r, "database.upgrade.check", plan.conn.Name, detail)
 	title := fmt.Sprintf("Check %s for %s %s", plan.conn.Name, plan.tmpl.label, plan.to.id)
-	return s.startTransfer(w, r, plan.conn, upgradeCheckJob, title, func(ctx context.Context, out jobs.Emitter) error {
+	return s.startTransfer(w, r, plan.conn, auth.CapSystemAdmin, upgradeCheckJob, title, func(ctx context.Context, out jobs.Emitter) error {
 		report, err := s.runUpgradeCheck(ctx, plan, out)
 		if err == nil {
 			if b, merr := json.Marshal(report); merr == nil {
@@ -276,7 +276,7 @@ func (s *Server) handleDBUpgradeStart(w http.ResponseWriter, r *http.Request) er
 	detail := map[string]any{"from": plan.from.id, "to": plan.to.id, "image": plan.to.image, "container": plan.detail.Name}
 	httpx.SetAudit(r, "database.upgrade", plan.conn.Name, detail)
 	title := fmt.Sprintf("Upgrade %s to %s %s", plan.conn.Name, plan.tmpl.label, plan.to.id)
-	return s.startTransfer(w, r, plan.conn, upgradeJob, title, func(ctx context.Context, out jobs.Emitter) error {
+	return s.startTransfer(w, r, plan.conn, auth.CapDestructive, upgradeJob, title, func(ctx context.Context, out jobs.Emitter) error {
 		record, err := s.insertUpgrade(context.WithoutCancel(ctx), plan, by)
 		if err != nil {
 			return err
@@ -334,7 +334,7 @@ func (s *Server) handleDBUpgradeRevert(w http.ResponseWriter, r *http.Request) e
 	detail := map[string]any{"from": rec.ToVersion, "to": rec.FromVersion, "container": rec.Container, "dumpFirst": req.DumpFirst}
 	httpx.SetAudit(r, "database.upgrade.revert", conn.Name, detail)
 	title := fmt.Sprintf("Revert %s to %s", conn.Name, upgradeEngineWords(rec))
-	return s.startTransfer(w, r, conn, upgradeRevertJob, title, func(ctx context.Context, out jobs.Emitter) error {
+	return s.startTransfer(w, r, conn, auth.CapDestructive, upgradeRevertJob, title, func(ctx context.Context, out jobs.Emitter) error {
 		dump, err := s.runUpgradeRevert(ctx, conn, dsn, rec, req.DumpFirst, by, out)
 		if err == nil {
 			res := map[string]any{"container": rec.Container, "version": rec.FromVersion, "removed": rec.Volume}

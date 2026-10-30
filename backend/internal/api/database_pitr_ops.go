@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
@@ -57,13 +58,13 @@ func walgProgress(out jobs.Emitter) func(string) {
 
 // startPITRJob starts a job for a server unless one is already running for
 // it, or a dump or restore is running against the connection.
-func (s *Server) startPITRJob(w http.ResponseWriter, r *http.Request, srv *pitrServer, what, title string, timeout time.Duration, run jobs.Runner) error {
+func (s *Server) startPITRJob(w http.ResponseWriter, r *http.Request, srv *pitrServer, capability auth.Capability, what, title string, timeout time.Duration, run jobs.Runner) error {
 	if job, running := s.runningTransfer(srv.conn.ID); running {
 		return httpx.Err(http.StatusConflict, "transfer_running",
 			fmt.Sprintf("%s is running against this connection; wait for it to finish first.", job.Title)).Describe("transfer", job.ID)
 	}
 	job, started := s.startPITR(srv.name, jobs.Spec{
-		Kind: pitrJobPrefix(srv.name) + what, Title: title, Target: srv.name,
+		Capability: capability, Kind: pitrJobPrefix(srv.name) + what, Title: title, Target: srv.name,
 		Timeout: timeout, StartedBy: httpx.MustPrincipal(r).Username(),
 	}, run)
 	if !started {

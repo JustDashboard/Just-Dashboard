@@ -272,4 +272,3 @@ func TestAnArtifactIsUsedOnlyWhenItsDigestMatches(t *testing.T) {
 		t.Fatalf("a mismatched artifact was kept: %#v", tampered.files)
 	}
 }
-

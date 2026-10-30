@@ -2137,7 +2137,9 @@ only renderer/executor/validation authority for their feature.
   union of the protected domains' credentials once per user: Caddy renders a `basic_auth` block, nginx an
   `auth_basic` with an htpasswd file beside the site written before the site and removed with it. The
   Domains settings and the public-address step offer **Ask visitors for a password**; the overview tags a
-  protected domain. Previews inherit the plan's protection.
+  protected domain. Previews inherit the plan's protection. A password typed in Domains settings stays
+  in memory beside the form's draft and joins the list only in the save, so a reload loses it and keeps
+  the rest of the draft.
 - Domain redirects and route rules. `domains[].redirectTo` names another of the plan's hostnames
   (`redirectCode` 301, 302, 307 or 308; empty is 308) that this one sends visitors to, with the path and
   query kept, instead of serving the application: the www. a bare domain keeps for old links, or the
@@ -2438,9 +2440,17 @@ are the two most contested numbers on a Linux server and nothing outside this ma
 Installation, restart, rebuild and self-update share `internal/stackports`. Before startup it identifies
 this checkout's running services using Compose labels and host process ownership, reserves distinct
 available ports, and atomically updates only the three port values in `.env`. Existing dashboard-owned
-ports stay put; foreign listeners stay running. Private `.env.jd-port-previous-*` backups preserve the
-prior configuration. Startup waits for container health and retries a newly observed port conflict up to
-three times. Health URLs and the dashboard endpoint follow the persisted choices. Settings changes use
+ports stay put; foreign listeners stay running. Lifecycle containers are unprivileged and cannot read the
+privileged backend's `/proc/<pid>/fd`, so a listener with no visible owner on the port a running
+host-network service declares (`JD_ADDR` for the backend, `JD_PORT` for the proxy) counts as that
+service's. A listener with a visible owner is always believed. Ports that stay put mean Compose may not
+recreate the backend, so `up --wait` relies on the running container staying healthy. Private
+`.env.jd-port-previous-*` backups preserve the prior configuration, and every Reconcile prunes them to the
+newest five by modification time, including one that moves nothing, so an install whose ports have settled
+sheds what earlier moves left. That number must not drop below three: a Start reconciles up to three
+times and a settings rollback holds the first backup it made. An uninstall's wipe removes them with the
+other copies of the `.env`. Startup waits for container health and retries a newly observed port conflict
+up to three times. Health URLs and the dashboard endpoint follow the persisted choices. Settings changes use
 the same free-port policy and preserve configuration rollback.
 
 New container and Compose starts recover published-port conflicts automatically. Bind scope, protocols

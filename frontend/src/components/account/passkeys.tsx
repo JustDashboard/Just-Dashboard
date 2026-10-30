@@ -12,6 +12,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { Field, FormNote, FormSection } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { Row, RowList } from "@/components/row-list"
+import { ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Button } from "@/components/ui/button"
@@ -65,10 +66,16 @@ export function PasskeysSection({ className }: { className?: string }) {
       title="Passkeys"
       hint={
         <span className="flex flex-col items-start gap-1.5">
-          <Status
-            verdict={list.length > 0 ? "ok" : "notice"}
-            label={list.length > 0 ? plural(list.length, "passkey") : "none"}
-          />
+          {/* "none" is an answer, so it waits for one: an unread list may hold
+              the only way this account signs in without a password. */}
+          {keys.data ? (
+            <Status
+              verdict={list.length > 0 ? "ok" : "notice"}
+              label={list.length > 0 ? plural(list.length, "passkey") : "none"}
+            />
+          ) : (
+            <Status tone="unknown" label={keys.error ? "could not read" : "reading"} />
+          )}
           <span>
             {totp
               ? "In place of the password. The code is still asked for."
@@ -77,6 +84,10 @@ export function PasskeysSection({ className }: { className?: string }) {
         </span>
       }
     >
+      {keys.error && !keys.data && (
+        <ErrorState error={keys.error} onRetry={keys.refresh} retryable />
+      )}
+      {keys.loading && !keys.data && <LoadingRows rows={1} />}
       {list.length > 0 && (
         <RowList aria-label="Passkeys">
           {list.map((key) => (

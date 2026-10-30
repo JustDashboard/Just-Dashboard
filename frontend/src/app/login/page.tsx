@@ -15,7 +15,12 @@ import {
 import { notify } from "@/lib/toast"
 import { ApiError, post } from "@/lib/api"
 import { passwordChecks } from "@/lib/password"
-import { conditionalSignInAvailable, usePasskeyPlace } from "@/lib/passkeys"
+import {
+  conditionalSignInAvailable,
+  PASSKEY_POLICY_REASON,
+  refusedByPolicy,
+  usePasskeyPlace,
+} from "@/lib/passkeys"
 import { cn } from "@/lib/utils"
 import type { AuthStatus } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
@@ -115,6 +120,9 @@ export default function LoginPage() {
         advanceRef.current(await loginWithPasskey({ conditional: true, signal: controller.signal }))
       } catch (err) {
         if (controller.signal.aborted) return
+        // Nobody asked for this one, so a refusal is nothing to interrupt
+        // them with; the button is where one gets its answer.
+        if (err instanceof DOMException && err.name === "NotAllowedError") return
         notify.error("Passkey sign-in failed", err instanceof ApiError ? err.message : String(err))
       }
     })()
@@ -138,6 +146,11 @@ export default function LoginPage() {
     try {
       advance(await loginWithPasskey({}))
     } catch (err) {
+      // A browser that cannot read its own policy until asked refuses here.
+      if (refusedByPolicy(err)) {
+        notify.error("Passkeys are blocked on this page", PASSKEY_POLICY_REASON)
+        return
+      }
       // Closing the browser's prompt is a choice, not a failure.
       if (err instanceof DOMException && err.name === "NotAllowedError") return
       notify.error("Passkey sign-in failed", err instanceof ApiError ? err.message : String(err))

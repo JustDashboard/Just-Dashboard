@@ -161,12 +161,15 @@ func (s *Server) handlePasskeyRegisterBegin(w http.ResponseWriter, r *http.Reque
 	}
 	// The password and code are guessed against the second factor's own
 	// per-account budget, so this form is no way around it.
-	if !s.loginLim.Allow("totp|" + strconv.FormatInt(p.UserID(), 10)) {
-		return httpx.Err(http.StatusTooManyRequests, "rate_limited", "too many verification attempts")
+	if err := s.spendGuess(r); err != nil {
+		return err
 	}
 	if err := s.Auth.VerifyReauthentication(r.Context(), p.UserID(), req.Password, req.Code); err != nil {
 		httpx.SetAudit(r, "auth.passkey.reauth", p.Username(), map[string]any{"result": "rejected"})
 		httpx.AuditFailed(r)
+		if errors.Is(err, auth.ErrSecondFactorLocked) {
+			return httpx.Err(http.StatusTooManyRequests, "second_factor_locked", err.Error())
+		}
 		if errors.Is(err, auth.ErrReauthentication) {
 			return httpx.Err(http.StatusUnauthorized, "invalid_credentials", err.Error())
 		}

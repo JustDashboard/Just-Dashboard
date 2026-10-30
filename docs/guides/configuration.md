@@ -22,7 +22,7 @@ The installer writes the settings that matter, and **Settings → Configuration*
 | `JD_PORT` | `8443` | The port you connect to — the only one the proxy publishes. |
 | `JD_BACKEND_PORT` | `8080` | The API's loopback port, behind the proxy. `install.sh` picks a random high port on a new install so nothing collides with it. |
 | `JD_FRONTEND_PORT` | `3000` | The UI's loopback port, behind the proxy. Likewise randomised at install time. |
-| `JD_ADDR` | `127.0.0.1:$JD_BACKEND_PORT` | Where the API binds, if you need to override the host as well as the port. Leave it on loopback; the proxy is the entry point. |
+| `JD_ADDR` | `127.0.0.1:$JD_BACKEND_PORT` | Where the API binds. `docker-compose.yml` sets it from `JD_BACKEND_PORT` and does not read it from `.env`, so change the port there; it is an override only when you run the binary yourself. Leave it on loopback; the proxy is the entry point. |
 | `JD_ALLOWED_ORIGINS` | none | Complete browser origins allowed to open WebSockets. Scheme, host, and port must match; only needed if the UI is served from a different origin. |
 
 **Behaviour**
@@ -46,7 +46,7 @@ The installer writes the settings that matter, and **Settings → Configuration*
 | `JD_ACME_DIRECTORY` | Let's Encrypt | Another ACME directory to order deployment certificates from: Let's Encrypt's staging endpoint for a rehearsal that spends no rate limit, or a private authority on a network that never sees the internet. Both the managed Caddy and certbot follow it — the Certificates page's orders and a deployment run's, over HTTP-01 and DNS-01 alike — and certbot registers an account with that directory rather than reusing one it has with another. |
 | `JD_ACME_CA_ROOT` | system roots | A PEM bundle to trust when that authority signs with its own roots — its issuing roots, and the root behind its directory's TLS listener if that is private too. Caddy is given it as its trusted roots and certbot as `REQUESTS_CA_BUNDLE`, so keep it where both read it (under `/etc`, `/srv`, `/opt` or the data directory, which the stack mounts at the same paths). With it set, the public-DNS check before an order is skipped, because a private authority validates however it was set up to. |
 | `JD_UPDATE_REPO` | `JustDashboard/Just-Dashboard` | The repository releases are read from. Change it to follow a fork. |
-| `JD_UPDATE_BRANCH` | `main` | The branch whose changelog decides what "newest" means, and which an in-app update fast-forwards to. |
+| `JD_UPDATE_BRANCH` | `main` | The branch whose changelog decides what "newest" means, and which an in-app update fast-forwards to, unless the announced version has a tag `v<version>`, which is then installed exactly. |
 | `JD_ACCOUNT_LINK` | `true` | Whether this server may be linked to a just-dashboard.com account. Linking is always something an administrator does; `false` removes the Settings page's controls, the installer's question and the terminal command, and silences a link that already exists, so nothing is ever sent. |
 | `JD_ACCOUNT_URL` | `https://just-dashboard.com` | The site this install may link to: an origin only, with no path, query or credentials. `https://` everywhere; `http://` only for `localhost`, `127.0.0.1` or `[::1]`, to develop the site beside the dashboard. Anything else refuses to start. |
 | `JD_USAGE_PING` | `true` | Whether an administrator may be asked to [count this server](linking-and-usage.md#the-usage-count) in the public install numbers. Nothing is sent until one says yes. `false` means nobody is asked and nothing is ever sent; `JD_ACCOUNT_LINK=false` does the same. |
@@ -76,7 +76,7 @@ The installer writes the settings that matter, and **Settings → Configuration*
 | Variable | Default | Description |
 | --- | --- | --- |
 | `JD_BOOTSTRAP_USER` | `admin` | Account created on an empty database. |
-| `JD_BOOTSTRAP_PASSWORD` | none | Leave empty for a generated one, logged once and replaced at first sign-in. A password set here is kept as is. |
+| `JD_BOOTSTRAP_PASSWORD` | none | Leave empty for a generated one, logged once and replaced at first sign-in. A password set here is kept as is. `install.sh` removes the one it writes from `.env` once the dashboard has answered; one you set yourself stays until you remove it. Neither is read again once an account exists. |
 
 Durations take a unit (`12h`, `60m`, and the metrics settings also accept `7d`); booleans
 take `true` or `false`. A value that cannot be parsed stops the dashboard at startup rather

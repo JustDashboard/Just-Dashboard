@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -58,9 +59,10 @@ func (s *Server) handleTLSScanAll(w http.ResponseWriter, r *http.Request) error 
 	}
 	httpx.SetAudit(r, "certificates.scan-all", "", map[string]any{"targets": len(targets)})
 	s.startJob(w, r, jobs.Spec{
-		Kind:   fleetJobKind,
-		Title:  "Scan every site",
-		Target: fmt.Sprintf("%d targets", len(targets)),
+		Capability: auth.CapSystemAdmin,
+		Kind:       fleetJobKind,
+		Title:      "Scan every site",
+		Target:     fmt.Sprintf("%d targets", len(targets)),
 		// Each report is allowed a minute, as a single one is.
 		Timeout: time.Duration(len(targets)/proxysvc.FleetConcurrency+1)*time.Minute + time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {

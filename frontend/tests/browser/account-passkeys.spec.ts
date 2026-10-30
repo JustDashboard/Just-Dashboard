@@ -275,3 +275,115 @@ test("the username field's autofill offers the passkey, and picking it signs in 
   await expectCodeOwed(page, finishes)
   expect(finishes).toHaveLength(1)
 })
+
+test("a page whose policy forbids passkeys says so and asks nothing of the browser", async ({
+  page,
+}) => {
+  let begins = 0
+  await page.route("**/api/v1/**", async (route) => {
+    if (route.request().url().endsWith("/auth/passkey/begin")) begins++
+    await json(route, { authenticated: false, require2fa: false })
+  })
+  await page.route("**/login*", async (route) => {
+    if (route.request().resourceType() !== "document") return route.fallback()
+    const response = await route.fetch()
+    await route.fulfill({
+      response,
+      headers: { ...response.headers(), "permissions-policy": "publickey-credentials-get=()" },
+    })
+  })
+  await localhost(page, "/login")
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible()
+  await expect(page.getByText(/This page's Permissions-Policy forbids passkeys/)).toBeVisible()
+  await expect(page.getByRole("button", { name: "Sign in with a passkey" })).toHaveCount(0)
+  await expect(page.getByText("Passkey sign-in failed")).toHaveCount(0)
+  expect(begins).toBe(0)
+})
+
+test("closing the browser's prompt is not reported, and the conditional offer stays quiet", async ({
+  page,
+}) => {
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    if (path === "/auth/passkey/begin") {
+      return json(route, {
+        challengeId: "sealed",
+        publicKey: { challenge: b64(randomBytes(32)), rpId: "localhost", timeout: 60000 },
+      })
+    }
+    return json(route, { authenticated: false, require2fa: false })
+  })
+  await page.addInitScript(() => {
+    navigator.credentials.get = () =>
+      Promise.reject(
+        new DOMException("The operation either timed out or was not allowed.", "NotAllowedError"),
+      )
+  })
+  await localhost(page, "/login")
+  await page.getByRole("button", { name: "Sign in with a passkey" }).click()
+  await expect(page.getByRole("button", { name: "Sign in with a passkey" })).toBeEnabled()
+  await expect(page.getByText("Passkey sign-in failed")).toHaveCount(0)
+  await expect(page.getByText("Passkeys are blocked on this page")).toHaveCount(0)
+})
+
+test("a refusal only the browser can name is explained when the button is pressed", async ({
+  page,
+}) => {
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    if (path === "/auth/passkey/begin") {
+      return json(route, {
+        challengeId: "sealed",
+        publicKey: { challenge: b64(randomBytes(32)), rpId: "localhost", timeout: 60000 },
+      })
+    }
+    return json(route, { authenticated: false, require2fa: false })
+  })
+  await page.addInitScript(() => {
+    navigator.credentials.get = () =>
+      Promise.reject(
+        new DOMException(
+          "The 'publickey-credentials-get' feature is not enabled in this document.",
+          "NotAllowedError",
+        ),
+      )
+  })
+  await localhost(page, "/login")
+  await page.getByRole("button", { name: "Sign in with a passkey" }).click()
+  await expect(page.getByText("Passkeys are blocked on this page")).toBeVisible()
+})
+
+test("regenerating recovery codes asks for the password, and sends it", async ({ page }) => {
+  const sent: unknown[] = []
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api\/v1/, "")
+    if (path === "/auth/session") return json(route, signedIn)
+    if (path === "/account/recovery-codes") {
+      sent.push(request.postDataJSON())
+      if (sent.length === 1) {
+        return json(
+          route,
+          { error: { code: "invalid_credentials", message: "that password is incorrect" } },
+          401,
+        )
+      }
+      return json(route, { recoveryCodes: ["aaaa-bbbb", "cccc-dddd"] })
+    }
+    return json(route, [])
+  })
+  await page.goto("/account/security")
+  await page.getByRole("button", { name: "Regenerate recovery codes" }).click()
+  const go = page.getByRole("button", { name: "Regenerate recovery codes" })
+  await expect(go).toBeDisabled()
+  await page.getByLabel("Current password").first().fill("Not-The-Password-1")
+  await go.click()
+  await expect(page.getByText("that password is incorrect")).toBeVisible()
+  await page.getByLabel("Current password").first().fill("Correct-Horse-Battery-9")
+  await go.click()
+  await expect(page.getByText("aaaa-bbbb")).toBeVisible()
+  expect(sent).toEqual([
+    { password: "Not-The-Password-1" },
+    { password: "Correct-Horse-Battery-9" },
+  ])
+})

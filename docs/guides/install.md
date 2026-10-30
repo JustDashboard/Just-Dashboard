@@ -16,6 +16,8 @@ rest in four labelled stages:
   `https://your-box.tailnet-name.ts.net:8443` with a real certificate.
 - **SSH tunnel (fallback):** the dashboard is served on loopback only.
 - It generates the master key and a first password, builds the stack and prints how to get in.
+  The password is removed from `.env` once the dashboard has answered, so a password you generated
+  is shown only that once.
 - It installs the host tools the terminal and pages rely on — `gh`, `git-lfs`, `whois`,
   `traceroute` — where they are missing.
 

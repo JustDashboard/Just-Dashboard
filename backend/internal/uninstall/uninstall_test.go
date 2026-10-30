@@ -273,6 +273,7 @@ func fixture(t *testing.T, mode Mode, deleteBackups bool) (*Store, *Run, *fakeHo
 	for path, body := range map[string]string{
 		"/opt/jd/.env":                         "JD_MASTER_KEY=abc\n",
 		"/opt/jd/.env.jd-previous":             "JD_MASTER_KEY=abc\n",
+		"/opt/jd/.env.jd-port-previous-123":    "JD_MASTER_KEY=abc\n",
 		"/opt/jd/.env.example":                 "JD_MASTER_KEY=\n",
 		"/opt/jd/docker-compose.yml":           "name: just-dashboard\n",
 		"/var/lib/just-dashboard/vpsd.db":      "db",
@@ -309,6 +310,8 @@ func TestKeepLeavesDataAndKeepsTheKey(t *testing.T) {
 		"systemctl stop jd-terminal-*",
 		"docker compose -f docker-compose.yml -p just-dashboard down --remove-orphans --timeout 30",
 		"docker image rm just-dashboard-frontend:latest",
+		"docker image rm just-dashboard-frontend:previous",
+		"docker image rm just-dashboard-backend:previous",
 		"systemd-run --unit just-dashboard-uninstall-20261012t120000z",
 	} {
 		if !strings.Contains(cmds, want) {
@@ -354,7 +357,7 @@ func TestWipeDeletesDataAndKeyButNotBackupsUnlessAsked(t *testing.T) {
 	if !exists(host.Path("/var/lib/just-dashboard/nginx-cache/site")) {
 		t.Fatal("a cache a site still uses was deleted")
 	}
-	if exists(host.Path("/opt/jd/.env")) || exists(host.Path("/opt/jd/.env.jd-previous")) {
+	if exists(host.Path("/opt/jd/.env")) || exists(host.Path("/opt/jd/.env.jd-previous")) || exists(host.Path("/opt/jd/.env.jd-port-previous-123")) {
 		t.Fatal("a copy of the key survived a wipe")
 	}
 	if !exists(host.Path("/opt/jd/.env.example")) || !exists(host.Path("/opt/jd/docker-compose.yml")) {

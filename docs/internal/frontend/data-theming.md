@@ -194,8 +194,10 @@ are dated evidence, not proof of current attachment ownership.
   `fileSource` → `file:<path>`, `journalSource`, `journalIdSource`, `kernelSource`, `stackSource`,
   `pm2Source`): an id spelled by hand — a bare path here, `file:` there — was a different session key for
   the same file and opened on the wrong remembered filter.
-- `usePoll` schedules the next request only after the previous one settles and pauses scheduled
-  requests on hidden tabs. Each successful response records `lastSuccess`; failed refreshes retain
+- `usePoll` schedules the next request only after the previous one settles and stops scheduling on
+  hidden tabs. Coming back to the tab fetches at once, replacing any pending timer; a request still in
+  flight stands as that refresh, and an interval of 0 ignores the tab. `pollLoop` is that schedule, with
+  `document` passed in so `bun test` can drive it. Each successful response records `lastSuccess`; failed refreshes retain
   that timestamp only for the same resource. Its fixed-length dependency list identifies the resource:
   changing it immediately hides the previous resource's data and resets loading. Refreshes and cadence changes
   retain the same resource's data. Cleanup aborts the request and ignores late responses.
@@ -273,7 +275,9 @@ are dated evidence, not proof of current attachment ownership.
   of the databases this tab has opened, `databases.known`, which holds names and so must not outlive
   a sign-out); and whatever holds rows of data or a secret — a staged change set, what a tab ran,
   unsaved Redis values, a console's transcript, staged document edits, a connect form's password — is
-  `useMemoryState` and never reaches Web Storage. One thing is kept beside the stores on purpose: a
+  `useMemoryState` and never reaches Web Storage. A settings draft is `useSessionState`, so a secret
+  typed in one is held beside it: the Domains form keeps visitor passwords in `useMemoryState` by
+  hostname and merges them only into what it sends (`settings/domain-passwords.ts`). One thing is kept beside the stores on purpose: a
   change of power in flight is written to `sessionStorage` and told over a `BroadcastChannel`
   (`jd.databases.power`, `database/home/power.ts`), so a reload, or another tab, shows a start or a
   stop that is under way. Every route area was reviewed for this:

@@ -166,6 +166,8 @@ stage 1 "Prepare the host"
 step "Required host tools"
 source scripts/install-dependencies.sh
 source scripts/dotenv.sh
+# shellcheck source=scripts/password.sh
+source scripts/password.sh
 jd_install_dependencies || die "Required host tools could not be provisioned. See the package-manager error above; re-run setup after resolving it."
 
 # The web terminal is a shell on this host, not in the dashboard's image, so
@@ -479,7 +481,7 @@ else
 		read -r -s -p "  Password (min 12 chars, mixing 3 of upper/lower/digit/symbol): " ADMIN_PW; echo
 		read -r -s -p "  Confirm: " ADMIN_PW2; echo
 		[ "$ADMIN_PW" = "$ADMIN_PW2" ] || { warn "they do not match"; continue; }
-		[ "${#ADMIN_PW}" -ge 12 ] || { warn "at least 12 characters"; continue; }
+		PW_PROBLEM="$(jd_password_problem "$ADMIN_PW")" || { warn "$PW_PROBLEM"; continue; }
 		break
 	done
 fi
@@ -646,8 +648,9 @@ JD_TERMINAL_ENABLED=$TERMINAL
 JD_REQUIRE_2FA=$REQUIRE_2FA
 $ACCOUNT_LINK_ENV
 
-# Used once, to create the first account. Safe to remove afterwards.
-JD_BOOTSTRAP_USER=$ADMIN_USER
+# Used once, to create the first account. The installer removes the password
+# from this file as soon as the dashboard has answered.
+JD_BOOTSTRAP_USER=$(jd_dotenv_literal "$ADMIN_USER")
 JD_BOOTSTRAP_PASSWORD=$(jd_dotenv_literal "$ADMIN_PW")
 
 JD_COMPOSE_ROOTS=/opt,/srv,/home
@@ -862,8 +865,6 @@ rm -f "$CLI_TMP"
 stage 4 "Verify startup"
 step "Waiting for the dashboard to answer"
 
-SITE_ADDR="$(grep -E '^JD_SITE=' .env | cut -d= -f2-)"
-
 # Read back rather than reused from above: a re-run that keeps an existing
 # .env never entered the block that chose them, and printing the defaults at
 # an install that is not using the defaults is how somebody ends up tunnelling
@@ -876,25 +877,50 @@ SITE_ADDR="$(grep -E '^JD_SITE=' .env | cut -d= -f2-)"
 env_port() { grep -E "^$1=" .env 2>/dev/null | cut -d= -f2- | tr -d '[:space:]' || true; }
 JD_PORT="$(env_port JD_PORT)";                   JD_PORT="${JD_PORT:-8443}"
 JD_BACKEND_PORT="$(env_port JD_BACKEND_PORT)";   JD_BACKEND_PORT="${JD_BACKEND_PORT:-8080}"
-JD_FRONTEND_PORT="$(env_port JD_FRONTEND_PORT)"; JD_FRONTEND_PORT="${JD_FRONTEND_PORT:-3000}"
+# The same default docker-compose.yml gives a .env with no JD_SITE.
+SITE_ADDR="$(env_port JD_SITE)";                 SITE_ADDR="${SITE_ADDR:-localhost}"
 
-HEALTHY=0
-for _ in $(seq 1 60); do
-	if curl -fsS --max-time 3 "http://127.0.0.1:$JD_BACKEND_PORT/healthz" >/dev/null 2>&1; then
-		HEALTHY=1; break
-	fi
-	sleep 2
-done
-
-if [ "$HEALTHY" -eq 1 ]; then
-	ok "backend is healthy"
-else
+wait_for_backend() {
+	local attempt
+	for attempt in $(seq 1 60); do
+		if curl -fsS --max-time 3 "http://127.0.0.1:$JD_BACKEND_PORT/healthz" >/dev/null 2>&1; then
+			ok "backend is healthy"
+			return 0
+		fi
+		sleep 2
+	done
 	warn "the backend did not answer within two minutes"
 	say ""
 	say "  Check what it is saying:"
 	say "    ${BOLD}$COMPOSE logs backend${RESET}"
 	exit 1
+}
+
+wait_for_backend
+
+# ── the first password ──────────────────────────────────────────────────────
+#
+# A healthy backend has already created the first account, since it creates it
+# before it listens, so the password has done its job and only this install
+# wrote it. A kept .env is the operator's file and is left as they have it.
+#
+# The copies matter as much as the file: a port conflict during startup leaves
+# a .env.jd-port-previous-* backup holding the same line, and the container
+# keeps the value it was created with until it is created again.
+if [ "${KEEP_ENV:-0}" -eq 0 ]; then
+	step "Removing the first password from .env"
+	for env_copy in .env .env.jd-port-previous-*; do
+		[ -f "$env_copy" ] || continue
+		jd_dotenv_drop JD_BOOTSTRAP_PASSWORD "$env_copy" ||
+			warn "could not edit $env_copy; remove its JD_BOOTSTRAP_PASSWORD line by hand"
+	done
+	if $COMPOSE up -d --no-deps --no-build backend; then
+		wait_for_backend
+	else
+		warn "the backend was not recreated; sudo ./scripts/manage.sh restart clears the password from its environment"
+	fi
 fi
+# ── end of the first password ───────────────────────────────────────────────
 
 # ── linking ─────────────────────────────────────────────────────────────────
 #

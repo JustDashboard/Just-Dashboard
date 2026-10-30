@@ -6018,10 +6018,10 @@ unless the changelog's newest release is the version named. Do it last before th
 
 A release is cut on its patch branch (`patch/0.7.2`) and reaches installs when that branch is merged into
 `main`. The GitHub release follows on its own: `.github/workflows/release.yml` runs after Verify passes on
-a push to `main`, reads `latest` from the changelog, and when that push changed it and no release
-`v<latest>` exists, tags that
+a push to `main`, reads `latest` from the changelog, and when no release `v<latest>` exists, tags that
 commit and publishes the release with the version's `CHANGELOG.md` section as its notes. The version
-comes from the changelog, never from the branch name, so a merge without a bump publishes nothing.
+comes from the changelog, never from the branch name, so a merge whose version is already released
+publishes nothing.
 Nothing is tagged by hand; a manual run of the workflow on `main` retries a failed publish.
 
 A changelog entry is written for the person deciding whether to upgrade a root-equivalent panel on their
@@ -6067,7 +6067,33 @@ done by hand, and the UI refuses to fold it away.
   as root, so afterwards the updater hands back to the checkout's owner everything root-owned in `.git`
   and each file the update changed with the folders above it (`handBack`, through `hostexec.GiveBack`).
   Until 0.7.1 an update's new folders stayed root's, and the operator's own next pull stopped halfway in
-  them. A checkout cloned with sudo has no owner but root for `handBack` to return to, so at every start
+  them.
+- **It installs the release that was announced** (`updateTarget`). After the fetch it prefers the tag
+  `v<ToVersion>`, asked of `origin` with `ls-remote` and fetched without touching local tags, so a tag
+  the operator made cannot stand in for it and one that clashes cannot fail the fetch. With no tag, which
+  is normal for a fork and for the window before `release.yml` has tagged a merge, it uses
+  `origin/<ref>`. Either way the changelog at the target must name `ToVersion`, or nothing changes. A
+  branch that has moved past `ToVersion` with no tag to pin it is refused rather than installed, because
+  nobody was shown that release's notes and checking again offers it properly. The version it reports
+  (`Run.InstalledVersion`) is read from the changelog at `HEAD` after the merge and recorded only on
+  success.
+- **It goes back if the new version does not come up** (`rollback.go`). Before the build it tags each image
+  the compose file builds `<image>:previous`; one that cannot be tagged is a warning, not a stop. On a
+  failed build, a failed `up --wait` or a failed health check it retags them, runs `up -d --no-build`,
+  moves the checkout with `git reset --keep <FromCommit>`, runs `up -d --no-build --remove-orphans`
+  (the release may have changed the compose file itself) and probes for three minutes. A failed build
+  has recreated no container, so it skips the first `up`: the release's compose file is never run against
+  a stack still serving. The reset is `--keep`, so an operator's edit survives and one in the way makes
+  git refuse. `update-index --refresh` comes first because `handBack`'s chown leaves the index stale,
+  which `--keep` otherwise reads as an edit. The checkout stays put if somebody else moved it during the
+  update. If an old image is missing after containers were replaced, stack and checkout both stay on the
+  failed update, since moving only one would make them disagree. Every failure is reported in the run's
+  error with the commands to finish by hand, and no step stops the ones after it. `.env` is not restored:
+  a port a Reconcile moved was moved because something holds the old one, and the old version runs on the
+  new one just as well. The rollback relies on database changes being additive (invariant 5), since the
+  new backend may already have migrated. The `:previous` images stay until the next update replaces them,
+  so a server holds one older generation on disk, and an uninstall removes them.
+- A checkout cloned with sudo has no owner but root for `handBack` to return to, so at every start
   the backend gives the checkout's root-owned entries to the owner of the directory holding it
   (`Service.adoptCheckout`, through `hostexec.Adopt`), when that is not root: whoever owns `/home/ubuntu`
   can already replace `/home/ubuntu/Just-Dashboard` with a tree of their own, so this grants nothing, and
@@ -6198,14 +6224,15 @@ silently switching the initial configuration to plain HTTP.
 `/dashboard/configuration`. It is the third lifecycle operation and the only one nothing comes back from,
 so it is built around the moment the page watching it loses its API.
 
-- **One question, two modes.** `keep` removes the stack — its three containers, the two images it builds,
+- **One question, two modes.** `keep` removes the stack — its three containers, the two images it builds
+  with the `:previous` tags an update keeps,
   the lifecycle siblings, `/tmp/just-dashboard` and the held terminal sessions (`systemctl stop
   jd-terminal-*` on the host) — and leaves everything the dashboard made: deployments keep running, and
   `JD_DATA_DIR`, the backups and the checkout's `.env` stay, with a copy of the `.env` written to
   `JD_DATA_DIR/install.env`. `wipe` also removes the deployments and deletes `JD_DATA_DIR`, the proxy's
   two Compose volumes (its CA) and every copy of the `.env` in the checkout (`.env`, `.env.jd-previous`,
-  `.env.jd-tmp`, `.env.backup.*`). `deleteBackups` deletes `JD_BACKUP_DIR` too and is honoured only with a
-  wipe. Neither mode touches databases the dashboard provisioned, proxy sites and their `jd-*` files,
+  `.env.jd-port-previous-*`, `.env.jd-tmp`, `.env.backup.*`). `deleteBackups` deletes `JD_BACKUP_DIR` too
+  and is honoured only with a wipe. Neither mode touches databases the dashboard provisioned, proxy sites and their `jd-*` files,
   certificates, the network module's `/etc/just-dashboard/network` and its boot units (the docs promise a
   reinstall finds them), SSH and fail2ban drop-ins, Linux accounts, or the checkout itself.
 - **The work is split across two processes, in the order the stack can lose them.** `Service.Begin`

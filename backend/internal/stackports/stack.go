@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -35,10 +36,20 @@ func (s Selection) Health() string {
 	return fmt.Sprintf("http://127.0.0.1:%d/healthz", s.BackendPort)
 }
 
+// keptBackups is how many .env backups Reconcile leaves, each holding the master
+// key. A Start reconciles up to three times and a rollback holds the first of
+// the backups it made, so this must never drop below three.
+const keptBackups = 5
+
+const backupPrefix = ".env.jd-port-previous-"
+
 type inspectedContainer struct {
-	ID              string
-	State           struct{ Running bool }
-	Config          struct{ Labels map[string]string }
+	ID     string
+	State  struct{ Running, Restarting bool }
+	Config struct {
+		Labels map[string]string
+		Env    []string
+	}
 	HostConfig      struct{ NetworkMode string }
 	NetworkSettings struct {
 		Ports map[string][]struct {
@@ -143,9 +154,12 @@ func reconcile(ctx context.Context, dir, compose string, out io.Writer, observe 
 	}
 	result.Endpoint = scheme + "://" + net.JoinHostPort(site, strconv.Itoa(result.Port))
 	if !result.Changed {
+		// Also when nothing moved: an install whose ports have settled would
+		// otherwise keep every copy of the key that earlier moves left behind.
+		pruneBackups(dir, "", out)
 		return result, nil
 	}
-	backup, err := os.CreateTemp(dir, ".env.jd-port-previous-*")
+	backup, err := os.CreateTemp(dir, backupPrefix+"*")
 	if err != nil {
 		return result, err
 	}
@@ -161,8 +175,50 @@ func reconcile(ctx context.Context, dir, compose string, out io.Writer, observe 
 	if err := atomicWrite(path, []byte(replacePorts(string(raw), selected))); err != nil {
 		return result, err
 	}
+	pruneBackups(dir, result.Backup, out)
 	fmt.Fprintf(out, "Dashboard address: %s\n", result.Endpoint)
 	return result, nil
+}
+
+// pruneBackups removes all but the newest keptBackups backups in dir, always
+// sparing current, the one just written, whatever the clock says. A failure
+// costs a stale file and nothing else, so it is reported and never stops a
+// configuration that has already been written.
+func pruneBackups(dir, current string, out io.Writer) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		fmt.Fprintf(out, "could not list old configuration backups: %v\n", err)
+		return
+	}
+	type candidate struct {
+		path     string
+		modified int64
+	}
+	var backups []candidate
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() || !strings.HasPrefix(entry.Name(), backupPrefix) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		backups = append(backups, candidate{filepath.Join(dir, entry.Name()), info.ModTime().UnixNano()})
+	}
+	sort.Slice(backups, func(i, j int) bool {
+		if backups[i].modified != backups[j].modified {
+			return backups[i].modified > backups[j].modified
+		}
+		return backups[i].path > backups[j].path
+	})
+	for index, backup := range backups {
+		if index < keptBackups || backup.path == current {
+			continue
+		}
+		if err := os.Remove(backup.path); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(out, "could not remove an old configuration backup: %v\n", err)
+		}
+	}
 }
 
 func envAssignment(line string) (string, string, bool) {
@@ -242,6 +298,7 @@ func observe(ctx context.Context, dir, compose string) (map[int]string, map[int]
 		return nil, nil, fmt.Errorf("inspect running containers before selecting ports: %w", err)
 	}
 	pidOwners := map[int32]string{}
+	declared := map[int]string{}
 	if list := strings.Fields(string(ids)); len(list) > 0 {
 		raw, err := hostexec.Command(ctx, "docker", append([]string{"inspect"}, list...)...).Output()
 		if err != nil {
@@ -286,6 +343,9 @@ func observe(ctx context.Context, dir, compose string) (map[int]string, map[int]
 				}
 			}
 			if ours && c.HostConfig.NetworkMode == "host" {
+				if port := declaredPort(c, service); port > 0 {
+					declared[port] = service
+				}
 				top, err := hostexec.Command(ctx, "docker", "top", c.ID, "-eo", "pid").Output()
 				if err != nil {
 					return nil, nil, fmt.Errorf("inspect %s processes: %w", service, err)
@@ -302,6 +362,50 @@ func observe(ctx context.Context, dir, compose string) (map[int]string, map[int]
 	if err != nil {
 		return nil, nil, err
 	}
+	classifyListeners(connections, pidOwners, declared, owned, foreign)
+	return owned, foreign, nil
+}
+
+// declaredPort is the port a host-network service of this checkout was started
+// to listen on, read from the environment Compose gave it. Each service is asked
+// only about its own variable: the proxy is also told the backend's port.
+func declaredPort(c inspectedContainer, service string) int {
+	// A container waiting to restart is not listening, whatever it was told.
+	if c.State.Restarting {
+		return 0
+	}
+	key := map[string]string{"backend": "JD_ADDR", "proxy": "JD_PORT"}[service]
+	if key == "" {
+		return 0
+	}
+	value := ""
+	for _, entry := range c.Config.Env {
+		if name, rest, ok := strings.Cut(entry, "="); ok && name == key {
+			value = rest
+		}
+	}
+	if key == "JD_ADDR" {
+		_, port, err := net.SplitHostPort(value)
+		if err != nil {
+			return 0
+		}
+		value = port
+	}
+	port, err := strconv.Atoi(value)
+	if err != nil || port < 1 || port > 65535 {
+		return 0
+	}
+	return port
+}
+
+// classifyListeners attributes each listening socket to a service or to nobody.
+//
+// A socket's process is found through /proc/<pid>/fd, which an unprivileged
+// lifecycle container may not read for the privileged backend, and such a socket
+// reports PID 0. An unknown owner on the port a running service of this checkout
+// declares is that service. A visible owner is always believed, so another
+// program holding that port still counts as foreign.
+func classifyListeners(connections []procnet.ConnectionStat, pidOwners map[int32]string, declared, owned map[int]string, foreign map[int]bool) {
 	for _, connection := range connections {
 		if connection.Status != "LISTEN" {
 			continue
@@ -309,11 +413,12 @@ func observe(ctx context.Context, dir, compose string) (map[int]string, map[int]
 		port := int(connection.Laddr.Port)
 		if owner := pidOwners[connection.Pid]; owner != "" {
 			owned[port] = owner
+		} else if connection.Pid == 0 && declared[port] != "" {
+			owned[port] = declared[port]
 		} else if owned[port] == "" {
 			foreign[port] = true
 		}
 	}
-	return owned, foreign, nil
 }
 
 // Start closes the observation/start race with bounded retries. start must wait

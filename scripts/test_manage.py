@@ -20,7 +20,7 @@ class TerminalToolsTest(unittest.TestCase):
         self.root = pathlib.Path(self.temp.name) / "checkout with spaces"
         self.scripts = self.root / "scripts"
         self.scripts.mkdir(parents=True)
-        for name in ("manage.sh", "create-user.sh", "reset-password.sh", "dotenv.sh"):
+        for name in ("manage.sh", "create-user.sh", "reset-password.sh", "dotenv.sh", "password.sh"):
             shutil.copy2(REPO / "scripts" / name, self.scripts / name)
         self.bin = pathlib.Path(self.temp.name) / "bin"
         self.bin.mkdir()
@@ -245,6 +245,60 @@ JD_FRONTEND_PORT=42002
         result = self.run_tool("manage.sh", "install-cli", env={"TEST_UID": "1000", "JD_CLI_PATH": str(target)})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("sudo", result.stderr)
+
+    def test_fresh_install_forgets_the_first_password_once_healthy(self):
+        # What a port conflict during startup leaves beside .env.
+        port_backup = self.root / ".env.jd-port-previous-fixture"
+        port_backup.write_text('JD_MASTER_KEY=fixture\nJD_BOOTSTRAP_PASSWORD="Abcd-1234-efgh"\n')
+        result = self.run_installer(env_file=False, answers="2\nad$min\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        written = (self.root / ".env").read_text()
+        self.assertNotIn("JD_BOOTSTRAP_PASSWORD=", written)
+        self.assertNotIn("JD_BOOTSTRAP_PASSWORD=", port_backup.read_text())
+        self.assertIn('JD_BOOTSTRAP_USER="ad$$min"\n', written)
+        self.assertEqual((self.root / ".env").stat().st_mode & 0o777, 0o600)
+        # The container is created again, so the value leaves its environment too.
+        self.assertIn(["compose", "up", "-d", "--no-deps", "--no-build", "backend"],
+                      [call["args"] for call in self.read_calls()])
+        # Still shown once: the summary reads it from memory, not from the file.
+        self.assertIn("Save that password now", result.stdout)
+
+    def test_unhealthy_fresh_install_keeps_the_first_password(self):
+        self.run_installer(env_file=False, answers="2\n")
+        self.tool("curl", '#!/bin/bash\nexit 1\n')
+        self.tool("seq", '#!/bin/bash\necho 1\n')
+        self.tool("sleep", '#!/bin/bash\nexit 0\n')
+        (self.root / ".env").unlink()
+        script = (self.root / "install.sh")
+        result = subprocess.run([str(script)], input="2\n", capture_output=True, text=True,
+                                cwd=self.temp.name, env=self.env)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("the backend did not answer", result.stdout)
+        self.assertIn("JD_BOOTSTRAP_PASSWORD=", (self.root / ".env").read_text())
+
+    def test_kept_env_keeps_its_bootstrap_password_and_is_not_recreated_for_it(self):
+        body = ('JD_MASTER_KEY=fixture\nJD_SITE=localhost\nJD_BIND=\nJD_TLS=off\nJD_REQUIRE_2FA=false\n'
+                'JD_TERMINAL_ENABLED=false\nJD_BOOTSTRAP_PASSWORD="Abcd-1234-efgh"\n')
+        result = self.run_installer(env_body=body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('JD_BOOTSTRAP_PASSWORD="Abcd-1234-efgh"\n', (self.root / ".env").read_text())
+        self.assertNotIn(["compose", "up", "-d", "--no-deps", "--no-build", "backend"],
+                         [call["args"] for call in self.read_calls()])
+
+    def test_kept_env_without_a_site_finishes_on_the_compose_default(self):
+        body = "JD_MASTER_KEY=fixture\nJD_TLS=off\nJD_REQUIRE_2FA=false\nJD_TERMINAL_ENABLED=false\n"
+        result = self.run_installer(env_body=body)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Setup complete", result.stdout)
+        self.assertIn("http://localhost:8443", result.stdout)
+
+    def test_installer_asks_again_for_a_password_the_backend_would_refuse(self):
+        answers = "2\nadmin\nn\n" + "shortAa1!\n" * 2 + "alllowercaseletters\n" * 2 + "Abcd-1234-efgh\n" * 2
+        result = self.run_installer(env_file=False, answers=answers)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("at least 12 characters", result.stdout + result.stderr)
+        self.assertIn("mix at least three of", result.stdout + result.stderr)
+        self.assertIn("(the one you chose)", result.stdout)
 
     def test_installer_restores_the_env_a_kept_uninstall_left(self):
         kept = pathlib.Path(self.temp.name) / "host/var/lib/just-dashboard/install.env"

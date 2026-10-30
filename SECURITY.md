@@ -15,6 +15,9 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   and the allowlist is checked **before** authentication.
 - Two-factor is enforced for every account that has enrolled; `JD_REQUIRE_2FA` decides whether an
   account *must* enrol. A passkey replaces the password at sign-in, never the code.
+- Repeated wrong passwords and repeated wrong two-factor codes each lock that part of an account's
+  sign-in for fifteen minutes. Regenerating recovery codes and turning two-factor off take the current
+  password.
 - Capabilities are checked on every backend route, never in the UI alone.
 - Destructive actions are confirmed and audited; deleting a project, database, stack, Git checkout or a
   host account's home, and uninstalling with a wipe, asks for a typed phrase checked on the server.

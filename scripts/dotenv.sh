@@ -11,3 +11,9 @@ jd_dotenv_literal() {
  value="${value//\$/\$\$}"
  printf '"%s"' "$value"
 }
+
+# Remove one variable's assignments from a dotenv file. sed -i keeps the file's
+# mode and owner, which for .env are the point.
+jd_dotenv_drop() {
+ sed -i "/^$1=/d" "$2"
+}

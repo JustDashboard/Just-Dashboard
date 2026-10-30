@@ -22,16 +22,13 @@ const buttonVariants = cva(
         // The command face is the brand blue, not ink: the product's one
         // pressable action wears its one colour, and the token carries the
         // hover and press steps so no call site re-mixes an opacity pair.
-        default:
-          "bg-brand text-brand-foreground hover:bg-brand-hover active:bg-brand-active",
-        destructive:
-          "bg-destructive/85 text-white hover:bg-destructive active:bg-destructive/70",
+        default: "bg-brand text-brand-foreground hover:bg-brand-hover active:bg-brand-active",
+        destructive: "bg-destructive/85 text-white hover:bg-destructive active:bg-destructive/70",
         outline:
           "border border-input bg-control hover:bg-control-hover hover:text-accent-foreground active:bg-control-active",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80 active:bg-secondary/60",
-        ghost:
-          "hover:bg-accent hover:text-accent-foreground active:bg-menu-hover",
+        ghost: "hover:bg-accent hover:text-accent-foreground active:bg-menu-hover",
         link: "text-primary underline-offset-4 hover:underline active:text-primary/80",
       },
       size: {

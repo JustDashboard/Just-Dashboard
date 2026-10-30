@@ -19,6 +19,7 @@ var (
 	ErrAccountDisabled    = errors.New("account disabled")
 	ErrTOTPAlreadyEnabled = errors.New("two-factor authentication is already enabled")
 	ErrInvalidTOTP        = errors.New("invalid verification code")
+	ErrSecondFactorLocked = errors.New("two-factor temporarily locked after repeated wrong codes; wait 15 minutes, or ask an administrator to reset it")
 	ErrTOTPRequired       = errors.New("this dashboard requires two-factor authentication, so it cannot be turned off")
 	ErrNotFound           = errors.New("not found")
 	ErrLastAdmin          = errors.New("cannot remove the last enabled admin")
@@ -26,6 +27,7 @@ var (
 
 const (
 	maxFailedLogins = 5
+	maxFailedCodes  = 5
 	lockoutWindow   = 15 * time.Minute
 	totpIssuer      = "Just Dashboard"
 )
@@ -465,7 +467,7 @@ type LoginResult struct {
 func (s *Service) Login(ctx context.Context, username, password, ip, userAgent string) (*LoginResult, error) {
 	username = strings.TrimSpace(strings.ToLower(username))
 	row := s.st.DB.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE username = ?`, username)
-	u, pwHash, _, failed, lockedUntil, err := scanUser(row)
+	u, pwHash, _, _, lockedUntil, err := scanUser(row)
 	if err == sql.ErrNoRows {
 		// Spend comparable time on unknown users so the response does not
 		// disclose which usernames exist.
@@ -483,20 +485,61 @@ func (s *Service) Login(ctx context.Context, username, password, ip, userAgent s
 		return nil, ErrAccountDisabled
 	}
 	if !VerifyPassword(password, pwHash) {
-		failed++
-		var locked int64
-		if failed >= maxFailedLogins {
-			locked = now.Add(lockoutWindow).Unix()
-			failed = 0
+		// Outlives the request: a client that hangs up after its guess has
+		// still spent it.
+		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		locked, err := countFailure(writeCtx, s.st.DB, failedLogins, u.ID)
+		if err != nil {
+			return nil, err
 		}
-		s.st.DB.ExecContext(ctx, `UPDATE users SET failed_count = ?, locked_until = ? WHERE id = ?`, failed, locked, u.ID)
-		if locked > 0 {
+		if locked {
 			return nil, ErrAccountLocked
 		}
 		return nil, ErrInvalidCredentials
 	}
-	s.st.DB.ExecContext(ctx, `UPDATE users SET failed_count = 0, locked_until = 0 WHERE id = ?`, u.ID)
+	// A lock set while this password was being checked stands.
+	res, err := s.st.DB.ExecContext(ctx,
+		`UPDATE users SET failed_count = 0, locked_until = 0 WHERE id = ? AND locked_until <= ?`, u.ID, now.Unix())
+	if err != nil {
+		return nil, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return nil, err
+	} else if n != 1 {
+		return nil, ErrAccountLocked
+	}
 	return s.startSession(ctx, u, ip, userAgent, "password")
+}
+
+// failureCounter is one of the counts that locks an account for lockoutWindow.
+// The columns are constants, never input.
+type failureCounter struct {
+	count, lockedUntil string
+	limit              int
+}
+
+var (
+	failedLogins = failureCounter{count: "failed_count", lockedUntil: "locked_until", limit: maxFailedLogins}
+	failedCodes  = failureCounter{count: "totp_failed_count", lockedUntil: "totp_locked_until", limit: maxFailedCodes}
+)
+
+// countFailure adds one failure in a single statement, so failures arriving
+// together each count, and reports whether the account is now locked.
+func countFailure(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, c failureCounter, userID int64) (bool, error) {
+	now := time.Now()
+	var lockedUntil int64
+	err := db.QueryRowContext(ctx, fmt.Sprintf(`UPDATE users SET
+		%[1]s = CASE WHEN %[1]s + 1 >= ? THEN 0 ELSE %[1]s + 1 END,
+		%[2]s = CASE WHEN %[1]s + 1 >= ? THEN ? ELSE %[2]s END
+		WHERE id = ? RETURNING %[2]s`, c.count, c.lockedUntil),
+		c.limit, c.limit, now.Add(lockoutWindow).Unix(), userID).Scan(&lockedUntil)
+	if err != nil {
+		return false, err
+	}
+	return lockedUntil > now.Unix(), nil
 }
 
 // startSession is where every sign-in becomes a session, a password's and a
@@ -555,7 +598,8 @@ func (s *Service) BeginTOTPEnrollment(ctx context.Context, userID int64) (*Enrol
 	// Stored but not yet enabled: enrollment only completes once the user
 	// proves they can generate a code from it.
 	res, err := s.st.DB.ExecContext(ctx,
-		`UPDATE users SET totp_secret = ?, totp_last_step = -1 WHERE id = ? AND totp_enabled = 0`, sealed, userID)
+		`UPDATE users SET totp_secret = ?, totp_last_step = -1, totp_failed_count = 0, totp_locked_until = 0
+		 WHERE id = ? AND totp_enabled = 0`, sealed, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -615,7 +659,7 @@ func (s *Service) DisableTOTP(ctx context.Context, userID int64) error {
 		return ErrTOTPRequired
 	}
 	if _, err := s.st.DB.ExecContext(ctx,
-		`UPDATE users SET totp_enabled = 0, totp_secret = '', totp_last_step = -1 WHERE id = ?`, userID); err != nil {
+		`UPDATE users SET totp_enabled = 0, totp_secret = '', totp_last_step = -1, totp_failed_count = 0, totp_locked_until = 0 WHERE id = ?`, userID); err != nil {
 		return err
 	}
 	_, err := s.st.DB.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID)
@@ -625,7 +669,7 @@ func (s *Service) DisableTOTP(ctx context.Context, userID int64) error {
 // ResetTOTP clears an enrollment so a locked-out user can re-enroll. Admin only.
 func (s *Service) ResetTOTP(ctx context.Context, userID int64) error {
 	if _, err := s.st.DB.ExecContext(ctx,
-		`UPDATE users SET totp_enabled = 0, totp_secret = '', totp_last_step = -1 WHERE id = ?`, userID); err != nil {
+		`UPDATE users SET totp_enabled = 0, totp_secret = '', totp_last_step = -1, totp_failed_count = 0, totp_locked_until = 0 WHERE id = ?`, userID); err != nil {
 		return err
 	}
 	if _, err := s.st.DB.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID); err != nil {

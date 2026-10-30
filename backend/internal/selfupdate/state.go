@@ -92,6 +92,9 @@ type Run struct {
 
 	FromCommit string `json:"fromCommit,omitempty"`
 	ToCommit   string `json:"toCommit,omitempty"`
+	// InstalledVersion is what the changelog at ToCommit says, which is the
+	// version the update really landed on rather than the one it was asked for.
+	InstalledVersion string `json:"installedVersion,omitempty"`
 
 	Actor      string     `json:"actor"`
 	StartedAt  time.Time  `json:"startedAt"`

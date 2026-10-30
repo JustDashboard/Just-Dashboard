@@ -62,6 +62,8 @@ Keep the PR focused and use the template to explain what changed, why, and how y
 related issues and include before/after screenshots for visual changes or a recording for interaction
 changes. Record validation limits and whether documentation needed updating; submitting the PR agrees
 to the contribution terms above, including the additional licence grant to the project owner.
+Binary evidence (screenshots, video, traces) goes on a `pr-assets/*` branch and is linked by commit SHA,
+never into `docs/audits/`.
 
 - Run the checks with `scripts/test-changed.sh`. It runs only what your diff can reach: Prettier and
   ESLint on the changed frontend files, `tsc --noEmit`, `bun test src`, `go build`/`go vet` and the
@@ -190,6 +192,8 @@ to the contribution terms above, including the additional licence grant to the p
   backwards, a removed passkey, an enrolled account still asked for its code), and
   `account-passkeys.spec.ts`, which uses Chrome's virtual authenticator over CDP at `localhost` —
   WebAuthn refuses the `127.0.0.1` the other specs use, so the spec opens the same server by name.
+  Browser specs do not pass through Caddy; `src/lib/passkeys.test.js` reads `deploy/Caddyfile` to hold
+  its `Permissions-Policy` to allowing passkeys.
 - Installer and terminal-admin changes also run `python3 scripts/test_manage.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.
@@ -234,10 +238,10 @@ to the contribution terms above, including the additional licence grant to the p
   by runs on `main` and `patch/*` and restored by pull requests into them, because a run can read
   the caches of its base branch and never those of another task branch.
 - `.github/workflows/release.yml` publishes the GitHub release. It runs after Verify passes on a push
-  to `main`, reads `latest` from `backend/internal/selfupdate/changelog.json`, and when that push
-  changed it and no release `v<latest>` exists yet, tags that commit and publishes the release with the version's section of
-  `CHANGELOG.md` as its notes. The branch a release was cut on does not matter, and a merge that
-  bumps no version publishes nothing. Never tag or publish a release by hand; a manual run of the
+  to `main`, reads `latest` from `backend/internal/selfupdate/changelog.json`, and when no release
+  `v<latest>` exists yet, tags that commit and publishes the release with the version's section of
+  `CHANGELOG.md` as its notes. The branch a release was cut on does not matter, and a merge whose
+  version is already released publishes nothing. Never tag or publish a release by hand; a manual run of the
   workflow on `main` retries one that failed.
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
   directive; the other nginx tests still run. `TestLiveSiteControlsAreMeasured` instead writes its

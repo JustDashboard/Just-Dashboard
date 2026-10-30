@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 )
 
@@ -138,7 +139,7 @@ func (s *Service) Create(ctx context.Context, name string, request Request, acto
 	active := &activeCapture{done: make(chan struct{})}
 	s.active[run.ID] = active
 	gate := make(chan struct{})
-	job, _ := s.jobs.StartExclusive(JobPrefix+run.ID+".", jobs.Spec{Kind: JobPrefix + run.ID + ".pcap", Title: "Packet capture", StartedBy: actor, Timeout: time.Duration(request.Seconds+10) * time.Second}, func(ctx context.Context, out jobs.Emitter) error { <-gate; return s.execute(ctx, run, out) })
+	job, _ := s.jobs.StartExclusive(JobPrefix+run.ID+".", jobs.Spec{Capability: auth.CapSystemAdmin, Kind: JobPrefix + run.ID + ".pcap", Title: "Packet capture", StartedBy: actor, Timeout: time.Duration(request.Seconds+10) * time.Second}, func(ctx context.Context, out jobs.Emitter) error { <-gate; return s.execute(ctx, run, out) })
 	active.jobID, run.JobID = job.ID, job.ID
 	err = s.update(ctx, run, nil)
 	if err != nil {

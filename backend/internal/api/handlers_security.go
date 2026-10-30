@@ -153,9 +153,10 @@ func (s *Server) handleSSHApply(w http.ResponseWriter, r *http.Request) error {
 		map[string]any{"applied": plan.Applied, "streamed": true})
 
 	s.startJob(w, r, jobs.Spec{
-		Kind:   "ssh.apply",
-		Title:  "Applying SSH settings: " + strings.Join(plan.Applied, ", "),
-		Target: plan.File, Timeout: 2 * time.Minute,
+		Capability: auth.CapDestructive,
+		Kind:       "ssh.apply",
+		Title:      "Applying SSH settings: " + strings.Join(plan.Applied, ", "),
+		Target:     plan.File, Timeout: 2 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		res, err := s.modules.netsec.ApplySSHPlan(ctx, plan, out)
 		if err != nil {
@@ -220,9 +221,10 @@ func (s *Server) startPendingSSHApply(w http.ResponseWriter, r *http.Request, pl
 	w.Header().Set("X-JD-Network-Change", change.ID)
 	w.Header().Set("X-JD-Network-Expires", change.ExpiresAt.Format(time.RFC3339Nano))
 	s.startJob(w, r, jobs.Spec{
-		Kind:   "ssh.apply",
-		Title:  "Applying SSH settings until confirmed: " + strings.Join(plan.Applied, ", "),
-		Target: plan.File, Timeout: 2 * time.Minute,
+		Capability: auth.CapDestructive,
+		Kind:       "ssh.apply",
+		Title:      "Applying SSH settings until confirmed: " + strings.Join(plan.Applied, ", "),
+		Target:     plan.File, Timeout: 2 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		res, err := s.modules.netsec.ApplySSHPlan(ctx, plan, out)
 		if err == nil {

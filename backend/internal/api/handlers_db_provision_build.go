@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
@@ -105,7 +106,8 @@ func (s *Server) handleDBProvisionBuild(w http.ResponseWriter, r *http.Request) 
 	}
 	digest := recipeDigest(tmpl.recipe)
 	spec := jobs.Spec{
-		Kind: recipeBuildKind(req.Engine, version), Title: "Building " + version.image, Target: version.image,
+		Capability: auth.CapSystemAdmin,
+		Kind:       recipeBuildKind(req.Engine, version), Title: "Building " + version.image, Target: version.image,
 		StartedBy: httpx.MustPrincipal(r).Username(), Timeout: recipeBuildTimeout,
 	}
 	docker := s.modules.docker

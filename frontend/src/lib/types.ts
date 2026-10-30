@@ -8837,6 +8837,8 @@ export type Job = {
   startedBy?: string
   /** Every line produced, including any the buffer has dropped. */
   lines: number
+  /** What stopping it takes: the capability the route that started it asks for. */
+  capability?: Capability
 }
 
 export type JobLine = {
