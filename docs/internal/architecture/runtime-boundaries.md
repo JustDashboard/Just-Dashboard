@@ -210,6 +210,9 @@ trail. No schema change or credential recovery is involved.
 The first admin is created by `cmd/server/main.go` from `JD_BOOTSTRAP_USER`/`JD_BOOTSTRAP_PASSWORD`;
 `must_change_pw` is set only when the password was *generated* there and printed to the log — a
 password the operator chose in the installer is theirs and is not demanded again at first sign-in.
+`install.sh` validates that password with `scripts/password.sh`, the same rule as
+`auth.ValidatePasswordStrength`, and on a fresh install removes it from `.env` and recreates the backend
+after the first health check; nothing reads it again once an account exists, and a kept `.env` is not touched.
 The same holds for `scripts/create-user.sh` and `scripts/reset-password.sh`: a password root typed on
 the host is already chosen. Only an account an admin creates from Account → Users owes a change.
 
@@ -362,3 +365,15 @@ that does not make it a password-and-code session. Enrolment proves its code, wh
 elevation retains its recorded provenance, including unknown legacy provenance. Account session summaries use this distinction and display
 legacy/unknown authentication honestly. Migration and authentication tests cover existing rows and
 password/code/recovery completion; route authorization and per-account enforcement are unchanged.
+
+## Container limits in `docker-compose.yml`
+
+Every service rotates its logs through the shared `x-logging` block (`json-file`, five files of 10 MB).
+The backend stays root and privileged, because managing the host is what it is for. The frontend and the
+proxy run with `no-new-privileges` and every capability dropped, and the proxy keeps `NET_BIND_SERVICE`
+although it never binds below 1024: the `caddy` binary in its image carries that as a file capability, and
+the kernel refuses to exec such a binary without it, so the container restart-loops with
+`caddy: Operation not permitted`. The proxy's healthcheck is `nc -z` on loopback, which it binds in every
+configuration. `up --wait` in the updater and the settings runner now waits for it as well, at the same
+30-second interval as the frontend's, so neither takes longer, and a proxy that never listens now fails
+that step instead of being found later.

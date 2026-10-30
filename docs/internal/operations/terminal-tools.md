@@ -108,7 +108,8 @@ image with no jd fails with a message and leaves nothing behind.
 Run `scripts/test-changed.sh main`, plus `python3 scripts/test_manage.py` and
 `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`.
 The Python fixtures check command arguments, stdin preservation, root and input checks, checkout paths
-with spaces, Compose fallback, restoring a kept uninstall's `.env`, asking for the key of a store left
+with spaces, Compose fallback, restoring a kept uninstall's `.env`, refusing a weak first password, removing
+the first password after a healthy fresh install and never from a kept `.env`, asking for the key of a store left
 without one, installing jd from the image (and finishing without it), `install-cli`, and the installer's successful/failing
 completion flows without changing
 host packages or the installed stack. The linking cases prove what the installer asked by what its answers did
