@@ -616,6 +616,7 @@ func TestADeployKeyCannotGiveADeploymentTheHost(t *testing.T) {
 		"a privileged container": configuration(map[string]any{"privileged": true}, []map[string]any{}),
 		"the host's network":     configuration(map[string]any{"hostNetwork": true}, []map[string]any{}),
 		"a capability":           configuration(map[string]any{"capabilities": []string{"SYS_ADMIN"}}, []map[string]any{}),
+		"the server's GPUs":      configuration(map[string]any{"gpus": map[string]any{"mode": "all"}}, []map[string]any{}),
 		"a host path":            configuration(map[string]any{"mounts": []map[string]any{{"source": "/etc", "target": "/host-etc", "ownership": "external"}}}, []map[string]any{}),
 		"a host release task": configuration(map[string]any{}, []map[string]any{{
 			"name": "migrate", "command": "cat /var/lib/just-dashboard/vpsd.db", "timeoutSeconds": 60, "env": []string{},
@@ -626,8 +627,15 @@ func TestADeployKeyCannotGiveADeploymentTheHost(t *testing.T) {
 			t.Errorf("%s: a deploy key got %d %s", name, w.Code, w.Body.String())
 		}
 	}
-	// An ordinary workload is the key's to configure.
-	if w := b.call(b.deploy, http.MethodPut, path, configuration(map[string]any{"memoryMb": 256}, []map[string]any{})); w.Code != http.StatusOK {
+	// An ordinary workload is the key's to configure, its process flags
+	// included: who it runs as, a read-only root, its limits and its own
+	// namespaced kernel parameters change nothing of the server's.
+	if w := b.call(b.deploy, http.MethodPut, path, configuration(map[string]any{
+		"memoryMb": 256, "user": "101:101", "readOnlyRootfs": true,
+		"tmpfs":   []map[string]any{{"path": "/var/cache/nginx"}, {"path": "/run"}},
+		"ulimits": []map[string]any{{"name": "nofile", "soft": 4096, "hard": 4096}},
+		"sysctls": []map[string]any{{"name": "net.core.somaxconn", "value": "1024"}},
+	}, []map[string]any{})); w.Code != http.StatusOK {
 		t.Fatalf("an ordinary configuration = %d %s", w.Code, w.Body.String())
 	}
 

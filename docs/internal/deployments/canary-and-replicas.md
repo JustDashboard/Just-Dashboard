@@ -45,7 +45,8 @@ production's traffic.
 ### The runtime owner
 
 `DockerRuntimeOwner.startContainer` creates the replicas one after another from the same image,
-command, environment, mounts and limits. The first keeps the name a release has always had,
+command, environment, mounts and limits, and the same process flags — user, read-only root and its
+writable paths, ulimits, sysctls and GPUs ([runtime flags](implementation.md)). The first keeps the name a release has always had,
 `jd-e<env>-r<number>`; the others are `jd-e<env>-r<number>-<i>` (`replicaContainerName`), so
 cancellation cleanup can still find every container a crash between `docker create` and the runtime
 record left (`orphanReplicas`). Each carries the release's labels plus `io.just-dashboard.replica` (its

@@ -730,7 +730,8 @@ only renderer/executor/validation authority for their feature.
   the release's resource limits and the plan's mounts (its volumes and binds, read-only where the plan
   says so, recorded in the task evidence as `mounts`) — a Heroku or Render release phase that sees the
   application's own data, so a migration or seed of SQLite on a volume reaches the file the release then
-  opens — but no ports, devices, capabilities or privilege, the image's entrypoint replaced by the
+  opens — as the release's user with its ulimits, but with no ports, devices, GPUs, capabilities or
+  privilege and neither its read-only root nor its kernel parameters, the image's entrypoint replaced by the
   command, and the container removed however the task ends. The task runs while the live release still
   serves from the same volume; a stop-first release stops it only when the candidate starts. The mounts
   are the frozen runtime plan's own — a bind source was resolved and authorised when the plan was saved,
@@ -854,6 +855,47 @@ only renderer/executor/validation authority for their feature.
   the limits their files declare. What they should be is [right-sizing](right-sizing.md)'s read of the
   environment's retained container samples (`GET …/environments/{env}/sizing`, `GET /deploy/sizing`);
   applying its suggestion is this plan's ordinary configuration save, applied with the next release.
+- The runtime plan also carries the container's process flags (`deploy/runtime_flags.go`): `user`
+  (`uid[:gid]` or a name the image has; its shape is checked, the image says at start whether it knows
+  the name), `readOnlyRootfs` with `tmpfs` — the paths kept writable in memory, `/tmp` alone when a
+  read-only root names none, 64 MiB each unless sized (up to 16 GiB, at most 16 paths), mounted as Docker
+  mounts a tmpfs (`nosuid,nodev,noexec`) and charged to the container's memory —, `ulimits` (`{name, soft,
+  hard}` over Docker's fifteen names, soft ≤ hard, -1 for unlimited except nofile, nice and rtprio;
+  nofile 16–1,048,576, the kernel's default `fs.nr_open`), `sysctls` (`{name, value}`, only the set a
+  container has a namespace of its own for: `net.*`, `fs.mqueue.*` and the System V IPC limits, with
+  `net.*` refused on the host network) and `gpus` (`all`, a `count` of 1–64, or `devices` by index or UUID:
+  Docker's `DeviceRequests` with the `nvidia` driver and the `gpu` capability). `PlanConfiguration.Validate`
+  refuses a bad value with the field it is about (`runtime.ulimits[0]`, `runtime.gpus.count`…), so a draft,
+  a settings save, `jd config set` and a blueprint are refused alike; canonicalisation trims and orders
+  them and leaves an absent one out, so a plan saved before them keeps its digest. A Compose plan refuses
+  each, naming the key its file has for it (`user:`, `read_only:`, `tmpfs:`, `ulimits:`, `sysctls:`, a
+  device reservation). The read-only root's one conflict the plan shows is refused: a plan nginx serves (a
+  static site, or a recipe with an output directory) needs `/var/cache/nginx` and `/run` writable — a
+  tmpfs or a writable mount at or above each — because nginx makes its temporary directories and PID file
+  there at start; a tmpfs where a mount already is, `/`, `/proc` and `/sys` are refused too. Seeds write
+  into named volumes, which stay writable. The runtime owner hands the flags to every container of a
+  release — each replica, a canary's candidate, and the same container a wake starts again — and a release
+  task gets the user and the ulimits, so what a migration writes into a volume belongs to whoever the
+  application runs as, but not the read-only root, the kernel parameters or the GPUs. A container the
+  daemon created and then would not start is removed with the replicas already started, and the start's
+  refusal is named (`runtime_gpu_unavailable`, `runtime_ulimit_refused`, `runtime_sysctl_refused`,
+  `runtime_user_unknown`); a write the read-only root refuses once the application runs is
+  `runtime_rootfs_read_only`, with the path the program tried and the directory to make writable. A pull
+  request preview inherits the user, the read-only root, the limits and the kernel parameters, and gets
+  the GPUs only when `gpus.previews` says so ([preview isolation](preview-isolation.md)). The release
+  comparison lists `user`, `read-only root` (with its writable paths), `writable paths` (on a writable
+  root), `ulimits`, `sysctls` and `gpus`. Preflight says each back (`runtime_user`,
+  `runtime_read_only_root`, `runtime_tmpfs`, `runtime_ulimits`, `runtime_sysctls`, `runtime_gpus`), warns
+  when the writable paths can hold more than the memory limit (`runtime_tmpfs_exceeds_memory`), reads
+  `docker info`'s runtimes for a plan with GPUs and warns when there is no `nvidia` one
+  (`runtime_gpu_runtime_missing`; `runtime_gpu_runtime_unknown` when the daemon could not be asked), and
+  counts a GPU as advanced runtime authority. A deploy key may set the user, the read-only root, the
+  limits and the kernel parameters; a GPU is host authority to it, as a device is. A container imported
+  from this server brings its user, read-only root, tmpfs mounts (as writable paths, no longer as storage
+  to adopt), ulimits, sysctls and GPUs into the plan that adopts it. `dockerx.ContainerSpec` carries them
+  without a JSON name, so the Docker page's form cannot set them, and `SpecOf` reads them back, so a
+  container recreated from its own spec keeps them. Runtime settings edits them under *Inside the
+  container* — one entry per line as `docker run` writes them — and, for the GPUs, *Container access*.
 - A failed readiness or smoke gate first asks the runtime owner to diagnose the candidate: container
   state, exit code, OOM flag, restart count and a bounded log tail (200 lines, 32 KiB, most recent kept).
   The tail is written to the run transcript after redaction of every runtime variable value; step
@@ -863,7 +905,8 @@ only renderer/executor/validation authority for their feature.
   `cat /proc/net/tcp /proc/net/tcp6` inside its own container through the check runner's closed-argv
   exec (bounded output, only parsed addresses kept). `applicationOutputCause`
   (`runtime_output_cause.go`, the one table of runtime and release-task causes) then names one cause,
-  most specific first: the container's own OOM flag (`runtime_oom`), a missing table
+  most specific first: the container's own OOM flag (`runtime_oom`), a write a read-only root refused
+  (`runtime_rootfs_read_only`, read only on a plan whose root is read-only), a missing table
   (`schema_missing`), a refused schema push (`runtime_schema_push_refused`: Prisma's
   `--accept-data-loss` and "changes that cannot be executed", Drizzle's rename and data-loss prompts),
   a SQLite file it cannot open or write (`runtime_sqlite_not_writable`), a variable the application
@@ -1165,8 +1208,9 @@ only renderer/executor/validation authority for their feature.
   .NET SDK image a `global.json` pin names that was never published is `dotnet_sdk_pin_unavailable`
   instead —, a JDK or .NET release the recipe refuses at prepare_context ends the run with preflight's
   own code (`java_version_unsupported`, `gradle_wrapper_incompatible`, `dotnet_version_unsupported`), and
-  a candidate's start names `runtime_port_in_use`, `image_missing` and `mount_invalid` from Docker's
-  refusal without repeating it. A context deadline that reaches a step while its run is alive is
+  a candidate's start names `runtime_port_in_use`, `image_missing`, `mount_invalid` and, for the process
+  flags, `runtime_gpu_unavailable`, `runtime_ulimit_refused`, `runtime_sysctl_refused` and
+  `runtime_user_unknown` from Docker's refusal without repeating it. A context deadline that reaches a step while its run is alive is
   `step_timeout`; only a cancelled context is a cancellation. The signature table and fixes are listed
   in [the recipe contract](recipes.md#failure-diagnosis).
 - A run that failed or rolled back can be asked about, on request only, of the provider an
@@ -1481,7 +1525,7 @@ only renderer/executor/validation authority for their feature.
   held to what a person in a session could not be refused: a generate or rotate answers it without
   `generatedValue`; a plan it commits, or an environment change it makes, may not carry host authority
   (`hostAuthority`: a folder on the server, Docker Compose, privileged, host network, capabilities,
-  devices, a host path mounted, a release task without `runner: "image"`), and an environment that
+  devices, the server's GPUs, a host path mounted, a release task without `runner: "image"`), and an environment that
   already does, or whose variables read a `credential` reference, is changed by a person only (it may
   still be deployed and have its variables set); a source may not gain a saved credential or send its
   Git credential to another repository; a variable may not be pointed at a `credential`, `database` or

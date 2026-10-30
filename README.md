@@ -113,6 +113,8 @@ free.
 - Skew protection: a visitor stays on the release that first answered them for the warm window after a
   cutover, so a page loaded before it never asks the new release for scripts it does not have
 - Right-sizing from what each app actually used: the memory and CPU limits it should have, applied in one click
+- The container flags `docker run` has, per deployment: the user it runs as, a read-only root with
+  writable paths in memory, ulimits, the container's own sysctls and NVIDIA GPUs
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
 - A domain's DNS record created from its settings with those same credentials: the A and AAAA to this
   server, or a tunnel's CNAME, written into its zone at Cloudflare, Route 53, DigitalOcean, Google Cloud
@@ -536,8 +538,8 @@ rollback-watch or rehearsal terms or edit a route's maintenance and error pages;
 a copy of a release's data; merge or comment on
 pull requests as the dashboard's GitHub account; approve previews; archive or delete deployments; or
 reach anything outside Deployments. It also cannot give a deployment access to the server itself — a
-privileged container, the host's network, a host folder, a release task in the host's shell, a Compose
-file — nor point a saved credential somewhere new; a deployment that already has such settings, or
+privileged container, the host's network, its devices or GPUs, a host folder, a release task in the
+host's shell, a Compose file — nor point a saved credential somewhere new; a deployment that already has such settings, or
 reads a saved credential through a variable, can be deployed and its variables set, but its
 configuration and source are changed in the dashboard. Every
 write is in the audit log under the key's name. See [the security notes](docs/internal/security/invariants.md)

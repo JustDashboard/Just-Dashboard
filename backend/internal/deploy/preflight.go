@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -76,6 +77,21 @@ type HostObservation struct {
 	// Tunnel is the Cloudflare Tunnel connection, observed when a domain is
 	// to be served through one (tunnel.go).
 	Tunnel *TunnelObservation `json:"tunnel,omitempty"`
+
+	// GPURuntime is the daemon's OCI runtimes, observed for a plan that asks
+	// for GPUs (runtime_flags.go).
+	GPURuntime *GPURuntimeObservation `json:"gpuRuntime,omitempty"`
+}
+
+// GPURuntimeObservation is whether Docker on this server lists the NVIDIA
+// runtime the Container Toolkit registers, which is what gives a container
+// the GPUs it asks for. Observed is false when `docker info` could not be
+// read, and Detail says why.
+type GPURuntimeObservation struct {
+	Observed bool     `json:"observed"`
+	NVIDIA   bool     `json:"nvidia"`
+	Runtimes []string `json:"runtimes,omitempty"`
+	Detail   string   `json:"detail,omitempty"`
 }
 
 type DomainObservation struct {
@@ -157,6 +173,9 @@ type ObservationRequest struct {
 	// EnvironmentID, when the environment exists, whose address it has.
 	Tailnet       bool
 	EnvironmentID int64
+	// NeedsGPU asks which runtimes the daemon offers, for a plan that asks
+	// for GPUs.
+	NeedsGPU bool
 }
 
 // TailnetObservation is what preflight says about the address a tailnet-only
@@ -308,6 +327,9 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	}
 	if request.NeedsBuildx || request.NeedsCompose {
 		observation.Emulators, observation.EmulationObserved = observeEmulators()
+	}
+	if request.NeedsGPU {
+		observation.GPURuntime = o.observeGPURuntime(ctx)
 	}
 	observeReleaseTaskTools(request.ReleaseTaskTools, observation.Facilities)
 	if len(request.Domains) > 0 {
@@ -504,6 +526,23 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	return observation, nil
 }
 
+// observeGPURuntime reads the daemon's runtimes, read-only.
+func (o *HostPreflightObserver) observeGPURuntime(ctx context.Context) *GPURuntimeObservation {
+	lister, ok := o.docker.(interface {
+		ContainerRuntimes(context.Context) ([]string, error)
+	})
+	if !ok {
+		return &GPURuntimeObservation{Detail: "Docker's runtimes cannot be read here"}
+	}
+	runtimesCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	runtimes, err := lister.ContainerRuntimes(runtimesCtx)
+	if err != nil {
+		return &GPURuntimeObservation{Detail: "docker info could not be read"}
+	}
+	return &GPURuntimeObservation{Observed: true, NVIDIA: slices.Contains(runtimes, "nvidia"), Runtimes: runtimes}
+}
+
 func (o *HostPreflightObserver) existingDeploymentPorts(
 	ctx context.Context,
 	request ObservationRequest,
@@ -671,6 +710,7 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 	request.ReleaseTaskTools = releaseTaskHostTools(configuration.Build.ReleaseTasks)
 	request.NeedsFirewall = publicRuntimeBind(configuration.Runtime) && len(request.Ports) > 0
 	request.Tailnet = configuration.Runtime.Tailnet != nil
+	request.NeedsGPU = configuration.Runtime.GPUs != nil
 	return request
 }
 
@@ -1026,7 +1066,8 @@ func preflightFindings(
 		}
 	}
 	advanced := configuration.Runtime.Privileged || configuration.Runtime.HostNetwork ||
-		len(configuration.Runtime.Capabilities) > 0 || len(configuration.Runtime.Devices) > 0
+		len(configuration.Runtime.Capabilities) > 0 || len(configuration.Runtime.Devices) > 0 ||
+		configuration.Runtime.GPUs != nil
 	for _, mount := range configuration.Runtime.Mounts {
 		if mount.Source == "/var/run/docker.sock" {
 			advanced = true
@@ -1045,7 +1086,7 @@ func preflightFindings(
 	} else if advanced {
 		findings = append(findings, finding("advanced_runtime", PreflightWarning,
 			"Runtime has host-equivalent options", "", "The container can affect more of the server than an ordinary workload.",
-			"Review privileged, network, capability, device, and mount settings.", "security", "runtime"))
+			"Review privileged, network, capability, device, GPU and mount settings.", "security", "runtime"))
 	}
 	if configuration.Runtime.Strategy.startsBeside() {
 		eligibleProfile := draft.Data.Intent.Profile == ProfileWeb || draft.Data.Intent.Profile == ProfileStatic
@@ -1208,6 +1249,7 @@ func preflightFindings(
 			"Docker caps the container at the host's CPU count; the extra allowance has no effect.",
 			"Lower the limit to at most the host CPU count.", "metrics", "runtime.cpus"))
 	}
+	findings = append(findings, runtimeFlagFindings(configuration, observation)...)
 	findings = append(findings, buildMemoryFindings(planned, configuration, observation)...)
 	findings = append(findings, platformVariableFindings(configuration, resolvedVariables)...)
 	if planned != nil && configuration.Build.Method == BuildRecipe && configuration.Build.Recipe == "node" {
