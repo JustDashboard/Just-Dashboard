@@ -252,7 +252,7 @@ func removeEnv(host Host, out io.Writer, warn func(string, ...any), dir string) 
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !(name == ".env" || name == ".env.jd-previous" || name == ".env.jd-tmp" ||
-			strings.HasPrefix(name, ".env.backup.")) {
+			strings.HasPrefix(name, ".env.backup.") || strings.HasPrefix(name, ".env.jd-port-previous-")) {
 			continue
 		}
 		path := filepath.Join(dir, name)
