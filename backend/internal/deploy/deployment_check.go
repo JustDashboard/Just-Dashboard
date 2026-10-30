@@ -69,7 +69,7 @@ func readDeploymentSource(ctx context.Context, root string, plan deploymentPlan)
 		reading.detection = &detection
 	}
 	switch plan.Configuration.Build.Method {
-	case BuildRecipe, BuildDockerfile, BuildStatic:
+	case BuildRecipe, BuildDockerfile, BuildStatic, BuildRailpack:
 		reading.dryRun = true
 		if err := dryRunBuild(ctx, root, plan.Configuration.Build, plan.BuildVariables); err != nil {
 			reading.refusal = checkoutRefusalFor(err, root)

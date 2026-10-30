@@ -681,7 +681,110 @@ With a Dockerfile at the same root the Dockerfile is the candidate — beside th
 a language that has one — and it takes the framework, the processes and the database drivers. Every
 other language is named only when nothing else at its root is a candidate, and C/C++ never inside
 another candidate's root, where it is that application's vendored code. Each entry is removed when its
-recipe lands.
+recipe lands. C/C++ and Zig, which Railpack has providers for, get a Railpack candidate beside the
+language's own, which builds and is selected ([Railpack](#railpack)).
+
+## Railpack
+
+Railpack ([railpack.com](https://railpack.com)) is what Railway and Coolify build a repository with when
+it has no Dockerfile; Nixpacks, its predecessor, is deprecated upstream and not offered. Here it is a
+build method of its own beside the recipes, a Dockerfile and a static site (`build.method: railpack`,
+`deploy/build_railpack.go`), for a source with a checkout — a Git repository or a local checkout. A
+Compose source has its own files, which decide its build, and an image, a template or an imported
+workload is not built here: the configuration save and the draft's commit refuse Railpack for them
+(`build.method`), and preflight's `build_method_changed` blocks it. What a recipe decides from this
+dashboard's reviewed catalogue, Railpack decides with its own detection.
+
+**How it runs.** prepare_context runs Railpack's planner — the `railpack` binary of the pinned frontend
+image, which is the CLI too — as a one-shot container (`railpackPrepareSpec`): `railpack prepare /app
+--plan-out /out/railpack-plan.json --info-out /out/railpack-info.json --error-missing-start`, the build
+root mounted read-only at `/app`, a folder of its own under the data directory's `railpack/` at `/out`,
+no capabilities, no new privileges, a read-only root, 1 GiB, one CPU and 256 processes, and a tmpfs
+`/tmp` that may execute. It runs as root without capabilities because the checkout is a private 0700
+tree only root may traverse, and it has Docker's bridge network because Railpack downloads its pinned
+mise release into `/tmp` and asks it which release each language resolves to; nothing else of the host
+is mounted. A planner container a stopped dashboard left behind (label `io.just-dashboard.railpack`) is
+removed before the next plan. build_artifact builds the plan through the same buildx path as a recipe,
+`--file .just-dashboard/railpack-plan.json --build-arg BUILDKIT_SYNTAX=<the same pinned image>`, so
+BuildKit runs Railpack's frontend and the image lands in the daemon's store under the run's tag, as a
+recipe's does (it carries Railpack's own `RAILPACK_VERSION` and `RAILPACK_BUILT_AT` variables, and the
+dashboard adds nothing to it a recipe's image lacks): readiness, the traffic replay, canary, activation, rollback, previews,
+promotion and the vulnerability scan read it the same way, and none of them looks at the method.
+No Railpack code is linked into the dashboard; its plan and its info are JSON read as data.
+
+**What the plan is given.** The plan's own build and start commands (`--build-cmd`, `--start-cmd`),
+its configuration file (below), and the plain build-scoped variables named `RAILPACK_*` (`--env
+NAME=value`: `RAILPACK_PACKAGES`, `RAILPACK_BUILD_APT_PACKAGES`, `RAILPACK_SPA_OUTPUT_DIR`, …, as on
+Railway; `RAILPACK_CONFIG_FILE` is the setting's, and a secret one reaches the build by name only,
+which preflight says with `railpack_variables_configure_plan`). Every build variable is added to the
+plan's secrets by name and reaches BuildKit as a secret mount from buildx's environment, as a recipe's
+does; Railpack mounts each in every command of its plan, which is its model, so the recipes' per-step
+mapping (`build.secrets`) is refused. A `secrets-hash` over the values, in buildx's environment and
+never argv, rebuilds the steps Railpack marks as reading them (its build step) when a value changes,
+where BuildKit alone would reuse the layer, and `cache-key=deployment-<environment>`
+keeps one project's mount caches (npm's, pip's, apt's) from every other's on the daemon. The plan's
+excludes gain `.git`, `.just-dashboard` and buildx's metadata file, so the repository's history and the
+dashboard's files stay out of the image; the repository's own `.dockerignore` is Railpack's to read, as
+on Railway. A secret the plan lists that the environment has no build variable for — a
+`railpack.json`'s own `secrets` — is refused at prepare_context by name, rather than left for BuildKit
+to report as a missing secret.
+
+**Settings.** `build.railpackVersion` is a release from the reviewed catalogue (`railpackReleases`;
+empty is the dashboard's current one, 0.43.0). `build.railpackProvider` is one of Railpack's providers
+(cpp, deno, dotnet, elixir, gleam, golang, java, node, php, python, ruby, rust, shell, staticfile, zig);
+Railpack reads a provider only from its configuration file, so the dashboard writes a copy of the
+repository's file with `provider` added (`.just-dashboard/railpack.json`) and points the planner at it,
+and a file that is not a plain JSON object — one with comments — is refused, the provider then
+belonging in the file itself. `build.railpackConfig` names another configuration file in the root
+directory; `railpack.json` is read whenever the repository has one. An output directory and the
+single-page fallback are refused (Railpack serves static output itself, `RAILPACK_SPA_OUTPUT_DIR`), the
+recipe, Dockerfile and Compose fields do not apply, and `canonicalConfiguration` clears the Railpack
+fields under any other method, so switching builder never leaves a refused plan. `jd config set` writes
+them through the same configuration PUT and validation.
+
+**When detection proposes it.** Beside a recipe it is a choice, never the selection: every recipe
+candidate records the Railpack provider that would build its directory (`railpackProvider`: node,
+python, golang, rust, java, dotnet, deno, php, ruby, elixir, gleam; none for the site generators, sbt,
+Leiningen and Dart), which the build step names under Railpack. Where nothing else builds a directory
+it is the fallback (`detect_railpack.go`): a language named without a recipe that Railpack has a
+provider for — C/C++ (CMake, Meson) and Zig — gets a Railpack candidate at the same root with the
+language's name, facts and evidence, at low confidence, which the ranking selects there because it is
+the one that builds, the recipe-less candidate kept after it; and a repository in which detection
+recognised nothing and set nothing aside gets one Railpack candidate at its root, at low confidence on
+port 8080 (the runtime sets `PORT` to the plan's port, which a Railpack image listens on), whose
+evidence says Railpack's own detection decides when the build is prepared — preflight warns
+`railpack_detection_deferred` for it. A Railpack candidate never outranks a candidate that builds at the
+same root.
+
+**What is pinned, and what is not.** The dashboard pins the Railpack release by tag and index digest
+(`ghcr.io/railwayapp/railpack-frontend:v0.43.0@sha256:355ef61f…`), and the planner and the frontend are
+that one image, as Railpack's docs ask (the frontend of the release that wrote the plan). It does not pin
+what the plan builds from. Railpack's builder and runtime images (`ghcr.io/railwayapp/railpack-builder`
+and `railpack-runtime`) are tagged by the mise release they carry (`mise-2026.10.14` for 0.43.0), a tag
+Railpack's maintainers never overwrite; a provider's other images (FrankenPHP for PHP)
+and any image a repository's `railpack.json` names are tags too. Each language release is resolved by
+mise when the plan is written — an exact release in the plan, at least 14 days old
+(`minimum_release_age`), mise in paranoid mode — so a rebuild may resolve a newer one. The recipes'
+bases are resolved to digests from a catalogue this dashboard reviewed; these are not, which preflight
+says (`railpack_bases_unpinned`, a warning), and the run records the images and releases Railpack chose.
+Preflight also asks whether the pinned image is on this server or its registry answers for it
+(`railpack_ready`, or `railpack_unavailable`, blocked).
+
+**Evidence.** The prepare step's `prepared.railpack` (`RailpackEvidence`) records the release, the
+providers Railpack detected and the one set, the configuration file read, each resolved package
+(requested, resolved, source), each step's commands, the start command, the images the plan builds
+from, the secrets it mounts by name, Railpack's metadata (the package manager, the runtime) and its
+warnings and errors, every text bounded and screened; what Railpack printed is in the transcript as
+`Railpack: …` lines, and the plan itself is the build's preview (`dockerfilePreview`, up to 64 KiB),
+under "Plan Railpack wrote" in Build settings. The run page draws the record as one view on the prepare
+step (`run-railpack.tsx`), and the release keeps it with its build provenance. A refused plan keeps the
+same record beside its cause.
+
+**Failures.** A plan Railpack refuses ends prepare_context with a cause in phase `plan`, named from its
+info's error line ([Failure diagnosis](#failure-diagnosis)), its exit 75 — a download that failed —
+leaving the step unavailable rather than failed. In the build a plan's commands are read like a
+recipe's: Railpack's `sh -c '…'` wrapper is taken off, `mise install`, apt and the package managers'
+installs are **install**, the build command is **build**.
 
 ## Submodules and Git LFS
 
@@ -2880,6 +2983,8 @@ names, with the remedy the evidence supports:
 | `build_theme_missing`, `build_site_render_failed` | a Hugo theme `module … not found in …/themes/`, Zola `Failed to load theme`, a Jekyll theme gem, MkDocs `Unrecognised theme name`, Sphinx `no theme named`; Hugo `error building site` and `execute of template failed`, Jekyll `Liquid Exception … in <file>`, Zola `Failed to build the site`, Eleventy `Problem writing Eleventy templates`, Hexo `Template render error`, MkDocs strict mode, Sphinx `-W` | — (a Hugo or Zola theme names the Source section's submodules switch) |
 | `build_output_missing`, `build_copy_source_missing`, `build_embed_source_missing`, `build_wrong_root` | the recipe's own guard, a missing `COPY` source, `go:embed` without files, a manifest the build cannot find, a module a `go.work` does not list | the detected output directory, else the field to review |
 | `build_out_of_memory`, `build_disk_full`, `build_timeout` | heap limits, exit 137 (which points at no line: the step's output only shows where it was), `OutOfMemoryError`; `no space left on device`; the 30-minute limit | `NODE_OPTIONS=--max-old-space-size=` three quarters of the server's memory (from 1 GiB, at most 8 GiB) |
+| `railpack_package_install_failed`, `build_apt_package_missing` | `mise ERROR Failed to install core:node@24.99.7` (a language release a Railpack plan installs); apt's `E: Unable to locate package` or `has no installation candidate` (a Railpack plan's, a Python recipe's system package, a Dockerfile's `apt-get`) | for the Python recipe, the system packages to review; for Railpack, the `RAILPACK_*_APT_PACKAGES` variables named in the sentence |
+| `railpack_no_provider`, `railpack_start_command_missing`, `railpack_package_unresolved`, `railpack_config_invalid`, `railpack_unavailable`, `railpack_plan_failed` | Railpack's planner, from its info's error line rather than BuildKit's output: `Railpack could not determine how to build the app`, `No start command detected`, `failed to resolve version X of Y`, a configuration file it could not read, its exit 75 | Railpack's provider, the start command, or the configuration file, to review |
 | `build_permission`, `build_script_crlf`, `build_wrapper_missing`, `build_dev_dependency_in_production`, `build_bundle_platform_missing`, `build_hugo_extended_required`, `build_base_image_missing`, `build_platform_unsupported`, `build_dockerfile_invalid` | exit 126, `\r` interpreters, the Gradle/Maven wrapper, Symfony dev bundles and Telescope, any provider class `package:discover` cannot load, a Gemfile.lock without Linux, Hugo Pipes' Sass, a FROM that does not resolve, a manifest for another platform, a Dockerfile that does not parse | — |
 
 The language recipes' own failures take the same codes: `mix.lock` refused by `--check-locked` and a
@@ -2942,6 +3047,14 @@ answering with cgo SQLite's version, a `Europe/Bucharest` zone and a generated t
 workspace member beside a maintenance binary; a Leptos (cargo-leptos) application with `hash-files`, its
 site's hashed scripts fetched; and a Trunk (yew) site, its WebAssembly module fetched. The WebAssembly builds install their tool
 from source and take several minutes each, so run them with `-timeout 90m`.
+`TestLiveRailpackBuildsAndServesWithoutARecipe` builds a Node app with only a `package.json` and an
+`index.js` and a Python app with only a `requirements.txt` and an `app.py` (`testdata/app-fixtures/railpack-*`)
+through the real planner container and Railpack's frontend, a build variable reaching the plan's build
+command and no layer, serves each through the runtime owner and requires its HTTP answer, then has a
+repository with nothing to build refused at the planner as `railpack_no_provider`; it removes its
+images, containers and the pinned image when it pulled it. The planner's settings, configuration and
+provider handling, the plan it writes, the evidence and every Railpack failure are table-tested in
+`build_railpack_test.go` against outputs captured from Railpack 0.43.0 (`testdata/railpack`).
 `TestLiveGoRecipeCatalogueResolves` resolves every Go family's image, the Alpine pair a dynamically linked
 Go build uses, and the Debian images of the Leptos and Trunk builds, and
 `TestLiveRecipeBaseCatalogueRunsOnAmd64AndArm64` every catalogue image with the Java and .NET releases'

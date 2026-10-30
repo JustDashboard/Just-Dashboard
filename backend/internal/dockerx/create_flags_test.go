@@ -87,3 +87,22 @@ func TestProcessFlagsReachTheEngineAndAreReadBack(t *testing.T) {
 		t.Fatalf("GPUs read back = %+v", read.GPUs)
 	}
 }
+
+// Docker mounts a tmpfs noexec; a helper that runs a tool it downloads into
+// one asks for exec, and nothing else gets it.
+func TestTmpfsIsExecutableOnlyWhenAsked(t *testing.T) {
+	plain, _, err := (MountSpec{Type: "tmpfs", Target: "/tmp", SizeMB: 64}).toEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.TmpfsOptions == nil || len(plain.TmpfsOptions.Options) != 0 {
+		t.Fatalf("plain tmpfs = %#v", plain.TmpfsOptions)
+	}
+	executable, _, err := (MountSpec{Type: "tmpfs", Target: "/tmp", Exec: true}).toEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executable.TmpfsOptions == nil || len(executable.TmpfsOptions.Options) != 1 || executable.TmpfsOptions.Options[0][0] != "exec" {
+		t.Fatalf("executable tmpfs = %#v", executable.TmpfsOptions)
+	}
+}

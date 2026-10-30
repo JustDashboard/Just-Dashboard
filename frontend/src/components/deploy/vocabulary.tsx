@@ -57,6 +57,7 @@ import type {
   DeploymentSummary,
   DeployProject,
   NotificationChannel,
+  RailpackProvider,
   ReleaseListChange,
   WorkloadProfile,
 } from "@/lib/types"
@@ -984,6 +985,53 @@ export const BUILD_METHOD_SHORT: Record<DeploymentBuildMethod, string> = {
   compose: "Compose",
   none: "No build",
   legacy_compose: "Compose",
+  railpack: "Railpack",
+}
+
+/** The Railpack release a plan that names none builds with (build_railpack.go). */
+export const RAILPACK_DEFAULT_VERSION = "0.43.0"
+
+/**
+ * Railpack's one-line description, where the recipes, a Dockerfile and a static site are
+ * offered: what it is and whose detection decides, since that is the difference.
+ */
+export const RAILPACK_DESCRIPTION =
+  "Railpack, the builder Railway and Coolify use: its own detection plans the build, pinned to a reviewed release."
+
+/** Railpack's providers by the language a reader knows them as, in the order of the recipes. */
+export const RAILPACK_PROVIDERS: [RailpackProvider, string][] = [
+  ["node", "Node.js, Bun and front-end apps"],
+  ["python", "Python"],
+  ["golang", "Go"],
+  ["rust", "Rust"],
+  ["java", "Java (Maven or Gradle)"],
+  ["dotnet", ".NET"],
+  ["deno", "Deno"],
+  ["php", "PHP"],
+  ["ruby", "Ruby"],
+  ["elixir", "Elixir"],
+  ["gleam", "Gleam"],
+  ["cpp", "C/C++"],
+  ["zig", "Zig"],
+  ["staticfile", "Static files (Staticfile)"],
+  ["shell", "Shell script (start.sh)"],
+]
+
+/**
+ * The line under the build method: for Railpack, what it is and the provider it would
+ * read the directory as; the other methods say what they are in their own options.
+ */
+export function buildMethodHint(method: DeploymentBuildMethod, provider?: string) {
+  if (method !== "railpack") return undefined
+  return provider
+    ? `${RAILPACK_DESCRIPTION} It reads this directory as ${railpackProviderLabel(provider)}.`
+    : RAILPACK_DESCRIPTION
+}
+
+/** A provider's short name: "Node.js", "Go", "C/C++". */
+export function railpackProviderLabel(provider: string | undefined) {
+  const label = RAILPACK_PROVIDERS.find(([value]) => value === provider)?.[1]
+  return label?.replace(/ \(.*\)$/, "").replace(/,.*$/, "") ?? provider
 }
 
 export function frameworkLabel(value: string) {

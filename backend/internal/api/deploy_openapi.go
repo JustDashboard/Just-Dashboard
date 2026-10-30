@@ -126,7 +126,7 @@ var openapiEnums = map[reflect.Type][]string{
 	reflect.TypeOf(deploy.EnvironmentKind("")):     {"production", "staging", "preview"},
 	reflect.TypeOf(deploy.OwnershipMode("")):       {"managed", "linked", "observed"},
 	reflect.TypeOf(deploy.SourceKind("")):          {"git", "local", "image", "compose", "blueprint", "import"},
-	reflect.TypeOf(deploy.BuildMethod("")):         {"recipe", "dockerfile", "static", "image", "compose", "none", "legacy_compose"},
+	reflect.TypeOf(deploy.BuildMethod("")):         {"recipe", "dockerfile", "static", "image", "compose", "none", "legacy_compose", "railpack"},
 	reflect.TypeOf(deploy.ReleaseStrategy("")):     {"blue_green", "stop_first", "canary"},
 	reflect.TypeOf(deploy.Operation("")):           {"deploy", "redeploy", "restart", "stop", "start", "force_build", "rollback", "promote", "preview_create", "preview_update", "preview_remove", "scheduled_action", "import_adopt", "remove_managed"},
 	reflect.TypeOf(deploy.TriggerKind("")):         {"manual", "git_push", "legacy_hook", "generic_hook", "github", "gitlab", "bitbucket", "gitea", "api", "schedule", "preview", "rollback", "migration", "auto_rollback"},

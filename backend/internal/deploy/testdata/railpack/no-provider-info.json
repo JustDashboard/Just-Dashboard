@@ -1,0 +1,20 @@
+{
+  "logs": [
+    {
+      "Level": "warn",
+      "Msg": "script start.sh not found",
+      "DocsPath": ""
+    },
+    {
+      "Level": "suggestion",
+      "Msg": "Add a `.dockerignore` file to exclude files from the build",
+      "DocsPath": "/config/excluding-files"
+    },
+    {
+      "Level": "error",
+      "Msg": "Railpack could not determine how to build the app.\n\nThe following languages are supported:\n- Php\n- Golang\n- Java\n- Rust\n- Ruby\n- Elixir\n- Python\n- Deno\n- Dotnet\n- Node\n- Gleam\n- Cpp\n- Zig\n- Staticfile\n- Shell\n\nThe app contents that Railpack analyzed contains:\n\n./\n└── README.md\n\nCheck out the docs for more information: https://railpack.com",
+      "DocsPath": ""
+    }
+  ],
+  "success": false
+}

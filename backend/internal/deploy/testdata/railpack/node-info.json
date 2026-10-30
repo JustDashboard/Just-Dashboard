@@ -1,0 +1,57 @@
+{
+  "railpackVersion": "0.43.0",
+  "resolvedPackages": {
+    "node": {
+      "name": "node",
+      "requestedVersion": "lts",
+      "resolvedVersion": "24.22.0",
+      "source": "railpack default"
+    }
+  },
+  "metadata": {
+    "nodePackageManager": "npm",
+    "nodeRuntime": "node",
+    "providers": "node"
+  },
+  "detectedProviders": [
+    "node"
+  ],
+  "logs": [
+    {
+      "Level": "warn",
+      "Msg": "No node package manager detected, using npm",
+      "DocsPath": ""
+    },
+    {
+      "Level": "suggestion",
+      "Msg": "Specify the package manager and version explicitly",
+      "DocsPath": "/config/recommendations#specify-the-node-package-manager-version"
+    },
+    {
+      "Level": "info",
+      "Msg": "Detected Node",
+      "DocsPath": ""
+    },
+    {
+      "Level": "info",
+      "Msg": "Using npm package manager",
+      "DocsPath": ""
+    },
+    {
+      "Level": "info",
+      "Msg": "Custom start command detected, skipping Caddy start",
+      "DocsPath": ""
+    },
+    {
+      "Level": "suggestion",
+      "Msg": "Add a `package-lock.json` for more deterministic installs",
+      "DocsPath": "/architecture/recommendations"
+    },
+    {
+      "Level": "suggestion",
+      "Msg": "Applying default exclude patterns: `node_modules`. Add a `.dockerignore` to customize",
+      "DocsPath": "/config/excluding-files"
+    }
+  ],
+  "success": true
+}

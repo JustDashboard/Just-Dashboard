@@ -111,6 +111,17 @@ type BuildInvocation struct {
 	// `--build-arg NAME` with the value only in its process environment.
 	Target    string
 	BuildArgs []BuildArgValue
+	// Frontend builds Dockerfile — a Railpack plan — through a BuildKit
+	// frontend image (build_railpack.go).
+	Frontend *BuildFrontend
+}
+
+// BuildFrontend is the BuildKit frontend a build goes through, pinned by
+// digest, with the cache key and secrets hash it is handed.
+type BuildFrontend struct {
+	Image       string
+	CacheKey    string
+	SecretsHash string
 }
 
 type BuildArgValue struct {
@@ -181,6 +192,9 @@ type PreparedBuild struct {
 	// WebConcurrency says the image's server takes its worker count from
 	// WEB_CONCURRENCY, which the runtime sizes to the container.
 	WebConcurrency bool `json:"webConcurrency,omitempty"`
+	// Railpack is what Railpack decided for a Railpack build: the release,
+	// the providers, packages and steps of its plan (build_railpack.go).
+	Railpack *RailpackEvidence `json:"railpack,omitempty"`
 }
 
 type PreparedComposeService struct {
@@ -220,6 +234,20 @@ type ArtifactBuilder struct {
 	// dryRun prepares without writing the generated Dockerfile, for preflight
 	// to learn what the recipe would refuse from the same code that refuses it.
 	dryRun bool
+	// railpackValues are the plain RAILPACK_* build variables a Railpack
+	// plan is configured with (railpackPlanValues), set for one preparation.
+	railpackValues map[string]string
+}
+
+// withRailpackValues is the builder preparing one Railpack plan with the run's
+// plain RAILPACK_* build variables.
+func (b *ArtifactBuilder) withRailpackValues(values map[string]string) *ArtifactBuilder {
+	if b == nil {
+		return nil
+	}
+	copied := *b
+	copied.railpackValues = values
+	return &copied
 }
 
 func NewArtifactBuilder(backend BuildBackend) *ArtifactBuilder {
@@ -454,6 +482,13 @@ func (b *ArtifactBuilder) PrepareWithin(
 		if len(config.Secrets) != 0 {
 			return PreparedBuild{}, fmt.Errorf("%w: custom Dockerfiles cannot prove scoped secrets remain out of layers; use a reviewed recipe", ErrUnsupportedBuilder)
 		}
+	case BuildRailpack:
+		if b.backend == nil {
+			return PreparedBuild{}, ErrBuilderUnavailable
+		}
+		if err := b.prepareRailpack(ctx, root, config, &prepared, railpackSecretNames(bindings)); err != nil {
+			return PreparedBuild{}, err
+		}
 	case BuildImage, BuildCompose, BuildNone, BuildLegacyCompose:
 		return prepared, nil
 	default:
@@ -485,12 +520,12 @@ func (b *ArtifactBuilder) Build(
 		return result, ErrBuilderUnavailable
 	}
 	switch config.Method {
-	case BuildRecipe, BuildDockerfile, BuildStatic:
+	case BuildRecipe, BuildDockerfile, BuildStatic, BuildRailpack:
 		bindings := prepared.SecretBindings
 		if bindings == nil {
 			bindings = config.Secrets
 		}
-		if config.Method == BuildRecipe {
+		if config.Method == BuildRecipe || config.Method == BuildRailpack {
 			expected, err := recipeBuildBindings(config, buildVariableNames(variables))
 			if err != nil {
 				return result, err
@@ -515,6 +550,7 @@ func (b *ArtifactBuilder) Build(
 			ContextDir: root, Dockerfile: prepared.Dockerfile, Tag: tag,
 			Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache",
 			Pull: true, Secrets: secrets, Target: prepared.Target, BuildArgs: buildArgs,
+			Frontend: railpackFrontendFor(prepared, tag, secrets),
 		}, redactBuildEmitter(redacted, emit))
 		if err != nil {
 			return result, err
@@ -1064,6 +1100,7 @@ func buildPreviewArgv(prepared PreparedBuild, tag string) []string {
 	for _, name := range prepared.BuildArgNames {
 		argv = append(argv, "--build-arg", name)
 	}
+	argv = append(argv, railpackPreviewArgs(prepared, tag)...)
 	for _, id := range prepared.SecretIDs {
 		argv = append(argv, "--secret", "id="+id+",env=<ephemeral>")
 	}

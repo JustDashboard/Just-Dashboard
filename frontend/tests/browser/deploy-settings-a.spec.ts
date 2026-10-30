@@ -296,9 +296,9 @@ test.describe("Build settings", () => {
 
     // Every recipe the backend builds is offered — the select this replaced
     // had three of eight — and the saved one is the lit card: fifteen
-    // recipes, a Dockerfile and a static site.
+    // recipes, a Dockerfile, a static site and Railpack.
     const builder = buildCard.getByRole("group", { name: "Builder" })
-    await expect(builder.getByRole("button")).toHaveCount(17)
+    await expect(builder.getByRole("button")).toHaveCount(18)
     await expect(builder.getByRole("button", { name: /^Node\.js/ })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -1116,5 +1116,64 @@ test.describe("Build settings for static output and Python", () => {
     expect(saved.build.dockerfile).toBe("deploy/Dockerfile")
     expect(saved.build.recipe).toBeUndefined()
     expect(saved.build.pythonVersion).toBeUndefined()
+  })
+
+  test("Railpack is offered beside the recipes with its provider and configuration file", async ({
+    page,
+  }) => {
+    const writes: Array<Record<string, unknown>> = []
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+      if (route.request().method() === "PUT")
+        writes.push(route.request().postDataJSON() as Record<string, unknown>)
+      await route.fallback()
+    })
+
+    await page.goto("/deploy/7/settings/build")
+    const buildCard = page.getByRole("form", { name: "Build" })
+    const builder = buildCard.getByRole("group", { name: "Builder" })
+    await builder.getByRole("button", { name: /^Railpack/ }).click()
+    await expect(builder.getByRole("button", { name: /^Railpack/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    // What decides the build, and what it pins and what it does not.
+    await expect(buildCard.getByText(/the builder Railway and Coolify use/)).toBeVisible()
+    await expect(
+      buildCard.getByText(/pinned by digest; the builder and runtime images/),
+    ).toBeVisible()
+    // The recipe's own fields leave with it; Railpack serves static output itself.
+    await expect(buildCard.getByRole("group", { name: "Package manager" })).toHaveCount(0)
+    await expect(buildCard.getByLabel("Output directory")).toHaveCount(0)
+
+    await buildCard.getByLabel("Provider").click()
+    await page.getByRole("option", { name: "Python" }).click()
+    await buildCard.getByLabel("Configuration file").fill("../railpack.json")
+    await saveSettings(page)
+    await expect(buildCard.getByText(/Name a \.json file inside the root directory/)).toBeVisible()
+    expect(writes).toHaveLength(0)
+
+    await buildCard.getByLabel("Configuration file").fill("deploy/railpack.json")
+    await saveSettings(page)
+    await expectSaved(page)
+    const saved = writes.at(-1) as { build: Record<string, unknown> }
+    expect(saved.build.method).toBe("railpack")
+    expect(saved.build.railpackProvider).toBe("python")
+    expect(saved.build.railpackConfig).toBe("deploy/railpack.json")
+    expect(saved.build.recipe).toBeUndefined()
+    expect(saved.build.packageManager).toBeUndefined()
+    expect(saved.build.outputDirectory).toBeUndefined()
+
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.screenshot({
+      path: test.info().outputPath("build-railpack-1280.png"),
+      fullPage: true,
+    })
+    await page.setViewportSize({ width: 390, height: 844 })
+    expect(await overflow(page)).toBeLessThanOrEqual(1)
+    await page.screenshot({
+      path: test.info().outputPath("build-railpack-390.png"),
+      fullPage: true,
+    })
   })
 })

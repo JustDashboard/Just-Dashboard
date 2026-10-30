@@ -482,7 +482,11 @@ only renderer/executor/validation authority for their feature.
   `build.nodeVersion` (the recipes that run the Node install, `nodeInstallRecipes`), `build.phpVersion`,
   `build.spaFallback`, `build.goPackage`, `build.cargoBin` (the binary a Rust recipe serves),
   `build.javaVersion` and `build.dotnetVersion` are additive plan fields, bounded by
-  `PlanConfiguration.Validate`.
+  `PlanConfiguration.Validate`, as are a Railpack build's `build.railpackVersion` (the reviewed
+  catalogue), `build.railpackProvider` and `build.railpackConfig` (`validateRailpackSettings`, cleared
+  by `canonicalConfiguration` for any other method); `railpack` is refused for a Compose, image,
+  template or imported source at the configuration save and at commit
+  (`refuseRailpackWithoutCheckout`).
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
   recorded on the build plan when a draft commits (`build.framework` on the configuration read) —
   the chosen candidate's, while the plan still builds that candidate's directory — so a later read,
@@ -692,7 +696,12 @@ only renderer/executor/validation authority for their feature.
   `deploy.source.detect`) reads the source again without writing, and Build settings' **Detect again**
   shows the same proposal, marks each field that differs and applies into the form's draft.
 - Normalized build execution uses the project-owned versioned recipe set or an explicit Dockerfile,
-  static, immutable-image, or Compose adapter. Reviewed base tags are resolved before rendering and every
+  static, immutable-image, Compose or Railpack adapter. Railpack (`build_railpack.go`,
+  [the recipe guide](recipes.md#railpack)) plans in prepare_context, in a one-shot container of the
+  pinned frontend image over the read-only checkout, and build_artifact builds the plan through the
+  same buildx path with that image as `BUILDKIT_SYNTAX`, so its image lands under the run's tag like a
+  recipe's and nothing after the build branches on the method; its build variables are BuildKit
+  secret mounts named in the plan, as the recipes' are. Reviewed base tags are resolved before rendering and every
   generated `FROM` is digest-pinned. Build secrets are BuildKit environment-backed secret mounts and
   never argv/build args; custom Dockerfiles with requested secrets, or a secret-named literal in an
   `ENV`/`ARG`, shell assignment, flag or heredoc (read over logical instructions, so a continuation line
@@ -1207,7 +1216,12 @@ only renderer/executor/validation authority for their feature.
   `registry_auth_failed`, `builder_missing`) with the daemon's own bounded reason in the transcript — a
   .NET SDK image a `global.json` pin names that was never published is `dotnet_sdk_pin_unavailable`
   instead —, a JDK or .NET release the recipe refuses at prepare_context ends the run with preflight's
-  own code (`java_version_unsupported`, `gradle_wrapper_incompatible`, `dotnet_version_unsupported`), and
+  own code (`java_version_unsupported`, `gradle_wrapper_incompatible`, `dotnet_version_unsupported`), a
+  plan Railpack's planner refuses ends it with a cause in phase `plan` named from its info's error line
+  (`railpackPrepareCause`: `railpack_no_provider`, `railpack_start_command_missing`,
+  `railpack_package_unresolved`, `railpack_config_invalid`, `railpack_unavailable` for its transient
+  exit 75, else `railpack_plan_failed`), with the planner's output in the transcript and what it decided
+  beside the cause, and
   a candidate's start names `runtime_port_in_use`, `image_missing`, `mount_invalid` and, for the process
   flags, `runtime_gpu_unavailable`, `runtime_ulimit_refused`, `runtime_sysctl_refused` and
   `runtime_user_unknown` from Docker's refusal without repeating it. A context deadline that reaches a step while its run is alive is
@@ -2632,8 +2646,8 @@ platform, changed in place through
 `PUT …/environments/{env}/source` and checked before it is saved) and Automatic deployment: the Git
 policy with a picture of what a push does, the last decision and the GitHub commit-status switch.
 None of the settings pages opens on a row of figures; each section's head says what it currently
-is. Build is the builder — every recipe, a Dockerfile or a static site
-— the package manager, the commands, the image and the build variables as one form and the release
+is. Build is the builder — every recipe, a Dockerfile, a static site or Railpack (its provider and
+configuration file) — the package manager, the commands, the image and the build variables as one form and the release
 tasks, reorderable and
 each with its last run, as another; choosing a builder that is not a recipe clears the recipe's
 versions, secrets and package manager, which the plan would otherwise refuse; the Build and Image

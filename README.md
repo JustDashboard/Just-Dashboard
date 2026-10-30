@@ -104,7 +104,8 @@ free.
   exported and imported as JSON
 - Minecraft Java and Bedrock servers with their console, players and settings file, kept on
   loopback until you open the port and its firewall rule
-- Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
+- Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more, and builds what no
+  recipe does with Railpack, the builder Railway and Coolify use, pinned to a reviewed release
 - Push to deploy, plus pull-request previews only your tailnet can reach — Compose stacks too, every
   service isolated on the preview's own network and storage
 - Database branches for previews: a preview's own copy of a linked PostgreSQL, MySQL or MariaDB,

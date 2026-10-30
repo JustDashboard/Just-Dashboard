@@ -19,7 +19,7 @@ func networkFindings(draft *Draft, configuration PlanConfiguration) []PreflightF
 	runtime := configuration.Runtime
 	profile := draft.Data.Intent.Profile
 	serves := (profile == ProfileWeb || profile == ProfileService) && !runtime.HostNetwork
-	built := build.Method == BuildRecipe || build.Method == BuildDockerfile
+	built := build.Method == BuildRecipe || build.Method == BuildDockerfile || build.Method == BuildRailpack
 	if serves && built && selected != nil {
 		findings = append(findings, listenFindings(draft, configuration, selected)...)
 	}

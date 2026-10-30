@@ -117,6 +117,10 @@ func scoreCandidate(candidate DetectedCandidate, only bool) candidateScore {
 				score.preference = 0
 			}
 		}
+	case BuildRailpack:
+		// Railpack is offered where nothing else builds a directory; beside
+		// a candidate that builds as well, that one is the answer.
+		score.preference = 0
 	case BuildCompose:
 		// A Compose file found in a repository has not been analysed as a
 		// Compose source, and the plan cannot build it until it is.
@@ -371,6 +375,8 @@ func candidateLabel(candidate DetectedCandidate) string {
 		return "the Compose file in " + rootLabel(candidate.Root)
 	case BuildStatic:
 		return "the static site in " + rootLabel(candidate.Root)
+	case BuildRailpack:
+		return "the Railpack build in " + rootLabel(candidate.Root)
 	}
 	label := candidate.Framework
 	if label == "" {

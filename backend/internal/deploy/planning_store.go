@@ -1320,6 +1320,9 @@ func validateDraftComplete(draft *Draft) error {
 	if err := draft.Data.Configuration.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
+	if err := refuseRailpackWithoutCheckout(draft.Data.Source.Kind, draft.Data.Configuration.Build); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+	}
 	values, _, err := ResolveVariableGraphWithModes(draft.variableValues(*draft.Data.Configuration), draft.variableModes(*draft.Data.Configuration), nil)
 	if err != nil {
 		return err

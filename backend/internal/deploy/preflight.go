@@ -81,6 +81,9 @@ type HostObservation struct {
 	// GPURuntime is the daemon's OCI runtimes, observed for a plan that asks
 	// for GPUs (runtime_flags.go).
 	GPURuntime *GPURuntimeObservation `json:"gpuRuntime,omitempty"`
+
+	// Railpack is the pinned Railpack image, observed for a Railpack plan.
+	Railpack *RailpackObservation `json:"railpack,omitempty"`
 }
 
 // GPURuntimeObservation is whether Docker on this server lists the NVIDIA
@@ -173,6 +176,9 @@ type ObservationRequest struct {
 	// EnvironmentID, when the environment exists, whose address it has.
 	Tailnet       bool
 	EnvironmentID int64
+	// RailpackImage asks whether the pinned Railpack image is here or can
+	// be pulled, for a Railpack plan (preflight_railpack.go).
+	RailpackImage string
 	// NeedsGPU asks which runtimes the daemon offers, for a plan that asks
 	// for GPUs.
 	NeedsGPU bool
@@ -330,6 +336,9 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	}
 	if request.NeedsGPU {
 		observation.GPURuntime = o.observeGPURuntime(ctx)
+	}
+	if request.RailpackImage != "" {
+		observation.Railpack = o.observeRailpack(ctx, request.RailpackImage)
 	}
 	observeReleaseTaskTools(request.ReleaseTaskTools, observation.Facilities)
 	if len(request.Domains) > 0 {
@@ -653,12 +662,13 @@ func PreflightDraftWithSource(
 func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) ObservationRequest {
 	source := draft.Data.Source
 	request := ObservationRequest{
-		NeedsGit:     source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit,
-		NeedsGitLFS:  source.IncludeLFS && (source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit),
-		NeedsDocker:  configuration.Build.Method != BuildNone,
-		NeedsBuildx:  buildMethodNeedsBuildx(configuration.Build.Method, draft.Data.Detection.Compose),
-		NeedsCompose: configuration.Build.Method == BuildCompose || configuration.Build.Method == BuildLegacyCompose,
-		Paths:        []string{}, Ports: []PortObservation{},
+		NeedsGit:      source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit,
+		NeedsGitLFS:   source.IncludeLFS && (source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit),
+		NeedsDocker:   configuration.Build.Method != BuildNone,
+		NeedsBuildx:   buildMethodNeedsBuildx(configuration.Build.Method, draft.Data.Detection.Compose),
+		NeedsCompose:  configuration.Build.Method == BuildCompose || configuration.Build.Method == BuildLegacyCompose,
+		RailpackImage: railpackObservedImage(configuration.Build),
+		Paths:         []string{}, Ports: []PortObservation{},
 		Domains:      append([]PlannedDomain(nil), configuration.Domains...),
 		Dependencies: append([]PlannedDependency(nil), configuration.Dependencies...),
 	}
@@ -870,6 +880,7 @@ func preflightFindings(
 				facility.name, ""))
 		}
 	}
+	findings = append(findings, railpackFindings(draft, configuration, observation)...)
 	for _, path := range observation.Paths {
 		switch {
 		case !path.Contained:
@@ -1271,7 +1282,7 @@ func preflightFindings(
 
 func buildMethodNeedsBuildx(method BuildMethod, compose *ComposeAnalysis) bool {
 	switch method {
-	case BuildRecipe, BuildDockerfile, BuildStatic:
+	case BuildRecipe, BuildDockerfile, BuildStatic, BuildRailpack:
 		return true
 	case BuildCompose:
 		if compose != nil {
