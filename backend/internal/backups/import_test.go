@@ -335,7 +335,7 @@ func TestAnEncryptedArchiveImportsOnceItsKeyIsHeldAndNamesTheKeyUntilThen(t *tes
 		t.Fatal(err)
 	}
 	archive := catalogue.Origins[0].Jobs[0].Archives[0]
-	if !archive.Encrypted || archive.Recipient != recipient || archive.Openable || archive.Importable || archive.Sources != nil ||
+	if !archive.Encrypted || archive.Recipient != recipient || archive.Openable || archive.Importable || archive.Sources != nil || !archive.NeedsKey ||
 		strings.Join(archive.Kinds, ",") != "paths" {
 		t.Fatalf("a sealed archive without its key = %+v", archive)
 	}

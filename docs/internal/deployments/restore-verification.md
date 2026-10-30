@@ -28,7 +28,10 @@ Run **Verify restore** in backup history to test an existing artifact. Status an
 appear with that run; Log includes the check ID, schema and actual application image ID. A failed
 check can be retried. The session/API must have `system.admin`. This operation creates and removes
 its own temporary copy; the existing destination restore still uses the destructive route and ordinary
-confirmation because it overwrites operator-selected data.
+confirmation because it overwrites operator-selected data. A run imported from another server's
+archives is verified the same way, against the recovery check its job carried when the archive was
+taken (the import takes it from the archive's manifest, validated), reading the archive from the
+destination it was imported from ([importing](../backend/git-backups-users.md#importing-what-a-destination-holds)).
 
 Deployments with **Require restore evidence** first check coverage and artifact integrity, then
 reuse a matching successful check or execute the job's configured checker. Missing configuration,

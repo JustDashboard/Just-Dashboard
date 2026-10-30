@@ -65,14 +65,17 @@ type CatalogueArchive struct {
 	Encrypted     bool             `json:"encrypted"`
 	Recipient     string           `json:"recipient,omitempty"`
 	Openable      bool             `json:"openable"`
-	Importable    bool             `json:"importable"`
-	Problem       string           `json:"problem,omitempty"`
-	ImportedRun   int64            `json:"importedRun,omitempty"`
-	ImportedJob   int64            `json:"importedJob,omitempty"`
-	origin        SidecarOrigin    // grouping
-	sidecar       *Sidecar         // what import reads
-	manifest      *Manifest        // opened, when it could be
-	keyErr        error            // the key that would open it, missing
+	// NeedsKey is a sealed archive whose key this server does not hold:
+	// Recipient names the key to import.
+	NeedsKey    bool          `json:"needsKey,omitempty"`
+	Importable  bool          `json:"importable"`
+	Problem     string        `json:"problem,omitempty"`
+	ImportedRun int64         `json:"importedRun,omitempty"`
+	ImportedJob int64         `json:"importedJob,omitempty"`
+	origin      SidecarOrigin // grouping
+	sidecar     *Sidecar      // what import reads
+	manifest    *Manifest     // opened, when it could be
+	keyErr      error         // the key that would open it, missing
 }
 
 // CatalogueDump is a native dump an archive holds, by what it was of.
@@ -334,7 +337,7 @@ func (r *Runner) describeArchive(ctx context.Context, reader destinationReader, 
 	if err != nil {
 		var keyErr *KeyError
 		if errors.As(err, &keyErr) {
-			archive.keyErr = err
+			archive.keyErr, archive.NeedsKey = err, true
 			archive.Problem = "Sealed to a backup key this server does not hold. Import that key to open it here."
 		} else {
 			archive.Problem = err.Error()
