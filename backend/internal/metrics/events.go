@@ -107,7 +107,7 @@ func (r *Recorder) backupEvents(ctx context.Context, from, to time.Time, limit i
 		SELECT b.started_at, b.ended_at, b.status, b.size_bytes, j.name
 		  FROM backup_runs b
 		  JOIN backup_jobs j ON j.id = b.job_id
-		 WHERE b.started_at >= ? AND b.started_at <= ?
+		 WHERE b.started_at >= ? AND b.started_at <= ? AND b.imported = 0
 		 ORDER BY b.started_at DESC
 		 LIMIT ?`, from.Unix(), to.Unix(), limit)
 	if err != nil {

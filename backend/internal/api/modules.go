@@ -371,6 +371,7 @@ func (s *Server) initModules() {
 		WithRecoveryChecker(&backupRecoveryChecker{server: s}).
 		WithDatabaseDumper(databaseDumper).
 		WithContainerPauser(&backupContainerPauser{docker: s.modules.docker}).
+		WithVolumeProvisioner(&backupVolumeProvisioner{docker: s.modules.docker}).
 		WithSQLiteSnapshotter(func(ctx context.Context, source, directory string) (string, error) {
 			dump, err := dbx.Dump(ctx, dbx.DriverSQLite, source, "", directory)
 			if err != nil {

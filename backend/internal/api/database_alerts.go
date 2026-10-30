@@ -777,7 +777,8 @@ func (a *dbAlerts) backupJobs(ctx context.Context) ([]dbAlertJob, error) {
 // database alerts keep the jobs that dump a database; the host alerts read
 // them all (host_alert_readings.go).
 func readAlertBackupJobs(ctx context.Context, db *sql.DB) ([]dbAlertJob, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, name, schedule, enabled, created_at, database_dumps FROM backup_jobs ORDER BY id`)
+	// An imported job never runs here, so it has nothing to fail or miss.
+	rows, err := db.QueryContext(ctx, `SELECT id, name, schedule, enabled, created_at, database_dumps FROM backup_jobs WHERE imported = 0 ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}

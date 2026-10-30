@@ -361,7 +361,15 @@ func alertsInfo(subjects []hostAlertSubject) []accountlink.AlertInfo {
 	return out
 }
 
-func backupsInfo(jobs []*backups.Job) *accountlink.BackupsInfo {
+func backupsInfo(all []*backups.Job) *accountlink.BackupsInfo {
+	// An imported job is the record of another server's archives: it never
+	// runs here, so it is not one of this server's backups to report.
+	jobs := make([]*backups.Job, 0, len(all))
+	for _, j := range all {
+		if !j.Imported {
+			jobs = append(jobs, j)
+		}
+	}
 	info := &accountlink.BackupsInfo{Jobs: len(jobs), List: make([]accountlink.BackupInfo, 0, len(jobs))}
 	var newest int64
 	for _, j := range jobs {
