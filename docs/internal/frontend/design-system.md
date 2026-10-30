@@ -2538,16 +2538,15 @@ The passes, in order. Each one is a diff you can review on its own.
    keys authorised, who signed in last) with the verdict at its right end — how many accounts need
    no password and how many of those are administrators, a press of which narrows the cards to
    exactly the accounts counted, beside a *No password* chip drawn only while there is one. Under
-   it `components/system-users/access-band.tsx` answers what the tiles never did, three blocks over
-   the accounts the page holds: **Last sign-ins**, one lane per account on an axis of 24h, 7d or 30d
-   that ends at this second, each a dot in the account's initials hue that moves toward now as the
-   clock runs, with a halo while the sign-in is under two minutes old and the places it came from
+   it a band, since removed in the third pass below, answered what the tiles never did, three blocks over
+   the accounts the page held: **Last sign-ins**, one lane per account on an axis of 24h, 7d or 30d
+   that ended at that second, each a dot in the account's initials hue that moved toward now as the
+   clock ran, with a halo while the sign-in is under two minutes old and the places it came from
    drawn as the network they are on; **Can become root**, every account with `sudo`, `wheel`,
    `admin`, `docker` (root by another name) or uid 0, those needing no password first and locked
    ones last; and **SSH keys**, one bar of every authorised key shared out by account, in the hue
-   each account has on the cards. The pure reads are `components/system-users/access.ts`
-   (unit-tested); a press on any row opens that account's keys sheet. The cards lead with the
-   account that needs no password and a new account rises into the list (`useArrivals`).
+   each account had on the cards. A press on any row opened that account's keys sheet. The cards led
+   with the account that needed no password and a new account rose into the list (`useArrivals`).
 
    It took a third pass in 0.8.2, at the operator's request, because the band said nothing on the
    servers it is mostly used on: "Nobody signed in", "2 never signed in" and "No account has an

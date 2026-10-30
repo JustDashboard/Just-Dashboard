@@ -4,7 +4,8 @@ import { resolve } from "node:path"
 import { CONTAINER_ID, mockCommandSearch } from "../tests/browser/command-search-fixture"
 
 const baseURL = process.env.JD_BROWSER_BASE_URL ?? "http://127.0.0.1:43117"
-const output = resolve("../docs/audits/2026-10-04-command-search/evidence")
+// The files stay out of the repository: publish them on a pr-assets/* branch.
+const output = resolve(process.argv[2] ?? "command-search-recording")
 await mkdir(output, { recursive: true })
 const browser = await chromium.launch()
 const context = await browser.newContext({

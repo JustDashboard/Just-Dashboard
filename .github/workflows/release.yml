@@ -53,14 +53,6 @@ jobs:
           manifest=backend/internal/selfupdate/changelog.json
           version=$(jq -r .latest "$manifest")
           tag="v$version"
-          # A manual run publishes whatever main carries, to retry a failed one.
-          if [ "$GITHUB_EVENT_NAME" = workflow_run ]; then
-            before=$(git show "HEAD^1:$manifest" | jq -r .latest)
-            if [ "$before" = "$version" ]; then
-              echo "This push leaves the version at $version; nothing to publish."
-              exit 0
-            fi
-          fi
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "$tag is already released; nothing to publish."
             exit 0

@@ -89,8 +89,9 @@ ${BOLD}Released $VERSION locally.${RESET} What is left:
   ${DIM}# read the diff — five files and the generated changelog${RESET}
   git diff --stat
 
-  ${DIM}# build both halves, as CONTRIBUTING requires${RESET}
-  (cd backend && go build ./... && go test ./...)
+  ${DIM}# the checks the diff reaches and both builds, as CONTRIBUTING requires${RESET}
+  scripts/test-changed.sh
+  (cd backend && go build ./...)
   (cd frontend && bun run build)
 
   git commit -am "Release $VERSION"

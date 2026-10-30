@@ -290,7 +290,7 @@ func TestReplayComparisonJudgesStatusClassesAndTheP95(t *testing.T) {
 // replayedRequest is what the candidate's side saw of one replayed request.
 type replayedRequest struct {
 	Method, Host, Path, Query, Proto, ForwardedHost, Replay string
-	Cookie, Authorization                               string
+	Cookie, Authorization                                   string
 }
 
 // replayCandidate is a candidate on loopback that answers by path and keeps
