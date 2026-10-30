@@ -99,6 +99,9 @@ free.
 
 - Deploy from a repository, an image, a Compose stack or **117 reviewed templates**, 35 of them
   multi-service stacks — an application with its own database, cache or worker
+- Templates of your own beside them: a pasted Compose file or a running deployment saved as one,
+  validated as a built-in is, its passwords made secrets each deployment generates or is asked for,
+  exported and imported as JSON
 - Minecraft Java and Bedrock servers with their console, players and settings file, kept on
   loopback until you open the port and its firewall rule
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more

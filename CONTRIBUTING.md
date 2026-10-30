@@ -320,6 +320,13 @@ to the contribution terms above, including the additional licence grant to the p
   (`JD_BLUEPRINT_ONLY=a,b` narrows it; each stack's containers, volumes and networks are removed after
   it, and so are images it pulled):
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks -count=1 -v -timeout 2h`.
+  Changes to templates added on a dashboard (`blueprint/user*.go`, `deploy/user_templates.go`,
+  `deploy/template_from_plan.go`) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveUserComposeTemplateStartsAndAnswersItsOwnChecks -count=1 -v`,
+  which makes an nginx-and-Redis template from a pasted Compose file through the store call the
+  route makes and brings it up through the same harness (it uses `nginx:alpine` and `redis:7-alpine`,
+  so a host that has them pulls nothing; the harness removes only what it added, digest references
+  included).
   A template's schema rules run at build time: every definition is parsed and validated when the
   catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship. The
   same package checks the catalogue's size: `catalogue_counts.go` declares how many definitions
