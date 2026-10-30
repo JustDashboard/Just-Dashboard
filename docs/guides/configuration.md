@@ -22,7 +22,7 @@ The installer writes the settings that matter, and **Settings → Configuration*
 | `JD_PORT` | `8443` | The port you connect to — the only one the proxy publishes. |
 | `JD_BACKEND_PORT` | `8080` | The API's loopback port, behind the proxy. `install.sh` picks a random high port on a new install so nothing collides with it. |
 | `JD_FRONTEND_PORT` | `3000` | The UI's loopback port, behind the proxy. Likewise randomised at install time. |
-| `JD_ADDR` | `127.0.0.1:$JD_BACKEND_PORT` | Where the API binds, if you need to override the host as well as the port. Leave it on loopback; the proxy is the entry point. |
+| `JD_ADDR` | `127.0.0.1:$JD_BACKEND_PORT` | Where the API binds. `docker-compose.yml` sets it from `JD_BACKEND_PORT` and does not read it from `.env`, so change the port there; it is an override only when you run the binary yourself. Leave it on loopback; the proxy is the entry point. |
 | `JD_ALLOWED_ORIGINS` | none | Complete browser origins allowed to open WebSockets. Scheme, host, and port must match; only needed if the UI is served from a different origin. |
 
 **Behaviour**
@@ -76,7 +76,7 @@ The installer writes the settings that matter, and **Settings → Configuration*
 | Variable | Default | Description |
 | --- | --- | --- |
 | `JD_BOOTSTRAP_USER` | `admin` | Account created on an empty database. |
-| `JD_BOOTSTRAP_PASSWORD` | none | Leave empty for a generated one, logged once and replaced at first sign-in. A password set here is kept as is. |
+| `JD_BOOTSTRAP_PASSWORD` | none | Leave empty for a generated one, logged once and replaced at first sign-in. A password set here is kept as is. `install.sh` removes the one it writes from `.env` once the dashboard has answered; one you set yourself stays until you remove it. Neither is read again once an account exists. |
 
 Durations take a unit (`12h`, `60m`, and the metrics settings also accept `7d`); booleans
 take `true` or `false`. A value that cannot be parsed stops the dashboard at startup rather

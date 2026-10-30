@@ -25,6 +25,9 @@ node_modules/
 .env.jd-tmp
 .DS_Store
 backend/just-dashboard-server
+# What `cd backend && go build ./cmd/jd` leaves. Anchored: a bare `jd` would also
+# ignore backend/cmd/jd, which is source.
+/backend/jd
 data/
 # The dashboard's own state lives in a directory called data; so does the
 # Databases section's Data page, which is source.

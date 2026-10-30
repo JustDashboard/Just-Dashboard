@@ -1,0 +1,7 @@
+# The binary `go build ./cmd/jd` leaves here. Anchored by how this file works:
+# unlike .gitignore, a bare name matches only at the context root, so cmd/jd,
+# which the image does build, is not caught.
+jd
+# Nothing the image compiles reads these; they only add to the build context.
+**/*_test.go
+**/testdata
