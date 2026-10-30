@@ -225,6 +225,11 @@ type DetectedCandidate struct {
 	// any path it has no file for with index.html.
 	SPAFallback   bool   `json:"spaFallback,omitempty"`
 	PythonVersion string `json:"pythonVersion,omitempty"`
+	// RailpackProvider is the Railpack provider that would build this
+	// candidate's directory: beside a recipe, the choice the build step
+	// offers next to it; on a Railpack candidate, the one it builds with
+	// (detect_railpack.go).
+	RailpackProvider string `json:"railpackProvider,omitempty"`
 	// UnpinnedDependencies records that the manifest names dependencies
 	// without exact versions, so a rebuild may install different ones.
 	UnpinnedDependencies bool                `json:"unpinnedDependencies,omitempty"`
@@ -578,6 +583,15 @@ type BuildPlanConfig struct {
 	// files decide (planning_compiled.go).
 	JavaVersion   string `json:"javaVersion,omitempty"`
 	DotnetVersion string `json:"dotnetVersion,omitempty"`
+	// RailpackVersion, RailpackProvider and RailpackConfig are a Railpack
+	// build's settings (build_railpack.go): the release from the reviewed
+	// catalogue (empty for the dashboard's current one, pinned by digest),
+	// the provider Railpack is told to use instead of detecting one, and
+	// the configuration file it reads, relative to the root directory
+	// (empty for railpack.json, read when the repository has one).
+	RailpackVersion  string `json:"railpackVersion,omitempty"`
+	RailpackProvider string `json:"railpackProvider,omitempty"`
+	RailpackConfig   string `json:"railpackConfig,omitempty"`
 }
 
 // BuildSecretConfig names a variable and the reviewed recipe stages in which
@@ -1545,6 +1559,9 @@ func (c PlanConfiguration) Validate() error {
 	if c.Build.PrimaryService != "" && (c.Build.Method != BuildCompose || !validComposeServiceName(c.Build.PrimaryService)) {
 		return invalidField("build.primaryService", "a primary service names one service of a Compose stack")
 	}
+	if err := validateRailpackSettings(c.Build); err != nil {
+		return err
+	}
 	for _, path := range []string{c.Build.RootDirectory, c.Build.Dockerfile} {
 		if path != "" && !safeRelativePath(path) {
 			return fmt.Errorf("build paths must remain inside the source root")
@@ -2304,7 +2321,7 @@ func validDetectedDatabaseEngine(engine string) bool {
 
 func validBuildMethod(method BuildMethod) bool {
 	switch method {
-	case BuildRecipe, BuildDockerfile, BuildStatic, BuildImage, BuildCompose, BuildNone, BuildLegacyCompose:
+	case BuildRecipe, BuildDockerfile, BuildStatic, BuildImage, BuildCompose, BuildNone, BuildLegacyCompose, BuildRailpack:
 		return true
 	default:
 		return false
@@ -2417,6 +2434,7 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			(candidate.Root != "" && !safeRelativePath(candidate.Root)) || len(candidate.Root) > 4096 ||
 			len(candidate.Framework) > 128 || len(candidate.Recipe) > 32 ||
 			(candidate.Recipe != "" && !validRecipe(candidate.Recipe)) ||
+			(candidate.RailpackProvider != "" && !slices.Contains(railpackProviders, candidate.RailpackProvider)) ||
 			len(candidate.PythonVersion) > 16 || (candidate.PythonVersion != "" && !pythonRecipeVersionRE.MatchString(candidate.PythonVersion)) ||
 			len(candidate.Variables) > 64 || len(candidate.Databases) > 8 ||
 			len(candidate.BuildCommand) > 4096 ||
@@ -2769,6 +2787,9 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 	}
 	if c.Build.Method != BuildCompose {
 		c.Build.PrimaryService = ""
+	}
+	if c.Build.Method != BuildRailpack {
+		c.Build.RailpackVersion, c.Build.RailpackProvider, c.Build.RailpackConfig = "", "", ""
 	}
 	if c.Build.Secrets == nil {
 		c.Build.Secrets = []BuildSecretConfig{}

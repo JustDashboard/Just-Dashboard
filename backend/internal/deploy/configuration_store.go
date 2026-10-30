@@ -1401,6 +1401,14 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 			return nil, err
 		}
 	}
+	var sourceKind SourceKind
+	if err := tx.QueryRowContext(ctx, `
+		SELECT kind FROM deploy_sources WHERE environment_id = ? AND revision = ?`, environmentID, current).Scan(&sourceKind); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if err := refuseRailpackWithoutCheckout(sourceKind, configuration.Build); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+	}
 	var previousBuildJSON string
 	if err := tx.QueryRowContext(ctx, `
 		SELECT config_json FROM deploy_build_plans WHERE environment_id = ? AND revision = ?`,

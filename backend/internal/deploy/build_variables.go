@@ -17,10 +17,11 @@ func buildVariableNames(variables map[string]string) []string {
 // Build scope is a usable contract on its own. Explicit stage mappings narrow
 // selected credentials to install, or widen a value to install and build
 // alike; other build values reach only the build command through ephemeral
-// mounts, never ARG, ENV or the generated Dockerfile.
+// mounts, never ARG, ENV or the generated Dockerfile. A Railpack plan mounts
+// every one of them in every command it runs, which is Railpack's model.
 func recipeBuildBindings(config BuildPlanConfig, names []string) ([]BuildSecretConfig, error) {
 	bindings := append([]BuildSecretConfig{}, config.Secrets...)
-	if config.Method != BuildRecipe {
+	if config.Method != BuildRecipe && config.Method != BuildRailpack {
 		return bindings, nil
 	}
 	seen := make(map[string]bool, len(bindings))

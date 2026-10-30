@@ -67,6 +67,14 @@ export const CAUSE_TITLES: Record<string, string> = {
   build_disk_full: "Disk full during build",
   build_dockerfile_invalid: "Dockerfile does not parse",
   build_timeout: "Build timed out",
+  build_apt_package_missing: "Debian package not found",
+  railpack_no_provider: "Railpack found nothing to build",
+  railpack_start_command_missing: "No start command for Railpack",
+  railpack_package_unresolved: "Railpack could not resolve a version",
+  railpack_config_invalid: "Railpack configuration unreadable",
+  railpack_unavailable: "Railpack could not fetch its tools",
+  railpack_plan_failed: "Railpack could not plan the build",
+  railpack_package_install_failed: "Package install failed",
   build_failed: "Build failed",
   builder_missing: "Docker Buildx missing",
   builder_unavailable: "Builder unavailable",
@@ -199,6 +207,10 @@ export function causeHeadline(cause: DeploymentFailureCause) {
       return subject ? `Application listens on port ${subject}` : causeTitle(cause.code)
     case "schema_missing":
       return cause.table ? `Table ${cause.table} does not exist` : causeTitle(cause.code)
+    case "build_apt_package_missing":
+      return subject ? `Debian has no package ${subject}` : causeTitle(cause.code)
+    case "railpack_package_install_failed":
+      return subject ? `${subject} could not be installed` : causeTitle(cause.code)
   }
   return causeTitle(cause.code)
 }
@@ -333,6 +345,10 @@ export function fixTarget(
       }
     case "rootDirectory":
       return { href: commands, label: "Review the root directory" }
+    case "railpackProvider":
+      return { href: `${base}/build#build`, label: "Choose Railpack's provider" }
+    case "railpackConfig":
+      return { href: `${base}/build#build`, label: "Review the Railpack configuration file" }
     case "releaseTasks":
       return { href: `${base}/build#release-tasks`, label: "Review the release tasks" }
   }

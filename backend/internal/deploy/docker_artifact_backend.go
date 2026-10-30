@@ -4,14 +4,28 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 )
 
-type DockerArtifactBackend struct{ docker *dockerx.Client }
+type DockerArtifactBackend struct {
+	docker *dockerx.Client
+	// railpackDir is where the Railpack planner writes its plan, a folder
+	// Docker binds by its path on this server (build_railpack.go).
+	railpackDir   string
+	sweepRailpack sync.Once
+}
 
 func NewDockerArtifactBackend(client *dockerx.Client) *DockerArtifactBackend {
 	return &DockerArtifactBackend{docker: client}
+}
+
+// WithRailpackDir names the folder the Railpack planner writes into: one the
+// daemon reaches by the same path as this process.
+func (b *DockerArtifactBackend) WithRailpackDir(dir string) *DockerArtifactBackend {
+	b.railpackDir = dir
+	return b
 }
 
 func (b *DockerArtifactBackend) ResolveImage(
@@ -47,12 +61,19 @@ func (b *DockerArtifactBackend) BuildImage(
 	for _, arg := range invocation.BuildArgs {
 		buildArgs = append(buildArgs, dockerx.BuildxArg{Name: arg.Name, Value: arg.Value})
 	}
+	var frontend *dockerx.BuildxFrontend
+	if invocation.Frontend != nil {
+		frontend = &dockerx.BuildxFrontend{
+			Image: invocation.Frontend.Image, CacheKey: invocation.Frontend.CacheKey,
+			SecretsHash: invocation.Frontend.SecretsHash,
+		}
+	}
 	image, err := consumeDockerBuildLogs(ctx, emit, func(child context.Context, output chan<- dockerx.LogLine) (dockerx.ImmutableImage, error) {
 		return b.docker.BuildImmutable(child, dockerx.ImmutableBuildOptions{
 			Dir: invocation.ContextDir, Dockerfile: invocation.Dockerfile,
 			Tag: invocation.Tag, Platform: invocation.Platform,
 			NoCache: invocation.NoCache, Pull: invocation.Pull, Secrets: secrets,
-			Target: invocation.Target, BuildArgs: buildArgs,
+			Target: invocation.Target, BuildArgs: buildArgs, Frontend: frontend,
 		}, output)
 	})
 	if err != nil {

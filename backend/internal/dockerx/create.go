@@ -184,6 +184,11 @@ type MountSpec struct {
 	ReadOnly bool   `json:"readOnly,omitempty"`
 	// SizeMB applies to tmpfs only.
 	SizeMB int64 `json:"sizeMb,omitempty"`
+	// Exec lets a tmpfs hold programs that run: Docker mounts one noexec.
+	// It is the dashboard's own, for a helper that downloads its tool into
+	// scratch memory (the Railpack planner's mise), so it has no JSON name
+	// and a request cannot ask for it.
+	Exec bool `json:"-"`
 }
 
 // Ulimit is one --ulimit: the soft and hard values, -1 for unlimited.
@@ -725,8 +730,11 @@ func (m MountSpec) toEngine() (mount.Mount, string, error) {
 		}, warn, nil
 	case "tmpfs":
 		mnt := mount.Mount{Type: mount.TypeTmpfs, Target: target}
-		if m.SizeMB > 0 {
+		if m.SizeMB > 0 || m.Exec {
 			mnt.TmpfsOptions = &mount.TmpfsOptions{SizeBytes: m.SizeMB * 1024 * 1024}
+		}
+		if m.Exec {
+			mnt.TmpfsOptions.Options = [][]string{{"exec"}}
 		}
 		return mnt, "", nil
 	default:

@@ -113,6 +113,10 @@ func checkoutRefusalFor(err error, root string) error {
 func recipeRefusalField(text string) string {
 	lower := strings.ToLower(text)
 	switch {
+	case strings.Contains(lower, "railpack configuration file"):
+		return "configuration.build.railpackConfig"
+	case strings.Contains(lower, "railpack's plan reads"):
+		return "variables"
 	case strings.Contains(lower, "main package"):
 		return "configuration.build.goPackage"
 	case strings.Contains(lower, "lockfile") || strings.Contains(lower, "package manager") || strings.Contains(lower, "the build uses"):
@@ -342,7 +346,7 @@ func withDraftSourceChecks(
 	var refusal error
 	err := inspector.InspectRevision(ctx, source, identity, func(root string, _ SourceIdentity) error {
 		switch configuration.Build.Method {
-		case BuildRecipe, BuildDockerfile, BuildStatic:
+		case BuildRecipe, BuildDockerfile, BuildStatic, BuildRailpack:
 			ran = true
 			if err := dryRunBuild(ctx, root, configuration.Build, nil); err != nil {
 				refusal = checkoutRefusalFor(err, root)

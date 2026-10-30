@@ -40,6 +40,24 @@ type ImmutableBuildOptions struct {
 	// value never appears in argv.
 	Target    string
 	BuildArgs []BuildxArg
+	// Frontend builds Dockerfile — then not a Dockerfile but the build
+	// definition the frontend reads, such as a Railpack plan — through a
+	// BuildKit frontend image instead of BuildKit's own Dockerfile frontend.
+	Frontend *BuildxFrontend
+}
+
+// BuildxFrontend is a BuildKit frontend image and the options the deployment
+// builder hands it. Image is passed as BUILDKIT_SYNTAX, which the Dockerfile
+// frontend forwards to; it must be pinned by digest, because whatever that
+// image is runs the build. CacheKey is prefixed to the frontend's mount
+// cache ids, so one project's build never reads another's package caches.
+// SecretsHash changes when a build secret's value does, so a step that read
+// the old value is not reused; it travels in buildx's environment, never in
+// argv, because it is derived from the values.
+type BuildxFrontend struct {
+	Image       string
+	CacheKey    string
+	SecretsHash string
 }
 
 type BuildxArg struct {
@@ -196,6 +214,25 @@ func BuildxCommand(opts ImmutableBuildOptions, metadataPath string) ([]string, [
 		environment = append(kept, prefix+arg.Value)
 		args = append(args, "--build-arg", arg.Name)
 	}
+	if frontend := opts.Frontend; frontend != nil {
+		if !buildxFrontendImageRE.MatchString(frontend.Image) {
+			return nil, nil, fmt.Errorf("a BuildKit frontend image must be pinned by digest")
+		}
+		args = append(args, "--build-arg", "BUILDKIT_SYNTAX="+frontend.Image)
+		if frontend.CacheKey != "" {
+			if !buildxCacheKeyRE.MatchString(frontend.CacheKey) {
+				return nil, nil, fmt.Errorf("invalid BuildKit frontend cache key")
+			}
+			args = append(args, "--build-arg", "cache-key="+frontend.CacheKey)
+		}
+		if frontend.SecretsHash != "" {
+			if !buildxSecretsHashRE.MatchString(frontend.SecretsHash) {
+				return nil, nil, fmt.Errorf("invalid BuildKit frontend secrets hash")
+			}
+			environment = append(environment, "secrets-hash="+frontend.SecretsHash)
+			args = append(args, "--build-arg", "secrets-hash")
+		}
+	}
 	args = append(args, ".")
 	environment = append(environment, "BUILDKIT_PROGRESS=plain", "DOCKER_CLI_HINTS=false")
 	return args, environment, nil
@@ -204,13 +241,18 @@ func BuildxCommand(opts ImmutableBuildOptions, metadataPath string) ([]string, [
 var (
 	buildxTargetRE  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,127}$`)
 	buildxArgNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
+	// A frontend reference names its digest: registry/path:tag@sha256:<64 hex>.
+	buildxFrontendImageRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._/:-]{0,255}@sha256:[0-9a-f]{64}$`)
+	buildxCacheKeyRE      = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
+	buildxSecretsHashRE   = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 func scrubBuildEnvironment(source []string) []string {
 	result := make([]string, 0, len(source))
 	for _, value := range source {
 		if strings.HasPrefix(value, "JD_") || strings.HasPrefix(value, "VPSD_") ||
-			strings.HasPrefix(value, "BUILDKIT_PROGRESS=") || strings.HasPrefix(value, "DOCKER_CLI_HINTS=") {
+			strings.HasPrefix(value, "BUILDKIT_PROGRESS=") || strings.HasPrefix(value, "DOCKER_CLI_HINTS=") ||
+			strings.HasPrefix(value, "secrets-hash=") {
 			continue
 		}
 		result = append(result, value)

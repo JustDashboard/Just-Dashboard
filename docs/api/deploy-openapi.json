@@ -552,7 +552,8 @@
               "image",
               "compose",
               "none",
-              "legacy_compose"
+              "legacy_compose",
+              "railpack"
             ],
             "type": "string"
           },
@@ -4208,7 +4209,8 @@
               "image",
               "compose",
               "none",
-              "legacy_compose"
+              "legacy_compose",
+              "railpack"
             ],
             "type": "string"
           },
@@ -4231,6 +4233,15 @@
             "type": "string"
           },
           "pythonVersion": {
+            "type": "string"
+          },
+          "railpackConfig": {
+            "type": "string"
+          },
+          "railpackProvider": {
+            "type": "string"
+          },
+          "railpackVersion": {
             "type": "string"
           },
           "recipe": {
@@ -5393,7 +5404,8 @@
               "image",
               "compose",
               "none",
-              "legacy_compose"
+              "legacy_compose",
+              "railpack"
             ],
             "type": "string"
           },
@@ -5653,7 +5665,8 @@
               "image",
               "compose",
               "none",
-              "legacy_compose"
+              "legacy_compose",
+              "railpack"
             ],
             "type": "string"
           },
@@ -5989,6 +6002,9 @@
             "type": "string"
           },
           "pythonVersion": {
+            "type": "string"
+          },
+          "railpackProvider": {
             "type": "string"
           },
           "readiness": {
