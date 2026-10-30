@@ -21,6 +21,7 @@ import {
   ShieldOff,
   StopCircle,
   Trash,
+  Users,
   type Icon,
 } from "@/components/icons"
 import { del, get, post, put } from "@/lib/api"
@@ -100,6 +101,7 @@ const KIND_ICON: Record<HostAlertKind, Icon> = {
   backup_failed: Archive,
   image_vulnerable: ShieldOff,
   tunnel_down: CloudUpload,
+  account_changed: Users,
 }
 
 /** What a rule watches, as the picture's left column draws it. */
@@ -132,6 +134,7 @@ const AREAS: Area[] = [
     fallback: CloudUpload,
     kinds: ["tunnel_down"],
   },
+  { key: "accounts", title: "Accounts", fallback: Users, kinds: ["account_changed"] },
 ]
 
 function areaOf(kind: HostAlertKind) {

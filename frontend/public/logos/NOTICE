@@ -269,3 +269,9 @@ was. excalidraw.svg, already here for the drawing editor, draws the Excalidraw
 template too. Onetime Secret has no file in any of the three collections, and
 Zipline's is a wordmark that does not read at 24px, so both keep the plain
 glyph rather than a mark that is not the project's.
+
+lxd.svg, zsh.svg, fish.svg and bash-light.svg are from Simple Icons 13.21.0
+(https://simpleicons.org), CC0 1.0: Linux Containers, Zsh, fish shell and GNU Bash,
+filled with Ubuntu's #E95420, Zsh's #F15A24, fish's #34C534 and Bash's #4EAA25,
+because Simple Icons ships the path alone and the Linux Containers mark's own
+#333333 and devicon's dark bash.svg disappear on a dark ground.

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { ProductGlyph } from "../product-logo"
-import { accountProduct, isAdmin } from "./marks"
+import { accountProduct, groupProduct, shellProduct } from "./marks"
 
 const PUBLIC = join(import.meta.dir, "../../../public")
 
@@ -20,12 +20,17 @@ test("an account nothing names, or a person's, is no product", () => {
   expect(accountProduct({ username: "git", system: false })).toBeUndefined()
 })
 
-test("an administrator is a member of a group that may run anything as root", () => {
-  expect(isAdmin({ groups: ["adm", "sudo"] })).toBe(true)
-  expect(isAdmin({ groups: ["wheel"] })).toBe(true)
-  expect(isAdmin({ groups: ["docker", "adm"] })).toBe(true)
-  expect(isAdmin({ uid: 0, groups: [] })).toBe(true)
-  expect(isAdmin({ uid: 1000, groups: ["adm"] })).toBe(false)
+test("a shell and a root-equivalent group are drawn as what they are", () => {
+  expect(shellProduct("/bin/bash")).toBe("shell-bash")
+  expect(shellProduct("/usr/bin/zsh")).toBe("shell-zsh")
+  expect(shellProduct("/usr/sbin/nologin")).toBeUndefined()
+  expect(groupProduct("docker")).toBe("docker")
+  expect(groupProduct("lxd")).toBe("lxd")
+  expect(groupProduct("adm")).toBeUndefined()
+  for (const id of ["shell-bash", "shell-zsh", "shell-fish", "lxd"]) {
+    const src = ProductGlyph({ id })?.props.src
+    expect(src !== undefined && existsSync(join(PUBLIC, src))).toBe(true)
+  }
 })
 
 test("every account product has its file", () => {

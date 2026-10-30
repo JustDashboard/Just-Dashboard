@@ -31,6 +31,10 @@ describe("host alerts", () => {
     expect(describeHostAlert("tunnel_down", {})).toBe(
       "holds no connection to Cloudflare's edge for 2 min",
     )
+    expect(describeHostAlert("account_changed", {})).toBe(
+      "a new account, SSH key or root-reaching sudo rule appears, or root signs in",
+    )
+    expect(hostAlertFields("account_changed")).toEqual({ threshold: false, minutes: false })
     for (const kind of HOST_ALERT_KINDS) expect(HOST_ALERT_DEFAULTS[kind]).toBeDefined()
   })
 

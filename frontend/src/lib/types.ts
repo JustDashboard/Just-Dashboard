@@ -2375,6 +2375,31 @@ export type MongoCollectionInfo = {
   stats?: Record<string, unknown>
 }
 
+export type PasswordState = "set" | "locked" | "none" | "empty" | "unknown"
+
+export type SignInRoute = { allowed: boolean; why?: string }
+
+export type RootRoute = {
+  kind: "uid0" | "sudo" | "group"
+  via?: string
+  noPassword?: boolean
+  limited?: boolean
+  ruleId?: string
+  file?: string
+  /** False for a rule that asks for a password the account does not have. */
+  usable: boolean
+}
+
+export type PasswordAging = {
+  lastChanged?: string
+  mustChange: boolean
+  minDays?: number
+  maxDays?: number
+  warnDays?: number
+  inactiveDays?: number
+  expiresOn?: string
+}
+
 export type SystemUser = {
   username: string
   uid: number
@@ -2383,13 +2408,30 @@ export type SystemUser = {
   home: string
   shell: string
   groups: string[]
+  primaryGroup?: string
   system: boolean
   locked: boolean
   noPassword: boolean
   lastLogin?: string
   lastLoginFrom?: string
   sshKeyCount: number
+  /** A key source that could not be read, so the count is a floor. */
+  keysUnknown?: boolean
   canLogin: boolean
+  password: PasswordState
+  disabled: boolean
+  /** Closed by its password's age rules, which clearing an expiry does not undo. */
+  passwordDead?: boolean
+  expiresOn?: string
+  aging: PasswordAging
+  signIn: { password: SignInRoute; key: SignInRoute }
+  rootRoutes: RootRoute[]
+  protected: boolean
+}
+
+export type SystemUserDetail = SystemUser & {
+  failedAttempts: { available: boolean; count: number }
+  shells: string[]
 }
 
 export type SSHKey = {
@@ -2400,7 +2442,143 @@ export type SSHKey = {
   bits?: number
   options?: string
   raw: string
+  weak?: string
+  lastUsed?: string
+  lastUsedFrom?: string
+  /** A key in a file this page does not write: sshd reads it, and it cannot be changed here. */
+  file?: string
 }
+
+export type SudoRule = {
+  id: string
+  file: string
+  line: number
+  text: string
+  who: string[]
+  runAs: string
+  commands: string[]
+  noPassword: boolean
+  full: boolean
+  asRoot: boolean
+  managed: boolean
+}
+
+export type SudoLevel = "none" | "password" | "nopassword"
+
+export type SudoGrant = { level: SudoLevel; commands: string[] }
+
+export type AccountSudo = { rules: SudoRule[]; managed: SudoGrant }
+
+export type AccountSession = {
+  user: string
+  tty: string
+  from: string
+  loginTime?: string
+  idle?: string
+  pid?: number
+  command?: string
+  isSsh: boolean
+}
+
+export type AccountProcess = {
+  pid: number
+  cpu: number
+  memory: number
+  seconds: number
+  name: string
+}
+
+export type AccountActivity = {
+  sessions: AccountSession[]
+  processes: number
+  busiest: AccountProcess[]
+  cronJobs: number
+}
+
+export type AccountLogin = {
+  kind: string
+  user: string
+  tty: string
+  from: string
+  loginTime?: string
+  endTime?: string
+  duration?: string
+  active: boolean
+}
+
+export type AccountSudoEvent = {
+  at: string
+  runAs: string
+  command: string
+  failed: boolean
+  reason?: string
+}
+
+export type AccountHistory = {
+  logins: AccountLogin[]
+  failed: AccountLogin[]
+  sudo: AccountSudoEvent[]
+}
+
+export type AccountRemoval = {
+  username: string
+  home: string
+  homeExists: boolean
+  homeBytes: number
+  homeUnsafe: boolean
+  processes: number
+  cronJobs: boolean
+  sshKeys: number
+  sudoRules: SudoRule[]
+  elsewhere: string[]
+  elsewhereTruncated: boolean
+  /** Another account with this one's number: only the name can be removed. */
+  sharesNumber?: string
+  blocked?: string
+}
+
+export type AccountLimits = {
+  cpuPercent: number
+  memoryBytes: number
+  tasks: number
+  systemd: boolean
+  quota?: { mount: string; usedBytes: number; softBytes: number; hardBytes: number }
+}
+
+export type SystemGroup = {
+  name: string
+  gid: number
+  members: string[]
+  primary: string[]
+  system: boolean
+  rootEquivalent: boolean
+  sudoRules: SudoRule[]
+  protected: boolean
+}
+
+export type AccountDefaults = {
+  passwordMaxDays: number
+  passwordMinDays: number
+  passwordWarnDays: number
+  shell: string
+  inactiveDays: number
+  quality: { available: boolean; minLength: number; minClasses: number }
+  skel: { name: string; bytes: number; dir: boolean }[]
+  shells: string[]
+}
+
+export type AccountTemplate = {
+  id: string
+  name: string
+  builtin: boolean
+  shell: string
+  groups: string[]
+  sudo: SudoLevel
+  system: boolean
+  noHome: boolean
+}
+
+export type BulkResults = { results: { username: string; error?: string }[] }
 
 export type FirewallRule = {
   number?: number

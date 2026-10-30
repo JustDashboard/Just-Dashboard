@@ -228,6 +228,7 @@ const LOGOS: Record<string, string> = {
   linkedin: "linkedin.svg",
   linkwarden: "linkwarden.webp",
   linux: "linux.svg",
+  lxd: "lxd.svg",
   linuxmint: "linuxmint.svg",
   listmonk: "listmonk.svg",
   "lobe-chat": "lobe-chat.svg",
@@ -330,6 +331,11 @@ const LOGOS: Record<string, string> = {
   // The language, never a process: a shell at its prompt keeps its glyph
   // in the process table and the terminal, where a logo would be a guess.
   shellscript: "bash.svg",
+  // A login shell on an account. Not `bash`: a process list has hundreds, and
+  // processProduct must keep saying a shell is nothing.
+  "shell-bash": "bash-light.svg",
+  "shell-fish": "fish.svg",
+  "shell-zsh": "zsh.svg",
   shlink: "shlink.svg",
   slack: "slack.svg",
   solid: "solid.svg",
