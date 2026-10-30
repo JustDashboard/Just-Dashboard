@@ -352,6 +352,34 @@ describe("detectSystems", () => {
     expect(loose.nodes.some((n) => n.itemId.startsWith("logs:"))).toBe(false)
   })
 
+  test("a volume is left out only when it is unused and nothing is wired to it", () => {
+    const map = serverMap(
+      [
+        reading("volumes", [
+          item("volume:stray", "0030209f", { tone: "idle", state: "unused" }),
+          item("volume:kept", "old-uploads", { tone: "idle", state: "unused" }),
+          item("volume:busy", "scratch", { state: "in use" }),
+        ]),
+        reading("backups", [item("backup:uploads", "uploads nightly")]),
+      ],
+      [link("volume:kept", "backup:uploads", "backup")],
+    )
+    const [loose, ...others] = detectSystems(map)
+    expect(others).toEqual([])
+    expect(loose.nodes.map((n) => n.itemId).sort()).toEqual([
+      "backup:uploads",
+      "volume:busy",
+      "volume:kept",
+    ])
+  })
+
+  test("unused volumes alone draw no system", () => {
+    const map = serverMap([
+      reading("volumes", [item("volume:stray", "0030209f", { tone: "idle", state: "unused" })]),
+    ])
+    expect(detectSystems(map)).toEqual([])
+  })
+
   test("an absent module and a reading that never arrived draw nothing", () => {
     const map = serverMap([
       reading("containers", [], { state: "absent" }),

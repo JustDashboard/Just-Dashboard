@@ -87,7 +87,7 @@ to the contribution terms above, including the additional licence grant to the p
   ([the clients](docs/internal/backend/deploy-api.md#the-clients-generated-from-it)). A deploy key
   route added or removed also adds or removes an MCP tool generated from it:
   `TestEveryDeployKeyRouteIsAnMCPTool` fails until `api.MCPGeneratedTools` and the counts quoted in
-  the MCP server's documentation, the README and the deployment implementation notes follow
+  the MCP server's documentation, `docs/features/databases.md` and the deployment implementation notes follow
   ([the generated tools](docs/internal/backend/databases-proxy-platform.md#the-mcp-server)).
 - Docker remedy changes run the live resource/policy acceptance: first make `alpine:3.20` available
   locally, then run from `backend/`:
@@ -356,8 +356,8 @@ to the contribution terms above, including the additional licence grant to the p
   A template's schema rules run at build time: every definition is parsed and validated when the
   catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship. The
   same package checks the catalogue's size: `catalogue_counts.go` declares how many definitions
-  ship, how many deploy and how many are Compose templates, because the competitive report and the
-  README quote those numbers, and `TestCatalogueCountsMatchTheShippedDefinitions` fails until a
+  ship, how many deploy and how many are Compose templates, because the competitive report and
+  `docs/features/deployments.md` quote those numbers, and `TestCatalogueCountsMatchTheShippedDefinitions` fails until a
   change that adds or retires a template bumps them.
 - Changes to shared variables or to how a run opens its variables also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveSharedVariableReachesTheContainer -count=1 -v`,

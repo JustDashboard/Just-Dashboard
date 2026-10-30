@@ -4,6 +4,24 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.8.3 — 30 October 2026
+
+**A map that unused volumes cannot bury**
+
+On a server with many unused Docker volumes, the Map's Everything else section grew into a column hundreds of boxes tall. The Map now leaves those volumes to the Volumes page. The Git page can also bring a checkout back in line with its remote in one step, and switching to a branch far behind its remote now brings it up to date.
+
+### Added
+
+- Match origin cleans up a checkout in one step
+  - The Branches tab fetches, shows what would change, then updates every branch, deletes the ones origin no longer has and ends on the default branch. A branch with commits origin lacks is kept unless you tick it, and uncommitted work goes into a stash.
+
+### Fixed
+
+- Unused volumes no longer fill the Map's Everything else section
+  - A volume that nothing mounts and nothing backs up is no longer drawn on the Map. A volume with a backup or one in use is still drawn, and the Volumes page still lists every volume.
+- Switching to a branch behind its remote brings it up to date
+  - A local branch behind its remote now offers Switch and update, and a remote branch keeps its Check out button when a local copy exists.
+
 ## 0.8.2 — 30 October 2026
 
 **Staging, canaries and warm rollbacks, and a map of the whole server**

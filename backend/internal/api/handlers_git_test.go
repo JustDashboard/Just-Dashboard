@@ -142,6 +142,7 @@ func TestGitDestructiveRoutesDoNotRequirePhrases(t *testing.T) {
 		{"/api/v1/git/tag/delete", `{"name":"nope"}`},
 		{"/api/v1/git/remote/delete", `{"name":"nope"}`},
 		{"/api/v1/git/branch/delete-remote", `{"remote":"origin","ref":"nope"}`},
+		{"/api/v1/git/match-remote", `{}`},
 	} {
 		w := c.do(http.MethodPost, gitPath(tc.path, repo), tc.body, nil)
 		if strings.Contains(w.Body.String(), "confirmation") {
@@ -171,7 +172,7 @@ func TestGitRoutesHonourCapabilities(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/git/discard", "/api/v1/git/reset", "/api/v1/git/stash/drop",
 		"/api/v1/git/branch/delete", "/api/v1/git/tag/delete", "/api/v1/git/remote/delete",
-		"/api/v1/git/pull/discard",
+		"/api/v1/git/pull/discard", "/api/v1/git/match-remote",
 	} {
 		if w := limited.do(http.MethodPost, gitPath(path, repo), `{}`, nil); w.Code != http.StatusForbidden {
 			t.Errorf("limited %s = %d, want 403", path, w.Code)

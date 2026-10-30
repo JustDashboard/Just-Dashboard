@@ -68,10 +68,9 @@ sed -i.bak "0,/\"version\": \".*\"/s//\"version\": \"$NPM_VERSION\"/" \
 	frontend/package.json
 # The README is the version somebody reads before they install anything, and
 # it is the one nothing used to write — which is how the front page of the
-# repository sat at 0.5.1 while the product shipped 0.5.8. Both mentions are
-# rewritten here and pinned by the version test, so it cannot drift again.
-sed -i.bak -e "s/^\*\*Version [0-9][0-9.]*\*\*/**Version $VERSION**/" \
-	-e "s/^This is \*\*[0-9][0-9.]*\*\*/This is **$VERSION**/" README.md
+# repository sat at 0.5.1 while the product shipped 0.5.8. It is rewritten here
+# and pinned by the version test, so it cannot drift again.
+sed -i.bak "s/^\*\*Version [0-9][0-9.]*\*\*/**Version $VERSION**/" README.md
 rm -f backend/internal/version/version.go.bak frontend/src/lib/version.ts.bak \
 	frontend/package.json.bak README.md.bak
 ok "version constants bumped"

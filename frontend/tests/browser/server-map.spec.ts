@@ -75,6 +75,7 @@ test("every system is its own diagram, listed in the rail by what anchors it", a
   ]) {
     await expect(frame(page, system)).toHaveCount(1)
   }
+  await expect(node(page, "system:loose/volume:old-uploads")).toHaveCount(0)
 })
 
 test("a deployment's diagram runs from its domains through its containers to its data and backups", async ({

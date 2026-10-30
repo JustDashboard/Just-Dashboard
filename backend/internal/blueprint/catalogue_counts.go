@@ -3,7 +3,7 @@ package blueprint
 // The catalogue's size, as the competitive report quotes it. These are
 // declared rather than derived so that a template added or retired by
 // accident fails catalogue_counts_test.go instead of silently changing the
-// numbers the report and the README repeat: whoever changes the catalogue
+// numbers the report and docs/features/deployments.md repeat: whoever changes the catalogue
 // bumps them deliberately in the same change, and the test confirms the
 // shipped definitions agree.
 const (

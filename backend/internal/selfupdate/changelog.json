@@ -1,6 +1,29 @@
 {
-  "latest": "0.8.2",
+  "latest": "0.8.3",
   "releases": [
+    {
+      "version": "0.8.3",
+      "date": "2026-10-30",
+      "title": "A map that unused volumes cannot bury",
+      "summary": "On a server with many unused Docker volumes, the Map's Everything else section grew into a column hundreds of boxes tall. The Map now leaves those volumes to the Volumes page. The Git page can also bring a checkout back in line with its remote in one step, and switching to a branch far behind its remote now brings it up to date.",
+      "changes": [
+        {
+          "kind": "fixed",
+          "text": "Unused volumes no longer fill the Map's Everything else section",
+          "detail": "A volume that nothing mounts and nothing backs up is no longer drawn on the Map. A volume with a backup or one in use is still drawn, and the Volumes page still lists every volume."
+        },
+        {
+          "kind": "added",
+          "text": "Match origin cleans up a checkout in one step",
+          "detail": "The Branches tab fetches, shows what would change, then updates every branch, deletes the ones origin no longer has and ends on the default branch. A branch with commits origin lacks is kept unless you tick it, and uncommitted work goes into a stash."
+        },
+        {
+          "kind": "fixed",
+          "text": "Switching to a branch behind its remote brings it up to date",
+          "detail": "A local branch behind its remote now offers Switch and update, and a remote branch keeps its Check out button when a local copy exists."
+        }
+      ]
+    },
     {
       "version": "0.8.2",
       "date": "2026-10-30",
@@ -640,7 +663,7 @@
         {
           "kind": "added",
           "text": "Create, edit and drop functions, procedures and triggers from the schema browser",
-          "detail": "Databases \u2192 Schema opens a function, procedure or trigger with Edit and Drop, and the schema offers New function, New procedure and New trigger (a table's Triggers reading has its own). The form has the fields the engine has a word for, the body in the editor and the exact statement under it, sent as one statement, so a MySQL BEGIN \u2026 END block, an Oracle PL/SQL block or a SQLite trigger needs no delimiter. PostgreSQL, MySQL, MariaDB, SQL Server and Oracle take all three; SQLite takes triggers. An edit uses CREATE OR REPLACE or CREATE OR ALTER where the engine has one and otherwise drops and creates in one transaction, or puts the old definition back if the new one is refused; Oracle's result is checked for compile errors. A program whose text holds something the form cannot state is shown with the reason and left to the Query tab. Writing one asks for the destructive capability, as the Query tab does for the same CREATE."
+          "detail": "Databases → Schema opens a function, procedure or trigger with Edit and Drop, and the schema offers New function, New procedure and New trigger (a table's Triggers reading has its own). The form has the fields the engine has a word for, the body in the editor and the exact statement under it, sent as one statement, so a MySQL BEGIN … END block, an Oracle PL/SQL block or a SQLite trigger needs no delimiter. PostgreSQL, MySQL, MariaDB, SQL Server and Oracle take all three; SQLite takes triggers. An edit uses CREATE OR REPLACE or CREATE OR ALTER where the engine has one and otherwise drops and creates in one transaction, or puts the old definition back if the new one is refused; Oracle's result is checked for compile errors. A program whose text holds something the form cannot state is shown with the reason and left to the Query tab. Writing one asks for the destructive capability, as the Query tab does for the same CREATE."
         },
         {
           "kind": "added",
