@@ -182,11 +182,13 @@ valid until revoked or expired; creating a replacement does not impersonate anot
 An MCP key's replacement is made on `POST /tokens/mcp` at the old key's role with the databases the
 old key reaches that are neither protected nor forgotten since, each narrowed to `read` where that
 role may not change a database, and the old key's deployment grant, narrowed to `read` where that
-role may not deploy, with the deployments that grant was narrowed to. `PUT /tokens/{id}/connections`
+role may not deploy, with the deployments that grant was narrowed to and the generated tools only if
+the old key had them. `PUT /tokens/{id}/connections`
 (session only, the owner's own active MCP key, `404` for another account's, `409 not_mcp_key` for any
 other key) replaces what a key reaches without a new secret — its databases, its deployment grant and
-its chosen deployments, each kept when left out; it is audited as
-`dashboard.token.connections` with the databases by name, the deployment grant and what it reaches. Forgetting a connection removes its grants
+its chosen deployments and whether it has the generated tools, each kept when left out; it is audited as
+`dashboard.token.connections` with the databases by name, the deployment grant, what it reaches and
+`operations`. Forgetting a connection removes its grants
 with it (`ON DELETE CASCADE`).
 A deploy key (`auth.ScopeDeploy`) is made on `POST /tokens/deploy` (session only, `system.admin`) from
 `{name, ttlDays, deploymentIds}` and always holds the administrator role, which `CreateDeployToken`

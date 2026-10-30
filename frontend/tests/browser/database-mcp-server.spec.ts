@@ -53,6 +53,7 @@ async function mockMcp(
       connections: body.connections,
       deployments: body.deployments,
       deploymentIds: body.deploymentIds,
+      operations: body.operations,
     })
     listed = [...listed, token]
     return { status: 201, body: { token, secret: SECRET } }
@@ -65,6 +66,7 @@ async function mockMcp(
         connections: body.connections,
         deployments: body.deployments,
         deploymentIds: body.deploymentIds,
+        operations: body.operations,
       }
       listed = listed.map((one) => (one.id === id ? token : one))
       return { body: token }
@@ -139,6 +141,7 @@ test.describe("MCP server", () => {
           ],
           deployments: "",
           deploymentIds: [],
+          operations: false,
         },
       ])
     await expect(dialog.getByRole("heading", { name: "Your new MCP key" })).toBeVisible()
@@ -188,6 +191,7 @@ test.describe("MCP server", () => {
           ],
           deployments: "",
           deploymentIds: [],
+          operations: false,
         },
       ])
     await expect(keys).toContainText("reads notes, shop")
@@ -224,7 +228,12 @@ test.describe("MCP server", () => {
     await expect
       .poll(() => server.bodies("PUT /tokens/9/connections"))
       .toEqual([
-        { connections: [{ connectionId: 1, access: "read" }], deployments: "", deploymentIds: [] },
+        {
+          connections: [{ connectionId: 1, access: "read" }],
+          deployments: "",
+          deploymentIds: [],
+          operations: false,
+        },
       ])
   })
 
@@ -245,7 +254,14 @@ test.describe("MCP server", () => {
     await expect(deploymentChoice(dialog, "None")).toBeChecked()
     await expect(create).toBeDisabled()
     await deploymentChoice(dialog, "Deploy").click()
-    await expect(dialog.getByText("Also deploys, rolls back and changes them")).toBeVisible()
+    await expect(dialog.getByText("Also queues a deploy or a rollback")).toBeVisible()
+    // A new key is offered the deployment API's tools, and says what they add.
+    await expect(
+      dialog.getByRole("checkbox", { name: "Offer every deployment route as a tool" }),
+    ).toBeChecked()
+    await expect(
+      dialog.getByText("Every deployment route this key's grant may call becomes a tool"),
+    ).toBeVisible()
     await create.click()
     await expect
       .poll(() => server.bodies("POST /tokens/mcp"))
@@ -256,6 +272,7 @@ test.describe("MCP server", () => {
           connections: [],
           deployments: "deploy",
           deploymentIds: [],
+          operations: true,
         },
       ])
     await dialog.getByRole("button", { name: "Done" }).click()
@@ -273,7 +290,7 @@ test.describe("MCP server", () => {
     await save.click()
     await expect
       .poll(() => server.bodies("PUT /tokens/12/connections"))
-      .toEqual([{ connections: [], deployments: "read", deploymentIds: [] }])
+      .toEqual([{ connections: [], deployments: "read", deploymentIds: [], operations: true }])
   })
 
   test("narrows a key's deployments to the ones ticked, and widens it again", async ({ page }) => {
@@ -302,6 +319,7 @@ test.describe("MCP server", () => {
           connections: [],
           deployments: "read",
           deploymentIds: [3, 8],
+          operations: true,
         },
       ])
     await dialog.getByRole("button", { name: "Done" }).click()
@@ -320,8 +338,28 @@ test.describe("MCP server", () => {
     await save.click()
     await expect
       .poll(() => server.bodies("PUT /tokens/12/connections"))
-      .toEqual([{ connections: [], deployments: "read", deploymentIds: [] }])
+      .toEqual([{ connections: [], deployments: "read", deploymentIds: [], operations: true }])
     await expect(keys).toContainText("reads deployments")
+  })
+
+  test("a key made before the deployment API's tools has them off until they are turned on", async ({
+    page,
+  }) => {
+    const server = await mockMcp(page, [mcpKey({ connections: [], deployments: "read" })])
+    const dialog = await open(page)
+    await dialog.getByRole("button", { name: "Edit access" }).click()
+    const tools = dialog.getByRole("checkbox", { name: "Offer every deployment route as a tool" })
+    await expect(tools).not.toBeChecked()
+    await expect(
+      dialog.getByText("The key is offered the six deployment tools alone"),
+    ).toBeVisible()
+    const save = dialog.getByRole("button", { name: "Save", exact: true })
+    await expect(save).toBeDisabled()
+    await tools.click()
+    await save.click()
+    await expect
+      .poll(() => server.bodies("PUT /tokens/9/connections"))
+      .toEqual([{ connections: [], deployments: "read", deploymentIds: [], operations: true }])
   })
 
   test("a role that runs no SQL makes keys that read", async ({ page }) => {

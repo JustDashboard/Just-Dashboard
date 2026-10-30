@@ -72,8 +72,10 @@ var (
 
 // CreateMCPToken mints an MCP key reaching the databases granted and, as
 // deployments says, the deployments: every one, or only those deploymentIDs
-// names, as a deploy key is narrowed. An empty role is the owner's.
-func (s *Service) CreateMCPToken(ctx context.Context, owner *User, name string, role Role, ttl time.Duration, grants []TokenConnection, deployments DeployAccess, deploymentIDs []int64) (*APIToken, string, error) {
+// names, as a deploy key is narrowed. operations offers it the tools
+// generated from the deployment API under that grant. An empty role is the
+// owner's.
+func (s *Service) CreateMCPToken(ctx context.Context, owner *User, name string, role Role, ttl time.Duration, grants []TokenConnection, deployments DeployAccess, deploymentIDs []int64, operations bool) (*APIToken, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, "", errors.New("token name required")
@@ -106,7 +108,7 @@ func (s *Service) CreateMCPToken(ctx context.Context, owner *User, name string, 
 	if err := writeTokenConnections(ctx, tx, id, grants); err != nil {
 		return nil, "", err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE api_tokens SET deploy_access = ? WHERE id = ?`, string(deployments), id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE api_tokens SET deploy_access = ?, mcp_operations = ? WHERE id = ?`, string(deployments), operations, id); err != nil {
 		return nil, "", err
 	}
 	if err := writeTokenDeployments(ctx, tx, id, ids); err != nil {
@@ -153,13 +155,14 @@ func writeTokenDeployments(ctx context.Context, db execer, tokenID int64, ids []
 }
 
 // SetTokenConnections replaces what an owner's MCP key reaches: its databases,
-// its deployment grant unless deployments is nil, which keeps it, and the
+// its deployment grant unless deployments is nil, which keeps it, the
 // deployments that grant is narrowed to unless deploymentIDs is nil, which
-// keeps them (a key given no deployments keeps none). The key keeps working,
+// keeps them (a key given no deployments keeps none), and whether it is
+// offered the generated tools unless operations is nil. The key keeps working,
 // so a client already set up with it sees one database more or one fewer
 // without a new key being pasted anywhere. Another account's key is not
 // found: an administrator may revoke it, never re-point it.
-func (s *Service) SetTokenConnections(ctx context.Context, owner *User, tokenID int64, grants []TokenConnection, deployments *DeployAccess, deploymentIDs *[]int64) (*APIToken, error) {
+func (s *Service) SetTokenConnections(ctx context.Context, owner *User, tokenID int64, grants []TokenConnection, deployments *DeployAccess, deploymentIDs *[]int64, operations *bool) (*APIToken, error) {
 	tx, err := s.st.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -217,6 +220,11 @@ func (s *Service) SetTokenConnections(ctx context.Context, owner *User, tokenID 
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE api_tokens SET deploy_access = ? WHERE id = ?`, string(access), tokenID); err != nil {
 		return nil, err
+	}
+	if operations != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE api_tokens SET mcp_operations = ? WHERE id = ?`, *operations, tokenID); err != nil {
+			return nil, err
+		}
 	}
 	if err := writeTokenDeployments(ctx, tx, tokenID, ids); err != nil {
 		return nil, err

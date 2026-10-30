@@ -84,13 +84,17 @@ A change that weakens any of these has to say so explicitly.
    deployment routes call and asks the key's role, narrowed to its owner's now, for the capability
    the route asks — `service.control` to deploy, `destructive` and the destructive budget to roll
    back. The grant reaches every deployment or, like a deploy key, only those chosen for it
-   (`api_token_deployments`, read with the key on every request). **It deliberately reaches more than
-   those two verbs:** every deployment route a deploy key may call (`keyOpen`, `keyEvery` in
+   (`api_token_deployments`, read with the key on every request). **With the generated tools on, it
+   deliberately reaches more than those two verbs:** every deployment route a deploy key may call (`keyOpen`, `keyEvery` in
    `deployKeyRoutes`) is also a tool generated from the API's description, so `read` reads what a
    deploy key reads and `deploy` changes what a deploy key changes — configuration, source, Git
    policy, triggers, variables, drafts — held to the key's owner's role (not the administrator role a
    deploy key carries), with the routes behind `s.destructive` only for a role holding `destructive`.
-   A key granted the deployments before the generated tools gains them with the upgrade. Such a call
+   **The generated tools are each key's to turn on** (`api_tokens.mcp_operations`, additive, `0` for
+   every key made before them): a key without them is offered exactly the hand-written tools under its
+   grant and is refused a generated one by name, so no key gains a tool with an upgrade; a new key made
+   from the dialog has them on unless its maker unticks them, and the flag is audited with the grant.
+   A generated tool's call
    never leaves the process: the MCP handler makes it through the dashboard's router as a request whose
    context carries the MCP key's principal (`httpx.WithMCPDelegate`); `AuthenticateFeatures` admits it
    only through the deploy key gate — the table's line, the key's chosen deployments, the

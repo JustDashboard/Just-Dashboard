@@ -132,7 +132,8 @@ export function scopeWords(token: ApiToken) {
  * What an MCP key's replacement reaches: the databases the key reaches that a
  * key can still be given, and the deployments as the key had them — the
  * grant, and the deployments it was narrowed to, so a replacement is never a
- * key that reaches more. A database protected since, or forgotten, is refused
+ * key that reaches more, and the generated tools only if the key had them. A
+ * database protected since, or forgotten, is refused
  * every call already, and the server would refuse the whole list for it.
  */
 async function replacementGrants(token: ApiToken | undefined, role: Role) {
@@ -149,6 +150,7 @@ async function replacementGrants(token: ApiToken | undefined, role: Role) {
     connections,
     deployments,
     deploymentIds: deployments === "" ? [] : [...(token?.deploymentIds ?? [])],
+    operations: deployments !== "" && (token?.operations ?? false),
   }
 }
 

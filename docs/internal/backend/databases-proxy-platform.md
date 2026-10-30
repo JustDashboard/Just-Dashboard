@@ -2830,7 +2830,8 @@ An AI client — Claude Code, Cursor, VS Code, anything that speaks the Model Co
 Streamable HTTP — reaches the databases, and the deployments if its key was given them, through one
 endpoint, `POST /api/v1/mcp` (`api/handlers_mcp.go`, `handlers_mcp_tools.go`, `handlers_mcp_deploy.go`,
 `handlers_mcp_operations.go`; the protocol is `internal/mcp`). It offers 110 tools in all: the seven
-database tools, the six hand-written deployment tools, and 97 tools generated from the deployment API. It sits outside the `/databases` tree, as the metrics export does,
+database tools, the six hand-written deployment tools, and 97 tools generated from the deployment API,
+the last to a key whose owner turned them on for it. It sits outside the `/databases` tree, as the metrics export does,
 because what admits a request there is different.
 
 - **Only an MCP key opens it, and an MCP key opens nothing else.** A key with `scope = 'mcp'` is
@@ -2846,13 +2847,14 @@ because what admits a request there is different.
   most 64, read again on every call so a grant taken away answers the next request. A key carries
   its owner's role or a narrower one, and like every key never more than its owner holds now.
   `POST /tokens/mcp` (session only) makes one from `{name, role?, ttlDays, connections, deployments?,
-  deploymentIds?}` — Account → API keys sends the replaced key's role, its databases less those
-  protected or forgotten since, its deployment grant (narrowed to `read` for a read-only role) and the
-  deployments that grant was narrowed to, so a replacement never reaches more;
+  deploymentIds?, operations?}` — Account → API keys sends the replaced key's role, its databases less
+  those protected or forgotten since, its deployment grant (narrowed to `read` for a read-only role),
+  the deployments that grant was narrowed to and whether it had the generated tools, so a replacement
+  never reaches more;
   `PUT /tokens/{id}/connections` (session only, the owner's own active MCP key) replaces what it
-  reaches — its databases, its deployment grant when `deployments` is sent and the deployments it is
-  narrowed to when `deploymentIds` is sent (either left out is kept; an empty list is every deployment)
-  — and keeps the secret. Both refuse a protected connection (`409 connection_read_only`), an
+  reaches — its databases, its deployment grant when `deployments` is sent, the deployments it is
+  narrowed to when `deploymentIds` is sent (an empty list is every deployment) and the generated tools
+  when `operations` is sent (each left out is kept) — and keeps the secret. Both refuse a protected connection (`409 connection_read_only`), an
   engine without the `mcp` capability (every SQL engine has it; MongoDB and Redis do not), a missing
   one, a key that would reach no database and no deployments, a `write` or `deploy` grant for a
   key whose role lacks `service.control`, and chosen deployments for a key given none of them, or one
@@ -2860,7 +2862,7 @@ because what admits a request there is different.
   lets a database protected since be cleared from a key, the one way to save the rest. They are audited as
   `dashboard.token.create` (with `scope`, the databases by name and `deployments`) and
   `dashboard.token.connections`, with `reaches` (`every`, or the chosen deployments by name) beside a
-  deployment grant. Listing, revoking and deleting are the routes every key has.
+  deployment grant and `operations`, whether the key has the generated tools. Listing, revoking and deleting are the routes every key has.
 - **The deployments are a grant of their own**, `api_tokens.deploy_access` (additive, default `''`,
   so every key made before reaches none): `''` none, `read`, or `deploy`. It reaches every deployment,
   or — like a deploy key — only the ones chosen for it, in `api_token_deployments` (the deploy keys'
@@ -2891,7 +2893,14 @@ because what admits a request there is different.
   not listed, and naming one is answered as a deployment that is not there. Each call is audited as
   `deploy.mcp.<tool>` with the deployment as target and the run number, release or ref in the detail.
 - **The tools generated from the deployment API** (`api/handlers_mcp_operations.go`, the tool's
-  shape in `mcp/operations.go`): every route under `/api/v1/deploy` whose line in `deployKeyRoutes`
+  shape in `mcp/operations.go`) are **each key's to turn on**: `api_tokens.mcp_operations`
+  (`APIToken.Operations`, additive, `0` for every key made before them, `mcp.Offer.Operations`). A key
+  without them is offered exactly the hand-written tools under its grant, its instructions say nothing
+  of the others, and a call to one by name is refused (`operations_off`: "this key's generated tools are
+  off; its owner can turn them on under Databases → MCP server"), so no key gains a tool with an
+  upgrade; the routes take `operations` (left out, a new key has them off), and the dialog makes a new
+  key with them on unless they are unticked. With them on, every route under `/api/v1/deploy` whose
+  line in `deployKeyRoutes`
   is `keyOpen` or `keyEvery` is a tool named for its operationId in snake case
   (`deploymentConfigurationSave` is `deployment_configuration_save`), its input schema the route's path
   and query parameters by name and its JSON body under `body`, with the components the body refers to
@@ -2987,7 +2996,10 @@ because what admits a request there is different.
   a form choosing databases (those the server would refuse listed with why) and read or change for
   each, None, Read or Deploy for the deployments (Deploy disabled for a role without
   `service.control` and for a key made read-only) and, for Read or Deploy, which deployments (every
-  one, or those ticked, with the deploy key dialog's own picker), the key shown once with the configuration for
+  one, or those ticked, with the deploy key dialog's own picker) and *Offer every deployment route as
+  a tool* (on for a new key, off for one made before the generated tools, its hint saying what it adds
+  under each grant and that a destructive route needs a role that may take destructive actions), the
+  key shown once with the configuration for
   Claude Code, Cursor and VS Code, editing what a key reaches (*Edit access*) and revoking it.
   Account → API keys lists MCP keys as *MCP only* and replaces one with the same databases and
   deployment grant.

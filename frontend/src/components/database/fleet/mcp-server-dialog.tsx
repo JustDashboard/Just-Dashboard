@@ -80,7 +80,8 @@ type View =
 
 /**
  * A key being made or re-pointed. The name and expiry are a new key's alone;
- * every and chosen are which deployments its deployment grant reaches.
+ * every and chosen are which deployments its deployment grant reaches, and
+ * operations whether it is offered the tools generated from the deployment API.
  */
 type Draft = {
   name: string
@@ -89,6 +90,7 @@ type Draft = {
   deployments: ApiTokenDeployments
   every: boolean
   chosen: ReadonlySet<number>
+  operations: boolean
 }
 
 /**
@@ -102,9 +104,13 @@ const reachesSomething = (draft: Draft) =>
 const deploymentIdsOf = (draft: Draft) =>
   chosenDeployments(draft.deployments, draft.every, draft.chosen)
 
+/** The generated tools mean nothing to a key given no deployments, so it has them off. */
+const operationsOf = (draft: Draft) => draft.deployments !== "" && draft.operations
+
 /** Whether a re-pointed key's deployments differ from what it reaches now. */
 const sameDeployments = (draft: Draft, token: ApiToken) =>
   draft.deployments === (token.deployments ?? "") &&
+  operationsOf(draft) === (token.operations ?? false) &&
   deploymentIdsOf(draft).join(",") ===
     [...(token.deployments ? (token.deploymentIds ?? []) : [])].sort((a, b) => a - b).join(",")
 
@@ -165,6 +171,7 @@ function McpServerDialog({
           connections,
           deployments: draft.deployments,
           deploymentIds: deploymentIdsOf(draft),
+          operations: operationsOf(draft),
         })
         notify.success(`${saved.name} ${grantSummary(saved, nameOf)}`)
         setView({ kind: "keys" })
@@ -175,6 +182,7 @@ function McpServerDialog({
           connections,
           deployments: draft.deployments,
           deploymentIds: deploymentIdsOf(draft),
+          operations: operationsOf(draft),
         })
         setView({ kind: "made", token: made.token, secret: made.secret })
       }
@@ -269,6 +277,10 @@ function McpServerDialog({
                         deployments: "",
                         every: true,
                         chosen: new Set(),
+                        // A new key is offered the deployment API's tools
+                        // unless they are turned off; a key made before them
+                        // is not, until its owner turns them on.
+                        operations: true,
                       },
                     })
                   }
@@ -335,6 +347,7 @@ function McpServerDialog({
                                   deployments: token.deployments ?? "",
                                   every: (token.deploymentIds ?? []).length === 0,
                                   chosen: new Set(token.deploymentIds ?? []),
+                                  operations: token.operations ?? false,
                                 },
                               }),
                           },
@@ -358,10 +371,11 @@ function McpServerDialog({
               and explain or run read-only queries. Where the key may change a database it can run
               one statement at a time, held to your role: a delete, an overwrite or a drop needs an
               administrator. Protected databases are never reachable, and every call is in the audit
-              log as the shape of its statement, without its values. A key given the deployments
-              reads them as a deploy key does — runs, transcripts, releases, settings, variables by
-              name and digest — every deployment or the ones you choose; one that may deploy also
-              deploys, rolls back and changes them as a deploy key would, held to your role.
+              log as the shape of its statement, without its values. A key given the deployments —
+              every one or the ones you choose — lists them and reads their runs and transcripts;
+              one that may deploy also queues a deploy or a rollback of a production environment, as
+              the deployment pages would. With the deployment API on, every deployment route its
+              grant may call is a tool as well, held to what a deploy key may do and to your role.
               {!canRun &&
                 " Your role runs no SQL and deploys nothing, so your keys can read structure, rows and the deployments only."}
             </FormNote>
@@ -398,7 +412,7 @@ function KeyFields({
 }) {
   const { engineFor } = useDatabases()
   const now = useNow(30_000)
-  const { name, ttl, grants, deployments, every, chosen } = draft
+  const { name, ttl, grants, deployments, every, chosen, operations } = draft
   const setGrants = (next: Grants) => onChange({ ...draft, grants: next })
 
   const toggle = (id: number, on: boolean) => {
@@ -535,6 +549,28 @@ function KeyFields({
         />
       )}
 
+      {deployments !== "" && (
+        <Field
+          label="Deployment API"
+          hint={
+            operations
+              ? "Every deployment route this key's grant may call becomes a tool: reads under Read; configuration, source, triggers, variables and drafts under Deploy, held to your role. A destructive one — the instant rollback, the maintenance switch, removing a shared variable — also needs a role that may take destructive actions."
+              : "The key is offered the six deployment tools alone: list deployments, runs and releases, read a run's log, deploy and roll back."
+          }
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <Checkbox
+              id="mcp-operations"
+              checked={operations}
+              onCheckedChange={(checked) => onChange({ ...draft, operations: checked === true })}
+            />
+            <label htmlFor="mcp-operations" className="min-w-0 text-body">
+              Offer every deployment route as a tool
+            </label>
+          </div>
+        </Field>
+      )}
+
       {!editing && (
         <Field
           label="Expires"
@@ -575,9 +611,9 @@ function KeyFields({
 /** What each deployment grant lets a client do, as the field's hint says it. */
 const DEPLOYMENT_HINTS: Record<ApiTokenDeployments, string> = {
   "": "The key reaches no deployment.",
-  read: "Lists the deployments and reads what a deploy key reads: runs, transcripts, releases and settings, variables by name only.",
+  read: "Lists the deployments and reads their runs, releases and transcripts.",
   deploy:
-    "Also deploys, rolls back and changes them as a deploy key does — configuration, variables, triggers, drafts — held to your role. A rollback needs an administrator.",
+    "Also queues a deploy or a rollback of a production environment, held to your role. A rollback needs an administrator.",
 }
 
 /** The key, once, and what to paste where to use it. */

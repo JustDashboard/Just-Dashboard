@@ -91,10 +91,12 @@ func TestOffersReachTheirGrants(t *testing.T) {
 		offer                    Offer
 		read, write, destructive bool
 	}{
-		{Offer{}, false, false, false},
-		{Offer{Deployments: true}, true, false, false},
-		{Offer{Deployments: true, Deploy: true}, true, true, false},
-		{Offer{Deployments: true, Deploy: true, Rollback: true}, true, true, true},
+		{Offer{Operations: true}, false, false, false},
+		{Offer{Deployments: true, Operations: true}, true, false, false},
+		{Offer{Deployments: true, Deploy: true, Operations: true}, true, true, false},
+		{Offer{Deployments: true, Deploy: true, Rollback: true, Operations: true}, true, true, true},
+		// A key whose generated tools are off reaches none of them.
+		{Offer{Deployments: true, Deploy: true, Rollback: true}, false, false, false},
 	} {
 		if c.offer.Reaches(read) != c.read || c.offer.Reaches(write) != c.write || c.offer.Reaches(destructive) != c.destructive {
 			t.Errorf("%+v reaches read %v write %v destructive %v", c.offer, c.offer.Reaches(read), c.offer.Reaches(write), c.offer.Reaches(destructive))

@@ -547,10 +547,11 @@ inside it, as in any CI system.
 
 **AI clients.** An MCP key given the deployments (**Databases → MCP server**, every deployment or the
 ones you pick) reaches the same API as tools: six written by hand — list deployments, runs and
-releases, read a run's log, deploy, roll back — and 97 tools generated from the deployment API, one per
-route a deploy key may call, named for its operation (`deployment_configuration_save`,
-`deployment_variable_put`, …): 110 tools in all with the seven database tools. *Read* is offered the
-reads; *Deploy* also the changes, held to your role and to everything above that a deploy key cannot
+releases, read a run's log, deploy, roll back — and, when *Offer every deployment route as a tool* is
+on for the key (it is for a new key, and off for every key made before it until you turn it on), 97
+tools generated from the deployment API, one per route a deploy key may call, named for its operation
+(`deployment_configuration_save`, `deployment_variable_put`, …): 110 tools in all with the seven
+database tools. *Read* is offered the reads; *Deploy* also the changes, held to your role and to everything above that a deploy key cannot
 do; a destructive route also needs a role that may take destructive actions. Each call goes through
 the dashboard's own routes as the key and is in the audit log twice: as the MCP call and as the
 route's own entry.

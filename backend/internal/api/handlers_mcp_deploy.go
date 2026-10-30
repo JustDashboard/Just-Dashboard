@@ -34,6 +34,7 @@ func mcpOffer(p *httpx.Principal, grants []auth.TokenConnection) mcp.Offer {
 	offer.Deployments = access != auth.DeployNone
 	offer.Deploy = access == auth.DeployRun && p.Can(auth.CapServiceControl)
 	offer.Rollback = offer.Deploy && p.Can(auth.CapDestructive)
+	offer.Operations = offer.Deployments && mcpOperationsOn(p)
 	return offer
 }
 

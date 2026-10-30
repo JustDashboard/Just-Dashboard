@@ -18,7 +18,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// The MCP tools generated from the deployment API. Every route the deploy key
+// The MCP tools generated from the deployment API, offered to a key whose
+// owner turned them on for it (api_tokens.mcp_operations). Every route the deploy key
 // table opens to a key that may reach it (keyOpen, keyEvery) is a tool named
 // for its operationId, read off the router Routes built and the description
 // generated from it, so the tools cannot drift from the routes: a route added
@@ -349,12 +350,21 @@ func (s *Server) dispatchMCP(r *http.Request, p *httpx.Principal, method string,
 	return rec, nil
 }
 
+// mcpOperationsOn reports whether a key is offered the generated tools: its
+// own flag (api_tokens.mcp_operations), off for every key made before them,
+// so no key gains them with an upgrade.
+func mcpOperationsOn(p *httpx.Principal) bool {
+	return p.Token != nil && p.Token.Operations
+}
+
 // operation is a generated tool's call.
 func (c *mcpCall) operation(op mcp.Operation, raw json.RawMessage) map[string]any {
 	c.detail["operation"] = op.ID
 	c.detail["route"] = op.Method + " " + op.Pattern
 	access := mcpDeployAccess(c.p)
 	switch {
+	case !mcpOperationsOn(c.p):
+		return c.refuse("operations_off", "This key's generated tools are off; its owner can turn them on under Databases → MCP server.")
 	case access == auth.DeployNone:
 		return c.refuse("not_granted", "This key was not given the deployments. Its owner can give it them under Databases → MCP server.")
 	case op.Grant != mcp.GrantRead && access != auth.DeployRun:

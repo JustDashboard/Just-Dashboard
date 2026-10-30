@@ -62,7 +62,10 @@ func Instructions(o Offer) string {
 		parts = append(parts, databaseInstructions)
 	}
 	if o.Deployments {
-		parts = append(parts, deployInstructions, apiInstructions)
+		parts = append(parts, deployInstructions)
+		if o.Operations {
+			parts = append(parts, apiInstructions)
+		}
 	}
 	return strings.Join(append(parts, auditInstructions), " ")
 }
@@ -206,6 +209,9 @@ type Offer struct {
 	// The generated tools follow the same three (Offer.Reaches): reads,
 	// changes, and the routes behind the destructive capability.
 	Deployments, Deploy, Rollback bool
+	// Operations is a key whose owner turned the generated tools on for it;
+	// without it a key is offered the hand-written tools alone.
+	Operations bool
 }
 
 func (o Offer) databases() bool { return o.Databases || !o.Deployments }

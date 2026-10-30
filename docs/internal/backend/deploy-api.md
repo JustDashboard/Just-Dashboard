@@ -187,6 +187,7 @@ with `JD_UPDATE_SDK=1 go test ./internal/openapigen`.
 ## The MCP tools generated from it
 
 Every operation whose route the deploy key table opens (`keyOpen`, `keyEvery`) is also an MCP tool,
+offered to a key whose owner turned the generated tools on for it,
 named for its operationId in snake case, its input schema read from this document (the path and
 query parameters, and the body with the components it refers to copied into the schema's `$defs`).
 The tools are read off the same router and the same description, so a route described here and given

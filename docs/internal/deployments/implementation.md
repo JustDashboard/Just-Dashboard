@@ -1648,7 +1648,8 @@ only renderer/executor/validation authority for their feature.
   runs and releases, read a run's transcript tail (`OrchestrationStore.RunTranscriptTail`, the stored
   and already masked `step.log` chunks, or a pre-engine run's bounded `deploy_runs.log`), and with
   `deploy` queue a deploy or a rollback of a production environment through the same enqueue
-  functions and capability checks as the run and rollback routes. Beside them, every route the deploy
+  functions and capability checks as the run and rollback routes. Beside them, for a key whose owner
+  turned them on (`api_tokens.mcp_operations`, off for every key made before them), every route the deploy
   key table opens (`keyOpen`, `keyEvery`) is a tool generated from the OpenAPI description, named for
   its operationId, and made through the router as the MCP key with the deploy key gate and every
   handler's deploy key rule applied (`httpx.WithMCPDelegate`, `Principal.ViaMCP`): reads under `read`,

@@ -66,8 +66,12 @@ type Parameter struct {
 	Name, Type string
 }
 
-// Reaches reports whether an offer reaches a generated tool.
+// Reaches reports whether an offer reaches a generated tool: one whose owner
+// turned the generated tools on, under the grant the tool asks.
 func (o Offer) Reaches(op Operation) bool {
+	if !o.Operations {
+		return false
+	}
 	switch op.Grant {
 	case GrantRead:
 		return o.Deployments

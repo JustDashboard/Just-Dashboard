@@ -43,7 +43,8 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   is held to the databases `api_token_connections` grants the key, read again on each call, and to
   its deployment grant (`api_tokens.deploy_access`, narrowed to chosen deployments in
   `api_token_deployments` as a deploy key is), read with the key. A tool generated from the
-  deployment API is a second request made inside the process through the root router, with no
+  deployment API (offered only to a key whose owner turned them on, `api_tokens.mcp_operations`) is a
+  second request made inside the process through the root router, with no
   credential and the MCP key's principal in its context (`httpx.WithMCPDelegate`): it passes the same
   layers, and the feature group's `AuthenticateFeatures` admits it only as the deploy key gate admits
   a deploy key, marking it `Principal.ViaMCP` (every other group refuses it); see

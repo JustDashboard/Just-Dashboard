@@ -174,9 +174,20 @@ func newMCPAPIBench(t *testing.T) *mcpAPIBench {
 	return b
 }
 
+// toolsKey is an administrator's key given the deployments as access says,
+// with the generated tools turned on.
+func (b *mcpAPIBench) toolsKey(access auth.DeployAccess) string {
+	b.t.Helper()
+	_, secret, err := b.s.Auth.CreateMCPToken(b.t.Context(), b.admin, "claude-desktop", "", time.Hour, nil, access, nil, true)
+	if err != nil {
+		b.t.Fatal(err)
+	}
+	return secret
+}
+
 func (b *mcpAPIBench) narrowedKey(access auth.DeployAccess, deployments ...int64) string {
 	b.t.Helper()
-	_, secret, err := b.s.Auth.CreateMCPToken(b.t.Context(), b.admin, "claude-narrowed", "", time.Hour, nil, access, deployments)
+	_, secret, err := b.s.Auth.CreateMCPToken(b.t.Context(), b.admin, "claude-narrowed", "", time.Hour, nil, access, deployments, true)
 	if err != nil {
 		b.t.Fatal(err)
 	}
@@ -190,8 +201,8 @@ func (b *mcpAPIBench) narrowedKey(access auth.DeployAccess, deployments ...int64
 // key table and its guards refuse a deploy key.
 func TestGeneratedToolsGoThroughTheRouterAsTheKey(t *testing.T) {
 	b := newMCPAPIBench(t)
-	reader := b.deployKey(b.admin, auth.DeployRead)
-	deployer := b.deployKey(b.admin, auth.DeployRun)
+	reader := b.toolsKey(auth.DeployRead)
+	deployer := b.toolsKey(auth.DeployRun)
 	shop := map[string]any{"id": b.shopID, "env": b.shopEnv}
 
 	// What each key is offered: the hand-written tools first, then the
@@ -302,6 +313,39 @@ func TestGeneratedToolsGoThroughTheRouterAsTheKey(t *testing.T) {
 	}
 }
 
+// The generated tools are each key's to turn on: a key made before them, or
+// without them, is offered exactly the hand-written tools under its grant and
+// is refused a generated one by name, so no key gains a tool with an upgrade.
+func TestAnMCPKeyIsOfferedTheGeneratedToolsOnlyWhenTurnedOn(t *testing.T) {
+	b := newMCPAPIBench(t)
+	before := b.deployKey(b.admin, auth.DeployRun) // the flag is off, as on every key made before it
+	if names := b.listTools(before); names != "list_deployments list_runs read_run_log list_releases deploy rollback" {
+		t.Errorf("a key without the generated tools is offered %s", names)
+	}
+	init := b.rpc(b.post(before, `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18",
+		"capabilities":{},"clientInfo":{"name":"claude-code","version":"2.4.0"}}}`, nil))
+	if text, _ := init.Result["instructions"].(string); strings.Contains(text, "deployment_configuration") {
+		t.Errorf("a key without the generated tools is told of them: %q", text)
+	}
+	if text := b.refused(before, "deployment_variables", map[string]any{"id": b.shopID, "env": b.shopEnv}); !strings.Contains(text, "generated tools are off") ||
+		!strings.Contains(text, "Databases → MCP server") {
+		t.Errorf("a key without the generated tools called one: %s", text)
+	}
+	if entry := b.lastAudit("deploy.mcp.deployment_variables"); entry.Success || !strings.Contains(entry.Detail, `"reason":"operations_off"`) {
+		t.Errorf("the refusal was audited as %+v", entry)
+	}
+	// The hand-written tools are as they were.
+	b.ok(before, mcp.ToolListDeployments, map[string]any{})
+
+	on := b.toolsKey(auth.DeployRun)
+	names := b.listTools(on)
+	if !strings.HasPrefix(names, "list_deployments list_runs read_run_log list_releases deploy rollback ") ||
+		len(strings.Fields(names)) != 6+MCPGeneratedTools {
+		t.Errorf("a key with the generated tools is offered %d tools: %s", len(strings.Fields(names)), names)
+	}
+	b.ok(on, "deployment_variables", map[string]any{"id": b.shopID, "env": b.shopEnv})
+}
+
 // A key narrowed to chosen deployments reaches those through every tool and
 // nothing else: the hand-written ones find no other deployment, a generated
 // one is refused by the deploy key gate as a narrowed deploy key is, and a
@@ -331,7 +375,7 @@ func TestANarrowedMCPKeyReachesOnlyItsDeployments(t *testing.T) {
 		t.Errorf("a narrowed key read what every deployment shares: %s", text)
 	}
 	// The key that reaches every deployment reads both.
-	every := b.deployKey(b.admin, auth.DeployRead)
+	every := b.toolsKey(auth.DeployRead)
 	b.ok(every, "deployment_variables", map[string]any{"id": b.otherID, "env": b.otherEnv})
 	b.ok(every, "shared_variables", map[string]any{})
 }
@@ -342,8 +386,9 @@ func TestMCPKeysAreNarrowedOnTheKeyRoutes(t *testing.T) {
 	b := newMCPAPIBench(t)
 	cookie := signInAs(t, b.s, "keys-admin", auth.RoleAdmin)
 	c := &client{t: t, h: b.h, cookie: cookie}
-	made := c.do(http.MethodPost, "/api/v1/tokens/mcp", fmt.Sprintf(`{"name":"claude","ttlDays":30,"deployments":"read","deploymentIds":[%d]}`, b.shopID), nil)
-	if made.Code != http.StatusCreated || !strings.Contains(made.Body.String(), fmt.Sprintf(`"deploymentIds":[%d]`, b.shopID)) {
+	made := c.do(http.MethodPost, "/api/v1/tokens/mcp", fmt.Sprintf(`{"name":"claude","ttlDays":30,"deployments":"read","deploymentIds":[%d],"operations":true}`, b.shopID), nil)
+	if made.Code != http.StatusCreated || !strings.Contains(made.Body.String(), fmt.Sprintf(`"deploymentIds":[%d]`, b.shopID)) ||
+		!strings.Contains(made.Body.String(), `"operations":true`) {
 		t.Fatalf("make a narrowed key = %d %s", made.Code, made.Body.String())
 	}
 	var answer struct {
@@ -353,7 +398,7 @@ func TestMCPKeysAreNarrowedOnTheKeyRoutes(t *testing.T) {
 	if err := json.Unmarshal(made.Body.Bytes(), &answer); err != nil {
 		t.Fatal(err)
 	}
-	if entry := b.lastAudit("dashboard.token.create"); !strings.Contains(entry.Detail, `"reaches":["shop"]`) {
+	if entry := b.lastAudit("dashboard.token.create"); !strings.Contains(entry.Detail, `"reaches":["shop"]`) || !strings.Contains(entry.Detail, `"operations":true`) {
 		t.Errorf("the key was audited as %+v", entry)
 	}
 	if w := c.do(http.MethodPost, "/api/v1/tokens/mcp", fmt.Sprintf(`{"name":"x","deploymentIds":[%d]}`, b.shopID), nil); w.Code != http.StatusBadRequest {
@@ -375,4 +420,24 @@ func TestMCPKeysAreNarrowedOnTheKeyRoutes(t *testing.T) {
 		t.Errorf("widened to every deployment = %d %s", w.Code, w.Body.String())
 	}
 	b.ok(answer.Secret, "deployment_variables", map[string]any{"id": b.otherID, "env": b.otherEnv})
+
+	// Turned off, and on again, without a new secret; left out, it is kept.
+	if w := c.do(http.MethodPut, path, `{"connections":[],"operations":false}`, nil); w.Code != http.StatusOK || strings.Contains(w.Body.String(), `"operations"`) {
+		t.Errorf("turned off = %d %s", w.Code, w.Body.String())
+	}
+	if entry := b.lastAudit("dashboard.token.connections"); !strings.Contains(entry.Detail, `"operations":false`) {
+		t.Errorf("turning the generated tools off was audited as %+v", entry)
+	}
+	if text := b.refused(answer.Secret, "deployment_variables", map[string]any{"id": b.otherID, "env": b.otherEnv}); !strings.Contains(text, "generated tools are off") {
+		t.Errorf("a key with its generated tools off called one: %s", text)
+	}
+	if w := c.do(http.MethodPut, path, `{"connections":[],"operations":true}`, nil); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"operations":true`) {
+		t.Errorf("turned on = %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do(http.MethodPut, path, `{"connections":[]}`, nil); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"operations":true`) {
+		t.Errorf("left out = %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do(http.MethodPost, "/api/v1/tokens/mcp", `{"name":"plain","deployments":"read"}`, nil); w.Code != http.StatusCreated || strings.Contains(w.Body.String(), `"operations"`) {
+		t.Errorf("a key made without asking for the generated tools = %d %s", w.Code, w.Body.String())
+	}
 }

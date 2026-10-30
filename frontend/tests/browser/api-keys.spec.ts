@@ -173,6 +173,7 @@ test("replacing an MCP key makes another MCP key for the same databases, at its 
         // The deployments as the key had them: none.
         deployments: "",
         deploymentIds: [],
+        operations: false,
       },
     })
   const secret = page.getByRole("dialog", { name: "Your new key" })
@@ -211,6 +212,7 @@ test("an MCP key replaced by an owner who can no longer change a database only r
       connections: [{ connectionId: 1, access: "read" }],
       deployments: "",
       deploymentIds: [],
+      operations: false,
     })
 })
 
@@ -230,6 +232,7 @@ test("an MCP key narrowed to chosen deployments is replaced by one narrowed to t
       connections: [],
       deployments: "deploy",
       deploymentIds: [3, 8],
+      operations: true,
     },
   ])
   await page.goto("/account/keys")
@@ -247,6 +250,7 @@ test("an MCP key narrowed to chosen deployments is replaced by one narrowed to t
       connections: [],
       deployments: "deploy",
       deploymentIds: [3, 8],
+      operations: true,
     })
 })
 

@@ -22,19 +22,6 @@ func (b *mcpBench) listTools(key string) string {
 	return toolNames(b.rpc(b.post(key, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, legacy)).Result)
 }
 
-// listHandWritten is the hand-written tools a key is offered, in order: the
-// ones generated from the deployment API follow them (handlers_mcp_operations_test.go).
-func (b *mcpBench) listHandWritten(key string) string {
-	b.t.Helper()
-	var names []string
-	for _, name := range strings.Fields(b.listTools(key)) {
-		if mcp.Known(name) {
-			names = append(names, name)
-		}
-	}
-	return strings.Join(names, " ")
-}
-
 func (b *mcpBench) runs(projectID int64) int {
 	b.t.Helper()
 	var n int
@@ -64,7 +51,7 @@ func TestTheDeploymentToolsNeedTheirOwnGrant(t *testing.T) {
 		t.Errorf("the refusal was audited as %+v", entry)
 	}
 
-	if names := b.listHandWritten(reader); names != "list_deployments list_runs read_run_log list_releases" {
+	if names := b.listTools(reader); names != "list_deployments list_runs read_run_log list_releases" {
 		t.Errorf("a key that reads the deployments alone is offered %s", names)
 	}
 	init := b.rpc(b.post(reader, `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18",
@@ -83,7 +70,7 @@ func TestTheDeploymentToolsNeedTheirOwnGrant(t *testing.T) {
 		t.Fatalf("a refused deploy queued %d runs", n)
 	}
 
-	if names := b.listHandWritten(deployer); !strings.Contains(names, "run_query list_deployments list_runs read_run_log list_releases deploy rollback") {
+	if names := b.listTools(deployer); !strings.Contains(names, "run_query list_deployments list_runs read_run_log list_releases deploy rollback") {
 		t.Errorf("an administrator's key that deploys is offered %s", names)
 	}
 	if text := b.refused(deployer, mcp.ToolListRuns, map[string]any{"deployment": "billing"}); !strings.Contains(text, "list_deployments names them") {
@@ -170,7 +157,7 @@ func TestADeployThroughMCPQueuesTheRunTheRouteWould(t *testing.T) {
 	if _, err := b.s.Store.DB.Exec(`UPDATE users SET role = 'readonly' WHERE id = ?`, b.admin.ID); err != nil {
 		t.Fatal(err)
 	}
-	if names := b.listHandWritten(key); strings.Contains(names, "deploy ") || strings.HasSuffix(names, "deploy") {
+	if names := b.listTools(key); strings.Contains(names, "deploy ") || strings.HasSuffix(names, "deploy") {
 		t.Errorf("a key whose owner may no longer deploy is offered %s", names)
 	}
 	if text := b.refused(key, mcp.ToolDeploy, map[string]any{"deployment": "shop-api"}); !strings.Contains(text, "readonly account") {
@@ -218,7 +205,7 @@ func TestARollbackThroughMCPGoesToTheReleaseBeforeTheLiveOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	operator := b.deployKey(limited, auth.DeployRun)
-	if names := b.listHandWritten(operator); !strings.HasSuffix(names, "list_releases deploy") {
+	if names := b.listTools(operator); !strings.HasSuffix(names, "list_releases deploy") {
 		t.Errorf("a limited account's key is offered %s", names)
 	}
 	if text := b.refused(operator, mcp.ToolRollback, map[string]any{"deployment": "shop-api"}); !strings.Contains(text, "limited account") {
