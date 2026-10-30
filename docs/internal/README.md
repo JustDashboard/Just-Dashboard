@@ -203,8 +203,8 @@ strategy, and feature ownership behind those rules.
 
 Documentation is part of the change. When code changes behavior, architecture, security boundaries,
 configuration, commands, tests, or contributor workflow, update the owning document in the same change.
-Before every push, compare the complete diff with this directory, `AGENTS.md`, `README.md`, and
-`CONTRIBUTING.md`; update every affected document or explicitly record that no update is needed.
+Before every push, compare the complete diff with this directory, `AGENTS.md`, `README.md`, `FEATURES.md`,
+`SECURITY.md`, `docs/features/`, `docs/guides/`, and `CONTRIBUTING.md`; update every affected document or explicitly record that no update is needed.
 
 For repository-wide verification:
 

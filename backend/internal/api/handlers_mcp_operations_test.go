@@ -128,7 +128,7 @@ func TestEveryDeployKeyRouteIsAnMCPTool(t *testing.T) {
 	}
 	if len(cat.ops) != MCPGeneratedTools {
 		t.Errorf("%d tools are generated from the deployment API and MCPGeneratedTools says %d: a deploy key route was added or removed. "+
-			"Set it to %d and say so in docs/internal/backend/databases-proxy-platform.md, README.md and docs/internal/deployments/implementation.md", len(cat.ops), MCPGeneratedTools, len(cat.ops))
+			"Set it to %d and say so in docs/internal/backend/databases-proxy-platform.md, docs/features/databases.md and docs/internal/deployments/implementation.md", len(cat.ops), MCPGeneratedTools, len(cat.ops))
 	}
 	if n := len(handWrittenTools()); n != 13 {
 		t.Errorf("%d hand-written tools; the documentation says 13", n)
@@ -136,7 +136,7 @@ func TestEveryDeployKeyRouteIsAnMCPTool(t *testing.T) {
 	total := MCPGeneratedTools + len(handWrittenTools())
 	for _, file := range []string{
 		filepath.Join("..", "..", "..", "docs", "internal", "backend", "databases-proxy-platform.md"),
-		filepath.Join("..", "..", "..", "README.md"),
+		filepath.Join("..", "..", "..", "docs", "features", "databases.md"),
 		filepath.Join("..", "..", "..", "docs", "internal", "deployments", "implementation.md"),
 	} {
 		text, err := os.ReadFile(file)

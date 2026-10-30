@@ -2918,7 +2918,7 @@ because what admits a request there is different.
   preview frame, the CSV export, the YAML description) and the JSON description itself: 100 tools
   generated, 113 tools in all. `TestEveryDeployKeyRouteIsAnMCPTool` walks the router and fails when a
   deploy key route is neither a tool nor left out with a reason, when a route no deploy key reaches is
-  a tool, or when the count differs from `api.MCPGeneratedTools` and the 113 these pages, the README and
+  a tool, or when the count differs from `api.MCPGeneratedTools` and the 113 these pages, `docs/features/databases.md` and
   the deployment implementation notes quote.
   - **Grants.** A `GET` is offered under `read`; any other method under `deploy` to an owner whose role
     holds `service.control`; a route behind `s.destructive` (read off its chain by the `markDestructive`
@@ -5978,7 +5978,7 @@ collects *every* malformed setting so `Load` refuses with the whole list rather 
 `/var/lib/vps-dashboard`. A handful of variables are **not** in `config.go`: `JD_LOG_LEVEL` and
 `JD_BOOTSTRAP_USER`/`JD_BOOTSTRAP_PASSWORD` are read in `cmd/server/main.go`, and `JD_SITE` belongs to
 `deploy/Caddyfile`. Wherever a variable is read, its documentation lives in four places that must stay in
-step: **the reading site, `.env.example`, `docker-compose.yml`, and the README's configuration table.**
+step: **the reading site, `.env.example`, `docker-compose.yml`, and the configuration table in `docs/guides/configuration.md`.**
 `JD_ACCOUNT_URL` and `JD_ACCOUNT_LINK` follow it: `config.go` reads both (the URL through
 `accountlink.ParseSiteURL`, so a malformed one refuses to start) and [account link](account-link.md) says what
 they decide. `JD_USAGE_PING` follows it too, and [the usage count](usage-ping.md) says what it decides. An install

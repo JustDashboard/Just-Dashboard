@@ -127,7 +127,7 @@ and, if the site still has the command open, reported.
 ## Configuration
 
 Four places, per [the configuration rule](databases-proxy-platform.md#configuration-version-release-self-update):
-`config.go`, `.env.example`, `docker-compose.yml` (the explicit `environment:` map) and the README table.
+`config.go`, `.env.example`, `docker-compose.yml` (the explicit `environment:` map) and the table in `docs/guides/configuration.md`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |

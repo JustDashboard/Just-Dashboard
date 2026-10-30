@@ -42,7 +42,7 @@ audited as local root.
 
 Linking is optional and refused when JD_ACCOUNT_LINK=false. The code link prints
 is only a pointer to the request; the key it is signed with never leaves the
-dashboard. See README.md, "Linking to just-dashboard.com".
+dashboard. See docs/guides/linking-and-usage.md.
 
 Examples:
   sudo ./scripts/create-user.sh alice limited

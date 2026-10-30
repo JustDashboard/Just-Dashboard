@@ -3,7 +3,7 @@ package blueprint
 import "testing"
 
 // The constants in catalogue_counts.go are what the competitive report and the
-// README quote. They are checked against the shipped definitions so a template
+// deployments feature page quote. They are checked against the shipped definitions so a template
 // cannot join or leave the catalogue without the numbers being bumped on
 // purpose in the same change.
 func TestCatalogueCountsMatchTheShippedDefinitions(t *testing.T) {

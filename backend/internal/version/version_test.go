@@ -29,7 +29,7 @@ func TestVersionMatchesFrontend(t *testing.T) {
 	}
 }
 
-// The README says which version this repository is, twice, and it is the
+// The README says which version this repository is, and it is the
 // version somebody reads before they install anything. Nothing linked it to
 // the constant, so it sat at 0.5.1 through seven releases — the front page of
 // the project describing a build nobody was running. Checked here for the same
@@ -44,11 +44,11 @@ func TestReadmeMatchesRelease(t *testing.T) {
 	claims := regexp.MustCompile(`(?m)^(?:\*\*Version|This is \*\*)\s*\*?\*?([0-9]+\.[0-9]+(?:\.[0-9]+)?)`).
 		FindAllSubmatch(b, -1)
 	if len(claims) == 0 {
-		t.Fatalf("%s no longer states a version; release.sh writes two, and this is the check on them", path)
+		t.Fatalf("%s no longer states a version; release.sh writes it, and this is the check on it", path)
 	}
 	for _, m := range claims {
 		if got := string(m[1]); got != Version {
-			t.Errorf("README says %q, the release is %q — scripts/release.sh writes both", got, Version)
+			t.Errorf("README says %q, the release is %q — scripts/release.sh writes it", got, Version)
 		}
 	}
 }
