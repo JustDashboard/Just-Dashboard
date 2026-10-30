@@ -424,6 +424,9 @@ func TestTemplateFromPlanRefusesWhatATemplateCannotRun(t *testing.T) {
 			Mounts: []RuntimeMount{{Source: "/srv/data", Target: "/data", Ownership: OwnershipLinked}}}},
 		"two Compose files": {SourceConfig: DraftSourceConfig{Kind: SourceCompose, Mode: SourceModeComposePaste,
 			ComposeFiles: []ComposeDocument{{Path: "a.yml"}, {Path: "b.yml"}}}},
+		"GPUs":             {SourceConfig: image, Runtime: RuntimePlanConfig{InternalPort: 80, GPUs: &RuntimeGPUs{}}},
+		"a user":           {SourceConfig: image, Runtime: RuntimePlanConfig{InternalPort: 80, User: "1000:1000"}},
+		"a read-only root": {SourceConfig: image, Runtime: RuntimePlanConfig{InternalPort: 80, ReadOnlyRootfs: true}},
 	} {
 		if _, err := TemplateFromPlan(plan, nil, meta); !errors.Is(err, ErrInvalidTemplate) {
 			t.Fatalf("%s: %v", name, err)

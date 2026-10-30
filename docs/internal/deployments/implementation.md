@@ -1991,7 +1991,10 @@ only renderer/executor/validation authority for their feature.
     source is the definition it rendered from under the new id, with this deployment's answers as
     the defaults the next one is offered (never the domain, never a secret). A source built on this
     server — Git, a folder, a Compose file read from either, an imported container — is refused, as
-    are privileges and a host path. A secret variable, or a plain one with a credential-shaped name,
+    are privileges, GPUs and a host path, and the container's process flags (its user, a read-only
+    root, ulimits, sysctls), which a template's schema has no place for and whose silent loss would
+    run the next deployment as root on a writable root: they are named, to be cleared and set again
+    on the deployment made from the template. A secret variable, or a plain one with a credential-shaped name,
     becomes a required secret input asked for on the next deployment's Variables screen; a plain
     literal a text input defaulting to it; one naming the concrete domain a startup `set_variable`
     from `{{input.domain}}` (the domain input then required); a reference or a value on several

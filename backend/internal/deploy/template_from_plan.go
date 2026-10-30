@@ -188,8 +188,15 @@ func templateFromImage(
 	domain string,
 ) (*blueprint.Blueprint, error) {
 	runtime := plan.Runtime
-	if runtime.Privileged || runtime.HostNetwork || len(runtime.Capabilities) > 0 || len(runtime.Devices) > 0 {
-		return nil, fmt.Errorf("%w: this deployment runs privileged, on the host's network or with capabilities or devices, which only a reviewed built-in may ask for", ErrInvalidTemplate)
+	if runtime.Privileged || runtime.HostNetwork || len(runtime.Capabilities) > 0 || len(runtime.Devices) > 0 || runtime.GPUs != nil {
+		return nil, fmt.Errorf("%w: this deployment runs privileged, on the host's network or with capabilities, devices or GPUs, which only a reviewed built-in may ask for", ErrInvalidTemplate)
+	}
+	// The container's process flags are not in a template's schema. Leaving
+	// them out would make the next deployment run as root on a writable root
+	// filesystem where this one did not, so they are named instead.
+	if flags := runtimeProcessFlags(runtime); len(flags) > 0 {
+		return nil, fmt.Errorf("%w: this deployment sets %s under Runtime, which a template cannot carry; clear %s to save it, and set it again on the deployment made from it",
+			ErrInvalidTemplate, strings.Join(flags, ", "), map[bool]string{true: "them", false: "it"}[len(flags) > 1])
 	}
 	image := strings.TrimSpace(plan.SourceConfig.Image)
 	if image == "" {
@@ -257,6 +264,24 @@ func templateFromImage(
 		spec.Checks = nil
 	}
 	return blueprint.FromImage(spec)
+}
+
+// runtimeProcessFlags names the process flags a runtime plan sets.
+func runtimeProcessFlags(runtime RuntimePlanConfig) []string {
+	var flags []string
+	if runtime.User != "" {
+		flags = append(flags, "the user it runs as")
+	}
+	if runtime.ReadOnlyRootfs || len(runtime.Tmpfs) > 0 {
+		flags = append(flags, "a read-only root filesystem")
+	}
+	if len(runtime.Ulimits) > 0 {
+		flags = append(flags, "ulimits")
+	}
+	if len(runtime.Sysctls) > 0 {
+		flags = append(flags, "sysctls")
+	}
+	return flags
 }
 
 // templateVolumeName names a volume after where it is mounted: the managed
