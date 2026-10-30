@@ -1,6 +1,19 @@
 {
-  "latest": "0.8.2",
+  "latest": "0.8.3",
   "releases": [
+    {
+      "version": "0.8.3",
+      "date": "2026-10-30",
+      "title": "A map that unused volumes cannot bury",
+      "summary": "On a server with many unused Docker volumes, the Map's Everything else section grew into a column hundreds of boxes tall. The Map now leaves those volumes to the Volumes page.",
+      "changes": [
+        {
+          "kind": "fixed",
+          "text": "Unused volumes no longer fill the Map's Everything else section",
+          "detail": "A volume that nothing mounts and nothing backs up is no longer drawn on the Map. A volume with a backup or one in use is still drawn, and the Volumes page still lists every volume."
+        }
+      ]
+    },
     {
       "version": "0.8.2",
       "date": "2026-10-30",

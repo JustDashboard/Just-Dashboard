@@ -4,6 +4,17 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.8.3 — 30 October 2026
+
+**A map that unused volumes cannot bury**
+
+On a server with many unused Docker volumes, the Map's Everything else section grew into a column hundreds of boxes tall. The Map now leaves those volumes to the Volumes page.
+
+### Fixed
+
+- Unused volumes no longer fill the Map's Everything else section
+  - A volume that nothing mounts and nothing backs up is no longer drawn on the Map. A volume with a backup or one in use is still drawn, and the Volumes page still lists every volume.
+
 ## 0.8.2 — 30 October 2026
 
 **Staging, canaries and warm rollbacks, and a map of the whole server**
