@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -568,7 +569,7 @@ func TestTheLastWayInIsAConflictOnEveryRoute(t *testing.T) {
 	last(h.admin.do(http.MethodPatch, "/api/v1/system-users/ion", `{"disabled":true}`, nil), "disable")
 	last(h.admin.do(http.MethodPatch, "/api/v1/system-users/ion", `{"shell":"/usr/sbin/nologin"}`, nil), "shell")
 	last(h.admin.do(http.MethodDelete, "/api/v1/system-users/ion?home=keep", "", nil), "delete")
-	last(h.admin.do(http.MethodDelete, "/api/v1/system-users/ion/keys?fingerprint="+listed.Keys[0].Fingerprint, "", nil), "last key")
+	last(h.admin.do(http.MethodDelete, "/api/v1/system-users/ion/keys?fingerprint="+url.QueryEscape(listed.Keys[0].Fingerprint), "", nil), "last key")
 	last(h.admin.do(http.MethodPut, "/api/v1/system-users/ion/sudo", `{"level":"none"}`, nil), "sudo")
 	if h.ran("userdel") {
 		t.Fatal("userdel was asked")
