@@ -9,7 +9,6 @@ import {
   ChartActivity,
   Clock,
   CloudUpload,
-  Cpu,
   Database,
   DesktopDevice,
   FolderOpen,
@@ -19,6 +18,7 @@ import {
   Key,
   Layers,
   LockClosed,
+  Logs,
   NetworkDevice,
   PaperAirplane,
   Puzzle,
@@ -26,9 +26,7 @@ import {
   SecureConnection,
   Servers,
   Shield,
-  ShieldCheck,
   Terminal,
-  TerminalWindow,
   UserSettings,
   Users,
   type Icon,
@@ -44,7 +42,6 @@ import {
   unitProduct,
 } from "@/components/product-logo"
 import type { DotTone } from "@/components/status-dot"
-import type { BranchKey } from "@/lib/server-map"
 import type { MapItem, MapTone, NotificationChannelKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -83,16 +80,7 @@ export const KIND_GLYPH: Record<string, Icon> = {
   systemUsers: UserSettings,
   security: Shield,
   tunnels: SecureConnection,
-}
-
-export const BRANCH_GLYPH: Record<BranchKey, Icon> = {
-  deployed: Rocket,
-  web: Globe,
-  host: Cpu,
-  workspace: TerminalWindow,
-  jobs: Clock,
-  people: Users,
-  protection: ShieldCheck,
+  logs: Logs,
 }
 
 /** A measured state as the dot draws it. Idle is a thing that is off, not a fault. */
@@ -115,6 +103,7 @@ const PRODUCT_OF: Record<string, (raw: string) => string | undefined> = {
   stacks: imageProduct,
   projects: (raw) => frameworkProduct(raw) ?? (hasProductLogo(raw) ? raw : imageProduct(raw)),
   services: unitProduct,
+  pm2: (raw) => (raw === "pm2" ? "pm2" : hasProductLogo(raw) ? raw : "pm2"),
   scheduled: unitProduct,
   channels: (raw) => channelProduct(raw as NotificationChannelKind),
   computers: platformProduct,
@@ -138,8 +127,8 @@ export function ItemMark({
 }: {
   item: MapItem
   kind: string
-  /** The tile's size, `ProductLogo`'s: `sm` in a list, `md` on the map's boxes. */
-  size?: "sm" | "md"
+  /** The tile's size, `ProductLogo`'s: `sm` in a list, `md` on a box, `lg` on a system's head. */
+  size?: "sm" | "md" | "lg"
   className?: string
 }) {
   const [failed, setFailed] = useState(false)
@@ -149,7 +138,7 @@ export function ItemMark({
         aria-hidden="true"
         className={cn(
           "flex shrink-0 items-center justify-center rounded-lg border border-hairline bg-background",
-          size === "sm" ? "size-8" : "size-10",
+          size === "sm" ? "size-8" : size === "lg" ? "size-12 rounded-xl" : "size-10",
           className,
         )}
       >
@@ -158,7 +147,10 @@ export function ItemMark({
         <img
           src={item.icon}
           alt=""
-          className={cn("object-contain", size === "sm" ? "size-4.5" : "size-6")}
+          className={cn(
+            "object-contain",
+            size === "sm" ? "size-4.5" : size === "lg" ? "size-7" : "size-6",
+          )}
           onError={() => setFailed(true)}
         />
       </span>

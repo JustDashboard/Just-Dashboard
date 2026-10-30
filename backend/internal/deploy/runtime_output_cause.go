@@ -55,6 +55,7 @@ var outputCauseTitles = map[string]string{
 	"runtime_php_extension_missing":   "PHP extension missing at runtime",
 	"runtime_assets_missing":          "Front-end assets not built",
 	"runtime_errors_hidden":           "Application errors are not logged",
+	"runtime_rootfs_read_only":        "Application writes to the read-only root",
 	"release_migration_failed":        "Migration failed",
 	"release_migration_failed_before": "Earlier migration failed",
 	"release_database_not_empty":      "Database has an unmanaged schema",
@@ -97,6 +98,46 @@ var sqliteReadOnlyPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`attempt to write a readonly database`),
 	regexp.MustCompile(`SQLITE_READONLY`),
 	regexp.MustCompile(`SQLITE_CANTOPEN|unable to open database file`),
+}
+
+// rootfsWritePatterns are a write the kernel refused with EROFS, in the
+// words of nginx, Node, Python, Go and Ruby, each capturing the path where
+// the program says it.
+var rootfsWritePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`"(/[^"]+)" failed \(30: Read-only file system\)`),                   // nginx
+	regexp.MustCompile(`EROFS: read-only file system, \w+ '([^']+)'`),                       // Node
+	regexp.MustCompile(`\[Errno 30\] Read-only file system: '([^']+)'`),                     // Python
+	regexp.MustCompile(`(?:open|mkdir|create|rename|remove) (/\S+): read-only file system`), // Go
+	regexp.MustCompile(`Read-only file system @ \w+ - (\S+)`),                               // Ruby
+	regexp.MustCompile(`(?i)read-only file system`),
+}
+
+// rootfsWriteCause names a write the read-only root refused, with the path
+// the program tried and the directory a writable path would make good. It
+// is read only for a plan whose root is read-only: elsewhere the same words
+// are a read-only volume or bind mount's, which is the plan's to say.
+func rootfsWriteCause(lines []collectedLine, context runtimeCauseContext) *OutputCause {
+	if !context.runtime.ReadOnlyRootfs || context.compose {
+		return nil
+	}
+	for _, line := range lines {
+		for _, pattern := range rootfsWritePatterns {
+			match := pattern.FindStringSubmatch(line.text)
+			if match == nil {
+				continue
+			}
+			cause := &OutputCause{Code: "runtime_rootfs_read_only", Fix: &CauseFix{Kind: fixReview, Field: "runtime.tmpfs"}}
+			if len(match) > 1 && match[1] != "" {
+				written := match[1]
+				cause.Subjects = []string{written}
+				if directory := path.Dir(written); path.IsAbs(written) && directory != "/" {
+					cause.Detail = directory
+				}
+			}
+			return cause
+		}
+	}
+	return nil
 }
 
 // envMissingSignatures are a variable the program reads and was not given,
@@ -206,6 +247,11 @@ func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCa
 				return &OutputCause{Code: "schema_missing", Table: match[1]}
 			}
 		}
+	}
+	// A refused write on a read-only root is the plan's own doing, and the
+	// one cause the application's output can name precisely.
+	if cause := rootfsWriteCause(lines, context); cause != nil {
+		return cause
 	}
 	// A refused push or an unopenable SQLite file stops the start before the
 	// server exists, whatever else it printed.
@@ -435,6 +481,12 @@ func (c *OutputCause) sentence() string {
 		return fmt.Sprintf("the application reports that table %s does not exist in its database, so the linked database has not received the application's schema; apply it before the application starts — for Prisma, `prisma migrate deploy`, or `prisma db push` when the project has no migrations", c.Table)
 	case "runtime_oom":
 		return "the kernel killed the application for exceeding its memory limit; raise the runtime memory limit or reduce what the application holds in memory"
+	case "runtime_rootfs_read_only":
+		where := "the directory it writes to"
+		if c.Detail != "" {
+			where = c.Detail
+		}
+		return "the application writes to " + orDefault(subject, "a path") + ", and the plan's root filesystem is read-only; add " + where + " as a writable path under Runtime, mount a volume there, or leave the root filesystem writable"
 	case "runtime_prisma_engine_missing":
 		return "Prisma's query engine could not load, because the image lacks the OpenSSL release it was generated for; install openssl in the image or set the Prisma generator's binaryTargets for it"
 	case "runtime_env_missing":

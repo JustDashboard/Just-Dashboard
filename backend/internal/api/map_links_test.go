@@ -9,8 +9,10 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 )
 
@@ -359,5 +361,71 @@ func TestMapRelationsReadsReferencesDependenciesAndPoolers(t *testing.T) {
 	}
 	if got.poolers[4] != "jd-pooler-4" {
 		t.Errorf("poolers = %v", got.poolers)
+	}
+}
+
+// This dashboard is drawn as a system of its own: the address it answers on,
+// the tailnet that carries it where its configuration says so, and the store
+// kept in the container mounting its data directory.
+func TestMapDrawsTheDashboardsAddressAndStore(t *testing.T) {
+	in := linkedInputs()
+	in.site, in.tlsMode = "box.tailnet.ts.net", selfcfg.TLSTailscale
+	in.store = mapStore{Path: "/data/vpsd.db", Size: 5 << 20}
+	in.vpn = mapGot(netx.VPNSummary{Tailscale: netx.TSSummary{Installed: true, Running: true}})
+	m := buildServerMap(in)
+
+	site := itemOf(t, m, "dashboard", "dashboard:site")
+	if site.Name != "box.tailnet.ts.net" || site.State != "https" || !strings.Contains(site.Detail, "Tailscale") {
+		t.Fatalf("site = %+v", site)
+	}
+	store := itemOf(t, m, "dashboard", "dashboard:store")
+	if store.Name != "vpsd.db" || store.Product != "sqlite" || store.Detail != "5.0 MB" {
+		t.Fatalf("store = %+v", store)
+	}
+	for _, f := range store.Facts {
+		if strings.Contains(f.Value, "/data") {
+			t.Fatalf("the store's folder is not the map's to send: %+v", store.Facts)
+		}
+	}
+	for _, want := range [][3]string{
+		{"dashboard:site", "dashboard:self", "route"},
+		{"dashboard:site", "vpn:tailscale", "tailnet"},
+		{"container:c-self", "dashboard:store", "mount"},
+		{"dashboard:self", "stack:just-dashboard", "self"},
+	} {
+		if !hasLink(m, want[0], want[1], want[2]) {
+			t.Errorf("no %s → %s (%s) in %v", want[0], want[1], want[2], m.Links)
+		}
+	}
+}
+
+func TestMapDashboardSiteIsOnTheTailnetOnlyWhereItsConfigurationSays(t *testing.T) {
+	for _, tc := range []struct {
+		site, tls string
+		tailnet   bool
+		state     string
+	}{
+		{"dash.example.com", selfcfg.TLSInternal, false, "https"},
+		{"https://Box.Tailnet.TS.net:8443", selfcfg.TLSInternal, true, "https"},
+		{"localhost", selfcfg.TLSOff, false, "http"},
+	} {
+		in := linkedInputs()
+		in.site, in.tlsMode = tc.site, tc.tls
+		in.vpn = mapGot(netx.VPNSummary{Tailscale: netx.TSSummary{Installed: true, Running: true}})
+		m := buildServerMap(in)
+		if got := hasLink(m, "dashboard:site", "vpn:tailscale", "tailnet"); got != tc.tailnet {
+			t.Errorf("%s over %s: tailnet line = %v, want %v", tc.site, tc.tls, got, tc.tailnet)
+		}
+		if got := itemOf(t, m, "dashboard", "dashboard:site").State; got != tc.state {
+			t.Errorf("%s over %s: state = %q, want %q", tc.site, tc.tls, got, tc.state)
+		}
+	}
+	// No address configured, no box; and no store read, none either.
+	in := linkedInputs()
+	m := buildServerMap(in)
+	for _, item := range kindOf(t, m, "dashboard").Items {
+		if item.ID != "dashboard:self" {
+			t.Fatalf("unexpected %s with no site and no store", item.ID)
+		}
 	}
 }

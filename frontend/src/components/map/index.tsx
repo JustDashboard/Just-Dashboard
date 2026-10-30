@@ -1,16 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { ReactFlowProvider } from "@xyflow/react"
 import { Page, PageContext } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useAuth } from "@/hooks/use-auth"
-import { useHiddenSections } from "@/hooks/use-hidden-sections"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
-import { foldedByDefault, visibleKinds } from "@/lib/server-map"
 import type { ServerMap } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { MapCanvas } from "@/components/map/canvas"
@@ -44,16 +42,16 @@ async function readMap(signal: AbortSignal) {
 }
 
 /**
- * The server map: this server in the middle and everything the dashboard
- * manages branching off it, laid out as a mind map the reader can rearrange
- * (`lib/server-map.ts`, `canvas.tsx`).
+ * The server map: every system the server runs — each deployment, Compose
+ * stack and PM2 app, this dashboard itself — drawn as its own diagram of what
+ * it is made of and wired to (`lib/server-systems.ts`, `canvas.tsx`).
  *
  * A reading page held to the window as a workbench (design system §16), one
- * frame around a canvas and its inspector, the way a database's Diagram is.
+ * frame around the rail of systems, a canvas and its inspector, the way a
+ * database's Diagram is.
  */
 export function ServerMapPage() {
-  const { can } = useAuth()
-  const { hidden } = useHiddenSections()
+  const asked = useSearchParams().get("system") ?? undefined
   const [seed] = useState(() =>
     lastMap && Date.now() - lastMap.at < 5 * 60_000 ? lastMap.value : undefined,
   )
@@ -66,9 +64,6 @@ export function ServerMapPage() {
   const read = usePoll(fetchMap, filling ? FILLING : EVERY, [], { seed })
   const memory = useMapMemory()
   const map = read.data
-
-  const kinds = useMemo(() => visibleKinds(map, can), [map, can])
-  const byDefault = useMemo(() => foldedByDefault(kinds, hidden), [kinds, hidden])
 
   // Full screen: the browser's own where it is offered, and a fixed overlay
   // where it is refused, as the diagram does.
@@ -118,17 +113,15 @@ export function ServerMapPage() {
             <ReactFlowProvider>
               <MapCanvas
                 map={map}
-                kinds={kinds}
-                byDefault={byDefault}
                 doc={memory.document!}
                 status={memory.status}
                 updatedAt={memory.updatedAt}
                 update={memory.update}
                 reset={memory.reset}
                 refresh={read.refresh}
-                can={can}
                 full={fullscreen || immersive}
                 onFullscreen={toggleFullscreen}
+                initialSystem={asked}
               />
             </ReactFlowProvider>
           ) : read.error && !map ? (
@@ -147,27 +140,25 @@ export function ServerMapPage() {
   )
 }
 
-/** The coming shape: the server in the middle and a branch either side of it. */
+/** The coming shape: the rail of systems, and a diagram's three columns. */
 function MapSkeleton() {
   return (
     <div role="status" aria-label="Reading the server" className="flex min-h-0 flex-1 flex-col">
       <PaneHeader className="h-11">
         <Skeleton className="h-7 w-64" />
       </PaneHeader>
-      <div className="relative min-h-0 flex-1 overflow-hidden">
-        <Skeleton className="absolute top-1/2 left-1/2 h-36 w-80 -translate-x-1/2 -translate-y-1/2 rounded-xl" />
-        {[18, 42, 66].map((top) => (
-          <div key={top}>
-            <Skeleton
-              className="absolute h-16 w-52 rounded-xl"
-              style={{ top: `${top}%`, left: "8%" }}
-            />
-            <Skeleton
-              className="absolute h-16 w-52 rounded-xl"
-              style={{ top: `${top}%`, right: "8%" }}
-            />
-          </div>
-        ))}
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[15rem_minmax(0,1fr)]">
+        <div className="space-y-2 border-r border-hairline p-3 max-lg:hidden">
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <Skeleton key={i} className="h-10 w-full rounded-lg" />
+          ))}
+        </div>
+        <div className="relative min-h-0 overflow-hidden">
+          <Skeleton className="absolute top-[38%] left-[8%] h-16 w-56 rounded-l-full rounded-r-xl" />
+          <Skeleton className="absolute top-[34%] left-[38%] h-40 w-72 rounded-xl" />
+          <Skeleton className="absolute top-[22%] right-[8%] h-24 w-56 rounded-xl" />
+          <Skeleton className="absolute top-[52%] right-[8%] h-28 w-56 rounded-[50%/16px]" />
+        </div>
       </div>
     </div>
   )

@@ -642,6 +642,17 @@ type RuntimePlanConfig struct {
 	CPUs          float64 `json:"cpus,omitempty"`
 	PidsLimit     int64   `json:"pidsLimit,omitempty"`
 	RestartPolicy string  `json:"restartPolicy,omitempty"`
+	// User, ReadOnlyRootfs with its Tmpfs paths, Ulimits, Sysctls and GPUs
+	// are the container's process flags (runtime_flags.go): who it runs as,
+	// where it may write, the kernel's limits and parameters it starts with,
+	// and the server's GPUs. Each is absent until set, so a plan made before
+	// them keeps its digest.
+	User           string          `json:"user,omitempty"`
+	ReadOnlyRootfs bool            `json:"readOnlyRootfs,omitempty"`
+	Tmpfs          []RuntimeTmpfs  `json:"tmpfs,omitempty"`
+	Ulimits        []RuntimeUlimit `json:"ulimits,omitempty"`
+	Sysctls        []RuntimeSysctl `json:"sysctls,omitempty"`
+	GPUs           *RuntimeGPUs    `json:"gpus,omitempty"`
 	// Replicas is how many containers of each release run side by side
 	// behind the route, 1 to MaxRuntimeReplicas; zero is one. Only a
 	// stateless release has more than one (replicaRefusal), and the limits
@@ -1702,6 +1713,9 @@ func (c PlanConfiguration) Validate() error {
 		if !filepath.IsAbs(device) || strings.ContainsAny(device, "\x00\r\n") {
 			return fmt.Errorf("runtime device is invalid")
 		}
+	}
+	if err := validateRuntimeFlags(c); err != nil {
+		return err
 	}
 	seenVariables := map[string]bool{}
 	variableScopes := map[string]map[string]bool{}
@@ -2885,6 +2899,7 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 	}
 	c.Runtime.Replay = canonicalReplayPlan(c.Runtime.Replay)
 	c.Runtime.Sleep = canonicalSleepPlan(c.Runtime.Sleep)
+	canonicalRuntimeFlags(&c.Runtime)
 	// A copy, so canonicalising never writes through to the caller's plan.
 	c.Runtime.EdgeRules = proxysvc.CanonicalEdgeRules(c.Runtime.EdgeRules)
 	if limit := c.Runtime.RateLimit; limit != nil {

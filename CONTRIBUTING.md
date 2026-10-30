@@ -312,6 +312,12 @@ to the contribution terms above, including the additional licence grant to the p
   also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveReleaseSeedsAreWrittenIntoTheVolumeBeforeStart -count=1 -v`,
   which needs the local `postgres:17-alpine` image and network access to GitHub's raw file host, and
   removes its volume and helpers ([game servers](docs/internal/deployments/game-servers.md#tests)).
+  Changes to a release container's process flags (`deploy/runtime_flags.go`, the runtime owner's
+  container spec, `dockerx`'s ulimits, sysctls and GPU requests) also run, as root,
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRuntimeFlagsReachTheReleaseContainer -count=1 -v`,
+  which needs the local `alpine:3.20` image: it starts a release container with a read-only root and two
+  tmpfs paths, a nofile limit, a sysctl and a user, reads each back from inside it, and — on a Docker
+  with no NVIDIA runtime — has a GPU request refused as `runtime_gpu_unavailable` with no container left.
 - Multi-service (Compose) templates have a sweep of their own. It saves each template's source the way
   the new-project page does (the server's render of the definition), resolves and pulls every service
   image through the Compose build step, starts the stack through the runtime owner with generated

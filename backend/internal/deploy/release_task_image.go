@@ -211,8 +211,12 @@ func (o *DockerRuntimeOwner) RemoveOrphanedReleaseTasks(ctx context.Context) err
 // release's image, variables, limits, networks and mounts — the host's own
 // network when the release runs on it, so a task reaches what the
 // application reaches — labelled as a release task so runtime observation
-// leaves it out. It publishes no port and takes none of the release's
-// devices, capabilities or privilege.
+// leaves it out. It runs as the release's user with the release's ulimits,
+// so what a migration writes into a volume belongs to whoever the
+// application runs as. It publishes no port and takes none of the release's
+// devices, GPUs, capabilities or privilege, nor its read-only root or
+// kernel parameters: a task is a command that may write where the
+// application does not.
 func releaseTaskContainerSpec(request ReleaseTaskRuntimeRequest, networks []string) (dockerx.ContainerSpec, error) {
 	entrypoint, cmd := releaseTaskArgv(request.Task.Command)
 	if len(entrypoint) == 0 {
@@ -237,6 +241,7 @@ func releaseTaskContainerSpec(request ReleaseTaskRuntimeRequest, networks []stri
 		Labels: labels, Networks: networks, Mounts: runtimeMountSpecs(plan), Logging: dockerx.CappedLogging(), Init: true,
 		NetworkMode: map[bool]string{true: "host"}[plan.HostNetwork],
 		Limits:      dockerx.ResourceLimits{MemoryMB: plan.MemoryMB, CPUs: plan.CPUs, PidsLimit: plan.PidsLimit},
+		User:        plan.User, Ulimits: plan.dockerUlimits(),
 	}
 	if plan.HostNetwork {
 		spec.Networks = nil

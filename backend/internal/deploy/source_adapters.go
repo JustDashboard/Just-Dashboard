@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1357,6 +1359,12 @@ func containerImportPreview(source DraftSourceConfig, spec *dockerx.ContainerSpe
 		}
 	}
 	for _, mount := range spec.Mounts {
+		// Memory is not storage to adopt: a tmpfs is one of the plan's
+		// writable paths, at the size it had.
+		if mount.Type == "tmpfs" {
+			configuration.Runtime.Tmpfs = append(configuration.Runtime.Tmpfs, RuntimeTmpfs{Path: mount.Target, SizeMB: mount.SizeMB})
+			continue
+		}
 		ownership := OwnershipObserved
 		configuration.Runtime.Mounts = append(configuration.Runtime.Mounts, RuntimeMount{
 			Source: mount.Source, Target: mount.Target, ReadOnly: mount.ReadOnly, Ownership: ownership,
@@ -1365,6 +1373,7 @@ func containerImportPreview(source DraftSourceConfig, spec *dockerx.ContainerSpe
 	for _, device := range spec.Devices {
 		configuration.Runtime.Devices = append(configuration.Runtime.Devices, device.Host)
 	}
+	importedRuntimeFlags(&configuration.Runtime, spec)
 	observed := map[string]any{
 		"name": spec.Name, "image": image, "command": command,
 		"environmentNames": variableNames(configuration.Variables), "ports": spec.Ports,
@@ -1382,6 +1391,30 @@ func containerImportPreview(source DraftSourceConfig, spec *dockerx.ContainerSpe
 		Kind: "container", ResourceID: source.ResourceID, Name: spec.Name, Source: source,
 		Configuration: canonicalConfiguration(configuration), Observed: observedJSON,
 		Unsupported: unsupported, Warnings: warnings, WouldChange: []string{},
+	}
+}
+
+// importedRuntimeFlags carries the process flags the container ran with
+// into the plan that adopts it, so the release that replaces it runs as it
+// did: the user, the read-only root, its ulimits and kernel parameters, and
+// its GPUs. Adoption validates them as it validates the rest.
+func importedRuntimeFlags(runtime *RuntimePlanConfig, spec *dockerx.ContainerSpec) {
+	runtime.User, runtime.ReadOnlyRootfs = spec.User, spec.ReadOnly
+	for _, limit := range spec.Ulimits {
+		runtime.Ulimits = append(runtime.Ulimits, RuntimeUlimit{Name: UlimitName(limit.Name), Soft: limit.Soft, Hard: limit.Hard})
+	}
+	for _, name := range slices.Sorted(maps.Keys(spec.Sysctls)) {
+		runtime.Sysctls = append(runtime.Sysctls, RuntimeSysctl{Name: name, Value: spec.Sysctls[name]})
+	}
+	if gpus := spec.GPUs; gpus != nil {
+		switch {
+		case len(gpus.DeviceIDs) > 0:
+			runtime.GPUs = &RuntimeGPUs{Mode: GPUDevices, DeviceIDs: slices.Clone(gpus.DeviceIDs)}
+		case gpus.Count > 0:
+			runtime.GPUs = &RuntimeGPUs{Mode: GPUCount, Count: gpus.Count}
+		case gpus.Count < 0:
+			runtime.GPUs = &RuntimeGPUs{Mode: GPUAll}
+		}
 	}
 }
 
