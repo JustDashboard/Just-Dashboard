@@ -12488,6 +12488,37 @@
         "title": "deploy.RunTraffic",
         "type": "object"
       },
+      "deploy.RuntimeGPUs": {
+        "properties": {
+          "count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "deviceIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "mode": {
+            "enum": [
+              "all",
+              "count",
+              "devices"
+            ],
+            "title": "deploy.GPUMode",
+            "type": "string"
+          },
+          "previews": {
+            "type": "boolean"
+          }
+        },
+        "title": "deploy.RuntimeGPUs",
+        "type": "object"
+      },
       "deploy.RuntimeMount": {
         "properties": {
           "ownership": {
@@ -12602,6 +12633,16 @@
               }
             ]
           },
+          "gpus": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/deploy.RuntimeGPUs"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "gracePeriodSeconds": {
             "format": "int64",
             "type": "integer"
@@ -12692,6 +12733,9 @@
               }
             ]
           },
+          "readOnlyRootfs": {
+            "type": "boolean"
+          },
           "replay": {
             "oneOf": [
               {
@@ -12752,6 +12796,15 @@
             "title": "deploy.ReleaseStrategy",
             "type": "string"
           },
+          "sysctls": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.RuntimeSysctl"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "tailnet": {
             "oneOf": [
               {
@@ -12761,6 +12814,27 @@
                 "type": "null"
               }
             ]
+          },
+          "tmpfs": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.RuntimeTmpfs"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "ulimits": {
+            "items": {
+              "$ref": "#/components/schemas/deploy.RuntimeUlimit"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "user": {
+            "type": "string"
           }
         },
         "title": "deploy.RuntimePlanConfig",
@@ -12887,6 +12961,66 @@
           }
         },
         "title": "deploy.RuntimeServices",
+        "type": "object"
+      },
+      "deploy.RuntimeSysctl": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.RuntimeSysctl",
+        "type": "object"
+      },
+      "deploy.RuntimeTmpfs": {
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sizeMb": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "deploy.RuntimeTmpfs",
+        "type": "object"
+      },
+      "deploy.RuntimeUlimit": {
+        "properties": {
+          "hard": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "enum": [
+              "core",
+              "cpu",
+              "data",
+              "fsize",
+              "locks",
+              "memlock",
+              "msgqueue",
+              "nice",
+              "nofile",
+              "nproc",
+              "rss",
+              "rtprio",
+              "rttime",
+              "sigpending",
+              "stack"
+            ],
+            "title": "deploy.UlimitName",
+            "type": "string"
+          },
+          "soft": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "deploy.RuntimeUlimit",
         "type": "object"
       },
       "deploy.Schedule": {

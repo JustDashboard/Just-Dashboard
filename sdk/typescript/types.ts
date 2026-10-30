@@ -2369,6 +2369,14 @@ export interface ForgeReport {
   state?: string
 }
 
+/** One of the values of deploy.GPUMode. */
+export const GPUMode = {
+  All: "all",
+  Count: "count",
+  Devices: "devices",
+} as const
+export type GPUMode = (typeof GPUMode)[keyof typeof GPUMode]
+
 /** api.gameConsoleRequest in the dashboard's source. */
 export interface GameConsoleRequest {
   command?: string
@@ -4226,6 +4234,14 @@ export interface RunTraffic {
   windowMinutes?: number
 }
 
+/** deploy.RuntimeGPUs in the dashboard's source. */
+export interface RuntimeGPUs {
+  count?: number
+  deviceIds?: string[] | null
+  mode?: GPUMode
+  previews?: boolean
+}
+
 /** deploy.RuntimeMount in the dashboard's source. */
 export interface RuntimeMount {
   ownership?: OwnershipMode
@@ -4248,6 +4264,7 @@ export interface RuntimePlanConfig {
   edgeRules?: EdgeRule[] | null
   errorPages?: number[] | null
   forwardAuth?: RouteForwardAuth | null
+  gpus?: RuntimeGPUs | null
   gracePeriodSeconds?: number
   hostNetwork?: boolean
   hostPort?: number
@@ -4265,6 +4282,7 @@ export interface RuntimePlanConfig {
   privileged?: boolean
   protocol?: string
   rateLimit?: DeploymentRateLimit | null
+  readOnlyRootfs?: boolean
   replay?: ReplayPlan | null
   replicas?: number
   responseHeaders?: RouteHeader[] | null
@@ -4274,7 +4292,11 @@ export interface RuntimePlanConfig {
   sleep?: SleepPlan | null
   stopSignal?: string
   strategy?: ReleaseStrategy
+  sysctls?: RuntimeSysctl[] | null
   tailnet?: RouteTailnet | null
+  tmpfs?: RuntimeTmpfs[] | null
+  ulimits?: RuntimeUlimit[] | null
+  user?: string
 }
 
 /** deploy.RuntimeSeed in the dashboard's source. */
@@ -4315,6 +4337,25 @@ export interface RuntimeServices {
   reason?: string
   services?: RuntimeService[] | null
   status?: string
+}
+
+/** deploy.RuntimeSysctl in the dashboard's source. */
+export interface RuntimeSysctl {
+  name?: string
+  value?: string
+}
+
+/** deploy.RuntimeTmpfs in the dashboard's source. */
+export interface RuntimeTmpfs {
+  path?: string
+  sizeMb?: number
+}
+
+/** deploy.RuntimeUlimit in the dashboard's source. */
+export interface RuntimeUlimit {
+  hard?: number
+  name?: UlimitName
+  soft?: number
 }
 
 /** deploy.Schedule in the dashboard's source. */
@@ -4933,6 +4974,26 @@ export interface TriggerWrite {
   name?: string
   provider?: string
 }
+
+/** One of the values of deploy.UlimitName. */
+export const UlimitName = {
+  Core: "core",
+  CPU: "cpu",
+  Data: "data",
+  Fsize: "fsize",
+  Locks: "locks",
+  Memlock: "memlock",
+  Msgqueue: "msgqueue",
+  Nice: "nice",
+  Nofile: "nofile",
+  Nproc: "nproc",
+  Rss: "rss",
+  Rtprio: "rtprio",
+  Rttime: "rttime",
+  Sigpending: "sigpending",
+  Stack: "stack",
+} as const
+export type UlimitName = (typeof UlimitName)[keyof typeof UlimitName]
 
 /** blueprint.Update in the dashboard's source. */
 export interface Update {

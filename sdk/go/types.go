@@ -2339,6 +2339,16 @@ type ForgeReport struct {
 	State      string    `json:"state,omitempty"`
 }
 
+// GPUMode is one of the values of deploy.GPUMode.
+type GPUMode string
+
+// The values of GPUMode.
+const (
+	GPUModeAll     GPUMode = "all"
+	GPUModeCount   GPUMode = "count"
+	GPUModeDevices GPUMode = "devices"
+)
+
 // GameConsoleRequest is api.gameConsoleRequest in the dashboard's source.
 type GameConsoleRequest struct {
 	Command string `json:"command,omitempty"`
@@ -4206,6 +4216,14 @@ type RunTraffic struct {
 	WindowMinutes         int64           `json:"windowMinutes,omitempty"`
 }
 
+// RuntimeGPUs is deploy.RuntimeGPUs in the dashboard's source.
+type RuntimeGPUs struct {
+	Count     int64    `json:"count,omitempty"`
+	DeviceIDs []string `json:"deviceIds"`
+	Mode      GPUMode  `json:"mode,omitempty"`
+	Previews  bool     `json:"previews,omitempty"`
+}
+
 // RuntimeMount is deploy.RuntimeMount in the dashboard's source.
 type RuntimeMount struct {
 	Ownership OwnershipMode `json:"ownership,omitempty"`
@@ -4228,6 +4246,7 @@ type RuntimePlanConfig struct {
 	EdgeRules          []EdgeRule           `json:"edgeRules"`
 	ErrorPages         []int64              `json:"errorPages"`
 	ForwardAuth        *RouteForwardAuth    `json:"forwardAuth,omitempty"`
+	Gpus               *RuntimeGPUs         `json:"gpus,omitempty"`
 	GracePeriodSeconds int64                `json:"gracePeriodSeconds,omitempty"`
 	HostNetwork        bool                 `json:"hostNetwork,omitempty"`
 	HostPort           int64                `json:"hostPort,omitempty"`
@@ -4245,6 +4264,7 @@ type RuntimePlanConfig struct {
 	Privileged         bool                 `json:"privileged,omitempty"`
 	Protocol           string               `json:"protocol,omitempty"`
 	RateLimit          *DeploymentRateLimit `json:"rateLimit,omitempty"`
+	ReadOnlyRootfs     bool                 `json:"readOnlyRootfs,omitempty"`
 	Replay             *ReplayPlan          `json:"replay,omitempty"`
 	Replicas           int64                `json:"replicas,omitempty"`
 	ResponseHeaders    []RouteHeader        `json:"responseHeaders"`
@@ -4254,7 +4274,11 @@ type RuntimePlanConfig struct {
 	Sleep              *SleepPlan           `json:"sleep,omitempty"`
 	StopSignal         string               `json:"stopSignal,omitempty"`
 	Strategy           ReleaseStrategy      `json:"strategy,omitempty"`
+	Sysctls            []RuntimeSysctl      `json:"sysctls"`
 	Tailnet            *RouteTailnet        `json:"tailnet,omitempty"`
+	Tmpfs              []RuntimeTmpfs       `json:"tmpfs"`
+	Ulimits            []RuntimeUlimit      `json:"ulimits"`
+	User               string               `json:"user,omitempty"`
 }
 
 // RuntimeSeed is deploy.RuntimeSeed in the dashboard's source.
@@ -4295,6 +4319,25 @@ type RuntimeServices struct {
 	Reason     string           `json:"reason,omitempty"`
 	Services   []RuntimeService `json:"services"`
 	Status     string           `json:"status,omitempty"`
+}
+
+// RuntimeSysctl is deploy.RuntimeSysctl in the dashboard's source.
+type RuntimeSysctl struct {
+	Name  string `json:"name,omitempty"`
+	Value string `json:"value,omitempty"`
+}
+
+// RuntimeTmpfs is deploy.RuntimeTmpfs in the dashboard's source.
+type RuntimeTmpfs struct {
+	Path   string `json:"path,omitempty"`
+	SizeMb int64  `json:"sizeMb,omitempty"`
+}
+
+// RuntimeUlimit is deploy.RuntimeUlimit in the dashboard's source.
+type RuntimeUlimit struct {
+	Hard int64      `json:"hard,omitempty"`
+	Name UlimitName `json:"name,omitempty"`
+	Soft int64      `json:"soft,omitempty"`
 }
 
 // Schedule is deploy.Schedule in the dashboard's source.
@@ -4927,6 +4970,28 @@ type TriggerWrite struct {
 	Name     string        `json:"name,omitempty"`
 	Provider string        `json:"provider,omitempty"`
 }
+
+// UlimitName is one of the values of deploy.UlimitName.
+type UlimitName string
+
+// The values of UlimitName.
+const (
+	UlimitNameCore       UlimitName = "core"
+	UlimitNameCPU        UlimitName = "cpu"
+	UlimitNameData       UlimitName = "data"
+	UlimitNameFsize      UlimitName = "fsize"
+	UlimitNameLocks      UlimitName = "locks"
+	UlimitNameMemlock    UlimitName = "memlock"
+	UlimitNameMsgqueue   UlimitName = "msgqueue"
+	UlimitNameNice       UlimitName = "nice"
+	UlimitNameNofile     UlimitName = "nofile"
+	UlimitNameNproc      UlimitName = "nproc"
+	UlimitNameRss        UlimitName = "rss"
+	UlimitNameRtprio     UlimitName = "rtprio"
+	UlimitNameRttime     UlimitName = "rttime"
+	UlimitNameSigpending UlimitName = "sigpending"
+	UlimitNameStack      UlimitName = "stack"
+)
 
 // Update is blueprint.Update in the dashboard's source.
 type Update struct {

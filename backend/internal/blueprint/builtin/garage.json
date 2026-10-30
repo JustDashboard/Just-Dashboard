@@ -1,0 +1,198 @@
+{
+  "id": "garage",
+  "version": "1.0.0",
+  "name": "Garage",
+  "category": "tool",
+  "profile": "web",
+  "description": "An S3-compatible object store built to be small and self-hosted, here as a single node: one access key and one bucket are created from the generated credentials on the first start, and any S3 client or SDK uses them over the domain. Metadata and objects live on their own volumes.",
+  "iconId": "database",
+  "docsUrl": "https://garagehq.deuxfleurs.fr/documentation/quick-start/",
+  "access": {
+    "kind": "client",
+    "secretVariable": "GARAGE_DEFAULT_SECRET_KEY",
+    "note": "Garage has no web interface: S3 clients connect to https://<domain> (path-style, region garage) with the access key id GARAGE_DEFAULT_ACCESS_KEY and the secret GARAGE_DEFAULT_SECRET_KEY from the Variables tab, and the bucket named here already exists. Garage stores that key on the first start and refuses to start if the secret is later changed, so do not rotate it; create further keys with \"garage key create\" in the container's terminal."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://git.deuxfleurs.fr/Deuxfleurs/garage",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "dxflrs/garage:v2.5.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing",
+    "command": [
+      "/garage",
+      "server",
+      "--single-node",
+      "--default-bucket"
+    ]
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the endpoint S3 clients are configured with; nothing else here changes when it does."
+    },
+    {
+      "name": "bucket",
+      "kind": "text",
+      "label": "Bucket",
+      "required": true,
+      "default": "default",
+      "description": "The bucket created on the first start, which the generated key may read and write.",
+      "variable": "GARAGE_DEFAULT_BUCKET",
+      "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+    }
+  ],
+  "ports": [
+    {
+      "name": "s3",
+      "internal": 3900,
+      "protocol": "tcp",
+      "purpose": "The S3 API",
+      "exposure": "proxy",
+      "primary": true
+    },
+    {
+      "name": "rpc",
+      "internal": 3901,
+      "protocol": "tcp",
+      "purpose": "Cluster RPC, unused by a single node",
+      "exposure": "internal"
+    },
+    {
+      "name": "admin",
+      "internal": 3903,
+      "protocol": "tcp",
+      "purpose": "The admin API and metrics, never published",
+      "exposure": "internal"
+    }
+  ],
+  "volumes": [
+    {
+      "name": "meta",
+      "target": "/var/lib/garage/meta",
+      "purpose": "The metadata database: buckets, keys and the object index",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "data",
+      "target": "/var/lib/garage/data",
+      "purpose": "Object data blocks",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "config",
+      "target": "/etc/garage",
+      "purpose": "garage.toml, with the RPC and admin secrets",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "S3 API accepts connections",
+      "kind": "tcp",
+      "phase": "readiness",
+      "required": true,
+      "port": "s3",
+      "timeoutSeconds": 60
+    },
+    {
+      "name": "Node reports a healthy layout",
+      "kind": "command",
+      "phase": "readiness",
+      "required": true,
+      "command": [
+        "/garage",
+        "status"
+      ],
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "install": [
+      {
+        "kind": "write_file",
+        "path": "/etc/garage/garage.toml",
+        "content": "# Written by Just Dashboard before the first start: a single-node Garage with\n# its metadata and data on this deployment's volumes.\nmetadata_dir = \"/var/lib/garage/meta\"\ndata_dir = \"/var/lib/garage/data\"\ndb_engine = \"sqlite\"\nreplication_factor = 1\n\nrpc_bind_addr = \"0.0.0.0:3901\"\nrpc_public_addr = \"127.0.0.1:3901\"\nrpc_secret = \"{{secret.rpc-secret}}\"\n\n[s3_api]\ns3_region = \"garage\"\napi_bind_addr = \"0.0.0.0:3900\"\n\n[admin]\napi_bind_addr = \"0.0.0.0:3903\"\nadmin_token = \"{{secret.admin-token}}\"\nmetrics_token = \"{{secret.metrics-token}}\"\n"
+      }
+    ],
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "GARAGE_CONFIG_FILE",
+        "value": "/etc/garage/garage.toml"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Garage upgrades its metadata in place on start within a major version; read the migration guide before a major upgrade and back up the meta volume first.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:a8090b48e87edb1457c4362b6382162b4df35b97dceb030926c26f78f726b06b"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "access-key",
+      "variable": "GARAGE_DEFAULT_ACCESS_KEY",
+      "label": "Access key id",
+      "length": 24,
+      "description": "The S3 access key id of the default key."
+    },
+    {
+      "name": "secret-key",
+      "variable": "GARAGE_DEFAULT_SECRET_KEY",
+      "label": "Secret access key",
+      "length": 64,
+      "description": "The S3 secret of the default key; Garage refuses to start if it changes after the first start.",
+      "alphabet": "hex"
+    },
+    {
+      "name": "rpc-secret",
+      "variable": "GARAGE_RPC_SECRET",
+      "label": "RPC secret",
+      "length": 64,
+      "description": "Authenticates Garage nodes to each other; written into garage.toml.",
+      "alphabet": "hex"
+    },
+    {
+      "name": "admin-token",
+      "variable": "GARAGE_ADMIN_TOKEN",
+      "label": "Admin API token",
+      "length": 48,
+      "description": "Authorises the admin API, which is not published."
+    },
+    {
+      "name": "metrics-token",
+      "variable": "GARAGE_METRICS_TOKEN",
+      "label": "Metrics token",
+      "length": 48,
+      "description": "Authorises reads of the metrics endpoint, which is not published."
+    }
+  ]
+}

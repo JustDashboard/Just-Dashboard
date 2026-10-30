@@ -1,0 +1,222 @@
+{
+  "id": "odoo",
+  "version": "1.0.0",
+  "name": "Odoo",
+  "category": "http",
+  "profile": "compose",
+  "description": "Odoo Community: CRM, sales, invoicing, inventory, projects, website and dozens more business apps that share one database. Runs Odoo with PostgreSQL; only Odoo is behind the domain.",
+  "iconId": "wallet",
+  "docsUrl": "https://hub.docker.com/_/odoo",
+  "access": {
+    "kind": "setup",
+    "path": "/web/database/manager",
+    "note": "A new Odoo has no database yet: the first visitor creates one, choosing the administrator's e-mail and password, and confirms the master password the form proposes. Write that master password down — it guards creating, copying and dropping databases and is kept in the config volume. Open the address yourself right after deploying, because whoever creates the first database owns it."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "LGPL-3.0",
+    "upstreamUrl": "https://github.com/odoo/odoo",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address the web client is opened at; nothing else here changes when it does."
+    }
+  ],
+  "secrets": [
+    {
+      "name": "db-password",
+      "variable": "ODOO_DB_PASSWORD",
+      "label": "Database password",
+      "length": 40,
+      "description": "Generated here and given only to the services that sign in to the database."
+    }
+  ],
+  "services": [
+    {
+      "name": "odoo",
+      "role": "app",
+      "purpose": "The Odoo server and its web client, behind the domain",
+      "image": {
+        "reference": "odoo:19.0-20261015",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing",
+        "command": [
+          "odoo",
+          "--proxy-mode"
+        ]
+      },
+      "environment": [
+        {
+          "name": "HOST",
+          "value": "db"
+        },
+        {
+          "name": "USER",
+          "value": "odoo"
+        },
+        {
+          "name": "PASSWORD",
+          "value": "{{secret.db-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 8069,
+          "protocol": "tcp",
+          "purpose": "The web client and the JSON-RPC API",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "filestore",
+          "target": "/var/lib/odoo",
+          "purpose": "Attachments, the file store and sessions",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "config",
+          "target": "/etc/odoo",
+          "purpose": "odoo.conf, where the master password is kept",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "addons",
+          "target": "/mnt/extra-addons",
+          "purpose": "Custom or third-party addons, empty until you add some",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 1536,
+        "minMemoryMb": 768
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fs",
+          "http://127.0.0.1:8069/web/health"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 18,
+        "startPeriodSeconds": 30
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "PostgreSQL, holding every company database Odoo creates",
+      "image": {
+        "reference": "postgres:17.11-alpine",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "POSTGRES_DB",
+          "value": "postgres"
+        },
+        {
+          "name": "POSTGRES_USER",
+          "value": "odoo"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "value": "{{secret.db-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "postgres",
+          "internal": 5432,
+          "protocol": "tcp",
+          "purpose": "SQL connections from Odoo",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/var/lib/postgresql/data",
+          "purpose": "Every table Odoo keeps",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "pg_isready",
+          "-h",
+          "127.0.0.1",
+          "-U",
+          "odoo",
+          "-d",
+          "postgres"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 20
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/web/health",
+      "port": "http",
+      "timeoutSeconds": 300
+    }
+  ],
+  "operations": {},
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "This image follows Odoo 19's nightly builds by date; a newer major version needs Odoo's own upgrade service, not a newer tag."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:cf11ba58448aad0321c933faf6a881bf7b2d958a52ecf17c0e06cb3837ed9e11"
+    }
+  ]
+}

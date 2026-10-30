@@ -143,6 +143,8 @@ var openapiEnums = map[reflect.Type][]string{
 	reflect.TypeOf(deploy.DraftStep("")):           {"intent", "source", "detection", "configuration", "preflight"},
 	reflect.TypeOf(deploy.SourceMode("")):          {"git_url", "connected_repository", "local_checkout", "image_reference", "compose_paste", "compose_upload", "compose_git", "compose_local", "blueprint", "existing_checkout", "existing_container", "existing_stack"},
 	reflect.TypeOf(deploy.DetectionConfidence("")): {"high", "medium", "low"},
+	reflect.TypeOf(deploy.UlimitName("")):          {"core", "cpu", "data", "fsize", "locks", "memlock", "msgqueue", "nice", "nofile", "nproc", "rss", "rtprio", "rttime", "sigpending", "stack"},
+	reflect.TypeOf(deploy.GPUMode("")):             {"all", "count", "devices"},
 	reflect.TypeOf(blueprint.Profile("")):          {"web", "database", "tool", "worker", "game", "compose"},
 	reflect.TypeOf(blueprint.Category("")):         {"http", "database", "tool", "automation", "game"},
 	reflect.TypeOf(blueprint.InputKind("")):        {"text", "secret", "number", "boolean", "choice", "domain", "memory", "accept"},

@@ -342,9 +342,9 @@ func containerRuntimeEnvironment(plan RuntimePlanConfig, variables map[string]st
 
 // runtimeMountSpecs are the plan's mounts as the container runtime takes
 // them: a path is a bind of that host directory, anything else a named
-// volume.
+// volume; then its writable tmpfs paths.
 func runtimeMountSpecs(plan RuntimePlanConfig) []dockerx.MountSpec {
-	mounts := make([]dockerx.MountSpec, 0, len(plan.Mounts))
+	mounts := make([]dockerx.MountSpec, 0, len(plan.Mounts)+len(plan.Tmpfs))
 	for _, planned := range plan.Mounts {
 		kind := "volume"
 		if filepath.IsAbs(planned.Source) {
@@ -354,7 +354,7 @@ func runtimeMountSpecs(plan RuntimePlanConfig) []dockerx.MountSpec {
 			Type: kind, Source: planned.Source, Target: planned.Target, ReadOnly: planned.ReadOnly,
 		})
 	}
-	return mounts
+	return append(mounts, plan.tmpfsMountSpecs()...)
 }
 
 func (o *DockerRuntimeOwner) startContainer(
@@ -417,12 +417,19 @@ func (o *DockerRuntimeOwner) startContainer(
 			RestartPolicy: plan.EffectiveRestartPolicy(), Logging: dockerx.CappedLogging(), StopSignal: stopSignal,
 			Limits:     dockerx.ResourceLimits{MemoryMB: plan.MemoryMB, CPUs: plan.CPUs, PidsLimit: plan.PidsLimit},
 			Privileged: plan.Privileged, CapAdd: append([]string(nil), plan.Capabilities...), Init: true,
+			User: plan.User, ReadOnly: plan.ReadOnlyRootfs, Ulimits: plan.dockerUlimits(),
+			Sysctls: plan.dockerSysctls(), GPUs: plan.dockerGPUs(),
 			Pull: "missing", Start: true,
 		}, nil)
 		if err != nil {
 			// A release is all of its replicas or none: the ones already
 			// started are removed, so a failed start leaves nothing behind
-			// for the compensation that follows to miss.
+			// for the compensation that follows to miss — the one the daemon
+			// created and then would not start included, as a GPU, a limit
+			// or a kernel parameter it refuses is refused only at start.
+			if result != nil && result.ID != "" {
+				replicas = append(replicas, runtimeReplica{Index: index, ContainerID: result.ID})
+			}
 			o.removeReplicas(ctx, replicas)
 			return StartedRuntime{}, err
 		}
