@@ -309,6 +309,8 @@ func TestKeepLeavesDataAndKeepsTheKey(t *testing.T) {
 		"systemctl stop jd-terminal-*",
 		"docker compose -f docker-compose.yml -p just-dashboard down --remove-orphans --timeout 30",
 		"docker image rm just-dashboard-frontend:latest",
+		"docker image rm just-dashboard-frontend:previous",
+		"docker image rm just-dashboard-backend:previous",
 		"systemd-run --unit just-dashboard-uninstall-20261012t120000z",
 	} {
 		if !strings.Contains(cmds, want) {

@@ -6067,7 +6067,33 @@ done by hand, and the UI refuses to fold it away.
   as root, so afterwards the updater hands back to the checkout's owner everything root-owned in `.git`
   and each file the update changed with the folders above it (`handBack`, through `hostexec.GiveBack`).
   Until 0.7.1 an update's new folders stayed root's, and the operator's own next pull stopped halfway in
-  them. A checkout cloned with sudo has no owner but root for `handBack` to return to, so at every start
+  them.
+- **It installs the release that was announced** (`updateTarget`). After the fetch it prefers the tag
+  `v<ToVersion>`, asked of `origin` with `ls-remote` and fetched without touching local tags, so a tag
+  the operator made cannot stand in for it and one that clashes cannot fail the fetch. With no tag, which
+  is normal for a fork and for the window before `release.yml` has tagged a merge, it uses
+  `origin/<ref>`. Either way the changelog at the target must name `ToVersion`, or nothing changes. A
+  branch that has moved past `ToVersion` with no tag to pin it is refused rather than installed, because
+  nobody was shown that release's notes and checking again offers it properly. The version it reports
+  (`Run.InstalledVersion`) is read from the changelog at `HEAD` after the merge and recorded only on
+  success.
+- **It goes back if the new version does not come up** (`rollback.go`). Before the build it tags each image
+  the compose file builds `<image>:previous`; one that cannot be tagged is a warning, not a stop. On a
+  failed build, a failed `up --wait` or a failed health check it retags them, runs `up -d --no-build`,
+  moves the checkout with `git reset --keep <FromCommit>`, runs `up -d --no-build --remove-orphans`
+  (the release may have changed the compose file itself) and probes for three minutes. A failed build
+  has recreated no container, so it skips the first `up`: the release's compose file is never run against
+  a stack still serving. The reset is `--keep`, so an operator's edit survives and one in the way makes
+  git refuse. `update-index --refresh` comes first because `handBack`'s chown leaves the index stale,
+  which `--keep` otherwise reads as an edit. The checkout stays put if somebody else moved it during the
+  update. If an old image is missing after containers were replaced, stack and checkout both stay on the
+  failed update, since moving only one would make them disagree. Every failure is reported in the run's
+  error with the commands to finish by hand, and no step stops the ones after it. `.env` is not restored:
+  a port a Reconcile moved was moved because something holds the old one, and the old version runs on the
+  new one just as well. The rollback relies on database changes being additive (invariant 5), since the
+  new backend may already have migrated. The `:previous` images stay until the next update replaces them,
+  so a server holds one older generation on disk, and an uninstall removes them.
+- A checkout cloned with sudo has no owner but root for `handBack` to return to, so at every start
   the backend gives the checkout's root-owned entries to the owner of the directory holding it
   (`Service.adoptCheckout`, through `hostexec.Adopt`), when that is not root: whoever owns `/home/ubuntu`
   can already replace `/home/ubuntu/Just-Dashboard` with a tree of their own, so this grants nothing, and
@@ -6198,7 +6224,8 @@ silently switching the initial configuration to plain HTTP.
 `/dashboard/configuration`. It is the third lifecycle operation and the only one nothing comes back from,
 so it is built around the moment the page watching it loses its API.
 
-- **One question, two modes.** `keep` removes the stack — its three containers, the two images it builds,
+- **One question, two modes.** `keep` removes the stack — its three containers, the two images it builds
+  with the `:previous` tags an update keeps,
   the lifecycle siblings, `/tmp/just-dashboard` and the held terminal sessions (`systemctl stop
   jd-terminal-*` on the host) — and leaves everything the dashboard made: deployments keep running, and
   `JD_DATA_DIR`, the backups and the checkout's `.env` stay, with a copy of the `.env` written to

@@ -40,9 +40,27 @@ func git(t *testing.T, dir string, args ...string) string {
 
 func write(t *testing.T, path, content string) {
 	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// release commits the version file and a changelog whose newest entry is version.
+func release(t *testing.T, repo, version string) {
+	t.Helper()
+	write(t, filepath.Join(repo, "version.txt"), version+"\n")
+	entries := []string{}
+	for _, known := range []string{"0.5", "0.6", "0.7"} {
+		if Compare(known, version) <= 0 {
+			entries = append(entries, `{"version":"`+known+`","date":"2026-01-01","title":"t","changes":[{"kind":"fixed","text":"x"}]}`)
+		}
+	}
+	write(t, filepath.Join(repo, ManifestPath), `{"latest":"`+version+`","releases":[`+strings.Join(entries, ",")+`]}`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-q", "-m", version)
 }
 
 // installed builds an "upstream" repository with two commits and a checkout of
@@ -59,16 +77,12 @@ func installed(t *testing.T) (upstream, checkout string) {
 	}
 	git(t, upstream, "init", "-q", "-b", "main")
 	write(t, filepath.Join(upstream, "docker-compose.yml"), "name: just-dashboard\n")
-	write(t, filepath.Join(upstream, "version.txt"), "0.5\n")
-	git(t, upstream, "add", ".")
-	git(t, upstream, "commit", "-q", "-m", "0.5")
+	release(t, upstream, "0.5")
 
 	checkout = filepath.Join(root, "checkout")
 	git(t, root, "clone", "-q", upstream, checkout)
 
-	write(t, filepath.Join(upstream, "version.txt"), "0.6\n")
-	git(t, upstream, "add", ".")
-	git(t, upstream, "commit", "-q", "-m", "0.6")
+	release(t, upstream, "0.6")
 	return upstream, checkout
 }
 
@@ -76,12 +90,15 @@ func TestFastForwardMovesTheCheckoutOn(t *testing.T) {
 	_, checkout := installed(t)
 	var log bytes.Buffer
 
-	commit, err := fastForward(context.Background(), checkout, "main", &log)
+	commit, version, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, log.String())
 	}
 	if commit == "" {
 		t.Error("the commit it landed on was not recorded")
+	}
+	if version != "0.6" {
+		t.Errorf("reported version %q", version)
 	}
 	got, err := os.ReadFile(filepath.Join(checkout, "version.txt"))
 	if err != nil {
@@ -108,7 +125,7 @@ func TestFastForwardKeepsALocalEditThatDoesNotCollide(t *testing.T) {
 	write(t, local, "name: just-dashboard\n# my own port mapping\n")
 
 	var log bytes.Buffer
-	if _, err := fastForward(context.Background(), checkout, "main", &log); err != nil {
+	if _, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log); err != nil {
 		t.Fatalf("an unrelated local edit blocked the upgrade: %v\n%s", err, log.String())
 	}
 	got, err := os.ReadFile(local)
@@ -128,7 +145,7 @@ func TestFastForwardRefusesToOverwriteACollidingEdit(t *testing.T) {
 	write(t, filepath.Join(checkout, "version.txt"), "mine\n")
 
 	var log bytes.Buffer
-	_, err := fastForward(context.Background(), checkout, "main", &log)
+	_, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
 	if err == nil {
 		t.Fatal("an upgrade overwrote a local edit to a file the release also changed")
 	}
@@ -151,7 +168,7 @@ func TestFastForwardRefusesADivergedCheckout(t *testing.T) {
 	git(t, checkout, "commit", "-q", "-m", "a change of my own")
 
 	var log bytes.Buffer
-	if _, err := fastForward(context.Background(), checkout, "main", &log); err == nil {
+	if _, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log); err == nil {
 		t.Fatal("a diverged checkout was fast-forwarded, which is not possible without losing a commit")
 	}
 	if _, err := os.Stat(filepath.Join(checkout, "local-only.txt")); err != nil {
@@ -164,11 +181,11 @@ func TestFastForwardRefusesADivergedCheckout(t *testing.T) {
 func TestFastForwardOnACurrentCheckoutIsFine(t *testing.T) {
 	_, checkout := installed(t)
 	var log bytes.Buffer
-	first, err := fastForward(context.Background(), checkout, "main", &log)
+	first, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := fastForward(context.Background(), checkout, "main", &log)
+	second, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log)
 	if err != nil {
 		t.Fatalf("re-running an upgrade on an already-current checkout failed: %v", err)
 	}
@@ -240,7 +257,7 @@ func TestFastForwardLeavesNothingRootOwnedBehind(t *testing.T) {
 	}
 
 	var log bytes.Buffer
-	if _, err := fastForward(context.Background(), checkout, "main", &log); err != nil {
+	if _, _, err := fastForward(context.Background(), checkout, "main", "0.6", &log); err != nil {
 		t.Fatalf("%v\n%s", err, log.String())
 	}
 	var left []string

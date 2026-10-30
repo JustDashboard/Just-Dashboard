@@ -11,7 +11,7 @@ The host itself and the people on it: packages, system users, roles, keys and th
 - Host package updates on apt, dnf, yum, zypper, pacman or apk
 - System users, an audit log of every change and the panel's own settings
 - Address, certificate, allowlist and ports applied with automatic rollback
-- One-click self-update, with the release notes compiled in
+- One-click self-update, with the release notes compiled in, that goes back to the previous version if the new one does not come up
 
 ## Accounts
 
