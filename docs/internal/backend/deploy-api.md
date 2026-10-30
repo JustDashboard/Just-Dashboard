@@ -139,7 +139,7 @@ not require a regeneration by itself.
 - **Go**, `sdk/go`: its own module, `github.com/Wayy01/Just-Dashboard/sdk/go`, package `jd`, with no
   dependency outside the standard library. It is a nested module rather than a package of the backend
   module because a consumer would otherwise download the backend's every dependency (Docker, the
-  AWS SDK, the database drivers) and its Go 1.26.8 floor to call an HTTP API, and could import
+  AWS SDK, the database drivers) and its Go 1.26.10 floor to call an HTTP API, and could import
   nothing under `internal/` anyway; its floor is Go 1.24 (`omitzero`). `types.go` has a struct per
   component and per object a route spells out inline (named for the operation and the property where
   it was met: `DeployGetResponse`), a string type and its constants per vocabulary (`RunState`,

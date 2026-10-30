@@ -2028,7 +2028,7 @@ stage installs `tzdata` as well (alpine carries none), for a `TZ` variable and a
 `/usr/share/zoneinfo`; `ca-certificates-bundle` is already in the image. Source scanning does not
 certify every transitive dependency: a cgo package outside the catalogue still builds without cgo, and
 its failure names the compiler (`build_native_toolchain_missing`). The dashboard's own required Go
-toolchain remains 1.26.8.
+toolchain remains 1.26.10.
 
 ## Rust
 

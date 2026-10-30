@@ -76,7 +76,7 @@ points them at a server on another port when worktrees run side by side. To iter
 it directly: `bunx playwright test tests/browser/docker-ui.spec.ts` (~30s).
 
 Install the browser once with `bun run test:browser:install`. Deployment changes have additional live,
-race, and browser requirements in [`CONTRIBUTING.md`](CONTRIBUTING.md). `go.mod` requires Go 1.26.8.
+race, and browser requirements in [`CONTRIBUTING.md`](CONTRIBUTING.md). `go.mod` requires Go 1.26.10.
 
 ## Security requirements
 

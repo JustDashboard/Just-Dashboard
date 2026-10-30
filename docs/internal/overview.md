@@ -117,7 +117,7 @@ rewrite proxies HTTP but **not** WebSocket upgrades, so socket-backed pages in d
 backend. The default WebSocket origin check matches scheme, hostname, and effective port (`https` in
 production, `http` under `JD_DEV`); each cross-origin exception must be a complete origin in that
 allowlist. `bun dev`/`bun run build` run `scripts/sync-monaco.mjs` first; invoking `next` directly skips
-it and leaves every editor spinning. `go.mod` declares `go 1.26.8` — check `go version` before blaming
+it and leaves every editor spinning. `go.mod` declares `go 1.26.10` — check `go version` before blaming
 the code on a network-restricted machine.
 
 **Browser testing.** Playwright tests live in `frontend/tests/browser`; `playwright.config.ts` starts a
