@@ -4,6 +4,70 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.8.4 — 30 October 2026
+
+**Passkeys that sign in, updates that roll back**
+
+Passkey sign-in works again behind the dashboard's own proxy, and the backend stops reporting unhealthy. An update now installs exactly the release it offered and goes back to the previous version if it fails. Sign-in, audit records and job controls are tighter, pages say when they could not read something, and Next.js and Go are on current patch releases.
+
+### Security
+
+- Copies of .env are kept in check and removed on uninstall
+  - Port changes now keep the newest five .env.jd-port-previous-* copies, and a wiping uninstall removes them all.
+- Repeated wrong two-factor codes lock the second factor for 15 minutes
+  - Recovery codes count too. A correct code is refused while it lasts, and an administrator's reset clears it.
+- Forms that ask for your password share one attempt budget
+  - This covers changing your password, turning two-factor off and registering a passkey. Wrong attempts on one form can briefly delay the others.
+- New recovery codes ask for your password
+  - An open session is no longer enough, as with turning two-factor off.
+- Stopping a job takes the capability that started it
+  - A limited account can still stop database dumps, base backups and package index refreshes. The job console hides Stop on the others.
+- Audit fields have a size limit, and failed sign-ins always count
+  - Usernames, targets and paths are capped in the audit log and the process log. Sign-in failures arriving together are each counted.
+- A password typed on a saved domain stays out of browser storage
+  - It is held in memory until you save, so a reload clears it. The rest of the draft is kept.
+
+### Added
+
+- A failed update goes back to the previous version
+  - The images it replaces are kept under a :previous tag. If the build or health check fails, they are restored and the checkout returns to where it was, without discarding local edits. This applies from the update after this one.
+- Missing and broken pages have a way back
+  - An unknown address inside the dashboard keeps the sidebar, and errors outside it get their own page instead of the browser's default.
+- Browser tabs are named after the page
+  - A tab reads like Files · Just Dashboard, so several open tabs can be told apart.
+
+### Changed
+
+- An update installs exactly the release it offered
+  - It uses the release's tag when there is one and checks the changelog before changing anything. A branch that has moved past the offered version is refused until you check again.
+- Next.js, Go and other dependencies are on current patch releases
+  - Next.js 16.4.3, Go 1.26.10 and updated x/net, with overrides for DOMPurify, lodash-es and nanoid.
+- Installs need fewer leftovers and containers run with less
+  - A fresh install removes the first password from .env once the dashboard answers. Logs rotate, the proxy has a health check, and the frontend and proxy drop capabilities they do not need. The first start on this release recreates all three containers.
+
+### Fixed
+
+- Passkey sign-in works in Chromium browsers behind the proxy
+  - The proxy's Permissions-Policy forbade using a passkey, though not enrolling one. If a page's policy still forbids it, the page now says so.
+- The backend no longer reports unhealthy after working with host files
+  - The main thread could stay in the host's mount namespace, so Docker's health check looked for the binary in the wrong filesystem.
+- Timeouts stop host commands
+  - A cancelled command run through nsenter could keep running and hold its request open. It now stops at its deadline.
+- The dashboard's own ports stay put across lifecycle runs
+  - A helper container that could not see the backend's process took its port for someone else's and moved it. A port that has already moved stays where it is.
+- The installer checks the full password rule up front
+  - A password the backend would refuse no longer leaves a half-finished install, and a kept .env without JD_SITE no longer ends the script silently.
+- Documented ACME and ingress settings reach the backend
+  - JD_ACME_DIRECTORY, JD_ACME_CA_ROOT and JD_INGRESS_CONTAINER were ignored when set in .env. If you set one, it now takes effect.
+- Failed reads no longer look like nothing there
+  - Passkeys, Promote and Docker cleanup show the error with a retry. The archive confirmation names what it could not read and waits for its reads to finish.
+- Coming back to a hidden tab refreshes it right away
+  - Polled pages used to wait for their next timer, which browsers slow down in the background.
+- Sizes under one byte no longer read undefined
+  - Very quiet network rates showed as 512.0 undefined.
+- A release can no longer be skipped by a failed first run
+  - The release workflow now publishes any version main carries that has no release yet.
+
 ## 0.8.3 — 30 October 2026
 
 **A map that unused volumes cannot bury**

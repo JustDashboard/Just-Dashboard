@@ -7,8 +7,9 @@ name: Release
 # with backend/internal/selfupdate/changelog.json on main, and
 # scripts/release.sh is what writes a new one. This only gives that version a
 # tag and a page under Releases, so the version is read from the changelog
-# rather than from a branch name, and only a push that changes it publishes:
-# a merge that bumps nothing stops, and so does one whose release exists. Waiting for Verify means a version whose
+# rather than from a branch name. A version whose release exists stops here, so
+# a merge that bumps nothing publishes nothing, and one whose first run failed
+# is published by the next that passes. Waiting for Verify means a version whose
 # merge run fails is never announced, and the page appears when main is known
 # good rather than when the merge was pushed.
 
@@ -43,8 +44,6 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ env.SHA }}
-          # The parent is what the version is compared with.
-          fetch-depth: 2
           persist-credentials: false
 
       - name: Publish the changelog's newest release
