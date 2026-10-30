@@ -34,7 +34,7 @@ services:
     # An explicit map rather than env_file, so that what the container gets is
     # visible here. The cost is that a variable missing from this list is
     # silently ignored however carefully it is set in .env — keep it in step
-    # with backend/internal/config, .env.example and the README table.
+    # with backend/internal/config, .env.example and the table in docs/guides/configuration.md.
     environment:
       # Loopback only. The proxy in front of it is the single entry point.
       # The port is a variable for the reason the header gives: 8080 is taken

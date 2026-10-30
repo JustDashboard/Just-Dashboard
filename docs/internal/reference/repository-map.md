@@ -9,6 +9,7 @@ fields.
 | Area | Responsibility | Detailed reference |
 | --- | --- | --- |
 | `docker-compose.yml`, `deploy/Caddyfile`, `deploy/proxy-entrypoint.sh` | Single-host production topology, loopback-only services, the Caddy listener and its three TLS modes, mounts, and health checks | [`../deployments/implementation.md`](../deployments/implementation.md#deployment-topology) |
+| `README.md`, `FEATURES.md`, `SECURITY.md`, `docs/features/`, `docs/guides/`, `docs/readme/` | The public documents. The README stays short: what it is, how to install it, who builds it and its sponsors. `FEATURES.md` is the gallery, `docs/features/` has one page per area, `docs/guides/` holds the install, configuration, `jd` and administration reference, and `SECURITY.md` is GitHub's Security tab. `docs/readme/` holds their screenshots, captured from the browser fixtures at 1440×900 and twice the density, then saved 2000 pixels wide as 256-colour palettes. |
 | `install.sh`, `.env.example` | Installation: two reachability routes (Tailscale, SSH tunnel), certificate issuance, randomised internal ports, secrets, and operator configuration | [`../overview.md`](../overview.md), public [`../../../README.md`](../../../README.md) |
 | `scripts/manage.sh`, `scripts/create-user.sh`, `scripts/reset-password.sh`, `scripts/test_manage.py` | Local root account administration, stack status/logs/recreation, installing `jd` (`install-cli`), and isolated terminal/installer fixtures | [`../operations/terminal-tools.md`](../operations/terminal-tools.md) |
 | `scripts/release.sh`, `backend/scripts/`, `.github/workflows/release.yml` | Version update, generated changelog, build verification, release commit preparation, and the GitHub release published after Verify passes on `main` | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#cutting-a-release) |
@@ -27,7 +28,7 @@ services, handles signals, and supports the isolated self-update worker and loca
 for the host to run. `backend/cmd/jd` is the `jd` command line (standard library only): it drives the deployment
 routes with an API key — normally a deploy key — keeps its URL and key in the user config directory (0600), and is
 built into the image beside the dashboard, installed to `/usr/local/bin/jd` by `install.sh` and `manage.sh install-cli`,
-and served at `GET /api/v1/cli/jd` (README, "The jd command line"; the key's boundary is in
+and served at `GET /api/v1/cli/jd` (`docs/guides/cli.md`; the key's boundary is in
 [`../security/invariants.md`](../security/invariants.md)). `jd openapi` prints the deployment API's OpenAPI
 description, which `api/deploy_openapi.go` generates from the router and is committed as `docs/api/deploy-openapi.json`
 ([`../backend/deploy-api.md`](../backend/deploy-api.md)); the clients in `sdk/` are generated from it. The packages under

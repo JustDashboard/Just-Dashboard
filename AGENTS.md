@@ -38,7 +38,8 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
   it ready for operator review. **Merging the pull request and deleting the branch do** require the
   operator's permission every time, unless they said to merge in the same request.
 - **Before every push, documentation review is mandatory.** Compare the complete diff with
-  `docs/internal/`, `AGENTS.md`, `README.md`, and `CONTRIBUTING.md`. Update every document affected by
+  `docs/internal/`, `AGENTS.md`, `README.md`, `FEATURES.md`, `SECURITY.md`, `docs/features/`, `docs/guides/`,
+  and `CONTRIBUTING.md`. Update every document affected by
   changes to behavior, architecture, security, configuration, commands, tests, or workflow in the same
   change. If no update is needed, explicitly confirm that during the pre-push review. Documentation must
   never knowingly be left stale.
