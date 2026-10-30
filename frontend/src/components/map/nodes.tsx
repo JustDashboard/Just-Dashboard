@@ -145,38 +145,22 @@ function Eyebrow({ children, className }: { children: ReactNode; className?: str
   return <span className={cn("eyebrow block truncate", className)}>{children}</span>
 }
 
-/**
- * A box's name. Zoomed out it is held to about 11px on the screen, up to
- * what a line of its box holds (`--map-name-floor`, written by the canvas in
- * whole pixels): the box's other lines go, and its name and its dot are what
- * is left to read. `base` is the size it is set in, so the floor only ever
- * grows it.
- */
-function Name({
-  children,
-  base,
-  className,
-}: {
-  children: ReactNode
-  base: number
-  className?: string
-}) {
+/** A box's name: the one line a box always has room for. */
+function Name({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <span
-      className={cn("map-name block truncate font-semibold text-foreground", className)}
-      style={{ "--map-base": `${base}px` } as React.CSSProperties}
-    >
+    <span className={cn("map-name block truncate font-semibold text-foreground", className)}>
       {children}
     </span>
   )
 }
 
+/** A box's state: its dot and its word, cut short rather than run out of the box. */
 function State({ item, className }: { item: MapItem; className?: string }) {
   return (
     <Status
       tone={TONE_DOT[item.tone]}
       label={item.state}
-      className={cn("map-state text-hint", className)}
+      className={cn("max-w-full min-w-0 text-hint [&>span:last-child]:truncate", className)}
     />
   )
 }
@@ -191,7 +175,7 @@ function SharedMark({ node }: { node: SystemNode }) {
   return (
     <span
       title={`Also drawn in ${node.shared.length === 1 ? "one other system" : `${node.shared.length} other systems`}`}
-      className="map-detail absolute -top-2.5 right-3 z-10 flex items-center gap-1 rounded-sm border border-hairline bg-card px-1.5 text-micro leading-4 text-muted-foreground"
+      className="absolute -top-2.5 right-3 z-10 flex items-center gap-1 rounded-sm border border-hairline bg-card px-1.5 text-micro leading-4 text-muted-foreground"
     >
       <Linked className="size-3" />
       also in {node.shared.length}
@@ -201,6 +185,12 @@ function SharedMark({ node }: { node: SystemNode }) {
 
 function factOf(item: MapItem, label: string) {
   return item.facts?.find((f) => f.label === label)?.value
+}
+
+/** "1 container", "3 containers": the fact is the bare count. */
+function containerCount(fact: string | undefined) {
+  if (!fact) return "no containers"
+  return /^1$/.test(fact.trim()) ? "1 container" : `${fact} containers`
 }
 
 // ---------------------------------------------------------------------------
@@ -233,13 +223,11 @@ export const HeroNode = memo(function HeroNode({ data }: FaceProps) {
             {dashboard ? "This dashboard" : "Deployment"}
             {environment && ` · ${environment}`}
           </Eyebrow>
-          <Name base={15} className="mt-0.5 text-title leading-6">
-            {item.name}
-          </Name>
+          <Name className="mt-0.5 text-title leading-6">{item.name}</Name>
           <State item={item} className="mt-1" />
         </div>
       </div>
-      <div className="map-detail mt-auto space-y-1 border-t border-hairline px-4 py-3">
+      <div className="mt-auto space-y-1 border-t border-hairline px-4 py-3">
         <span className="flex items-center gap-1.5 truncate font-mono text-hint text-foreground">
           <Globe className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate">{address ?? item.detail ?? "no address"}</span>
@@ -264,16 +252,14 @@ export const StackNode = memo(function StackNode({ data }: FaceProps) {
         <ProductLogo id="docker-compose" size="md" fallback={Layers} />
         <div className="min-w-0 flex-1">
           <Eyebrow>Compose stack</Eyebrow>
-          <Name base={15} className="mt-0.5 text-title">
-            {item.name}
-          </Name>
+          <Name className="mt-0.5 text-title">{item.name}</Name>
           <State item={item} className="mt-1" />
         </div>
       </div>
-      <div className="map-detail mt-auto flex items-center gap-2 border-t border-hairline px-4 py-2.5">
-        <ItemMark item={item} kind={node.kind} size="sm" className="size-6 rounded-md" />
+      <div className="mt-auto flex items-center gap-2 border-t border-hairline px-4 py-2">
+        <ItemMark item={item} kind={node.kind} size="sm" className="size-5 rounded-md" />
         <span className="truncate text-hint text-muted-foreground">
-          {factOf(item, "Containers")} containers
+          {containerCount(factOf(item, "Containers"))}
         </span>
       </div>
     </div>
@@ -320,11 +306,9 @@ export const EntryNode = memo(function EntryNode({ data }: FaceProps) {
         </span>
       )}
       <div className="min-w-0 flex-1">
-        <Eyebrow className="map-detail">{eyebrow}</Eyebrow>
-        <Name base={13} className="font-mono text-body font-medium">
-          {item.name}
-        </Name>
-        <State item={item} className="map-detail" />
+        <Eyebrow>{eyebrow}</Eyebrow>
+        <Name className="font-mono text-body font-medium">{item.name}</Name>
+        <State item={item} />
       </div>
     </div>
   )
@@ -351,17 +335,15 @@ export const RuntimeNode = memo(function RuntimeNode({ data }: FaceProps) {
     <div className="flex min-w-0 flex-1 items-center gap-3 px-3">
       <ItemMark item={item} kind={node.kind} />
       <div className="min-w-0 flex-1">
-        <Eyebrow className="map-detail flex items-center gap-1">
+        <Eyebrow className="flex items-center gap-1">
           {RoleGlyph && <RoleGlyph className="size-3 shrink-0" />}
           {ROLE_LABEL[role]} · container
         </Eyebrow>
-        <Name base={13} className="text-body">
-          {item.name}
-        </Name>
+        <Name className="text-body">{item.name}</Name>
         <span className="flex min-w-0 items-center gap-2">
           <State item={item} />
           {(ports || up) && (
-            <span className="map-detail truncate font-mono text-micro text-muted-foreground">
+            <span className="truncate font-mono text-micro text-muted-foreground">
               {ports ? `:${ports.split("→")[0]}` : `up ${up}`}
             </span>
           )}
@@ -399,7 +381,7 @@ export const RuntimeNode = memo(function RuntimeNode({ data }: FaceProps) {
       <SharedMark node={node} />
       {role === "web" && (
         // A browser's bar: three dots and the image in the address field.
-        <span className="map-detail flex h-6 shrink-0 items-center gap-1.5 border-b border-hairline px-3">
+        <span className="flex h-6 shrink-0 items-center gap-1.5 border-b border-hairline px-3">
           <span className="size-1.5 rounded-full bg-border-strong" />
           <span className="size-1.5 rounded-full bg-border-strong" />
           <span className="size-1.5 rounded-full bg-border-strong" />
@@ -410,7 +392,7 @@ export const RuntimeNode = memo(function RuntimeNode({ data }: FaceProps) {
       )}
       <div className="flex min-h-0 flex-1 items-center">{body}</div>
       {role !== "web" && role !== "cache" && role !== "queue" && image && (
-        <span className="map-detail block truncate border-t border-hairline px-3 py-1 font-mono text-micro text-muted-foreground">
+        <span className="block truncate border-t border-hairline px-3 py-1 font-mono text-micro text-muted-foreground">
           {image}
         </span>
       )}
@@ -427,7 +409,7 @@ export const ProcessNode = memo(function ProcessNode({ data }: FaceProps) {
     <div className={cn(shell(state, item.tone), "flex flex-col rounded-xl")}>
       <Ports data={data} />
       <SharedMark node={node} />
-      <span className="map-detail flex h-6 shrink-0 items-center gap-1.5 border-b border-hairline bg-background/60 px-3 font-mono text-micro text-muted-foreground">
+      <span className="flex h-6 shrink-0 items-center gap-1.5 border-b border-hairline bg-background/60 px-3 font-mono text-micro text-muted-foreground">
         <Terminal className="size-3" />
         {pm2 ? "pm2" : "systemd"}
         {item.detail && <span className="truncate">· {item.detail}</span>}
@@ -435,10 +417,8 @@ export const ProcessNode = memo(function ProcessNode({ data }: FaceProps) {
       <div className="flex min-h-0 flex-1 items-center gap-3 px-3">
         <ItemMark item={item} kind={node.kind} />
         <div className="min-w-0 flex-1">
-          <Eyebrow className="map-detail">{pm2 ? "PM2 app" : "Service"}</Eyebrow>
-          <Name base={13} className="text-body">
-            {item.name}
-          </Name>
+          <Eyebrow>{pm2 ? "PM2 app" : "Service"}</Eyebrow>
+          <Name className="text-body">{item.name}</Name>
           <State item={item} />
         </div>
       </div>
@@ -461,19 +441,17 @@ export const DatastoreNode = memo(function DatastoreNode({ data }: FaceProps) {
       <div className="flex min-w-0 flex-1 items-center gap-3 px-4 pt-2">
         <ItemMark item={item} kind={store ? "databases" : node.kind} />
         <div className="min-w-0 flex-1">
-          <Eyebrow className="map-detail">{store ? "Dashboard store" : "Database"}</Eyebrow>
-          <Name base={14} className="text-sm">
-            {item.name}
-          </Name>
+          <Eyebrow>{store ? "Dashboard store" : "Database"}</Eyebrow>
+          <Name className="text-sm">{item.name}</Name>
           <span className="flex min-w-0 items-center gap-2">
             <State item={item} />
             {answered && (
-              <span className="map-detail font-mono text-micro text-muted-foreground">
+              <span className="truncate font-mono text-micro text-muted-foreground">
                 {answered}
               </span>
             )}
           </span>
-          <span className="map-detail mt-0.5 block truncate font-mono text-micro text-muted-foreground">
+          <span className="mt-0.5 block truncate font-mono text-micro text-muted-foreground">
             {[engine, where && `in ${where}`].filter(Boolean).join(" · ")}
           </span>
         </div>
@@ -497,13 +475,11 @@ export const VolumeNode = memo(function VolumeNode({ data }: FaceProps) {
         <span className="size-1.5 rounded-full bg-muted-foreground" />
       </span>
       <div className="min-w-0 flex-1">
-        <Name base={11} className="font-mono text-hint font-medium">
-          {item.name}
-        </Name>
-        <span className="flex items-center gap-2">
-          <State item={item} className="text-micro" />
+        <Name className="font-mono text-hint font-medium">{item.name}</Name>
+        <span className="flex min-w-0 items-center gap-2">
+          <State item={item} />
           {item.detail && (
-            <span className="map-detail font-mono text-micro text-muted-foreground">
+            <span className="truncate font-mono text-micro text-muted-foreground">
               {item.detail}
             </span>
           )}
@@ -525,14 +501,12 @@ export const BackupNode = memo(function BackupNode({ data }: FaceProps) {
       <div className="flex min-h-0 flex-1 items-center gap-3 px-3">
         <ProductLogo id={item.product} fallback={Archive} />
         <div className="min-w-0 flex-1">
-          <Eyebrow className="map-detail">Backup</Eyebrow>
-          <Name base={13} className="text-body">
-            {item.name}
-          </Name>
+          <Eyebrow>Backup</Eyebrow>
+          <Name className="text-body">{item.name}</Name>
           <State item={item} />
         </div>
       </div>
-      <span className="map-detail flex items-center gap-1.5 truncate border-t border-hairline px-3 py-1.5 text-micro text-muted-foreground">
+      <span className="flex items-center gap-1.5 truncate border-t border-hairline px-3 py-1.5 text-micro text-muted-foreground">
         <Clock className="size-3 shrink-0" />
         <span className="truncate">
           {[item.detail, destination].filter(Boolean).join(" · ") || "no schedule"}
@@ -605,12 +579,12 @@ export const SatelliteNode = memo(function SatelliteNode({ data }: FaceProps) {
           <ItemMark item={item} kind={node.kind} size="sm" className="border-0 bg-transparent" />
         )}
       </span>
-      <Name base={11} className="mt-1.5 w-full text-hint font-medium">
+      <Name className="mt-1.5 w-full text-hint font-medium">
         {node.kind === "certificates" ? "Certificate" : item.name}
       </Name>
       <span
         className={cn(
-          "map-detail block w-full truncate text-micro",
+          "block w-full truncate text-micro",
           item.tone === "danger"
             ? "text-destructive"
             : item.tone === "warning"
@@ -724,9 +698,11 @@ function Gateway({
 // ---------------------------------------------------------------------------
 
 /**
- * A system's frame: its mark, its name, what anchors it and what it holds, on
- * a head that flies the canvas to it. The ground inside is a step up from the
- * canvas's so one system reads as one thing among the others.
+ * A system's frame: its mark, its name, what anchors it and what it holds.
+ * The ground inside is a step up from the canvas's so one system reads as one
+ * thing among the others, and its head is the handle the whole diagram is
+ * carried by (the canvas picks it up from `map-frame-grip`) — `nopan` so
+ * pressing it does not start a pan instead.
  */
 export const SystemFrameNode = memo(function SystemFrameNode({ data }: NodeProps<Node<FrameData>>) {
   const loose = data.kind === "loose"
@@ -739,7 +715,10 @@ export const SystemFrameNode = memo(function SystemFrameNode({ data }: NodeProps
         data.dimmed && "opacity-40",
       )}
     >
-      <div className="map-frame-head flex h-16 items-center gap-3 border-b border-hairline px-6">
+      <div
+        title="Drag to move this system"
+        className="map-frame-grip nopan nodrag flex h-16 items-center gap-3 rounded-t-[28px] border-b border-hairline px-6"
+      >
         {loose ? (
           <span className="flex size-10 items-center justify-center rounded-lg border border-hairline bg-background">
             <Layers className="size-4 text-muted-foreground" />
@@ -748,13 +727,10 @@ export const SystemFrameNode = memo(function SystemFrameNode({ data }: NodeProps
           <ItemMark item={data.anchor} kind={data.anchorKind} />
         )}
         <div className="min-w-0 flex-1">
-          <span
-            className="map-name map-frame-title block truncate text-title font-semibold text-foreground"
-            style={{ "--map-base": "15px" } as React.CSSProperties}
-          >
+          <span className="map-name block truncate text-title font-semibold text-foreground">
             {data.title}
           </span>
-          <span className="map-detail block truncate text-hint text-muted-foreground">
+          <span className="block truncate text-hint text-muted-foreground">
             {SYSTEM_LABEL[data.kind]}
             {data.census && ` · ${data.census}`}
           </span>
@@ -763,29 +739,9 @@ export const SystemFrameNode = memo(function SystemFrameNode({ data }: NodeProps
           <Status
             tone={TONE_DOT[data.anchor.tone]}
             label={data.anchor.state}
-            className="map-detail shrink-0 text-hint"
+            className="max-w-[40%] min-w-0 text-hint [&>span:last-child]:truncate"
           />
         )}
-      </div>
-      {/* From far out the frame is its name, held to about 15px on the screen. */}
-      <div className="map-far-title pointer-events-none absolute inset-0 items-center justify-center">
-        <span className="flex origin-center [transform:scale(calc(var(--map-unzoom,1)*0.95))] items-center gap-2 rounded-lg border border-hairline bg-popover px-3 py-1.5 whitespace-nowrap">
-          <span
-            className={cn(
-              "size-2 rounded-full",
-              loose
-                ? "bg-muted-foreground"
-                : data.anchor.tone === "danger"
-                  ? "bg-destructive"
-                  : data.anchor.tone === "warning"
-                    ? "bg-warning"
-                    : data.anchor.tone === "ok"
-                      ? "bg-success"
-                      : "bg-muted-foreground",
-            )}
-          />
-          <span className="text-title font-semibold text-foreground">{data.title}</span>
-        </span>
       </div>
     </div>
   )
@@ -822,14 +778,14 @@ export const StackFrameNode = memo(function StackFrameNode({ data }: NodeProps<N
           className="size-6 rounded-md"
           fallback={Layers}
         />
-        <span className="eyebrow">Stack</span>
-        <span className="truncate font-mono text-hint font-medium text-foreground">
+        <span className="eyebrow shrink-0">Stack</span>
+        <span className="min-w-0 truncate font-mono text-hint font-medium text-foreground">
           {item.name}
         </span>
         <Status
           tone={TONE_DOT[item.tone]}
           label={item.state}
-          className="map-detail ml-auto text-micro"
+          className="ml-auto max-w-[45%] min-w-0 text-micro [&>span:last-child]:truncate"
         />
       </div>
     </div>

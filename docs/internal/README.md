@@ -87,9 +87,9 @@ strategy, and feature ownership behind those rules.
   the menu, and route permissions.
 - [`server-map.md`](server-map.md) — the server map: one diagram per system (each deployment, stack,
   PM2 app, this dashboard), how a system is found from the links and what it takes, the columns and
-  the shape of each kind of box, satellites and stack frames, dragging, the three distances, the one
-  read and its held sources, the links and how each is known, who is sent what, the per-account
-  arrangement and the tests.
+  the shape of each kind of box, satellites and stack frames, moving the canvas like a whiteboard,
+  dragging boxes and carrying systems, the one read and its held sources, the links and how each is
+  known, who is sent what, the per-account arrangement and the tests.
 - [`backend/deploy-api.md`](backend/deploy-api.md) — the deployment API's OpenAPI 3.1 description:
   generated from the router and the handlers' types, served at `GET /deploy/openapi.json`, committed
   under `docs/api/`, the tests that keep it honest, and what is generated from it: the Go and
