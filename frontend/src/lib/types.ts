@@ -2812,6 +2812,24 @@ export type BackupJob = {
   /** New archives are sealed to the server's backup key before they are written. */
   encrypt?: boolean
   recovery?: BackupRecoveryPlan
+  /**
+   * Adopted from what a destination holds: the record of another server's job
+   * (or this one's before a rebuild). It never runs, is never scheduled, and
+   * its archives are never pruned from here.
+   */
+  imported?: boolean
+  origin?: BackupJobOrigin
+}
+
+/** What an imported job was on the server it came from. */
+export type BackupJobOrigin = {
+  /** The install's identity, a random value made once per install. */
+  id: string
+  host?: string
+  jobId: number
+  jobName: string
+  /** Archives this install wrote whose records it no longer had. */
+  thisServer?: boolean
 }
 
 /** The server's backup key, by its public half; the secret never leaves but by export. */
@@ -2823,6 +2841,8 @@ export type BackupArchiveKey = {
   exportedAt?: string
   encryptingJobs: number
   encryptedArchives: number
+  /** Keys brought from other servers to open what they sealed; nothing new is sealed to them. */
+  imported?: { recipient: string; importedAt: string }[]
 }
 
 export type BackupResourceKind =
@@ -2873,6 +2893,20 @@ export type BackupRestoreResult = {
   bytes: number
   skipped?: string[]
   targets?: string[]
+  /** What a restore in place made first: "volume NAME", or a directory. */
+  created?: string[]
+}
+
+/** Where one recorded source goes in a restore in place on this host, and what it makes first. */
+export type BackupRestoreTarget = {
+  archivePath: string
+  path: string
+  target: string
+  kind: "path" | "volume"
+  volume?: string
+  exists: boolean
+  creates?: "volume" | "directory"
+  refused?: string
 }
 
 export type BackupDatabaseDump = {
@@ -2892,10 +2926,28 @@ export type BackupManifest = {
   /** Over the bytes the destination holds: the ciphertext, for an encrypted archive. */
   artifactDigest: string
   complete: boolean
-  sources?: { path: string; archivePath: string }[]
+  sources?: BackupManifestSource[]
   databaseDumps?: BackupDatabaseDump[]
   pausedContainers?: string[]
   encryption?: BackupArchiveEncryption
+  artifactBytes?: number
+  /** The install, job and run that took the archive; written since 0.8.2. */
+  origin?: {
+    id: string
+    host?: string
+    jobId: number
+    jobName: string
+    runId: number
+    startedAt: string
+  }
+}
+
+export type BackupManifestSource = {
+  path: string
+  archivePath: string
+  /** "volume" for a Docker volume's directory; absent for a path. */
+  kind?: "volume"
+  volume?: string
 }
 
 /** How an archive was sealed: age, to the key whose public half is `recipient`. */
@@ -2948,6 +3000,10 @@ export type BackupRun = {
   duration?: string
   manifest?: BackupManifest
   restoreVerification?: BackupRestoreVerification
+  /** Adopted from a destination; its artifact is the destination's object. */
+  imported?: boolean
+  /** A copy the import kept on this server, read first while it is there. */
+  localCopy?: string
 }
 
 export type DeployProject = {

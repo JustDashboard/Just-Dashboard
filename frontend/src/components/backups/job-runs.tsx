@@ -90,7 +90,11 @@ export function RunRail({
                   />
                 </span>
                 <span className="numeric w-24 shrink-0 truncate text-right text-hint text-muted-foreground">
-                  {run.trigger.replaceAll("_", " ")} · {run.duration ?? "running"}
+                  {/* An imported run was taken elsewhere; how long it took is that
+                      server's to have recorded, and it is not still running. */}
+                  {run.imported
+                    ? "imported"
+                    : `${run.trigger.replaceAll("_", " ")} · ${run.duration ?? "running"}`}
                 </span>
               </span>
             </button>
