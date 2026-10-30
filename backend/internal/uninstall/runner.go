@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 )
 
 // The program the sibling container runs: `just-dashboard -self-uninstall`.
@@ -136,6 +137,13 @@ func carryOut(ctx context.Context, store *Store, run *Run, out io.Writer, host H
 		_ = host.Docker(ctx, run.Dir, io.Discard, "rm", "-f", name)
 	}
 	for _, image := range built {
+		// An update keeps the version before it under this tag, and the image
+		// stays on the server until the tag goes. Most installs have none yet.
+		if previous := selfupdate.PreviousImage(image); previous != "" {
+			if host.Docker(ctx, run.Dir, io.Discard, "image", "rm", previous) == nil {
+				fmt.Fprintf(out, "removed image %s\n", previous)
+			}
+		}
 		if image == run.Image {
 			continue
 		}
