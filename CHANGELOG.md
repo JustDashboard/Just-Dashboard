@@ -24,6 +24,8 @@ Deployments gain what hosted platforms put between a commit and production: a st
   - Each release's image and the bases it was pinned on are scanned with Trivy after the build and daily while the release is live, and the project overview's Vulnerabilities panel lists the findings that have a fix beside Rebuild, which builds again on the base's current digest. A host alert fires when a live release has a fixable finding at or above the environment's floor, High unless set in Build settings, and a newer base exists. The vulnerability database is downloaded by the dashboard from mirror.gcr.io, or ghcr.io, about once a day.
 - The image scanner runs with no network and never sees the Docker socket
   - Trivy runs as a one-shot container as nobody, with no network, no capabilities, a read-only root and limits on memory, processors and processes, reading only the image archive it is handed. The dashboard downloads and checks the database itself, so the scanner has nothing to reach.
+- The last way in cannot be closed from System users
+  - Deleting, disabling, locking, removing the last key, changing the shell or taking away sudo is refused when nobody else could sign in over SSH and become root. Accounts a package made are read-only until editing is turned on for them, a login shell has to be one the host lists, and a new person's account has to be given a way in or be said to need none.
 
 ### Added
 
@@ -133,6 +135,24 @@ Deployments gain what hosted platforms put between a commit and production: a st
   - On a server without nginx the overview opens on Install nginx and certbot, with the exact command beside it, streams the install and redraws as the engine view. A module a host package provides gets Install in the modules list, and every install shares one console, so two never race for the package manager.
 - Paste files, screenshots and text from your computer into the Files page
   - Ctrl or Cmd+V uploads files copied in Explorer or Finder into the open folder through the usual upload review, a copied picture as a Pasted image named with the time, and copied text as a text file. Copying in the dashboard puts the selected paths on your clipboard, one per line.
+- Count this server in the public install numbers, if an administrator says yes
+  - An administrator is asked once on the Overview, and nothing is sent until somebody says yes. A yes sends one report a day: the version and whether anybody signed in today and this week, with no ID and no hostname. Settings → Configuration prints the report exactly as it is sent and has the off switch, and JD_USAGE_PING=false means nobody is asked and nothing is ever sent.
+- Set, generate and remove an account's password, and disable an account outright
+  - Passwords go to chpasswd over stdin and a generated one is shown once. A password can be required to change at the next sign-in, given an expiry and rules for its age, and a faillock lockout can be cleared. Disabling expires the account, which stops keys as well, where a password lock does not.
+- Grant and take away sudo from an account's page
+  - With a password, without one, or for named commands. A grant is its own file in /etc/sudoers.d, checked by visudo before it can take effect and taken back if the whole configuration stops parsing, because one bad line stops sudo for everyone. Rules in other files, cloud-init's included, can be removed from the account they name.
+- Manage SSH keys properly
+  - Import a person's public keys from GitHub, generate a pair and download the private half once, label a key, limit it by address, command or expiry date, copy it to another account, and see when each was last used and whether it is too weak to keep.
+- Manage groups, an account's identity and its limits
+  - Create, rename and delete groups and choose their members, each saying what it grants. Rename an account, which takes its private group, crontab and sudo rule along, change its full name, shell, home, main group and number, and cap its CPU, memory, processes and, where the filesystem has quotas on, its disk.
+- Open a terminal as any account
+  - An administrator can open a shell as a chosen account, root included, and every window opened from it stays that account.
+- See what an account is doing and has done
+  - Its sessions, which can be ended, its busiest processes, cron jobs and disk use, with its sign-ins, refused attempts and sudo commands as the host recorded them.
+- Be told when the host's accounts change
+  - A new host alert, Accounts changed, reports a new account, SSH key or sudo rule that reaches root, and root signing in, whether or not the dashboard made the change.
+- Set the rules new accounts start under, and start from a template
+  - Password age and length, the default shell and days of inactivity are edited in the host's own files with everything else in them left alone. Accounts can start from a built-in template or one of your own, and several can be locked, disabled, re-enabled or moved between groups at once.
 
 ### Changed
 
@@ -154,6 +174,8 @@ Deployments gain what hosted platforms put between a commit and production: a st
   - It counts the sites served and opens a blank site on Proxy → Sites, for administrators who keep Proxy in their sidebar.
 - The dashboard draws itself with the new brand logo
   - The wordmark, the start-up splash and the browser icons use the new mark, and the dashboard's own stack, containers, sockets and routes show it where they showed Docker's or Caddy's.
+- Deleting an account says what it would leave behind and lets you choose
+  - It counts the home, the files the account owns elsewhere, its running processes, cron jobs and sudo rules first. The home can be kept, archived or deleted, and the account's files handed to another; its sudo rules, crontab and limits go with it, so they cannot land on whoever is next given that name or number. Deleting a home with no archive now takes the account's name typed.
 
 ### Fixed
 
@@ -189,6 +211,12 @@ Deployments gain what hosted platforms put between a commit and production: a st
   - Package commands ran inside the backend's container, so an upgrade of docker-ce restarted Docker, killed the dpkg configuring it, and left every later apt command refusing to run. Installs, upgrades and removals now run as host systemd units that a restarted backend reconnects to, an interrupted dpkg is finished first, and a command waits for unattended-upgrades to let go of the lock instead of failing.
 - Closing a terminal window no longer crashes its reader or leaves its shell running
   - A window closed while its output was being announced could crash the loop reading it, and a lost hangup let the shell outlive the window. The close and the announcement are now ordered, and the window waits for the shell to exit.
+- The version check says how often it really runs
+  - Configuration and the README said four times a day. It runs every two hours, and at most every five minutes while pages are being opened.
+- System users no longer says a password was unlocked when nothing changed
+  - An account with no password behind its lock, which is every account this page created and the login on most cloud images, has nothing to unlock. usermod said so on stderr, changed nothing and exited 0, so the page reported success. It now says there is no password to unlock and offers to set one.
+- System users tells you who can really sign in
+  - Each account now says whether SSH would let it in by password and by key, and what stands in the way, read from the shadow file, its keys and sshd's own configuration for that account. Root is always listed: it was hidden as a system account, so a host where root signs in with a password read as having no way in at all. Who can become root comes from the sudoers files rather than from group names, so cloud-init's passwordless rule shows and a sudo group member with no password to type does not read as root.
 
 ## 0.8.1 — 19 October 2026
 
