@@ -75,13 +75,24 @@ export type MapDocument = {
    * lays it out without moving anything the reader arranged.
    */
   positions: Record<string, Point>
+  /**
+   * Where a whole system was carried to by its head, by system id
+   * (`system:project:1`): its frame's corner on the canvas. A system nobody
+   * carried has none and keeps the place the atlas gives it.
+   */
+  frames: Record<string, Point>
   /** The system the reader was last looking at, flown back to on the next visit. */
   focus?: string
   viewport?: { x: number; y: number; zoom: number }
   minimap: boolean
 }
 
-export const DEFAULT_DOCUMENT: MapDocument = { version: 2, positions: {}, minimap: true }
+export const DEFAULT_DOCUMENT: MapDocument = {
+  version: 2,
+  positions: {},
+  frames: {},
+  minimap: true,
+}
 
 const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n)
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -98,11 +109,14 @@ export function decodeDocument(raw: unknown): MapDocument {
   if (!isRecord(raw)) return DEFAULT_DOCUMENT
   const minimap = typeof raw.minimap === "boolean" ? raw.minimap : DEFAULT_DOCUMENT.minimap
   if (raw.version !== 2) return { ...DEFAULT_DOCUMENT, minimap }
-  const positions: Record<string, Point> = {}
-  if (isRecord(raw.positions)) {
-    for (const [id, p] of Object.entries(raw.positions)) {
-      if (isRecord(p) && finite(p.x) && finite(p.y)) positions[id] = { x: p.x, y: p.y }
+  const points = (from: unknown) => {
+    const out: Record<string, Point> = {}
+    if (isRecord(from)) {
+      for (const [id, p] of Object.entries(from)) {
+        if (isRecord(p) && finite(p.x) && finite(p.y)) out[id] = { x: p.x, y: p.y }
+      }
     }
+    return out
   }
   const v = raw.viewport
   const viewport =
@@ -111,7 +125,9 @@ export function decodeDocument(raw: unknown): MapDocument {
       : undefined
   return {
     version: 2,
-    positions,
+    positions: points(raw.positions),
+    // Saved before systems could be carried: none was.
+    frames: points(raw.frames),
     focus: typeof raw.focus === "string" ? raw.focus : undefined,
     viewport,
     minimap,
@@ -119,5 +135,5 @@ export function decodeDocument(raw: unknown): MapDocument {
 }
 
 export function isArranged(doc: MapDocument) {
-  return Object.keys(doc.positions).length > 0
+  return Object.keys(doc.positions).length > 0 || Object.keys(doc.frames).length > 0
 }

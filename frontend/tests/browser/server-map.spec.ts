@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
-import { freshMap, mockServerMap } from "./server-map-fixture"
+import type { MapItem } from "@/lib/types"
+import { busyMap, freshMap, mockServerMap } from "./server-map-fixture"
 
 /**
  * The server map against a busy server — this dashboard, six deployments, two
@@ -20,6 +21,24 @@ async function open(page: Page, path = "/map", options?: Parameters<typeof mockS
   await page.goto(path)
   await expect(page.locator(".react-flow__node").first()).toBeVisible()
   return mock
+}
+
+/** Where the canvas is and how far in: the transform React Flow puts on its viewport. */
+const view = (page: Page) =>
+  page.locator(".react-flow__viewport").evaluate((el) => {
+    const m = new DOMMatrix(getComputedStyle(el).transform)
+    return { x: m.e, y: m.f, zoom: m.a }
+  })
+
+/** Waits out a flight: the canvas has stopped moving. */
+async function still(page: Page) {
+  await expect
+    .poll(async () => {
+      const a = await view(page)
+      await page.waitForTimeout(120)
+      return JSON.stringify(a) === JSON.stringify(await view(page))
+    })
+    .toBe(true)
 }
 
 async function at(page: Page, id: string) {
@@ -218,11 +237,167 @@ test("an arrangement the mind map saved is read as a fresh one", async ({ page }
   await expect(frame(page, "system:project:1")).toBeVisible()
 })
 
-test("from far out each system is its name across its frame", async ({ page }) => {
-  await open(page)
+test("nothing changes size but by the zoom: far out, every word is the same size, only smaller", async ({
+  page,
+}) => {
+  await open(page, "/map?system=system:project:1")
+  const title = frame(page, "system:project:1").locator(".map-name").first()
+  const name = node(page, "system:project:1/db:1").locator(".map-name")
+  const sizes = async () => ({
+    title: await title.evaluate((el) => getComputedStyle(el).fontSize),
+    name: await name.evaluate((el) => getComputedStyle(el).fontSize),
+  })
+  const near = await sizes()
   await page.getByRole("button", { name: "All", exact: true }).click()
-  await expect(page.locator("[data-slot=server-map]")).toHaveAttribute("data-zoom", "far")
-  await expect(frame(page, "system:project:1").locator(".map-far-title")).toBeVisible()
+  await expect.poll(async () => (await view(page)).zoom).toBeLessThan(0.3)
+  expect(await sizes()).toEqual(near)
+  await expect(node(page, "system:project:1/db:1")).not.toHaveCSS("opacity", "0.5")
+})
+
+test("a trackpad's two fingers slide the canvas and a pinch zooms it, as on a whiteboard", async ({
+  page,
+}) => {
+  await open(page, "/map?system=system:project:1")
+  const box = (await page.locator("[data-slot=server-map]").boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+
+  const start = await view(page)
+  await page.mouse.wheel(120, 80)
+  await expect
+    .poll(() => view(page))
+    .toEqual({
+      x: start.x - 120,
+      y: start.y - 80,
+      zoom: start.zoom,
+    })
+
+  // A pinch is a wheel with Ctrl held, which is also how a mouse zooms.
+  const before = await view(page)
+  await page.keyboard.down("Control")
+  await page.mouse.wheel(0, -40)
+  await page.keyboard.up("Control")
+  await expect.poll(async () => (await view(page)).zoom).toBeGreaterThan(before.zoom)
+
+  // The keys a whiteboard has: Ctrl+0 is the real size, Shift+1 everything.
+  await page.keyboard.press("Control+0")
+  await expect(page.getByRole("button", { name: "100%" })).toBeVisible()
+  await page.keyboard.press("Shift+Digit1")
+  await expect.poll(async () => (await view(page)).zoom).toBeLessThan(0.5)
+})
+
+test("a mouse drags the canvas by open ground, inside a system's frame as well as between them", async ({
+  page,
+}) => {
+  await open(page, "/map?system=system:project:1")
+  const f = await at(page, "frame:system:project:1")
+  // Inside the frame, under its head, where no box is.
+  const from = { x: f.x + 12, y: f.y + f.height - 12 }
+  const start = await view(page)
+  await page.mouse.move(from.x, from.y)
+  await page.mouse.down()
+  await page.mouse.move(from.x + 90, from.y - 40, { steps: 6 })
+  await page.mouse.up()
+  const after = await view(page)
+  expect(after.x - start.x).toBeCloseTo(90, 0)
+  expect(after.y - start.y).toBeCloseTo(-40, 0)
+})
+
+test("a system is carried by its head, everything in it with it, and stays where it was put", async ({
+  page,
+}) => {
+  const mock = await open(page, "/map?system=system:stack:monitoring")
+  const s = "system:stack:monitoring"
+  const head = frame(page, s).locator(".map-frame-grip")
+  const was = {
+    frame: await at(page, `frame:${s}`),
+    box: await at(page, `${s}/container:c-grafana`),
+  }
+  const grip = (await head.boundingBox())!
+  const camera = await view(page)
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(grip.x + grip.width / 2 + 160, grip.y + grip.height / 2 + 120, { steps: 8 })
+  await page.mouse.up()
+
+  const now = {
+    frame: await at(page, `frame:${s}`),
+    box: await at(page, `${s}/container:c-grafana`),
+  }
+  expect(now.frame.x - was.frame.x).toBeCloseTo(160, 0)
+  expect(now.frame.y - was.frame.y).toBeCloseTo(120, 0)
+  expect(now.box.x - was.box.x).toBeCloseTo(160, 0)
+  expect(now.box.y - was.box.y).toBeCloseTo(120, 0)
+
+  await expect.poll(() => mock.saved.puts).toBeGreaterThan(0)
+  const saved = mock.saved.layout as { frames: Record<string, { x: number; y: number }> }
+  expect(Object.keys(saved.frames)).toEqual([s])
+  // Picking it up and putting it down is not a click: the camera stayed put.
+  expect(await view(page)).toEqual(camera)
+
+  await page.reload()
+  await expect(frame(page, s)).toBeVisible()
+  // Everything in view, so the system it is measured against is drawn too.
+  await page.getByRole("button", { name: "All", exact: true }).click()
+  await still(page)
+  const other = "system:stack:data"
+  const gap = async () => {
+    const [a, b] = [await at(page, `frame:${s}`), await at(page, `frame:${other}`)]
+    const z = (await view(page)).zoom
+    return { x: Math.round((a.x - b.x) / z), y: Math.round((a.y - b.y) / z) }
+  }
+  const kept = await gap()
+  // Across the reload it is still where it was put against a system nobody carried.
+  expect(kept.x).not.toBe(0)
+  await page.getByRole("button", { name: /Tidy up/ }).click()
+  await expect.poll(() => Object.keys((mock.saved.layout as { frames: object }).frames)).toEqual([])
+  await expect.poll(gap).not.toEqual(kept)
+})
+
+test("no box's words run out of it, however long a name or a state is", async ({ page }) => {
+  const long = (i: MapItem): MapItem => ({
+    ...i,
+    name: `${i.name}-with-a-name-longer-than-any-box`,
+    state: i.state && `${i.state} and a good deal more besides`,
+    detail: i.detail && `${i.detail} · and a long tail of detail`,
+    facts: i.facts?.map((f) => ({ ...f, value: `${f.value} and a long tail` })),
+  })
+  for (const map of [
+    busyMap,
+    {
+      ...busyMap,
+      kinds: busyMap.kinds.map((k) => ({
+        ...k,
+        items: (k.items as MapItem[] | undefined)?.map(long),
+      })),
+    },
+  ]) {
+    await page.setViewportSize({ width: 1920, height: 1080 })
+    await mockServerMap(page, { map: map as typeof busyMap })
+    await page.goto("/map")
+    await expect(page.locator(".react-flow__node").first()).toBeVisible()
+    await page.getByRole("button", { name: "All", exact: true }).click()
+    await expect.poll(async () => (await view(page)).zoom).toBeLessThan(0.3)
+    const spilled = await page.evaluate(() => {
+      const out: string[] = []
+      const vp = document.querySelector(".react-flow__viewport") as HTMLElement
+      const zoom = new DOMMatrix(getComputedStyle(vp).transform).a
+      for (const n of document.querySelectorAll<HTMLElement>(".react-flow__node")) {
+        const r = n.getBoundingClientRect()
+        for (const el of n.querySelectorAll<HTMLElement>("*")) {
+          // A port sits on the outline, and the shared tag on the corner, by design.
+          if (el.closest(".react-flow__handle, [title^='Also drawn in']")) continue
+          const e = el.getBoundingClientRect()
+          if (!e.width || !e.height) continue
+          const over =
+            Math.max(r.left - e.left, e.right - r.right, r.top - e.top, e.bottom - r.bottom) / zoom
+          if (over > 1)
+            out.push(`${n.dataset.id}: ${el.textContent?.slice(0, 30)} by ${Math.round(over)}px`)
+        }
+      }
+      return out
+    })
+    expect(spilled).toEqual([])
+  }
 })
 
 test("a server with nothing on it offers the first deployment, and says what it could not read", async ({

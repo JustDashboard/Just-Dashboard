@@ -513,7 +513,7 @@ export type System = {
 /** The sizes the shapes are drawn at, by face and, for a container, by role. */
 export const FACE_SIZE: Record<Face, { width: number; height: number }> = {
   hero: { width: 288, height: 164 },
-  stack: { width: 256, height: 124 },
+  stack: { width: 256, height: 132 },
   entry: { width: 232, height: 64 },
   runtime: { width: 216, height: 88 },
   process: { width: 216, height: 84 },

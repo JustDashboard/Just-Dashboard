@@ -87,7 +87,7 @@ export const Wire = memo(function Wire({
                   ? `Also: ${data.also.map((v) => VIA_LABEL[v] ?? v).join(", ")}`
                   : undefined
               }
-              className="block [transform:scale(max(1,calc(var(--map-unzoom,1)*0.8)))] rounded-sm border border-hairline bg-popover px-1.5 py-0.5 text-micro whitespace-nowrap text-muted-foreground"
+              className="block rounded-sm border border-hairline bg-popover px-1.5 py-0.5 text-micro whitespace-nowrap text-muted-foreground"
             >
               {label}
             </span>

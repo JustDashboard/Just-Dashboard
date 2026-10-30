@@ -99,14 +99,38 @@ where there is not. The same reading lays out the same diagram.
 
 ## Moving it
 
+The canvas moves the way a whiteboard's does (Excalidraw's), set once in `MOVE` in `canvas.tsx`:
+
+- **On a trackpad** two fingers slide it (`panOnScroll`, at the fingers' own pace) and a pinch zooms it
+  about the fingers — a pinch arrives as a wheel with Ctrl held (`zoomOnPinch`). Safari sends its
+  pinch as `gesture*` events instead, and would zoom the page with it: the canvas takes those itself,
+  zooming about where the pointer last was, and lets go of any Ctrl-wheel Safari also sends during
+  one so a pinch zooms once.
+- **With a mouse** a drag on open ground slides it — inside a system's frame as well as between frames,
+  since a frame is not draggable and so not `nopan` — and so does a middle-button drag anywhere. Its
+  wheel slides it too (Shift for sideways); Ctrl or ⌘ with the wheel zooms. Space held makes any drag
+  a slide. Double-clicking the canvas does not zoom.
+- **Keys**, wherever the page has the keyboard and not a field: Ctrl/⌘ `+` and `−` zoom, Ctrl/⌘ `0` is
+  the real size, Shift+1 fits every system and Shift+2 what is chosen. The zoom buttons show the
+  percentage, which goes back to 100% when pressed.
+- **Nothing changes size but by the zoom.** Every word, box and line is drawn once at its own size and
+  the zoom scales the picture; from far out the boxes and their names are smaller, never re-lettered,
+  faded or swapped for a title.
+
 A box can be dragged where the reader wants it inside its system: the place is kept against the
 account, by node id and relative to its system (`system:project:1/db:3`), so a reading that adds a
 container lays that one out and moves nothing the reader put. A satellite nobody moved follows the box
 it hangs under, a stack's frame is drawn round wherever its containers are, and the system's frame
-grows round whatever left it (`settle`) without moving the frames beside it. **Tidy up** forgets
-every position (with *Undo* in its toast); **Forget this layout** in Options throws away the whole
-arrangement, the system last read included, behind a confirmation. Systems themselves are not
-dragged: the atlas lays them out.
+grows round whatever left it (`settle`) without moving the frames beside it.
+
+A whole system is carried by its frame's head (`map-frame-grip`, a grab cursor): the canvas picks it
+up on the press, moves it once the pointer has gone a few pixels — less is a click, which only makes
+it the system being read, without moving the camera — and saves the frame's corner by system id when
+it is put down. A system nobody carried keeps the place the atlas gives it.
+
+**Tidy up** forgets every box's position and every system's place (with *Undo* in its toast);
+**Forget this layout** in Options throws away the whole arrangement, the system last read included,
+behind a confirmation.
 
 ## Reading it
 
@@ -126,14 +150,12 @@ dragged: the atlas lays them out.
 - **Search** (`/`) keeps the systems in the rail and the frames on the canvas that hold a match — by
   name, state, detail, product or role — rings each matching box, and Enter chooses the first and
   frames it with its neighbours.
-- **Three distances.** `data-zoom` on the canvas is `near` (every word, from 0.6), `mid` (a box is its
-  mark, its name and its state, from 0.3) or `far`, where each system's name is drawn across its frame
-  held to about 15px on the screen (`--map-unzoom`) over the faded shapes of its boxes. Zooming
-  re-renders no box: the distance is CSS.
+- **No box spills.** A box's name and state are cut short with an ellipsis rather than wrapping or
+  running past its outline, so the sizes `server-systems.ts` lays out are the sizes drawn.
 - **A source that could not be read says so** over the canvas, with its reason, and is never drawn as
   an empty system (security invariants: an unavailable reading is neither healthy nor a problem).
 - **Keys**: `/` search, `f` fit the system being read (or every system), `i` the inspector, Enter
-  opens the chosen box's page, Escape lets it go.
+  opens the chosen box's page, Escape lets it go; the zoom keys are under *Moving it*.
 
 ## What keeps it light
 
@@ -158,7 +180,8 @@ dragged: the atlas lays them out.
 - **Each kind is capped** at 300 things, worst first, with the true total.
 - **The canvas draws what is on screen** (`onlyRenderVisibleElements`), and a box's data is the same
   object while nothing it draws has changed (`faceData` in `canvas.tsx`), so a click re-renders the
-  boxes it lit or dimmed rather than all of them; zooming re-renders none (the distance is CSS).
+  boxes it lit or dimmed rather than all of them; zooming or sliding re-renders none (it is the
+  viewport's transform), and carrying a system moves only its own boxes.
 - **Every node carries `measured`.** React Flow keeps a node's handles — where its lines attach — only
   while the node it is handed says it was measured; a reading or a click that hands it fresh nodes
   without that drops every line on the canvas. The layout knows each box's size, so it hands it over
@@ -221,8 +244,9 @@ every role and is no business of an API key. The server checks only that the bod
 512 KiB; `decodeDocument` reads it back defensively. A save is debounced (900 ms), reported in the
 toolbar (*Saving…*, *Saved*, *Not saved*), sent on the way out of the page on a request the browser
 keeps alive, and audited as `map.layout.save` / `map.layout.reset`. The document (`version: 2`) holds
-the positions of the boxes dragged, by node id inside their system; the system last read; the view;
-and the minimap switch. A version-1 document — the mind map this replaced, whose positions placed
+the positions of the boxes dragged, by node id inside their system; the corners of the systems
+carried, by system id (`frames`, absent from a document saved before systems could be carried); the
+system last read; the view; and the minimap switch. A version-1 document — the mind map this replaced, whose positions placed
 shelves round the server — is read as a fresh arrangement, keeping only its minimap switch.
 
 ## Tests
@@ -257,5 +281,8 @@ shelves round the server — is read as a fresh arrangement, keeping only its mi
   stack, roles and store; choosing a box (its lines named in the inspector, the rest stepped back,
   Escape); a shared database's *Also drawn in* flying to the stack that runs it; the rail flying the
   canvas and a search keeping what holds a match; a drag saved by node id, kept across a reload and
-  tidied away; a version-1 arrangement read as fresh; the far distance's titles; and a fresh server's
-  offer to deploy with what it could not read. `/map` is one of `design-system.spec.ts`'s surfaces.
+  tidied away; a version-1 arrangement read as fresh; every word the same size far out; a trackpad's
+  slide, its pinch and the zoom keys; a mouse sliding the canvas from inside a frame; a system carried
+  by its head with everything in it, not taken for a click, kept across a reload and tidied away; no
+  box's words running out of it with every name and state stretched; and a fresh server's offer to
+  deploy with what it could not read. `/map` is one of `design-system.spec.ts`'s surfaces.

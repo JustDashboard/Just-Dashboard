@@ -82,22 +82,26 @@ const ZOOM = { min: 0.06, max: 2 }
 const FLY = { padding: 0.04, maxZoom: 1 }
 
 /**
- * The distance the canvas is read at. Near, every word; mid, a box is its
- * mark, its name and its state; far, each system is its name across its
- * frame. One attribute CSS reads, so zooming re-renders no box.
+ * How the canvas is moved, a whiteboard's (Excalidraw's): two fingers on a
+ * trackpad slide it, a pinch zooms it about the fingers; a mouse drags it by
+ * any open ground, or by its middle button anywhere, and its wheel slides it
+ * too — Ctrl or ⌘ with the wheel zooms, Shift with it slides sideways. Space
+ * held makes any drag a slide. Nothing on it changes size but by the zoom.
  */
-function zoomBucket(zoom: number): "near" | "mid" | "far" {
-  if (zoom < 0.28) return "far"
-  if (zoom < 0.62) return "mid"
-  return "near"
+const MOVE = {
+  panOnScroll: true,
+  panOnScrollSpeed: 1,
+  zoomOnScroll: false,
+  zoomOnPinch: true,
+  zoomOnDoubleClick: false,
+  panOnDrag: [0, 1],
 }
 
-/** The size a name is held at, in whole pixels so a zoom lays the names out a few times, not every frame. */
-function nameFloor(zoom: number) {
-  return Math.min(24, Math.round(10.5 / Math.max(zoom, 0.05)))
-}
+const clampZoom = (z: number) => Math.min(ZOOM.max, Math.max(ZOOM.min, z))
 
 type Seat = { system: System; placed: Placed; origin: Point }
+
+const atlasCorner = (p: Placed): Point => ({ x: p.x, y: p.y })
 
 /**
  * A box's data, one object per box per state, so a click re-renders only the
@@ -159,38 +163,28 @@ export function MapCanvas({
   const { confirm, dialog } = useConfirm()
   const canvasRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
-  const zoom = useStore((s) => zoomBucket(s.transform[2]))
-
-  // Names with open ground round them — a system's title across its frame
-  // from far out, a line's label — are held to the screen against the zoom,
-  // written straight onto the canvas so a zoom draws no React.
   const store = useStoreApi()
-  useEffect(() => {
-    let floor = ""
-    const apply = (z: number) => {
-      const canvas = canvasRef.current
-      if (!canvas) return
-      canvas.style.setProperty("--map-unzoom", String(1 / Math.max(z, 0.05)))
-      const next = `${nameFloor(z)}px`
-      if (next !== floor) {
-        floor = next
-        canvas.style.setProperty("--map-name-floor", next)
-      }
-    }
-    apply(store.getState().transform[2])
-    return store.subscribe((state) => apply(state.transform[2]))
-  }, [store])
 
   const systems = useMemo(() => detectSystems(map), [map])
   const placed = useMemo(() => layoutAtlas(systems), [systems])
+
+  // Where the reader carried whole systems by their heads: the document's,
+  // with the carry in hand laid over it, the same way as a box's drag below.
+  // A system nobody carried keeps the place the atlas gives it.
+  const [carrying, setCarrying] = useState<Record<string, Point> | null>(null)
+  const carryingRef = useRef<Record<string, Point> | null>(null)
+  const frames = carrying ?? doc.frames
+  const corner = useCallback((p: Placed): Point => frames[p.system.id] ?? atlasCorner(p), [frames])
+
   const seats = useMemo(() => {
     const out = new Map<string, Seat>()
     for (const p of placed) {
-      const origin = { x: p.x + FRAME.pad, y: p.y + FRAME.head + FRAME.pad }
+      const at = corner(p)
+      const origin = { x: at.x + FRAME.pad, y: at.y + FRAME.head + FRAME.pad }
       for (const n of p.system.nodes) out.set(n.id, { system: p.system, placed: p, origin })
     }
     return out
-  }, [placed])
+  }, [placed, corner])
   const bySystem = useMemo(() => new Map(placed.map((p) => [p.system.id, p])), [placed])
 
   // Where the reader dragged boxes: the document's, with the drag in hand laid
@@ -232,14 +226,15 @@ export function MapCanvas({
       const p = bySystem.get(id)
       const s = settled.get(id)
       if (!p || !s) return null
+      const at = corner(p)
       return {
-        x: p.x + s.minX,
-        y: p.y + s.minY,
+        x: at.x + s.minX,
+        y: at.y + s.minY,
         width: Math.max(p.width, s.maxX - s.minX + FRAME.pad * 2),
         height: Math.max(p.height, s.maxY - s.minY + FRAME.head + FRAME.pad * 2),
       }
     },
-    [bySystem, settled],
+    [bySystem, settled, corner],
   )
 
   const flyTo = useCallback(
@@ -255,14 +250,125 @@ export function MapCanvas({
     void flow.fitView({ padding: 0.06, duration: 450 })
   }, [flow, update])
   const focusOn = useCallback(
-    (id: string) => {
+    (id: string, fly = true) => {
       setFocus(id)
       setChosen(null)
       update({ focus: id })
-      flyTo(id)
+      if (fly) flyTo(id)
     },
     [flyTo, update],
   )
+
+  const frameNode = useCallback(
+    (id: string) => {
+      const seat = seats.get(id)
+      if (!seat) return
+      const ids = [...neighbours(seat.system, id)]
+      void flow.fitView({
+        nodes: ids.map((n) => ({ id: n })),
+        padding: 0.25,
+        duration: 400,
+        maxZoom: 1.1,
+      })
+    },
+    [flow, seats],
+  )
+
+  // A whiteboard's keys, wherever the page has the keyboard: Ctrl or ⌘ with
+  // + and − zooms, with 0 is the real size; Shift+1 fits everything, Shift+2
+  // what is chosen.
+  const chosenRef = useRef<{ chosen: string | null; focus: string | null }>({
+    chosen: null,
+    focus: null,
+  })
+  useEffect(() => {
+    chosenRef.current = { chosen, focus }
+  }, [chosen, focus])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (
+        target?.closest?.("input, textarea, select, [contenteditable], [role=dialog], [role=menu]")
+      )
+        return
+      const mod = (e.ctrlKey || e.metaKey) && !e.altKey
+      if (mod && (e.key === "=" || e.key === "+")) {
+        e.preventDefault()
+        void flow.zoomIn({ duration: 150 })
+      } else if (mod && e.key === "-") {
+        e.preventDefault()
+        void flow.zoomOut({ duration: 150 })
+      } else if (mod && e.key === "0") {
+        e.preventDefault()
+        void flow.zoomTo(1, { duration: 150 })
+      } else if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Digit1") {
+        e.preventDefault()
+        void flow.fitView({ padding: 0.06, duration: 300 })
+      } else if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Digit2") {
+        e.preventDefault()
+        const { chosen: id, focus: system } = chosenRef.current
+        if (id) frameNode(id)
+        else if (system) flyTo(system)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [flow, flyTo, frameNode])
+
+  // Safari sends a trackpad's pinch as gesture events rather than as the
+  // Ctrl-wheel every other browser sends, and zooms the page with it unless
+  // told not to. Its gestures carry a scale and no point, so the canvas zooms
+  // about where the pointer last was, and any Ctrl-wheel it also sends while
+  // one runs is let go so a pinch zooms once.
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+    let base: number | null = null
+    let at = { x: 0, y: 0 }
+    const track = (e: PointerEvent) => {
+      at = { x: e.clientX, y: e.clientY }
+    }
+    const start = (e: Event) => {
+      e.preventDefault()
+      base = store.getState().transform[2]
+    }
+    const change = (e: Event) => {
+      e.preventDefault()
+      if (base === null) return
+      const [x, y, k] = store.getState().transform
+      const next = clampZoom(base * (e as Event & { scale: number }).scale)
+      const rect = el.getBoundingClientRect()
+      const px = at.x - rect.left
+      const py = at.y - rect.top
+      void flow.setViewport({
+        x: px - ((px - x) * next) / k,
+        y: py - ((py - y) * next) / k,
+        zoom: next,
+      })
+    }
+    const end = (e: Event) => {
+      e.preventDefault()
+      base = null
+    }
+    const once = (e: WheelEvent) => {
+      if (base !== null && e.ctrlKey) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+    el.addEventListener("pointermove", track)
+    el.addEventListener("gesturestart", start)
+    el.addEventListener("gesturechange", change)
+    el.addEventListener("gestureend", end)
+    el.addEventListener("wheel", once, { capture: true, passive: false })
+    return () => {
+      el.removeEventListener("pointermove", track)
+      el.removeEventListener("gesturestart", start)
+      el.removeEventListener("gesturechange", change)
+      el.removeEventListener("gestureend", end)
+      el.removeEventListener("wheel", once, { capture: true })
+    }
+  }, [flow, store])
 
   // The first view: the system the address or the last visit named, else
   // where the reader left the canvas, else every system at once.
@@ -278,13 +384,66 @@ export function MapCanvas({
     }, 0)
   }, [placed.length, initialSystem, doc.focus, doc.viewport, bySystem, flyTo, flow])
 
+  // Carrying a system: its head is pressed, and the whole diagram follows the
+  // pointer once it has gone a few pixels — less is a click, which the frame
+  // still answers. Saved once, when it is put down.
+  const carried = useRef(false)
+  const carry = useCallback(
+    (e: React.PointerEvent<HTMLElement>) => {
+      if (e.button !== 0) return
+      const grip = (e.target as HTMLElement).closest<HTMLElement>(".map-frame-grip")
+      const frameId = grip?.closest<HTMLElement>(".react-flow__node")?.dataset.id
+      if (!grip || !frameId) return
+      const sid = frameId.slice("frame:".length)
+      const p = bySystem.get(sid)
+      if (!p) return
+      carried.current = false
+      const pointer = e.pointerId
+      const start = { x: e.clientX, y: e.clientY }
+      const from = (carryingRef.current ?? doc.frames)[sid] ?? atlasCorner(p)
+      const zoom = store.getState().transform[2]
+      grip.setPointerCapture(pointer)
+      const move = (ev: PointerEvent) => {
+        const dx = ev.clientX - start.x
+        const dy = ev.clientY - start.y
+        if (!carried.current && Math.hypot(dx, dy) < 4) return
+        if (!carried.current) {
+          carried.current = true
+          canvasRef.current?.setAttribute("data-carrying", "")
+        }
+        const next = {
+          ...(carryingRef.current ?? doc.frames),
+          [sid]: { x: Math.round(from.x + dx / zoom), y: Math.round(from.y + dy / zoom) },
+        }
+        carryingRef.current = next
+        setCarrying(next)
+      }
+      const end = () => {
+        grip.removeEventListener("pointermove", move)
+        grip.removeEventListener("pointerup", end)
+        grip.removeEventListener("pointercancel", end)
+        if (grip.hasPointerCapture(pointer)) grip.releasePointerCapture(pointer)
+        canvasRef.current?.removeAttribute("data-carrying")
+        const put = carryingRef.current?.[sid]
+        carryingRef.current = null
+        setCarrying(null)
+        if (put) update((d) => ({ ...d, frames: { ...d.frames, [sid]: put } }))
+      }
+      grip.addEventListener("pointermove", move)
+      grip.addEventListener("pointerup", end)
+      grip.addEventListener("pointercancel", end)
+    },
+    [bySystem, doc.frames, store, update],
+  )
+
   const nodes = useMemo(() => {
     const out: Node[] = []
     for (const p of placed) {
       const sid = p.system.id
       const s = settled.get(sid)!
       const rect = frameRect(sid)!
-      const origin = { x: p.x + FRAME.pad, y: p.y + FRAME.head + FRAME.pad }
+      const base = corner(p)
+      const origin = { x: base.x + FRAME.pad, y: base.y + FRAME.head + FRAME.pad }
       const dimmed = kept !== null && !kept.has(sid)
       out.push({
         id: `frame:${sid}`,
@@ -361,7 +520,7 @@ export function MapCanvas({
       }
     }
     return out
-  }, [placed, settled, frameRect, kept, focus, lit, chosenSeat, chosen, hovered, hits])
+  }, [placed, settled, frameRect, corner, kept, focus, lit, chosenSeat, chosen, hovered, hits])
 
   const edges = useMemo(() => {
     const out: Edge[] = []
@@ -422,13 +581,13 @@ export function MapCanvas({
   }, [update])
 
   const tidy = useCallback(() => {
-    const before = doc.positions
-    update((d) => ({ ...d, positions: {} }))
+    const before = { positions: doc.positions, frames: doc.frames }
+    update((d) => ({ ...d, positions: {}, frames: {} }))
     notify.success("Laid out again", {
-      description: "Every box is back where its system puts it.",
-      action: { label: "Undo", onClick: () => update((d) => ({ ...d, positions: before })) },
+      description: "Every system and every box is back where the map puts it.",
+      action: { label: "Undo", onClick: () => update((d) => ({ ...d, ...before })) },
     })
-  }, [doc.positions, update])
+  }, [doc.positions, doc.frames, update])
 
   const forget = useCallback(() => {
     confirm({
@@ -457,20 +616,6 @@ export function MapCanvas({
       setFocus(seat.system.id)
     },
     [seats],
-  )
-  const frameNode = useCallback(
-    (id: string) => {
-      const seat = seats.get(id)
-      if (!seat) return
-      const ids = [...neighbours(seat.system, id)]
-      void flow.fitView({
-        nodes: ids.map((n) => ({ id: n })),
-        padding: 0.25,
-        duration: 400,
-        maxZoom: 1.1,
-      })
-    },
-    [flow, seats],
   )
 
   const onKey = (e: React.KeyboardEvent) => {
@@ -553,10 +698,10 @@ export function MapCanvas({
         <Saved status={status} updatedAt={updatedAt} arranged={isArranged(doc)} />
 
         <IconAction
-          label="Tidy up: put every box back where its system puts it"
+          label="Tidy up: put every system and every box back where the map puts it"
           className="size-7"
           onClick={tidy}
-          disabled={Object.keys(doc.positions).length === 0}
+          disabled={!isArranged(doc)}
         >
           <RotateCounterClockwise />
         </IconAction>
@@ -621,8 +766,8 @@ export function MapCanvas({
         <SystemRail systems={systems} focus={focus} kept={kept} onFocus={focusOn} onAll={showAll} />
         <div
           ref={canvasRef}
-          data-zoom={zoom}
           data-slot="server-map"
+          onPointerDown={carry}
           className="group/map relative min-h-0 min-w-0"
         >
           {systems.length === 0 ? (
@@ -635,8 +780,11 @@ export function MapCanvas({
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               onNodeClick={(_, n) => {
-                if (n.type === "systemFrame") focusOn(n.id.slice("frame:".length))
-                else if (n.type !== "stackFrame") choose(n.id)
+                if (n.type === "systemFrame") {
+                  // Put down after a carry: not a click.
+                  if (carried.current) carried.current = false
+                  else focusOn(n.id.slice("frame:".length), false)
+                } else if (n.type !== "stackFrame") choose(n.id)
               }}
               onNodeDoubleClick={(_, n) => {
                 if (n.type === "systemFrame") {
@@ -654,6 +802,7 @@ export function MapCanvas({
               }}
               minZoom={ZOOM.min}
               maxZoom={ZOOM.max}
+              {...MOVE}
               proOptions={{ hideAttribution: true }}
               nodesConnectable={false}
               elementsSelectable
@@ -725,6 +874,7 @@ export function MapCanvas({
 
 function ZoomButtons({ onFit, onAll }: { onFit: () => void; onAll: () => void }) {
   const flow = useReactFlow()
+  const percent = useStore((s) => Math.round(s.transform[2] * 100))
   return (
     <div className="absolute bottom-3 left-3 flex items-center gap-0.5 rounded-md border border-hairline bg-popover p-0.5">
       <IconAction
@@ -734,6 +884,15 @@ function ZoomButtons({ onFit, onAll }: { onFit: () => void; onAll: () => void })
       >
         <Minus />
       </IconAction>
+      <Button
+        size="xs"
+        variant="ghost"
+        title="Back to the real size (Ctrl 0)"
+        className="numeric h-7 min-w-12 px-1.5 text-hint"
+        onClick={() => void flow.zoomTo(1, { duration: 150 })}
+      >
+        {percent}%
+      </Button>
       <IconAction
         label="Zoom in"
         className="size-7"

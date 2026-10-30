@@ -1098,8 +1098,7 @@
 }
 
 /* The server map's wiring (components/map). Its shapes are Tailwind; these are
- * the parts React Flow draws itself, and the three distances the canvas is
- * read at.
+ * the parts React Flow draws itself.
  *
  * The ports are a workflow editor's: a line leaves a box from a round port
  * on its right and arrives at a bar on its left, and what hangs under a box
@@ -1145,39 +1144,17 @@
 [data-slot="server-map"] .map-frame {
   background: color-mix(in oklab, var(--card) 42%, transparent);
 }
+/* A system's head is the handle its whole diagram is carried by. */
+[data-slot="server-map"] .map-frame-grip {
+  cursor: grab;
+}
+[data-slot="server-map"][data-carrying] .map-frame-grip,
+[data-slot="server-map"][data-carrying] .react-flow__pane {
+  cursor: grabbing;
+}
 
-/* A name is held to a size that reads on the screen however far out the
- * canvas is (`--map-name-floor`, whole pixels, written by the canvas as it
- * zooms), never below the size it is set in (`--map-base`); a state's word
- * follows a step behind. */
+/* A box's name: one size at every distance, like everything else on the
+ * canvas — zooming scales the picture, it does not re-letter it. */
 [data-slot="server-map"] .map-name {
-  font-size: max(var(--map-base, 13px), var(--map-name-floor, 0px));
   line-height: 1.3;
-}
-[data-slot="server-map"] .map-state {
-  font-size: max(11px, calc(var(--map-name-floor, 0px) * 0.8));
-}
-
-/* Mid: a box is its mark, its name and its state. Far: each system is its
- * name across its frame, held to the screen, over the shapes of its boxes. */
-[data-slot="server-map"][data-zoom="mid"] .map-detail,
-[data-slot="server-map"][data-zoom="far"] .map-detail,
-[data-slot="server-map"][data-zoom="far"] .map-port-label {
-  visibility: hidden;
-}
-[data-slot="server-map"] .map-far-title {
-  display: none;
-}
-[data-slot="server-map"][data-zoom="far"] .map-far-title {
-  display: flex;
-}
-[data-slot="server-map"][data-zoom="far"] .react-flow__node:not(.react-flow__node-systemFrame) {
-  opacity: 0.5;
-}
-[data-slot="server-map"][data-zoom="far"] .map-frame-head {
-  visibility: hidden;
-}
-[data-slot="server-map"][data-zoom="far"] .map-frame {
-  border-color: var(--border);
-  background: color-mix(in oklab, var(--card) 70%, transparent);
 }

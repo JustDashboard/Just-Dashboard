@@ -474,4 +474,17 @@ describe("the document", () => {
     expect(isArranged(doc)).toBe(true)
     expect(decodeDocument("nonsense")).toEqual(DEFAULT_DOCUMENT)
   })
+
+  test("where whole systems were carried is kept, and alone makes the map arranged", () => {
+    const doc = decodeDocument({
+      version: 2,
+      positions: {},
+      frames: { "system:stack:data": { x: 1200, y: -40 }, "system:loose": { x: null, y: 0 } },
+      minimap: true,
+    })
+    expect(doc.frames).toEqual({ "system:stack:data": { x: 1200, y: -40 } })
+    expect(isArranged(doc)).toBe(true)
+    // Saved before systems could be carried: none was.
+    expect(decodeDocument({ version: 2, positions: {}, minimap: true }).frames).toEqual({})
+  })
 })
