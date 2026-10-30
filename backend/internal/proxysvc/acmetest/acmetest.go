@@ -40,14 +40,33 @@ type DNS01 struct {
 	client     *http.Client
 }
 
-// StartDNS01 starts BIND, authoritative for zone and open to signed updates
-// of its TXT records, and a Pebble on the same Docker network that resolves
-// challenges through it. Everything is removed when the test ends. It skips
-// the test where Docker is not available.
-func StartDNS01(ctx context.Context, t testing.TB, zone string) *DNS01 {
+// BIND is a running authoritative BIND for one zone, open to RFC 2136
+// updates signed with a key the test holds.
+type BIND struct {
+	// Container is its name, Network the Docker network it is on and
+	// Address its address there; Port is its TCP port published on
+	// 127.0.0.1.
+	Container, Network, Address, Port string
+	Zone                              string
+	// Credentials is what the Certificates page saves for the RFC 2136
+	// provider to update Zone here, signed with HMAC-SHA256.
+	Credentials string
+	// Secret is the key's secret in base64, and KeyName its name.
+	Secret, KeyName string
+	ctx             context.Context
+}
+
+// StartBIND starts BIND, authoritative for zone, on a Docker network of its
+// own, granting the test's key updates of the record types named (TXT when
+// none is). Everything is removed when the test ends. It skips the test
+// where Docker is not available.
+func StartBIND(ctx context.Context, t testing.TB, zone string, types ...string) *BIND {
 	t.Helper()
 	if !hostexec.Available("docker") {
 		t.Skip("docker is not installed here")
+	}
+	if len(types) == 0 {
+		types = []string{"TXT"}
 	}
 	docker := func(args ...string) string {
 		t.Helper()
@@ -84,7 +103,7 @@ key "jd-live-key." { algorithm hmac-sha256; secret "` + key + `"; };
 zone "` + zone + `" {
   type primary;
   file "/var/lib/bind/zone.db";
-  update-policy { grant jd-live-key. zonesub TXT; };
+  update-policy { grant jd-live-key. zonesub ` + strings.Join(types, " ") + `; };
 };
 `,
 		"zone.db": "$TTL 30\n@ IN SOA ns." + zone + ". hostmaster." + zone + ". ( 1 60 60 600 30 )\n" +
@@ -98,12 +117,74 @@ zone "` + zone + `" {
 	bind := prefix + "-bind"
 	docker("create", "--name", bind, "--network", network, "-p", "127.0.0.1::53/tcp",
 		"internetsystemsconsortium/bind9:9.20", "-g", "-c", "/etc/bind/named.conf")
-	t.Cleanup(func() { remove("rm", "-f", "-v", bind) })
+	t.Cleanup(func() {
+		if t.Failed() {
+			raw, _ := hostexec.Command(context.Background(), "docker", "logs", "--tail", "40", bind).CombinedOutput()
+			t.Logf("bind:\n%s", raw)
+		}
+		remove("rm", "-f", "-v", bind)
+	})
 	docker("cp", filepath.Join(dir, "named.conf"), bind+":/etc/bind/named.conf")
 	docker("cp", filepath.Join(dir, "zone.db"), bind+":/var/lib/bind/zone.db")
 	docker("start", bind)
 	address := docker("inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", bind)
 	_, port, _ := strings.Cut(docker("port", bind, "53/tcp"), "127.0.0.1:")
+	server := &BIND{
+		Container: bind, Network: network, Address: address, Port: port, Zone: zone,
+		Credentials: "dns_rfc2136_server = 127.0.0.1\ndns_rfc2136_port = " + port + "\n" +
+			"dns_rfc2136_name = jd-live-key.\ndns_rfc2136_secret = " + key + "\ndns_rfc2136_algorithm = HMAC-SHA256\n",
+		Secret: key, KeyName: "jd-live-key.", ctx: ctx,
+	}
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(250 * time.Millisecond) {
+		if _, err := server.dig(zone, "SOA"); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("BIND did not come up: %s", docker("logs", bind))
+		}
+	}
+	return server
+}
+
+func (b *BIND) dig(name, kind string) (string, error) {
+	raw, err := hostexec.Command(b.ctx, "docker", "exec", b.Container, "dig", "+short", "+tcp", "@127.0.0.1", name, kind).Output()
+	return strings.TrimSpace(string(raw)), err
+}
+
+// Dig answers what BIND itself serves for a name and type, one value a
+// line, asked inside its container so nothing of this dashboard's is the
+// one reading it.
+func (b *BIND) Dig(t testing.TB, name, kind string) []string {
+	t.Helper()
+	out, err := b.dig(name, kind)
+	if err != nil {
+		t.Fatalf("dig %s %s: %v", name, kind, err)
+	}
+	if out == "" {
+		return []string{}
+	}
+	return strings.Split(out, "\n")
+}
+
+// StartDNS01 starts BIND, authoritative for zone and open to signed updates
+// of its TXT records, and a Pebble on the same Docker network that resolves
+// challenges through it. Everything is removed when the test ends. It skips
+// the test where Docker is not available.
+func StartDNS01(ctx context.Context, t testing.TB, zone string) *DNS01 {
+	t.Helper()
+	bindServer := StartBIND(ctx, t, zone)
+	docker := func(args ...string) string {
+		t.Helper()
+		raw, err := hostexec.Command(ctx, "docker", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("docker %s: %v: %s", strings.Join(args, " "), err, raw)
+		}
+		return strings.TrimSpace(string(raw))
+	}
+	remove := func(args ...string) { _ = hostexec.Command(context.Background(), "docker", args...).Run() }
+	prefix := strings.TrimSuffix(bindServer.Container, "-bind")
+	dir := t.TempDir()
+	network, address, bind := bindServer.Network, bindServer.Address, bindServer.Container
 
 	// Real validation, so no PEBBLE_VA_ALWAYS_VALID, and every order proved
 	// again rather than half of them on an authorization Pebble kept from an
@@ -133,12 +214,11 @@ zone "` + zone + `" {
 	})
 
 	fixture := &DNS01{
-		Directory: "https://" + docker("port", pebble, "14000/tcp") + "/dir",
-		Bundle:    filepath.Join(dir, "minica.pem"),
-		Credentials: "dns_rfc2136_server = 127.0.0.1\ndns_rfc2136_port = " + port + "\n" +
-			"dns_rfc2136_name = jd-live-key.\ndns_rfc2136_secret = " + key + "\ndns_rfc2136_algorithm = HMAC-SHA256\n",
-		Zone:       zone,
-		management: "https://" + docker("port", pebble, "15000/tcp"),
+		Directory:   "https://" + docker("port", pebble, "14000/tcp") + "/dir",
+		Bundle:      filepath.Join(dir, "minica.pem"),
+		Credentials: bindServer.Credentials,
+		Zone:        zone,
+		management:  "https://" + docker("port", pebble, "15000/tcp"),
 	}
 	for attempt := 0; ; attempt++ {
 		if err := hostexec.Command(ctx, "docker", "cp", pebble+":/test/certs/pebble.minica.pem", fixture.Bundle).Run(); err == nil {

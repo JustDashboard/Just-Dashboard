@@ -99,6 +99,7 @@ const (
 	whyDataCopy        = "a copy of a release's data is a second copy of production's data, and its address carries a password: it is asked for, read and removed in the dashboard"
 	whyPreviewBranch   = "what a database gives previews is a second copy of production's data next to a pull request's code: it is decided in the dashboard"
 	whyScanTerms       = "whether an environment's images are scanned, and from which severity up, is set in the dashboard"
+	whyDNSRecord       = "a domain's DNS record is read and written in a zone outside this server, with the DNS credentials saved under Certificates, in the dashboard"
 	// A key reads the catalogue to choose from it, and makes drafts from a
 	// template added here as from a built-in; adding to it is not a key's.
 	whyTemplates = "a template is the operator's catalogue, which every deployment is made from, not a deployment a key is narrowed to; templates are added, changed and removed in the dashboard"
@@ -326,6 +327,8 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"PUT /deploy/{id}/environments/{env}/rollback-policy":                            keySession(whyRollbackTerms),
 	"PUT /deploy/{id}/environments/{env}/rehearsal":                                  keySession(whyRehearsalTerms),
 	"PUT /deploy/{id}/environments/{env}/vulnerabilities":                            keySession(whyScanTerms),
+	"GET /deploy/{id}/domains/{domain}/dns-record":                                   keySession(whyDNSRecord),
+	"POST /deploy/{id}/domains/{domain}/dns-record":                                  keySession(whyDNSRecord),
 	"POST /deploy/blueprints/{id}/render":                                            keySession("a template's plan is previewed in the dashboard; a draft from it is a deploy key's to make"),
 	"POST /deploy/templates":                                                         keySession(whyTemplates),
 	"POST /deploy/templates/from-deployment":                                         keySession(whyTemplates),

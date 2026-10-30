@@ -84,6 +84,10 @@ type Server struct {
 	// The GitHub accounts' own pictures, read once an hour per account.
 	avatars avatarCache
 
+	// What the DNS record routes reach, which a test replaces
+	// (handlers_deploy_dns_record.go).
+	dnsRecords dnsRecordHooks
+
 	// What the database inventory last found on this machine, kept for the
 	// few seconds between two polls (handlers_db_inventory.go).
 	dbInventory dbInventoryState

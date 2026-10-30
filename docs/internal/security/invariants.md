@@ -125,8 +125,10 @@ A change that weakens any of these has to say so explicitly.
    copy of production's data whose address carries a password), what a linked database gives
    previews and a preview's database branch restored again (`PUT …/database-links/{connection}/previews`,
    `POST …/pull-requests/{number}/preview/branches/{connection}/refresh`: a second copy of production's
-   data next to a pull request's code), and a route's maintenance
-   and error pages (`PUT …/pages/{page}`, files on the server beside the proxy's route). The
+   data next to a pull request's code), a route's maintenance
+   and error pages (`PUT …/pages/{page}`, files on the server beside the proxy's route), and a domain's
+   DNS record (`GET` and `POST …/domains/{domain}/dns-record`: read and written in a zone outside this
+   server with the DNS credentials saved under Certificates, which the key never sees). The
    secret-store list (`GET /deploy/secret-stores`), which an ordinary key reads, answers a deploy key
    `key_scope`: it carries each connection's address and sign-in fields and every deployment's
    variables that read it, and the key cannot point a variable at a store. Variables are write-only to

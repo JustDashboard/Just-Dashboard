@@ -174,7 +174,7 @@ survives the restart it asks for.
 
 ## Tests
 
-- `go test ./internal/blueprint` — the counts (`CatalogueDeployable` 137), the refusals in
+- `go test ./internal/blueprint` — the counts (`CatalogueDeployable` 157), the refusals in
   `TestValidationRejectsEachUnsafeShape`, `TestDeploymentSupportRefusesOnlyAnUnpinnedArtifact`,
   `TestInstallFilesRenderInputsAndReferenceSecrets`.
 - `go test ./internal/deploy -run 'Game|Seed|Artifact|UDP|Handshake'` — the draft journey for both

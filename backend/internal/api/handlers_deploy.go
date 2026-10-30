@@ -185,6 +185,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPut, "/{id}/shared-variables/{name}", s.handle(s.handleSharedVariablePut))
 				r.Method(http.MethodGet, "/{id}/shared-variables/{name}/reveal", s.handle(s.handleSharedVariableReveal))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfigurationSave))
+				// A domain's DNS record, read and written in its zone with the
+				// DNS credentials saved under Certificates: an administrator's
+				// in a session, as the domains in the configuration are.
+				s.mountDeploymentDNSRecordRoutes(r)
 				// What every visitor is shown when the route answers with one
 				// of its own pages: written as the configuration is.
 				r.Method(http.MethodPut, "/{id}/environments/{env}/pages/{page}", s.handle(s.handleDeploymentPagePut))

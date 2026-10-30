@@ -242,7 +242,8 @@ only renderer/executor/validation authority for their feature.
   proves it, because the answer looks up the zone's nameservers for a name the caller chose, which
   stays with administrators for the reason `resolves` does. Both are reported so the screen can say what the run
   will do, not so the operator has to do it. Asked about a hostname the operator typed (`?hostname=`), it also
-  answers `address`, this server's public IPv4, which is the A record the name needs, and — for
+  answers `address`, this server's public IPv4, which is the A record the name needs (once the name is
+  saved, the Domains settings' DNS record sheet can write it: [DNS records](dns-records.md)), and — for
   `system.admin` only — `resolves`, whether the name already points here, taken from the reverse
   proxy's own DNS check so the Domains sheet and the proxy page never disagree about one name. It is
   a pointer for the reason `nameTaken` is: a host with no public address cannot make the comparison,
@@ -1852,8 +1853,8 @@ only renderer/executor/validation authority for their feature.
   next to a routed primary (Gitea's SSH, Syncthing's sync protocol) becomes an additional
   `runtime.ports[]` publication on its own number (see published ports below) instead of silently
   replacing the routed port; the primary always stays the one the proxy and the checks reach. The
-  catalogue ships 142 reviewed definitions, 137 of them offered (see "how the first sign-in works"
-  below for the five that are retired; 43 are the multi-service templates of the next item). The
+  catalogue ships 162 reviewed definitions, 157 of them offered (see "how the first sign-in works"
+  below for the five that are retired; 56 are the multi-service templates of the next item). The
   three counts the competitive report quotes — built in, deployable, Compose — are constants in
   `blueprint/catalogue_counts.go`, and `catalogue_counts_test.go` fails when the shipped
   definitions disagree, so they are bumped deliberately in the change that adds a template. Every
@@ -2378,6 +2379,22 @@ private network the connector shares with the ingress; activation sets the tunne
 the name's proxied CNAME to `<tunnel>.cfargotunnel.com` before the public-route checks. The tunnel's
 health is cloudflared's own (its `/ready` and its log), and the host alert kind **Tunnel down** tells the
 channels when the connector loses the edge. See [Cloudflare Tunnel](cloudflare-tunnel.md).
+
+A domain's **DNS record** is written from here with the credentials the Certificates page saved for
+DNS-01 (`dnsrecords`, `api/handlers_deploy_dns_record.go`): an `A` and an `AAAA` to the host's first
+public address of each family — the addresses preflight compares — or for a tunnel's name a proxied
+`CNAME` to `<tunnel>.cfargotunnel.com` with the tunnel's own comment, in the longest zone any saved
+provider's credentials reach (Cloudflare, Route 53, DigitalOcean, Google Cloud DNS, Linode, OVH and Gandi
+through their documented REST APIs, RFC 2136 through a signed DNS UPDATE over TCP). `GET
+/deploy/{id}/domains/{domain}/dns-record` is the dry run — what the zone holds, what a write does, through
+which credential and zone — and `POST` writes it; both are `system.admin` in a session and refused to a
+deploy key, the write audited as `deploy.domain.record`. Nothing is deleted: a CNAME where an address is
+wanted, or a set a one-record-per-value provider would have to shrink, is a refusal in words, and a
+record this dashboard did not write is replaced only with `replace`. What was written is kept in
+`deploy_dns_records` (who, when, which provider and zone), which is how the sheet tells a record managed
+here from one that is not. When a planned name does not resolve where it should, preflight adds
+`dns_record_writable` (the Domains sheet's **Create the record** as its fix) or `dns_record_missing`
+beside `dns_unverified`. See [DNS records](dns-records.md).
 
 ## Deployment topology
 
