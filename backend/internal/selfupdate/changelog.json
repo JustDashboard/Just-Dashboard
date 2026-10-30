@@ -1,6 +1,433 @@
 {
-  "latest": "0.8.1",
+  "latest": "0.8.2",
   "releases": [
+    {
+      "version": "0.8.2",
+      "date": "2026-10-30",
+      "title": "Staging, canaries and warm rollbacks, and a map of the whole server",
+      "summary": "Deployments gain what hosted platforms put between a commit and production: a staging environment and one exact image promoted from a pull request's preview through staging to production, release tasks rehearsed on a restored copy of the database, recorded traffic replayed and a canary tried before the cutover, and the previous release kept warm and switched back to on its own when the new one does worse. Domains get redirects, sign-in, maintenance pages, edge rules, rate limits, wildcard certificates, DNS records and Cloudflare Tunnel; releases can run as replicas, sleep when idle or live only on the tailnet; variables can come from six secret stores; output, requests and traces ship to the tools you already run, and every image is scanned for known vulnerabilities. Deploy keys, the jd command line and an OpenAPI description with generated Go and TypeScript clients open it all to pipelines, and the catalogue grows by a hundred templates and keeps your own. Beside deployments: a Map of the whole server, host alerts, passkeys, SFTP and rclone backups that another server can import, and a session cookie that no longer reaches the apps the dashboard publishes on its own name.",
+      "changes": [
+        {
+          "kind": "security",
+          "text": "The dashboard's session cookie no longer reaches the apps it publishes on its own name",
+          "detail": "Browsers send a cookie to every port of a host name, so a browser signed in to the dashboard on its tailnet name sent the session to every preview and tailnet app served on that name, a pull request's own code included. The cookie is now __Host-jd_session, and every tailnet address goes through a front that takes the dashboard's cookies out of the request before it reaches the app. Upgrading signs nobody out: the old cookie is swapped for the new one on the next request."
+        },
+        {
+          "kind": "added",
+          "text": "Add a staging environment and promote its exact image into production",
+          "detail": "Staging is a second, long-lived environment of a deployment with its own branch, domain, variables, volumes and database links, built and deployed exactly as production is. Promote to production runs a staging release's image, with nothing rebuilt, under production's own configuration, variables, release tasks, readiness checks and cutover, and production's history says which staging release each promotion came from. One switch makes production take only promotions, so new code reaches it only as an image staging already ran."
+        },
+        {
+          "kind": "added",
+          "text": "Promote a pull request preview's exact image into staging",
+          "detail": "A preview whose live commit carries the pull request's current approval can be promoted into staging, never straight into production, and runs there with staging's own plan and variables, never the preview's. With staging's promotion to production, the image that was reviewed in the preview is the image production runs."
+        },
+        {
+          "kind": "added",
+          "text": "Rehearse a release's tasks against a restored copy of the database before they touch production",
+          "detail": "With rehearsal on in Build settings, the linked database is restored from its point-in-time archive or newest backup dump into a throwaway copy, the release tasks run there with the same image, variables and timeout, and the run reports how long each took and which locks it held. A task that fails against the copy stops the release before production is touched, and a promotion rehearses production's tasks the same way. It is off by default, because it holds a second copy of the database for as long as it runs."
+        },
+        {
+          "kind": "added",
+          "text": "Replay recorded requests against a new release before traffic moves to it",
+          "detail": "Traffic replay sends the last distinct GET and HEAD requests your domains answered to the candidate's own address, before anything is routed to it, and compares its answers and p95 with the live release's. Requests whose answer depended on who asked, that carry a credential in their query or that scanners sent are left out. It is set beside the release strategy in Runtime settings and is off by default."
+        },
+        {
+          "kind": "added",
+          "text": "Try a canary release on a share of the live route before its cutover",
+          "detail": "The Canary strategy sends between 1 and 50 percent of the live route's requests to the candidate for the window you choose, records the two releases' answers apart and judges the candidate by the rule the warm rollback uses. One that does worse is removed with the live release untouched; one that does not is promoted at the end of the window when Promote on its own is set, or by Promote now. The run page shows the countdown, both releases side by side, and Abort."
+        },
+        {
+          "kind": "added",
+          "text": "Keep the previous release warm after a cutover, and switch traffic back to it on its own",
+          "detail": "After a blue/green cutover the release it replaced is paused rather than removed, for ten minutes by default, while the new release's 5xx share and p95 are compared with the old one's from the ingress's own request record. If either crosses its line over enough requests, traffic goes back to the warm container in seconds, with no build or cold start, and the rollback is recorded with its measured reason and told to your notification channels. It is on by default for blue/green releases and is turned off per environment under Runtime settings → After a release goes live; while a window is open the project overview offers Roll back instantly and Keep release."
+        },
+        {
+          "kind": "added",
+          "text": "Keep each visitor on the release that first answered them",
+          "detail": "With skew protection on, a cookie keeps a visitor on the release that served their page for as long as that release is kept warm, so a page loaded before a cutover never asks the new release for scripts, styles or data it does not have. A cookie naming a release that is gone is ignored and replaced."
+        },
+        {
+          "kind": "added",
+          "text": "Bring a linked database back as it was when an older release went live, into a copy beside production",
+          "detail": "Each release now records, for every database it links, the moment in the point-in-time archive or the backup it can be brought back to, shown as a data point on the release's row. Restore data as of this release restores each linked PostgreSQL, MySQL or MariaDB database from that point into a side copy to compare with or restore from; production's data is never touched."
+        },
+        {
+          "kind": "added",
+          "text": "Preview a pull request of a Compose stack, with every service isolated",
+          "detail": "Pull request previews of Compose releases were refused. Each service of a preview now gets the preview's own network, fresh volumes and no published ports, the public service is reached only through the preview's route, and anything that cannot be isolated, such as a host path mounted into a service, is left out and named in the run transcript."
+        },
+        {
+          "kind": "added",
+          "text": "Give a pull request's preview its own branch of a linked database",
+          "detail": "Settings → Databases → Previews can give each preview a copy of a linked database restored from its newest backup, with chosen columns masked in their own shape before anything reads them. The branch sits on the preview's own network with a generated password, production's database is never reachable from it, a fork's preview never gets one, and it is removed with the preview."
+        },
+        {
+          "kind": "changed",
+          "text": "Say when a release goes live without a readiness check, and propose one for services",
+          "detail": "Preflight now warns when nothing checks a release before traffic moves to it, and the run page says the release went live unverified, with a link to the health-check settings. A new service or image deployment with a known port is offered the image's own health check, an HTTP check on a path detection found, or a TCP check on the port; plans without a check keep deploying as before."
+        },
+        {
+          "kind": "added",
+          "text": "Redirect a deployment's domains, set response headers and allow only listed addresses",
+          "detail": "A domain can send its visitors to another of the deployment's hostnames with the path and query kept, the way an old www. name is kept for links, with the status code you choose. Settings → Domains → Access and headers sets headers on every answer and limits the route to listed addresses and ranges, refused with 403 before any password prompt, on nginx and on the Docker Caddy ingress alike."
+        },
+        {
+          "kind": "added",
+          "text": "Require sign-in through Authelia, Authentik or oauth2-proxy before a deployment's domains answer",
+          "detail": "Every request is checked with the forward-auth server first: the application is told who signed in as Remote-User and Remote-Email, a visitor who is not signed in is sent to the sign-in page, and the request is refused while the auth server is down. The gate can cover production and previews or previews only, and a rollback restores the sign-in its release had."
+        },
+        {
+          "kind": "added",
+          "text": "Switch a deployment's domains to a maintenance page at once, and give them their own error pages",
+          "detail": "The maintenance switch on Settings → Domains answers every visitor with the maintenance page and a 503 immediately, without a deployment or a reload, except the addresses you let past, and no release, rollback or cutover turns it on or off. Custom 404, 502, 503 and 504 pages replace the proxy's, and optionally the application's own, edited in the editor Proxy sites use. A route written before this release needs one deployment before its maintenance can be switched."
+        },
+        {
+          "kind": "added",
+          "text": "Decide requests at the proxy with ordered edge rules",
+          "detail": "Settings → Domains → Edge rules blocks, answers with a status, lets through or redirects requests by path, method, user agent and client address, the first matching rule deciding, before the application sees them, and each rule counts what it decided in the last day. The rules are part of the release, so a rollback restores them; matching by country stays with Network → Protection, since neither proxy carries a location database."
+        },
+        {
+          "kind": "added",
+          "text": "Limit each client address's request rate, and refuse the addresses CrowdSec has banned",
+          "detail": "On nginx the limit answers 429 with Retry-After, counting the visitor rather than a proxy in front once JD_TRUSTED_PROXIES names it. The Docker Caddy ingress has no rate-limit module, so its page offers Apply on the host instead and says what that is: a host-wide limit on new connections at the network gateway. With CrowdSec on, the route refuses every address its local engine has banned, read again each minute, firewall bouncer or not."
+        },
+        {
+          "kind": "added",
+          "text": "Send HSTS from a deployment's HTTPS domains",
+          "detail": "Access and headers can send Strict-Transport-Security with the age, subdomains and preload you choose, held to the rules a Proxy site's HSTS is held to, on the HTTPS domains only; preflight says which served domains receive it. It replaces the application's own header and is off until chosen."
+        },
+        {
+          "kind": "fixed",
+          "text": "A deployment domain with HTTPS off is served over plain HTTP, as its switch says",
+          "detail": "One HTTPS domain turned TLS on for the whole route, so a domain marked HTTP only was redirected to an HTTPS it had no certificate for, and the run asked for a certificate covering it. Each domain is now served on its own scheme, and the certificate covers only the HTTPS names."
+        },
+        {
+          "kind": "added",
+          "text": "Issue a deployment's wildcard certificate over DNS-01 during the run, on nginx and Caddy hosts",
+          "detail": "A plan serving a wildcard name such as *.example.com stopped at the certificate step until the certificate was issued by hand. The run now reuses a certificate that already covers the name, a preview under a wildcard included, and otherwise proves the wildcard over DNS-01 with the credentials saved under Proxy → Certificates; the Docker Caddy ingress serves it from a copy. Without credentials that answer for the zone, preflight and the Domains sheet say what to save and where."
+        },
+        {
+          "kind": "fixed",
+          "text": "The Caddy ingress serves a renewed certificate as soon as certbot renews it",
+          "detail": "A certbot or imported certificate reused on a Docker Caddy host was served from a copy made when the release went live, so after a renewal Caddy kept serving the old one until the next deploy, past its expiry if none came. Each copy now records where it came from, and a renewal refreshes every route served from it."
+        },
+        {
+          "kind": "fixed",
+          "text": "A deployment on the Docker Caddy ingress can serve more than one hostname over HTTPS",
+          "detail": "The ingress refused a TLS deployment with a second hostname; each name now gets its own certificate from Caddy."
+        },
+        {
+          "kind": "added",
+          "text": "Create a deployment domain's DNS record from its settings",
+          "detail": "Open the DNS record, in a domain's menu, shows what the name should hold beside what its zone holds and creates or corrects the A, AAAA or CNAME record through the DNS credentials the Certificates page already keeps: Cloudflare, Route 53, DigitalOcean, Google Cloud DNS, Linode, OVH, Gandi or RFC 2136. A record this dashboard did not write is replaced only after you press Replace the record, and no record is ever deleted."
+        },
+        {
+          "kind": "added",
+          "text": "Serve deployment domains through Cloudflare Tunnel, with no port open on this server",
+          "detail": "Proxy → Tunnel connects one tunnel, from a pasted token or created with the Cloudflare API token already saved for certificates, and runs cloudflared beside the ingress with no published port. A domain switched to the tunnel skips the certificate and public-address checks and gets its ingress rule and CNAME when the release goes live, never replacing someone else's record. The page shows cloudflared's own state, and a Tunnel down host alert says when it loses Cloudflare's edge."
+        },
+        {
+          "kind": "added",
+          "text": "Publish an environment only on the tailnet, and admit only the Tailscale logins and tags it lists",
+          "detail": "A tailnet-only environment gets an address on this server's tailnet the way previews do, with no public domain, certificate or routable address. With a list of logins and tags, each visitor's Tailscale identity is checked before the application answers, without a sign-in server."
+        },
+        {
+          "kind": "added",
+          "text": "Run a stateless release as up to eight replicas behind one route",
+          "detail": "Runtime settings → Releases runs 1 to 8 containers of the same release on this server, without Swarm or Kubernetes, and both proxies spread requests across them. The replicas are one release for readiness, cutover, the warm window and rollback, and a plan only one container can hold, with a fixed host port, a writable mount or a Compose build, is refused with the reason."
+        },
+        {
+          "kind": "added",
+          "text": "Let an idle environment sleep, and wake it on the first request",
+          "detail": "With Sleep when idle on in Runtime settings, the live container is stopped after a quiet spell, 15 minutes unless set, and the route keeps answering: the first visitor's request is held while the container starts and then answered as usual. It never sleeps while a run is queued, a warm window is open or the request record cannot be read; the overview shows Asleep with Wake now, and every sleep and wake is audited."
+        },
+        {
+          "kind": "added",
+          "text": "Choose the user a release container runs as, a read-only root, ulimits and kernel parameters",
+          "detail": "Runtime settings → Inside the container sets the user, a read-only root filesystem with writable temporary paths, ulimits such as nofile and memlock, and the network and IPC kernel parameters Docker allows per container. A bad value is refused with the field it is about, and a Compose plan keeps these in its own file."
+        },
+        {
+          "kind": "added",
+          "text": "Give a release container NVIDIA GPUs",
+          "detail": "Container access passes every GPU, a number of them or chosen devices to the release, and preflight warns when the server has no NVIDIA container runtime."
+        },
+        {
+          "kind": "added",
+          "text": "Suggest each deployment's memory and CPU limits, and forecast when a disk fills",
+          "detail": "A Right-size card on the project overview suggests limits from the container history the server already records, beside the p95, peak, OOM kills and throttling it rests on, and Apply suggested limits saves them. Metrics gains a Capacity forecast with the days until each mount is full and the apps growing fastest."
+        },
+        {
+          "kind": "added",
+          "text": "Deploy the Minecraft templates as game servers",
+          "detail": "Both Minecraft templates deploy instead of showing as not available: their settings file is written before the first start, so Server settings edits now survive restarts, and they publish UDP where the game needs it, on loopback until you choose every interface. The game pages say what stands between a player and the server, with an Allow button that adds the firewall rule, and the console is RCON."
+        },
+        {
+          "kind": "added",
+          "text": "Define variables once for the server or a project, and read them by reference",
+          "detail": "Deployments → Shared variables holds values any project reads as ${{server.NAME}}, and a project's Settings → Variables holds values its environments read as ${{project.NAME}}. A shared value is read at each run, so a change reaches a release on its next deploy, and each list says which variables read it and which of them are not live yet."
+        },
+        {
+          "kind": "added",
+          "text": "Read deployment variables from HashiCorp Vault, OpenBao, Infisical and Doppler",
+          "detail": "A connection saved once under Deployments → Secret stores lets a variable hold a reference such as ${{store.vault-prod/apps/web#DATABASE_URL}}, read at every run, or pinned to a version with @4. The variable becomes secret, and its row shows the store and where the key is, never the value."
+        },
+        {
+          "kind": "added",
+          "text": "Read deployment variables from AWS Secrets Manager and Azure Key Vault",
+          "detail": "A reference reads a whole secret, one field of a JSON secret with #KEY, or a version or staging label with @, as in ${{store.aws/prod/db#DATABASE_URL}}. AWS signs in with an access key and Azure with an application's client secret, and Test names the first secret the identity can read."
+        },
+        {
+          "kind": "added",
+          "text": "Deploy a template as a stack: the application with the database, cache or worker it needs",
+          "detail": "A template can now be a multi-service Compose stack. Only its public service is reached through the domain; its databases and queues sit on a private network with nothing published and no route out, and the passwords they share are generated here."
+        },
+        {
+          "kind": "added",
+          "text": "Choose from a hundred more one-click templates",
+          "detail": "The catalogue grows from 62 templates to 162, 56 of them stacks, among them WordPress, Ghost, Nextcloud, n8n, Plausible, Gitea, Forgejo, Mattermost, authentik, Keycloak, LibreChat, LiteLLM, Flowise, Paperless-ngx, Excalidraw, Pocket ID, Garage and GitLab. Every one was started on real Docker and answered its own checks before it was offered, and an application whose first account would be the same for everybody is not offered."
+        },
+        {
+          "kind": "added",
+          "text": "Keep your own templates beside the built-in ones",
+          "detail": "Deployments → Templates makes a template from a pasted Compose file or imports one as JSON, and Settings → General → Save as template… makes one from a deployment that runs published images, with its secrets turned into inputs and any password written in a file generated instead. An added template is held to every rule a built-in is held to and deploys through the same path, and each deployment keeps its own copy, so editing or removing the template changes only the next one."
+        },
+        {
+          "kind": "added",
+          "text": "Build a project that no recipe recognises with Railpack",
+          "detail": "A project outside the fifteen language recipes needed a Dockerfile of its own. The Railpack builder, which replaced Nixpacks upstream, now builds it on this server, and its image deploys like any other release."
+        },
+        {
+          "kind": "added",
+          "text": "Make deploy keys: API keys a pipeline can deploy with",
+          "detail": "Account → API keys → New key → Deploy key, made by an administrator in the browser, does on the deployments what used to need a browser session: create and commit drafts, change configuration, source, Git policy and triggers, set variables, deploy, promote, roll back, switch back to the warm release and switch maintenance. A key can be narrowed to chosen deployments, and a narrowed key can create deployments that become its own."
+        },
+        {
+          "kind": "security",
+          "text": "A deploy key never reads a variable's value and reaches nothing outside deployments",
+          "detail": "It lists variable names, never values, and generated values are not returned to it; reveals, saved registry and Git credentials, pull request merges and comments, and the removals that take a typed phrase stay a signed-in person's. A deploy key cannot point a variable at a saved credential, a database or a secret store, and a narrowed key reaches only routes about its own deployments."
+        },
+        {
+          "kind": "security",
+          "text": "The audit log names the API key behind every request made with one",
+          "detail": "Every request made with any API key records the key as well as its account, the audit page shows it beside the actor, and a deploy key refused at the gate is recorded too."
+        },
+        {
+          "kind": "added",
+          "text": "Deploy from a terminal or CI with jd, the dashboard's command line",
+          "detail": "jd login, deploy --wait (its exit code is the run's result), logs --follow, rollback, vars set, config set and the rest work with a deploy key, and every read takes --json. install.sh puts jd in /usr/local/bin and the dashboard keeps that copy current after updates; another machine downloads it from the dashboard or builds it from the repository."
+        },
+        {
+          "kind": "added",
+          "text": "Let an AI client list, deploy, roll back and read the runs of deployments over MCP",
+          "detail": "An MCP key has a deployment grant of None, Read or Deploy in Databases → MCP server. Read lists deployments, runs, run logs and releases, and Deploy can also deploy and roll back production; every existing key reaches no deployment until it is given a grant."
+        },
+        {
+          "kind": "added",
+          "text": "Describe the deployment API as OpenAPI 3.1",
+          "detail": "Every deployment route is described from the router and the handlers' own types, served at /api/v1/deploy/openapi.json and openapi.yaml, printed by jd openapi and committed to the repository, and tests fail when it drifts from the code. It carries the shapes of requests and answers, never a value from this server."
+        },
+        {
+          "kind": "added",
+          "text": "Call the deployment API from Go and TypeScript clients generated from its description",
+          "detail": "sdk/go and sdk/typescript in the repository hold a client with one method per operation, typed requests and answers and the API's whole error envelope, using nothing beyond each language's standard library. They are generated from the OpenAPI description, and a test fails until they are regenerated after a route changes."
+        },
+        {
+          "kind": "security",
+          "text": "An MCP key is offered the whole deployment API as tools only when its owner turns them on",
+          "detail": "Every route a deploy key may call can also be an MCP tool, 97 beside the 13 written by hand, held to the key's grant, its owner's role and the deployments it is narrowed to, and called through the dashboard's own routes and audit. Every key made before this release keeps exactly the tools it had until its owner ticks the box in Databases → MCP server, where a key's deployments can now be narrowed as a deploy key's are."
+        },
+        {
+          "kind": "added",
+          "text": "Report releases to GitLab, Gitea and Forgejo, and keep a comment on their merge and pull requests",
+          "detail": "A run on a GitLab, Gitea or Forgejo source posts pending, then success or failure, on the exact commit, and a preview keeps one comment on its merge or pull request from Building to Ready, Failed or Removed, as GitHub already had. The source's own token or a saved provider token for the host is used, and Settings says where the last status went or why the host refused it."
+        },
+        {
+          "kind": "added",
+          "text": "Ship deployments' output and requests to OpenTelemetry, Loki or any JSON-lines endpoint",
+          "detail": "Deployments → Log drains copies every line a deployment's containers write and every request the ingress served, as they happen, in OTLP, Loki's push format or JSON lines, compressed and with each line's level read from the line itself. Each drain says what it shipped and when or, in amber, the destination's own answer and how much is waiting."
+        },
+        {
+          "kind": "added",
+          "text": "Trace each request from the ingress into the application with OpenTelemetry",
+          "detail": "The ingress sends every routed request a W3C traceparent, continuing the client's trace when it brought one, and records the ids beside the request, so the application's own spans join the request at the edge; an OpenTelemetry log drain can send each request as a span too. A route is traced from its next deploy, and a Caddy ingress older than 2.8 stays untraced."
+        },
+        {
+          "kind": "added",
+          "text": "Keep deployments' crashes and OOM kills past a restart, and scrape deployments with Prometheus",
+          "detail": "A deployment's container events are stored for at least 30 days instead of being lost when the dashboard restarts, and the project overview shows its availability over a day, a week and a month. /api/v1/metrics/deployments serves runs, releases, containers, restarts, OOM kills, request errors and latency to a key limited to reading metrics."
+        },
+        {
+          "kind": "added",
+          "text": "Ask the assistant why a deployment run failed",
+          "detail": "Under a failed or rolled-back run, Ask why it failed sends the run's record, with secret values masked and variables by name only, to the provider an administrator set up for the assistant, and shows the likely cause, the transcript lines that show it and what to try. Nothing leaves the server until someone presses, nothing in the answer is applied, and the answer is kept with the run."
+        },
+        {
+          "kind": "added",
+          "text": "Diagnose a deployment with the assistant, which reads only with your leave and runs nothing",
+          "detail": "Diagnose on the project overview asks the assistant about an environment and the server under it. Each read it wants, from run transcripts and container logs to lifecycle events, host alerts and firewall rules, waits for your Allow and runs with your role, masked, and what it proposes is a card whose press is the page's own audited request."
+        },
+        {
+          "kind": "security",
+          "text": "Scan every release's image for known vulnerabilities, and rebuild it on a newer base",
+          "detail": "Each release's image and the bases it was pinned on are scanned with Trivy after the build and daily while the release is live, and the project overview's Vulnerabilities panel lists the findings that have a fix beside Rebuild, which builds again on the base's current digest. A host alert fires when a live release has a fixable finding at or above the environment's floor, High unless set in Build settings, and a newer base exists. The vulnerability database is downloaded by the dashboard from mirror.gcr.io, or ghcr.io, about once a day."
+        },
+        {
+          "kind": "security",
+          "text": "The image scanner runs with no network and never sees the Docker socket",
+          "detail": "Trivy runs as a one-shot container as nobody, with no network, no capabilities, a read-only root and limits on memory, processors and processes, reading only the image archive it is handed. The dashboard downloads and checks the database itself, so the scanner has nothing to reach."
+        },
+        {
+          "kind": "fixed",
+          "text": "A deployment's HTTP-01 certificate is ordered from the ACME directory you configured",
+          "detail": "The path a host nginx deployment takes ignored JD_ACME_DIRECTORY and ordered from Let's Encrypt, and a private authority refused it for want of a contact. It now orders from the configured directory through the Certificates page's certbot, as the DNS-01 path and Caddy already did."
+        },
+        {
+          "kind": "fixed",
+          "text": "A deployment run's certificate order waits for the Certificates page's certbot, and the page's for a run's",
+          "detail": "Two certbots at once failed whichever started second with Another instance of Certbot is already running. Each now waits its turn and says in its transcript what it is waiting for, and a run that waited reuses a certificate the page's job has just issued."
+        },
+        {
+          "kind": "fixed",
+          "text": "Deployment routes from the tenth environment on no longer fail nginx's configuration test",
+          "detail": "A route's variable names passed nginx's default length from environment 10 on, and from shorter lengths for long Proxy site and stream names, which failed nginx -t and every other site's reload with it. Names that would be too long are now shortened with a hash, and files that already load keep theirs."
+        },
+        {
+          "kind": "fixed",
+          "text": "Remove the routes, domains and certificates a deleted deployment left behind",
+          "detail": "A Caddy route whose deployment was deleted or archived kept serving its domain and renewing its certificate, with no way to remove it. Proxy → Sites now offers Remove route for a deployment route with no live owner, and the certificate only that route served goes with it."
+        },
+        {
+          "kind": "changed",
+          "text": "The proxy pages draw a deployment's route with its project's name and icon",
+          "detail": "A deployment is reached at its container's network address, so the overview's routes, route map and traffic band drew a bare address under a cube."
+        },
+        {
+          "kind": "fixed",
+          "text": "Saving a deployment check that nothing runs is refused",
+          "detail": "DNS, TLS and backup-freshness checks could be saved through the API but never ran, so a required one stopped every deploy. They are now refused when a configuration is saved, each with what to use instead, and plans saved before keep deploying as they did."
+        },
+        {
+          "kind": "fixed",
+          "text": "Deploy a Compose stack, on an empty Projects page, opens the Docker tab",
+          "detail": "It opened whichever tab was used last in the session, since the source strip has no Compose tab."
+        },
+        {
+          "kind": "added",
+          "text": "See the whole server on the Map, one diagram per system",
+          "detail": "Server → Map finds each system the server runs, this dashboard, every deployment, Compose stack, PM2 app and wired service among them, and draws it left to right the way a request travels: tailnet, domains and certificates, the application and its containers, databases and volumes, backups. Every line comes from a link the server records, never a guess from a name; a database several systems share is drawn in each with where else it is, and names stay readable however far out you zoom. The map changes nothing on the server, and each box opens its own page."
+        },
+        {
+          "kind": "added",
+          "text": "Alert on the server's CPU, memory and disks, containers going down and failed backups",
+          "detail": "Monitoring → Alerts holds rules for host CPU and memory over a window, each mount's space or inodes, each container and each backup job, told to the channels the deployments use once when a rule starts firing and once when it recovers. A container counts as down when it crashes, is killed for memory, loops on restart or turns unhealthy, never when someone stopped it."
+        },
+        {
+          "kind": "added",
+          "text": "Send notifications to ntfy, Gotify, Pushover, Mattermost and Microsoft Teams",
+          "detail": "Deployments → Notifications offers ten kinds of channel for deploy runs and every alert, each field checked as it is typed. The push services raise priority only for bad news: a failed run or an alert firing."
+        },
+        {
+          "kind": "added",
+          "text": "Back up to SFTP servers, and to Google Drive, OneDrive, Dropbox, WebDAV and the other services rclone speaks",
+          "detail": "An SFTP destination takes a password, a private key or both, pins the server's host key the first time and refuses another key before any credential is sent. An rclone destination takes the remote's section as rclone config show prints it, and one that could write to this server's own disk or run a program is refused; both are encrypted by default, like S3 and B2."
+        },
+        {
+          "kind": "added",
+          "text": "Import another server's backups, and restore them on this one",
+          "detail": "Every archive now has a manifest beside it naming the server, job and run that wrote it. Backups reads what a destination holds that this server did not write, imports those archives as runs of an imported job after checking each against its manifest, and takes the backup key exported on the old server so they open here. A restore in place makes what is missing first, a Docker volume with its labels included, and an imported job never runs, schedules or prunes."
+        },
+        {
+          "kind": "added",
+          "text": "Sign in with a passkey in place of the password",
+          "detail": "Account → Security registers passkeys after asking for the password and, with an authenticator, a fresh code, and the sign-in page offers Sign in with a passkey and the browser's own autofill. A passkey replaces the password, never the second factor, so an account with an authenticator still gives its code, and a password reset from the terminal removes the account's passkeys."
+        },
+        {
+          "kind": "added",
+          "text": "Link this dashboard to a just-dashboard.com account, outbound only, at a scope you choose here",
+          "detail": "Settings → Connect, a question in install.sh or scripts/manage.sh link asks for a code you approve on the site; the server then sends a signed heartbeat and polls for commands, and nothing on it listens. Observe shows the site health, version and counts, Operate also lets it start, stop and restart containers and stacks and run backups, and Maintain also update and restart the dashboard; the dashboard's own containers are refused at every scope, and every command is audited. Nothing is linked until someone links it, JD_ACCOUNT_LINK=false removes the feature, and the page draws the link live with what the last heartbeat sent."
+        },
+        {
+          "kind": "added",
+          "text": "Install nginx and certbot from the Proxy overview, and the modules nginx is missing",
+          "detail": "On a server without nginx the overview opens on Install nginx and certbot, with the exact command beside it, streams the install and redraws as the engine view. A module a host package provides gets Install in the modules list, and every install shares one console, so two never race for the package manager."
+        },
+        {
+          "kind": "changed",
+          "text": "The Proxy overview says each thing once, and its alerts have a page of their own",
+          "detail": "The header is one bar with the engine's version and state, Refresh and an Alerts link with the firing count; facts that are the expected answer move into tooltips, and an empty block is a card that says what is missing and offers the fix. Proxy → Alerts replaces the sheet and is drawn the way Notifications is."
+        },
+        {
+          "kind": "changed",
+          "text": "A clean nginx configuration test answers with a toast",
+          "detail": "Test config opened a full-height panel just to say Valid. A pass is now a toast with Show output, and a warning or failure still opens the panel."
+        },
+        {
+          "kind": "added",
+          "text": "Paste files, screenshots and text from your computer into the Files page",
+          "detail": "Ctrl or Cmd+V uploads files copied in Explorer or Finder into the open folder through the usual upload review, a copied picture as a Pasted image named with the time, and copied text as a text file. Copying in the dashboard puts the selected paths on your clipboard, one per line."
+        },
+        {
+          "kind": "fixed",
+          "text": "The Files page opens every path on the host, not only those the backend's container mirrors",
+          "detail": "Paths outside /home, /opt, /srv, /root, /etc, /var/log and Docker's volumes came back not found, or showed the container image's own files. Every Files operation now runs in the host's own view of its disks, held to the same path checks as before."
+        },
+        {
+          "kind": "fixed",
+          "text": "New files and folders made on the Files page belong to the owner of the folder they are made in",
+          "detail": "The backend runs as root, so a folder created or uploaded into a checkout belonged to root, and the Git page's pull, which runs as the checkout's owner, could not replace it. Entries made in another account's folder now belong to that account, as the same action in its shell would make them."
+        },
+        {
+          "kind": "fixed",
+          "text": "The Git page offers to give back a root-owned folder before a pull, even one holding only untracked files",
+          "detail": "The Git page's check looked only at folders holding tracked files, so a root-owned folder of untracked copies made Discard and pull fail with Permission denied. It now offers to give such folders to the checkout's owner and pull."
+        },
+        {
+          "kind": "fixed",
+          "text": "The Files list's header stays opaque when rows scroll under it"
+        },
+        {
+          "kind": "changed",
+          "text": "The Git workspace strip folds into two full rows on a narrow screen",
+          "detail": "Below a set width it shows the name, account and menu on one row and the branch beside Fetch, Pull and Push on the next, instead of wrapping wherever it ran out of space."
+        },
+        {
+          "kind": "changed",
+          "text": "An install checkout cloned with sudo is handed to the owner of its directory",
+          "detail": "A checkout cloned with sudo into a home directory belonged to root, so its owner's git refused it for dubious ownership and git worktree add failed. At start the dashboard gives it to the account that owns the directory, leaving other accounts' files and files only root may read, such as .env, as they are, and signs that account in to GitHub with the dashboard's own login when it has none."
+        },
+        {
+          "kind": "fixed",
+          "text": "MongoDB 8 starts on Linux 6.19 to 7.0.13",
+          "detail": "MongoDB 8 refuses to start on these kernels, so its container restarted for ever. A new server is started with the glibc setting that lets it run, the Databases page offers a one-click fix to a server made before, and MongoDB 7.0 and 6.0, and kernels from 7.0.14 on, need nothing."
+        },
+        {
+          "kind": "changed",
+          "text": "Found on this server lists only what there is to take",
+          "detail": "Servers and the files an application keeps are listed; other programs' state, backups and copies, data directories with no server and ignored items sit behind one Set aside fold, and ignore marks for things that are gone are one line with Forget them. Every row has the same two lines."
+        },
+        {
+          "kind": "fixed",
+          "text": "Upgrading packages that restart Docker no longer leaves dpkg interrupted",
+          "detail": "Package commands ran inside the backend's container, so an upgrade of docker-ce restarted Docker, killed the dpkg configuring it, and left every later apt command refusing to run. Installs, upgrades and removals now run as host systemd units that a restarted backend reconnects to, an interrupted dpkg is finished first, and a command waits for unattended-upgrades to let go of the lock instead of failing."
+        },
+        {
+          "kind": "fixed",
+          "text": "Closing a terminal window no longer crashes its reader or leaves its shell running",
+          "detail": "A window closed while its output was being announced could crash the loop reading it, and a lost hangup let the shell outlive the window. The close and the announcement are now ordered, and the window waits for the shell to exit."
+        },
+        {
+          "kind": "changed",
+          "text": "Add a site takes the Overview's eighth shortcut",
+          "detail": "It counts the sites served and opens a blank site on Proxy → Sites, for administrators who keep Proxy in their sidebar."
+        },
+        {
+          "kind": "changed",
+          "text": "The dashboard draws itself with the new brand logo",
+          "detail": "The wordmark, the start-up splash and the browser icons use the new mark, and the dashboard's own stack, containers, sockets and routes show it where they showed Docker's or Caddy's."
+        }
+      ]
+    },
     {
       "version": "0.8.1",
       "date": "2026-10-19",
