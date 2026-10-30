@@ -846,10 +846,25 @@ function RestoreFilesDialog({
     0,
     [run.id, inPlace, paths.join("\n")],
   )
-  const targets = plan.data?.targets ?? []
+  // A plan that cannot be read leaves the restore as it was before plans:
+  // every recorded source written back over its path, which the server still
+  // makes when it is missing.
+  const fallback = sources.map((source): BackupRestoreTarget => ({
+    archivePath: source.archivePath,
+    path: source.path,
+    target: source.path,
+    kind: source.kind ?? "path",
+    volume: source.volume,
+    exists: true,
+  }))
+  const targets: BackupRestoreTarget[] = Array.isArray(plan.data?.targets)
+    ? plan.data.targets
+    : plan.data || plan.error
+      ? fallback
+      : []
   const refused = targets.filter((target) => target.refused)
   const ready = inPlace
-    ? canInPlace && Boolean(plan.data) && refused.length === 0
+    ? canInPlace && Boolean(plan.data || plan.error) && refused.length === 0
     : destination.trim().length > 0
 
   const submit = () => {
@@ -967,7 +982,12 @@ function RestoreFilesDialog({
               Each source tree is written back over its original path. Anything changed there since
               the backup is replaced; what is not there is made first.
             </FormNote>
-            {plan.error && <FormNote tone="danger">{plan.error.message}</FormNote>}
+            {plan.error && (
+              <FormNote>
+                What this server lacks could not be read ({plan.error.message}); anything missing is
+                made as the files are written.
+              </FormNote>
+            )}
             {plan.loading && !plan.data && <LoadingRows rows={2} />}
             <ul className="space-y-1 text-xs" aria-label="Where each source goes">
               {targets.map((target) => (
