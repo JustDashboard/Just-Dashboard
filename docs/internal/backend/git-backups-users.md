@@ -110,13 +110,38 @@ descriptor, under a root that must already be the owner's — audits them with t
 `git.pull.own`, and pulls. Each works out again on the server what is in the way; none takes a path
 from the request. Push never forces and establishes a missing
 upstream on the branch's own remote; checkout never forces, and a remote branch is checked out as a new
-local branch that tracks it. The legacy merge, revert and cherry-pick endpoints still abort on failure.
+local branch that tracks it, or, when that local branch already exists, as a switch to it followed by a
+fast-forward to the remote branch (`/git/checkout` with `update`, and `from` naming the remote branch). A
+local branch behind its upstream takes the same switch from its own row. Being unable to fast-forward does
+not fail the switch: git's reason comes back beside it. The legacy merge, revert and cherry-pick endpoints still abort on failure.
 The workspace uses `/operation/start`, which requires a clean checkout and retains conflicts for the
 visual resolver, `/operation/continue` and ordinarily confirmed `/operation/abort`. Branch deletion
 defaults to Git's merged-only mode; stash includes untracked files; discard restores a tracked path from the index and
 deletes an untracked one (`clean -fd`); a hard reset may also clean untracked files; an identity is
 written into the repository's own config; a clone lands only in a new directory under a root, as the
 root's owner, and `init` starts an existing directory on `main`.
+
+**Match origin** makes a checkout look like a fresh copy of its remote in one confirmed step, for the
+server whose list has grown to hundreds of finished branches. The page fetches with prune, then reads
+`GET /git/match-remote` (read tier). The remote is the current branch's, then `origin`, then the only one
+there is. The answer sorts every local branch by what acting on it would lose: `update` and `delete` hold
+nothing the remote lacks, judged by whether the tip is in `rev-list --branches --not --remotes=<remote>`,
+one process for any number of branches; `unique` holds commits no ref of the remote reaches, each with its
+count; `inUse` is checked out by another worktree. A branch following another remote that still has it is
+left out. `staleRefs` are remote-tracking refs under a name no configured remote claims, which no fetch can
+update or prune. `blocked` says why nothing can happen yet: no remote, an operation in progress, or a
+detached HEAD on commits the remote lacks.
+
+`POST /git/match-remote` (inside `s.destructive`, ordinary confirmation) reads the plan again rather than
+taking it from the request. The request only names the `unique` branches to discard, each with the commit
+the operator saw, so a commit made after the dialog opened keeps its branch. A named branch is deleted, or
+moved back to its remote branch if there is one. The run stashes uncommitted work (untracked included) only
+when the working tree has to move, moves other branches with `update-ref` against the commit it read, moves
+the branch it will land on before switching so the tree goes straight to its final state, switches to the
+remote's default branch, fast-forwards it if it was already current, deletes branches and then stale refs
+in batches of 100. A linked worktree cannot leave its branch, so it updates or keeps that branch and
+switches nothing. Tags and existing stashes are not touched. A failure stops the run and answers with what
+had already happened. It is audited as `git.match.remote`.
 
 Deleting a checkout from the server starts with `GET /git/removal` (read tier), which answers what the
 delete would lose: `changes`, `untracked`, `conflicts`, `stashes`, `unpushed` (commits on local
@@ -139,7 +164,7 @@ It is audited as `git.repository.delete`.
 Route capabilities reflect recoverability: reads require `read`; fetch/pull/push (and pushing tags), stash-and-pull,
 checkout, branch create/rename, merge, revert, cherry-pick, tag create, stash push/pop/apply,
 stage/unstage/commit, identity, adding a remote, clone and init require `service.control`, and giving a
-blocked pull's folders back also `file.write`; discard, reset, discard-and-pull, stash drop, deleting a branch, a remote branch, a tag or a remote, and deleting a checkout pass through
+blocked pull's folders back also `file.write`; discard, reset, discard-and-pull, stash drop, deleting a branch, a remote branch, a tag or a remote, matching a checkout to its remote, and deleting a checkout pass through
 `s.destructive`. Discard, hard reset, stash drop, and Git deletions use ordinary confirmation; deleting
 a whole checkout is the one Git route that takes a typed phrase. Every mutation lands in
 the audit log as `git.<verb>` with the repository it touched.

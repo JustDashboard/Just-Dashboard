@@ -438,11 +438,36 @@ async function fixture(
         case "/git/roots":
           response = { roots: ["/srv"] }
           break
+        case "/git/match-remote":
+          response = {
+            remote: "origin",
+            branch: "main",
+            stash: 0,
+            delete: [{ name: "finished", head: sha }],
+            update: [],
+            unique: [{ name: "only-here", head: sha, commits: 2 }],
+            inUse: [],
+            staleRefs: ["pr/1"],
+            staleRemotes: ["pr"],
+          }
+          break
         case "/git/log":
           response = [commit]
           break
         case "/git/branches":
-          response = [branch, { ...branch, name: "feature", current: false, upstream: "" }]
+          response = [
+            branch,
+            { ...branch, name: "feature", current: false, upstream: "" },
+            {
+              ...branch,
+              name: "origin/release",
+              current: false,
+              remote: true,
+              upstream: "",
+              remoteName: "origin",
+              local: "release",
+            },
+          ]
           break
         case "/git/commit":
           response = { ...commit, changes: [change] }
@@ -995,6 +1020,24 @@ test("branches can change and unset their upstream", async ({ page }) => {
   await expect
     .poll(() => seen.some((r) => r.path === "/git/upstream" && r.body.ref === ""))
     .toBe(true)
+})
+
+test("matching the remote fetches, shows the plan and only discards what is ticked", async ({
+  page,
+}) => {
+  const seen = await fixture(page)
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+  await page.getByRole("tab", { name: "Branches", exact: true }).click()
+  await page.getByRole("button", { name: "Match origin", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByText("finished", { exact: true })).toBeVisible()
+  await expect(dialog.getByText("2 commits only here")).toBeVisible()
+  expect(seen.some((r) => r.path === "/git/fetch")).toBe(true)
+  await dialog.getByRole("checkbox").check()
+  await dialog.getByRole("button", { name: "Match origin", exact: true }).click()
+  await expect
+    .poll(() => seen.find((r) => r.path === "/git/match-remote" && r.body.discard)?.body)
+    .toEqual({ discard: [{ name: "only-here", head: sha }] })
 })
 
 test("a conflict is resolved in the preview and the merge can continue", async ({ page }) => {

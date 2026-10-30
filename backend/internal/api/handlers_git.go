@@ -22,8 +22,8 @@ import (
 //	                stash-and-pull; giving a blocked pull's folders back to
 //	                the checkout's owner also needs file.write
 //	destructive     discard, reset, stash drop, discard-and-pull, and
-//	                deleting a branch, tag, or remote (all use ordinary
-//	                confirmation)
+//	                deleting a branch, tag, or remote, and matching a checkout
+//	                to its remote (all use ordinary confirmation)
 func (s *Server) mountGitRoutes(r chi.Router) {
 	r.Route("/git", func(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleGitRepos))
@@ -45,6 +45,8 @@ func (s *Server) mountGitRoutes(r chi.Router) {
 		// What deleting a checkout would lose, read before the confirmation
 		// that asks for it.
 		r.Method(http.MethodGet, "/removal", s.handle(s.handleGitRemoval))
+		// What matching the checkout to its remote would do, likewise.
+		r.Method(http.MethodGet, "/match-remote", s.handle(s.handleGitMatchPlan))
 		r.Method(http.MethodGet, "/conflict", s.handle(s.handleGitConflict))
 		r.Method(http.MethodGet, "/patch", s.handle(s.handleGitPartialDiff))
 		r.Method(http.MethodGet, "/rebase/plan", s.handle(s.handleGitRebasePlan))
@@ -128,6 +130,10 @@ func (s *Server) mountGitRoutes(r chi.Router) {
 			// than severity decides).
 			r.Method(http.MethodPost, "/branch/delete", s.handle(s.handleGitBranchDelete))
 			r.Method(http.MethodPost, "/branch/delete-remote", s.handle(s.handleGitBranchDeleteRemote))
+			// Deletes and moves many branches at once, but it is the same act as
+			// deleting one: only a branch the operator named can lose commits, so
+			// an ordinary confirmation is still the right weight.
+			r.Method(http.MethodPost, "/match-remote", s.handle(s.handleGitMatchRemote))
 			r.Method(http.MethodPost, "/tag/delete", s.handle(s.handleGitTagDelete))
 			r.Method(http.MethodPost, "/remote/delete", s.handle(s.handleGitRemoteDelete))
 			// Deleting a whole checkout is typed for: uncommitted work, stashes
@@ -570,6 +576,7 @@ type gitRefRequest struct {
 	Amend   bool     `json:"amend"`
 	Index   int      `json:"index"`
 	Pop     bool     `json:"pop"`
+	Update  bool     `json:"update"`
 }
 
 func (s *Server) handleGitPushTags(w http.ResponseWriter, r *http.Request) error {
@@ -591,6 +598,9 @@ func (s *Server) handleGitCheckout(w http.ResponseWriter, r *http.Request) error
 	return s.gitAction(w, r, "checkout", func(p string) (*gitx.Result, error) {
 		if req.Local != "" {
 			return s.modules.git.CheckoutRemote(r.Context(), p, req.Ref, req.Local)
+		}
+		if req.Update {
+			return s.modules.git.CheckoutUpdated(r.Context(), p, req.Ref, req.From)
 		}
 		return s.modules.git.Checkout(r.Context(), p, req.Ref)
 	})
@@ -771,6 +781,34 @@ func (s *Server) handleGitBranchDelete(w http.ResponseWriter, r *http.Request) e
 	}
 	return s.gitAction(w, r, "branch.delete", func(p string) (*gitx.Result, error) {
 		return s.modules.git.DeleteBranch(r.Context(), p, req.Ref, req.Hard)
+	})
+}
+
+func (s *Server) handleGitMatchPlan(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	plan, err := s.modules.git.MatchPlan(r.Context(), path)
+	if err != nil {
+		return gitErr(err)
+	}
+	httpx.JSON(w, http.StatusOK, plan)
+	return nil
+}
+
+// handleGitMatchRemote works the plan out again on the server. The request
+// only names which branches holding unique commits may go, each at the commit
+// the operator saw.
+func (s *Server) handleGitMatchRemote(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Discard []gitx.MatchChoice `json:"discard"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	return s.gitAction(w, r, "match.remote", func(p string) (*gitx.Result, error) {
+		return s.modules.git.MatchRemote(r.Context(), p, req.Discard)
 	})
 }
 

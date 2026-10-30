@@ -7201,6 +7201,36 @@ export type GitBranch = {
   local?: string
 }
 
+/** One local branch in a `GitMatchPlan`. */
+export type GitMatchBranch = {
+  name: string
+  /** The commit the plan was read at; a discard only applies while it still sits here. */
+  head: string
+  /** The remote branch this one becomes; absent when it is deleted. */
+  target?: string
+  behind?: number
+  ahead?: number
+  /** Commits no ref on the remote reaches: what discarding this would lose. */
+  commits?: number
+  worktree?: string
+}
+
+/** What matching a checkout to its remote would do, read before confirming. */
+export type GitMatchPlan = {
+  remote: string
+  /** The remote's default branch, where the checkout ends up. */
+  branch?: string
+  switch?: boolean
+  stash: number
+  delete: GitMatchBranch[]
+  update: GitMatchBranch[]
+  unique: GitMatchBranch[]
+  inUse: GitMatchBranch[]
+  staleRefs: string[]
+  staleRemotes: string[]
+  blocked?: string
+}
+
 export type GitResult = {
   command: string
   output: string

@@ -13,13 +13,15 @@ import {
 } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
+import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { SourceBranch, SourceMerge } from "@/components/git/glyphs"
-import type { GitBranch, GitResult, GitTag as GitTagType } from "@/lib/types"
+import type { GitBranch, GitMatchPlan, GitResult, GitTag as GitTagType } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { AheadBehind } from "@/components/git/ahead-behind"
 import { GitExplain } from "@/components/git/help"
+import { MatchOriginBody, matchPlanIsEmpty } from "@/components/git/match-origin"
 import { NameDialog } from "@/components/git/name-dialog"
 import type { GitPreview } from "@/components/git/preview-panel"
 import type { GitRun } from "@/components/git/run"
@@ -46,7 +48,13 @@ import { VerbActions, type Verb } from "@/components/verbs"
  * then the tags. Switching is offered only for local branches: checking a
  * remote one out directly lands in a detached HEAD, which is precisely the
  * state a newcomer cannot get out of, so a remote branch offers "check out"
- * instead, which makes a local branch that tracks it.
+ * instead, which makes a local branch that tracks it. A branch behind its
+ * remote is brought up to date as it is switched to, from either row, because
+ * arriving on a stale copy of it is never what the click meant.
+ *
+ * "Match origin" is the whole-repository version of the row verbs, for the
+ * server whose list is hundreds of finished branches: it reads what it would
+ * do, says so, and does it in one go (see gitx.MatchRemote).
  *
  * Every other verb sits behind one menu, by name: merge into
  * the current branch, compare, rename, delete here, delete on the remote.
@@ -77,6 +85,7 @@ export function BranchesPanel({
   const [creating, setCreating] = useState<"branch" | "tag" | null>(null)
   const [renaming, setRenaming] = useState<GitBranch | null>(null)
   const [tracking, setTracking] = useState<GitBranch | null>(null)
+  const [matching, setMatching] = useState(false)
   const branches = usePoll(
     (signal) => get<GitBranch[]>("/git/branches", { path: repoPath }, signal),
     0,
@@ -96,6 +105,47 @@ export function BranchesPanel({
     void run(label, () => post<GitResult>(path, body, { query: q }))
       .then(refresh)
       .catch(() => undefined)
+
+  // Fetches first: the plan is only as true as the refs it is read from, and a
+  // branch deleted on the remote a minute ago is the reason this was clicked.
+  const matchRemote = async () => {
+    setMatching(true)
+    try {
+      await post<GitResult>("/git/fetch", undefined, { query: { ...q, prune: true } })
+      const plan = await get<GitMatchPlan>("/git/match-remote", q)
+      refresh()
+      if (plan.blocked) {
+        notify.error(`Cannot match ${plan.remote || "a remote"}`, plan.blocked)
+      } else if (matchPlanIsEmpty(plan)) {
+        notify.success(`Already matches ${plan.remote}`)
+      } else {
+        confirmMatch(plan)
+      }
+    } catch (err) {
+      notify.error("Could not read the remote", err)
+    } finally {
+      setMatching(false)
+    }
+  }
+
+  const confirmMatch = (plan: GitMatchPlan) => {
+    let discard = false
+    confirm({
+      title: `Match ${plan.remote}`,
+      confirmLabel: `Match ${plan.remote}`,
+      description: <MatchOriginBody plan={plan} onDiscardChange={(chosen) => (discard = chosen)} />,
+      action: async () => {
+        const res = await post<GitResult>(
+          "/git/match-remote",
+          { discard: discard ? plan.unique.map(({ name, head }) => ({ name, head })) : [] },
+          { query: q },
+        )
+        notify.success(`Matched ${plan.remote}`, { description: res.output })
+        refresh()
+        return "reported"
+      },
+    })
+  }
 
   const remove = (b: GitBranch, force: boolean) =>
     confirm({
@@ -303,7 +353,10 @@ export function BranchesPanel({
 
   const local = branches.data?.filter((b) => !b.remote) ?? []
   const remote = branches.data?.filter((b) => b.remote) ?? []
-  const localNames = new Set(local.map((b) => b.name))
+  const localByName = new Map(local.map((b) => [b.name, b]))
+  const matchTarget = remote.some((b) => b.remoteName === "origin")
+    ? "origin"
+    : remote[0]?.remoteName
   const tagList = tags.data ?? []
 
   return (
@@ -329,6 +382,25 @@ export function BranchesPanel({
             New tag
           </Button>
           <span className="flex-1" />
+          {canDestruct && matchTarget && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  disabled={!!busy || matching}
+                  pending={matching}
+                  onClick={() => void matchRemote()}
+                >
+                  <CloudDownload className="size-3" />
+                  {`Match ${matchTarget}`}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {`Update every branch to ${matchTarget} and delete the ones it no longer has. Shows you what first.`}
+              </TooltipContent>
+            </Tooltip>
+          )}
           {tagList.length > 0 && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -459,12 +531,21 @@ export function BranchesPanel({
                       variant="ghost"
                       disabled={!!busy}
                       className="shrink-0"
-                      onClick={() => act(`Switched to ${b.name}`, "/git/checkout", { ref: b.name })}
+                      onClick={() =>
+                        act(`Switched to ${b.name}`, "/git/checkout", {
+                          ref: b.name,
+                          update: updates(b),
+                        })
+                      }
                     >
-                      Switch
+                      {updates(b) ? "Switch and update" : "Switch"}
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>{`Check out ${b.name}`}</TooltipContent>
+                  <TooltipContent>
+                    {updates(b)
+                      ? `Check out ${b.name} and bring it up to ${b.upstream}`
+                      : `Check out ${b.name}`}
+                  </TooltipContent>
                 </Tooltip>
               )}
               <VerbActions verbs={localVerbs(b)} reveal />
@@ -479,47 +560,55 @@ export function BranchesPanel({
           <>
             <GroupLabel label="Remote" explain="remote" count={remote.length} />
             <ul className="divide-y divide-hairline">
-              {remote.map((b) => (
-                <li
-                  key={b.name}
-                  className="group flex min-w-0 items-center gap-2 py-1.5 pr-1.5 pl-3 text-muted-foreground transition-colors hover:bg-row-hover"
-                >
-                  <CloudDownload aria-hidden className="size-4 shrink-0 opacity-60" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-mono text-xs">{b.name}</p>
-                    {b.subject && (
-                      <p className="truncate text-micro">
-                        {b.subject}
-                        {b.at ? ` · ${relativeTime(b.at)}` : ""}
-                      </p>
+              {remote.map((b) => {
+                const mine = b.local ? localByName.get(b.local) : undefined
+                return (
+                  <li
+                    key={b.name}
+                    className="group flex min-w-0 items-center gap-2 py-1.5 pr-1.5 pl-3 text-muted-foreground transition-colors hover:bg-row-hover"
+                  >
+                    <CloudDownload aria-hidden className="size-4 shrink-0 opacity-60" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-mono text-xs">{b.name}</p>
+                      {b.subject && (
+                        <p className="truncate text-micro">
+                          {b.subject}
+                          {b.at ? ` · ${relativeTime(b.at)}` : ""}
+                        </p>
+                      )}
+                    </div>
+                    {canControl && b.local && !mine?.current && !mine?.worktree && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            disabled={!!busy}
+                            className="shrink-0"
+                            onClick={() =>
+                              act(
+                                `Checked out ${b.local}`,
+                                "/git/checkout",
+                                mine
+                                  ? { ref: mine.name, from: b.name, update: true }
+                                  : { ref: b.name, local: b.local },
+                              )
+                            }
+                          >
+                            Check out
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {mine
+                            ? `Switch to your ${b.local} and bring it up to ${b.name}`
+                            : `Make a local ${b.local} that tracks ${b.name}, and switch to it`}
+                        </TooltipContent>
+                      </Tooltip>
                     )}
-                  </div>
-                  {canControl && b.local && !localNames.has(b.local) && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          disabled={!!busy}
-                          className="shrink-0"
-                          onClick={() =>
-                            act(`Checked out ${b.local}`, "/git/checkout", {
-                              ref: b.name,
-                              local: b.local,
-                            })
-                          }
-                        >
-                          Check out
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {`Make a local ${b.local} that tracks ${b.name}, and switch to it`}
-                      </TooltipContent>
-                    </Tooltip>
-                  )}
-                  <VerbActions verbs={remoteVerbs(b)} reveal />
-                </li>
-              ))}
+                    <VerbActions verbs={remoteVerbs(b)} reveal />
+                  </li>
+                )
+              })}
             </ul>
           </>
         )}
@@ -599,6 +688,12 @@ export function BranchesPanel({
       />
     </div>
   )
+}
+
+// Only a branch that can fast-forward: one with commits of its own would stop
+// at the merge and say so after the switch, which reads as a failure.
+function updates(b: GitBranch): boolean {
+  return b.behind > 0 && b.ahead === 0 && !b.gone
 }
 
 function GroupLabel({ label, explain, count }: { label: string; explain: string; count: number }) {
