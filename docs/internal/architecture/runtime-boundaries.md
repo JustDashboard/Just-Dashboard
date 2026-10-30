@@ -89,8 +89,15 @@ systemd through `jobs.RunDetached`, and a restarted backend adopts them; see
 
 - `Command` runs a binary locally when present, else via `nsenter --target 1`. `CommandOnHost` *always*
   crosses (for tools like `who` that exist in the image but would report on the container).
-  `CommandInDir` and `CommandOnHostInDir` pass `--wd` to nsenter because crossing namespaces silently
-  discards `cmd.Dir`.
+  `CommandInDir` and `CommandOnHostInDir` change directory in a small shell on the far side, because
+  crossing namespaces silently discards `cmd.Dir` and nsenter's `--wd` resolves the path on the wrong side.
+- nsenter runs with `--no-fork`, so the process `exec.Cmd` holds is the host command and a cancelled
+  context reaches it. `--pid` still has nothing to fork for: `/proc/1` is resolved in this process's own
+  PID namespace, so the namespace it joins is the one it is already in. Every command also carries a
+  `WaitDelay` (5 seconds): Wait stops waiting for descendants that keep the output pipe open, and reports
+  `exec.ErrWaitDelay` when the command itself succeeded. Killing one command does not kill what it
+  started; a caller that must stop a whole tree uses `RunGroup`, which clears the delay and signals the
+  process group.
 - `AsOwner(cmd)` drops to the UID/GID owning `cmd.Dir`, so a `git pull` does not leave root-owned files.
 - `CommandOnHostAsUser` enters the host namespace before using `setpriv` to select the trusted account's
   UID/GID and groups, clear capabilities and set no-new-privileges. PM2 uses this path with a minimal
@@ -99,6 +106,9 @@ systemd through `jobs.RunDetached`, and a restarted backend adopts them; see
   to a thread that unshares its filesystem attributes and `setns`es into `/proc/1/ns/mnt`, a thread Go
   then discards rather than reuses. Only `fn` moves; a goroutine it starts is back in the container.
   Where there is no other namespace (a plain install) or it cannot be entered, `fn` runs in place.
+  The runtime cannot discard the process's main thread, so `cmd/server` keeps it on the main goroutine
+  with `runtime.LockOSThread` in `init`. Otherwise `/proc/<pid>/ns/mnt`, which `docker exec` and so the
+  container health check join, can end up as the host's for good.
 - Argv is passed through unchanged and **never** through a shell. Keep it that way ([invariant 6](../security/invariants.md#invariants-that-must-not-regress)).
 
 Local interactive rebase uses Git's editor protocol: `gitx` sets the editor to the current server

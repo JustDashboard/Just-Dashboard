@@ -60,7 +60,29 @@ func (e *GroupError) Unwrap() error { return e.Cause }
 // nsenterArgs enters the host's mount, UTS, IPC, network and PID namespaces.
 // The mount namespace is the one that matters — it is what makes the host's
 // /usr/sbin and its shared libraries visible.
-var nsenterArgs = []string{"--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid", "--"}
+//
+// --no-fork makes the host command the process exec.Cmd started. Without it
+// nsenter stays behind as the parent of the command, so cancelling a context
+// kills only nsenter while the command runs on, holding the output pipe that
+// Wait is reading. Forking exists to put the command inside a PID namespace
+// nsenter has just joined, and here there is none to join: /proc/1 is resolved
+// in this process's own PID namespace, so its PID namespace is this one, and a
+// command that does not fork already sees the same PIDs.
+var nsenterArgs = []string{"--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid", "--no-fork", "--"}
+
+// commandWaitDelay is how long Wait gives a stopped or finished command's
+// descendants to let go of its output before closing the pipes itself. Killing
+// a shell leaves the pipeline it started, and those keep a pipe open for as
+// long as they run. RunGroup clears it, because it stops the descendants too.
+const commandWaitDelay = 5 * time.Second
+
+// contextCommand is exec.CommandContext with the backstop every command built
+// here carries, so that a cancelled context always ends Wait.
+func contextCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = commandWaitDelay
+	return cmd
+}
 
 var (
 	hostOnce sync.Once
@@ -128,16 +150,16 @@ func Command(ctx context.Context, name string, args ...string) *exec.Cmd {
 // preserve it. Callers must resolve and contain dir before it reaches here.
 func CommandInDir(ctx context.Context, dir, name string, args ...string) *exec.Cmd {
 	if _, err := exec.LookPath(name); err == nil {
-		cmd := exec.CommandContext(ctx, name, args...)
+		cmd := contextCommand(ctx, name, args...)
 		cmd.Dir = dir
 		return cmd
 	}
 	if hostReachable() {
-		return exec.CommandContext(ctx, "nsenter", hostArgv(dir, name, args)...)
+		return contextCommand(ctx, "nsenter", hostArgv(dir, name, args)...)
 	}
 	// Nothing can run it; return the direct form so the caller reports the
 	// ordinary "executable not found" rather than an nsenter error.
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := contextCommand(ctx, name, args...)
 	cmd.Dir = dir
 	return cmd
 }
@@ -159,11 +181,11 @@ func CommandOnHost(ctx context.Context, name string, args ...string) *exec.Cmd {
 // why neither cmd.Dir nor nsenter's own --wd can deliver this.
 func CommandOnHostInDir(ctx context.Context, dir, name string, args ...string) *exec.Cmd {
 	if !hostReachable() {
-		cmd := exec.CommandContext(ctx, name, args...)
+		cmd := contextCommand(ctx, name, args...)
 		cmd.Dir = dir
 		return cmd
 	}
-	return exec.CommandContext(ctx, "nsenter", hostArgv(dir, name, args)...)
+	return contextCommand(ctx, "nsenter", hostArgv(dir, name, args)...)
 }
 
 // HostPath names a host path as this process can open it. Only the mounts

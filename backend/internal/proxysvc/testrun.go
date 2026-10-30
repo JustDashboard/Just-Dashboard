@@ -25,8 +25,8 @@ var ErrTestUnfinished = errors.New("the configuration test did not finish")
 var testTimeout = 30 * time.Second
 
 // testWaitDelay bounds the wait, once a test is stopped, for whatever still
-// holds its output open: killing nsenter or a shell leaves the nginx it
-// started writing, and the test would run on past its timeout.
+// holds its output open: killing a shell leaves the nginx it started writing,
+// and the test would run on past its timeout.
 const testWaitDelay = 2 * time.Second
 
 // UnfinishedTestError is ErrTestUnfinished for one run: the command, why it
