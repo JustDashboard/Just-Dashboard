@@ -426,6 +426,66 @@
           "kind": "changed",
           "text": "The dashboard draws itself with the new brand logo",
           "detail": "The wordmark, the start-up splash and the browser icons use the new mark, and the dashboard's own stack, containers, sockets and routes show it where they showed Docker's or Caddy's."
+        },
+        {
+          "kind": "fixed",
+          "text": "System users no longer says a password was unlocked when nothing changed",
+          "detail": "An account with no password behind its lock, which is every account this page created and the login on most cloud images, has nothing to unlock. usermod said so on stderr, changed nothing and exited 0, so the page reported success. It now says there is no password to unlock and offers to set one."
+        },
+        {
+          "kind": "fixed",
+          "text": "System users tells you who can really sign in",
+          "detail": "Each account now says whether SSH would let it in by password and by key, and what stands in the way, read from the shadow file, its keys and sshd's own configuration for that account. Root is always listed: it was hidden as a system account, so a host where root signs in with a password read as having no way in at all. Who can become root comes from the sudoers files rather than from group names, so cloud-init's passwordless rule shows and a sudo group member with no password to type does not read as root."
+        },
+        {
+          "kind": "added",
+          "text": "Set, generate and remove an account's password, and disable an account outright",
+          "detail": "Passwords go to chpasswd over stdin and a generated one is shown once. A password can be required to change at the next sign-in, given an expiry and rules for its age, and a faillock lockout can be cleared. Disabling expires the account, which stops keys as well, where a password lock does not."
+        },
+        {
+          "kind": "added",
+          "text": "Grant and take away sudo from an account's page",
+          "detail": "With a password, without one, or for named commands. A grant is its own file in /etc/sudoers.d, checked by visudo before it can take effect and taken back if the whole configuration stops parsing, because one bad line stops sudo for everyone. Rules in other files, cloud-init's included, can be removed from the account they name."
+        },
+        {
+          "kind": "added",
+          "text": "Manage SSH keys properly",
+          "detail": "Import a person's public keys from GitHub, generate a pair and download the private half once, label a key, limit it by address, command or expiry date, copy it to another account, and see when each was last used and whether it is too weak to keep."
+        },
+        {
+          "kind": "added",
+          "text": "Manage groups, an account's identity and its limits",
+          "detail": "Create, rename and delete groups and choose their members, each saying what it grants. Rename an account, which takes its private group, crontab and sudo rule along, change its full name, shell, home, main group and number, and cap its CPU, memory, processes and, where the filesystem has quotas on, its disk."
+        },
+        {
+          "kind": "added",
+          "text": "Open a terminal as any account",
+          "detail": "An administrator can open a shell as a chosen account, root included, and every window opened from it stays that account."
+        },
+        {
+          "kind": "added",
+          "text": "See what an account is doing and has done",
+          "detail": "Its sessions, which can be ended, its busiest processes, cron jobs and disk use, with its sign-ins, refused attempts and sudo commands as the host recorded them."
+        },
+        {
+          "kind": "changed",
+          "text": "Deleting an account says what it would leave behind and lets you choose",
+          "detail": "It counts the home, the files the account owns elsewhere, its running processes, cron jobs and sudo rules first. The home can be kept, archived or deleted, and the account's files handed to another; its sudo rules, crontab and limits go with it, so they cannot land on whoever is next given that name or number. Deleting a home with no archive now takes the account's name typed."
+        },
+        {
+          "kind": "security",
+          "text": "The last way in cannot be closed from System users",
+          "detail": "Deleting, disabling, locking, removing the last key, changing the shell or taking away sudo is refused when nobody else could sign in over SSH and become root. Accounts a package made are read-only until editing is turned on for them, a login shell has to be one the host lists, and a new person's account has to be given a way in or be said to need none."
+        },
+        {
+          "kind": "added",
+          "text": "Be told when the host's accounts change",
+          "detail": "A new host alert, Accounts changed, reports a new account, SSH key or sudo rule that reaches root, and root signing in, whether or not the dashboard made the change."
+        },
+        {
+          "kind": "added",
+          "text": "Set the rules new accounts start under, and start from a template",
+          "detail": "Password age and length, the default shell and days of inactivity are edited in the host's own files with everything else in them left alone. Accounts can start from a built-in template or one of your own, and several can be locked, disabled, re-enabled or moved between groups at once."
         }
       ]
     },

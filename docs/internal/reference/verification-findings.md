@@ -7,12 +7,18 @@ They remain open engineering findings; documenting them does not relax
 ## Host command authority is not uniform
 
 Invariant 6 requires host commands to use `hostexec` with explicit argv. The normalized deployment and
-proxy paths do, but the repository still contains direct `os/exec` calls in `gitx`, `ghx`, `linuxusers`,
+proxy paths do, but the repository still contains direct `os/exec` calls in `gitx`, `ghx`,
 `selfupdate`, `procs`, and `dockerx`, in addition to the documented stored deployment shell exception.
 Many direct calls intentionally use binaries pinned in the backend image against bind-mounted host paths
 or the Docker socket, and Git/GitHub apply `hostexec.AsOwner`, but they do not all pass through
 `hostexec.Command*`. This boundary needs an architecture decision or implementation convergence; do not
 cite the presence of this page as approval for another direct executor.
+
+`linuxusers` was on that list, and that part of the finding is closed: every tool it runs goes through
+one seam (`run.go`), which prefers the host's own copy through `hostexec.CommandOnHost` and falls back to
+the image's through `hostexec.Command`, and `TestNothingHereStartsAProcessOfItsOwn` reads every non-test
+file of the package and fails on a direct `exec.Command`. It imports `os/exec` only for the type a missing
+tool's error is read from.
 
 `dbx` was on that list, and that part of the finding is closed. It used to start `pg_dump`, `pg_restore`,
 `mysqldump`, `mysql`, `mongodump` and `mongorestore` with `os/exec` itself. The transfer work put every

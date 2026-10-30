@@ -505,27 +505,150 @@ moved through S3 between two stores.
 
 ## Host users and SSH keys
 
-`internal/linuxusers` manages local operating-system accounts, not dashboard identities. The entire
-`/system-users` route tree requires `system.admin`, including reads, because it exposes shells, groups,
-login history, lock state, and SSH-key counts. Account state is assembled from the mounted host
-`/etc/passwd`, `/etc/group`, `/etc/shadow`, `lastlog`, and each home directory's `authorized_keys`; system
-accounts are hidden by default in the UI.
+`internal/linuxusers` manages local operating-system accounts, not dashboard identities. The whole
+`/system-users` and `/system-accounts` route trees require `system.admin`, reads included, because they
+expose shells, groups, login history and who can become root. `/system-accounts` is separate because
+anything else under `/system-users` would shadow an account of that name.
 
-Usernames and group names follow a closed 32-character Unix pattern. New accounts are created with a
-locked password, so access must be added deliberately with a public key; shells must be absolute, comments
-cannot inject passwd fields, and the group picker comes from the host group database. A protected-account
-set cannot be deleted or locked. Account deletion is destructive and ordinarily confirmed, especially
-because it may remove the home directory; key removal is destructive but ordinarily confirmed.
+**Reading.** `Service.read` is one reading of everything an account's standing depends on: `/etc/passwd`,
+`/etc/group`, `/etc/shadow`, `lastlog` (or `lastlog2`), each `authorized_keys`, the sudoers files and
+`sshd -T`. Every other judgement in the package, a guard included, starts from it.
 
-SSH public keys are parsed with `x/crypto/ssh`, reject private/multi-line input, expose SHA-256 fingerprints,
-and de-duplicate by fingerprint. Home traversal and `.ssh`/`authorized_keys` opens refuse symlinks.
-Directory descriptors anchor reads and atomic replacements even if the account renames a directory.
-New `.ssh` directories belong to the account at `0700`; existing directories must already belong to it
-before their mode is tightened. Keys are written into exclusive random `0600` files and renamed into
-place, so a preexisting symlink or hard link cannot redirect a privileged write or ownership change.
-Removal matches a fingerprint and retains comments and unrecognised lines. Reads are bounded to 2 MiB.
+- `password` is what is behind the shadow field, which `locked` cannot say: `set`, `locked` (a hash behind
+  a `!`, which unlocking restores), `none` (`!`, `*`, `!!`: nothing to restore), `empty` (no password is
+  asked for) or `unknown` (shadow unreadable). `usermod --unlock` on a bare `!` warns on stderr, changes
+  nothing and **exits 0**, so `SetLocked` asks the file first, answers `nothing_to_unlock`, and re-reads the
+  file after any lock or unlock rather than believing the exit status. `SetPassword` does the same.
+- `signIn` (`access.go`) is whether SSH would admit the account by password and by key, with `why` naming
+  the first thing closing each route: the account's expiry, its shell, sshd's AllowUsers, DenyUsers,
+  AllowGroups and DenyGroups in sshd's own order, PermitRootLogin, the auth methods, `UsePAM no` over a
+  locked password, then the password state and the key count. `Get` asks `sshd -T -C user=<name>,…`, so a
+  Match block is in one account's answer; the listing asks once, because a process per account is not free
+  on a page that polls. A socket-activated sshd (Ubuntu's default) has not made `/run/sshd` until somebody
+  first connects and `-T` refuses to answer without it, so that directory is made and the question asked
+  again. The answers are checked against real sign-ins in the live suite below.
+- `rootRoutes` (`sudo.go`) is read from the sudoers files, following `@includedir`, `#includedir` and
+  aliases (read before the rules, since sudo takes an alias defined below the rule using it), skipping what
+  sudo skips (a name with a dot or ending in a tilde), and telling `#1000` from a comment. A rule read wrongly
+  is root access the page, the guard and the alert all miss, so run-as and tags are followed command by
+  command as sudo does, a second host spec is read, `Defaults !authenticate` counts as asking for no
+  password, and `ALL, !/bin/su` counts as everything: a negated command is no protection, and calling it
+  limited would understate root. `usable` is false for a rule that asks for a password the account does not have, which is what
+  a member of `sudo` with a locked password is. `docker`, `lxd`, `lxc`, `libvirt` and `disk` are routes of
+  kind `group`: root by another name. Where the sudoers files cannot be read at all, the conventional group
+  names stand in. Root is always in the listing, whatever `?system=` says: it is the most important account
+  on the machine, and hiding it as a system account is how a host could read "nobody can sign in" while
+  root signed in with a password.
 
-The current host-execution implementation and its relationship to the documented invariant are recorded in
+- `sshKeyCount` and `keysUnknown` read every file sshd would (`AuthorizedKeysFile` from `sshd -T`, so
+  `authorized_keys2` and an absolute path are in the count), through `otherKeys`, which only reads: this page
+  writes `.ssh/authorized_keys` and nothing else. A file it cannot read, a link where a file should be, or an
+  `AuthorizedKeysCommand` is `keysUnknown`, and an unknown is reported as a route that may be open rather than
+  as zero keys, because zero is what would let the guard close the last way in.
+
+**Execution.** Every tool goes through `run.go`: the host's own copy through `hostexec.CommandOnHost` where
+it has one (built against the host's PAM, `login.defs` and shadow suite), and the image's through
+`hostexec.Command` otherwise, since `/etc` is the host's own directory in here too. Secrets travel on stdin,
+never argv. A home and the keys in it are reached through `hostexec.HostPath`, because the container shares
+`/home` and `/root` and little else, and a daemon's home under `/var/lib` is not one of those. For the same
+reason an archive's directory is made by a tool: tar runs on the host, and a directory made from this
+process would be one tar cannot see.
+
+**Writes that must not lock anyone out.** `guard.go` judges a change against the reading before it is made.
+The last way in is an account that could sign in over SSH and reach root with a usable, unlimited route, and
+deleting, disabling, locking, removing a password or the last key, changing the shell, leaving a group or
+removing or replacing a sudo rule, a home changed without its files, a rename outside AllowUsers, a main group
+that carried a rule, or password rules that have already run out is refused with `409 last_way_in` when it
+would leave none. Each judgement and its write happen under the service's lock, so two changes cannot each
+pass on the strength of the other's account. A host with no way in has
+nothing left to lose and is not stopped from mending itself. The dashboard's own terminal is not counted: it
+stops working the day the stack does, and that is the day somebody needs SSH.
+
+`protected` names accounts the system boots with: they cannot be deleted, locked, disabled, renamed, moved
+or renumbered, and keep a login shell where they have one. Root may still lose its password (keys only is
+how a server is meant to be, and the guard stops it being the last way in). Accounts a package made are
+read-only over HTTP unless the request says `allowSystem=true` (`guardSystemAccount`, invariant 4), and
+bulk routes never touch them. A system group keeps its name, number and existence the same way
+(`guardSystemGroup`), though who is in one is the operator's to change. Making a second uid 0 is refused, and a shell must be in `/etc/shells` or be a
+nologin.
+
+**Shared numbers.** A process and a file have a number and no name, so anything aimed at an account's processes
+or files lands on every account with that number. `EndSessions` refuses a uid 0 alias or a shared number
+(`409 shares_number`): `pkill --uid` on one would end sshd, dockerd and the dashboard. Deleting such an account
+removes the name and nothing else, with `userdel --force` because userdel looks for processes by number, and
+the preview says so (`sharesNumber`) rather than listing the other account's processes as this one's. Usernames and group names follow a closed 32-character Unix pattern.
+
+**Creating.** `POST /system-users/` checks everything it can before the account exists (a key, a password, a
+sudo grant, the GitHub login), refuses a person's account with no way in unless `noSignIn` says that is the
+intent (`400 no_way_in`), and takes the account back out if anything after `useradd` fails. It is
+session-only, as are `POST …/password` and `POST …/keys/generate`: a password or a private key leaving the
+dashboard is a way onto the machine, and a long-lived API key may not mint one. A generated password or
+private key is in that one response and nowhere else, and none of them reaches the audit log.
+
+**Sudo.** `SudoGrant` is the dashboard's own rule, one file per account (`/etc/sudoers.d/jd-<name>`): all
+commands or named ones, with or without a password. It is written to a sibling sudo ignores, checked with
+`visudo --check --file`, renamed into place, and the whole configuration is checked with `visudo --check`,
+with the old file put back if that fails, because one bad line stops sudo for everyone. `sudoCommandRe` holds
+what visudo was found to accept: `=` is escaped, and `@` is refused everywhere since visudo refuses it even
+escaped. `RemoveSudoRule` takes a rule out of whatever file holds it, keeping the rest of the file and anyone
+else the rule names; a group's rule is refused, because leaving the group is what takes it away.
+
+**Removal.** `GET …/removal` counts what would go: the home, files the account owns elsewhere (a bounded
+sample from `find -xdev`, against a clock), processes, its crontab, keys and sudo rules, and why it cannot go
+at all. `DELETE …` takes `home=keep|archive|delete`, `endSessions` and `transferTo`. `home=delete` takes the
+typed name (invariant 3). A home that is too near the root or shared with another account is never removed,
+because `userdel --remove` takes whatever the passwd file says. An account with processes running is refused
+unless `endSessions` says to stop them, an archive (`/var/backups/just-dashboard/accounts`, root-only) is read
+back before the home goes. A delete closes the account first, under the lock: it is expired, its crontab goes and
+its sudo rules are rewritten before anything long or irreversible starts, because an archive takes minutes and a
+handover is a root chown across files the account controlled, and an account still able to act could swap a path
+under it. Handing over uses `chown --from=<uid> -h` and `find -execdir`: `--from` leaves a hard link to somebody
+else's file alone, `-h` stops at a symlink, and `-execdir` means a directory swapped for a link to `/etc` between
+find listing it and chown running changes nothing. A home is not this account's to remove when it is a link, holds
+another account's home, or is shared. Rules go with the account by every spelling that would outlive it, `#uid`
+and a private `%group` as well as its name. A home that was already there when an account is created is reported
+back (`inheritedHome`), and undoing a failed create leaves it alone. The
+account's sudo rules, crontab and limit drop-in go with it, so none can land on whoever is next given that
+name or number.
+
+**Renaming** moves the private group, the crontab and the dashboard's sudo file. A rule in somebody else's file
+that names the account is refused rather than rewritten: left behind, it would hand root to the next account
+given the old name. The same goes for a group a sudo rule names.
+
+**Keys.** Parsed with `x/crypto/ssh`, private and multi-line input refused, SHA-256 fingerprints, de-duplicated
+by fingerprint. Home traversal and `.ssh`/`authorized_keys` opens refuse symlinks, directory descriptors anchor
+reads and atomic replacements even if the account renames a directory, new `.ssh` directories belong to the
+account at `0700`, and keys go into exclusive random `0600` files renamed into place, so a preexisting symlink
+or hard link cannot redirect a privileged write. Removal and editing keep comments and unrecognised lines.
+Restrictions are a closed list of what `authorized_keys` understands, and a composed line is parsed back and
+must keep its fingerprint, so an option cannot smuggle in a second key or break the line. `lastUsed` comes from
+the auth log, and `weak` flags DSA and short RSA. GitHub import fetches one fixed URL with a validated login and
+bounds the response.
+
+**Limits and defaults.** Per-account CPU, memory and tasks are a drop-in on `user-<uid>.slice`
+(`/etc/systemd/system/user-<uid>.slice.d/50-just-dashboard.conf`), taken back if `daemon-reload` fails so a file
+never claims a limit systemd did not take, with a floor below which no login could start. Disk is `setquota`,
+offered only where the home's mount has quotas on. `Defaults` reads and writes a few keys of `login.defs`,
+`/etc/default/useradd` and `pwquality.conf`, keeping every other line and comment. Templates are shapes (shell,
+groups, sudo level), never credentials: the built-in ones are in the code and the operator's own in the settings
+store.
+
+**Tests.** The fast layer runs against a temporary `/etc` and a fake runner. `live_test.go` runs the real
+shadow suite, visudo, gpasswd, tar and sshd, including real SSH sign-ins checked against what `signIn` said, and
+changes real accounts, so it refuses to run without a marker file baked into its throwaway image:
+
+```bash
+go test -c -o /tmp/l/linuxusers.test ./internal/linuxusers
+docker run --rm --network none -e JD_USERS_LIVE=1 -v /tmp/l:/t:ro <sandbox> /t/linuxusers.test -test.run Live -test.v
+```
+
+The sandbox is `ubuntu:24.04` with `sudo openssh-server cron procps rsyslog libpam-pwquality`, `ssh-keygen -A`
+and `touch /.jd-users-live-sandbox`. `TestLiveSystemdLimitsAndTheHostPath` needs the same image with systemd as
+PID 1 (`--privileged --cgroupns=private --tmpfs /run`, `JD_USERS_LIVE_SYSTEMD=1`), and
+`TestLiveAcrossTheMountNamespace` runs that under `unshare --mount` with tmpfs over `/data` and `/var/backups`
+(`JD_USERS_LIVE_NAMESPACE=1`), which is the boundary the dashboard's container sits behind.
+
+The relationship between host execution and the documented invariant is recorded in
 [`../reference/verification-findings.md`](../reference/verification-findings.md).
 
 A backup job's destination can also be given to a PostgreSQL server's point-in-time recovery
