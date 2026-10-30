@@ -159,6 +159,8 @@ export default function TerminalPage() {
 
   const params = useSearchParams()
   const requestedCwd = params.get("cwd")
+  // A shell as a chosen host account: System users' Open terminal links here.
+  const requestedAccount = params.get("as")
   const requestedSession = params.get("session")
   const launched = useRef(false)
   // Five seconds rather than ten: the listing now carries whether each session
@@ -184,7 +186,7 @@ export default function TerminalPage() {
   }, 5000)
 
   const openSession = useCallback(
-    async (cwd?: string) => {
+    async (cwd?: string, asUser?: string) => {
       try {
         // No title, even for a shell opened in a chosen directory: the rail
         // follows the shell, whose prompt names the directory it is in, and a
@@ -193,6 +195,7 @@ export default function TerminalPage() {
           rows: 30,
           cols: 110,
           cwd,
+          asUser,
         })
         await refresh()
         setRemembered(session.id)
@@ -205,7 +208,7 @@ export default function TerminalPage() {
   )
 
   useEffect(() => {
-    if (!requestedCwd) {
+    if (!requestedCwd && !requestedAccount) {
       launched.current = false
       return
     }
@@ -213,9 +216,10 @@ export default function TerminalPage() {
     launched.current = true
     const url = new URL(window.location.href)
     url.searchParams.delete("cwd")
+    url.searchParams.delete("as")
     window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash)
-    void openSession(requestedCwd)
-  }, [requestedCwd, data, openSession])
+    void openSession(requestedCwd ?? undefined, requestedAccount ?? undefined)
+  }, [requestedCwd, requestedAccount, data, openSession])
 
   // A session named in the address — the Overview's shells link to one — is
   // picked as if from the rail, so it is also the one the next visit opens on.

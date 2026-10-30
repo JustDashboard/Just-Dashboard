@@ -47,6 +47,9 @@ const (
 	// or running with no connection to Cloudflare's edge: every name routed
 	// through it unreachable.
 	hostAlertTunnelDown = "tunnel_down"
+	// hostAlertAccountChanged is a new account, SSH key or root-reaching sudo
+	// rule on the host, or root signing in, however it came about.
+	hostAlertAccountChanged = "account_changed"
 
 	// A container down for a minute is most of a minute nobody was told.
 	// Every reading but Docker's is a query of what the store already holds.
@@ -58,6 +61,7 @@ var hostAlertKinds = []string{
 	hostAlertCPUHigh, hostAlertMemoryHigh, hostAlertDiskFilling, hostAlertContainerDown, hostAlertBackupFailed,
 	hostAlertImageVulnerable,
 	hostAlertTunnelDown,
+	hostAlertAccountChanged,
 }
 
 // hostAlertSpec is one kind's line and timing: the default and range of its
@@ -72,6 +76,10 @@ type hostAlertSpec struct {
 	// over instead, which already is the hold: a minute at 100% inside ten at
 	// 40% is a spike, and the stored history is what says so.
 	hold bool
+	// oneShot is a kind whose subject is an event rather than a condition. A key
+	// that was added has nothing to recover from, so the next pass ends it without
+	// a word.
+	oneShot bool
 }
 
 var hostAlertSpecs = map[string]hostAlertSpec{
@@ -93,6 +101,8 @@ var hostAlertSpecs = map[string]hostAlertSpec{
 	// A connector reconnects on its own after a blip of the edge, so two
 	// minutes down, read twice, before anybody is told.
 	hostAlertTunnelDown: {minutes: 2, minMinutes: 1, maxMinutes: 1440, passes: 2, hold: true},
+	// A change has happened by the time it is read, and it is told the once.
+	hostAlertAccountChanged: {passes: 1, oneShot: true},
 }
 
 // hostAlertClearLine is where a percentage must fall below before a firing
@@ -447,7 +457,9 @@ func (a *hostAlerts) evaluateRule(ctx context.Context, rule hostAlertRule, readi
 		case hostAlertFired:
 			told = append(told, hostAlertTold{after, deploy.NotificationEventHostFiring, after.Detail, time.Unix(after.FiringSince, 0).UTC()})
 		case hostAlertRecovered:
-			told = append(told, hostAlertTold{after, deploy.NotificationEventHostRecovered, after.Detail, now})
+			if !hostAlertSpecs[rule.Kind].oneShot {
+				told = append(told, hostAlertTold{after, deploy.NotificationEventHostRecovered, after.Detail, now})
+			}
 		}
 		return nil
 	}
@@ -643,17 +655,20 @@ func hostAlertPage(kind, subject string) string {
 		return "/deploy"
 	case hostAlertTunnelDown:
 		return "/proxy/tunnel"
+	case hostAlertAccountChanged:
+		return "/system-users"
 	}
 	return "/metrics"
 }
 
 // hostAlertTestDetail is a kind's reading as a test message states it.
 var hostAlertTestDetail = map[string]string{
-	hostAlertCPUHigh:       "CPU averaged 96% over the last 10 min (peak 100%); the line is 90%.",
-	hostAlertMemoryHigh:    "Memory averaged 94% over the last 5 min (peak 97%); the line is 90%.",
-	hostAlertDiskFilling:   "93% of / is used (186.0 GB of 200.0 GB); the line is 90%.",
-	hostAlertContainerDown: "It exited with code 1.",
-	hostAlertBackupFailed:  "The run of nightly that started 2026-10-25 03:00 UTC failed: upload refused.",
+	hostAlertCPUHigh:        "CPU averaged 96% over the last 10 min (peak 100%); the line is 90%.",
+	hostAlertMemoryHigh:     "Memory averaged 94% over the last 5 min (peak 97%); the line is 90%.",
+	hostAlertDiskFilling:    "93% of / is used (186.0 GB of 200.0 GB); the line is 90%.",
+	hostAlertContainerDown:  "It exited with code 1.",
+	hostAlertBackupFailed:   "The run of nightly that started 2026-10-25 03:00 UTC failed: upload refused.",
+	hostAlertAccountChanged: "A new SSH key, laptop, can sign in as ubuntu (SHA256:Ab1Cd2Ef3Gh4).",
 	hostAlertImageVulnerable: "Release 12 has 1 critical and 2 high findings with a fix (zlib 1.2.12-r0, fixed in 1.2.12-r2), " +
 		"and node:22-alpine now names a newer image than the one it was built on. Rebuild it from the project's overview.",
 	hostAlertTunnelDown: "The connector holds no connection to Cloudflare's edge. cloudflared said: Unauthorized: Invalid tunnel secret.",
@@ -665,6 +680,7 @@ var hostAlertTestLabel = map[string]string{
 	hostAlertBackupFailed:    "nightly",
 	hostAlertImageVulnerable: "shop · production",
 	hostAlertTunnelDown:      "production-tunnel",
+	hostAlertAccountChanged:  "ubuntu",
 }
 
 // testState is what a test message is about: the rule's kind as it would

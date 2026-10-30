@@ -36,7 +36,8 @@ const ConfirmParam = "confirm"
 // (docs/internal/security/invariants.md) lists it: permanently deleting an
 // archived deployment project, dropping a database, taking a Compose stack
 // down (from its page or from an archived project's removal plan), deleting a
-// Git checkout from the server, and uninstalling the dashboard with a wipe.
+// Git checkout from the server, uninstalling the dashboard with a wipe, and
+// deleting a host account along with its home and no archive.
 // A prune is not on that list — a
 // container, network or image comes back from a registry or a compose file —
 // nor is deleting a proxy site, a stream or a branch, each of which is

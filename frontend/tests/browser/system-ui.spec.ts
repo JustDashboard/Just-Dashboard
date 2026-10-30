@@ -1,21 +1,19 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { answerSystemUsers } from "./system-users-fixture"
 
 const recordWorkspace = process.env.JD_WORKSPACE_VIDEO === "1"
 test.use({ video: recordWorkspace ? "on" : "off" })
 
 /**
- * The two System pages, System users and the audit log, checked in a browser
- * against a mocked host with enough people, daemons and history in it for
- * every mark to have something to draw.
+ * The audit log, and that both System pages hold their width, checked in a
+ * browser against a mocked host with enough history in it for every mark to have
+ * something to draw. The accounts have a spec of their own, system-users.spec.ts.
  *
  * What these assert is what a type check cannot (design-system.md §12, §14,
- * §15, §16): that the accounts are cards you open — people as their initials
- * in their own hue, daemons as the product that runs under them — under four
- * readings whose faces say who they count; that the audit trail stays a
- * framed table of readings under four readings of the last day, with every
- * entry drawn as what it touched and who touched it, shelved by day; and that
- * the chips narrow both. The screenshots are the eyes the assertions do not
- * have.
+ * §15, §16): that the audit trail stays a framed table of readings under four
+ * readings of the last day, with every entry drawn as what it touched and who
+ * touched it, shelved by day; and that the chips narrow it. The screenshots are
+ * the eyes the assertions do not have.
  */
 
 const now = Date.now()
@@ -45,105 +43,6 @@ const session = {
     lastLoginAt: ago(0),
     createdAt: ago(0),
   },
-}
-
-const account = (fields: Record<string, unknown>) => ({
-  gid: 1000,
-  comment: "",
-  home: `/home/${fields.username}`,
-  shell: "/bin/bash",
-  groups: [],
-  system: false,
-  locked: false,
-  noPassword: false,
-  sshKeyCount: 0,
-  canLogin: true,
-  ...fields,
-})
-
-const people = [
-  account({
-    username: "ion",
-    uid: 1000,
-    comment: "Ion Moisei",
-    groups: ["adm", "sudo", "docker"],
-    lastLogin: ago(2 * HOUR),
-    lastLoginFrom: "100.101.4.12",
-    sshKeyCount: 2,
-  }),
-  account({
-    username: "deploy",
-    uid: 1001,
-    comment: "Deploy bot",
-    groups: ["docker"],
-    lastLogin: ago(3 * 24 * HOUR),
-    lastLoginFrom: "203.0.113.9",
-    sshKeyCount: 1,
-  }),
-  account({ username: "mira", uid: 1002, groups: ["sudo"], noPassword: true }),
-  account({
-    username: "backup",
-    uid: 1003,
-    shell: "/usr/sbin/nologin",
-    locked: true,
-    canLogin: false,
-  }),
-]
-
-const daemons = [
-  account({
-    username: "root",
-    uid: 0,
-    home: "/root",
-    groups: ["root"],
-    system: true,
-    locked: true,
-  }),
-  account({
-    username: "postgres",
-    uid: 113,
-    home: "/var/lib/postgresql",
-    groups: ["postgres", "ssl-cert"],
-    system: true,
-  }),
-  account({
-    username: "redis",
-    uid: 114,
-    home: "/var/lib/redis",
-    shell: "/usr/sbin/nologin",
-    system: true,
-    canLogin: false,
-  }),
-  account({
-    username: "www-data",
-    uid: 33,
-    home: "/var/www",
-    shell: "/usr/sbin/nologin",
-    system: true,
-    canLogin: false,
-  }),
-]
-
-const keys = {
-  path: "/home/ion/.ssh/authorized_keys",
-  keys: [
-    {
-      line: 1,
-      type: "ssh-ed25519",
-      comment: "ion@macbook",
-      fingerprint: "SHA256:q1w2e3r4t5y6u7i8o9p0",
-      bits: 256,
-      raw: "",
-    },
-    {
-      line: 2,
-      type: "ssh-ed25519",
-      comment: "github-actions-deploy",
-      fingerprint: "SHA256:a1s2d3f4g5h6j7k8l9",
-      bits: 256,
-      raw: "",
-    },
-  ],
 }
 
 type Entry = {
@@ -287,132 +186,11 @@ async function mockHost(page: Page) {
     const path = url.pathname.replace(/^\/api\/v1/, "")
     if (path === "/auth/session") return json(route, session)
     if (path === "/updates/self") return json(route, { current: "0.7.0", latest: "0.7.0" })
-    if (path === "/system-users/") {
-      const system = url.searchParams.get("system") === "true"
-      return json(route, system ? [...people, ...daemons] : people)
-    }
-    if (path === "/system-users/ion/keys") return json(route, keys)
+    if (await answerSystemUsers(route)) return
     if (path === "/audit/") return json(route, audit(url))
     return json(route, [])
   })
 }
-
-test.describe("system users", () => {
-  test("opens on the host's accounts, not on tiles, and draws every account as a card", async ({
-    page,
-  }) => {
-    await mockHost(page)
-    await page.goto("/system-users")
-    await page.waitForLoadState("networkidle")
-
-    // The four metric tiles are gone; the identity line says what they counted.
-    await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
-    const line = page.locator("[data-slot='host-identity']")
-    await expect(line).toContainText("4 people")
-    await expect(line).toContainText("3 have sign-in routes")
-    await expect(line).toContainText("3 SSH keys authorised")
-    await expect(line).toContainText("ion")
-    // Mira holds sudo and needs no password, so she is the verdict.
-    await expect(line).toContainText("1 without a password")
-    await expect(line).toContainText("1 can run anything as root")
-
-    // Cards you open, not a table: each opens its keys.
-    expect(await page.locator("[data-slot='table']").count()).toBe(0)
-    const cards = page.locator("[data-slot='choice-row']")
-    await expect(cards).toHaveCount(4)
-    await expect(page.getByRole("button", { name: "SSH keys for ion" }).first()).toBeVisible()
-    // The account that needs no password leads the list.
-    await expect(cards.first()).toContainText("mira")
-    const ion = cards.filter({ hasText: "ion" }).first()
-    // A person is their silhouette; an administrator's group is said first.
-    await expect(ion.locator("[data-slot='initials-mark'] svg")).toHaveCount(1)
-    await expect(ion).toContainText("sudo")
-    await expect(ion.locator("img[src='/logos/docker.svg']")).toHaveCount(1)
-    // Where they last signed in from is drawn as the network it is on.
-    await expect(ion.locator("img[src='/logos/tailscale.svg']")).toHaveCount(1)
-  })
-
-  test("the band says who signed in, who can become root and whose keys open the host", async ({
-    page,
-  }) => {
-    await mockHost(page)
-    await page.goto("/system-users")
-    await page.waitForLoadState("networkidle")
-
-    const band = page.locator("[data-slot='access-band']")
-    const signIns = band.getByRole("region", { name: "Last sign-ins" })
-    await expect(signIns.getByRole("listitem")).toHaveCount(2)
-    await expect(signIns.getByRole("listitem").first()).toContainText("ion")
-    await expect(signIns).toContainText("1 never signed in")
-    // The 24h window holds only Ion's sign-in two hours ago.
-    await signIns.getByRole("button", { name: "24h" }).click()
-    await expect(signIns.getByRole("listitem")).toHaveCount(1)
-    await expect(signIns).toContainText("1 earlier")
-
-    // Mira leads: sudo, no password. Ion is in sudo and docker.
-    const root = band.getByRole("region", { name: "Root access" })
-    await expect(root.getByRole("listitem")).toHaveCount(3)
-    await expect(root.getByRole("listitem").first()).toContainText("mira")
-    await expect(root.getByRole("listitem").first()).toContainText("No password")
-
-    const keys = band.getByRole("region", { name: "SSH keys by account" })
-    // Ion holds two of the three keys.
-    await expect(keys).toContainText("67%")
-    await keys.getByRole("button", { name: "SSH keys for ion" }).click()
-    await expect(page.getByRole("dialog")).toContainText("/home/ion/.ssh/authorized_keys")
-  })
-
-  test("the verdict and the No password chip narrow the cards to who needs no password", async ({
-    page,
-  }) => {
-    await mockHost(page)
-    await page.goto("/system-users")
-    await page.waitForLoadState("networkidle")
-
-    await page.getByRole("button", { name: /without a password/ }).click()
-    await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
-    await expect(page.locator("[data-slot='choice-row']")).toContainText("mira")
-    await page.getByRole("button", { name: /^All/ }).click()
-    await page.getByRole("button", { name: /^No password/ }).click()
-    await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
-  })
-
-  test("the chips narrow the cards and system accounts are their own shelf", async ({ page }) => {
-    await mockHost(page)
-    await page.goto("/system-users")
-    await page.waitForLoadState("networkidle")
-
-    await page.getByRole("button", { name: /^Password locked/ }).click()
-    await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
-    await expect(page.locator("[data-slot='choice-row']")).toContainText("backup")
-    await page.getByRole("button", { name: /^All/ }).click()
-
-    await page.getByRole("button", { name: "System accounts", exact: true }).click()
-    await expect(page.locator("[data-slot='choice-row']")).toHaveCount(8)
-    await expect(page.getByText("People", { exact: true })).toBeVisible()
-    const postgres = page.locator("[data-slot='choice-row']").filter({ hasText: "postgres" })
-    await expect(postgres.locator("img[src='/logos/postgresql.svg']")).toHaveCount(1)
-    // www-data is nginx's on one host and Apache's on the next: no guess.
-    const web = page.locator("[data-slot='choice-row']").filter({ hasText: "www-data" })
-    await expect(web.locator("img")).toHaveCount(0)
-  })
-
-  test("a card opens the account's keys, each drawn as where it lives", async ({ page }) => {
-    await mockHost(page)
-    await page.goto("/system-users")
-    await page.waitForLoadState("networkidle")
-
-    await page
-      .locator("[data-slot='choice-row']")
-      .getByRole("button", { name: "SSH keys for ion" })
-      .click()
-    const sheet = page.getByRole("dialog")
-    await expect(sheet).toContainText("ion")
-    await expect(sheet).toContainText("github-actions-deploy")
-    await expect(sheet.locator("img[src='/logos/github.svg']")).toHaveCount(1)
-    await expect(sheet).toContainText("/home/ion/.ssh/authorized_keys")
-  })
-})
 
 test.describe("audit log", () => {
   test("opens on the last day and draws each entry as what it touched", async ({ page }) => {
@@ -565,25 +343,4 @@ test("workspace: mobile audit navigation respects input and sidebar focus", asyn
   await expect(action).toHaveValue("?")
   await expect(page.getByRole("dialog")).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
-})
-
-test("password-locked SSH accounts retain their route and uid-0 counts as administration", async ({
-  page,
-}) => {
-  await mockHost(page)
-  await page.route("**/api/v1/system-users/**", (route) =>
-    json(route, [
-      account({ username: "keyonly", uid: 1100, groups: ["docker"], locked: true, sshKeyCount: 1 }),
-      account({ username: "superuser", uid: 0, groups: [], locked: false }),
-    ]),
-  )
-  await page.goto("/system-users")
-  await expect(page.locator("[data-slot=host-identity]")).toContainText("2 have sign-in routes")
-  const reach = page.getByRole("region", { name: "Root access" })
-  await expect(reach.getByRole("listitem")).toHaveCount(2)
-  await expect(reach).toContainText("does not revoke SSH keys")
-  await expect(page.locator("[data-slot=choice-row]").filter({ hasText: "keyonly" })).toContainText(
-    "Password locked",
-  )
-  await expect(page.getByRole("button", { name: "Unlock password" })).toBeVisible()
 })

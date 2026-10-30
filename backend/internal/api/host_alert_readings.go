@@ -83,6 +83,10 @@ func (s *Server) observeHostAlerts(ctx context.Context, rules []hostAlertRule, n
 	if uses[hostAlertImageVulnerable] {
 		scans, scansErr = s.modules.deployRuns.LiveImageScans(ctx)
 	}
+	var accounts hostAlertReading
+	if uses[hostAlertAccountChanged] {
+		accounts = s.accountChangeReading(ctx, now, s.modules.linuxUsers.TakeSnapshot)
+	}
 	server := alerts.machine(ctx)
 
 	out := map[int64]hostAlertReading{}
@@ -138,6 +142,8 @@ func (s *Server) observeHostAlerts(ctx context.Context, rules []hostAlertRule, n
 				continue
 			}
 			out[rule.ID] = imageAlertReading(scans)
+		case hostAlertAccountChanged:
+			out[rule.ID] = accounts
 		}
 	}
 	return out

@@ -17,6 +17,7 @@ export type HostAlertKind =
   | "backup_failed"
   | "image_vulnerable"
   | "tunnel_down"
+  | "account_changed"
 
 /** Each kind reads its own; the server clears the rest. */
 export type HostAlertParams = {
@@ -90,6 +91,7 @@ export const HOST_ALERT_KINDS: HostAlertKind[] = [
   "backup_failed",
   "image_vulnerable",
   "tunnel_down",
+  "account_changed",
 ]
 
 /** The server's defaults (`hostAlertSpecs`), so a new form opens on them. */
@@ -101,6 +103,7 @@ export const HOST_ALERT_DEFAULTS: Record<HostAlertKind, HostAlertParams> = {
   backup_failed: {},
   image_vulnerable: {},
   tunnel_down: { minutes: 2 },
+  account_changed: {},
 }
 
 /** The ranges the server accepts, so the form says so before it is sent. */
@@ -113,6 +116,7 @@ const LIMITS: Record<HostAlertKind, { threshold?: [number, number]; minutes?: [n
     backup_failed: {},
     image_vulnerable: {},
     tunnel_down: { minutes: [1, 1440] },
+    account_changed: {},
   }
 
 /** Whether a kind has a line, and whether it has minutes. */
@@ -154,6 +158,10 @@ export const HOST_ALERT_WORDS: Record<HostAlertKind, { label: string; hint: stri
     label: "Tunnel down",
     hint: "The Cloudflare Tunnel's connector stopped, or holding no connection to Cloudflare's edge, in cloudflared's own words.",
   },
+  account_changed: {
+    label: "Accounts changed",
+    hint: "A new account, SSH key or sudo rule that reaches root, or root signing in, whoever made the change.",
+  },
 }
 
 /** A minute count in words: "1 min", "90 min", "2 h", "1 day". */
@@ -183,6 +191,8 @@ export function describeHostAlert(kind: HostAlertKind, params: HostAlertParams) 
       return "a live release's image has a fixable vulnerability and a newer base to rebuild on"
     case "tunnel_down":
       return `holds no connection to Cloudflare's edge for ${minutesWords(p.minutes ?? 1)}`
+    case "account_changed":
+      return "a new account, SSH key or root-reaching sudo rule appears, or root signs in"
   }
 }
 

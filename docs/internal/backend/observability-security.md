@@ -132,8 +132,8 @@ proxy's page in `components/alerts/alert-parts.tsx`.
   bytes for memory). `disk_filling` (default 90%, 10–99) reads the recorder's newest
   `metric_mount_samples` batch and fires a mount on its space **or** its inodes, since a filesystem out
   of inodes reports free space and refuses to create a file; a mount missing from the newest batch has
-  been unmounted and leaves. `container_down` (minutes 2, 1–1440), `backup_failed`, `image_vulnerable`
-  and `tunnel_down` (minutes 2, 1–1440) are below.
+  been unmounted and leaves. `container_down` (minutes 2, 1–1440), `backup_failed`, `image_vulnerable`,
+  `tunnel_down` (minutes 2, 1–1440) and `account_changed` are below.
 - **One pass a minute** (`hostAlerts.Start` from `Server.Start`, clock, observer and deliverer fields
   for tests); each source is read once a pass and only when an enabled rule needs it. CPU, memory and
   disk are queries of what the recorder already keeps; with `JD_METRICS_RETENTION=0` those rules are
@@ -183,6 +183,14 @@ proxy's page in `components/alerts/alert-parts.tsx`.
   Proxy › Tunnel; with no tunnel connected the rule is unjudged rather than quiet. It holds two passes
   and the rule's minutes, as a container does, because a connector reconnects by itself after a blip of
   the edge.
+- **The host's accounts changed** (`account_changed`, `accountChangeReading`, `host_alert_accounts.go`)
+  when a pass finds a new account, SSH key or sudo rule that reaches root, or root has signed in since the
+  last pass. It reads the host through `linuxusers.TakeSnapshot` and compares with the reading it kept in
+  the settings store (`system_account_baseline`), so a change made outside the dashboard is caught, which
+  is the one that matters. A first pass, or a reading older than a day (the rule was off, not the dashboard
+  restarting), sets the line and tells nothing; a pass that cannot read or store is unjudged. It is the one
+  kind that is `oneShot`: a key that was added has nothing to recover from, so the next pass ends its
+  subject without a word. What disappeared is not told, and neither is a key relabelled.
 - **Hold and state** (`stepHostAlert`, one pure function). A subject is told once when it has been over
   the line for its kind's passes and minutes — one pass for CPU, memory (their window is the hold) and
   backups, two for disks, two and the rule's minutes for containers — and once when it comes back,

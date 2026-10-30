@@ -769,11 +769,13 @@ to the contribution terms above, including the additional licence grant to the p
 - Keep the security posture intact. The network allowlist runs before
   authentication, enrolled accounts always require their second factor, every destructive route sits behind
   the destructive capability with an audit entry, and deletion of deployment projects, entire databases,
-  and Docker stacks requires a typed confirmation phrase enforced server-side. A change that
+  Docker stacks and a host account's home with no archive requires a typed confirmation phrase enforced
+  server-side. A change that
   weakens any of those needs to say so explicitly in the PR description.
 - Before changing typed confirmation, read invariant 3 in
   `docs/internal/security/invariants.md`. The typed set is limited to deletion of deployment projects,
-  entire databases, and Docker stacks; other destructive actions use ordinary confirmation.
+  entire databases, Docker stacks, Git checkouts and a host account's home with no archive, and to
+  uninstalling with a wipe; other destructive actions use ordinary confirmation.
 - Never edit `CHANGELOG.md` by hand — it is generated from
   `backend/internal/selfupdate/changelog.json`, which is also the file every
   install in the world reads to find out whether it is behind. If your change

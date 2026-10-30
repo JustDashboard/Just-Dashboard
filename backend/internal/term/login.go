@@ -71,6 +71,22 @@ func resolveAccount(configured string) (Account, error) {
 	return accountFrom(u.Username, u.Uid, u.Gid, u.HomeDir, loginShellOf(u.Username))
 }
 
+// resolveLoginAccount is one session's account rather than every session's. A
+// nologin shell is refused, not worked around: su would print "This account is
+// currently not available" and the terminal would close, and forcing a shell on it
+// is exactly what that account's shell is there to prevent.
+func resolveLoginAccount(name string) (Account, error) {
+	u, err := user.Lookup(name)
+	if err != nil {
+		return Account{}, fmt.Errorf("%w: %s", ErrNoSuchAccount, name)
+	}
+	shell := loginShellOf(u.Username)
+	if !isLoginShell(shell) {
+		return Account{}, fmt.Errorf("%w: %s", ErrAccountCannotLogin, name)
+	}
+	return accountFrom(u.Username, u.Uid, u.Gid, u.HomeDir, shell)
+}
+
 func accountFrom(name, uid, gid, home, shell string) (Account, error) {
 	n, err := strconv.Atoi(uid)
 	if err != nil {

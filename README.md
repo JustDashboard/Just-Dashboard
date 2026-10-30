@@ -627,8 +627,8 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Two-factor is enforced for every account that has enrolled; `JD_REQUIRE_2FA` decides whether an
   account *must* enrol. A passkey replaces the password at sign-in, never the code.
 - Capabilities are checked on every backend route, never in the UI alone.
-- Destructive actions are confirmed and audited; deleting a project, database, stack or Git checkout,
-  and uninstalling with a wipe, asks for a typed phrase checked on the server.
+- Destructive actions are confirmed and audited; deleting a project, database, stack, Git checkout or a
+  host account's home, and uninstalling with a wipe, asks for a typed phrase checked on the server.
 - Every state-changing request lands in the audit log.
 - The session cookie stays the dashboard's. It is `__Host-jd_session` — HttpOnly, SameSite=Strict,
   Secure and sent to no other name — and the previews and tailnet-only apps the dashboard publishes on

@@ -453,6 +453,8 @@ function isCurrent(item: NavScopeEntry, pathname: string) {
   // A run is opened from its project's Deployments, and is one of them.
   const run = /^\/deploy\/(\d+)\/runs\//.exec(pathname)
   if (run) return path === `/deploy/${run[1]}/deployments`
+  // An account, the groups and the defaults are opened from System users.
+  if (pathname.startsWith("/system-users/")) return path === "/system-users"
   return path === pathname
 }
 

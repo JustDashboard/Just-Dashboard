@@ -58,6 +58,13 @@ A change that weakens any of these has to say so explicitly.
      for anybody else (an allowlisted network, the tailnet's previews, the SSH tunnel) needs an
      explicit `acknowledgeBoundary` (`netsec.BoundaryImpacts`,
      [observability-security](../backend/observability-security.md#the-access-boundary));
+   - `api.spendDestructive` for a body under `/system-users` that is destructive though its route is not:
+     disabling with `endSessions`, a sudo level of `none`, and bulk `end-sessions`;
+   - `api.guardSystemAccount` for every write under `/system-users/{name}`: an account a package made
+     (below uid 1000, and `nobody`, but not root) is refused with `403 system_account` unless the request
+     says `allowSystem=true`, and `handleTerminalCreate`, where `asUser` asks for `system.admin` on a route
+     that otherwise asks only for `terminal` and refuses an API key, because root is one of the accounts it
+     can name;
    - `api.logTargetFor` for a log source that is login and sudo records (auth data needs
      `system.admin` on every `/logs` route that reads a source — except the whole journal
      (`journal:`), which stays `read` as it was before the gate; those lines are in it unfiltered, a
@@ -386,7 +393,7 @@ setting off would strand everyone who was mid-flow with a session that can never
 
 ## Invariant 3: which routes take a typed phrase
 
-Typed confirmation is reserved for six deletion operations:
+Typed confirmation is reserved for seven deletion operations:
 
 - Permanently deleting an archived deployment project (`DELETE /deploy/{id}/permanent`) requires the
   project's name. Archiving a project is reversible and uses ordinary confirmation.
@@ -406,6 +413,10 @@ Typed confirmation is reserved for six deletion operations:
   the server's host name, because it removes every deployment with its managed volumes and paths and
   deletes the dashboard's database and the key it is sealed with. Uninstalling and keeping everything
   takes ordinary confirmation: running `install.sh` again restores the dashboard as it was.
+- Deleting a host account along with its home directory and no archive (`DELETE /system-users/{name}`
+  with `home=delete`) requires the account's name, because what a person keeps in a home exists nowhere
+  else. Its preview (`GET /system-users/{name}/removal`) counts it first. Keeping the home, or archiving
+  it to a root-only tarball first, takes ordinary confirmation, and bulk deletion only ever keeps homes.
 
 These are the only places the UI asks the operator to type a phrase. Other destructive operations,
 including table and collection deletion, data restores, Docker volume removal and pruning, account and
@@ -423,7 +434,7 @@ beside `total`, which is what its confirmation has to show. The Redis console's 
 like `DROP DATABASE` through the SQL query route, take the destructive capability and no phrase: a console
 is where an operator types the statement itself.
 
-The server enforces the six phrases inside their handlers. The browser sends an
+The server enforces the seven phrases inside their handlers. The browser sends an
 `encodeURIComponent`-encoded value in `X-Confirm` with `X-Confirm-Encoding: uri`; the backend decodes
 it once, requires valid UTF-8, and compares the exact phrase. Legacy unencoded headers remain
 supported. Only the Compose WebSocket action accepts a phrase in a query parameter because browsers

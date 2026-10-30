@@ -205,7 +205,7 @@ that does something.
   Environment tab hides. `build-dialog.tsx` is where the
   git panel and Docker stop being two products: a repository we already pull is a build context.
 
-Five deep links are worth preserving: `/files?path=`, `/git?repo=`, `/terminal?cwd=`,
+Six deep links are worth preserving: `/files?path=`, `/git?repo=`, `/terminal?cwd=`, `/terminal?as=` (a shell as that account, from its System users page),
 `/terminal?session=`, `/audit?action=`. Files and Git selections follow the address bar, while the
 terminal opens a session exactly once per mount because a shell is a process; `?session=` opens on an
 existing session instead (the Overview's shells link with it), remembered as if picked in the rail,

@@ -156,9 +156,9 @@ taking a frame:
   `Pane` and whose jobs and timers open sheets of their own — with a detail sheet built
   from plain panels that opens on the thing's own mark, the unit's journal, a PM2
   application's logs, a timer's runs and a job's cron lines a `Pane` in their sheets — and the
-  two System pages follow the same shape: on System users four readings (accounts, administrators,
-  who can sign in, the last sign-in) over the accounts as lit cards in a plain list, because each
-  opens its keys, with its SSH-keys sheet a plain list of rows and a plain form, and on the audit
+  two System pages follow the same shape: on System users the identity line and what to change over
+  the accounts as a table of readings whose row opens the account, each account's page plain lists
+  of rows and plain forms, and on the audit
   log four readings of the last day over its table and filters, where a request's outcome is a
   `Status` dot and the code in its family's colour rather than a wash across the row; and
   both of the dashboard's own pages — on Version the identity line, the update in flight and the
@@ -1009,7 +1009,7 @@ above:
   the fleet's live and build-slot figures, the
   Overview's requests, the delivery insights, Automation's
   revisions awaiting review and alerts firing, the live usage tiles, the readings on
-  Packages, System users and the audit log, and every lens's readings (`ReadingTile`) — the logs
+  Packages and the audit log, and every lens's readings (`ReadingTile`) — the logs
   page's, a service page's and Security's alike. A figure that follows a
   draft as it is typed — Build's and Runtime's settings readings — does not count, because it would
   count again on every keystroke; it rises once when it lands instead;
@@ -1151,7 +1151,11 @@ is chosen once (`useMediaQuery`) rather than by `hidden`/`xl:block` twins, becau
 exists in a hidden copy is two answers to every query a test or a screen reader makes. The list around the cards is a plain panel — a frame around framed cards is two nested
 frames, which is the stacking this section refuses. System users took the same argument in 0.7.0:
 every account opened its keys, so the eight-column table became cards (`AccountCard` on the page),
-their groups, last sign-in, keys and state beside the name from `lg` and beneath it below. The audit
+their groups, last sign-in, keys and state beside the name from `lg` and beneath it below. It became
+a table again in 0.8.2 at the operator's request, when an account came to open a whole page rather
+than a sheet: the readings on a card had no names on them, a key count beside an arrow and a padlock
+that read as a state rather than a verb, and the four questions the page exists for are each asked
+of a column. The audit
 log is the counter-example on the next page of the same section: an entry opens nothing, so its
 trail stays a table. The volumes were cards from 2026-09-23 and became a table again on 2026-10-08
 at the operator's request: a volume's card said "1 container" and not which, so the question every
@@ -1633,8 +1637,9 @@ draws a person as their initials in the hue their name has everywhere else — t
 dashboard's `ion` are one colour — and an account a package made for its daemon as the product that
 runs under it (`accountProduct`, `components/system-users/marks.tsx`: `postgres`, `redis`,
 `gitlab-runner`), with `www-data`, which is nginx's on one host and Apache's on the next, left as a
-glyph; an administrator's group is drawn first behind a shield and `docker` behind Docker's mark,
-because a member of either can become root. The audit log draws each entry with the mark of the part
+glyph; a group that reaches root is drawn behind a shield or as its product (`docker`, `lxd`), and a
+login shell as its own (`shellProduct`), under ids of their own so a process list still draws no
+mark for a shell. The audit log draws each entry with the mark of the part
 of the product it touched (`auditSection`, `components/audit/marks.tsx`: Docker's whale, Git's and
 GitHub's marks, PM2's, fail2ban's, the terminal's, Let's Encrypt's for an issued or renewed
 certificate, the dashboard's own for its settings, and the sidebar's glyph for every section that is
@@ -2544,6 +2549,16 @@ The passes, in order. Each one is a diff you can review on its own.
    (unit-tested); a press on any row opens that account's keys sheet. The cards lead with the
    account that needs no password and a new account rises into the list (`useArrivals`).
 
+   It took a third pass in 0.8.2, at the operator's request, because the band said nothing on the
+   servers it is mostly used on: "Nobody signed in", "2 never signed in" and "No account has an
+   authorised key" filled the top half of the page, and every figure in them is a column of the
+   table that replaced the cards. So the band went, and what it was for became the findings under
+   the line (`accountFindings`): each a thing to change with where to change it, and none at all on
+   a host with nothing to say, so there is no green line to learn to skip. The line's verdict went
+   for a harder reason. It read "No account signs in without a password" over a host where root
+   signs in with one, because root is a system account by its number and the page left system
+   accounts out by default. Root is in the list now whatever the switch says.
+
    A proxy site's own page took the same exit in 0.7.1, at the operator's request, because it was
    four grey figures — requests a minute, server errors, refused, upstream failures — over a
    two-column route line and its logs, with nothing on it that moved. Each went where it is said
@@ -3341,6 +3356,7 @@ the reader through it.
 | Sign-in, first-run setup, `/welcome` — the first-run question | **Flow** | A sequence with an outcome: the account's sidebar. |
 | Remote Desktop — the computers (`/remote-desktop`) | Reading | The reader arrives to find out which computers can be opened now. |
 | A Remote Desktop session (`/remote-desktop/[id]`) | Reading, as a workbench | The terminal's columns held to the window around the live screen, but edge to edge: no measure, gutter or frame, since every pixel of those was taken from the screen; a stream's frame is the computer's own shape, so the space left round it is the workspace's ground rather than black bars; drawn by guacd (Control) or streamed by Sunshine (Stream); what a stream waits on (its bridge, Sunshine, the PIN) is said in the screen's place, with Sunshine's own mark. |
+| `/system-users/new` — add an account | **Flow** | What it is for, then who it is and how they get in, ending in the one command that creates it. An account nobody can sign in to has to be asked for by name, which is the failure this replaced: a dialog that took a name and left the way in optional made an administrator nobody could ever sign in as. An account's own page, the groups and the defaults are reading pages. |
 | `/remote-desktop/new` — add a computer | **Flow** | Which computer, is its remote desktop on, and the sign-in: ending in the one command that saves it and opens the screen. |
 
 A section does not pick a register — a *page* does. The deployment section has pages in both, which

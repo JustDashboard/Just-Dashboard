@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { DATABASE_SURFACES, mockDatabases } from "./database-fixture"
+import { answerSystemUsers } from "./system-users-fixture"
 import { mockProject } from "./deploy-fixture"
 import { overview as remoteDesktopOverview } from "./remote-desktop-fixture"
 import { busyMap } from "./server-map-fixture"
@@ -73,6 +74,7 @@ async function mockShell(page: Page) {
     const path = url.pathname.replace(/^\/api\/v1/, "")
     if (path === "/auth/session") return json(route, user)
     if (path === "/updates/self") return json(route, { current: "0.6.7", latest: "0.6.7" })
+    if (await answerSystemUsers(route)) return
     if (path === "/deploy/" && url.searchParams.get("view") === "fleet") {
       return json(route, {
         deployments: [],
@@ -111,6 +113,11 @@ async function mockShell(page: Page) {
 const SURFACES = [
   "/audit",
   "/system-users",
+  "/system-users/user/ion",
+  "/system-users/user/postgres",
+  "/system-users/new",
+  "/system-users/groups",
+  "/system-users/defaults",
   "/packages",
   "/security",
   "/backups",
