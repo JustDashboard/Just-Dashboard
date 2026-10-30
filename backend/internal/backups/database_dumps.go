@@ -170,13 +170,14 @@ func (m *Manifest) CoversDatabase(connectionID int64) bool {
 // that connection's native dump, by the test a restore applies. The runs are
 // what count rather than the jobs' current lists, so a connection taken out of
 // a job keeps the backups that still hold it, and one just added has none
-// until a run has taken it.
+// until a run has taken it. An imported run is another server's: the
+// connection ids in its manifest are that server's, not this one's.
 func (s *Store) LastDatabaseDumps(ctx context.Context) (map[int64]time.Time, error) {
 	// Newest first, so the first run found holding a connection is its
 	// answer; a run that dumped no database is not read at all.
 	rows, err := s.st.DB.QueryContext(ctx,
 		`SELECT started_at, manifest_json FROM backup_runs
-		 WHERE status = ? AND artifact != '' AND instr(manifest_json, '"databaseDumps"') > 0
+		 WHERE status = ? AND artifact != '' AND imported = 0 AND instr(manifest_json, '"databaseDumps"') > 0
 		 ORDER BY started_at DESC, id DESC`, string(StatusSuccess))
 	if err != nil {
 		return nil, err
@@ -211,7 +212,7 @@ func (s *Store) LastDatabaseDumps(ctx context.Context) (map[int64]time.Time, err
 func (s *Store) LatestDatabaseDump(ctx context.Context, connectionID int64) (int64, time.Time, DatabaseDump, error) {
 	rows, err := s.st.DB.QueryContext(ctx,
 		`SELECT id, started_at, manifest_json FROM backup_runs
-		 WHERE status = ? AND artifact != '' AND instr(manifest_json, '"databaseDumps"') > 0
+		 WHERE status = ? AND artifact != '' AND imported = 0 AND instr(manifest_json, '"databaseDumps"') > 0
 		 ORDER BY started_at DESC, id DESC`, string(StatusSuccess))
 	if err != nil {
 		return 0, time.Time{}, DatabaseDump{}, err
@@ -303,6 +304,53 @@ func (r *Runner) RestoreDatabase(ctx context.Context, runID, connectionID int64,
 	return r.databases.RestoreDatabase(ctx, connectionID, database, target)
 }
 
+// RestoreDatabaseDump loads the dump recorded at archivePath into one of this
+// server's saved connections, which need not be the one it was taken from.
+// It is how an imported run's dump goes back: the connection ids in that
+// manifest are the other server's, so the dump is named by where it lies in
+// the archive, and the connection it goes into must be of the same engine.
+func (r *Runner) RestoreDatabaseDump(ctx context.Context, runID int64, archivePath string, connectionID int64, database string) (string, error) {
+	if r.databases == nil {
+		return "", errors.New("the database dump owner is unavailable")
+	}
+	target, err := r.databases.DescribeDatabase(ctx, connectionID)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(r.stage, 0o700); err != nil {
+		return "", err
+	}
+	directory, err := os.MkdirTemp(r.stage, "restore-db-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(directory)
+	run, archive, cleanup, err := r.localArtifact(ctx, runID)
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+	var selected *DatabaseDump
+	if run.Manifest != nil && run.Manifest.Complete {
+		for index := range run.Manifest.DatabaseDumps {
+			if run.Manifest.DatabaseDumps[index].ArchivePath == archivePath {
+				selected = &run.Manifest.DatabaseDumps[index]
+			}
+		}
+	}
+	if selected == nil || !strings.HasPrefix(selected.Digest, "sha256:") {
+		return "", fmt.Errorf("run %d holds no native dump at %s", runID, archivePath)
+	}
+	if !strings.EqualFold(selected.Driver, target.Driver) {
+		return "", fmt.Errorf("the dump is of a %s database and %s is %s; restore it into a connection of the same engine", selected.Driver, target.Name, target.Driver)
+	}
+	path, err := extractDump(ctx, archive, *selected, directory)
+	if err != nil {
+		return "", err
+	}
+	return r.databases.RestoreDatabase(ctx, connectionID, database, path)
+}
+
 // ExtractDatabaseDump writes one connection's native dump out of a run's
 // archive into directory, checked against the digest the manifest recorded,
 // and answers its path. The caller owns the directory.
@@ -312,6 +360,9 @@ func (r *Runner) ExtractDatabaseDump(ctx context.Context, runID, connectionID in
 		return "", DatabaseDump{}, err
 	}
 	defer cleanup()
+	if run.Imported {
+		return "", DatabaseDump{}, fmt.Errorf("run %d was imported: its connection ids are another server's; name the dump by its archive path", runID)
+	}
 	var selected *DatabaseDump
 	for index := range run.Manifest.DatabaseDumps {
 		if run.Manifest.DatabaseDumps[index].ConnectionID == connectionID {
@@ -321,7 +372,17 @@ func (r *Runner) ExtractDatabaseDump(ctx context.Context, runID, connectionID in
 	if selected == nil || !run.Manifest.CoversDatabase(connectionID) {
 		return "", DatabaseDump{}, fmt.Errorf("run %d holds no native dump for database connection %d", runID, connectionID)
 	}
-	target := filepath.Join(directory, selected.File)
+	target, err := extractDump(ctx, archive, *selected, directory)
+	if err != nil {
+		return "", DatabaseDump{}, err
+	}
+	return target, *selected, nil
+}
+
+// extractDump writes one recorded dump out of an archive and proves it
+// against the digest its manifest recorded.
+func extractDump(ctx context.Context, archive ArchiveFile, selected DatabaseDump, directory string) (string, error) {
+	target := filepath.Join(directory, filepath.Base(selected.File))
 	extracted := false
 	if err := walkArchive(ctx, archive, func(header *tar.Header, reader *tar.Reader) error {
 		if header.Name != selected.ArchivePath || header.Typeflag != tar.TypeReg {
@@ -341,19 +402,19 @@ func (r *Runner) ExtractDatabaseDump(ctx context.Context, runID, connectionID in
 		extracted = true
 		return nil
 	}); err != nil {
-		return "", DatabaseDump{}, err
+		return "", err
 	}
 	if !extracted {
-		return "", DatabaseDump{}, fmt.Errorf("database dump %s is missing from the archive", selected.ArchivePath)
+		return "", fmt.Errorf("database dump %s is missing from the archive", selected.ArchivePath)
 	}
 	digest, err := fileDigest(ctx, target)
 	if err != nil {
-		return "", DatabaseDump{}, err
+		return "", err
 	}
 	if digest != selected.Digest {
-		return "", DatabaseDump{}, errors.New("extracted database dump does not match its recorded digest")
+		return "", errors.New("extracted database dump does not match its recorded digest")
 	}
-	return target, *selected, nil
+	return target, nil
 }
 
 func walkArchive(ctx context.Context, archive ArchiveFile, visit func(*tar.Header, *tar.Reader) error) error {

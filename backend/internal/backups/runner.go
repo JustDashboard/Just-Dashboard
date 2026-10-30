@@ -36,6 +36,9 @@ type Runner struct {
 	sqliteSnapshot SQLiteSnapshotter
 	databases      DatabaseDumper
 	pauser         ContainerPauser
+	volumes        VolumeProvisioner
+	// importMu keeps two imports of one archive from both adopting it.
+	importMu sync.Mutex
 }
 
 func NewRunner(store *Store, stageDir string, log *slog.Logger) *Runner {
@@ -94,6 +97,9 @@ func (r *Runner) Execute(ctx context.Context, jobID int64, trigger string) (*Run
 	if err != nil {
 		return nil, err
 	}
+	if job.Imported {
+		return nil, ErrImportedJob
+	}
 	runID, err := r.store.StartRun(ctx, jobID, trigger)
 	if err != nil {
 		return nil, err
@@ -139,6 +145,14 @@ func (r *Runner) performWithManifest(ctx context.Context, job *Job, runID int64,
 		return "", 0, nil, err
 	}
 	manifest := newManifest(job)
+	// Without its origin the archive is whole and restores here; only the
+	// manifest beside it, for another server to import it by, is left out.
+	if origin, err := r.store.origin(ctx, job, runID, time.Now()); err == nil {
+		manifest.Origin = origin
+	} else {
+		fmt.Fprintf(logBuf, "could not read this server's identity (%v); the archive is written without its manifest beside it\n", err)
+	}
+	r.annotateVolumes(ctx, manifest, logBuf)
 	for _, source := range job.Sources {
 		// A source that contains the staging directory would archive the
 		// archive being written. The dashboard's own data directory is the
@@ -197,6 +211,7 @@ func (r *Runner) performWithManifest(ctx context.Context, job *Job, runID int64,
 		return "", 0, manifest, err
 	}
 	manifest.Encryption = seal.evidence()
+	manifest.ArtifactBytes = size
 	manifest.Complete = true
 	fmt.Fprintf(logBuf, "archived %d file(s), %d bytes\n", count, size)
 	if seal != nil {
@@ -213,6 +228,9 @@ func (r *Runner) performWithManifest(ctx context.Context, job *Job, runID int64,
 			return "", 0, manifest, err
 		}
 		fmt.Fprintf(logBuf, "stored at %s\n", dest)
+		r.writeSidecar(manifest, name, seal, logBuf, func(sidecar []byte) error {
+			return writeNewFile(dest+sidecarSuffix, sidecar)
+		})
 		return dest, size, manifest, nil
 
 	case TargetS3, TargetB2, TargetSFTP, TargetRclone:
@@ -236,6 +254,14 @@ func (r *Runner) performWithManifest(ctx context.Context, job *Job, runID int64,
 			fmt.Fprintf(logBuf, "pinned the server's host key %s\n", job.Target.HostKeyFingerprint)
 		}
 		fmt.Fprintf(logBuf, "upload complete\n")
+		r.writeSidecar(manifest, name, seal, logBuf, func(sidecar []byte) error {
+			staged := local + sidecarSuffix
+			if err := writeNewFile(staged, sidecar); err != nil {
+				return err
+			}
+			defer os.Remove(staged)
+			return uploadArtifact(ctx, job, secrets, r.store.Pinner(job.ID), key+sidecarSuffix, staged)
+		})
 		return key, size, manifest, nil
 
 	default:
@@ -439,9 +465,49 @@ func excluded(path string, patterns []string) bool {
 	return false
 }
 
+// writeSidecar puts the finished manifest beside the archive. A failure is
+// the log's to say and not the run's: the archive is whole and restores here,
+// and only an import on another server needs what is beside it.
+func (r *Runner) writeSidecar(manifest *Manifest, name string, seal *archiveSeal, logBuf *bytes.Buffer, put func([]byte) error) {
+	if manifest.Origin == nil {
+		return
+	}
+	sidecar, err := newSidecar(name, manifest, seal)
+	if err == nil {
+		err = put(sidecar)
+	}
+	if err != nil {
+		fmt.Fprintf(logBuf, "could not write the manifest beside the archive (%v); another server cannot import this archive\n", err)
+		r.log.Warn("backup manifest was not written beside its archive", "archive", name, "err", err)
+		return
+	}
+	fmt.Fprintf(logBuf, "wrote the manifest beside the archive as %s%s\n", name, sidecarSuffix)
+}
+
+// writeNewFile creates a file that must not exist yet, private to the owner.
+func writeNewFile(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(path)
+		return err
+	}
+	return f.Close()
+}
+
 // prune enforces retention, deleting the artifacts beyond the keep count or
 // older than the keep age from both the destination and the run history.
+//
+// An imported job is never pruned, and neither is an imported run: those
+// archives were written by another server, which may still be keeping them
+// by its own rules, and this one has no business deleting them.
 func (r *Runner) prune(ctx context.Context, job *Job) error {
+	if job.Imported {
+		return nil
+	}
 	if job.Retention <= 0 && job.RetentionDays <= 0 {
 		return nil
 	}
@@ -460,6 +526,9 @@ func (r *Runner) prune(ctx context.Context, job *Job) error {
 		}
 	}
 	for _, old := range expired {
+		if old.Imported {
+			continue
+		}
 		if !r.artifactMu.TryLock() {
 			// It will be pruned by the next run. Deleting an artifact out
 			// from under a restore in progress buys nothing and costs the
@@ -486,6 +555,9 @@ func (r *Runner) prune(ctx context.Context, job *Job) error {
 				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 					return err
 				}
+				if hasSidecar(old) {
+					_ = os.Remove(path + sidecarSuffix)
+				}
 			default:
 				if secrets == nil {
 					if secrets, err = r.store.Secrets(ctx, job.ID); err != nil {
@@ -497,6 +569,11 @@ func (r *Runner) prune(ctx context.Context, job *Job) error {
 					r.log.Warn("could not delete remote artifact", "key", old.Artifact, "err", err)
 					return nil
 				}
+				if hasSidecar(old) {
+					if err := deleteArtifact(ctx, target, secrets, pin, old.Artifact+sidecarSuffix); err != nil {
+						r.log.Warn("could not delete the manifest beside a pruned archive", "key", old.Artifact, "err", err)
+					}
+				}
 			}
 			return r.store.DeleteRun(ctx, old.ID)
 		}()
@@ -505,6 +582,12 @@ func (r *Runner) prune(ctx context.Context, job *Job) error {
 		}
 	}
 	return nil
+}
+
+// hasSidecar says whether a run's archive was written with its manifest beside
+// it, which arrived with the manifest's origin.
+func hasSidecar(run *Run) bool {
+	return run.Manifest != nil && run.Manifest.Origin != nil
 }
 
 // pruneCandidates picks, from runs sorted newest first, the ones retention

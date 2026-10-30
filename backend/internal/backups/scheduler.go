@@ -72,7 +72,7 @@ func (s *Scheduler) Reload(ctx context.Context) error {
 		delete(s.entries, id)
 	}
 	for _, job := range jobs {
-		if !job.Enabled || job.Schedule == "" {
+		if !job.Enabled || job.Schedule == "" || job.Imported {
 			continue
 		}
 		id := job.ID

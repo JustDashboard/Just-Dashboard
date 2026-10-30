@@ -23,6 +23,9 @@ type RestoreResult struct {
 	// Targets are the paths written to. One directory for a restore into a
 	// destination; one file or directory per recorded source in place.
 	Targets []string `json:"targets,omitempty"`
+	// Created names what a restore in place had to make on this host first:
+	// a Docker volume ("volume app_data") or a directory and its parents.
+	Created []string `json:"created,omitempty"`
 }
 
 // RestoreOptions narrows a restore. Paths are archive paths ("source-0001/etc"
@@ -65,6 +68,12 @@ func (r *Runner) Restore(ctx context.Context, runID int64, destination string, o
 // path is resolved through the file service again, so a root restriction
 // added since the backup still holds. Database dumps are never written to
 // disk by this; they go back through the Databases owner.
+//
+// On a host that lacks a target — a server the archive is being moved to —
+// a directory is made with its parents, and a volume is made through Docker
+// with the labels it had, after the archive has been fetched and proved and
+// before a byte is written. A source the restore was narrowed away from is
+// neither made nor touched.
 func (r *Runner) RestoreInPlace(ctx context.Context, runID int64, opts ...RestoreOptions) (*RestoreResult, error) {
 	run, archive, cleanup, err := r.localArtifact(ctx, runID)
 	if err != nil {
@@ -74,23 +83,37 @@ func (r *Runner) RestoreInPlace(ctx context.Context, runID int64, opts ...Restor
 	if run.Manifest == nil || !run.Manifest.Complete {
 		return nil, errors.New("this archive has no manifest, so its files cannot be put back where they came from; restore it into a directory instead")
 	}
-	plan := restorePlan{filter: newPathFilter(opts), roots: map[string]string{}}
-	var targets []string
-	for _, source := range run.Manifest.Sources {
-		resolved, err := r.store.paths.Resolve(source.Path)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", source.Path, err)
+	filter := newPathFilter(opts)
+	planned, err := r.restoreTargets(ctx, run.Manifest, filter, false)
+	if err != nil {
+		return nil, err
+	}
+	for _, target := range planned {
+		if target.Refused != "" {
+			return nil, errors.New(target.Refused)
 		}
-		if resolved == "/" {
-			return nil, fmt.Errorf("refusing to restore directly over /")
+	}
+	resolvedTargets, err := r.restoreTargets(ctx, run.Manifest, filter, true)
+	if err != nil {
+		return nil, err
+	}
+	plan := restorePlan{filter: filter, roots: map[string]string{}}
+	var targets, created []string
+	for _, target := range resolvedTargets {
+		plan.roots[target.ArchivePath] = target.Target
+		targets = append(targets, target.Target)
+		switch target.Creates {
+		case SourceVolume:
+			created = append(created, "volume "+target.Volume)
+		case "directory":
+			created = append(created, target.Target)
 		}
-		plan.roots[source.ArchivePath] = resolved
-		targets = append(targets, resolved)
 	}
 	res, err := extractArchiveBounded(ctx, archive, "", runID, 0, plan)
 	if res != nil {
 		res.Destination = ""
 		res.Targets = targets
+		res.Created = created
 	}
 	return res, err
 }
@@ -139,6 +162,20 @@ func newPathFilter(opts []RestoreOptions) *pathFilter {
 		return nil
 	}
 	return &pathFilter{prefixes: out}
+}
+
+// touches says whether a restore narrowed to the filter's paths writes
+// anything under one recorded source root (source-0001).
+func (f *pathFilter) touches(root string) bool {
+	if f == nil {
+		return true
+	}
+	for _, p := range f.prefixes {
+		if first, _, _ := strings.Cut(p, "/"); first == root {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *pathFilter) wants(name string) bool {
@@ -302,6 +339,30 @@ type ArchiveEntry struct {
 	IsDir bool   `json:"isDir"`
 }
 
+// localCopy is an imported run's copy on this server when it is still there
+// and still the archive its manifest describes. One that is gone or changed
+// is passed over for the destination's object, and the log says so.
+func (r *Runner) localCopy(ctx context.Context, run *Run) (string, bool) {
+	if run.LocalCopy == "" {
+		return "", false
+	}
+	path, err := r.store.paths.Resolve(run.LocalCopy)
+	if err == nil {
+		var info os.FileInfo
+		if info, err = os.Lstat(path); err == nil && !info.Mode().IsRegular() {
+			err = errors.New("not a regular file")
+		}
+	}
+	if err == nil {
+		err = verifyArtifact(ctx, path, run)
+	}
+	if err != nil {
+		r.log.Info("reading an imported archive from its destination; the copy here is not usable", "run", run.ID, "copy", run.LocalCopy, "err", err)
+		return "", false
+	}
+	return path, true
+}
+
 func verifyArtifact(ctx context.Context, path string, run *Run) error {
 	if run.Manifest == nil {
 		return nil // Legacy archives remain recoverable without inventing evidence.
@@ -329,6 +390,13 @@ func (r *Runner) OpenArtifact(ctx context.Context, runID int64) (*Run, ArchiveFi
 
 // localArtifact pins the run against retention and uses its original target
 // configuration. Cleanup releases both the pin and a private download, if any.
+//
+// An imported run is read where this server reaches the destination it was
+// imported from — the imported job's target and keys, not the endpoint or
+// path the server that wrote it used — and from the copy the import kept
+// here first, while that copy exists and still proves its digest. Whichever
+// it is read from, the bytes are proved against the manifest before a byte is
+// decrypted or extracted.
 func (r *Runner) localArtifact(ctx context.Context, runID int64) (*Run, ArchiveFile, func(), error) {
 	release, err := r.beginRead()
 	if err != nil {
@@ -357,6 +425,16 @@ func (r *Runner) localArtifact(ctx context.Context, runID int64) (*Run, ArchiveF
 		return failed(err)
 	}
 	job, pin := r.store.transferJob(current, run)
+	if current.Imported {
+		job, pin = current, r.store.Pinner(current.ID)
+	}
+	if copyPath, ok := r.localCopy(ctx, run); ok {
+		archive, err := r.archiveFile(ctx, run, copyPath)
+		if err != nil {
+			return failed(err)
+		}
+		return run, archive, cleanup, nil
+	}
 	path := run.Artifact
 	if job.TargetKind == TargetLocal {
 		path, err = r.store.paths.Resolve(path)

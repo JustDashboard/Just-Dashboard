@@ -31,11 +31,39 @@ type Manifest struct {
 	// pointer, so a manifest written before encryption existed encodes — and
 	// digests, for the recovery evidence bound to it — exactly as it did.
 	Encryption *ArchiveEncryption `json:"encryption,omitempty"`
+	// ArtifactBytes is the size of the bytes ArtifactDigest is over, and
+	// Origin the install, job and run that took the archive. Both arrived
+	// with the manifest written beside the archive (sidecar.go), so another
+	// server can read what a destination holds; older manifests have neither
+	// and encode as they did.
+	ArtifactBytes int64   `json:"artifactBytes,omitempty"`
+	Origin        *Origin `json:"origin,omitempty"`
 }
 
 type ManifestSource struct {
 	Path        string `json:"path"`
 	ArchivePath string `json:"archivePath"`
+	// Kind is "volume" for a Docker volume's directory, which a restore on a
+	// host without that volume creates through Docker rather than as a bare
+	// directory Docker would not know; empty for a path. Volume and
+	// VolumeLabels are the volume's name and labels, so the one created
+	// carries them (Compose finds its own volume by its labels).
+	Kind         string            `json:"kind,omitempty"`
+	Volume       string            `json:"volume,omitempty"`
+	VolumeLabels map[string]string `json:"volumeLabels,omitempty"`
+}
+
+// SourceVolume is the volume a recorded source is, by the manifest or, for a
+// manifest written before sources carried their kind, by the local driver's
+// own layout under the default Docker root.
+func (s ManifestSource) SourceVolume() (string, bool) {
+	if s.Kind == SourceVolume && validVolumeName(s.Volume) {
+		return s.Volume, true
+	}
+	if s.Kind != "" {
+		return "", false
+	}
+	return volumeFromMountpoint(s.Path)
 }
 
 func newManifest(job *Job) *Manifest {

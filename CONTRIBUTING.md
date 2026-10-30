@@ -395,9 +395,16 @@ to the contribution terms above, including the additional licence grant to the p
   a native dump restored from an encrypted archive takes `JD_TEST_POSTGRES_DSN` and
   `JD_TEST_MYSQL_ADMIN_DSN`: `go test ./internal/api -run TestLiveEncryptedArchiveRestoresANativeDump -count=1 -v`.
   SFTP and rclone destinations against an OpenSSH server (atmoz/sftp) and a WebDAV server run by rclone,
-  through the same lifecycle plus a refused host-key change:
+  through the same lifecycle plus a refused host-key change, and each read and imported from a fresh store:
   `JD_DEPLOY_LIVE=1 go test ./internal/backups -run TestLiveSFTPAndRcloneBackupsUploadPruneAndRestore -count=1 -v`
   (the rclone half needs `rclone` on PATH, as the backend image ships it).
+  Changes to the catalogue, import, the manifest beside an archive, or restoring on another host run, as
+  root (a volume's data is under Docker's root), the migration end to end: a labelled volume and a
+  directory backed up encrypted to S3 (`localstack/localstack:4.14.0`), both removed, then a second
+  server with its own store imports the key and the job's history and restores both in place, byte for
+  byte, the volume made again with its label:
+  `go test -c -o api.test ./internal/api && sudo env JD_DEPLOY_LIVE=1 PATH=$PATH ./api.test -test.run TestLiveImportedBackupRestoresOnAFreshServer -test.v`.
+  It removes its container, bucket and volume.
 - The public-certificate journey against a real ACME authority (an isolated Caddy and a Pebble that
   validates nothing, on one Docker network):
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory -count=1 -v`.
