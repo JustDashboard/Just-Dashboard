@@ -19,8 +19,8 @@ import { host, snapshot, user } from "./host-fixture"
  * - a native Postgres under systemd, and a Gitea service a domain routes to;
  * - an Uptime Kuma and a Vaultwarden on their own, and a Metabase reading an
  *   external analytics database;
- * - and what nothing claims: an old domain with an expired certificate, an
- *   unused volume and a folder backup.
+ * - and what nothing claims: an old domain with an expired certificate and a
+ *   folder backup, beside an unused volume the map leaves out.
  *
  * With images, networks, accounts, keys, shells and drawings on the reading
  * too, as the server sends them, so what the map leaves out is tested.

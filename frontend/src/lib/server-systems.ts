@@ -429,6 +429,15 @@ function draftSystems(graph: Graph): Draft[] {
   for (const kind of LOOSE) {
     for (const e of ofKind(kind)) {
       if (claimed.has(e.item.id) || restSeen.has(e.item.id)) continue
+      // A volume nothing mounts or backs up is the volumes page's to list:
+      // a server can pile up hundreds of them, and they would bury the rest.
+      if (
+        kind === "volumes" &&
+        e.item.state === "unused" &&
+        (graph.adjacent.get(e.item.id) ?? []).length === 0
+      ) {
+        continue
+      }
       // What hangs off a loose thing is drawn under it even where another
       // system draws it too — a wildcard certificate, a shared backup.
       for (const id of claim(graph, e.item.id, anchors)) {

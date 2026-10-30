@@ -38,7 +38,9 @@ backups, the services and PM2 apps something is wired to, and the tailnet. Image
 accounts, API keys, shells, drawings, schedules, alert rules and the firewall are on their own pages
 and not here; the backend still sends them (`GET /map` is one reading for every page that wants one),
 and `SYSTEM_KINDS` is what the map takes of it. A systemd unit nothing is wired to is not drawn: a
-thousand units are the services page's to list.
+thousand units are the services page's to list. Nor is a volume the server reads as `unused` with no
+link to anything: a server can pile up hundreds of them, and the volumes page is where they are
+reviewed and removed. A volume with a backup, or one that is in use, stays drawn.
 
 ## Systems
 
@@ -46,8 +48,8 @@ thousand units are the services page's to list.
 rail's: this dashboard (`dashboard:self`), the deployments, the stacks no deployment runs, the PM2
 apps, the containers on their own, the databases nothing above took, the services something is wired
 to, and last one system — *Everything else* — for what nothing claims (a domain whose upstream is not
-on this machine, an unused volume, a folder backup, a checkout nobody builds from). Within each kind,
-worst first and then by name.
+on this machine, an unused volume that is backed up, a folder backup, a checkout nobody builds
+from). Within each kind, worst first and then by name.
 
 A system grows from its anchor along the links the server sent, and only along them (`CLAIMS`): a
 deployment takes its release containers and stack, the databases it is bound to, names or depends on,
