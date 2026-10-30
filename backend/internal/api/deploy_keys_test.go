@@ -78,6 +78,9 @@ var sessionOnlyBefore = []string{
 	// branch again from the newest backup, decided in a session.
 	"PUT /deploy/{id}/environments/{env}/database-links/{connection}/previews",
 	"POST /deploy/{id}/pull-requests/{number}/preview/branches/{connection}/refresh",
+	// The catalogue's own templates: written on a draft's terms, in a session.
+	"POST /deploy/templates", "POST /deploy/templates/from-deployment", "POST /deploy/templates/import",
+	"PUT /deploy/templates/{template}", "DELETE /deploy/templates/{template}",
 }
 
 // keyBench is a server with an administrator, a session, and the three kinds

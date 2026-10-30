@@ -99,6 +99,9 @@ const (
 	whyDataCopy        = "a copy of a release's data is a second copy of production's data, and its address carries a password: it is asked for, read and removed in the dashboard"
 	whyPreviewBranch   = "what a database gives previews is a second copy of production's data next to a pull request's code: it is decided in the dashboard"
 	whyScanTerms       = "whether an environment's images are scanned, and from which severity up, is set in the dashboard"
+	// A key reads the catalogue to choose from it, and makes drafts from a
+	// template added here as from a built-in; adding to it is not a key's.
+	whyTemplates = "a template is the operator's catalogue, which every deployment is made from, not a deployment a key is narrowed to; templates are added, changed and removed in the dashboard"
 )
 
 // deployKeyRoutes is the decision table: every route a deploy key may make,
@@ -115,6 +118,9 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/blueprints/":                        keyOpen,
 	"GET /deploy/blueprints/{id}":                    keyOpen,
 	"GET /deploy/blueprints/{id}/versions":           keyOpen,
+	"GET /deploy/templates":                          keyOpen,
+	"GET /deploy/templates/{template}":               keyOpen,
+	"GET /deploy/templates/{template}/export":        keyOpen,
 	"GET /deploy/pull-requests":                      keyEvery,
 	"GET /deploy/traffic":                            keyEvery,
 	"GET /deploy/shared-variables":                   keyEvery,
@@ -321,6 +327,11 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"PUT /deploy/{id}/environments/{env}/rehearsal":                                  keySession(whyRehearsalTerms),
 	"PUT /deploy/{id}/environments/{env}/vulnerabilities":                            keySession(whyScanTerms),
 	"POST /deploy/blueprints/{id}/render":                                            keySession("a template's plan is previewed in the dashboard; a draft from it is a deploy key's to make"),
+	"POST /deploy/templates":                                                         keySession(whyTemplates),
+	"POST /deploy/templates/from-deployment":                                         keySession(whyTemplates),
+	"POST /deploy/templates/import":                                                  keySession(whyTemplates),
+	"PUT /deploy/templates/{template}":                                               keySession(whyTemplates),
+	"DELETE /deploy/templates/{template}":                                            keySession(whyTemplates),
 	"POST /deploy/import/preview":                                                    keySession(whyHost),
 	"POST /deploy/import/adopt":                                                      keySession(whyHost),
 	"POST /deploy/game/import/preview":                                               keySession(whyHost),

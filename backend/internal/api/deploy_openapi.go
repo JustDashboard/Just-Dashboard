@@ -112,6 +112,7 @@ var openapiTags = []struct{ Name, Description string }{
 	{"secret stores", "Connections to Vault, OpenBao, Infisical and Doppler that variables read through."},
 	{"github-app", "The dashboard's own GitHub App: its status, repositories, manifest flow and removal."},
 	{"blueprints", "The template catalogue and the plan a template renders to."},
+	{"templates", "Templates added on this dashboard: made from a Compose file or a deployment's frozen plan, imported, changed, exported and removed."},
 	{"game", "Operating a deployed game server: players, console, properties and importing an existing one."},
 	{"keys", "What the holder of a key reads to use this API: this description."},
 }
@@ -151,6 +152,7 @@ var openapiEnums = map[reflect.Type][]string{
 	reflect.TypeOf(blueprint.AccessKind("")):       {"setup", "credentials", "token", "client", "open", "unavailable"},
 	reflect.TypeOf(blueprint.ServiceRole("")):      {"app", "worker", "database", "cache"},
 	reflect.TypeOf(blueprint.StartCondition("")):   {"healthy", "started", "completed"},
+	reflect.TypeOf(deploy.TemplateOrigin("")):      {"compose", "deployment", "import"},
 	reflect.TypeOf(gameserver.PlayerAction("")):    {"kick", "ban", "pardon", "op", "deop", "whitelist_add", "whitelist_remove"},
 }
 
@@ -406,6 +408,16 @@ var deployOperations = map[string]deployOperation{
 	"GET /deploy/blueprints/{id}/versions": {Tag: "blueprints", Summary: "List the upstream versions a game template can be deployed at; other templates follow their image tag.", Response: gameserver.VersionList{}},
 	"POST /deploy/blueprints/{id}/render":  {Tag: "blueprints", Summary: "Render a template with its inputs into the plan a draft would commit.", Request: blueprintRenderRequest{}, Response: (*deploy.BlueprintPlan)(nil)},
 
+	// Templates added on this dashboard.
+	"GET /deploy/templates":                   {Tag: "templates", Summary: "List the templates added on this dashboard, with how each was made and how many deployments' sources name it.", Response: []deploy.UserTemplate(nil)},
+	"GET /deploy/templates/{template}":        {Tag: "templates", Summary: "Read a template added on this dashboard, with its whole definition.", Response: (*deploy.UserTemplateDetail)(nil)},
+	"GET /deploy/templates/{template}/export": {Tag: "templates", Summary: "Export a template's definition as a JSON file: a built-in's or one added here, in the catalogue's own schema.", Response: (*blueprint.Blueprint)(nil)},
+	"POST /deploy/templates":                  {Tag: "templates", Summary: "Add a template from a pasted Compose file and the inputs declared for the variables it reads.", Request: deploy.ComposeTemplateRequest{}, Response: anyOf{(*deploy.UserTemplateDetail)(nil), (*deploy.TemplatePreview)(nil)}, Status: http.StatusCreated, Note: "With dryRun, nothing is stored and the definition the file makes is answered with 200. A literal password in the file becomes a secret the template generates; a host port is dropped, since the public service is published on loopback behind the proxy."},
+	"POST /deploy/templates/from-deployment":  {Tag: "templates", Summary: "Save a deployment as a template: the definition its live release's frozen plan was deployed from.", Request: deploy.DeploymentTemplateRequest{}, Response: anyOf{(*deploy.UserTemplateDetail)(nil), (*deploy.TemplatePreview)(nil)}, Status: http.StatusCreated, Note: "A secret variable becomes a secret input and its value is never read; the domain becomes the domain input and a fixed host port a number input. With dryRun, nothing is stored and the definition is answered with 200."},
+	"POST /deploy/templates/import":           {Tag: "templates", Summary: "Import a template's JSON definition; an id outside the user- namespace is put in it.", Request: blueprint.Blueprint{}, Response: (*deploy.UserTemplateDetail)(nil), Status: http.StatusCreated},
+	"PUT /deploy/templates/{template}":        {Tag: "templates", Summary: "Replace a template's definition; its id does not change, and a changed definition at the same version is the next patch version.", Request: blueprint.Blueprint{}, Response: (*deploy.UserTemplateDetail)(nil)},
+	"DELETE /deploy/templates/{template}":     {Tag: "templates", Summary: "Remove a template from the catalogue; deployments made from it keep running from their own copy.", Status: http.StatusNoContent, Note: "Destructive, with an ordinary confirmation."},
+
 	// Game servers.
 	"GET /deploy/{id}/game/":                  {Tag: "game", Summary: "Read a game server's overview: version, players online and its checks.", Response: gameOverview{}},
 	"GET /deploy/{id}/game/players":           {Tag: "game", Summary: "List the players on a game server.", Response: (*gameserver.Players)(nil)},
@@ -481,6 +493,8 @@ func openapiPathParam(pattern, name string) map[string]any {
 		schema, description = integer, "The pull request's number."
 	case "draft":
 		schema, description = map[string]any{"type": "string"}, "The draft's id."
+	case "template":
+		schema, description = map[string]any{"type": "string"}, "The template's id: user-<name> for one added here, or a built-in's for an export."
 	case "name":
 		schema, description = map[string]any{"type": "string"}, "The variable's name."
 	case "key":

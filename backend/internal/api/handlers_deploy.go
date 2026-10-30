@@ -38,6 +38,8 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		})
 		r.Method(http.MethodGet, "/", s.handle(s.handleDeployList))
 		r.Method(http.MethodGet, "/hostname", s.handle(s.handleDeploymentHostname))
+		// Static, and registered before /{id} for the reason /hostname is.
+		s.mountTemplateReads(r)
 		// The OpenAPI description of this API (deploy_openapi.go): static,
 		// for any signed-in account and any key, and registered before /{id}
 		// for the reason /hostname is.
@@ -159,6 +161,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Use(httpx.RequireSession)
 				r.Method(http.MethodPost, "/drafts", s.handle(s.handleDeploymentDraftCreate))
 				r.Method(http.MethodPost, "/drafts/{draft}/commit", s.handle(s.handleDeploymentDraftCommit))
+				// A template is written on the terms a draft is: it is what
+				// the next deployment is made from.
+				s.mountTemplateWrites(r)
 				r.Method(http.MethodPost, "/import/preview", s.handle(s.handleDeploymentImportPreview))
 				r.Method(http.MethodPost, "/import/adopt", s.handle(s.handleDeploymentImportAdopt))
 				r.Method(http.MethodPost, "/game/import/preview", s.handle(s.handleGameImportPreview))
@@ -277,6 +282,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// Removing a secret store is a saved credential's case: refused
 			// while a variable reads it, and entered again in a minute.
 			s.mountSecretStoreRemoval(r)
+			// Removing a template takes nothing off the host: what was made
+			// from it runs from its own copy, and it is added again in a
+			// minute, so an ordinary confirmation.
+			s.mountTemplateRemoval(r)
 		})
 	})
 }
