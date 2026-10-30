@@ -1,7 +1,9 @@
 package term
 
 import (
+	"errors"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -280,5 +282,55 @@ func TestShellWordQuoting(t *testing.T) {
 	}
 	if got := shellWord("it's"); !strings.HasPrefix(got, "'") || strings.Count(got, "'") < 4 {
 		t.Errorf("a quote must be escaped rather than ending the word, got %q", got)
+	}
+}
+
+// A session opened as a chosen account goes through its own login: su for anyone
+// else, its own shell for root, and never the default account's.
+func TestAChosenAccountsLoginIsThatAccounts(t *testing.T) {
+	m := &Manager{shell: "", shellDir: "", account: Account{Name: "ubuntu", UID: 1000, Shell: "/bin/bash"}}
+	target := Account{Name: "zoro", UID: 1001, Shell: "/bin/zsh", Home: "/home/zoro"}
+	args := m.startupArgvFor(target, false, "", "")
+	if strings.Contains(strings.Join(args, " "), "ubuntu") {
+		t.Fatalf("the default account is in %q", args)
+	}
+	if os.Geteuid() == 0 {
+		if !equal(args, []string{"su", "-l", "zoro"}) {
+			t.Fatalf("args = %q", args)
+		}
+	} else if !equal(args, []string{"/bin/zsh", "-l"}) {
+		t.Fatalf("args = %q", args)
+	}
+	root := m.startupArgvFor(Account{Name: "root", UID: 0, Shell: "/bin/bash"}, false, "", "")
+	if !equal(root, []string{"/bin/bash", "-l"}) {
+		t.Fatalf("root = %q", root)
+	}
+	env := strings.Join(heldEnv(target, "abc", "/bin/zsh"), "\n")
+	for _, want := range []string{"HOME=/home/zoro", "USER=zoro", "LOGNAME=zoro", "SHELL=/bin/zsh"} {
+		if !strings.Contains(env, want) {
+			t.Fatalf("env = %s", env)
+		}
+	}
+}
+
+func TestAChosenAccountMustExistAndAllowALogin(t *testing.T) {
+	me, err := user.Current()
+	if err != nil {
+		t.Skip(err)
+	}
+	withPasswd(t, me.Username+":x:"+me.Uid+":"+me.Gid+"::"+me.HomeDir+":/usr/sbin/nologin\n")
+	if _, err := resolveLoginAccount(me.Username); !errors.Is(err, ErrAccountCannotLogin) {
+		t.Fatalf("nologin: %v", err)
+	}
+	if _, err := resolveLoginAccount("no-such-account-here"); !errors.Is(err, ErrNoSuchAccount) {
+		t.Fatalf("unknown: %v", err)
+	}
+	withPasswd(t, me.Username+":x:"+me.Uid+":"+me.Gid+"::"+me.HomeDir+":/bin/sh\n")
+	got, err := resolveLoginAccount(me.Username)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != me.Username || got.Shell != "/bin/sh" {
+		t.Fatalf("got %+v", got)
 	}
 }

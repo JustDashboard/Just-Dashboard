@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
 	"github.com/go-chi/chi/v5"
 )
@@ -87,6 +88,10 @@ func mapTermError(err error) error {
 		return httpx.Err(http.StatusBadRequest, "terminal_agent_shell_unavailable", err.Error())
 	case errors.Is(err, term.ErrInvalidSourceWindow):
 		return httpx.Err(http.StatusBadRequest, "invalid_terminal_source", err.Error())
+	case errors.Is(err, term.ErrNoSuchAccount):
+		return httpx.Err(http.StatusNotFound, "no_such_account", err.Error())
+	case errors.Is(err, term.ErrAccountCannotLogin):
+		return httpx.Err(http.StatusBadRequest, "account_cannot_login", err.Error())
 	case errors.Is(err, term.ErrCWDUnavailable):
 		return httpx.Err(http.StatusServiceUnavailable, "cwd_unavailable", err.Error())
 	case errors.Is(err, term.ErrClipboardType):
@@ -233,6 +238,11 @@ type createTerminalRequest struct {
 	Folder string `json:"folder"`
 	Rows   uint16 `json:"rows"`
 	Cols   uint16 `json:"cols"`
+	// AsUser opens the shell as another host account. The terminal capability
+	// says somebody may have a shell; becoming a chosen account, root included,
+	// is what system.admin says, so it is asked for here where the request's
+	// contents are known (invariant 4).
+	AsUser string `json:"asUser"`
 }
 
 func (s *Server) handleTerminalCreate(w http.ResponseWriter, r *http.Request) error {
@@ -241,9 +251,22 @@ func (s *Server) handleTerminalCreate(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 	p := httpx.MustPrincipal(r)
+	if req.AsUser != "" {
+		if !p.Can(auth.CapSystemAdmin) {
+			return httpx.ErrForbidden
+		}
+		// A shell as a chosen account, root among them, is a person's to open. A
+		// long-lived key that leaks should not be able to.
+		if p.KeyID() != 0 {
+			return httpx.Err(http.StatusForbidden, "session_required", "opening a shell as another account needs a browser session")
+		}
+		if err := linuxusers.ValidateUsername(req.AsUser); err != nil {
+			return httpx.Err(http.StatusBadRequest, "invalid_username", err.Error())
+		}
+	}
 	sess, err := s.modules.term.Create(r.Context(), term.CreateOptions{
 		Title: req.Title, Owner: p.Username(), CWD: req.CWD, Folder: req.Folder,
-		Rows: req.Rows, Cols: req.Cols,
+		Rows: req.Rows, Cols: req.Cols, AsUser: req.AsUser,
 	})
 	if err != nil {
 		return mapTermError(err)
@@ -643,7 +666,7 @@ func (s *Server) handleTerminalWindowCreate(w http.ResponseWriter, r *http.Reque
 	}
 	httpx.SetAudit(r, "terminal.window.create", id, map[string]any{
 		"name": sess.WindowName, "sourceWindowId": req.SourceWindowID, "agent": req.Agent,
-		"cwd": sess.CWDHint,
+		"cwd": sess.CWDHint, "user": sess.User,
 	})
 	httpx.JSON(w, http.StatusCreated, map[string]any{"id": sess.ID, "name": sess.WindowName})
 	return nil

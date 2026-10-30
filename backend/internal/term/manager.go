@@ -110,6 +110,10 @@ type CreateOptions struct {
 	// windows reuse the first window's workspace id.
 	WorkspaceID string
 	WindowName  string
+	// AsUser opens this session as another account instead of the one sessions
+	// run as by default. It is a host account name, and whoever fills it in has
+	// already decided the caller may become that account.
+	AsUser string
 }
 
 // Create requires a host holder for direct PTYs: silently falling back to a
@@ -121,6 +125,17 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 	}
 	if err := m.validateAgent(opts.Agent); err != nil {
 		return nil, err
+	}
+	account := m.account
+	if opts.AsUser != "" && opts.AsUser != m.account.Name {
+		target, err := resolveLoginAccount(opts.AsUser)
+		if err != nil {
+			return nil, err
+		}
+		account = target
+		// tmux keeps one default-command and one reattach for all its sessions,
+		// and both are the default account's. A holder keeps this account's.
+		opts.Persist = false
 	}
 	if !(m.useTmux && opts.Persist) {
 		if err := m.PersistenceError(); err != nil {
@@ -140,7 +155,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 	if opts.Cols == 0 {
 		opts.Cols = 80
 	}
-	if m.accountErr != nil {
+	if m.accountErr != nil && account.Name == "" {
 		return nil, m.accountErr
 	}
 	// The shell is the account's own unless the operator pinned one. Resolving
@@ -148,7 +163,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 	// the listing endpoint can show which shell a tab is actually running.
 	shell := m.shell
 	if shell == "" {
-		shell = m.account.Shell
+		shell = account.Shell
 	}
 	if shell == "" {
 		shell = "/bin/bash"
@@ -160,7 +175,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 		WindowName:  sanitiseField(opts.WindowName),
 		Title:       m.defaultTitle(opts.Title),
 		Shell:       shell,
-		User:        m.account.Name,
+		User:        account.Name,
 		CreatedAt:   time.Now().UTC(),
 		Owner:       opts.Owner,
 		Rows:        opts.Rows,
@@ -194,7 +209,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 	// A requested directory changes *how* the login is assembled rather than
 	// being applied on top of it — see loginArgv, where a plain login's
 	// chdir-to-home is the thing standing in the way.
-	argv := m.startupArgv(startDir != "", opts.Agent, startDir)
+	argv := m.startupArgvFor(account, startDir != "", opts.Agent, startDir)
 	if startDir != "" {
 		// The directory the command itself starts in. It has to be handed to
 		// hostexec rather than set on cmd.Dir: a host command crosses into the
@@ -223,7 +238,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 	if m.Holding() {
 		// The holder runs on the host already, so the directory is its own
 		// to start in and needs no crossing.
-		if err := m.spawnHeld(ctx, sess, argv, startDir); err != nil {
+		if err := m.spawnHeld(ctx, sess, account, argv, startDir); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrPersistenceUnavailable, err)
 		}
 	} else {
@@ -489,9 +504,12 @@ func (m *Manager) NewDirectWindowWithOptions(ctx context.Context, workspaceID st
 		}
 		cwd = root.CWD()
 	}
+	// A window belongs to its workspace's account. Opening it as the default one
+	// would hand somebody a different login in what looks like the same terminal.
 	created, err := m.Create(ctx, CreateOptions{
 		Title: meta.Title, Owner: root.Owner, Rows: opts.Rows, Cols: opts.Cols, CWD: cwd,
 		Folder: meta.Folder, WorkspaceID: root.WorkspaceID, WindowName: opts.Name, Agent: opts.Agent,
+		AsUser: root.User,
 	})
 	if err != nil {
 		return nil, err

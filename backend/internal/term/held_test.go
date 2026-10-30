@@ -412,3 +412,49 @@ func TestAdoptClearsAbandonedSockets(t *testing.T) {
 		t.Fatalf("adopted %d sessions from a dead socket", len(m.List()))
 	}
 }
+
+// A session as a chosen account, and every window opened from it, is that account:
+// the record the holder keeps says so, so a restart cannot lose it either.
+func TestASessionAsAnotherAccountStaysThatAccount(t *testing.T) {
+	me, err := user.Current()
+	if err != nil {
+		t.Skip(err)
+	}
+	// The default account is somebody else, so that AsUser is doing the work.
+	m := heldManager(t, t.TempDir())
+	m.account.Name = "default-account"
+	m.account.Home = "/nonexistent"
+	withPasswd(t, me.Username+":x:"+me.Uid+":"+me.Gid+"::"+me.HomeDir+":/bin/sh\n")
+	ctx := context.Background()
+	sess, err := m.Create(ctx, CreateOptions{Owner: "tester", AsUser: me.Username})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(m.Shutdown)
+	if sess.User != me.Username {
+		t.Fatalf("user = %q", sess.User)
+	}
+	if got := sess.heldMeta().User; got != me.Username {
+		t.Fatalf("the holder's record says %q", got)
+	}
+	window, err := m.NewDirectWindow(ctx, sess.WorkspaceID, "second", "", 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if window.User != me.Username {
+		t.Fatalf("a new window opened as %q", window.User)
+	}
+	plain, err := m.Create(ctx, CreateOptions{Owner: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.User != "default-account" {
+		t.Fatalf("a plain session opened as %q", plain.User)
+	}
+	if _, err := m.Create(ctx, CreateOptions{Owner: "tester", AsUser: "no-such-account-here"}); !errors.Is(err, ErrNoSuchAccount) {
+		t.Fatalf("unknown: %v", err)
+	}
+	if len(m.List()) != 3 || m.pending != 0 {
+		t.Fatalf("a refusal consumed a slot: %d sessions, %d pending", len(m.List()), m.pending)
+	}
+}

@@ -1421,7 +1421,7 @@ func mapCron(tab procs.Crontab, job procs.CronJob) mapItem {
 var alertKindLabel = map[string]string{
 	"cpu_high": "CPU high", "memory_high": "Memory high", "disk_filling": "Disk filling",
 	"container_down": "Container down", "backup_failed": "Backup failed", "image_vulnerable": "Vulnerable base image",
-	"tunnel_down":   "Tunnel down",
+	"tunnel_down": "Tunnel down", "account_changed": "Account changed",
 	"cert_expiring": "Certificate expiring", "cert_expired": "Certificate expired",
 	"renewal_failed": "Renewal failed", "served_drift": "Served certificate differs",
 	"engine_down": "Proxy down", "upstream_down": "Upstream down",
@@ -1548,10 +1548,13 @@ func mapSystemUser(u linuxusers.User) mapItem {
 		ID: "sysuser:" + u.Username, Name: u.Username, Href: "/system-users",
 		Detail: mapPlural(u.SSHKeys, "SSH key", "SSH keys"),
 	}
+	// What sshd would do rather than what the shadow file looks like: a password
+	// lock says nothing about keys, and a login shell says nothing about whether
+	// anything gets as far as it.
 	switch {
-	case u.Locked:
-		item.Tone, item.State = mapIdle, "locked"
-	case u.CanLogin:
+	case u.Disabled:
+		item.Tone, item.State = mapIdle, "disabled"
+	case u.SignIn.Any():
 		item.Tone, item.State = mapOK, "can sign in"
 	default:
 		item.Tone, item.State = mapIdle, "no sign-in"

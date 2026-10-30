@@ -31,6 +31,8 @@ var (
 	ErrUnknownAgent           = errors.New("terminal agent must be codex or claude")
 	ErrAgentShellUnavailable  = errors.New("automatic agent launch requires the bundled bash or zsh startup")
 	ErrInvalidSourceWindow    = errors.New("the source terminal is not a window in this session")
+	ErrNoSuchAccount          = errors.New("no such account on this host")
+	ErrAccountCannotLogin     = errors.New("this account's shell does not allow a login")
 	ErrCWDUnavailable         = errors.New("cannot determine the source terminal's working directory")
 	// The limit counts PTY windows, because each direct window owns a process,
 	// file descriptor and reader goroutine even when no browser is attached.

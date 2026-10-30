@@ -245,7 +245,7 @@ func newHeldSession(id string, hello ptyhold.Hello, f *os.File, link *ptyhold.Co
 }
 
 // spawnHeld starts a holder for a new window and hands it the login.
-func (m *Manager) spawnHeld(ctx context.Context, sess *Session, argv []string, dir string) error {
+func (m *Manager) spawnHeld(ctx context.Context, sess *Session, account Account, argv []string, dir string) error {
 	socket := filepath.Join(m.holders, sess.ID+".sock")
 	if err := m.launch(ctx, sess.ID, socket); err != nil {
 		return fmt.Errorf("start the terminal holder: %w", err)
@@ -255,7 +255,7 @@ func (m *Manager) spawnHeld(ctx context.Context, sess *Session, argv []string, d
 		return err
 	}
 	link, hello, f, err := ptyhold.Spawn(socket, ptyhold.Spec{
-		Argv: argv, Dir: dir, Env: m.heldEnv(sess.ID, sess.Shell),
+		Argv: argv, Dir: dir, Env: heldEnv(account, sess.ID, sess.Shell),
 		Rows: sess.Rows, Cols: sess.Cols, Meta: meta,
 	}, 10*time.Second)
 	if err != nil {
@@ -271,12 +271,12 @@ func (m *Manager) spawnHeld(ctx context.Context, sess *Session, argv []string, d
 // service's. su replaces most of it for another account anyway; this is what a
 // login needs before its profile runs, and what the terminal on the other end
 // depends on.
-func (m *Manager) heldEnv(id, shell string) []string {
+func heldEnv(account Account, id, shell string) []string {
 	env := []string{
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"HOME=" + m.account.Home,
-		"USER=" + m.account.Name,
-		"LOGNAME=" + m.account.Name,
+		"HOME=" + account.Home,
+		"USER=" + account.Name,
+		"LOGNAME=" + account.Name,
 		"SHELL=" + shell,
 	}
 	if lang := os.Getenv("LANG"); lang != "" {

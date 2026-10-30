@@ -77,9 +77,13 @@ func (m *Manager) validateAgent(agent string) error {
 }
 
 func (m *Manager) startupArgv(keepCWD bool, agent, cwd string) []string {
+	return m.startupArgvFor(m.account, keepCWD, agent, cwd)
+}
+
+func (m *Manager) startupArgvFor(account Account, keepCWD bool, agent, cwd string) []string {
 	shell := m.shell
 	if shell == "" {
-		shell = m.account.Shell
+		shell = account.Shell
 	}
 	if shell == "" {
 		shell = "/bin/bash"
@@ -97,10 +101,10 @@ func (m *Manager) startupArgv(keepCWD bool, agent, cwd string) []string {
 			bootstrap = `export JD_ORIGINAL_ZDOTDIR="${ZDOTDIR:-$HOME}"; export ZDOTDIR="$1" JD_TERMINAL_START_AGENT="$2" JD_TERMINAL_START_DIR="$3"; exec "$0" -i`
 		}
 	default:
-		return m.account.loginArgv(m.shell, keepCWD)
+		return account.loginArgv(m.shell, keepCWD)
 	}
 	if m.shellDir == "" {
-		return m.account.loginArgv(m.shell, keepCWD)
+		return account.loginArgv(m.shell, keepCWD)
 	}
 	// The login half is the account's own shell, as it is over ssh, and $0 is
 	// the one the window runs. A bash account keeps ~/.local/bin and the rest
@@ -108,16 +112,16 @@ func (m *Manager) startupArgv(keepCWD bool, agent, cwd string) []string {
 	// opened in JD_TERMINAL_SHELL's zsh said "command not found" for what ssh
 	// ran. The bootstrap is POSIX, so any POSIX login shell can run it.
 	login := shell
-	if posixShell(m.account.Shell) {
-		login = m.account.Shell
+	if posixShell(account.Shell) {
+		login = account.Shell
 	}
 	args := []string{login, "-l"}
-	if !m.account.IsRoot() && os.Geteuid() == 0 {
+	if !account.IsRoot() && os.Geteuid() == 0 {
 		args = []string{"su", "-s", login}
 		if !keepCWD {
 			args = append(args, "-l")
 		}
-		args = append(args, m.account.Name, "--", "-l")
+		args = append(args, account.Name, "--", "-l")
 	}
 	args = append(args, "-c", bootstrap, shell, m.shellDir)
 	if agent != "" {

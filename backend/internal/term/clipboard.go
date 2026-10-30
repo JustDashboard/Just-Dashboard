@@ -84,14 +84,21 @@ func (m *Manager) SaveClipboard(sessionID, owner, declaredMIME string, src io.Re
 	if sess.Owner != owner {
 		return ClipboardFile{}, ErrSessionOwner
 	}
-	if m.accountErr != nil {
+	// The image has to be readable by whoever the shell runs as, and a session may
+	// have been opened as somebody other than the default account.
+	account := m.account
+	if sess.User != "" && sess.User != m.account.Name {
+		if account, err = resolveAccount(sess.User); err != nil {
+			return ClipboardFile{}, err
+		}
+	} else if m.accountErr != nil {
 		return ClipboardFile{}, m.accountErr
 	}
 	if m.clipboard == nil {
 		m.clipboard = newClipboardStore(ClipboardRoot)
 	}
 
-	file, err := m.clipboard.save(sessionID, declaredMIME, src, m.account.UID, m.account.GID)
+	file, err := m.clipboard.save(sessionID, declaredMIME, src, account.UID, account.GID)
 	if err != nil {
 		return ClipboardFile{}, err
 	}
