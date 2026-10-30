@@ -1,0 +1,405 @@
+{
+  "id": "chatwoot",
+  "version": "1.0.0",
+  "name": "Chatwoot",
+  "category": "http",
+  "profile": "compose",
+  "description": "Customer support across channels: website live chat, e-mail, WhatsApp, Telegram, Facebook and more in one shared inbox, with canned replies, automation, a help center and reports. Runs the Rails app, its Sidekiq worker, PostgreSQL (pgvector) and Valkey; only the app is behind the domain.",
+  "iconId": "chat",
+  "docsUrl": "https://www.chatwoot.com/docs/self-hosted/deployment/docker",
+  "access": {
+    "kind": "setup",
+    "note": "A new Chatwoot asks the first visitor to create the super administrator and the first account. Open the address yourself right after deploying; public sign-up stays off (ENABLE_ACCOUNT_SIGNUP). E-mail notifications and the e-mail channel need SMTP settings added as variables."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT (with an enterprise directory)",
+    "upstreamUrl": "https://github.com/chatwoot/chatwoot",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Chatwoot builds the widget script, e-mail links and webhooks from this address."
+    }
+  ],
+  "secrets": [
+    {
+      "name": "secret-key-base",
+      "variable": "CHATWOOT_SECRET_KEY_BASE",
+      "label": "Rails secret key base",
+      "length": 96,
+      "description": "Signs sessions and encrypted fields; changing it signs everybody out."
+    },
+    {
+      "name": "db-password",
+      "variable": "CHATWOOT_DB_PASSWORD",
+      "label": "Database password",
+      "length": 40,
+      "description": "Generated here and given only to the services that sign in to the database."
+    }
+  ],
+  "services": [
+    {
+      "name": "rails",
+      "role": "app",
+      "purpose": "The Chatwoot web app, its API and the widget, behind the domain; it prepares the database before it starts",
+      "image": {
+        "reference": "chatwoot/chatwoot:v4.19.1",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing",
+        "command": [
+          "sh",
+          "-c",
+          "rm -f /app/tmp/pids/server.pid && bundle exec rails db:chatwoot_prepare && exec bundle exec rails s -p 3000 -b 0.0.0.0"
+        ]
+      },
+      "environment": [
+        {
+          "name": "RAILS_ENV",
+          "value": "production"
+        },
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        },
+        {
+          "name": "INSTALLATION_ENV",
+          "value": "docker"
+        },
+        {
+          "name": "SECRET_KEY_BASE",
+          "value": "{{secret.secret-key-base}}"
+        },
+        {
+          "name": "FRONTEND_URL",
+          "value": "{{variable.FRONTEND_URL}}"
+        },
+        {
+          "name": "POSTGRES_HOST",
+          "value": "db"
+        },
+        {
+          "name": "POSTGRES_DATABASE",
+          "value": "chatwoot"
+        },
+        {
+          "name": "POSTGRES_USERNAME",
+          "value": "chatwoot"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "value": "{{secret.db-password}}"
+        },
+        {
+          "name": "REDIS_URL",
+          "value": "redis://cache:6379"
+        },
+        {
+          "name": "ENABLE_ACCOUNT_SIGNUP",
+          "value": "false"
+        },
+        {
+          "name": "ACTIVE_STORAGE_SERVICE",
+          "value": "local"
+        },
+        {
+          "name": "RAILS_LOG_TO_STDOUT",
+          "value": "true"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 3000,
+          "protocol": "tcp",
+          "purpose": "The dashboard, the API and the website widget",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "storage",
+          "target": "/app/storage",
+          "purpose": "Uploaded attachments and avatars",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 1536,
+        "minMemoryMb": 768
+      },
+      "healthcheck": {
+        "test": [
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:3000/health"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 30,
+        "startPeriodSeconds": 120
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        },
+        {
+          "service": "cache",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "sidekiq",
+      "role": "worker",
+      "purpose": "Runs the background jobs: sending replies, channel sync, automations and notifications",
+      "image": {
+        "reference": "chatwoot/chatwoot:v4.19.1",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing",
+        "command": [
+          "bundle",
+          "exec",
+          "sidekiq",
+          "-C",
+          "config/sidekiq.yml"
+        ]
+      },
+      "environment": [
+        {
+          "name": "RAILS_ENV",
+          "value": "production"
+        },
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        },
+        {
+          "name": "INSTALLATION_ENV",
+          "value": "docker"
+        },
+        {
+          "name": "SECRET_KEY_BASE",
+          "value": "{{secret.secret-key-base}}"
+        },
+        {
+          "name": "FRONTEND_URL",
+          "value": "{{variable.FRONTEND_URL}}"
+        },
+        {
+          "name": "POSTGRES_HOST",
+          "value": "db"
+        },
+        {
+          "name": "POSTGRES_DATABASE",
+          "value": "chatwoot"
+        },
+        {
+          "name": "POSTGRES_USERNAME",
+          "value": "chatwoot"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "value": "{{secret.db-password}}"
+        },
+        {
+          "name": "REDIS_URL",
+          "value": "redis://cache:6379"
+        },
+        {
+          "name": "ENABLE_ACCOUNT_SIGNUP",
+          "value": "false"
+        },
+        {
+          "name": "ACTIVE_STORAGE_SERVICE",
+          "value": "local"
+        },
+        {
+          "name": "RAILS_LOG_TO_STDOUT",
+          "value": "true"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "storage",
+          "target": "/app/storage",
+          "purpose": "Uploaded attachments and avatars",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 1024,
+        "minMemoryMb": 512
+      },
+      "healthcheck": {
+        "test": [
+          "pgrep",
+          "-f",
+          "sidekiq"
+        ],
+        "intervalSeconds": 15,
+        "timeoutSeconds": 5,
+        "retries": 10,
+        "startPeriodSeconds": 30
+      },
+      "dependsOn": [
+        {
+          "service": "rails",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "PostgreSQL, holding every conversation, contact and account",
+      "image": {
+        "reference": "pgvector/pgvector:0.8.1-pg17",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "POSTGRES_DB",
+          "value": "chatwoot"
+        },
+        {
+          "name": "POSTGRES_USER",
+          "value": "chatwoot"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "value": "{{secret.db-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "postgres",
+          "internal": 5432,
+          "protocol": "tcp",
+          "purpose": "SQL connections from Chatwoot",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/var/lib/postgresql/data",
+          "purpose": "Every table Chatwoot keeps",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "pg_isready",
+          "-h",
+          "127.0.0.1",
+          "-U",
+          "chatwoot",
+          "-d",
+          "chatwoot"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 20
+      }
+    },
+    {
+      "name": "cache",
+      "role": "cache",
+      "purpose": "Valkey, Sidekiq's queue, the cache and the live-update channels",
+      "image": {
+        "reference": "valkey/valkey:9.0.6-alpine",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "ports": [
+        {
+          "name": "redis",
+          "internal": 6379,
+          "protocol": "tcp",
+          "purpose": "Redis protocol from Chatwoot",
+          "exposure": "internal"
+        }
+      ],
+      "resources": {
+        "memoryMb": 256,
+        "minMemoryMb": 64
+      },
+      "healthcheck": {
+        "test": [
+          "valkey-cli",
+          "ping"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 5
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health",
+      "port": "http",
+      "timeoutSeconds": 900
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "FRONTEND_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "Chatwoot prepares and migrates its database on every start and does not migrate back; take a backup before moving to a newer image."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "support.example.test"
+      },
+      "digest": "sha256:a627c3b4d4636399946d7a908f68f569546dd8ed62e4fbcb80f81cbd6dc376fe"
+    }
+  ]
+}

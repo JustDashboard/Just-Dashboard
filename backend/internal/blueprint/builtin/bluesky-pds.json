@@ -1,0 +1,179 @@
+{
+  "id": "bluesky-pds",
+  "version": "1.0.0",
+  "name": "Bluesky PDS",
+  "category": "http",
+  "profile": "web",
+  "description": "A Personal Data Server for the AT Protocol: Bluesky accounts hosted on your own server, with their posts, follows and media stored here and federated to the Bluesky network through the public relay. Account creation is by invite code, so only people you invite can join.",
+  "iconId": "chat",
+  "docsUrl": "https://github.com/bluesky-social/pds#self-hosting-pds",
+  "access": {
+    "kind": "client",
+    "secretVariable": "PDS_ADMIN_PASSWORD",
+    "note": "A PDS has no web interface of its own: accounts are created with an invite code from its admin API, signed with user admin and the generated PDS_ADMIN_PASSWORD from the Variables tab (POST https://<domain>/xrpc/com.atproto.server.createInviteCode), then signed up for in the Bluesky app with <domain> as the hosting provider. Handles under <domain> need a wildcard DNS record and certificate; a handle on a domain of your own needs only a DNS TXT record."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT or Apache-2.0",
+    "upstreamUrl": "https://github.com/bluesky-social/pds",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "ghcr.io/bluesky-social/pds:0.4.5051",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "The PDS's own hostname: account DIDs are bound to it, so it cannot change later."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 3000,
+      "protocol": "tcp",
+      "purpose": "The XRPC API the Bluesky app and the relay talk to",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/pds",
+      "purpose": "Account databases, repositories and uploaded blobs",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/xrpc/_health",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "PDS_HOSTNAME",
+        "value": "{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "PDS_DATA_DIRECTORY",
+        "value": "/pds"
+      },
+      {
+        "kind": "set_variable",
+        "name": "PDS_BLOBSTORE_DISK_LOCATION",
+        "value": "/pds/blocks"
+      },
+      {
+        "kind": "set_variable",
+        "name": "PDS_BLOB_UPLOAD_LIMIT",
+        "value": "104857600"
+      },
+      {
+        "kind": "set_variable",
+        "name": "PDS_INVITE_REQUIRED",
+        "value": "true"
+      },
+      {
+        "kind": "set_variable",
+        "name": "PDS_DID_PLC_URL",
+        "value": "https://plc.directory"
+      },
+      {
+        "kind": "set_variable",
+        "name": "PDS_BSKY_APP_VIEW_URL",
+        "value": "https://api.bsky.app"
+      },
+      {
+        "kind": "set_variable",
+        "name": "PDS_BSKY_APP_VIEW_DID",
+        "value": "did:web:api.bsky.app"
+      },
+      {
+        "kind": "set_variable",
+        "name": "PDS_REPORT_SERVICE_URL",
+        "value": "https://mod.bsky.app"
+      },
+      {
+        "kind": "set_variable",
+        "name": "PDS_REPORT_SERVICE_DID",
+        "value": "did:plc:ar7c4by46qjdydhdevvrndac"
+      },
+      {
+        "kind": "set_variable",
+        "name": "PDS_CRAWLERS",
+        "value": "https://bsky.network"
+      },
+      {
+        "kind": "set_variable",
+        "name": "LOG_ENABLED",
+        "value": "true"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "The PDS migrates its databases on start. Keep the rotation key with every backup: without it the identities of accounts created here cannot be updated.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "pds.example.test"
+      },
+      "digest": "sha256:ea76e52d0da96a7229a6e0f63fd9426abd04b12305a66a379efad8c8df8db61b"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "admin-password",
+      "variable": "PDS_ADMIN_PASSWORD",
+      "label": "Admin password",
+      "length": 32,
+      "description": "Signs admin API calls such as creating invite codes."
+    },
+    {
+      "name": "jwt-secret",
+      "variable": "PDS_JWT_SECRET",
+      "label": "Session signing secret",
+      "length": 64,
+      "description": "Signs access and refresh tokens; changing it signs every account out.",
+      "alphabet": "hex"
+    },
+    {
+      "name": "rotation-key",
+      "variable": "PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX",
+      "label": "PLC rotation key",
+      "length": 64,
+      "description": "The secp256k1 key that may update the identities of accounts created here; keep it with the backups.",
+      "alphabet": "hex"
+    }
+  ]
+}

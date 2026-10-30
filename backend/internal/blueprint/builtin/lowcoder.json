@@ -1,0 +1,147 @@
+{
+  "id": "lowcoder",
+  "version": "1.0.0",
+  "name": "Lowcoder",
+  "category": "tool",
+  "profile": "web",
+  "description": "A low-code builder for internal tools, dashboards and customer-facing apps: drag components onto a page, wire them to databases and APIs, and publish. The all-in-one image runs the API, the node service, the frontend and its own MongoDB and Redis, all kept on the data volume.",
+  "iconId": "bolt",
+  "docsUrl": "https://docs.lowcoder.cloud/lowcoder-documentation/setup-and-run/self-hosting",
+  "access": {
+    "kind": "setup",
+    "note": "Lowcoder starts with no account: the first account signed up administers the instance. Open the address yourself right after deploying and sign up before anyone else; sign-up by e-mail can be closed with LOWCODER_EMAIL_SIGNUP_ENABLED in the deployment's variables."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/lowcoder-org/lowcoder",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "lowcoderorg/lowcoder-ce:2.7.6",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Lowcoder builds links to published apps and invitation e-mails from this address."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 3000,
+      "protocol": "tcp",
+      "purpose": "The editor, published apps and the API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/lowcoder-stacks",
+      "purpose": "The bundled MongoDB and Redis data, logs and uploaded assets",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 2048,
+    "minMemoryMb": 1024
+  },
+  "checks": [
+    {
+      "name": "Editor answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 300
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "LOWCODER_PUBLIC_URL",
+        "value": "https://{{input.domain}}/"
+      },
+      {
+        "kind": "set_variable",
+        "name": "LOWCODER_EMAIL_SIGNUP_ENABLED",
+        "value": "true"
+      },
+      {
+        "kind": "set_variable",
+        "name": "LOWCODER_EMAIL_AUTH_ENABLED",
+        "value": "true"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Lowcoder migrates its bundled MongoDB on start; back up the data volume before moving to a newer image.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "apps.example.test"
+      },
+      "digest": "sha256:092370d19e2a84fbcb5bf34209c30cba470cb83180861858a0e7d80e41875059"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "encryption-password",
+      "variable": "LOWCODER_DB_ENCRYPTION_PASSWORD",
+      "label": "Encryption password",
+      "length": 32,
+      "description": "Encrypts stored data-source credentials; changing it makes them unreadable."
+    },
+    {
+      "name": "encryption-salt",
+      "variable": "LOWCODER_DB_ENCRYPTION_SALT",
+      "label": "Encryption salt",
+      "length": 32,
+      "description": "Salts the encryption of stored data-source credentials."
+    },
+    {
+      "name": "api-key-secret",
+      "variable": "LOWCODER_API_KEY_SECRET",
+      "label": "API key signing secret",
+      "length": 64,
+      "description": "Signs the API keys Lowcoder issues.",
+      "alphabet": "hex"
+    },
+    {
+      "name": "node-secret",
+      "variable": "LOWCODER_NODE_SERVICE_SECRET",
+      "label": "Node service secret",
+      "length": 64,
+      "description": "Authenticates the API to its node service.",
+      "alphabet": "hex"
+    },
+    {
+      "name": "node-salt",
+      "variable": "LOWCODER_NODE_SERVICE_SECRET_SALT",
+      "label": "Node service salt",
+      "length": 32,
+      "description": "Salts the node service secret."
+    }
+  ]
+}
