@@ -314,6 +314,17 @@ A change that weakens any of these has to say so explicitly.
     nothing a release runs: a rebuild is offered as the runs route's own `force_build`, gated and
     audited as any build is. See [image vulnerabilities](../deployments/image-vulnerabilities.md).
 
+15. Railpack's planner reads a checkout; it never reaches the host. `deploy.railpackPrepareSpec` runs
+    the pinned Railpack image (tag and index digest) with the build root mounted **read-only**, a fresh
+    output folder of its own, no capabilities, no new privileges, a read-only root, bounded memory, CPU
+    and processes, and never the Docker socket, a host path of the operator's or a credential. It has
+    Docker's bridge network, as a build has, because Railpack downloads its pinned mise release and
+    resolves language releases; it runs as root inside the container only because the checkout is a
+    root-only 0700 tree, and with every capability dropped. Build variables reach it by name only,
+    except plain `RAILPACK_*` ones, which configure the plan; their values reach the build as BuildKit
+    secret mounts, as a recipe's do. A Railpack plan runs only in BuildKit, like a Dockerfile's steps.
+    See [Railpack](../deployments/recipes.md#railpack).
+
 ## Invariant 2: what two-factor still guarantees
 
 Two-factor used to be unconditional, and the reasoning was sound for the install the product was first
