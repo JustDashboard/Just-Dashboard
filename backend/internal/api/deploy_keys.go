@@ -445,8 +445,8 @@ func refuseForDeployKey(reason string) error {
 // container to the server itself: a folder on the server as the source,
 // Docker Compose (whose file can ask for any of the rest, and is only
 // reviewed when a person commits it), a privileged container, the host's
-// network, added capabilities, devices, a host path mounted in, and a release
-// task that runs in a shell on the host. Any of these is the server, and with
+// network, added capabilities, devices, the server's GPUs, a host path
+// mounted in, and a release task that runs in a shell on the host. Any of these is the server, and with
 // it every secret the session-only routes keep from a deploy key.
 func hostAuthority(source *deploy.DraftSourceConfig, build deploy.BuildPlanConfig, runtime deploy.RuntimePlanConfig) []string {
 	var out []string
@@ -473,6 +473,9 @@ func hostAuthority(source *deploy.DraftSourceConfig, build deploy.BuildPlanConfi
 	}
 	if len(runtime.Devices) > 0 {
 		out = append(out, "host devices")
+	}
+	if runtime.GPUs != nil {
+		out = append(out, "the server's GPUs")
 	}
 	for _, mount := range runtime.Mounts {
 		if filepath.IsAbs(strings.TrimSpace(mount.Source)) {
