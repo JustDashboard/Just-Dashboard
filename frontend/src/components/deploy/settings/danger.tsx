@@ -426,6 +426,14 @@ function useArchiveReach(configuration: DeploymentEnvironmentConfiguration) {
     previews.data?.filter((one) => one.state === "open").length &&
       plural(previews.data.filter((one) => one.state === "open").length, "preview environment"),
   ].filter(Boolean) as string[]
+  // What could not be read is not what is off: archiving turns these off all
+  // the same, so the confirmation has to say it does not know how many.
+  const unread = [
+    triggers.error && !triggers.data && "webhooks",
+    schedules.error && !schedules.data && "schedules",
+    previews.error && !previews.data && "previews",
+  ].filter(Boolean) as string[]
+  const reading = triggers.loading || schedules.loading || previews.loading
   const volumes = (configuration.runtime.mounts ?? []).filter(
     (mount) => !mount.source.startsWith("/"),
   )
@@ -435,16 +443,25 @@ function useArchiveReach(configuration: DeploymentEnvironmentConfiguration) {
     volumes.length > 0 && plural(volumes.length, "volume"),
     project.releases.length > 0 && plural(project.releases.length, "release"),
   ].filter(Boolean) as string[]
-  return { stops, keeps }
+  return { stops, unread, reading, keeps }
 }
 
 function ArchiveRow({ configuration }: { configuration: DeploymentEnvironmentConfiguration }) {
   const project = useProject()
   const { confirm, dialog } = useConfirm()
-  const { stops, keeps } = useArchiveReach(configuration)
+  const { stops, unread, reading, keeps } = useArchiveReach(configuration)
   const facts = (
     <>
-      <Reach label="Stops">{stops.length > 0 ? stops.join(" · ") : "nothing is automatic"}</Reach>
+      {(stops.length > 0 || unread.length === 0) && (
+        <Reach label="Stops">
+          {stops.length > 0 ? stops.join(" · ") : reading ? "reading…" : "nothing is automatic"}
+        </Reach>
+      )}
+      {unread.length > 0 && (
+        <Reach label="Could not read">
+          {unread.join(" · ")}. Any of them that are on stop as well.
+        </Reach>
+      )}
       <Reach label="Keeps">{keeps.join(" · ")}</Reach>
     </>
   )
@@ -456,8 +473,10 @@ function ArchiveRow({ configuration }: { configuration: DeploymentEnvironmentCon
       sentence="Takes it off the active list. What runs keeps running."
       facts={facts}
       action={
+        // The dialog keeps the facts it opened with, so it waits for all of them.
         <Button
           variant="destructive"
+          disabled={reading}
           onClick={() =>
             confirm(
               archiveRequest(

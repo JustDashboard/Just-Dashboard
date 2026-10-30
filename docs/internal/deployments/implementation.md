@@ -2137,7 +2137,9 @@ only renderer/executor/validation authority for their feature.
   union of the protected domains' credentials once per user: Caddy renders a `basic_auth` block, nginx an
   `auth_basic` with an htpasswd file beside the site written before the site and removed with it. The
   Domains settings and the public-address step offer **Ask visitors for a password**; the overview tags a
-  protected domain. Previews inherit the plan's protection.
+  protected domain. Previews inherit the plan's protection. A password typed in Domains settings stays
+  in memory beside the form's draft and joins the list only in the save, so a reload loses it and keeps
+  the rest of the draft.
 - Domain redirects and route rules. `domains[].redirectTo` names another of the plan's hostnames
   (`redirectCode` 301, 302, 307 or 308; empty is 308) that this one sends visitors to, with the path and
   query kept, instead of serving the application: the www. a bare domain keeps for old links, or the

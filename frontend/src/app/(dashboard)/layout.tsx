@@ -1,12 +1,13 @@
 "use client"
 
 import { useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { MetricsStream } from "@/hooks/use-metrics"
 import { SelfUpdateProvider } from "@/hooks/use-self-update"
 import { AppSidebar } from "@/components/app-sidebar"
 import { Logo, LogoStacked } from "@/components/logo"
+import { tabTitle } from "@/components/nav"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { CommandPaletteProvider, useCommandPalette } from "@/components/command-palette"
 import { MagnifyingGlass } from "@/components/icons"
@@ -17,7 +18,23 @@ import { WorkspaceCommandsProvider } from "@/components/workspace/commands"
 import { NetworkChangeConfirmation } from "@/components/network/change-confirmation"
 import { HeldSessionsHost, HeldSessionsProvider } from "@/components/remote-desktop/held-sessions"
 
+/**
+ * The page's name in the tab is what tells a row of dashboard tabs apart. This
+ * layout is a client component, so it cannot export `metadata`; React carries
+ * the element to the head instead. The root layout declares no title for that
+ * reason: Next would write its own over a `document.title`, and beside this one
+ * would be the first of two.
+ */
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <title>{tabTitle(usePathname())}</title>
+      <DashboardShell>{children}</DashboardShell>
+    </>
+  )
+}
+
+function DashboardShell({ children }: { children: React.ReactNode }) {
   const { status, loading, sessionEnded } = useAuth()
   const router = useRouter()
 

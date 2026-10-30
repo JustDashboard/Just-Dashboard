@@ -34,12 +34,60 @@ type PollOptions<T> = {
   seed?: T
 }
 
+/** The part of `document` a poll watches, so the schedule can be tested without one. */
+type PollPage = Pick<Document, "visibilityState" | "addEventListener" | "removeEventListener">
+
 /**
- * Fetches on mount and schedules the next poll after each request settles,
- * so a slow endpoint cannot stack requests. The interval is paused while
- * the tab is hidden — a dashboard left open in a background tab should not
- * keep hammering the server it is monitoring.
+ * Fetches now and schedules the next fetch after each one settles, so a slow
+ * endpoint cannot stack requests. The interval stops while the tab is hidden —
+ * a dashboard left open in a background tab should not keep hammering the
+ * server it is monitoring — and coming back fetches at once rather than
+ * showing a stale page until a timer is next due. A fetch already in flight is
+ * the refresh; its own settling schedules the next.
+ *
+ * An interval of 0 fetches once: it has no schedule to catch up on.
+ * `fetchOnce` must not reject. Returns what stops it.
  */
+export function pollLoop(
+  fetchOnce: () => Promise<void>,
+  intervalMs: number,
+  page: PollPage = document,
+): () => void {
+  let stopped = false
+  let fetching = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const schedule = () => {
+    if (stopped || intervalMs <= 0) return
+    timer = setTimeout(() => {
+      // Hidden, nothing rearms this: the return to the tab does.
+      if (page.visibilityState === "visible") void run()
+    }, intervalMs)
+  }
+
+  const run = async () => {
+    fetching = true
+    await fetchOnce()
+    fetching = false
+    schedule()
+  }
+
+  const onVisibility = () => {
+    if (page.visibilityState !== "visible" || fetching) return
+    clearTimeout(timer)
+    void run()
+  }
+
+  void run()
+  if (intervalMs > 0) page.addEventListener("visibilitychange", onVisibility)
+  return () => {
+    stopped = true
+    clearTimeout(timer)
+    page.removeEventListener("visibilitychange", onVisibility)
+  }
+}
+
+/** `pollLoop` as a hook: the latest result, and a way to ask again. */
 export function usePoll<T>(
   fetcher: (signal: AbortSignal) => Promise<T>,
   intervalMs = 5000,
@@ -72,17 +120,8 @@ export function usePoll<T>(
     if (!enabled) return
     let cancelled = false
     const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined
 
-    const schedule = () => {
-      if (cancelled || intervalMs <= 0) return
-      timer = setTimeout(() => {
-        if (document.visibilityState === "visible") void run()
-        else schedule()
-      }, intervalMs)
-    }
-
-    const run = async () => {
+    const stop = pollLoop(async () => {
       try {
         const next = await fetcherRef.current(controller.signal)
         if (cancelled) return
@@ -96,16 +135,13 @@ export function usePoll<T>(
           error: err instanceof Error ? err : new Error(String(err)),
           lastSuccess: previous?.resource === resource ? previous.lastSuccess : undefined,
         }))
-      } finally {
-        schedule()
       }
-    }
+    }, intervalMs)
 
-    void run()
     return () => {
       cancelled = true
       controller.abort()
-      clearTimeout(timer)
+      stop()
     }
   }, [intervalMs, tick, enabled, resource])
 

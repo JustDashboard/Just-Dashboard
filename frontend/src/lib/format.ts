@@ -2,7 +2,8 @@ const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"]
 
 export function bytes(value: number | undefined | null, precision = 1): string {
   if (value === undefined || value === null || Number.isNaN(value)) return "—"
-  if (value === 0) return "0 B"
+  // Below one byte the logarithm goes negative and there is no unit down there.
+  if (Math.abs(value) < 1) return `${Math.round(value)} B`
   const exp = Math.min(
     Math.floor(Math.log(Math.abs(value)) / Math.log(1024)),
     BYTE_UNITS.length - 1,
