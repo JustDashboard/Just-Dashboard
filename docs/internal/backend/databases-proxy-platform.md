@@ -5981,7 +5981,8 @@ collects *every* malformed setting so `Load` refuses with the whole list rather 
 step: **the reading site, `.env.example`, `docker-compose.yml`, and the README's configuration table.**
 `JD_ACCOUNT_URL` and `JD_ACCOUNT_LINK` follow it: `config.go` reads both (the URL through
 `accountlink.ParseSiteURL`, so a malformed one refuses to start) and [account link](account-link.md) says what
-they decide. An install that is never linked sends the site nothing.
+they decide. `JD_USAGE_PING` follows it too, and [the usage count](usage-ping.md) says what it decides. An install
+that is never linked, and whose administrators never said yes to the count, sends the site nothing.
 
 ### Cutting a release
 

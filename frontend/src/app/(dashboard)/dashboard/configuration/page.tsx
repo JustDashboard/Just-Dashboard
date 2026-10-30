@@ -19,6 +19,7 @@ import { Allowlist } from "@/components/config/allowlist"
 import { EndpointText, RequestPath } from "@/components/config/request-path"
 import { RestartProgress } from "@/components/config/restart-progress"
 import { UninstallDialog, UninstallProgress, UninstallRow } from "@/components/config/uninstall"
+import { UsagePingPanel } from "@/components/config/usage-ping"
 import { ShellWords } from "@/components/deploy/run-evidence"
 import { Disclosure, Field, FieldRow, FormSection, OptionList, OptionRow } from "@/components/form"
 import { LogoGlyph } from "@/components/logo"
@@ -755,7 +756,7 @@ export default function DashboardConfigurationPage() {
                 />
                 <OptionRow
                   title={<Option product="github">Check for new versions</Option>}
-                  hint="One small file from GitHub, four times a day — the only outbound request it makes."
+                  hint="One small file from GitHub, every two hours and at most every five minutes while pages are opening."
                   checked={draft.updateCheck}
                   disabled={!editable}
                   onCheckedChange={(value) => set("updateCheck", value)}
@@ -765,6 +766,8 @@ export default function DashboardConfigurationPage() {
           </SettingsRow>
         </PanelBody>
       </Panel>
+
+      {admin && !removing && <UsagePingPanel />}
 
       {admin && !removing && (
         <p className="text-xs text-muted-foreground">

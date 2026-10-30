@@ -71,6 +71,9 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 			if s.modules.accountLink != nil {
 				s.mountAccountLinkRoutes(r)
 			}
+			if s.modules.usagePing != nil {
+				s.mountUsagePingRoutes(r)
+			}
 		})
 	})
 }

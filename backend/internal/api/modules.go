@@ -51,6 +51,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/uninstall"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/updates"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/usageping"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/version"
 )
 
@@ -90,6 +91,9 @@ type moduleSet struct {
 	// accountLink links this dashboard to a just-dashboard.com account. Nil in
 	// agent mode, where the only caller is the hub and nothing here applies.
 	accountLink *accountlink.Service
+	// usagePing is the optional daily count of servers. Nil in agent mode, for
+	// the reason accountLink is: an agent answers only to its hub.
+	usagePing *usageping.Service
 
 	// hostFiles is files with every operation run in the host's mount
 	// namespace. The Files page, and only it, uses it: its paths are typed by
@@ -525,6 +529,7 @@ func (s *Server) initModules() {
 	s.initProxyExtras()
 	s.initUninstall()
 	s.initAccountLink()
+	s.initUsagePing()
 }
 
 // initAccountLink makes the connector to a linked just-dashboard.com account.
@@ -539,6 +544,25 @@ func (s *Server) initAccountLink() {
 		Store: s.Store, Sealer: s.Sealer, Audit: s.Audit, Log: s.Log,
 		SiteURL: s.Cfg.AccountURL, Enabled: s.Cfg.AccountLink,
 		Host: newAccountHost(s), Version: version.Version,
+	})
+}
+
+// initUsagePing makes the optional daily count. JD_ACCOUNT_LINK=false turns it
+// off too: that switch tells an operator the server never contacts the site, and
+// a report sent there on a later yes would make that sentence untrue.
+func (s *Server) initUsagePing() {
+	if s.Cfg.AgentMode {
+		return
+	}
+	offBy := ""
+	switch {
+	case !s.Cfg.UsagePing:
+		offBy = "JD_USAGE_PING"
+	case !s.Cfg.AccountLink:
+		offBy = "JD_ACCOUNT_LINK"
+	}
+	s.modules.usagePing = usageping.New(usageping.Options{
+		Store: s.Store, Log: s.Log, SiteURL: s.Cfg.AccountURL, Version: version.Version, OffBy: offBy,
 	})
 }
 

@@ -111,6 +111,11 @@ type Config struct {
 	// that.
 	AccountURL  string
 	AccountLink bool
+
+	// UsagePing is whether this install may ever send the optional daily count
+	// to AccountURL. On, an administrator is still asked first and nothing goes
+	// until they say yes; off, nobody is asked and nothing is ever sent.
+	UsagePing bool
 }
 
 func Load() (*Config, error) {
@@ -156,6 +161,7 @@ func Load() (*Config, error) {
 		UpdateBranch:     env("JD_UPDATE_BRANCH", selfupdate.DefaultRef),
 		UpdateDir:        env("JD_UPDATE_DIR", ""),
 		AccountLink:      l.boolean("JD_ACCOUNT_LINK", true),
+		UsagePing:        l.boolean("JD_USAGE_PING", true),
 	}
 	c.AccountURL = l.accountURL()
 

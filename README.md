@@ -596,6 +596,27 @@ is written to the audit log as the site account. Unlink from Settings, with
 the feature off entirely: no page controls, no installer question, no command, and a link that exists
 goes quiet. `JD_ACCOUNT_URL` names the site, an origin only (`http://` just for `localhost`).
 
+## The usage count
+
+An administrator is asked once, on the Overview, whether this server may be counted in the public install
+numbers at [just-dashboard.com/stats](https://just-dashboard.com/stats). **Nothing is sent until somebody says
+yes.** You can change the answer at any time under **Settings → Configuration**, which also prints the report
+exactly as it is sent.
+
+A server that says yes sends one request a day, and this is all of it:
+
+```json
+{"version":"0.8.2","usedToday":true,"usedThisWeek":true}
+```
+
+The two flags say whether anybody signed in during the last 24 hours and the last 7 days. There is no ID and no
+hostname, so a server cannot be followed from one day to the next, and the number counts servers rather than
+people. The site sees the address a request comes from, as any server does; it adds the report to that day's
+totals and keeps no address.
+
+`JD_USAGE_PING=false` means nobody is asked and nothing is ever sent, and silences an earlier yes.
+`JD_ACCOUNT_LINK=false` does the same.
+
 ## Security first
 
 **This dashboard is root-equivalent.** Anyone who reaches it with a valid session has root on the
@@ -617,6 +638,7 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Linking to a just-dashboard.com account is optional and outbound only. A command from the site runs
   only if its signature verifies against the key pinned at link time and its kind is within the scope
   you chose; linking is a browser-session action for an administrator, or root at the terminal.
+- [The usage count](#the-usage-count) is off until an administrator says yes, and is three fields with no ID.
 
 ### Roles
 
@@ -634,7 +656,8 @@ disk.
 This is **0.8.2**. It is not 1.0 because the API is still moving. Every release is in
 [CHANGELOG.md](CHANGELOG.md) and in the dashboard itself, where **Update now** pulls, rebuilds and
 restarts from a container that outlives the restart. The update check is one unauthenticated GET of
-one file from GitHub; `JD_UPDATE_CHECK=false` turns it off.
+one file from GitHub, every two hours and at most every five minutes while pages are being opened;
+`JD_UPDATE_CHECK=false` turns it off.
 
 ## Configuration
 
@@ -683,13 +706,14 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_DEPLOY_LEASE_TTL` | `30s` | Time before a silent deployment worker claim is reconciled after a crash. Valid range: 5s–5m. |
 | `JD_METRICS_INTERVAL` | `15s` | How often the backend samples the host, and every running container, into its own history. Clamped to 5s and 5m. |
 | `JD_METRICS_RETENTION` | `7d` | How long that history is kept — and with it the sizes of the volumes deployments own, sampled every 15 minutes for the capacity forecast. Right-sizing needs a day of it before it suggests a limit. Accepts days. `0` records nothing and leaves only the live feed. A deployment's container events (exits, OOM kills, restarts, health changes) are kept for 30 days or this, whichever is longer, whatever this is set to. |
-| `JD_UPDATE_CHECK` | `true` | Whether the dashboard may ask GitHub whether a newer version of *itself* exists — one unauthenticated GET of one file, four times a day, carrying nothing but a version number. `false` turns it off; the release notes for the version you run stay readable, since they are compiled in. |
+| `JD_UPDATE_CHECK` | `true` | Whether the dashboard may ask GitHub whether a newer version of *itself* exists — one unauthenticated GET of one file, every two hours and at most every five minutes while pages are being opened, carrying nothing but a version number. `false` turns it off; the release notes for the version you run stay readable, since they are compiled in. |
 | `JD_ACME_DIRECTORY` | Let's Encrypt | Another ACME directory to order deployment certificates from: Let's Encrypt's staging endpoint for a rehearsal that spends no rate limit, or a private authority on a network that never sees the internet. Both the managed Caddy and certbot follow it — the Certificates page's orders and a deployment run's, over HTTP-01 and DNS-01 alike — and certbot registers an account with that directory rather than reusing one it has with another. |
 | `JD_ACME_CA_ROOT` | system roots | A PEM bundle to trust when that authority signs with its own roots — its issuing roots, and the root behind its directory's TLS listener if that is private too. Caddy is given it as its trusted roots and certbot as `REQUESTS_CA_BUNDLE`, so keep it where both read it (under `/etc`, `/srv`, `/opt` or the data directory, which the stack mounts at the same paths). With it set, the public-DNS check before an order is skipped, because a private authority validates however it was set up to. |
 | `JD_UPDATE_REPO` | `JustDashboard/Just-Dashboard` | The repository releases are read from. Change it to follow a fork. |
 | `JD_UPDATE_BRANCH` | `main` | The branch whose changelog decides what "newest" means, and which an in-app update fast-forwards to. |
 | `JD_ACCOUNT_LINK` | `true` | Whether this server may be linked to a just-dashboard.com account. Linking is always something an administrator does; `false` removes the Settings page's controls, the installer's question and the terminal command, and silences a link that already exists, so nothing is ever sent. |
 | `JD_ACCOUNT_URL` | `https://just-dashboard.com` | The site this install may link to: an origin only, with no path, query or credentials. `https://` everywhere; `http://` only for `localhost`, `127.0.0.1` or `[::1]`, to develop the site beside the dashboard. Anything else refuses to start. |
+| `JD_USAGE_PING` | `true` | Whether an administrator may be asked to [count this server](#the-usage-count) in the public install numbers. Nothing is sent until one says yes. `false` means nobody is asked and nothing is ever sent; `JD_ACCOUNT_LINK=false` does the same. |
 | `JD_UPDATE_DIR` | discovered | The directory you cloned into. Normally empty: the dashboard asks Docker where its own stack was deployed from. Set it only if the Updates page says that failed. |
 | `JD_AGENT_MODE` | `false` | Run as an agent managed by a hub: no login, mutual TLS only. Not useful on its own yet. |
 | `JD_DEV` | `false` | Development only. Drops `Secure` from the session cookie, which is then `jd_session` rather than `__Host-jd_session`, so the UI works over plain HTTP. Never set it on a real host. |
