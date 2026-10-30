@@ -96,6 +96,7 @@ description, which `api/deploy_openapi.go` generates from the router and is comm
 | `term` | Direct PTY sessions, holding and adopting them through `ptyhold`, replay, organization, clipboard uploads, and bundled shell setup | [`../backend/processes-terminal-github.md`](../backend/processes-terminal-github.md#the-terminal) |
 | `uninstall` | Removing the dashboard from the server: the plan the dialog shows, pausing the deployment machinery, removing the deployments for a wipe (`deployments.go`), and the `-self-uninstall` sibling that takes the stack down and deletes the files (`runner.go`) | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#uninstalling) |
 | `updates` | Six package-manager adapters, catalogue, upgrades, reboot state, and usage summaries | [`../backend/observability-security.md`](../backend/observability-security.md#packages-six-managers-one-interface) |
+| `usageping` | The optional daily count of servers: an administrator's answer, the three-field report with no ID, one per UTC day | [`../backend/usage-ping.md`](../backend/usage-ping.md) |
 | `version` | Build/release version normalization | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#configuration-version-release-self-update) |
 | `wsx` | WebSocket origin validation, upgrade, and shared socket behavior | [`../architecture/request-lifecycle.md`](../architecture/request-lifecycle.md) |
 

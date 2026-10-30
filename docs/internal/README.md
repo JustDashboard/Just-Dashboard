@@ -28,6 +28,8 @@ strategy, and feature ownership behind those rules.
   protocol it implements (the site repository's `server-link-protocol.md`), the trust model, the three doors
   (Settings, `install.sh`, `manage.sh link`), the scope table and what the heartbeat carries, command
   verification and audit, automatic-update policy, the local API, configuration and failure modes.
+- [`backend/usage-ping.md`](backend/usage-ping.md) — the optional daily count of servers: the three fields it
+  sends, why there is no ID, how it decides to send, its switches, routes and surfaces, and the site's side.
 - [`backend/network.md`](backend/network.md) — the network module: the spec restored at boot, the
   client-path guard, devices and namespaces, routing and forwarding, the gateway table and forward
   admission, blocklists, kernel protections, shaping, WireGuard and Tailscale, the resolver and traffic.

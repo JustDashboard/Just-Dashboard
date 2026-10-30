@@ -363,6 +363,8 @@ func (s *Server) Start(ctx context.Context) error {
 	// Last, because a link's first heartbeat reads nearly everything above. A
 	// no-op until the dashboard is linked, and always when linking is off.
 	s.modules.accountLink.Start(ctx)
+	// Runs and sends nothing until an administrator has said yes.
+	s.modules.usagePing.Start(ctx)
 	return nil
 }
 
@@ -406,6 +408,7 @@ func (s *Server) startDeployEngine(ctx context.Context) error {
 // Shutdown releases the resources that outlive a request: database pools,
 // live PTY sessions, the metrics sampler and the backup scheduler.
 func (s *Server) Shutdown() {
+	s.modules.usagePing.Stop()
 	s.modules.accountLink.Stop()
 	s.modules.deployPreviews.Stop()
 	s.modules.deployGit.Stop()

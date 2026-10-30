@@ -132,7 +132,7 @@ Four places, per [the configuration rule](databases-proxy-platform.md#configurat
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `JD_ACCOUNT_URL` | `https://just-dashboard.com` | An origin only: no userinfo, path, query or fragment; `https` everywhere, `http` only for `localhost`, `127.0.0.0/8` or `[::1]`. Anything else refuses to start. A link remembers the URL it was made with; if the setting no longer matches, the connector goes idle and the page says why |
-| `JD_ACCOUNT_LINK` | `true` | `false`: nothing is ever sent. The controls, the installer's question and `--admin link` refuse; `Start` runs nothing; an existing link is left in the store, idle; unlink still works and then tells no one |
+| `JD_ACCOUNT_LINK` | `true` | `false`: nothing is ever sent. That includes [the usage count](usage-ping.md), which reports to the same site. The controls, the installer's question and `--admin link` refuse; `Start` runs nothing; an existing link is left in the store, idle; unlink still works and then tells no one |
 
 In agent mode no connector is built and the routes are not mounted: the hub is the only caller and has no
 business handing an agent to a site account.

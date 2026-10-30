@@ -103,6 +103,7 @@ services:
       # URL is an origin: https, or http for localhost while developing the site.
       JD_ACCOUNT_LINK: ${JD_ACCOUNT_LINK:-true}
       JD_ACCOUNT_URL: ${JD_ACCOUNT_URL:-https://just-dashboard.com}
+      JD_USAGE_PING: ${JD_USAGE_PING:-true}
       JD_LOG_LEVEL: ${JD_LOG_LEVEL:-info}
     volumes:
       # Root-equivalent access. Everything that reaches it is authenticated,

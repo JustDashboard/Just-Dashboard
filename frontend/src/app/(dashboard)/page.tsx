@@ -40,6 +40,7 @@ import { lastFleet, readFleet } from "@/components/database/fleet/read"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import { ProjectCard } from "@/components/deploy/fleet-card"
 import { sortFleet } from "@/components/deploy/fleet"
+import { UsagePingQuestion } from "@/components/overview/usage-ping-question"
 import { ActivityPanel } from "@/components/overview/activity"
 import { BackupsPanel, DatabasesPanel } from "@/components/overview/data"
 import {
@@ -158,6 +159,8 @@ export default function OverviewPage() {
   return (
     <Page className="animate-rise">
       <PageContext title={host.hostname} />
+
+      <UsagePingQuestion />
 
       {/* What this machine is, in one line: the distribution drawn as
           itself, then what it runs on. The uptime, process count and cores

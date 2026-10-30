@@ -8337,6 +8337,21 @@ export type DashboardConfigReport = {
 export type AccountLinkScope = "observe" | "operate" | "maintain"
 
 /**
+ * The optional daily count of servers. Mirrors `GET /dashboard/usage-ping`. `enabled` is false when
+ * `offBy` names a switch in `.env`; the bodies are the report's exact bytes.
+ */
+export type UsagePingStatus = {
+  enabled: boolean
+  offBy?: "JD_USAGE_PING" | "JD_ACCOUNT_LINK"
+  choice: "undecided" | "on" | "off"
+  siteUrl: string
+  nextBody: string
+  lastBody?: string
+  lastSentAt?: string
+  lastError?: string
+}
+
+/**
  * This server's link to a just-dashboard.com account. Mirrors the `/dashboard/link` routes;
  * optional fields are omitted by the backend when absent, never `null`.
  */

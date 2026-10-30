@@ -343,6 +343,10 @@ A change that weakens any of these has to say so explicitly.
     except plain `RAILPACK_*` ones, which configure the plan; their values reach the build as BuildKit
     secret mounts, as a recipe's do. A Railpack plan runs only in BuildKit, like a Dockerfile's steps.
     See [Railpack](../deployments/recipes.md#railpack).
+16. The usage count reports nothing without an administrator's yes, given in a session and audited, and an API
+    key cannot give it. The report is the three fields of `usageping.Report` with no identifier, at most once per
+    UTC day, and a redirect is never followed. `JD_USAGE_PING=false` or `JD_ACCOUNT_LINK=false` stops it, and an
+    agent has none. See [the usage count](../backend/usage-ping.md).
 
 ## Invariant 2: what two-factor still guarantees
 

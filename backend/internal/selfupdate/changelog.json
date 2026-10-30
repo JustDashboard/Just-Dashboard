@@ -368,6 +368,11 @@
           "detail": "Ctrl or Cmd+V uploads files copied in Explorer or Finder into the open folder through the usual upload review, a copied picture as a Pasted image named with the time, and copied text as a text file. Copying in the dashboard puts the selected paths on your clipboard, one per line."
         },
         {
+          "kind": "added",
+          "text": "Count this server in the public install numbers, if an administrator says yes",
+          "detail": "An administrator is asked once on the Overview, and nothing is sent until somebody says yes. A yes sends one report a day: the version and whether anybody signed in today and this week, with no ID and no hostname. Settings → Configuration prints the report exactly as it is sent and has the off switch, and JD_USAGE_PING=false means nobody is asked and nothing is ever sent."
+        },
+        {
           "kind": "fixed",
           "text": "The Files page opens every path on the host, not only those the backend's container mirrors",
           "detail": "Paths outside /home, /opt, /srv, /root, /etc, /var/log and Docker's volumes came back not found, or showed the container image's own files. Every Files operation now runs in the host's own view of its disks, held to the same path checks as before."
@@ -416,6 +421,11 @@
           "kind": "fixed",
           "text": "Closing a terminal window no longer crashes its reader or leaves its shell running",
           "detail": "A window closed while its output was being announced could crash the loop reading it, and a lost hangup let the shell outlive the window. The close and the announcement are now ordered, and the window waits for the shell to exit."
+        },
+        {
+          "kind": "fixed",
+          "text": "The version check says how often it really runs",
+          "detail": "Configuration and the README said four times a day. It runs every two hours, and at most every five minutes while pages are being opened."
         },
         {
           "kind": "changed",
