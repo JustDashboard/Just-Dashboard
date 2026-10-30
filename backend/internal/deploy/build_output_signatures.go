@@ -63,6 +63,13 @@ var buildSignatures = []buildSignature{
 	exitSignature("build_out_of_memory", 137),
 	signature("build_registry_rate_limited", "", "", `toomanyrequests|pull rate limit|429 Too Many Requests|rate limit exceeded|ERR_PNPM_FETCH_429|E429`),
 
+	// The packages a Railpack plan installs before anything of the
+	// repository's runs: a language release mise could not install, a
+	// Debian package apt has never heard of (also a Python recipe's system
+	// package, or a Dockerfile's apt-get).
+	signature("railpack_package_install_failed", "mise", "mise ERROR", `mise ERROR Failed to install (?:[a-z]+:)?([\w.+/-]+@[\w.+-]+)`),
+	signature("build_apt_package_missing", "apt", "E: ", `E: Unable to locate package (\S+)|E: Package '([^']+)' has no installation candidate`),
+
 	// Lockfiles that no longer describe their manifest.
 	signature("build_lockfile_out_of_sync", "package-lock.json", "can only install packages when your package.json and",
 		`can only install packages when your package\.json and package-lock\.json`).

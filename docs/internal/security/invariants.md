@@ -144,8 +144,10 @@ A change that weakens any of these has to say so explicitly.
    copy of production's data whose address carries a password), what a linked database gives
    previews and a preview's database branch restored again (`PUT …/database-links/{connection}/previews`,
    `POST …/pull-requests/{number}/preview/branches/{connection}/refresh`: a second copy of production's
-   data next to a pull request's code), and a route's maintenance
-   and error pages (`PUT …/pages/{page}`, files on the server beside the proxy's route). The
+   data next to a pull request's code), a route's maintenance
+   and error pages (`PUT …/pages/{page}`, files on the server beside the proxy's route), and a domain's
+   DNS record (`GET` and `POST …/domains/{domain}/dns-record`: read and written in a zone outside this
+   server with the DNS credentials saved under Certificates, which the key never sees). The
    secret-store list (`GET /deploy/secret-stores`), which an ordinary key reads, answers a deploy key
    `key_scope`: it carries each connection's address and sign-in fields and every deployment's
    variables that read it, and the key cannot point a variable at a store. Variables are write-only to
@@ -288,7 +290,13 @@ A change that weakens any of these has to say so explicitly.
    `{{variable.…}}`) that render as interpolations of the deployment's sealed variables, so its document
    holds no value; commands and healthchecks are argv that are never templated, so neither an
    operator's input nor a secret reaches a process list or a shell. The stored document is the server's
-   own render of a shipped version, never one a client sent under a template's name.
+   own render of a shipped version or of a template added on this dashboard, never one a client sent
+   under a template's name. A template added on this dashboard is held to every one of these rules when
+   it is saved, and to more: its id is in the `user-` namespace no built-in may use, so it can never
+   stand in for a reviewed definition; it may take no privilege, host network, capability, device or
+   Docker socket, since only a reviewed built-in may reach the host; and a source that names it is
+   saved with the server's stored copy frozen in, never a definition the client sent. A template made
+   from a deployment never opens a secret's value: each becomes an input the next deployment answers.
 10. The game console is not a shell. `gameserver.ValidateCommand` refuses anything carrying a shell
     metacharacter, newline or NUL, the command reaches Docker exec as separate argv elements, and player
     actions come from a closed set with the account name validated before interpolation. The same
@@ -324,6 +332,17 @@ A change that weakens any of these has to say so explicitly.
     digest, as a build pulls it. The scanner image is pinned by tag and index digest. Scanning changes
     nothing a release runs: a rebuild is offered as the runs route's own `force_build`, gated and
     audited as any build is. See [image vulnerabilities](../deployments/image-vulnerabilities.md).
+
+15. Railpack's planner reads a checkout; it never reaches the host. `deploy.railpackPrepareSpec` runs
+    the pinned Railpack image (tag and index digest) with the build root mounted **read-only**, a fresh
+    output folder of its own, no capabilities, no new privileges, a read-only root, bounded memory, CPU
+    and processes, and never the Docker socket, a host path of the operator's or a credential. It has
+    Docker's bridge network, as a build has, because Railpack downloads its pinned mise release and
+    resolves language releases; it runs as root inside the container only because the checkout is a
+    root-only 0700 tree, and with every capability dropped. Build variables reach it by name only,
+    except plain `RAILPACK_*` ones, which configure the plan; their values reach the build as BuildKit
+    secret mounts, as a recipe's do. A Railpack plan runs only in BuildKit, like a Dockerfile's steps.
+    See [Railpack](../deployments/recipes.md#railpack).
 
 ## Invariant 2: what two-factor still guarantees
 

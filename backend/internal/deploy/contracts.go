@@ -60,6 +60,11 @@ const (
 	BuildCompose       BuildMethod = "compose"
 	BuildNone          BuildMethod = "none"
 	BuildLegacyCompose BuildMethod = "legacy_compose"
+	// BuildRailpack builds a checkout the way Railway and Coolify do:
+	// Railpack's own detection writes a build plan, and BuildKit builds it
+	// through Railpack's frontend (build_railpack.go). The image it makes is
+	// a release image like any recipe's.
+	BuildRailpack BuildMethod = "railpack"
 )
 
 type ReleaseStrategy string

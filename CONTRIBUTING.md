@@ -275,6 +275,14 @@ to the contribution terms above, including the additional licence grant to the p
   and changes to a recipe's base images
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRecipeBaseCatalogueRunsOnAmd64AndArm64 -count=1 -v`,
   which resolves (without pulling) every catalogue image and requires it for amd64 and arm64.
+  Changes to the Railpack build method (`deploy/build_railpack.go`, `detect_railpack.go`,
+  `preflight_railpack.go`, or the BuildKit frontend option and executable tmpfs in `dockerx`) also run,
+  as root, `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRailpackBuildsAndServesWithoutARecipe -count=1 -v`.
+  It pulls the pinned Railpack image and, through BuildKit, the builder and runtime images and the
+  language releases its plans name, builds a Node app and a Python app with Railpack through the real
+  planner container and frontend, serves each and requires its answer, has an empty
+  repository refused at the planner, and removes its images, containers and the Railpack image when it
+  pulled it (BuildKit's cache is left, as every build's is).
   Changes to build-failure diagnosis (the BuildKit reader in `dockerx`, the collector or the signature
   table) also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBuildFailureIsNamedFromBuildKit -count=1 -v`,
   which builds an npm project whose lockfile matches package.json but leaves out a package a locked
@@ -338,6 +346,13 @@ to the contribution terms above, including the additional licence grant to the p
   (`JD_BLUEPRINT_ONLY=a,b` narrows it; each stack's containers, volumes and networks are removed after
   it, and so are images it pulled):
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks -count=1 -v -timeout 2h`.
+  Changes to templates added on a dashboard (`blueprint/user*.go`, `deploy/user_templates.go`,
+  `deploy/template_from_plan.go`) also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveUserComposeTemplateStartsAndAnswersItsOwnChecks -count=1 -v`,
+  which makes an nginx-and-Redis template from a pasted Compose file through the store call the
+  route makes and brings it up through the same harness (it uses `nginx:alpine` and `redis:7-alpine`,
+  so a host that has them pulls nothing; the harness removes only what it added, digest references
+  included).
   A template's schema rules run at build time: every definition is parsed and validated when the
   catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship. The
   same package checks the catalogue's size: `catalogue_counts.go` declares how many definitions
@@ -392,9 +407,16 @@ to the contribution terms above, including the additional licence grant to the p
   a native dump restored from an encrypted archive takes `JD_TEST_POSTGRES_DSN` and
   `JD_TEST_MYSQL_ADMIN_DSN`: `go test ./internal/api -run TestLiveEncryptedArchiveRestoresANativeDump -count=1 -v`.
   SFTP and rclone destinations against an OpenSSH server (atmoz/sftp) and a WebDAV server run by rclone,
-  through the same lifecycle plus a refused host-key change:
+  through the same lifecycle plus a refused host-key change, and each read and imported from a fresh store:
   `JD_DEPLOY_LIVE=1 go test ./internal/backups -run TestLiveSFTPAndRcloneBackupsUploadPruneAndRestore -count=1 -v`
   (the rclone half needs `rclone` on PATH, as the backend image ships it).
+  Changes to the catalogue, import, the manifest beside an archive, or restoring on another host run, as
+  root (a volume's data is under Docker's root), the migration end to end: a labelled volume and a
+  directory backed up encrypted to S3 (`localstack/localstack:4.14.0`), both removed, then a second
+  server with its own store imports the key and the job's history and restores both in place, byte for
+  byte, the volume made again with its label:
+  `go test -c -o api.test ./internal/api && sudo env JD_DEPLOY_LIVE=1 PATH=$PATH ./api.test -test.run TestLiveImportedBackupRestoresOnAFreshServer -test.v`.
+  It removes its container, bucket and volume.
 - The public-certificate journey against a real ACME authority (an isolated Caddy and a Pebble that
   validates nothing, on one Docker network):
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory -count=1 -v`.
@@ -420,6 +442,13 @@ to the contribution terms above, including the additional licence grant to the p
   (the wildcard served by a real `caddy:2-alpine`, then renewed and refreshed; needs the plugin above)
   and `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyRefreshesRenewedCertificateCopies -count=1 -v`
   (the renewal refresh on a real Caddy with no authority involved).
+  Changes to writing a domain's DNS record (`internal/dnsrecords`, `api/handlers_deploy_dns_record.go`)
+  also run `JD_DEPLOY_LIVE=1 go test ./internal/dnsrecords -run TestLiveRFC2136WritesRecordsIntoBIND -count=1 -v`
+  (as root for Docker, through `go test -c` and `sudo`), which writes A, AAAA and CNAME records into the
+  same `acmetest` BIND through a signed RFC 2136 UPDATE and reads them back with BIND's own `dig`; it
+  needs no certbot. Cloudflare, Route 53, DigitalOcean, Google Cloud DNS, Linode, OVH and Gandi have no
+  server to run here and are covered by `httptest` fakes of their documented APIs in the package's unit
+  tests ([DNS records](docs/internal/deployments/dns-records.md#verification)).
   Changes to how a deployment route renders its redirects, response headers, allowed addresses, HSTS,
   a domain's own scheme, edge rules or the CrowdSec list also
   run `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyServesRouteRules -count=1 -v`,

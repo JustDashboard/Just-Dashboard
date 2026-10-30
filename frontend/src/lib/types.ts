@@ -2812,6 +2812,24 @@ export type BackupJob = {
   /** New archives are sealed to the server's backup key before they are written. */
   encrypt?: boolean
   recovery?: BackupRecoveryPlan
+  /**
+   * Adopted from what a destination holds: the record of another server's job
+   * (or this one's before a rebuild). It never runs, is never scheduled, and
+   * its archives are never pruned from here.
+   */
+  imported?: boolean
+  origin?: BackupJobOrigin
+}
+
+/** What an imported job was on the server it came from. */
+export type BackupJobOrigin = {
+  /** The install's identity, a random value made once per install. */
+  id: string
+  host?: string
+  jobId: number
+  jobName: string
+  /** Archives this install wrote whose records it no longer had. */
+  thisServer?: boolean
 }
 
 /** The server's backup key, by its public half; the secret never leaves but by export. */
@@ -2823,6 +2841,8 @@ export type BackupArchiveKey = {
   exportedAt?: string
   encryptingJobs: number
   encryptedArchives: number
+  /** Keys brought from other servers to open what they sealed; nothing new is sealed to them. */
+  imported?: { recipient: string; importedAt: string }[]
 }
 
 export type BackupResourceKind =
@@ -2873,6 +2893,20 @@ export type BackupRestoreResult = {
   bytes: number
   skipped?: string[]
   targets?: string[]
+  /** What a restore in place made first: "volume NAME", or a directory. */
+  created?: string[]
+}
+
+/** Where one recorded source goes in a restore in place on this host, and what it makes first. */
+export type BackupRestoreTarget = {
+  archivePath: string
+  path: string
+  target: string
+  kind: "path" | "volume"
+  volume?: string
+  exists: boolean
+  creates?: "volume" | "directory"
+  refused?: string
 }
 
 export type BackupDatabaseDump = {
@@ -2892,10 +2926,28 @@ export type BackupManifest = {
   /** Over the bytes the destination holds: the ciphertext, for an encrypted archive. */
   artifactDigest: string
   complete: boolean
-  sources?: { path: string; archivePath: string }[]
+  sources?: BackupManifestSource[]
   databaseDumps?: BackupDatabaseDump[]
   pausedContainers?: string[]
   encryption?: BackupArchiveEncryption
+  artifactBytes?: number
+  /** The install, job and run that took the archive; written since 0.8.2. */
+  origin?: {
+    id: string
+    host?: string
+    jobId: number
+    jobName: string
+    runId: number
+    startedAt: string
+  }
+}
+
+export type BackupManifestSource = {
+  path: string
+  archivePath: string
+  /** "volume" for a Docker volume's directory; absent for a path. */
+  kind?: "volume"
+  volume?: string
 }
 
 /** How an archive was sealed: age, to the key whose public half is `recipient`. */
@@ -2948,6 +3000,10 @@ export type BackupRun = {
   duration?: string
   manifest?: BackupManifest
   restoreVerification?: BackupRestoreVerification
+  /** Adopted from a destination; its artifact is the destination's object. */
+  imported?: boolean
+  /** A copy the import kept on this server, read first while it is there. */
+  localCopy?: string
 }
 
 export type DeployProject = {
@@ -3114,6 +3170,7 @@ export type DeploymentBuildEvidence = {
       dockerfileDigest?: string
       targetPlatform?: string
       cachePolicy?: string
+      railpack?: RailpackEvidence
     }
   }
 }
@@ -3127,7 +3184,8 @@ export type DeploymentBuildEvidence = {
  */
 export type DeploymentFailureCause = {
   code: string
-  phase?: "install" | "build" | "output_check" | "setup" | "dockerfile" | "base_image" | "pull"
+  phase?:
+    "install" | "build" | "output_check" | "setup" | "dockerfile" | "base_image" | "pull" | "plan"
   command?: string
   exitCode?: number
   subjects?: string[]
@@ -3145,7 +3203,8 @@ export type DeploymentFailureCause = {
  * The one plan change a cause's evidence supports. `set_build` and
  * `set_runtime` replace the field with `value`; `add_variable` creates the
  * variable in `scope`; `variable_scope` adds `scope` to an existing one;
- * `review` opens a field whose right value the output cannot prove.
+ * `review` opens a field whose right value the output cannot prove;
+ * `dns_record` opens a domain's DNS record sheet on Domains settings.
  */
 export type DeploymentCauseFix = {
   kind:
@@ -3155,7 +3214,8 @@ export type DeploymentCauseFix = {
     | "variable_scope"
     | "remove_variable_scope"
     | "review"
-  /** `configuration.build.packageManager`, `runtime.internalPort`, `variables.NAME`, `dependencies`. */
+    | "dns_record"
+  /** `configuration.build.packageManager`, `runtime.internalPort`, `variables.NAME`, `dependencies`, `domains.HOST`. */
   field: string
   value?: string
   scope?: string
@@ -3312,6 +3372,43 @@ export type BlueprintSummary = {
    */
   sourceKind?: "blueprint" | "compose"
   services?: BlueprintServiceSummary[]
+  /**
+   * Shipped with the dashboard, or added on it — a template from a Compose
+   * file, a deployment saved as one, or an imported file. An added
+   * template's id is always `user-<name>`, so it never stands in for a
+   * built-in.
+   */
+  origin?: "builtin" | "user"
+}
+
+/** How a template added on this dashboard was made. */
+export type DeploymentTemplateSource = "compose" | "deployment" | "import"
+
+/** One template added on this dashboard, as `GET /deploy/templates` lists it. */
+export type UserTemplate = {
+  id: string
+  name: string
+  version: string
+  source: DeploymentTemplateSource
+  /** The deployment a template was saved from; it may have been removed since. */
+  fromDeploymentId?: number
+  summary: BlueprintSummary
+  /** How many deployments' sources name it. Each runs its own copy. */
+  deployments: number
+  createdBy: string
+  createdAt: string
+  updatedBy: string
+  updatedAt: string
+}
+
+export type UserTemplateDetail = UserTemplate & { definition: BlueprintDetail }
+
+/** A dry run's answer: the definition a file or a deployment makes, not stored. */
+export type TemplatePreview = {
+  definition: BlueprintDetail
+  summary: BlueprintSummary
+  /** Whether a template already has this id, so saving would be refused. */
+  exists: boolean
 }
 
 export type BlueprintServiceRole = "app" | "worker" | "database" | "cache"
@@ -4712,6 +4809,87 @@ export type DeploymentHostnameSuggestion = {
   nameTaken?: boolean
 }
 
+/** One record set: a name, a type, and every value the name holds of it. */
+export type DeploymentDNSRecordSet = {
+  name: string
+  type: "A" | "AAAA" | "CNAME"
+  values: string[]
+  /** Seconds; 1 is Cloudflare's automatic, which a proxied record has. */
+  ttl: number
+  /** Cloudflare's edge answers for the name: a tunnel's CNAME always is. */
+  proxied?: boolean
+  comment?: string
+}
+
+/** A set's line of a DNS record plan: what the zone holds and what a write does. */
+export type DeploymentDNSRecordChange = {
+  type: DeploymentDNSRecordSet["type"]
+  name: string
+  /** `conflict` blocks the write; `stale` is said and left alone, since nothing is deleted. */
+  action: "create" | "update" | "keep" | "conflict" | "stale"
+  current: string[]
+  want: string[]
+  currentTtl?: number
+  ttl?: number
+  proxied?: boolean
+  detail: string
+  /** The set as the zone holds it now is the one this dashboard wrote. */
+  ours: boolean
+}
+
+/** A set this dashboard wrote into the zone, with who and when. */
+export type DeploymentDNSRecordManaged = {
+  type: DeploymentDNSRecordSet["type"]
+  values: string[]
+  ttl: number
+  provider: string
+  zone: string
+  createdBy: string
+  createdAt: string
+  updatedBy: string
+  updatedAt: string
+  /** The zone still holds what was written. */
+  current: boolean
+}
+
+/**
+ * `GET /deploy/{id}/domains/{domain}/dns-record`, the dry run, and the POST
+ * that writes it: what the name should hold (A and AAAA to this server, or a
+ * proxied CNAME to the tunnel), what its zone holds, and through which saved
+ * DNS credential and zone it is written.
+ */
+export type DeploymentDNSRecordPlan = {
+  hostname: string
+  environmentId: number
+  environment: string
+  tunnel: boolean
+  want: DeploymentDNSRecordSet[]
+  provider?: string
+  providerKey?: string
+  zone?: string
+  account?: string
+  candidates: { key: string; provider: string; zone?: string; error?: string }[]
+  problems: string[]
+  changes: DeploymentDNSRecordChange[]
+  writable: boolean
+  ready: boolean
+  /** The write would change a record this dashboard did not write; it is sent with `replace`. */
+  foreign: boolean
+  refusal?: string
+  refusalCode?:
+    | "no_public_address"
+    | "tunnel_not_connected"
+    | "no_credentials"
+    | "no_zone"
+    | "ambiguous"
+    | "tunnel_zone"
+    | "provider_error"
+    | "conflict"
+  summary: string
+  managed: DeploymentDNSRecordManaged[]
+  written?: DeploymentDNSRecordChange[]
+}
+
 export type DeploymentDraftSource = {
   kind: DeploymentSourceKind
   mode: DeploymentSourceMode
@@ -4976,6 +5154,11 @@ export type DeploymentStaticSite = {
 
 export type DeploymentDetectionCandidate = {
   dockerfile?: string
+  /**
+   * The Railpack provider that would build this directory: beside a recipe, the choice
+   * offered next to it; on a Railpack candidate, the one it builds with.
+   */
+  railpackProvider?: RailpackProvider
   goVersion?: string
   packageManager?: NodePackageManager
   packageManagers?: NodePackageManager[]
@@ -5357,7 +5540,46 @@ export type DeploymentDetection = {
 }
 
 export type DeploymentBuildMethod =
-  "recipe" | "dockerfile" | "static" | "image" | "compose" | "none" | "legacy_compose"
+  "recipe" | "dockerfile" | "static" | "image" | "compose" | "none" | "legacy_compose" | "railpack"
+
+/** The providers Railpack has: the values its provider setting, like railpack.json's, takes. */
+export type RailpackProvider =
+  | "cpp"
+  | "deno"
+  | "dotnet"
+  | "elixir"
+  | "gleam"
+  | "golang"
+  | "java"
+  | "node"
+  | "php"
+  | "python"
+  | "ruby"
+  | "rust"
+  | "shell"
+  | "staticfile"
+  | "zig"
+
+/**
+ * What Railpack decided for a run, from its info and its plan: the release (pinned by
+ * digest), the providers it detected, the packages it resolved, the steps of its plan
+ * and the images that plan builds from, as Railpack names them.
+ */
+export type RailpackEvidence = {
+  version: string
+  image: string
+  provider?: RailpackProvider
+  providers: string[]
+  configFile?: string
+  packages: { name: string; requested?: string; resolved?: string; source?: string }[]
+  steps: { name: string; commands: string[] }[]
+  startCommand?: string
+  images: string[]
+  secrets?: string[]
+  facts?: Record<string, string>
+  logs?: { level: "error" | "warn" | "info" | "suggestion"; message: string }[]
+  success: boolean
+}
 
 export type DeploymentOwnership = "managed" | "linked" | "observed"
 
@@ -5576,6 +5798,12 @@ export type DeploymentConfiguration = {
     target?: string
     /** The Compose service readiness and the release's container follow; empty keeps detection's. */
     primaryService?: string
+    /** A Railpack build's release from the reviewed catalogue; empty is the dashboard's current one. */
+    railpackVersion?: string
+    /** The provider Railpack is told to use instead of detecting one. */
+    railpackProvider?: RailpackProvider
+    /** The configuration file Railpack reads, relative to the root; empty is railpack.json. */
+    railpackConfig?: string
     noCache?: boolean
     secrets?: { variable: string; step: BuildSecretStep }[]
     releaseTasks?: {

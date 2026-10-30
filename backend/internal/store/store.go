@@ -22,7 +22,7 @@ type Store struct {
 // whether a pre-rename data directory should be adopted.
 const DatabaseFile = "vpsd.db"
 
-const schema = cloudflareTunnelSchema + sleepSchema + runDiagnosisSchema + rehearsalSchema + dataRollbackSchema + previewBranchSchema + imageScanSchema + rollbackWatchSchema + canarySchema + deployEventSchema + serverMapSchema + sharedVariableSchema + secretStoreSchema + passkeySchema + accountLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
+const schema = dnsRecordSchema + deployTemplateSchema + cloudflareTunnelSchema + sleepSchema + runDiagnosisSchema + rehearsalSchema + dataRollbackSchema + previewBranchSchema + imageScanSchema + rollbackWatchSchema + canarySchema + deployEventSchema + serverMapSchema + sharedVariableSchema + secretStoreSchema + passkeySchema + accountLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -595,6 +595,8 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
   pause_containers TEXT NOT NULL DEFAULT '[]',
   revision    INTEGER NOT NULL DEFAULT 1,
   encrypt     INTEGER NOT NULL DEFAULT 0,
+  imported    INTEGER NOT NULL DEFAULT 0,
+  origin_json TEXT NOT NULL DEFAULT '',
   created_at  INTEGER NOT NULL
 );
 
@@ -608,7 +610,9 @@ CREATE TABLE IF NOT EXISTS backup_runs (
   size_bytes INTEGER NOT NULL DEFAULT 0,
   log        TEXT NOT NULL DEFAULT '',
   trigger    TEXT NOT NULL DEFAULT 'manual',
-  manifest_json TEXT NOT NULL DEFAULT '{}'
+  manifest_json TEXT NOT NULL DEFAULT '{}',
+  imported   INTEGER NOT NULL DEFAULT 0,
+  local_copy TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_backup_runs_job ON backup_runs(job_id, started_at DESC);
 
@@ -1700,6 +1704,15 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Backup jobs learned to encrypt their archives. A job that predates the
 	// setting keeps writing what it always wrote until somebody turns it on.
 	{"backup_jobs", "encrypt", "INTEGER NOT NULL DEFAULT 0"},
+	// A job and its runs can be imported from what a destination holds: the
+	// archives another server (or this one, before a rebuild) wrote there.
+	// Everything that existed before is this server's own.
+	{"backup_jobs", "imported", "INTEGER NOT NULL DEFAULT 0"},
+	{"backup_jobs", "origin_json", "TEXT NOT NULL DEFAULT ''"},
+	{"backup_runs", "imported", "INTEGER NOT NULL DEFAULT 0"},
+	// An imported run may keep a copy of its archive on this server; the
+	// destination's object stays where it was either way.
+	{"backup_runs", "local_copy", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_preview_approvals", "generation", "INTEGER NOT NULL DEFAULT 1"},
 	// A preview started from the dashboard's "Test this pull request" rather
 	// than from a webhook remembers where it came from, the pull request's

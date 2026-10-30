@@ -58,6 +58,16 @@ export interface AccesslogSummary {
   truncated?: boolean
 }
 
+/** One of the values of dnsrecords.Action. */
+export const Action = {
+  Create: "create",
+  Update: "update",
+  Keep: "keep",
+  Conflict: "conflict",
+  Stale: "stale",
+} as const
+export type Action = (typeof Action)[keyof typeof Action]
+
 /** deploy.ActiveWork in the dashboard's source. */
 export interface ActiveWork {
   currentStatus?: StepState
@@ -183,6 +193,35 @@ export interface BackupSummary {
   status?: string
 }
 
+/** blueprint.Blueprint in the dashboard's source. */
+export interface Blueprint {
+  access?: Access
+  automation?: Automation[] | null
+  category?: Category
+  checks?: Check[] | null
+  description?: string
+  docsUrl?: string
+  files?: ConfigFile[] | null
+  fixtures?: Fixture[] | null
+  iconId?: string
+  id?: string
+  image?: Image
+  inputs?: Input[] | null
+  name?: string
+  operations?: Operations
+  ports?: Port[] | null
+  profile?: Profile
+  provenance?: Provenance
+  resources?: Resources
+  retired?: string
+  secrets?: Secret[] | null
+  security?: Security
+  services?: Service[] | null
+  update?: Update
+  version?: string
+  volumes?: Volume[] | null
+}
+
 /** api.blueprintDetail in the dashboard's source. */
 export interface BlueprintDetail {
   access?: Access
@@ -261,6 +300,7 @@ export interface BlueprintSummary {
   maintainer?: string
   memoryMb?: number
   name?: string
+  origin?: string
   privileged?: boolean
   profile?: Profile
   requiresAcceptance?: boolean
@@ -290,6 +330,7 @@ export const BuildMethod = {
   Compose: "compose",
   None: "none",
   LegacyCompose: "legacy_compose",
+  Railpack: "railpack",
 } as const
 export type BuildMethod = (typeof BuildMethod)[keyof typeof BuildMethod]
 
@@ -311,6 +352,9 @@ export interface BuildPlanConfig {
   phpVersion?: string
   primaryService?: string
   pythonVersion?: string
+  railpackConfig?: string
+  railpackProvider?: string
+  railpackVersion?: string
   recipe?: string
   releaseTasks?: ReleaseTaskConfig[] | null
   rootDirectory?: string
@@ -382,6 +426,14 @@ export interface CanaryWindow {
   verdict?: RollbackVerdict | null
 }
 
+/** dnsrecords.Candidate in the dashboard's source. */
+export interface Candidate {
+  error?: string
+  key?: string
+  provider?: string
+  zone?: string
+}
+
 /** One of the values of blueprint.Category. */
 export const Category = {
   HTTP: "http",
@@ -398,6 +450,19 @@ export interface CauseFix {
   kind?: string
   scope?: string
   value?: string
+}
+
+/** dnsrecords.Change in the dashboard's source. */
+export interface Change {
+  action?: Action
+  current?: string[] | null
+  currentTtl?: number
+  detail?: string
+  name?: string
+  proxied?: boolean
+  ttl?: number
+  type?: Type
+  want?: string[] | null
 }
 
 /** blueprint.Check in the dashboard's source. */
@@ -543,6 +608,21 @@ export interface ComposeServicePlan {
   ports?: string[] | null
 }
 
+/** deploy.ComposeTemplateRequest in the dashboard's source. */
+export interface ComposeTemplateRequest {
+  access?: Access | null
+  category?: Category
+  compose?: string
+  description?: string
+  docsUrl?: string
+  dryRun?: boolean
+  healthPath?: string
+  inputs?: Input[] | null
+  name?: string
+  publicService?: string
+  slug?: string
+}
+
 /** blueprint.ConfigFile in the dashboard's source. */
 export interface ConfigFile {
   description?: string
@@ -672,6 +752,64 @@ export interface CurrentStep {
   key?: StepKey
   label?: string
   state?: StepState
+}
+
+/** api.dnsRecordChange in the dashboard's source. */
+export interface DNSRecordChange {
+  action?: Action
+  current?: string[] | null
+  currentTtl?: number
+  detail?: string
+  name?: string
+  ours?: boolean
+  proxied?: boolean
+  ttl?: number
+  type?: Type
+  want?: string[] | null
+}
+
+/** api.dnsRecordManaged in the dashboard's source. */
+export interface DNSRecordManaged {
+  createdAt?: string
+  createdBy?: string
+  current?: boolean
+  provider?: string
+  ttl?: number
+  type?: Type
+  updatedAt?: string
+  updatedBy?: string
+  values?: string[] | null
+  zone?: string
+}
+
+/** api.dnsRecordPlan in the dashboard's source. */
+export interface DNSRecordPlan {
+  account?: string
+  candidates?: Candidate[] | null
+  changes?: DNSRecordChange[] | null
+  environment?: string
+  environmentId?: number
+  foreign?: boolean
+  hostname?: string
+  managed?: DNSRecordManaged[] | null
+  problems?: string[] | null
+  provider?: string
+  providerKey?: string
+  ready?: boolean
+  refusal?: string
+  refusalCode?: string
+  summary?: string
+  tunnel?: boolean
+  want?: Set[] | null
+  writable?: boolean
+  written?: Change[] | null
+  zone?: string
+}
+
+/** api.dnsRecordWriteRequest in the dashboard's source. */
+export interface DNSRecordWriteRequest {
+  replace?: boolean
+  ttl?: number
 }
 
 /** deploy.DataCopy in the dashboard's source. */
@@ -1209,6 +1347,8 @@ export interface DeploymentScheduleTestResponse {
 
 /** api.deploymentSourceUpdateRequest in the dashboard's source. */
 export interface DeploymentSourceUpdateRequest {
+  /** Any JSON value; the handler passes it on as it was sent. */
+  blueprintDefinition?: unknown
   blueprintId?: string
   blueprintInputs?: Record<string, string> | null
   blueprintVersion?: string
@@ -1293,6 +1433,16 @@ export interface DeploymentSummary {
   stopped?: boolean
   strategy?: ReleaseStrategy
   updatedAt?: string
+}
+
+/** deploy.DeploymentTemplateRequest in the dashboard's source. */
+export interface DeploymentTemplateRequest {
+  deploymentId?: number
+  description?: string
+  dryRun?: boolean
+  environmentId?: number
+  name?: string
+  slug?: string
 }
 
 /**
@@ -1423,6 +1573,7 @@ export interface DetectedCandidate {
   pythonInstall?: string
   pythonRequires?: string
   pythonVersion?: string
+  railpackProvider?: string
   readiness?: DetectedReadiness | null
   recipe?: string
   recipeIssue?: string
@@ -2048,6 +2199,8 @@ export interface DraftSaveRequest {
 
 /** deploy.DraftSourceConfig in the dashboard's source. */
 export interface DraftSourceConfig {
+  /** Any JSON value; the handler passes it on as it was sent. */
+  blueprintDefinition?: unknown
   blueprintId?: string
   blueprintInputs?: Record<string, string> | null
   blueprintVersion?: string
@@ -3230,6 +3383,7 @@ export interface Point {
 /** blueprint.Port in the dashboard's source. */
 export interface Port {
   exposure?: string
+  hostInput?: string
   internal?: number
   name?: string
   primary?: boolean
@@ -3892,6 +4046,7 @@ export interface RenderedFile {
 /** blueprint.RenderedPort in the dashboard's source. */
 export interface RenderedPort {
   exposure?: string
+  hostPort?: number
   internal?: number
   name?: string
   primary?: boolean
@@ -4496,6 +4651,17 @@ export interface ServiceSummary {
   role?: ServiceRole
 }
 
+/** dnsrecords.Set in the dashboard's source. */
+export interface Set {
+  comment?: string
+  name?: string
+  proxied?: boolean
+  ttl?: number
+  type?: Type
+  unwritable?: string
+  values?: string[] | null
+}
+
 /** secretstore.Settings in the dashboard's source. */
 export interface Settings {
   auth?: string
@@ -4809,6 +4975,21 @@ export interface TailnetSummary {
   url?: string
 }
 
+/** One of the values of deploy.TemplateOrigin. */
+export const TemplateOrigin = {
+  Compose: "compose",
+  Deployment: "deployment",
+  Import: "import",
+} as const
+export type TemplateOrigin = (typeof TemplateOrigin)[keyof typeof TemplateOrigin]
+
+/** deploy.TemplatePreview in the dashboard's source. */
+export interface TemplatePreview {
+  definition?: Blueprint | null
+  exists?: boolean
+  summary?: BlueprintSummary
+}
+
 /** secretstore.TestResult in the dashboard's source. */
 export interface TestResult {
   message?: string
@@ -4975,6 +5156,14 @@ export interface TriggerWrite {
   provider?: string
 }
 
+/** One of the values of dnsrecords.Type. */
+export const Type = {
+  A: "A",
+  AAAA: "AAAA",
+  CNAME: "CNAME",
+} as const
+export type Type = (typeof Type)[keyof typeof Type]
+
 /** One of the values of deploy.UlimitName. */
 export const UlimitName = {
   Core: "core",
@@ -5001,6 +5190,37 @@ export interface Update {
   detector?: string
   notes?: string
   versionSource?: string
+}
+
+/** deploy.UserTemplate in the dashboard's source. */
+export interface UserTemplate {
+  createdAt?: string
+  createdBy?: string
+  deployments?: number
+  fromDeploymentId?: number
+  id?: string
+  name?: string
+  source?: TemplateOrigin
+  summary?: BlueprintSummary
+  updatedAt?: string
+  updatedBy?: string
+  version?: string
+}
+
+/** deploy.UserTemplateDetail in the dashboard's source. */
+export interface UserTemplateDetail {
+  createdAt?: string
+  createdBy?: string
+  definition?: Blueprint | null
+  deployments?: number
+  fromDeploymentId?: number
+  id?: string
+  name?: string
+  source?: TemplateOrigin
+  summary?: BlueprintSummary
+  updatedAt?: string
+  updatedBy?: string
+  version?: string
 }
 
 /** api.variableGenerateRequest in the dashboard's source. */

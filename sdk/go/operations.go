@@ -484,6 +484,60 @@ func (c *Client) DeploymentCredentials(ctx context.Context, opts ...RequestOptio
 	return out, nil
 }
 
+// DeploymentDNSRecordParams are the query parameters of DeploymentDNSRecord. A parameter left at
+// its zero value is not sent.
+type DeploymentDNSRecordParams struct {
+	// The TTL to plan with, in seconds; the provider's floor and a day's cap apply, and 300 when
+	// absent.
+	TTL int64
+}
+
+// DeploymentDNSRecord is GET /deploy/{id}/domains/{domain}/dns-record: dry-run a domain's DNS
+// record: what its zone holds, what would be written (A and AAAA to this server, or a proxied
+// CNAME to the tunnel for a name served through Cloudflare Tunnel), and through which saved DNS
+// credential and zone.
+//
+// Nothing is written. A plan that cannot be written says why in refusal and refusalCode rather
+// than failing.
+//
+// Only an interactive session may call it; no key reaches it.
+func (c *Client) DeploymentDNSRecord(ctx context.Context, id int64, domain string, params *DeploymentDNSRecordParams, opts ...RequestOption) (*DNSRecordPlan, error) {
+	query := url.Values{}
+	if params != nil {
+		if params.TTL != 0 {
+			query.Set("ttl", strconv.FormatInt(params.TTL, 10))
+		}
+	}
+	var out DNSRecordPlan
+	if err := c.do(ctx, "GET", "/deploy/"+strconv.FormatInt(id, 10)+"/domains/"+url.PathEscape(domain)+"/dns-record", query, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeploymentDNSRecordWrite is POST /deploy/{id}/domains/{domain}/dns-record: write a domain's DNS
+// record into its zone with the DNS credentials saved under Certificates: create or change A and
+// AAAA, or the tunnel's CNAME; a record is never deleted.
+//
+// Answers 409 dns_record_unwritable (no saved credential reaches the zone),
+// dns_record_tunnel_zone, dns_record_conflict (a record stands in the way and would have to be
+// deleted), dns_record_foreign (a record this dashboard did not write, changed only with replace),
+// no_public_address or tunnel_not_connected, and 502 dns_provider_error in the provider's words.
+// Audited as deploy.domain.record.
+//
+// Only an interactive session may call it; no key reaches it.
+func (c *Client) DeploymentDNSRecordWrite(ctx context.Context, id int64, domain string, body *DNSRecordWriteRequest, opts ...RequestOption) (*DNSRecordPlan, error) {
+	var payload any
+	if body != nil {
+		payload = body
+	}
+	var out DNSRecordPlan
+	if err := c.do(ctx, "POST", "/deploy/"+strconv.FormatInt(id, 10)+"/domains/"+url.PathEscape(domain)+"/dns-record", nil, payload, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // DeploymentDataCopiesParams are the query parameters of DeploymentDataCopies. A parameter left at
 // its zero value is not sent.
 type DeploymentDataCopiesParams struct {
@@ -2656,6 +2710,115 @@ func (c *Client) SharedVariables(ctx context.Context, opts ...RequestOption) ([]
 		return nil, err
 	}
 	return out, nil
+}
+
+// TemplateCreate is POST /deploy/templates: add a template from a pasted Compose file and the
+// inputs declared for the variables it reads.
+//
+// With dryRun, nothing is stored and the definition the file makes is answered with 200. A literal
+// password in the file becomes a secret the template generates; a host port is dropped, since the
+// public service is published on loopback behind the proxy.
+//
+// Only an interactive session may call it; no key reaches it.
+//
+// The answer is one of UserTemplateDetail or TemplatePreview, as the request chooses; decode it
+// into the one asked for.
+func (c *Client) TemplateCreate(ctx context.Context, body ComposeTemplateRequest, opts ...RequestOption) (json.RawMessage, error) {
+	var out json.RawMessage
+	if err := c.do(ctx, "POST", "/deploy/templates", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// TemplateDelete is DELETE /deploy/templates/{template}: remove a template from the catalogue;
+// deployments made from it keep running from their own copy.
+//
+// Destructive, with an ordinary confirmation.
+//
+// Only an interactive session may call it; no key reaches it. Destructive: it needs a role that
+// may take destructive actions, and spends their budget.
+func (c *Client) TemplateDelete(ctx context.Context, template string, opts ...RequestOption) error {
+	return c.do(ctx, "DELETE", "/deploy/templates/"+url.PathEscape(template), nil, nil, nil, opts)
+}
+
+// TemplateExport is GET /deploy/templates/{template}/export: export a template's definition as a
+// JSON file: a built-in's or one added here, in the catalogue's own schema.
+//
+// A deploy key: allowed.
+func (c *Client) TemplateExport(ctx context.Context, template string, opts ...RequestOption) (*Blueprint, error) {
+	var out Blueprint
+	if err := c.do(ctx, "GET", "/deploy/templates/"+url.PathEscape(template)+"/export", nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// TemplateFromDeployment is POST /deploy/templates/from-deployment: save a deployment as a
+// template: the definition its live release's frozen plan was deployed from.
+//
+// A secret variable becomes a secret input and its value is never read; the domain becomes the
+// domain input and a fixed host port a number input. With dryRun, nothing is stored and the
+// definition is answered with 200.
+//
+// Only an interactive session may call it; no key reaches it.
+//
+// The answer is one of UserTemplateDetail or TemplatePreview, as the request chooses; decode it
+// into the one asked for.
+func (c *Client) TemplateFromDeployment(ctx context.Context, body DeploymentTemplateRequest, opts ...RequestOption) (json.RawMessage, error) {
+	var out json.RawMessage
+	if err := c.do(ctx, "POST", "/deploy/templates/from-deployment", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// TemplateGet is GET /deploy/templates/{template}: read a template added on this dashboard, with
+// its whole definition.
+//
+// A deploy key: allowed.
+func (c *Client) TemplateGet(ctx context.Context, template string, opts ...RequestOption) (*UserTemplateDetail, error) {
+	var out UserTemplateDetail
+	if err := c.do(ctx, "GET", "/deploy/templates/"+url.PathEscape(template), nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// TemplateImport is POST /deploy/templates/import: import a template's JSON definition; an id
+// outside the user- namespace is put in it.
+//
+// Only an interactive session may call it; no key reaches it.
+func (c *Client) TemplateImport(ctx context.Context, body Blueprint, opts ...RequestOption) (*UserTemplateDetail, error) {
+	var out UserTemplateDetail
+	if err := c.do(ctx, "POST", "/deploy/templates/import", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// TemplateList is GET /deploy/templates: list the templates added on this dashboard, with how each
+// was made and how many deployments' sources name it.
+//
+// A deploy key: allowed.
+func (c *Client) TemplateList(ctx context.Context, opts ...RequestOption) ([]UserTemplate, error) {
+	var out []UserTemplate
+	if err := c.do(ctx, "GET", "/deploy/templates", nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// TemplateUpdate is PUT /deploy/templates/{template}: replace a template's definition; its id does
+// not change, and a changed definition at the same version is the next patch version.
+//
+// Only an interactive session may call it; no key reaches it.
+func (c *Client) TemplateUpdate(ctx context.Context, template string, body Blueprint, opts ...RequestOption) (*UserTemplateDetail, error) {
+	var out UserTemplateDetail
+	if err := c.do(ctx, "PUT", "/deploy/templates/"+url.PathEscape(template), nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // TrafficAlertCreate is POST /deploy/{id}/alerts: add a traffic alert.

@@ -465,6 +465,9 @@ func validatePorts(blueprint *Blueprint) error {
 		if port.Primary {
 			primaries++
 		}
+		if err := validateHostInput(blueprint, port); err != nil {
+			return err
+		}
 	}
 	if primaries > 1 {
 		return errors.New("more than one port is marked primary")
@@ -479,6 +482,34 @@ func validatePorts(blueprint *Blueprint) error {
 		}
 	}
 	return nil
+}
+
+// validateHostInput holds a port that takes its host number from an input to
+// an input that always yields one: a declared number, bounded to the ports a
+// host has, that the operator must answer or that has a default.
+func validateHostInput(blueprint *Blueprint, port Port) error {
+	if port.HostInput == "" {
+		return nil
+	}
+	if port.Exposure != "direct" {
+		return fmt.Errorf("port %q takes its host port from an input, which only a direct port is published on", port.Name)
+	}
+	for _, input := range blueprint.Inputs {
+		if input.Name != port.HostInput {
+			continue
+		}
+		if input.Kind != InputNumber {
+			return fmt.Errorf("port %q takes its host port from %q, which is not a number input", port.Name, input.Name)
+		}
+		if input.Minimum < 1 || input.Maximum > 65535 || input.Maximum < input.Minimum {
+			return fmt.Errorf("port %q takes its host port from %q, which must be bounded within 1-65535", port.Name, input.Name)
+		}
+		if !input.Required && input.Default == "" {
+			return fmt.Errorf("port %q takes its host port from %q, which is optional with no default", port.Name, input.Name)
+		}
+		return nil
+	}
+	return fmt.Errorf("port %q takes its host port from %q, which is not an input of this blueprint", port.Name, port.HostInput)
 }
 
 func validateVolumes(blueprint *Blueprint) error {

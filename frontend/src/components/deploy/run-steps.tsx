@@ -39,6 +39,8 @@ import { rehearsalOf } from "@/components/deploy/rehearsal-model"
 import { RehearsalView } from "@/components/deploy/run-rehearsal"
 import { replayOf } from "@/components/deploy/replay-model"
 import { ReplayView } from "@/components/deploy/run-replay"
+import { railpackOf, withoutRailpack } from "@/components/deploy/railpack-model"
+import { RailpackView } from "@/components/deploy/run-railpack"
 import {
   runValidationFindings,
   findingFixAction,
@@ -535,6 +537,9 @@ function Inspector({
   const preflight = step.key === "analyze_plan" ? preflightOf(evidence) : undefined
   const rehearsal = step.key === "rehearse_migration" ? rehearsalOf(evidence) : undefined
   const replay = step.key === "replay_traffic" ? replayOf(evidence) : undefined
+  // What Railpack decided is drawn as one, and left out of the generic reading.
+  const railpack = railpackOf(step)
+  const reading = railpack ? withoutRailpack(evidence) : evidence
   const tail = rows.filter((row) => row.stepId === step.id).slice(-TAIL)
   const recorded = Object.keys(evidence).length > 0
   const name = stepName(step.key, operation)
@@ -592,6 +597,7 @@ function Inspector({
       {preflight && <PreflightChecks projectId={projectId} {...preflight} />}
       {rehearsal && <RehearsalView step={step} report={rehearsal} />}
       {replay && <ReplayView step={step} report={replay} />}
+      {railpack && <RailpackView evidence={railpack} />}
 
       {tail.length > 0 && (
         <figure className="min-w-0 overflow-hidden rounded-lg border border-hairline bg-surface-sunken">
@@ -613,7 +619,7 @@ function Inspector({
       )}
 
       {recorded ? (
-        <EvidenceView evidence={evidence} omit={drawnElsewhere(step)} />
+        <EvidenceView evidence={reading} omit={drawnElsewhere(step)} />
       ) : (
         <p className="text-body text-muted-foreground">
           {step.state === "pending"

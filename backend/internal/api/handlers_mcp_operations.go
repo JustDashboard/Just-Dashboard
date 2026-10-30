@@ -94,6 +94,8 @@ func mcpParameterHint(pattern, name string) string {
 		return "deployment_notifications lists them."
 	case "number":
 		return "deployment_pull_requests lists them."
+	case "template":
+		return "template_list lists them."
 	}
 	return ""
 }
@@ -104,7 +106,7 @@ func mcpParameterHint(pattern, name string) string {
 // documentation quotes it (and the total with the 13 hand-written tools), so
 // TestEveryDeployKeyRouteIsAnMCPTool fails until a change that adds or
 // removes a deploy key route bumps it and the documentation with it.
-const MCPGeneratedTools = 97
+const MCPGeneratedTools = 100
 
 // mcpSkip is a deploy key route that is not a generated tool, and why.
 type mcpSkip struct {

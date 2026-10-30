@@ -736,7 +736,13 @@ func (s *PlanningStore) Save(
 		if request.Source == nil || request.Intent != nil || request.Configuration != nil || request.Dotenv != nil {
 			return nil, fmt.Errorf("%w: source step requires only source data", ErrInvalidPlan)
 		}
-		copy, err := canonicalSourceConfig(*request.Source).WithTemplateDocuments()
+		// A template added here is frozen into the source first, so every
+		// read below renders the definition this draft will deploy.
+		copy, err := s.WithUserTemplate(ctx, canonicalSourceConfig(*request.Source))
+		if err != nil {
+			return nil, err
+		}
+		copy, err = copy.WithTemplateDocuments()
 		if err != nil {
 			return nil, err
 		}
@@ -1312,6 +1318,9 @@ func validateDraftComplete(draft *Draft) error {
 		return err
 	}
 	if err := draft.Data.Configuration.Validate(); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+	}
+	if err := refuseRailpackWithoutCheckout(draft.Data.Source.Kind, draft.Data.Configuration.Build); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
 	values, _, err := ResolveVariableGraphWithModes(draft.variableValues(*draft.Data.Configuration), draft.variableModes(*draft.Data.Configuration), nil)

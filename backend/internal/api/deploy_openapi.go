@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/blueprint"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dnsrecords"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gameserver"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/ghx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/githubapp"
@@ -105,13 +106,14 @@ var openapiTags = []struct{ Name, Description string }{
 	{"releases", "Retained releases, their comparison, pinning, rollback, the warm release kept after a deploy, and promotion from staging."},
 	{"runs", "Runs and their steps, logs, transcript, metrics, settings drift, traffic and diagnosis."},
 	{"previews", "Pull requests, their previews and the approvals a preview's revision needs."},
-	{"domains", "What a deployment's public route serves: the maintenance switch and pages, hostname suggestions, the requests and traffic it saw."},
+	{"domains", "What a deployment's public route serves: the maintenance switch and pages, hostname suggestions, a domain's DNS record, the requests and traffic it saw."},
 	{"database links", "The databases an environment's variables read and the addresses it reaches them at."},
 	{"log drains", "Where a deployment's output and requests are copied to."},
 	{"notifications", "Notification channels, their deliveries, and a deployment's traffic alerts."},
 	{"secret stores", "Connections to Vault, OpenBao, Infisical and Doppler that variables read through."},
 	{"github-app", "The dashboard's own GitHub App: its status, repositories, manifest flow and removal."},
 	{"blueprints", "The template catalogue and the plan a template renders to."},
+	{"templates", "Templates added on this dashboard: made from a Compose file or a deployment's frozen plan, imported, changed, exported and removed."},
 	{"game", "Operating a deployed game server: players, console, properties and importing an existing one."},
 	{"keys", "What the holder of a key reads to use this API: this description."},
 }
@@ -124,7 +126,7 @@ var openapiEnums = map[reflect.Type][]string{
 	reflect.TypeOf(deploy.EnvironmentKind("")):     {"production", "staging", "preview"},
 	reflect.TypeOf(deploy.OwnershipMode("")):       {"managed", "linked", "observed"},
 	reflect.TypeOf(deploy.SourceKind("")):          {"git", "local", "image", "compose", "blueprint", "import"},
-	reflect.TypeOf(deploy.BuildMethod("")):         {"recipe", "dockerfile", "static", "image", "compose", "none", "legacy_compose"},
+	reflect.TypeOf(deploy.BuildMethod("")):         {"recipe", "dockerfile", "static", "image", "compose", "none", "legacy_compose", "railpack"},
 	reflect.TypeOf(deploy.ReleaseStrategy("")):     {"blue_green", "stop_first", "canary"},
 	reflect.TypeOf(deploy.Operation("")):           {"deploy", "redeploy", "restart", "stop", "start", "force_build", "rollback", "promote", "preview_create", "preview_update", "preview_remove", "scheduled_action", "import_adopt", "remove_managed"},
 	reflect.TypeOf(deploy.TriggerKind("")):         {"manual", "git_push", "legacy_hook", "generic_hook", "github", "gitlab", "bitbucket", "gitea", "api", "schedule", "preview", "rollback", "migration", "auto_rollback"},
@@ -153,7 +155,10 @@ var openapiEnums = map[reflect.Type][]string{
 	reflect.TypeOf(blueprint.AccessKind("")):       {"setup", "credentials", "token", "client", "open", "unavailable"},
 	reflect.TypeOf(blueprint.ServiceRole("")):      {"app", "worker", "database", "cache"},
 	reflect.TypeOf(blueprint.StartCondition("")):   {"healthy", "started", "completed"},
+	reflect.TypeOf(deploy.TemplateOrigin("")):      {"compose", "deployment", "import"},
 	reflect.TypeOf(gameserver.PlayerAction("")):    {"kick", "ban", "pardon", "op", "deop", "whitelist_add", "whitelist_remove"},
+	reflect.TypeOf(dnsrecords.Type("")):            {"A", "AAAA", "CNAME"},
+	reflect.TypeOf(dnsrecords.Action("")):          {"create", "update", "keep", "conflict", "stale"},
 }
 
 // openapiWriteOnly is every field that carries a secret in: a value, a token,
@@ -309,6 +314,13 @@ var deployOperations = map[string]deployOperation{
 	"GET /deploy/{id}/requests/export":                 {Tag: "domains", Summary: "Export the filtered requests as CSV.", Query: requestFilterQuery, Content: "text/csv"},
 	"GET /deploy/traffic":                              {Tag: "domains", Summary: "Read the traffic pulse of every deployment's public route, by deployment id.", Response: map[string]deploy.TrafficPulse(nil)},
 	"GET /deploy/{id}/runs/{run}/traffic":              {Tag: "runs", Summary: "Read the request readings around a run's cutover.", Response: deploy.RunTraffic{}},
+	// A domain's DNS record, in its zone (handlers_deploy_dns_record.go).
+	"GET /deploy/{id}/domains/{domain}/dns-record": {Tag: "domains", Summary: "Dry-run a domain's DNS record: what its zone holds, what would be written (A and AAAA to this server, or a proxied CNAME to the tunnel for a name served through Cloudflare Tunnel), and through which saved DNS credential and zone.",
+		Query: []openapiQuery{{"ttl", "integer", "The TTL to plan with, in seconds; the provider's floor and a day's cap apply, and 300 when absent."}}, Response: dnsRecordPlan{},
+		Note: "Nothing is written. A plan that cannot be written says why in refusal and refusalCode rather than failing."},
+	"POST /deploy/{id}/domains/{domain}/dns-record": {Tag: "domains", Summary: "Write a domain's DNS record into its zone with the DNS credentials saved under Certificates: create or change A and AAAA, or the tunnel's CNAME; a record is never deleted.",
+		Request: dnsRecordWriteRequest{}, Optional: true, Response: dnsRecordPlan{},
+		Note: "Answers 409 dns_record_unwritable (no saved credential reaches the zone), dns_record_tunnel_zone, dns_record_conflict (a record stands in the way and would have to be deleted), dns_record_foreign (a record this dashboard did not write, changed only with replace), no_public_address or tunnel_not_connected, and 502 dns_provider_error in the provider's words. Audited as deploy.domain.record."},
 
 	// Releases.
 	"GET /deploy/{id}/environments/{env}/releases":                        {Tag: "releases", Summary: "List an environment's retained releases, newest first.", Query: []openapiQuery{queryLimit}, Response: []deploy.Release(nil)},
@@ -446,6 +458,16 @@ var deployOperations = map[string]deployOperation{
 	"GET /deploy/blueprints/{id}/versions": {Tag: "blueprints", Summary: "List the upstream versions a game template can be deployed at; other templates follow their image tag.", Response: gameserver.VersionList{}},
 	"POST /deploy/blueprints/{id}/render":  {Tag: "blueprints", Summary: "Render a template with its inputs into the plan a draft would commit.", Request: blueprintRenderRequest{}, Response: (*deploy.BlueprintPlan)(nil)},
 
+	// Templates added on this dashboard.
+	"GET /deploy/templates":                   {Tag: "templates", Summary: "List the templates added on this dashboard, with how each was made and how many deployments' sources name it.", Response: []deploy.UserTemplate(nil)},
+	"GET /deploy/templates/{template}":        {Tag: "templates", Summary: "Read a template added on this dashboard, with its whole definition.", Response: (*deploy.UserTemplateDetail)(nil)},
+	"GET /deploy/templates/{template}/export": {Tag: "templates", Summary: "Export a template's definition as a JSON file: a built-in's or one added here, in the catalogue's own schema.", Response: (*blueprint.Blueprint)(nil)},
+	"POST /deploy/templates":                  {Tag: "templates", Summary: "Add a template from a pasted Compose file and the inputs declared for the variables it reads.", Request: deploy.ComposeTemplateRequest{}, Response: anyOf{(*deploy.UserTemplateDetail)(nil), (*deploy.TemplatePreview)(nil)}, Status: http.StatusCreated, Note: "With dryRun, nothing is stored and the definition the file makes is answered with 200. A literal password in the file becomes a secret the template generates; a host port is dropped, since the public service is published on loopback behind the proxy."},
+	"POST /deploy/templates/from-deployment":  {Tag: "templates", Summary: "Save a deployment as a template: the definition its live release's frozen plan was deployed from.", Request: deploy.DeploymentTemplateRequest{}, Response: anyOf{(*deploy.UserTemplateDetail)(nil), (*deploy.TemplatePreview)(nil)}, Status: http.StatusCreated, Note: "A secret variable becomes a secret input and its value is never read; the domain becomes the domain input and a fixed host port a number input. With dryRun, nothing is stored and the definition is answered with 200."},
+	"POST /deploy/templates/import":           {Tag: "templates", Summary: "Import a template's JSON definition; an id outside the user- namespace is put in it.", Request: blueprint.Blueprint{}, Response: (*deploy.UserTemplateDetail)(nil), Status: http.StatusCreated},
+	"PUT /deploy/templates/{template}":        {Tag: "templates", Summary: "Replace a template's definition; its id does not change, and a changed definition at the same version is the next patch version.", Request: blueprint.Blueprint{}, Response: (*deploy.UserTemplateDetail)(nil)},
+	"DELETE /deploy/templates/{template}":     {Tag: "templates", Summary: "Remove a template from the catalogue; deployments made from it keep running from their own copy.", Status: http.StatusNoContent, Note: "Destructive, with an ordinary confirmation."},
+
 	// Game servers.
 	"GET /deploy/{id}/game/":                  {Tag: "game", Summary: "Read a game server's overview: version, players online and its checks.", Response: gameOverview{}},
 	"GET /deploy/{id}/game/players":           {Tag: "game", Summary: "List the players on a game server.", Response: (*gameserver.Players)(nil)},
@@ -521,12 +543,16 @@ func openapiPathParam(pattern, name string) map[string]any {
 		schema, description = integer, "The pull request's number."
 	case "draft":
 		schema, description = map[string]any{"type": "string"}, "The draft's id."
+	case "template":
+		schema, description = map[string]any{"type": "string"}, "The template's id: user-<name> for one added here, or a built-in's for an export."
 	case "name":
 		schema, description = map[string]any{"type": "string"}, "The variable's name."
 	case "key":
 		schema, description = map[string]any{"type": "string"}, "The legacy variable's key."
 	case "page":
 		schema, description = map[string]any{"type": "string"}, "Which of the route's pages: maintenance, or an error status such as 502."
+	case "domain":
+		schema, description = map[string]any{"type": "string"}, "The domain, as the environment's saved configuration lists it."
 	case "action":
 		values := make([]any, 0)
 		for _, v := range openapiEnums[reflect.TypeOf(gameserver.PlayerAction(""))] {

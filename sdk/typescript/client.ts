@@ -4,6 +4,7 @@
 import type {
   ArchivedDeployment,
   Availability,
+  Blueprint,
   BlueprintDetail,
   BlueprintPlan,
   BlueprintRenderRequest,
@@ -12,6 +13,7 @@ import type {
   CanaryWindow,
   CheckRun,
   Commit,
+  ComposeTemplateRequest,
   ConfigurationWriteRequest,
   ConsoleResult,
   CredentialCreateRequest,
@@ -19,6 +21,8 @@ import type {
   CredentialTestRequest,
   CredentialTestResult,
   CredentialUpdateRequest,
+  DNSRecordPlan,
+  DNSRecordWriteRequest,
   DataCopy,
   DataCopyComparison,
   DataCopyExtendRequest,
@@ -64,6 +68,7 @@ import type {
   DeploymentSourceUpdateRequest,
   DeploymentSourceUpdateResult,
   DeploymentStagingRemoveResponse,
+  DeploymentTemplateRequest,
   DeploymentTriggerRotateSecretResponse,
   DeploymentTriggerTestResponse,
   DeploymentVariable,
@@ -170,6 +175,7 @@ import type {
   StagingCopy,
   StagingCreateRequest,
   StagingRemoveRequest,
+  TemplatePreview,
   TestResult,
   TrafficAlert,
   TrafficAlertList,
@@ -180,6 +186,8 @@ import type {
   TriggerCreated,
   TriggerDelivery,
   TriggerWrite,
+  UserTemplate,
+  UserTemplateDetail,
   VariableGenerateRequest,
   VariableMutationResult,
   VariableReveal,
@@ -1144,6 +1152,75 @@ export function deploymentCredentials(
     {
       method: "GET",
       path: `/deploy/credentials`,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/** The query parameters of deploymentDNSRecord. One left out is not sent. */
+export interface DeploymentDNSRecordQuery {
+  /**
+   * The TTL to plan with, in seconds; the provider's floor and a day's cap apply, and 300 when
+   * absent.
+   */
+  ttl?: number
+}
+
+/**
+ * deploymentDNSRecord is GET /deploy/{id}/domains/{domain}/dns-record: dry-run a domain's DNS
+ * record: what its zone holds, what would be written (A and AAAA to this server, or a proxied
+ * CNAME to the tunnel for a name served through Cloudflare Tunnel), and through which saved DNS
+ * credential and zone.
+ *
+ * Nothing is written. A plan that cannot be written says why in refusal and refusalCode rather
+ * than failing.
+ *
+ * Only an interactive session may call it; no key reaches it.
+ */
+export function deploymentDNSRecord(
+  client: Client,
+  id: number,
+  domain: string,
+  query?: DeploymentDNSRecordQuery,
+  options?: RequestOptions,
+): Promise<DNSRecordPlan> {
+  return client.request<DNSRecordPlan>(
+    {
+      method: "GET",
+      path: `/deploy/${pathParam(id)}/domains/${pathParam(domain)}/dns-record`,
+      query,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * deploymentDNSRecordWrite is POST /deploy/{id}/domains/{domain}/dns-record: write a domain's DNS
+ * record into its zone with the DNS credentials saved under Certificates: create or change A and
+ * AAAA, or the tunnel's CNAME; a record is never deleted.
+ *
+ * Answers 409 dns_record_unwritable (no saved credential reaches the zone),
+ * dns_record_tunnel_zone, dns_record_conflict (a record stands in the way and would have to be
+ * deleted), dns_record_foreign (a record this dashboard did not write, changed only with replace),
+ * no_public_address or tunnel_not_connected, and 502 dns_provider_error in the provider's words.
+ * Audited as deploy.domain.record.
+ *
+ * Only an interactive session may call it; no key reaches it.
+ */
+export function deploymentDNSRecordWrite(
+  client: Client,
+  id: number,
+  domain: string,
+  body?: DNSRecordWriteRequest,
+  options?: RequestOptions,
+): Promise<DNSRecordPlan> {
+  return client.request<DNSRecordPlan>(
+    {
+      method: "POST",
+      path: `/deploy/${pathParam(id)}/domains/${pathParam(domain)}/dns-record`,
+      body,
       accept: "json",
     },
     options,
@@ -4735,6 +4812,189 @@ export function sharedVariables(
     {
       method: "GET",
       path: `/deploy/shared-variables`,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * templateCreate is POST /deploy/templates: add a template from a pasted Compose file and the
+ * inputs declared for the variables it reads.
+ *
+ * With dryRun, nothing is stored and the definition the file makes is answered with 200. A literal
+ * password in the file becomes a secret the template generates; a host port is dropped, since the
+ * public service is published on loopback behind the proxy.
+ *
+ * Only an interactive session may call it; no key reaches it.
+ */
+export function templateCreate(
+  client: Client,
+  body: ComposeTemplateRequest,
+  options?: RequestOptions,
+): Promise<UserTemplateDetail | TemplatePreview> {
+  return client.request<UserTemplateDetail | TemplatePreview>(
+    {
+      method: "POST",
+      path: `/deploy/templates`,
+      body,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * templateDelete is DELETE /deploy/templates/{template}: remove a template from the catalogue;
+ * deployments made from it keep running from their own copy.
+ *
+ * Destructive, with an ordinary confirmation.
+ *
+ * Only an interactive session may call it; no key reaches it. Destructive: it needs a role that
+ * may take destructive actions, and spends their budget.
+ */
+export function templateDelete(
+  client: Client,
+  template: string,
+  options?: RequestOptions,
+): Promise<void> {
+  return client.request<void>(
+    {
+      method: "DELETE",
+      path: `/deploy/templates/${pathParam(template)}`,
+      accept: "none",
+    },
+    options,
+  )
+}
+
+/**
+ * templateExport is GET /deploy/templates/{template}/export: export a template's definition as a
+ * JSON file: a built-in's or one added here, in the catalogue's own schema.
+ *
+ * A deploy key: allowed.
+ */
+export function templateExport(
+  client: Client,
+  template: string,
+  options?: RequestOptions,
+): Promise<Blueprint> {
+  return client.request<Blueprint>(
+    {
+      method: "GET",
+      path: `/deploy/templates/${pathParam(template)}/export`,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * templateFromDeployment is POST /deploy/templates/from-deployment: save a deployment as a
+ * template: the definition its live release's frozen plan was deployed from.
+ *
+ * A secret variable becomes a secret input and its value is never read; the domain becomes the
+ * domain input and a fixed host port a number input. With dryRun, nothing is stored and the
+ * definition is answered with 200.
+ *
+ * Only an interactive session may call it; no key reaches it.
+ */
+export function templateFromDeployment(
+  client: Client,
+  body: DeploymentTemplateRequest,
+  options?: RequestOptions,
+): Promise<UserTemplateDetail | TemplatePreview> {
+  return client.request<UserTemplateDetail | TemplatePreview>(
+    {
+      method: "POST",
+      path: `/deploy/templates/from-deployment`,
+      body,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * templateGet is GET /deploy/templates/{template}: read a template added on this dashboard, with
+ * its whole definition.
+ *
+ * A deploy key: allowed.
+ */
+export function templateGet(
+  client: Client,
+  template: string,
+  options?: RequestOptions,
+): Promise<UserTemplateDetail> {
+  return client.request<UserTemplateDetail>(
+    {
+      method: "GET",
+      path: `/deploy/templates/${pathParam(template)}`,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * templateImport is POST /deploy/templates/import: import a template's JSON definition; an id
+ * outside the user- namespace is put in it.
+ *
+ * Only an interactive session may call it; no key reaches it.
+ */
+export function templateImport(
+  client: Client,
+  body: Blueprint,
+  options?: RequestOptions,
+): Promise<UserTemplateDetail> {
+  return client.request<UserTemplateDetail>(
+    {
+      method: "POST",
+      path: `/deploy/templates/import`,
+      body,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * templateList is GET /deploy/templates: list the templates added on this dashboard, with how each
+ * was made and how many deployments' sources name it.
+ *
+ * A deploy key: allowed.
+ */
+export function templateList(
+  client: Client,
+  options?: RequestOptions,
+): Promise<UserTemplate[] | null> {
+  return client.request<UserTemplate[] | null>(
+    {
+      method: "GET",
+      path: `/deploy/templates`,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * templateUpdate is PUT /deploy/templates/{template}: replace a template's definition; its id does
+ * not change, and a changed definition at the same version is the next patch version.
+ *
+ * Only an interactive session may call it; no key reaches it.
+ */
+export function templateUpdate(
+  client: Client,
+  template: string,
+  body: Blueprint,
+  options?: RequestOptions,
+): Promise<UserTemplateDetail> {
+  return client.request<UserTemplateDetail>(
+    {
+      method: "PUT",
+      path: `/deploy/templates/${pathParam(template)}`,
+      body,
       accept: "json",
     },
     options,

@@ -66,6 +66,18 @@ type AccesslogSummary struct {
 	Truncated       bool             `json:"truncated,omitempty"`
 }
 
+// Action is one of the values of dnsrecords.Action.
+type Action string
+
+// The values of Action.
+const (
+	ActionCreate   Action = "create"
+	ActionUpdate   Action = "update"
+	ActionKeep     Action = "keep"
+	ActionConflict Action = "conflict"
+	ActionStale    Action = "stale"
+)
+
 // ActiveWork is deploy.ActiveWork in the dashboard's source.
 type ActiveWork struct {
 	CurrentStatus StepState `json:"currentStatus,omitempty"`
@@ -193,6 +205,35 @@ type BackupSummary struct {
 	Status string      `json:"status,omitempty"`
 }
 
+// Blueprint is blueprint.Blueprint in the dashboard's source.
+type Blueprint struct {
+	Access      Access       `json:"access,omitzero"`
+	Automation  []Automation `json:"automation"`
+	Category    Category     `json:"category,omitempty"`
+	Checks      []Check      `json:"checks"`
+	Description string       `json:"description,omitempty"`
+	DocsURL     string       `json:"docsUrl,omitempty"`
+	Files       []ConfigFile `json:"files"`
+	Fixtures    []Fixture    `json:"fixtures"`
+	IconID      string       `json:"iconId,omitempty"`
+	ID          string       `json:"id,omitempty"`
+	Image       Image        `json:"image,omitzero"`
+	Inputs      []Input      `json:"inputs"`
+	Name        string       `json:"name,omitempty"`
+	Operations  Operations   `json:"operations,omitzero"`
+	Ports       []Port       `json:"ports"`
+	Profile     Profile      `json:"profile,omitempty"`
+	Provenance  Provenance   `json:"provenance,omitzero"`
+	Resources   Resources    `json:"resources,omitzero"`
+	Retired     string       `json:"retired,omitempty"`
+	Secrets     []Secret     `json:"secrets"`
+	Security    Security     `json:"security,omitzero"`
+	Services    []Service    `json:"services"`
+	Update      Update       `json:"update,omitzero"`
+	Version     string       `json:"version,omitempty"`
+	Volumes     []Volume     `json:"volumes"`
+}
+
 // BlueprintDetail is api.blueprintDetail in the dashboard's source.
 type BlueprintDetail struct {
 	Access              Access       `json:"access,omitzero"`
@@ -271,6 +312,7 @@ type BlueprintSummary struct {
 	Maintainer          string           `json:"maintainer,omitempty"`
 	MemoryMb            int64            `json:"memoryMb,omitempty"`
 	Name                string           `json:"name,omitempty"`
+	Origin              string           `json:"origin,omitempty"`
 	Privileged          bool             `json:"privileged,omitempty"`
 	Profile             Profile          `json:"profile,omitempty"`
 	RequiresAcceptance  bool             `json:"requiresAcceptance,omitempty"`
@@ -303,35 +345,39 @@ const (
 	BuildMethodCompose       BuildMethod = "compose"
 	BuildMethodNone          BuildMethod = "none"
 	BuildMethodLegacyCompose BuildMethod = "legacy_compose"
+	BuildMethodRailpack      BuildMethod = "railpack"
 )
 
 // BuildPlanConfig is deploy.BuildPlanConfig in the dashboard's source.
 type BuildPlanConfig struct {
-	BuildCommand    string              `json:"buildCommand,omitempty"`
-	CargoBin        string              `json:"cargoBin,omitempty"`
-	Dockerfile      string              `json:"dockerfile,omitempty"`
-	DotnetVersion   string              `json:"dotnetVersion,omitempty"`
-	Framework       string              `json:"framework,omitempty"`
-	GoPackage       string              `json:"goPackage,omitempty"`
-	GoVersion       string              `json:"goVersion,omitempty"`
-	JavaVersion     string              `json:"javaVersion,omitempty"`
-	Method          BuildMethod         `json:"method,omitempty"`
-	NoCache         bool                `json:"noCache,omitempty"`
-	NodeVersion     string              `json:"nodeVersion,omitempty"`
-	OutputDirectory string              `json:"outputDirectory,omitempty"`
-	PackageManager  string              `json:"packageManager,omitempty"`
-	PhpVersion      string              `json:"phpVersion,omitempty"`
-	PrimaryService  string              `json:"primaryService,omitempty"`
-	PythonVersion   string              `json:"pythonVersion,omitempty"`
-	Recipe          string              `json:"recipe,omitempty"`
-	ReleaseTasks    []ReleaseTaskConfig `json:"releaseTasks"`
-	RootDirectory   string              `json:"rootDirectory,omitempty"`
-	Secrets         []BuildSecretConfig `json:"secrets"`
-	SpaFallback     bool                `json:"spaFallback,omitempty"`
-	StartCommand    string              `json:"startCommand,omitempty"`
-	SystemPackages  []string            `json:"systemPackages"`
-	Target          string              `json:"target,omitempty"`
-	TargetPlatform  string              `json:"targetPlatform,omitempty"`
+	BuildCommand     string              `json:"buildCommand,omitempty"`
+	CargoBin         string              `json:"cargoBin,omitempty"`
+	Dockerfile       string              `json:"dockerfile,omitempty"`
+	DotnetVersion    string              `json:"dotnetVersion,omitempty"`
+	Framework        string              `json:"framework,omitempty"`
+	GoPackage        string              `json:"goPackage,omitempty"`
+	GoVersion        string              `json:"goVersion,omitempty"`
+	JavaVersion      string              `json:"javaVersion,omitempty"`
+	Method           BuildMethod         `json:"method,omitempty"`
+	NoCache          bool                `json:"noCache,omitempty"`
+	NodeVersion      string              `json:"nodeVersion,omitempty"`
+	OutputDirectory  string              `json:"outputDirectory,omitempty"`
+	PackageManager   string              `json:"packageManager,omitempty"`
+	PhpVersion       string              `json:"phpVersion,omitempty"`
+	PrimaryService   string              `json:"primaryService,omitempty"`
+	PythonVersion    string              `json:"pythonVersion,omitempty"`
+	RailpackConfig   string              `json:"railpackConfig,omitempty"`
+	RailpackProvider string              `json:"railpackProvider,omitempty"`
+	RailpackVersion  string              `json:"railpackVersion,omitempty"`
+	Recipe           string              `json:"recipe,omitempty"`
+	ReleaseTasks     []ReleaseTaskConfig `json:"releaseTasks"`
+	RootDirectory    string              `json:"rootDirectory,omitempty"`
+	Secrets          []BuildSecretConfig `json:"secrets"`
+	SpaFallback      bool                `json:"spaFallback,omitempty"`
+	StartCommand     string              `json:"startCommand,omitempty"`
+	SystemPackages   []string            `json:"systemPackages"`
+	Target           string              `json:"target,omitempty"`
+	TargetPlatform   string              `json:"targetPlatform,omitempty"`
 }
 
 // BuildSecretConfig is deploy.BuildSecretConfig in the dashboard's source.
@@ -394,6 +440,14 @@ type CanaryWindow struct {
 	Verdict           *RollbackVerdict `json:"verdict,omitempty"`
 }
 
+// Candidate is dnsrecords.Candidate in the dashboard's source.
+type Candidate struct {
+	Error    string `json:"error,omitempty"`
+	Key      string `json:"key,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Zone     string `json:"zone,omitempty"`
+}
+
 // Category is one of the values of blueprint.Category.
 type Category string
 
@@ -412,6 +466,19 @@ type CauseFix struct {
 	Kind  string `json:"kind,omitempty"`
 	Scope string `json:"scope,omitempty"`
 	Value string `json:"value,omitempty"`
+}
+
+// Change is dnsrecords.Change in the dashboard's source.
+type Change struct {
+	Action     Action   `json:"action,omitempty"`
+	Current    []string `json:"current"`
+	CurrentTTL int64    `json:"currentTtl,omitempty"`
+	Detail     string   `json:"detail,omitempty"`
+	Name       string   `json:"name,omitempty"`
+	Proxied    bool     `json:"proxied,omitempty"`
+	TTL        int64    `json:"ttl,omitempty"`
+	Type       Type     `json:"type,omitempty"`
+	Want       []string `json:"want"`
 }
 
 // Check is blueprint.Check in the dashboard's source.
@@ -559,6 +626,21 @@ type ComposeServicePlan struct {
 	Ports               []string          `json:"ports"`
 }
 
+// ComposeTemplateRequest is deploy.ComposeTemplateRequest in the dashboard's source.
+type ComposeTemplateRequest struct {
+	Access        *Access  `json:"access,omitempty"`
+	Category      Category `json:"category,omitempty"`
+	Compose       string   `json:"compose,omitempty"`
+	Description   string   `json:"description,omitempty"`
+	DocsURL       string   `json:"docsUrl,omitempty"`
+	DryRun        bool     `json:"dryRun,omitempty"`
+	HealthPath    string   `json:"healthPath,omitempty"`
+	Inputs        []Input  `json:"inputs"`
+	Name          string   `json:"name,omitempty"`
+	PublicService string   `json:"publicService,omitempty"`
+	Slug          string   `json:"slug,omitempty"`
+}
+
 // ConfigFile is blueprint.ConfigFile in the dashboard's source.
 type ConfigFile struct {
 	Description     string     `json:"description,omitempty"`
@@ -688,6 +770,64 @@ type CurrentStep struct {
 	Key   StepKey   `json:"key,omitempty"`
 	Label string    `json:"label,omitempty"`
 	State StepState `json:"state,omitempty"`
+}
+
+// DNSRecordChange is api.dnsRecordChange in the dashboard's source.
+type DNSRecordChange struct {
+	Action     Action   `json:"action,omitempty"`
+	Current    []string `json:"current"`
+	CurrentTTL int64    `json:"currentTtl,omitempty"`
+	Detail     string   `json:"detail,omitempty"`
+	Name       string   `json:"name,omitempty"`
+	Ours       bool     `json:"ours,omitempty"`
+	Proxied    bool     `json:"proxied,omitempty"`
+	TTL        int64    `json:"ttl,omitempty"`
+	Type       Type     `json:"type,omitempty"`
+	Want       []string `json:"want"`
+}
+
+// DNSRecordManaged is api.dnsRecordManaged in the dashboard's source.
+type DNSRecordManaged struct {
+	CreatedAt time.Time `json:"createdAt,omitzero"`
+	CreatedBy string    `json:"createdBy,omitempty"`
+	Current   bool      `json:"current,omitempty"`
+	Provider  string    `json:"provider,omitempty"`
+	TTL       int64     `json:"ttl,omitempty"`
+	Type      Type      `json:"type,omitempty"`
+	UpdatedAt time.Time `json:"updatedAt,omitzero"`
+	UpdatedBy string    `json:"updatedBy,omitempty"`
+	Values    []string  `json:"values"`
+	Zone      string    `json:"zone,omitempty"`
+}
+
+// DNSRecordPlan is api.dnsRecordPlan in the dashboard's source.
+type DNSRecordPlan struct {
+	Account       string             `json:"account,omitempty"`
+	Candidates    []Candidate        `json:"candidates"`
+	Changes       []DNSRecordChange  `json:"changes"`
+	Environment   string             `json:"environment,omitempty"`
+	EnvironmentID int64              `json:"environmentId,omitempty"`
+	Foreign       bool               `json:"foreign,omitempty"`
+	Hostname      string             `json:"hostname,omitempty"`
+	Managed       []DNSRecordManaged `json:"managed"`
+	Problems      []string           `json:"problems"`
+	Provider      string             `json:"provider,omitempty"`
+	ProviderKey   string             `json:"providerKey,omitempty"`
+	Ready         bool               `json:"ready,omitempty"`
+	Refusal       string             `json:"refusal,omitempty"`
+	RefusalCode   string             `json:"refusalCode,omitempty"`
+	Summary       string             `json:"summary,omitempty"`
+	Tunnel        bool               `json:"tunnel,omitempty"`
+	Want          []Set              `json:"want"`
+	Writable      bool               `json:"writable,omitempty"`
+	Written       []Change           `json:"written"`
+	Zone          string             `json:"zone,omitempty"`
+}
+
+// DNSRecordWriteRequest is api.dnsRecordWriteRequest in the dashboard's source.
+type DNSRecordWriteRequest struct {
+	Replace bool  `json:"replace,omitempty"`
+	TTL     int64 `json:"ttl,omitempty"`
 }
 
 // DataCopy is deploy.DataCopy in the dashboard's source.
@@ -1183,27 +1323,29 @@ type DeploymentScheduleTestResponse struct {
 
 // DeploymentSourceUpdateRequest is api.deploymentSourceUpdateRequest in the dashboard's source.
 type DeploymentSourceUpdateRequest struct {
-	BlueprintID       string            `json:"blueprintId,omitempty"`
-	BlueprintInputs   map[string]string `json:"blueprintInputs"`
-	BlueprintVersion  string            `json:"blueprintVersion,omitempty"`
-	ComposeFiles      []ComposeDocument `json:"composeFiles"`
-	CredentialID      int64             `json:"credentialId,omitempty"`
-	Image             string            `json:"image,omitempty"`
-	IncludeLfs        bool              `json:"includeLfs,omitempty"`
-	IncludeSubmodules bool              `json:"includeSubmodules,omitempty"`
-	Kind              SourceKind        `json:"kind,omitempty"`
-	LocalPath         string            `json:"localPath,omitempty"`
-	ManagedInPlace    bool              `json:"managedInPlace,omitempty"`
-	Mode              SourceMode        `json:"mode,omitempty"`
-	Platform          string            `json:"platform,omitempty"`
-	Provider          string            `json:"provider,omitempty"`
-	ProviderBaseURL   string            `json:"providerBaseUrl,omitempty"`
-	Ref               string            `json:"ref,omitempty"`
-	Repository        string            `json:"repository,omitempty"`
-	ResourceID        string            `json:"resourceId,omitempty"`
-	Revision          int64             `json:"revision,omitempty"`
-	Subdirectory      string            `json:"subdirectory,omitempty"`
-	URL               string            `json:"url,omitempty"`
+	// Any JSON value; the handler passes it on as it was sent.
+	BlueprintDefinition any               `json:"blueprintDefinition"`
+	BlueprintID         string            `json:"blueprintId,omitempty"`
+	BlueprintInputs     map[string]string `json:"blueprintInputs"`
+	BlueprintVersion    string            `json:"blueprintVersion,omitempty"`
+	ComposeFiles        []ComposeDocument `json:"composeFiles"`
+	CredentialID        int64             `json:"credentialId,omitempty"`
+	Image               string            `json:"image,omitempty"`
+	IncludeLfs          bool              `json:"includeLfs,omitempty"`
+	IncludeSubmodules   bool              `json:"includeSubmodules,omitempty"`
+	Kind                SourceKind        `json:"kind,omitempty"`
+	LocalPath           string            `json:"localPath,omitempty"`
+	ManagedInPlace      bool              `json:"managedInPlace,omitempty"`
+	Mode                SourceMode        `json:"mode,omitempty"`
+	Platform            string            `json:"platform,omitempty"`
+	Provider            string            `json:"provider,omitempty"`
+	ProviderBaseURL     string            `json:"providerBaseUrl,omitempty"`
+	Ref                 string            `json:"ref,omitempty"`
+	Repository          string            `json:"repository,omitempty"`
+	ResourceID          string            `json:"resourceId,omitempty"`
+	Revision            int64             `json:"revision,omitempty"`
+	Subdirectory        string            `json:"subdirectory,omitempty"`
+	URL                 string            `json:"url,omitempty"`
 }
 
 // DeploymentSourceUpdateResult is api.deploymentSourceUpdateResult in the dashboard's source.
@@ -1265,6 +1407,16 @@ type DeploymentSummary struct {
 	Stopped          bool            `json:"stopped,omitempty"`
 	Strategy         ReleaseStrategy `json:"strategy,omitempty"`
 	UpdatedAt        time.Time       `json:"updatedAt,omitzero"`
+}
+
+// DeploymentTemplateRequest is deploy.DeploymentTemplateRequest in the dashboard's source.
+type DeploymentTemplateRequest struct {
+	DeploymentID  int64  `json:"deploymentId,omitempty"`
+	Description   string `json:"description,omitempty"`
+	DryRun        bool   `json:"dryRun,omitempty"`
+	EnvironmentID int64  `json:"environmentId,omitempty"`
+	Name          string `json:"name,omitempty"`
+	Slug          string `json:"slug,omitempty"`
 }
 
 // DeploymentTriggerRotateSecretResponse is the object deploymentTriggerRotateSecret response
@@ -1387,6 +1539,7 @@ type DetectedCandidate struct {
 	PythonInstall         string                     `json:"pythonInstall,omitempty"`
 	PythonRequires        string                     `json:"pythonRequires,omitempty"`
 	PythonVersion         string                     `json:"pythonVersion,omitempty"`
+	RailpackProvider      string                     `json:"railpackProvider,omitempty"`
 	Readiness             *DetectedReadiness         `json:"readiness,omitempty"`
 	Recipe                string                     `json:"recipe,omitempty"`
 	RecipeIssue           string                     `json:"recipeIssue,omitempty"`
@@ -2014,26 +2167,28 @@ type DraftSaveRequest struct {
 
 // DraftSourceConfig is deploy.DraftSourceConfig in the dashboard's source.
 type DraftSourceConfig struct {
-	BlueprintID       string            `json:"blueprintId,omitempty"`
-	BlueprintInputs   map[string]string `json:"blueprintInputs"`
-	BlueprintVersion  string            `json:"blueprintVersion,omitempty"`
-	ComposeFiles      []ComposeDocument `json:"composeFiles"`
-	CredentialID      int64             `json:"credentialId,omitempty"`
-	Image             string            `json:"image,omitempty"`
-	IncludeLfs        bool              `json:"includeLfs,omitempty"`
-	IncludeSubmodules bool              `json:"includeSubmodules,omitempty"`
-	Kind              SourceKind        `json:"kind,omitempty"`
-	LocalPath         string            `json:"localPath,omitempty"`
-	ManagedInPlace    bool              `json:"managedInPlace,omitempty"`
-	Mode              SourceMode        `json:"mode,omitempty"`
-	Platform          string            `json:"platform,omitempty"`
-	Provider          string            `json:"provider,omitempty"`
-	ProviderBaseURL   string            `json:"providerBaseUrl,omitempty"`
-	Ref               string            `json:"ref,omitempty"`
-	Repository        string            `json:"repository,omitempty"`
-	ResourceID        string            `json:"resourceId,omitempty"`
-	Subdirectory      string            `json:"subdirectory,omitempty"`
-	URL               string            `json:"url,omitempty"`
+	// Any JSON value; the handler passes it on as it was sent.
+	BlueprintDefinition any               `json:"blueprintDefinition"`
+	BlueprintID         string            `json:"blueprintId,omitempty"`
+	BlueprintInputs     map[string]string `json:"blueprintInputs"`
+	BlueprintVersion    string            `json:"blueprintVersion,omitempty"`
+	ComposeFiles        []ComposeDocument `json:"composeFiles"`
+	CredentialID        int64             `json:"credentialId,omitempty"`
+	Image               string            `json:"image,omitempty"`
+	IncludeLfs          bool              `json:"includeLfs,omitempty"`
+	IncludeSubmodules   bool              `json:"includeSubmodules,omitempty"`
+	Kind                SourceKind        `json:"kind,omitempty"`
+	LocalPath           string            `json:"localPath,omitempty"`
+	ManagedInPlace      bool              `json:"managedInPlace,omitempty"`
+	Mode                SourceMode        `json:"mode,omitempty"`
+	Platform            string            `json:"platform,omitempty"`
+	Provider            string            `json:"provider,omitempty"`
+	ProviderBaseURL     string            `json:"providerBaseUrl,omitempty"`
+	Ref                 string            `json:"ref,omitempty"`
+	Repository          string            `json:"repository,omitempty"`
+	ResourceID          string            `json:"resourceId,omitempty"`
+	Subdirectory        string            `json:"subdirectory,omitempty"`
+	URL                 string            `json:"url,omitempty"`
 }
 
 // DraftStep is one of the values of deploy.DraftStep.
@@ -3201,12 +3356,13 @@ type Point struct {
 
 // Port is blueprint.Port in the dashboard's source.
 type Port struct {
-	Exposure string `json:"exposure,omitempty"`
-	Internal int64  `json:"internal,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Primary  bool   `json:"primary,omitempty"`
-	Protocol string `json:"protocol,omitempty"`
-	Purpose  string `json:"purpose,omitempty"`
+	Exposure  string `json:"exposure,omitempty"`
+	HostInput string `json:"hostInput,omitempty"`
+	Internal  int64  `json:"internal,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Primary   bool   `json:"primary,omitempty"`
+	Protocol  string `json:"protocol,omitempty"`
+	Purpose   string `json:"purpose,omitempty"`
 }
 
 // PreflightFinding is deploy.PreflightFinding in the dashboard's source.
@@ -3870,6 +4026,7 @@ type RenderedFile struct {
 // RenderedPort is blueprint.RenderedPort in the dashboard's source.
 type RenderedPort struct {
 	Exposure string `json:"exposure,omitempty"`
+	HostPort int64  `json:"hostPort,omitempty"`
 	Internal int64  `json:"internal,omitempty"`
 	Name     string `json:"name,omitempty"`
 	Primary  bool   `json:"primary,omitempty"`
@@ -4480,6 +4637,17 @@ type ServiceSummary struct {
 	Role     ServiceRole `json:"role,omitempty"`
 }
 
+// Set is dnsrecords.Set in the dashboard's source.
+type Set struct {
+	Comment    string   `json:"comment,omitempty"`
+	Name       string   `json:"name,omitempty"`
+	Proxied    bool     `json:"proxied,omitempty"`
+	TTL        int64    `json:"ttl,omitempty"`
+	Type       Type     `json:"type,omitempty"`
+	Unwritable string   `json:"unwritable,omitempty"`
+	Values     []string `json:"values"`
+}
+
 // Settings is secretstore.Settings in the dashboard's source.
 type Settings struct {
 	Auth        string `json:"auth,omitempty"`
@@ -4805,6 +4973,23 @@ type TailnetSummary struct {
 	URL         string   `json:"url,omitempty"`
 }
 
+// TemplateOrigin is one of the values of deploy.TemplateOrigin.
+type TemplateOrigin string
+
+// The values of TemplateOrigin.
+const (
+	TemplateOriginCompose    TemplateOrigin = "compose"
+	TemplateOriginDeployment TemplateOrigin = "deployment"
+	TemplateOriginImport     TemplateOrigin = "import"
+)
+
+// TemplatePreview is deploy.TemplatePreview in the dashboard's source.
+type TemplatePreview struct {
+	Definition *Blueprint       `json:"definition,omitempty"`
+	Exists     bool             `json:"exists,omitempty"`
+	Summary    BlueprintSummary `json:"summary,omitzero"`
+}
+
 // TestResult is secretstore.TestResult in the dashboard's source.
 type TestResult struct {
 	Message string `json:"message,omitempty"`
@@ -4971,6 +5156,16 @@ type TriggerWrite struct {
 	Provider string        `json:"provider,omitempty"`
 }
 
+// Type is one of the values of dnsrecords.Type.
+type Type string
+
+// The values of Type.
+const (
+	TypeA     Type = "A"
+	TypeAAAA  Type = "AAAA"
+	TypeCNAME Type = "CNAME"
+)
+
 // UlimitName is one of the values of deploy.UlimitName.
 type UlimitName string
 
@@ -4999,6 +5194,37 @@ type Update struct {
 	Detector      string `json:"detector,omitempty"`
 	Notes         string `json:"notes,omitempty"`
 	VersionSource string `json:"versionSource,omitempty"`
+}
+
+// UserTemplate is deploy.UserTemplate in the dashboard's source.
+type UserTemplate struct {
+	CreatedAt        time.Time        `json:"createdAt,omitzero"`
+	CreatedBy        string           `json:"createdBy,omitempty"`
+	Deployments      int64            `json:"deployments,omitempty"`
+	FromDeploymentID int64            `json:"fromDeploymentId,omitempty"`
+	ID               string           `json:"id,omitempty"`
+	Name             string           `json:"name,omitempty"`
+	Source           TemplateOrigin   `json:"source,omitempty"`
+	Summary          BlueprintSummary `json:"summary,omitzero"`
+	UpdatedAt        time.Time        `json:"updatedAt,omitzero"`
+	UpdatedBy        string           `json:"updatedBy,omitempty"`
+	Version          string           `json:"version,omitempty"`
+}
+
+// UserTemplateDetail is deploy.UserTemplateDetail in the dashboard's source.
+type UserTemplateDetail struct {
+	CreatedAt        time.Time        `json:"createdAt,omitzero"`
+	CreatedBy        string           `json:"createdBy,omitempty"`
+	Definition       *Blueprint       `json:"definition,omitempty"`
+	Deployments      int64            `json:"deployments,omitempty"`
+	FromDeploymentID int64            `json:"fromDeploymentId,omitempty"`
+	ID               string           `json:"id,omitempty"`
+	Name             string           `json:"name,omitempty"`
+	Source           TemplateOrigin   `json:"source,omitempty"`
+	Summary          BlueprintSummary `json:"summary,omitzero"`
+	UpdatedAt        time.Time        `json:"updatedAt,omitzero"`
+	UpdatedBy        string           `json:"updatedBy,omitempty"`
+	Version          string           `json:"version,omitempty"`
 }
 
 // VariableGenerateRequest is api.variableGenerateRequest in the dashboard's source.

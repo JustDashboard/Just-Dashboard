@@ -371,6 +371,7 @@ func (s *Server) initModules() {
 		WithRecoveryChecker(&backupRecoveryChecker{server: s}).
 		WithDatabaseDumper(databaseDumper).
 		WithContainerPauser(&backupContainerPauser{docker: s.modules.docker}).
+		WithVolumeProvisioner(&backupVolumeProvisioner{docker: s.modules.docker}).
 		WithSQLiteSnapshotter(func(ctx context.Context, source, directory string) (string, error) {
 			dump, err := dbx.Dump(ctx, dbx.DriverSQLite, source, "", directory)
 			if err != nil {
@@ -406,11 +407,13 @@ func (s *Server) initModules() {
 		s.modules.proxy,
 	).WithFirewall(s.modules.netsec).WithTailnet(preflightTailnet{server: s}).WithDependencies(newDeploymentDependencyObserver(
 		s.Store, s.modules.backupStore, s.modules.docker,
-	).withExtensionProbe(s.databaseExtensions)).WithTunnel(s.tunnelObserver())
+	).withExtensionProbe(s.databaseExtensions)).WithTunnel(s.tunnelObserver()).WithDNSRecords(s.dnsRecordObserver())
 	s.modules.deployChecker = deploy.NewDeploymentChecker(
 		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,
 	)
-	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker)
+	// The Railpack planner writes its plan into a folder Docker binds by
+	// path, which the data directory is on the server and in here alike.
+	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker).WithRailpackDir(filepath.Join(s.Cfg.DataDir, "railpack"))
 	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
 	s.modules.promotionImages = s.modules.deployArtifacts
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)

@@ -578,7 +578,8 @@
               "image",
               "compose",
               "none",
-              "legacy_compose"
+              "legacy_compose",
+              "railpack"
             ],
             "title": "deploy.BuildMethod",
             "type": "string"
@@ -1177,6 +1178,9 @@
       },
       "api.deploymentSourceUpdateRequest": {
         "properties": {
+          "blueprintDefinition": {
+            "description": "Any JSON value; the handler passes it on as it was sent."
+          },
           "blueprintId": {
             "type": "string"
           },
@@ -1393,6 +1397,237 @@
           }
         },
         "title": "api.diagnoseRequest",
+        "type": "object"
+      },
+      "api.dnsRecordChange": {
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update",
+              "keep",
+              "conflict",
+              "stale"
+            ],
+            "title": "dnsrecords.Action",
+            "type": "string"
+          },
+          "current": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "currentTtl": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ours": {
+            "type": "boolean"
+          },
+          "proxied": {
+            "type": "boolean"
+          },
+          "ttl": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "A",
+              "AAAA",
+              "CNAME"
+            ],
+            "title": "dnsrecords.Type",
+            "type": "string"
+          },
+          "want": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "api.dnsRecordChange",
+        "type": "object"
+      },
+      "api.dnsRecordManaged": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "ttl": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "A",
+              "AAAA",
+              "CNAME"
+            ],
+            "title": "dnsrecords.Type",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedBy": {
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "zone": {
+            "type": "string"
+          }
+        },
+        "title": "api.dnsRecordManaged",
+        "type": "object"
+      },
+      "api.dnsRecordPlan": {
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/dnsrecords.Candidate"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/api.dnsRecordChange"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "environment": {
+            "type": "string"
+          },
+          "environmentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "foreign": {
+            "type": "boolean"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "managed": {
+            "items": {
+              "$ref": "#/components/schemas/api.dnsRecordManaged"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "providerKey": {
+            "type": "string"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "refusal": {
+            "type": "string"
+          },
+          "refusalCode": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "tunnel": {
+            "type": "boolean"
+          },
+          "want": {
+            "items": {
+              "$ref": "#/components/schemas/dnsrecords.Set"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "writable": {
+            "type": "boolean"
+          },
+          "written": {
+            "items": {
+              "$ref": "#/components/schemas/dnsrecords.Change"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "zone": {
+            "type": "string"
+          }
+        },
+        "title": "api.dnsRecordPlan",
+        "type": "object"
+      },
+      "api.dnsRecordWriteRequest": {
+        "properties": {
+          "replace": {
+            "type": "boolean"
+          },
+          "ttl": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "api.dnsRecordWriteRequest",
         "type": "object"
       },
       "api.draftRevisionRequest": {
@@ -2772,6 +3007,186 @@
         "title": "blueprint.Automation",
         "type": "object"
       },
+      "blueprint.Blueprint": {
+        "properties": {
+          "access": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/blueprint.Access"
+              }
+            ]
+          },
+          "automation": {
+            "items": {
+              "$ref": "#/components/schemas/blueprint.Automation"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "category": {
+            "enum": [
+              "http",
+              "database",
+              "tool",
+              "automation",
+              "game"
+            ],
+            "title": "blueprint.Category",
+            "type": "string"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/blueprint.Check"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "docsUrl": {
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/blueprint.ConfigFile"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "fixtures": {
+            "items": {
+              "$ref": "#/components/schemas/blueprint.Fixture"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "iconId": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "image": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/blueprint.Image"
+              }
+            ]
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/blueprint.Input"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "operations": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/blueprint.Operations"
+              }
+            ]
+          },
+          "ports": {
+            "items": {
+              "$ref": "#/components/schemas/blueprint.Port"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "profile": {
+            "enum": [
+              "web",
+              "database",
+              "tool",
+              "worker",
+              "game",
+              "compose"
+            ],
+            "title": "blueprint.Profile",
+            "type": "string"
+          },
+          "provenance": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/blueprint.Provenance"
+              }
+            ]
+          },
+          "resources": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/blueprint.Resources"
+              }
+            ]
+          },
+          "retired": {
+            "type": "string"
+          },
+          "secrets": {
+            "items": {
+              "$ref": "#/components/schemas/blueprint.Secret"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "security": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/blueprint.Security"
+              }
+            ]
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/blueprint.Service"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "update": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/blueprint.Update"
+              }
+            ]
+          },
+          "version": {
+            "type": "string"
+          },
+          "volumes": {
+            "items": {
+              "$ref": "#/components/schemas/blueprint.Volume"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "blueprint.Blueprint",
+        "type": "object"
+      },
       "blueprint.Check": {
         "properties": {
           "command": {
@@ -3318,6 +3733,9 @@
           "exposure": {
             "type": "string"
           },
+          "hostInput": {
+            "type": "string"
+          },
           "internal": {
             "format": "int64",
             "type": "integer"
@@ -3509,6 +3927,10 @@
         "properties": {
           "exposure": {
             "type": "string"
+          },
+          "hostPort": {
+            "format": "int64",
+            "type": "integer"
           },
           "internal": {
             "format": "int64",
@@ -3876,6 +4298,9 @@
             "type": "integer"
           },
           "name": {
+            "type": "string"
+          },
+          "origin": {
             "type": "string"
           },
           "privileged": {
@@ -4259,7 +4684,8 @@
               "image",
               "compose",
               "none",
-              "legacy_compose"
+              "legacy_compose",
+              "railpack"
             ],
             "title": "deploy.BuildMethod",
             "type": "string"
@@ -4283,6 +4709,15 @@
             "type": "string"
           },
           "pythonVersion": {
+            "type": "string"
+          },
+          "railpackConfig": {
+            "type": "string"
+          },
+          "railpackProvider": {
+            "type": "string"
+          },
+          "railpackVersion": {
             "type": "string"
           },
           "recipe": {
@@ -4875,6 +5310,66 @@
         "title": "deploy.ComposeServicePlan",
         "type": "object"
       },
+      "deploy.ComposeTemplateRequest": {
+        "properties": {
+          "access": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/blueprint.Access"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category": {
+            "enum": [
+              "http",
+              "database",
+              "tool",
+              "automation",
+              "game"
+            ],
+            "title": "blueprint.Category",
+            "type": "string"
+          },
+          "compose": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "docsUrl": {
+            "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "healthPath": {
+            "type": "string"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/blueprint.Input"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "publicService": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.ComposeTemplateRequest",
+        "type": "object"
+      },
       "deploy.ConfigurationWriteRequest": {
         "properties": {
           "build": {
@@ -5447,7 +5942,8 @@
               "image",
               "compose",
               "none",
-              "legacy_compose"
+              "legacy_compose",
+              "railpack"
             ],
             "title": "deploy.BuildMethod",
             "type": "string"
@@ -5606,6 +6102,32 @@
         "title": "deploy.DeploymentSummary",
         "type": "object"
       },
+      "deploy.DeploymentTemplateRequest": {
+        "properties": {
+          "deploymentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "description": {
+            "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "environmentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.DeploymentTemplateRequest",
+        "type": "object"
+      },
       "deploy.DeploymentVariable": {
         "properties": {
           "createdAt": {
@@ -5712,7 +6234,8 @@
               "image",
               "compose",
               "none",
-              "legacy_compose"
+              "legacy_compose",
+              "railpack"
             ],
             "title": "deploy.BuildMethod",
             "type": "string"
@@ -6051,6 +6574,9 @@
             "type": "string"
           },
           "pythonVersion": {
+            "type": "string"
+          },
+          "railpackProvider": {
             "type": "string"
           },
           "readiness": {
@@ -8301,6 +8827,9 @@
       },
       "deploy.DraftSourceConfig": {
         "properties": {
+          "blueprintDefinition": {
+            "description": "Any JSON value; the handler passes it on as it was sent."
+          },
           "blueprintId": {
             "type": "string"
           },
@@ -13665,6 +14194,32 @@
         "title": "deploy.TailnetSummary",
         "type": "object"
       },
+      "deploy.TemplatePreview": {
+        "properties": {
+          "definition": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/blueprint.Blueprint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "summary": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/blueprint.Summary"
+              }
+            ]
+          }
+        },
+        "title": "deploy.TemplatePreview",
+        "type": "object"
+      },
       "deploy.TrafficAlert": {
         "properties": {
           "channels": {
@@ -14083,6 +14638,122 @@
         "title": "deploy.TriggerWrite",
         "type": "object"
       },
+      "deploy.UserTemplate": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "deployments": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "fromDeploymentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "compose",
+              "deployment",
+              "import"
+            ],
+            "title": "deploy.TemplateOrigin",
+            "type": "string"
+          },
+          "summary": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/blueprint.Summary"
+              }
+            ]
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedBy": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.UserTemplate",
+        "type": "object"
+      },
+      "deploy.UserTemplateDetail": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "definition": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/blueprint.Blueprint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deployments": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "fromDeploymentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "compose",
+              "deployment",
+              "import"
+            ],
+            "title": "deploy.TemplateOrigin",
+            "type": "string"
+          },
+          "summary": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/blueprint.Summary"
+              }
+            ]
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedBy": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "title": "deploy.UserTemplateDetail",
+        "type": "object"
+      },
       "deploy.VariableMutationResult": {
         "properties": {
           "desiredRevision": {
@@ -14196,6 +14867,125 @@
           }
         },
         "title": "deploy.WakeOutcome",
+        "type": "object"
+      },
+      "dnsrecords.Candidate": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "zone": {
+            "type": "string"
+          }
+        },
+        "title": "dnsrecords.Candidate",
+        "type": "object"
+      },
+      "dnsrecords.Change": {
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update",
+              "keep",
+              "conflict",
+              "stale"
+            ],
+            "title": "dnsrecords.Action",
+            "type": "string"
+          },
+          "current": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "currentTtl": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "proxied": {
+            "type": "boolean"
+          },
+          "ttl": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "A",
+              "AAAA",
+              "CNAME"
+            ],
+            "title": "dnsrecords.Type",
+            "type": "string"
+          },
+          "want": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "dnsrecords.Change",
+        "type": "object"
+      },
+      "dnsrecords.Set": {
+        "properties": {
+          "comment": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "proxied": {
+            "type": "boolean"
+          },
+          "ttl": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "A",
+              "AAAA",
+              "CNAME"
+            ],
+            "title": "dnsrecords.Type",
+            "type": "string"
+          },
+          "unwritable": {
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "dnsrecords.Set",
         "type": "object"
       },
       "dockerx.Event": {
@@ -18364,6 +19154,337 @@
         "x-deploy-key": "allowed"
       }
     },
+    "/deploy/templates": {
+      "get": {
+        "operationId": "templateList",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/deploy.UserTemplate"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "List the templates added on this dashboard, with how each was made and how many deployments' sources name it.",
+        "tags": [
+          "templates"
+        ],
+        "x-deploy-key": "allowed"
+      },
+      "post": {
+        "description": "With dryRun, nothing is stored and the definition the file makes is answered with 200. A literal password in the file becomes a secret the template generates; a host port is dropped, since the public service is published on loopback behind the proxy.",
+        "operationId": "templateCreate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/deploy.ComposeTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/deploy.UserTemplateDetail"
+                    },
+                    {
+                      "$ref": "#/components/schemas/deploy.TemplatePreview"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Add a template from a pasted Compose file and the inputs declared for the variables it reads.",
+        "tags": [
+          "templates"
+        ],
+        "x-deploy-key": "refused (session_required): a template is the operator's catalogue, which every deployment is made from, not a deployment a key is narrowed to; templates are added, changed and removed in the dashboard"
+      }
+    },
+    "/deploy/templates/from-deployment": {
+      "post": {
+        "description": "A secret variable becomes a secret input and its value is never read; the domain becomes the domain input and a fixed host port a number input. With dryRun, nothing is stored and the definition is answered with 200.",
+        "operationId": "templateFromDeployment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/deploy.DeploymentTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/deploy.UserTemplateDetail"
+                    },
+                    {
+                      "$ref": "#/components/schemas/deploy.TemplatePreview"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Save a deployment as a template: the definition its live release's frozen plan was deployed from.",
+        "tags": [
+          "templates"
+        ],
+        "x-deploy-key": "refused (session_required): a template is the operator's catalogue, which every deployment is made from, not a deployment a key is narrowed to; templates are added, changed and removed in the dashboard"
+      }
+    },
+    "/deploy/templates/import": {
+      "post": {
+        "operationId": "templateImport",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/blueprint.Blueprint"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/deploy.UserTemplateDetail"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Import a template's JSON definition; an id outside the user- namespace is put in it.",
+        "tags": [
+          "templates"
+        ],
+        "x-deploy-key": "refused (session_required): a template is the operator's catalogue, which every deployment is made from, not a deployment a key is narrowed to; templates are added, changed and removed in the dashboard"
+      }
+    },
+    "/deploy/templates/{template}": {
+      "delete": {
+        "description": "Destructive, with an ordinary confirmation.",
+        "operationId": "templateDelete",
+        "responses": {
+          "204": {
+            "description": "No Content: done, with no body."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Remove a template from the catalogue; deployments made from it keep running from their own copy.",
+        "tags": [
+          "templates"
+        ],
+        "x-deploy-key": "refused (session_required): a template is the operator's catalogue, which every deployment is made from, not a deployment a key is narrowed to; templates are added, changed and removed in the dashboard",
+        "x-destructive": true
+      },
+      "get": {
+        "operationId": "templateGet",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/deploy.UserTemplateDetail"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Read a template added on this dashboard, with its whole definition.",
+        "tags": [
+          "templates"
+        ],
+        "x-deploy-key": "allowed"
+      },
+      "parameters": [
+        {
+          "description": "The template's id: user-\u003cname\u003e for one added here, or a built-in's for an export.",
+          "in": "path",
+          "name": "template",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "operationId": "templateUpdate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/blueprint.Blueprint"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/deploy.UserTemplateDetail"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Replace a template's definition; its id does not change, and a changed definition at the same version is the next patch version.",
+        "tags": [
+          "templates"
+        ],
+        "x-deploy-key": "refused (session_required): a template is the operator's catalogue, which every deployment is made from, not a deployment a key is narrowed to; templates are added, changed and removed in the dashboard"
+      }
+    },
+    "/deploy/templates/{template}/export": {
+      "get": {
+        "operationId": "templateExport",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/blueprint.Blueprint"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Export a template's definition as a JSON file: a built-in's or one added here, in the catalogue's own schema.",
+        "tags": [
+          "templates"
+        ],
+        "x-deploy-key": "allowed"
+      },
+      "parameters": [
+        {
+          "description": "The template's id: user-\u003cname\u003e for one added here, or a built-in's for an export.",
+          "in": "path",
+          "name": "template",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
     "/deploy/traffic": {
       "get": {
         "operationId": "deploymentTrafficPulse",
@@ -19008,6 +20129,108 @@
           }
         }
       ]
+    },
+    "/deploy/{id}/domains/{domain}/dns-record": {
+      "get": {
+        "description": "Nothing is written. A plan that cannot be written says why in refusal and refusalCode rather than failing.",
+        "operationId": "deploymentDNSRecord",
+        "parameters": [
+          {
+            "description": "The TTL to plan with, in seconds; the provider's floor and a day's cap apply, and 300 when absent.",
+            "in": "query",
+            "name": "ttl",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.dnsRecordPlan"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Dry-run a domain's DNS record: what its zone holds, what would be written (A and AAAA to this server, or a proxied CNAME to the tunnel for a name served through Cloudflare Tunnel), and through which saved DNS credential and zone.",
+        "tags": [
+          "domains"
+        ],
+        "x-deploy-key": "refused (session_required): a domain's DNS record is read and written in a zone outside this server, with the DNS credentials saved under Certificates, in the dashboard"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The domain, as the environment's saved configuration lists it.",
+          "in": "path",
+          "name": "domain",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "description": "Answers 409 dns_record_unwritable (no saved credential reaches the zone), dns_record_tunnel_zone, dns_record_conflict (a record stands in the way and would have to be deleted), dns_record_foreign (a record this dashboard did not write, changed only with replace), no_public_address or tunnel_not_connected, and 502 dns_provider_error in the provider's words. Audited as deploy.domain.record.",
+        "operationId": "deploymentDNSRecordWrite",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/api.dnsRecordWriteRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.dnsRecordPlan"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Write a domain's DNS record into its zone with the DNS credentials saved under Certificates: create or change A and AAAA, or the tunnel's CNAME; a record is never deleted.",
+        "tags": [
+          "domains"
+        ],
+        "x-deploy-key": "refused (session_required): a domain's DNS record is read and written in a zone outside this server, with the DNS credentials saved under Certificates, in the dashboard"
+      }
     },
     "/deploy/{id}/duplicate": {
       "parameters": [
@@ -26795,7 +28018,7 @@
       "name": "previews"
     },
     {
-      "description": "What a deployment's public route serves: the maintenance switch and pages, hostname suggestions, the requests and traffic it saw.",
+      "description": "What a deployment's public route serves: the maintenance switch and pages, hostname suggestions, a domain's DNS record, the requests and traffic it saw.",
       "name": "domains"
     },
     {
@@ -26821,6 +28044,10 @@
     {
       "description": "The template catalogue and the plan a template renders to.",
       "name": "blueprints"
+    },
+    {
+      "description": "Templates added on this dashboard: made from a Compose file or a deployment's frozen plan, imported, changed, exported and removed.",
+      "name": "templates"
     },
     {
       "description": "Operating a deployed game server: players, console, properties and importing an existing one.",

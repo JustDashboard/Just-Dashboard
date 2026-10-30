@@ -97,11 +97,15 @@ free.
 
 ### 🚀 Deployments
 
-- Deploy from a repository, an image, a Compose stack or **137 reviewed templates**, 43 of them
+- Deploy from a repository, an image, a Compose stack or **157 reviewed templates**, 56 of them
   multi-service stacks — an application with its own database, cache or worker
+- Templates of your own beside them: a pasted Compose file or a running deployment saved as one,
+  validated as a built-in is, its passwords made secrets each deployment generates or is asked for,
+  exported and imported as JSON
 - Minecraft Java and Bedrock servers with their console, players and settings file, kept on
   loopback until you open the port and its firewall rule
-- Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
+- Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more, and builds what no
+  recipe does with Railpack, the builder Railway and Coolify use, pinned to a reviewed release
 - Push to deploy, plus pull-request previews only your tailnet can reach — Compose stacks too, every
   service isolated on the preview's own network and storage
 - Database branches for previews: a preview's own copy of a linked PostgreSQL, MySQL or MariaDB,
@@ -116,6 +120,9 @@ free.
 - The container flags `docker run` has, per deployment: the user it runs as, a read-only root with
   writable paths in memory, ulimits, the container's own sysctls and NVIDIA GPUs
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
+- A domain's DNS record created from its settings with those same credentials: the A and AAAA to this
+  server, or a tunnel's CNAME, written into its zone at Cloudflare, Route 53, DigitalOcean, Google Cloud
+  DNS, Linode, OVH, Gandi or your own RFC 2136 server, shown as a dry run first and never deleting a record
 - Domains served through Cloudflare Tunnel from a server with no public address or open port: the
   connector runs as a container, and its routes and DNS records are set as each release goes live
 - Edge rules per deployment: block, answer or redirect by path, method, user agent or address, a
@@ -181,8 +188,8 @@ free.
 - Alerts when a database goes down, fills its disk, runs low on connections, lags or misses a backup
 - An MCP server for AI clients such as Claude Code, Cursor and VS Code: keys that reach only the
   databases you choose, read-only unless you allow changes, never a protected one, and the
-  deployments only if you allow it — every one or the ones you pick — through 110 tools in all,
-  97 tools generated from the deployment API; every call audited
+  deployments only if you allow it — every one or the ones you pick — through 113 tools in all,
+  100 tools generated from the deployment API; every call audited
 
 </td>
 </tr>
@@ -234,7 +241,8 @@ free.
 - Scheduled backups to disk, S3, Backblaze B2, an SFTP server or Google Drive, OneDrive, Dropbox, WebDAV
   and the other services rclone speaks, encrypted on the way out, and native database dumps
 - A coverage map of everything that is *not* backed up yet
-- Single-file and in-place restore
+- Single-file and in-place restore, on this server or a fresh one: import what a destination holds and
+  restore it there, its Docker volumes made again
 
 </td>
 </tr>
@@ -550,9 +558,9 @@ inside it, as in any CI system.
 **AI clients.** An MCP key given the deployments (**Databases → MCP server**, every deployment or the
 ones you pick) reaches the same API as tools: six written by hand — list deployments, runs and
 releases, read a run's log, deploy, roll back — and, when *Offer every deployment route as a tool* is
-on for the key (it is for a new key, and off for every key made before it until you turn it on), 97
+on for the key (it is for a new key, and off for every key made before it until you turn it on), 100
 tools generated from the deployment API, one per route a deploy key may call, named for its operation
-(`deployment_configuration_save`, `deployment_variable_put`, …): 110 tools in all with the seven
+(`deployment_configuration_save`, `deployment_variable_put`, …): 113 tools in all with the seven
 database tools. *Read* is offered the reads; *Deploy* also the changes, held to your role and to everything above that a deploy key cannot
 do; a destructive route also needs a role that may take destructive actions. Each call goes through
 the dashboard's own routes as the key and is in the audit log twice: as the MCP call and as the

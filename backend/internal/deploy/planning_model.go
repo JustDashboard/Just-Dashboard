@@ -17,6 +17,7 @@ import (
 
 	"github.com/distribution/reference"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/blueprint"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/tailnetgate"
 )
@@ -149,6 +150,12 @@ type DraftSourceConfig struct {
 	// fields. They are the only thing that varies between two deployments of
 	// the same reviewed blueprint version.
 	BlueprintInputs map[string]string `json:"blueprintInputs,omitempty"`
+	// BlueprintDefinition is a template added on this dashboard, frozen into
+	// the source when it is saved (PlanningStore.WithUserTemplate): the
+	// definition this deployment renders from on every later run, whatever
+	// becomes of the stored template. A built-in has none; it is re-resolved
+	// from the catalogue the binary ships.
+	BlueprintDefinition json.RawMessage `json:"blueprintDefinition,omitempty"`
 }
 
 type SourceIdentity struct {
@@ -225,6 +232,11 @@ type DetectedCandidate struct {
 	// any path it has no file for with index.html.
 	SPAFallback   bool   `json:"spaFallback,omitempty"`
 	PythonVersion string `json:"pythonVersion,omitempty"`
+	// RailpackProvider is the Railpack provider that would build this
+	// candidate's directory: beside a recipe, the choice the build step
+	// offers next to it; on a Railpack candidate, the one it builds with
+	// (detect_railpack.go).
+	RailpackProvider string `json:"railpackProvider,omitempty"`
 	// UnpinnedDependencies records that the manifest names dependencies
 	// without exact versions, so a rebuild may install different ones.
 	UnpinnedDependencies bool                `json:"unpinnedDependencies,omitempty"`
@@ -578,6 +590,15 @@ type BuildPlanConfig struct {
 	// files decide (planning_compiled.go).
 	JavaVersion   string `json:"javaVersion,omitempty"`
 	DotnetVersion string `json:"dotnetVersion,omitempty"`
+	// RailpackVersion, RailpackProvider and RailpackConfig are a Railpack
+	// build's settings (build_railpack.go): the release from the reviewed
+	// catalogue (empty for the dashboard's current one, pinned by digest),
+	// the provider Railpack is told to use instead of detecting one, and
+	// the configuration file it reads, relative to the root directory
+	// (empty for railpack.json, read when the repository has one).
+	RailpackVersion  string `json:"railpackVersion,omitempty"`
+	RailpackProvider string `json:"railpackProvider,omitempty"`
+	RailpackConfig   string `json:"railpackConfig,omitempty"`
 }
 
 // BuildSecretConfig names a variable and the reviewed recipe stages in which
@@ -1190,6 +1211,15 @@ func (c DraftSourceConfig) Validate() error {
 		}
 	case SourceModeBlueprint:
 		allowed = sourceFieldSet("blueprintId", "blueprintVersion", "blueprintInputs")
+		if blueprint.IsUserID(c.BlueprintID) {
+			// A template added here deploys from the definition saved with
+			// the source, never from one a client chose to send, which is
+			// why the saves replace it from the store before this runs.
+			allowed["blueprintDefinition"] = true
+			if len(c.BlueprintDefinition) == 0 || len(c.BlueprintDefinition) > blueprint.MaxUserTemplateBytes {
+				return fmt.Errorf("%w: the template %s is not saved with this source; choose it again", ErrInvalidSource, c.BlueprintID)
+			}
+		}
 		if c.Kind == SourceCompose {
 			// A Compose template stores the document rendered from it
 			// (WithTemplateDocuments), which every release then runs.
@@ -1242,6 +1272,7 @@ func (c DraftSourceConfig) firstUnexpectedField(allowed map[string]bool) string 
 		{"platform", c.Platform != ""}, {"composeFiles", len(c.ComposeFiles) != 0}, {"resourceId", c.ResourceID != ""},
 		{"blueprintId", c.BlueprintID != ""}, {"blueprintVersion", c.BlueprintVersion != ""},
 		{"blueprintInputs", len(c.BlueprintInputs) != 0},
+		{"blueprintDefinition", len(c.BlueprintDefinition) != 0},
 	}
 	for _, field := range present {
 		if field.set && !allowed[field.name] {
@@ -1544,6 +1575,9 @@ func (c PlanConfiguration) Validate() error {
 	}
 	if c.Build.PrimaryService != "" && (c.Build.Method != BuildCompose || !validComposeServiceName(c.Build.PrimaryService)) {
 		return invalidField("build.primaryService", "a primary service names one service of a Compose stack")
+	}
+	if err := validateRailpackSettings(c.Build); err != nil {
+		return err
 	}
 	for _, path := range []string{c.Build.RootDirectory, c.Build.Dockerfile} {
 		if path != "" && !safeRelativePath(path) {
@@ -2304,7 +2338,7 @@ func validDetectedDatabaseEngine(engine string) bool {
 
 func validBuildMethod(method BuildMethod) bool {
 	switch method {
-	case BuildRecipe, BuildDockerfile, BuildStatic, BuildImage, BuildCompose, BuildNone, BuildLegacyCompose:
+	case BuildRecipe, BuildDockerfile, BuildStatic, BuildImage, BuildCompose, BuildNone, BuildLegacyCompose, BuildRailpack:
 		return true
 	default:
 		return false
@@ -2417,6 +2451,7 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			(candidate.Root != "" && !safeRelativePath(candidate.Root)) || len(candidate.Root) > 4096 ||
 			len(candidate.Framework) > 128 || len(candidate.Recipe) > 32 ||
 			(candidate.Recipe != "" && !validRecipe(candidate.Recipe)) ||
+			(candidate.RailpackProvider != "" && !slices.Contains(railpackProviders, candidate.RailpackProvider)) ||
 			len(candidate.PythonVersion) > 16 || (candidate.PythonVersion != "" && !pythonRecipeVersionRE.MatchString(candidate.PythonVersion)) ||
 			len(candidate.Variables) > 64 || len(candidate.Databases) > 8 ||
 			len(candidate.BuildCommand) > 4096 ||
@@ -2769,6 +2804,9 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 	}
 	if c.Build.Method != BuildCompose {
 		c.Build.PrimaryService = ""
+	}
+	if c.Build.Method != BuildRailpack {
+		c.Build.RailpackVersion, c.Build.RailpackProvider, c.Build.RailpackConfig = "", "", ""
 	}
 	if c.Build.Secrets == nil {
 		c.Build.Secrets = []BuildSecretConfig{}

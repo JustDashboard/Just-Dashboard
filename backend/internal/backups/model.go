@@ -124,6 +124,12 @@ type Job struct {
 	// Stored counts the successful artifacts retention has kept and their
 	// total size, which is what the destination is being charged for.
 	Stored StoredSummary `json:"stored"`
+	// Imported is a job adopted from what a destination holds: the record of
+	// another server's job (or this one's before a rebuild), whose runs point
+	// at archives this server did not write. It never runs, is never
+	// scheduled, and its archives are never pruned from here.
+	Imported bool       `json:"imported,omitempty"`
+	Origin   *JobOrigin `json:"origin,omitempty"`
 }
 
 // StoredSummary is the space a job's retained artifacts take.
@@ -153,6 +159,11 @@ type Run struct {
 	Duration            string               `json:"duration,omitempty"`
 	Manifest            *Manifest            `json:"manifest,omitempty"`
 	RestoreVerification *RestoreVerification `json:"restoreVerification,omitempty"`
+	// Imported is a run adopted from a destination's catalogue. Its artifact
+	// is the destination's object; LocalCopy, when the import was asked to
+	// keep one, is a copy on this server that reads prefer while it exists.
+	Imported  bool   `json:"imported,omitempty"`
+	LocalCopy string `json:"localCopy,omitempty"`
 }
 
 func encodeJSON(v any) string {
@@ -194,45 +205,8 @@ func (j *Job) Validate() error {
 	if len(j.Sources) == 0 && len(j.DatabaseDumps) == 0 {
 		return fmt.Errorf("at least one source path or database dump is required")
 	}
-	if !j.TargetKind.Valid() {
-		return fmt.Errorf("target must be one of local, s3, b2, sftp, rclone")
-	}
-	switch j.TargetKind {
-	case TargetLocal:
-		if strings.TrimSpace(j.Target.Path) == "" {
-			return fmt.Errorf("a local target needs a destination path")
-		}
-	case TargetS3, TargetB2:
-		if strings.TrimSpace(j.Target.Bucket) == "" {
-			return fmt.Errorf("an object storage target needs a bucket")
-		}
-		if j.TargetKind == TargetB2 && strings.TrimSpace(j.Target.Endpoint) == "" {
-			return fmt.Errorf("Backblaze B2 needs its S3-compatible endpoint, for example s3.us-west-004.backblazeb2.com")
-		}
-	case TargetSFTP:
-		j.Target.Host = strings.TrimSpace(j.Target.Host)
-		j.Target.Username = strings.TrimSpace(j.Target.Username)
-		j.Target.Path = strings.TrimSpace(j.Target.Path)
-		if !validSFTPHost(j.Target.Host) {
-			return fmt.Errorf("an SFTP destination needs a host name or address, without a scheme or path")
-		}
-		if j.Target.Port == 0 {
-			j.Target.Port = 22
-		}
-		if j.Target.Port < 1 || j.Target.Port > 65535 {
-			return fmt.Errorf("the SFTP port must be between 1 and 65535")
-		}
-		if j.Target.Username == "" || strings.ContainsAny(j.Target.Username, " \t\r\n\x00@:") {
-			return fmt.Errorf("an SFTP destination needs the account to sign in as")
-		}
-		if j.Target.Path == "" || !validRemotePath(j.Target.Path) {
-			return fmt.Errorf("an SFTP destination needs the directory archives are written to")
-		}
-	case TargetRclone:
-		j.Target.Path = strings.Trim(strings.TrimSpace(j.Target.Path), "/")
-		if !validRemotePath(j.Target.Path) {
-			return fmt.Errorf("the folder inside the rclone remote is not a usable path")
-		}
+	if err := ValidateTarget(j.TargetKind, &j.Target); err != nil {
+		return err
 	}
 	if j.Retention < 0 {
 		return fmt.Errorf("retention cannot be negative")
@@ -249,6 +223,53 @@ func (j *Job) Validate() error {
 			return fmt.Errorf("container %q is not a container name or id", name)
 		}
 		j.PauseContainers[i] = name
+	}
+	return nil
+}
+
+// ValidateTarget checks a destination on its own, as a job's and as one
+// entered to read its catalogue, normalising what it can (an SFTP port of 22
+// when none was given, an rclone folder without its slashes).
+func ValidateTarget(kind TargetKind, target *TargetConfig) error {
+	if !kind.Valid() {
+		return fmt.Errorf("target must be one of local, s3, b2, sftp, rclone")
+	}
+	switch kind {
+	case TargetLocal:
+		if strings.TrimSpace(target.Path) == "" {
+			return fmt.Errorf("a local target needs a destination path")
+		}
+	case TargetS3, TargetB2:
+		if strings.TrimSpace(target.Bucket) == "" {
+			return fmt.Errorf("an object storage target needs a bucket")
+		}
+		if kind == TargetB2 && strings.TrimSpace(target.Endpoint) == "" {
+			return fmt.Errorf("Backblaze B2 needs its S3-compatible endpoint, for example s3.us-west-004.backblazeb2.com")
+		}
+	case TargetSFTP:
+		target.Host = strings.TrimSpace(target.Host)
+		target.Username = strings.TrimSpace(target.Username)
+		target.Path = strings.TrimSpace(target.Path)
+		if !validSFTPHost(target.Host) {
+			return fmt.Errorf("an SFTP destination needs a host name or address, without a scheme or path")
+		}
+		if target.Port == 0 {
+			target.Port = 22
+		}
+		if target.Port < 1 || target.Port > 65535 {
+			return fmt.Errorf("the SFTP port must be between 1 and 65535")
+		}
+		if target.Username == "" || strings.ContainsAny(target.Username, " \t\r\n\x00@:") {
+			return fmt.Errorf("an SFTP destination needs the account to sign in as")
+		}
+		if target.Path == "" || !validRemotePath(target.Path) {
+			return fmt.Errorf("an SFTP destination needs the directory archives are written to")
+		}
+	case TargetRclone:
+		target.Path = strings.Trim(strings.TrimSpace(target.Path), "/")
+		if !validRemotePath(target.Path) {
+			return fmt.Errorf("the folder inside the rclone remote is not a usable path")
+		}
 	}
 	return nil
 }

@@ -21,8 +21,10 @@ import type {
   BackupJob,
   BackupResourceReport,
   BackupRestoreResult,
+  BackupRestoreTarget,
   BackupRun,
   Container,
+  DbConnection,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
@@ -55,7 +57,7 @@ import {
   scheduleLabel,
   targetLabel,
 } from "@/components/backups/shared"
-import { LastRun } from "@/components/backups/job-card"
+import { LastRun, importedFrom } from "@/components/backups/job-card"
 import { RunContents, RunEncryption, RunLog, RunRail } from "@/components/backups/job-runs"
 import { JobMark, destinationProduct, jobProducts, jobProject } from "@/components/backups/marks"
 import { JobMap } from "@/components/backups/protection-map"
@@ -298,6 +300,12 @@ export function JobPage() {
                       <span>encrypted with this server&apos;s backup key</span>
                     </>
                   )}
+                  {job.imported && (
+                    <>
+                      <FactDot />
+                      <span>{importedFrom(job)}</span>
+                    </>
+                  )}
                   {job.recovery && (
                     <>
                       <FactDot />
@@ -345,13 +353,15 @@ export function JobPage() {
               <StatTile
                 label="Next run"
                 value={job.enabled && job.nextRun ? relativeTime(job.nextRun) : "—"}
-                tone={!job.enabled && job.schedule ? "warning" : undefined}
+                tone={!job.enabled && job.schedule && !job.imported ? "warning" : undefined}
                 hint={
-                  !job.schedule
-                    ? "runs by hand"
-                    : job.enabled
-                      ? scheduleLabel(job.schedule)
-                      : "schedule paused"
+                  job.imported
+                    ? "imported; it never runs or prunes here"
+                    : !job.schedule
+                      ? "runs by hand"
+                      : job.enabled
+                        ? scheduleLabel(job.schedule)
+                        : "schedule paused"
                 }
               />
             </StatGrid>
@@ -510,10 +520,14 @@ function RunInspector({
             <span className="numeric">{timestamp(run.startedAt)}</span>
             <FactDot />
             <span>{run.trigger.replaceAll("_", " ")}</span>
-            <FactDot />
-            <span>
-              took <span className="numeric text-foreground">{run.duration ?? "—"}</span>
-            </span>
+            {!run.imported && (
+              <>
+                <FactDot />
+                <span>
+                  took <span className="numeric text-foreground">{run.duration ?? "—"}</span>
+                </span>
+              </>
+            )}
             {run.sizeBytes > 0 && (
               <>
                 <FactDot />
@@ -580,6 +594,7 @@ function RunInspector({
       <RunLog log={run.log} />
       {run.manifest && <RunContents manifest={run.manifest} />}
       {run.manifest?.encryption && <RunEncryption encryption={run.manifest.encryption} />}
+      {run.imported && <RunOrigin run={run} />}
       {run.artifact && (
         <p className="font-mono text-hint break-all text-muted-foreground">{run.artifact}</p>
       )}
@@ -587,6 +602,37 @@ function RunInspector({
         <ArchiveBrowser run={run} canRestore={canRestore} onRestorePaths={onRestorePaths} />
       )}
     </section>
+  )
+}
+
+/**
+ * Where an imported run came from: the server, the job and the run there, and
+ * where this server reads it — the destination's object, or the copy kept here
+ * first while it is there.
+ */
+function RunOrigin({ run }: { run: BackupRun }) {
+  const origin = run.manifest?.origin
+  return (
+    <DetailList className="text-body">
+      <Detail label="Imported">
+        {origin ? (
+          <span>
+            run {origin.runId} of {origin.jobName} on{" "}
+            {origin.host || "a server that did not record its name"},{" "}
+            <span className="numeric">{timestamp(origin.startedAt)}</span>
+          </span>
+        ) : (
+          "from a destination"
+        )}
+      </Detail>
+      <Detail label="Read from">
+        {run.localCopy ? (
+          <span className="font-mono text-xs break-all">{run.localCopy}, else the destination</span>
+        ) : (
+          "the destination, on every restore"
+        )}
+      </Detail>
+    </DetailList>
   )
 }
 
@@ -784,7 +830,42 @@ function RestoreFilesDialog({
   const [mode, setMode] = useState<"directory" | "in-place">("directory")
   const [destination, setDestination] = useState("")
   const inPlace = mode === "in-place"
-  const ready = inPlace ? canInPlace : destination.trim().length > 0
+  // Where each source goes on this host and what has to be made first — a
+  // volume Docker does not have, a directory that is not there — read from
+  // the manifest before anything is confirmed. On another host than the one
+  // that took the backup, that is most of what the restore does.
+  const plan = usePoll(
+    (signal) =>
+      inPlace
+        ? get<{ targets: BackupRestoreTarget[] }>(
+            `/backups/runs/${run.id}/restore-plan`,
+            paths.length > 0 ? { path: paths } : undefined,
+            signal,
+          )
+        : Promise.resolve({ targets: [] as BackupRestoreTarget[] }),
+    0,
+    [run.id, inPlace, paths.join("\n")],
+  )
+  // A plan that cannot be read leaves the restore as it was before plans:
+  // every recorded source written back over its path, which the server still
+  // makes when it is missing.
+  const fallback = sources.map((source): BackupRestoreTarget => ({
+    archivePath: source.archivePath,
+    path: source.path,
+    target: source.path,
+    kind: source.kind ?? "path",
+    volume: source.volume,
+    exists: true,
+  }))
+  const targets: BackupRestoreTarget[] = Array.isArray(plan.data?.targets)
+    ? plan.data.targets
+    : plan.data || plan.error
+      ? fallback
+      : []
+  const refused = targets.filter((target) => target.refused)
+  const ready = inPlace
+    ? canInPlace && Boolean(plan.data || plan.error) && refused.length === 0
+    : destination.trim().length > 0
 
   const submit = () => {
     onOpenChange(false)
@@ -794,17 +875,42 @@ function RestoreFilesDialog({
       workingLabel: "Restoring files from the backup…",
       description: inPlace ? (
         <div className="space-y-2">
-          <p className="text-destructive">
-            Overwrites the live files under {sources.length === 1 ? "this path" : "these paths"}
-            {paths.length > 0 ? ` for the ${paths.length} selected entries` : ""}:
-          </p>
-          <ul className="space-y-0.5 font-mono text-xs">
-            {sources.map((s) => (
-              <li key={s.archivePath} className="truncate">
-                {s.path}
-              </li>
-            ))}
-          </ul>
+          {targets.some((target) => target.exists) && (
+            <>
+              <p className="text-destructive">
+                Overwrites the live files under{" "}
+                {targets.filter((target) => target.exists).length === 1
+                  ? "this path"
+                  : "these paths"}
+                {paths.length > 0 ? ` for the ${paths.length} selected entries` : ""}:
+              </p>
+              <ul className="space-y-0.5 font-mono text-xs">
+                {targets
+                  .filter((target) => target.exists)
+                  .map((target) => (
+                    <li key={target.archivePath} className="truncate">
+                      {target.target}
+                    </li>
+                  ))}
+              </ul>
+            </>
+          )}
+          {targets.some((target) => target.creates) && (
+            <>
+              <p>Makes on this server first:</p>
+              <ul className="space-y-0.5 font-mono text-xs">
+                {targets
+                  .filter((target) => target.creates)
+                  .map((target) => (
+                    <li key={target.archivePath} className="truncate">
+                      {target.creates === "volume"
+                        ? `volume ${target.volume}`
+                        : `${target.target} and the directories above it`}
+                    </li>
+                  ))}
+              </ul>
+            </>
+          )}
         </div>
       ) : (
         <p>
@@ -820,7 +926,12 @@ function RestoreFilesDialog({
           { confirm: confirmation },
         )
         notify.success(`Restored ${res.entries} entries (${bytes(res.bytes)})`, {
-          description: (res.targets ?? [res.destination]).join(", "),
+          description: [
+            (res.targets ?? [res.destination]).join(", "),
+            res.created?.length ? `Made ${res.created.join(", ")}` : "",
+          ]
+            .filter(Boolean)
+            .join(". "),
         })
         onDone()
       },
@@ -869,12 +980,42 @@ function RestoreFilesDialog({
           <div className="space-y-1.5">
             <FormNote tone="warning">
               Each source tree is written back over its original path. Anything changed there since
-              the backup is replaced.
+              the backup is replaced; what is not there is made first.
             </FormNote>
-            <ul className="space-y-0.5 font-mono text-xs">
-              {sources.map((s) => (
-                <li key={s.archivePath} className="truncate">
-                  {s.archivePath} → {s.path}
+            {plan.error && (
+              <FormNote>
+                What this server lacks could not be read ({plan.error.message}); anything missing is
+                made as the files are written.
+              </FormNote>
+            )}
+            {plan.loading && !plan.data && <LoadingRows rows={2} />}
+            <ul className="space-y-1 text-xs" aria-label="Where each source goes">
+              {targets.map((target) => (
+                <li key={target.archivePath} className="min-w-0">
+                  <span className="block truncate font-mono">
+                    {target.archivePath} →{" "}
+                    {target.creates === "volume" ? `volume ${target.volume}` : target.target}
+                  </span>
+                  <span
+                    className={cn(
+                      "text-hint",
+                      target.refused
+                        ? "text-destructive"
+                        : target.exists
+                          ? "text-warning"
+                          : "text-muted-foreground",
+                    )}
+                  >
+                    {target.refused
+                      ? target.refused
+                      : target.creates === "volume"
+                        ? "not on this server: the volume is made through Docker with the labels it had"
+                        : target.creates === "directory"
+                          ? "not on this server: made with the directories above it"
+                          : target.kind === "volume"
+                            ? `overwrites volume ${target.volume}`
+                            : "overwrites what is there"}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -934,8 +1075,29 @@ function RestoreDatabaseDialog({
     ),
   )
   const [database, setDatabase] = useState("")
-  const selected = dumps.find((dump) => String(dump.connectionId) === connectionId)
-  const target = database.trim() || selected?.database || ""
+  // An imported run's dumps were taken of another server's connections: the
+  // dump is picked by where it lies in the archive, and goes into one of this
+  // server's saved connections of the same engine.
+  const imported = Boolean(run.imported)
+  const [dumpPath, setDumpPath] = useState(dumps[0]?.archivePath ?? "")
+  const [into, setInto] = useState("")
+  const connections = usePoll(
+    (signal) =>
+      imported ? get<DbConnection[]>("/databases/", undefined, signal) : Promise.resolve([]),
+    0,
+    [imported],
+  )
+  const importedDump = dumps.find((dump) => dump.archivePath === dumpPath)
+  const candidates = (connections.data ?? []).filter(
+    (connection) => connection.driver === importedDump?.driver,
+  )
+  const intoConnection = candidates.find((connection) => String(connection.id) === into)
+  const selected = imported
+    ? importedDump && intoConnection
+      ? { ...importedDump, connectionId: intoConnection.id, name: intoConnection.name }
+      : undefined
+    : dumps.find((dump) => String(dump.connectionId) === connectionId)
+  const target = database.trim() || (imported ? intoConnection?.database : selected?.database) || ""
   return (
     <Modal
       open
@@ -964,7 +1126,11 @@ function RestoreDatabaseDialog({
               action: async (confirmation) => {
                 const res = await post<{ output: string }>(
                   `/backups/runs/${run.id}/restore-database`,
-                  { connectionId: selected.connectionId, database: database.trim() || undefined },
+                  {
+                    connectionId: selected.connectionId,
+                    database: database.trim() || undefined,
+                    dump: imported ? selected.archivePath : undefined,
+                  },
                   { confirm: confirmation },
                 )
                 notify.success(`Restored ${selected.name} into ${target}`, {
@@ -980,20 +1146,71 @@ function RestoreDatabaseDialog({
       }
     >
       <div className="space-y-4">
-        <Field label="Database dump" htmlFor="restore-db-connection">
-          <Select value={connectionId} onValueChange={setConnectionId}>
-            <SelectTrigger id="restore-db-connection" size="sm" className="w-full">
-              <SelectValue placeholder="Choose a dump" />
-            </SelectTrigger>
-            <SelectContent>
-              {dumps.map((dump) => (
-                <SelectItem key={dump.connectionId} value={String(dump.connectionId)}>
-                  {dump.name} · {dump.driver} · {dump.database} · {bytes(dump.bytes)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
+        {imported ? (
+          <>
+            <Field label="Database dump" htmlFor="restore-db-dump">
+              <Select
+                value={dumpPath}
+                onValueChange={(value) => {
+                  setDumpPath(value)
+                  setInto("")
+                }}
+              >
+                <SelectTrigger id="restore-db-dump" size="sm" className="w-full">
+                  <SelectValue placeholder="Choose a dump" />
+                </SelectTrigger>
+                <SelectContent>
+                  {dumps.map((dump) => (
+                    <SelectItem key={dump.archivePath} value={dump.archivePath}>
+                      {dump.name} · {dump.driver} · {dump.database} · {bytes(dump.bytes)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field
+              label="Into"
+              htmlFor="restore-db-into"
+              hint="This run was taken on another server, so its dump goes into one of this server's saved connections of the same engine."
+            >
+              <Select value={into} onValueChange={setInto}>
+                <SelectTrigger id="restore-db-into" size="sm" className="w-full">
+                  <SelectValue
+                    placeholder={
+                      connections.loading
+                        ? "Reading the saved connections…"
+                        : candidates.length === 0
+                          ? `No saved ${importedDump?.driver ?? ""} connection here`
+                          : "Choose a connection"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {candidates.map((connection) => (
+                    <SelectItem key={connection.id} value={String(connection.id)}>
+                      {connection.name} · {connection.database || connection.host}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          </>
+        ) : (
+          <Field label="Database dump" htmlFor="restore-db-connection">
+            <Select value={connectionId} onValueChange={setConnectionId}>
+              <SelectTrigger id="restore-db-connection" size="sm" className="w-full">
+                <SelectValue placeholder="Choose a dump" />
+              </SelectTrigger>
+              <SelectContent>
+                {dumps.map((dump) => (
+                  <SelectItem key={dump.connectionId} value={String(dump.connectionId)}>
+                    {dump.name} · {dump.driver} · {dump.database} · {bytes(dump.bytes)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        )}
         <Field
           label="Target database"
           htmlFor="restore-db-target"
@@ -1003,7 +1220,7 @@ function RestoreDatabaseDialog({
             id="restore-db-target"
             value={database}
             onChange={(e) => setDatabase(e.target.value)}
-            placeholder={selected?.database ?? ""}
+            placeholder={(imported ? intoConnection?.database : selected?.database) ?? ""}
             className="font-mono text-body"
           />
         </Field>

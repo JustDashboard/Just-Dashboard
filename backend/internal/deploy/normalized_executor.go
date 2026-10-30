@@ -545,9 +545,21 @@ func (e *NormalizedStepExecutor) prepareContext(
 			return normalizedStepFailure(err)
 		}
 	}
-	prepared, err := e.builder.PrepareWithin(ctx, source.Root, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag, names...)
+	builder := e.builder
+	if plan.Build.Method == BuildRailpack {
+		// Railpack's planner is configured by the plain RAILPACK_* build
+		// variables, as it is on Railway; every other value it gets by name.
+		builder = builder.withRailpackValues(railpackPlanValues(buildVariables, secret))
+	}
+	prepared, err := builder.PrepareWithin(ctx, source.Root, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag, names...)
 	if err != nil {
 		cleaned, cleanupErr := source.Cleanup()
+		var railpack *RailpackPrepareError
+		if errors.As(err, &railpack) {
+			result := e.railpackPrepareFailure(execution, plan, railpack, buildRedactor(buildLogRedactions(buildVariables, secret)))
+			result.Cleanup = mustJSON(map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)})
+			return result
+		}
 		result := normalizedStepFailure(err)
 		if errors.Is(err, ErrBuilderUnavailable) {
 			result = builderUnavailableFailure(err)

@@ -198,8 +198,12 @@ func renderComposeDocument(blueprint *Blueprint, public *Service) (string, error
 		addPair(services, service.Name, node)
 	}
 	root := mappingNode()
-	root.HeadComment = fmt.Sprintf("Rendered by Just Dashboard from the reviewed %s@%s template.\n"+
-		"Values are the deployment's own variables; this file holds none.", blueprint.ID, blueprint.Version)
+	origin := "the reviewed"
+	if IsUserID(blueprint.ID) {
+		origin = "this dashboard's own"
+	}
+	root.HeadComment = fmt.Sprintf("Rendered by Just Dashboard from %s %s@%s template.\n"+
+		"Values are the deployment's own variables; this file holds none.", origin, blueprint.ID, blueprint.Version)
 	addPair(root, "services", services)
 	if len(volumes.Content) > 0 {
 		addPair(root, "volumes", volumes)

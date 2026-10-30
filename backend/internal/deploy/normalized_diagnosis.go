@@ -49,6 +49,32 @@ func (e *NormalizedStepExecutor) buildFailure(
 	}
 }
 
+// railpackPrepareFailure is a plan Railpack's planner refused: what it
+// printed goes to the transcript, and the step is named from its info as a
+// build is named from its output, with what Railpack did decide kept beside
+// the cause for the run page.
+func (e *NormalizedStepExecutor) railpackPrepareFailure(
+	execution StepExecution,
+	plan *StoredExecutionPlan,
+	failure *RailpackPrepareError,
+	redact func(string) string,
+) StepResult {
+	for _, line := range failure.Output {
+		_ = stepLog(execution, "stdout", redact(line))
+	}
+	cause := railpackPrepareCause(failure, causeContext{build: plan.Build, runtime: plan.Runtime, variables: plan.Variables})
+	message := redact(cause.sentence())
+	_ = stepLog(execution, "status", "Diagnosis: "+message)
+	state := StepFailed
+	if failure.Transient {
+		state = StepUnavailable
+	}
+	return StepResult{
+		State: state, ErrorCode: cause.Code, ErrorMessage: message,
+		Evidence: mustJSON(map[string]any{"cause": cause, "railpack": failure.Evidence}),
+	}
+}
+
 // buildFailureCleanup keeps the process-group evidence of a build stopped at
 // its time limit beside the workspace cleanup.
 func buildFailureCleanup(cleanup map[string]any, err error) map[string]any {

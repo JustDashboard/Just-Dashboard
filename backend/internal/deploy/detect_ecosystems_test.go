@@ -34,17 +34,31 @@ func TestEcosystemsWithoutARecipeAreNamed(t *testing.T) {
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			result := detectShapeFixture(t, fixture.files)
-			if len(result.Candidates) != 1 {
+			// Railpack has a provider for C/C++ and Zig, so there it is
+			// the build detection offers, ahead of the language's own
+			// candidate that says what to commit (detect_railpack.go).
+			provider := railpackEcosystemProviders[fixture.framework]
+			want := 1
+			if provider != "" {
+				want = 2
+			}
+			if len(result.Candidates) != want {
 				t.Fatalf("candidates = %#v", result.Candidates)
 			}
-			candidate := result.Candidates[0]
+			candidate := result.Candidates[want-1]
 			if candidate.Framework != fixture.framework || candidate.Recipe != "" || candidate.Profile != fixture.profile ||
 				candidate.Port != fixture.port || !strings.Contains(candidate.RecipeIssue, "no automatic recipe") ||
 				!strings.Contains(candidate.RecipeIssue, fixture.remedy) {
 				t.Fatalf("candidate = %#v", candidate)
 			}
-			if result.SelectedID != candidate.ID {
-				t.Fatal("the only candidate was not selected")
+			selected := result.Candidates[0]
+			if result.SelectedID != selected.ID {
+				t.Fatalf("the first candidate was not selected: %s", result.SelectionReason)
+			}
+			if provider != "" && (selected.BuildMethod != BuildRailpack || selected.RailpackProvider != provider ||
+				selected.Framework != fixture.framework || selected.RecipeIssue != "" || selected.Confidence != ConfidenceLow ||
+				!strings.Contains(result.SelectionReason, "cannot build as detected")) {
+				t.Fatalf("Railpack fallback = %#v (%s)", selected, result.SelectionReason)
 			}
 		})
 	}

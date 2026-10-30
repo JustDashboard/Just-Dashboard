@@ -7,6 +7,7 @@ import type {
   DeploymentRecipe,
   GitHubBranch,
   NodePackageManager,
+  RailpackProvider,
   WorkloadProfile,
 } from "@/lib/types"
 import { Disclosure, Field, FieldRow, FormFact, FormFacts, FormSection } from "@/components/form"
@@ -29,10 +30,14 @@ import {
 } from "@/components/ui/select"
 import {
   DEPLOYMENT_NAME,
+  RAILPACK_DESCRIPTION,
+  RAILPACK_PROVIDERS,
   RECIPE_LABELS,
   SOURCE_KIND_LABELS,
+  buildMethodHint,
   frameworkLabel,
   humanize,
+  railpackProviderLabel,
 } from "@/components/deploy/vocabulary"
 import {
   DOTNET_VERSIONS,
@@ -61,12 +66,49 @@ import {
 import type { ConfigureFlow, FlowUpdate } from "@/components/deploy/new-project/draft"
 import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
 
-/** The three ways a repository becomes an image, in the order they are tried. */
-const BUILD_METHODS: [DeploymentBuildMethod, string][] = [
-  ["recipe", "Automatic recipe"],
-  ["dockerfile", "Dockerfile"],
-  ["static", "Static files"],
+/**
+ * The ways a repository becomes an image, in the order they are tried, each with the
+ * line that says what decides the build.
+ */
+const BUILD_METHODS: [DeploymentBuildMethod, string, string][] = [
+  ["recipe", "Automatic recipe", "A reviewed recipe for the language, on digest-pinned bases."],
+  ["dockerfile", "Dockerfile", "The repository's own Dockerfile, built as written."],
+  ["static", "Static files", "The files as they are, served by nginx."],
+  ["railpack", "Railpack", RAILPACK_DESCRIPTION],
 ]
+
+/** What switching the build method to `method` changes besides the method. */
+function buildMethodPatch(method: DeploymentBuildMethod) {
+  if (method !== "railpack") {
+    return {
+      method,
+      railpackVersion: undefined,
+      railpackProvider: undefined,
+      railpackConfig: undefined,
+    }
+  }
+  // A recipe's settings, a Dockerfile's and a static site's output are refused
+  // beside Railpack, which decides each of them itself.
+  return {
+    method,
+    recipe: undefined,
+    packageManager: undefined,
+    goVersion: undefined,
+    goPackage: undefined,
+    cargoBin: undefined,
+    pythonVersion: undefined,
+    nodeVersion: undefined,
+    phpVersion: undefined,
+    systemPackages: undefined,
+    javaVersion: undefined,
+    dotnetVersion: undefined,
+    dockerfile: undefined,
+    target: undefined,
+    outputDirectory: undefined,
+    spaFallback: undefined,
+    secrets: [],
+  }
+}
 
 /**
  * Step one of the four Configure was split into: **what is this project, and
@@ -663,23 +705,81 @@ export function StepProject({
               what it runs, where the files are. */}
           <div className="space-y-5">
             <FieldRow columns={2}>
-              <Field label="Build method" htmlFor="build-method" error={errors.buildMethod}>
+              <Field
+                label="Build method"
+                htmlFor="build-method"
+                error={errors.buildMethod}
+                hint={buildMethodHint(configuration.build.method, flow.candidate?.railpackProvider)}
+              >
                 <Select
                   value={configuration.build.method}
-                  onValueChange={(value) => updateBuild({ method: value as DeploymentBuildMethod })}
+                  onValueChange={(value) =>
+                    updateBuild(buildMethodPatch(value as DeploymentBuildMethod))
+                  }
                 >
                   <SelectTrigger id="build-method" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {BUILD_METHODS.map(([method, label]) => (
-                      <SelectItem key={method} value={method}>
+                    {BUILD_METHODS.map(([method, label, description]) => (
+                      <SelectItem key={method} value={method} hint={description}>
                         {label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </Field>
+              {configuration.build.method === "railpack" && (
+                <Field
+                  label="Railpack provider"
+                  htmlFor="railpack-provider"
+                  hint={
+                    flow.candidate?.railpackProvider
+                      ? `Leave on Railpack's detection, which reads this directory as ${railpackProviderLabel(flow.candidate.railpackProvider)}.`
+                      : "Leave on Railpack's detection unless it picks the wrong language."
+                  }
+                >
+                  <Select
+                    value={configuration.build.railpackProvider ?? "detect"}
+                    onValueChange={(value) =>
+                      updateBuild({
+                        railpackProvider:
+                          value === "detect" ? undefined : (value as RailpackProvider),
+                      })
+                    }
+                  >
+                    <SelectTrigger id="railpack-provider" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="detect">Railpack&apos;s detection</SelectItem>
+                      {RAILPACK_PROVIDERS.map(([provider, label]) => (
+                        <SelectItem key={provider} value={provider}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+              {configuration.build.method === "railpack" && (
+                <Field
+                  label="Railpack configuration"
+                  htmlFor="railpack-config"
+                  hint="Leave empty to read railpack.json when the repository has one."
+                  error={errors.railpackConfig}
+                >
+                  <Input
+                    id="railpack-config"
+                    className="font-mono"
+                    value={configuration.build.railpackConfig ?? ""}
+                    onChange={(event) =>
+                      updateBuild({ railpackConfig: event.target.value.trim() || undefined })
+                    }
+                    placeholder="railpack.json"
+                  />
+                </Field>
+              )}
               {configuration.build.method === "recipe" && (
                 <Field label="Language" htmlFor="recipe">
                   <Select
@@ -988,7 +1088,15 @@ export function StepProject({
 
             {configuration.build.method !== "dockerfile" && (
               <FieldRow columns={2}>
-                <Field label="Build command" htmlFor="build-command">
+                <Field
+                  label="Build command"
+                  htmlFor="build-command"
+                  hint={
+                    configuration.build.method === "railpack"
+                      ? "Leave empty for the one Railpack's plan runs."
+                      : undefined
+                  }
+                >
                   <Input
                     id="build-command"
                     value={configuration.build.buildCommand ?? ""}

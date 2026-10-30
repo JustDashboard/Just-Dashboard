@@ -168,6 +168,9 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         icon: Rocket,
         children: [
           { title: "Projects", href: "/deploy", icon: GridMasonry },
+          // The catalogue's own templates: read by anyone who may read the
+          // catalogue, added and removed by an administrator.
+          { title: "Templates", href: "/deploy/templates", icon: Layers },
           // Reading the credential list needs system.admin — the backend seals
           // every credential route alike — so the row is drawn only where the
           // destination would not simply refuse it.

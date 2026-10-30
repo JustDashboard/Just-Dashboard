@@ -11,9 +11,14 @@ through `files.Resolve`. Named volumes must inspect as local Docker volumes with
 mountpoint. Unknown, anonymous or unresolved sources block the gate rather than disappearing from coverage.
 
 Backups persist `manifest_json` on each successful run with a version, resolved source paths, disjoint
-archive roots, exclusions, original destination and SHA-256 digest. The migration is additive; old runs
+archive roots, exclusions, original destination and SHA-256 digest; since 0.8.2 also the archive's size,
+its origin (install, host, job, run) and which sources are Docker volumes, with the manifest written
+beside the archive at the destination for another server to import. The migration is additive; old runs
 with no manifest remain listable/restorable but cannot satisfy the coverage gate. The gate checks both
-the current job and the completed run: editing a job cannot make an old artifact cover new data.
+the current job and the completed run: editing a job cannot make an old artifact cover new data. An
+imported job and its runs ([importing](../backend/git-backups-users.md#importing-what-a-destination-holds))
+are another server's: they cover nothing in the coverage report, and their dumps never answer when a
+connection here was last dumped, since the connection ids they record are that server's.
 
 Full persistent-data coverage rejects any exclusion filter. Every requested path must be under a recorded
 source and present in the verified tar archive. Checking actual entries prevents a directory created after

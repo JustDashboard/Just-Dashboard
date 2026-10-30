@@ -81,6 +81,9 @@ type HostObservation struct {
 	// GPURuntime is the daemon's OCI runtimes, observed for a plan that asks
 	// for GPUs (runtime_flags.go).
 	GPURuntime *GPURuntimeObservation `json:"gpuRuntime,omitempty"`
+
+	// Railpack is the pinned Railpack image, observed for a Railpack plan.
+	Railpack *RailpackObservation `json:"railpack,omitempty"`
 }
 
 // GPURuntimeObservation is whether Docker on this server lists the NVIDIA
@@ -111,6 +114,10 @@ type DomainObservation struct {
 	CertificateRefusal     string `json:"certificateRefusal,omitempty"`
 	Conflict               bool   `json:"conflict"`
 	Detail                 string `json:"detail,omitempty"`
+	// Record is, for a name the lookup says does not reach where it
+	// should, the record it needs and whether saved credentials can write
+	// it (preflight_dns_record.go).
+	Record *DNSRecordObservation `json:"record,omitempty"`
 }
 
 type FirewallObservation struct {
@@ -169,6 +176,9 @@ type ObservationRequest struct {
 	// EnvironmentID, when the environment exists, whose address it has.
 	Tailnet       bool
 	EnvironmentID int64
+	// RailpackImage asks whether the pinned Railpack image is here or can
+	// be pulled, for a Railpack plan (preflight_railpack.go).
+	RailpackImage string
 	// NeedsGPU asks which runtimes the daemon offers, for a plan that asks
 	// for GPUs.
 	NeedsGPU bool
@@ -220,6 +230,7 @@ type HostPreflightObserver struct {
 	tailnet    PreflightTailnet
 	volumeRoot string
 	tunnel     TunnelObserver
+	dnsRecords DNSRecordObserver
 }
 
 func (o *HostPreflightObserver) WithTailnet(tailnet PreflightTailnet) *HostPreflightObserver {
@@ -326,6 +337,9 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	if request.NeedsGPU {
 		observation.GPURuntime = o.observeGPURuntime(ctx)
 	}
+	if request.RailpackImage != "" {
+		observation.Railpack = o.observeRailpack(ctx, request.RailpackImage)
+	}
 	observeReleaseTaskTools(request.ReleaseTaskTools, observation.Facilities)
 	if len(request.Domains) > 0 {
 		proxyAvailable := false
@@ -413,6 +427,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 				} else {
 					domain.Detail = check.Summary
 				}
+				domain.Record = o.observeDNSRecord(ctx, planned, check.PointsHere, check.BehindProxy)
 				domains[index] = domain
 			}()
 		}
@@ -647,12 +662,13 @@ func PreflightDraftWithSource(
 func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) ObservationRequest {
 	source := draft.Data.Source
 	request := ObservationRequest{
-		NeedsGit:     source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit,
-		NeedsGitLFS:  source.IncludeLFS && (source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit),
-		NeedsDocker:  configuration.Build.Method != BuildNone,
-		NeedsBuildx:  buildMethodNeedsBuildx(configuration.Build.Method, draft.Data.Detection.Compose),
-		NeedsCompose: configuration.Build.Method == BuildCompose || configuration.Build.Method == BuildLegacyCompose,
-		Paths:        []string{}, Ports: []PortObservation{},
+		NeedsGit:      source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit,
+		NeedsGitLFS:   source.IncludeLFS && (source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit),
+		NeedsDocker:   configuration.Build.Method != BuildNone,
+		NeedsBuildx:   buildMethodNeedsBuildx(configuration.Build.Method, draft.Data.Detection.Compose),
+		NeedsCompose:  configuration.Build.Method == BuildCompose || configuration.Build.Method == BuildLegacyCompose,
+		RailpackImage: railpackObservedImage(configuration.Build),
+		Paths:         []string{}, Ports: []PortObservation{},
 		Domains:      append([]PlannedDomain(nil), configuration.Domains...),
 		Dependencies: append([]PlannedDependency(nil), configuration.Dependencies...),
 	}
@@ -864,6 +880,7 @@ func preflightFindings(
 				facility.name, ""))
 		}
 	}
+	findings = append(findings, railpackFindings(draft, configuration, observation)...)
 	for _, path := range observation.Paths {
 		switch {
 		case !path.Contained:
@@ -908,6 +925,9 @@ func preflightFindings(
 			// This server's public address, and a certificate for it, say
 			// nothing about a name Cloudflare serves through the tunnel.
 			findings = append(findings, tunnelFindings(planned, observation, field)...)
+			if item, ok := dnsRecordFinding(planned, domainEvidence[planned.Hostname].Record, field); ok {
+				findings = append(findings, item)
+			}
 			continue
 		}
 		if !ok {
@@ -969,6 +989,9 @@ func preflightFindings(
 				"Domain does not resolve to this host", strings.Join(observed.Addresses, ", "),
 				"The public route and HTTP certificate challenge will not reach this server.",
 				"Update DNS or explicitly accept the delayed cutover.", "proxy", field))
+		}
+		if item, ok := dnsRecordFinding(planned, observed.Record, field); ok {
+			findings = append(findings, item)
 		}
 		if planned.HTTPS && observed.CertificateRefusal != "" {
 			item := finding("certificate_wildcard_unavailable", PreflightBlocked,
@@ -1259,7 +1282,7 @@ func preflightFindings(
 
 func buildMethodNeedsBuildx(method BuildMethod, compose *ComposeAnalysis) bool {
 	switch method {
-	case BuildRecipe, BuildDockerfile, BuildStatic:
+	case BuildRecipe, BuildDockerfile, BuildStatic, BuildRailpack:
 		return true
 	case BuildCompose:
 		if compose != nil {

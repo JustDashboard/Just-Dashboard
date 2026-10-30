@@ -1,0 +1,144 @@
+{
+  "id": "mage-ai",
+  "version": "1.0.0",
+  "name": "Mage",
+  "category": "automation",
+  "profile": "web",
+  "description": "A data pipeline tool: build batch and streaming pipelines from Python, SQL and R blocks in a notebook-style editor, schedule them, and watch their runs. One container with the project, its SQLite metadata and the pipelines' code on the data volume.",
+  "iconId": "bolt",
+  "docsUrl": "https://docs.mage.ai/production/deploying-to-cloud/using-docker",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "DEFAULT_OWNER_EMAIL",
+    "secretVariable": "DEFAULT_OWNER_PASSWORD",
+    "note": "Mage creates its owner from the environment on the first start: sign in with the e-mail chosen here and the generated DEFAULT_OWNER_PASSWORD from the Variables tab. It is applied only while no owner exists, so change the password inside Mage afterwards. Signed-in users can run code and open a terminal in the container, so invite only people you trust."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://github.com/mage-ai/mage-ai",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "mageai/mageai:0.9.80",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address the editor is opened at; nothing else here changes when it does."
+    },
+    {
+      "name": "owner-email",
+      "kind": "text",
+      "label": "Owner e-mail",
+      "required": true,
+      "default": "admin@example.com",
+      "variable": "DEFAULT_OWNER_EMAIL",
+      "description": "The owner account's sign-in e-mail.",
+      "pattern": "^[^@\\s]+@[^@\\s]+$"
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 6789,
+      "protocol": "tcp",
+      "purpose": "The editor, the API and the run views",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "project",
+      "target": "/home/src",
+      "purpose": "The project: pipelines' code, configuration and the SQLite metadata",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 2048,
+    "minMemoryMb": 1024
+  },
+  "checks": [
+    {
+      "name": "Status endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/status",
+      "timeoutSeconds": 300
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "DEFAULT_OWNER_USERNAME",
+        "value": "admin"
+      },
+      {
+        "kind": "set_variable",
+        "name": "REQUIRE_USER_AUTHENTICATION",
+        "value": "1"
+      },
+      {
+        "kind": "set_variable",
+        "name": "PROJECT_NAME",
+        "value": "default_project"
+      },
+      {
+        "kind": "set_variable",
+        "name": "USER_CODE_PATH",
+        "value": "/home/src/default_project"
+      },
+      {
+        "kind": "set_variable",
+        "name": "ENV",
+        "value": "production"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Mage migrates its metadata database on start; back up the project volume before moving to a newer image.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:d687d622fbb10ea82f19ed007ff943e03fe18810c3fb2db91b73b8d13f1bc0a3"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "owner-password",
+      "variable": "DEFAULT_OWNER_PASSWORD",
+      "label": "Owner password",
+      "length": 32,
+      "description": "The first password of the owner account."
+    },
+    {
+      "name": "jwt-secret",
+      "variable": "JWT_SECRET",
+      "label": "Session signing secret",
+      "length": 64,
+      "description": "Signs sessions; without it Mage would use a value every installation shares."
+    }
+  ]
+}

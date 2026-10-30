@@ -9,7 +9,7 @@
 - [`preview-isolation.md`](preview-isolation.md) — exact-revision approval, previews tested from the dashboard, Compose previews with every service isolated, copied production variables, database branches (a preview's own masked copy of a linked database), tailnet-only addresses, reconciliation with GitHub, storage, network and cleanup.
 - [`backup-coverage.md`](backup-coverage.md) — immutable archive manifests and persistent-data coverage limitations.
 - [`restore-verification.md`](restore-verification.md) — native SQLite snapshots and artifact-bound isolated application recovery checks.
-- [`recipes.md`](recipes.md) — build variable delivery, the framework catalogue (JavaScript, Python, Go, Rust, Java, .NET, Deno, PHP), environment discovery, Procfiles, where a server listens and whom it trusts behind the proxy, repository shape and candidate selection, other platforms' deployment files, background processes, ecosystems without a recipe, submodules and LFS, the single-page fallback and toolchain selection.
+- [`recipes.md`](recipes.md) — build variable delivery, the framework catalogue (JavaScript, Python, Go, Rust, Java, .NET, Deno, PHP), environment discovery, Procfiles, where a server listens and whom it trusts behind the proxy, repository shape and candidate selection, other platforms' deployment files, background processes, ecosystems without a recipe, Railpack (the build method beside the recipes: its planner container, the pinned frontend, detection's fallback and what it does not pin), submodules and LFS, the single-page fallback and toolchain selection.
 - [`git-policy.md`](git-policy.md) — shared polling/hook policy, manual-only mode, promotion-only production, complete path comparison and decision evidence.
 - [`canary-and-replicas.md`](canary-and-replicas.md) — replicas: several containers of one release behind one route, which plans may have them and why, how the runtime owner starts, names, stops and keeps them warm as one release, readiness on every replica, the nginx and Caddy pools and their passive health; canary releases: the strategy's terms, the canary step and its side-by-side judgement, abort and promotion, restart and cancellation, the split on each proxy, routes, CLI and UI; skew protection: the jd_release cookie, the route on each proxy, the warm release kept running for its visitors and every way it leaves the route; and the live proofs of all three.
 - [`staging-promotion.md`](staging-promotion.md) — the staging environment (what it copies from production and why), promoting a staging release's exact image into production with no build — and a pull request preview's approved image into staging — promotion-only production, retention of a promotion's image, removal, routes, UI and the decision record.
@@ -19,6 +19,11 @@
   tunnel created with the saved Cloudflare API token, the cloudflared connector as a managed container,
   a domain served through it (no certificate here, no public-address check), its routes and CNAME
   records, health in cloudflared's own words and the Tunnel down alert.
+- [`dns-records.md`](dns-records.md) — a domain's DNS record written from here with the DNS-01
+  credentials saved under Certificates: A and AAAA to this server or the tunnel's proxied CNAME, the
+  longest zone a saved credential reaches, the eight providers' APIs (RFC 2136 over signed DNS UPDATE),
+  the plan that never deletes, the dry-run and write routes, what was written and by whom, preflight's
+  `dns_record_writable` / `dns_record_missing` and the Domains sheet's Create the record.
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
   logs, the request readings, container lifecycle events, and the three container-output fixes.
 - [`image-vulnerabilities.md`](image-vulnerabilities.md) — each release's image and the bases it was
