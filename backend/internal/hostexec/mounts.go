@@ -56,6 +56,10 @@ func hostMountNamespace() (int, error) {
 // a goroutine locked to a thread of its own that unshares those attributes
 // first, and that thread is never unlocked: Go discards it when the goroutine
 // returns rather than handing a thread with another root to unrelated code.
+// The exception is the process's main thread, which Go parks instead of ending,
+// and which is what /proc/<pid>/ns reports. A program using this must keep that
+// thread off the scheduler with runtime.LockOSThread in an init function, as
+// cmd/server does.
 // Only fn itself is moved. A goroutine it starts runs in this container again,
 // and so does anything it leaves for later; descriptors it opens are the
 // process's and stay valid everywhere.
