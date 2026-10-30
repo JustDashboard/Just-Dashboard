@@ -51,6 +51,9 @@ A change that weakens any of these has to say so explicitly.
      network's dependents: the dashboard's own containers, the shared ingress and database-link members
      are never detached, nothing joins the dashboard's own network, a live deployment's network is not
      removed by hand, and an unreadable dependency reading refuses the change;
+   - `api.handleJobCancel` for stopping a job: it takes the capability the job's route took
+     (`jobs.Spec.Capability`, kept on a detached job's record across a restart), and `system.admin` for a
+     job naming none;
    - the generic job handlers for `network.diagnostic.*` jobs: lists filter them and get/stream/cancel
      require `system.admin`, matching the saved-artifact routes;
    - `api.boundaryGate` for a fail2ban ban, a CrowdSec decision and an SSH settings change: one that
@@ -372,8 +375,14 @@ What did **not** change, and must not:
 - Where `JD_REQUIRE_2FA` is true, an account with no authenticator gets a password-only session that
   reaches nothing but enrolment — the old behaviour, unchanged.
 - Turning an authenticator off is the account holder's own action, requires their password, and is
-  refused outright by `Service.DisableTOTP` where the policy demands one.
-- Setup, enrollment confirmation and code verification share one account-scoped attempt budget.
+  refused outright by `Service.DisableTOTP` where the policy demands one. Regenerating recovery codes
+  takes the same password, since a recovery code passes for the authenticator.
+- Setup, enrollment confirmation and code verification share one account-scoped attempt budget, and so
+  does every form that asks a session for its password again. Five wrong codes for an account lock its
+  second factor for fifteen minutes (`totp_failed_count`, `totp_locked_until`), whichever route they
+  came through and whichever kind of code they were; while it is locked a right code is refused too. Only
+  an accepted code ends the count: a password or passkey sign-in does not. An administrator's reset,
+  turning the authenticator off and a password reset at the host clear it.
   Enrollment cannot be used again after TOTP is enabled. An accepted TOTP counter or recovery code is
   consumed atomically with session elevation; another session cannot reuse it.
 - A passkey replaces the password and nothing else. A passkey sign-in starts its session through the

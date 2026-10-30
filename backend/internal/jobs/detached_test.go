@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 )
 
 // localUnits stands in for the host's systemd: each "unit" is an ordinary
@@ -168,7 +170,7 @@ func TestDetachedCommandShowsWhatItWasAskedToShow(t *testing.T) {
 // long as the unit runs.
 func TestDetachedCommandIsRecordedWhileItRuns(t *testing.T) {
 	m := detachedManager(t, t.TempDir(), newLocalUnits())
-	job := m.Start(Spec{Kind: "packages.install", Title: "Installing htop", Target: "htop", StartedBy: "tester", Timeout: 10 * time.Second},
+	job := m.Start(Spec{Kind: "packages.install", Title: "Installing htop", Target: "htop", StartedBy: "tester", Capability: auth.CapSystemAdmin, Timeout: 10 * time.Second},
 		func(ctx context.Context, out Emitter) error {
 			_, err := out.RunDetached(ctx, nil, nil, "sh", "-c", "sleep 1")
 			return err
@@ -185,6 +187,11 @@ func TestDetachedCommandIsRecordedWhileItRuns(t *testing.T) {
 			t.Fatal("no record was written for a running detached command")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	// A dashboard that restarts under this job still has to ask for what
+	// stopping it takes.
+	if rec.Job.Capability != auth.CapSystemAdmin {
+		t.Errorf("record lost the capability: %+v", rec.Job)
 	}
 	if rec.Job.ID != job.ID || rec.Job.Kind != "packages.install" || rec.Job.StartedBy != "tester" || rec.BootID != bootID() {
 		t.Errorf("record = %+v", rec)

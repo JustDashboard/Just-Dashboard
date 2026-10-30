@@ -163,7 +163,8 @@ func (s *Server) handleRemoteDesktopBridgeInstall(w http.ResponseWriter, r *http
 	}
 	httpx.SetAudit(r, "remote_desktop.stream.install", remotedesk.BridgeImage, nil)
 	spec := jobs.Spec{
-		Kind: "remote-desktop.stream.install", Title: "Install Stream mode", Target: "Moonlight Web " + remotedesk.BridgeVersion,
+		Capability: auth.CapSystemAdmin,
+		Kind:       "remote-desktop.stream.install", Title: "Install Stream mode", Target: "Moonlight Web " + remotedesk.BridgeVersion,
 		StartedBy: httpx.MustPrincipal(r).Username(), Timeout: 15 * time.Minute,
 	}
 	job, _ := s.modules.jobs.StartExclusive("remote-desktop.", spec, func(ctx context.Context, out jobs.Emitter) error {

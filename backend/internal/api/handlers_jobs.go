@@ -30,10 +30,12 @@ func (s *Server) mountJobRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleJobList))
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleJobGet))
 		r.Method(http.MethodGet, "/{id}/stream", s.handle(s.handleJobStream))
-		// Stopping a running upgrade needs the capability that started it.
-		// It is not in the destructive group: interrupting is how you *avoid*
-		// a bad outcome, and a typed phrase in front of a stop button is a
-		// phrase somebody types while something is going wrong.
+		// Stopping a running upgrade needs the capability that started it,
+		// which only the job knows, so handleJobCancel asks; service.control
+		// is the least any job takes. It is not in the destructive group:
+		// interrupting is how you *avoid* a bad outcome, and a typed phrase in
+		// front of a stop button is a phrase somebody types while something is
+		// going wrong.
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/{id}/cancel", s.handle(s.handleJobCancel))
@@ -78,10 +80,11 @@ func (s *Server) handleJobCancel(w http.ResponseWriter, r *http.Request) error {
 	if !ok {
 		return httpx.BadRequest("that operation is not running")
 	}
+	if needs := jobStopCapability(job); !httpx.MustPrincipal(r).Can(needs) {
+		httpx.SetAudit(r, "job.cancel", id, map[string]any{"kind": job.Kind, "needs": needs})
+		return httpx.ErrForbidden
+	}
 	if privateNetworkJob(job.Kind) {
-		if !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
-			return httpx.ErrForbidden
-		}
 		if strings.HasPrefix(job.Kind, netcapture.JobPrefix) {
 			captureID := strings.Split(strings.TrimPrefix(job.Kind, netcapture.JobPrefix), ".")[0]
 			httpx.SetAudit(r, "network.capture.cancel", captureID, map[string]any{"jobId": id})
@@ -105,6 +108,15 @@ func (s *Server) handleJobCancel(w http.ResponseWriter, r *http.Request) error {
 	httpx.SetAudit(r, "job.cancel", id, nil)
 	httpx.NoContent(w)
 	return nil
+}
+
+// jobStopCapability is what stopping a job takes. One with none named is a
+// record from before jobs named one, and fails closed.
+func jobStopCapability(job jobs.Job) auth.Capability {
+	if job.Capability == "" {
+		return auth.CapSystemAdmin
+	}
+	return job.Capability
 }
 
 // handleJobStream tails a job.

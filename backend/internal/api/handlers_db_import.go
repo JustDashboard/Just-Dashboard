@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
@@ -660,7 +661,7 @@ func (s *Server) handleImportStart(w http.ResponseWriter, r *http.Request) error
 		"structureOnly": req.StructureOnly}
 	httpx.SetAudit(r, "database.import.start", conn.Name, detail)
 
-	job, err := s.launchTransfer(r, conn, "import", "Import "+database, func(ctx context.Context, out jobs.Emitter) error {
+	job, err := s.launchTransfer(r, conn, auth.CapSystemAdmin, "import", "Import "+database, func(ctx context.Context, out jobs.Emitter) error {
 		var err error
 		if mode == importReplication {
 			err = s.runReplicationImport(ctx, conn, dsn, source, number, name, database, req, out)
@@ -945,7 +946,7 @@ func (s *Server) handleImportCutover(w http.ResponseWriter, r *http.Request) err
 	base := auditBaseOf(r)
 	detail := map[string]any{"name": row.Name, "database": row.Database, "source": row.Source.label()}
 	httpx.SetAudit(r, "database.import.cutover", conn.Name, detail)
-	err = s.startTransfer(w, r, conn, "import-cutover", "Cut over "+row.Database, func(ctx context.Context, out jobs.Emitter) error {
+	err = s.startTransfer(w, r, conn, auth.CapSystemAdmin, "import-cutover", "Cut over "+row.Database, func(ctx context.Context, out jobs.Emitter) error {
 		s.setImport(row.ID, importCutting, "")
 		err := s.runCutover(ctx, conn, dsn, source, row, out)
 		if err != nil {

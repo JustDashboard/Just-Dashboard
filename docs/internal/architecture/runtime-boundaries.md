@@ -173,6 +173,12 @@ records the greatest consumed 30-second counter; verification conditionally adva
 the session in one transaction, so simultaneous requests cannot reuse a code. Recovery codes are also
 consumed transactionally. An additive schema migration introduces the counter column; resetting TOTP
 clears the counter with the account update.
+Failed sign-ins count in the write itself (`auth.countFailure`, one `UPDATE … RETURNING`), so failures
+arriving together each count, and a lock set while a password was being checked stands. Five wrong
+passwords lock sign-in for fifteen minutes; five wrong codes, authenticator or recovery, lock the second
+factor for fifteen, apart from it (`totp_failed_count`, `totp_locked_until`, additive). A code's verdict
+and its count share one immediate transaction that does not end with the request, so an attempt counts
+even if the client disconnects. `VerifyReauthentication` reads and adds to the same count.
 An account marked `must_change_pw` must finish its required factors before the password-change
 route becomes available, and cannot use feature routes or API tokens until the password is changed.
 API tokens may narrow their creator's role, never widen it, and are demoted with the account.
@@ -221,7 +227,7 @@ heap had doubled, which left the process at about 155 MB for up to half a minute
 
 Local host-root account recovery uses the same binary's isolated `--admin` mode through
 `scripts/manage.sh`. It opens only an existing store and starts no server or modules. Password resets
-atomically set the new password, clear any owed change and login lockout, and revoke sessions/API
+atomically set the new password, clear any owed change and both lockouts, and revoke sessions/API
 tokens and passkeys while keeping TOTP enrollment, recovery codes and disabled state; account mutations are audited
 as actor `cli`. See [terminal tools](../operations/terminal-tools.md) for commands and the local
 privilege boundary.
@@ -300,7 +306,9 @@ columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract.
 `internal/audit` writes `audit_log` **and** mirrors every entry to the process log, so a trail survives
 the database being tampered with. The row is written with the request's values but not its
 cancellation (bounded at five seconds), so a client that disconnects once its mutation applied still
-leaves the row. An `Entry` records who (user, role, `Actor` = session or token), from
+leaves the row. Fields a request can choose are bounded in both the row and the log line (`Username`
+128 bytes, `Target` 1000, `Path` 2048, `Detail` 4000, `KeyName` 200, cut on a character boundary and
+ending in `…`). An `Entry` records who (user, role, `Actor` = session or token), from
 where, what (action, target, method, path), and how it went. Local root account commands use
 `Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target.
 
@@ -324,6 +332,12 @@ it was registered under and the name its owner gave it; `ON DELETE CASCADE` with
   `dash.example.com` does not sign in at the tailnet name; each is stored with its RP ID and the
   security page says where a passkey made elsewhere works. At an IP address the sign-in and security
   pages say why no passkey is offered instead of offering one that fails.
+- **The page's policy.** `deploy/Caddyfile` sends `publickey-credentials-get=(self)` in its
+  `Permissions-Policy`, and `passkeys.test.js` reads the file to hold it there, since browser specs do
+  not pass through Caddy. Where another proxy forbids the feature, the same pages say so in place of
+  the offer (`policyAllowsPasskeys`). A browser that cannot read its policy refuses with the
+  `NotAllowedError` a closed prompt gives, told apart by the browser's message (`refusedByPolicy`), and
+  only a press of the button reports it: the autofill offer stays quiet.
 - **Ceremonies.** Registration asks for a discoverable credential with user verification required,
   excludes the account's existing ones, and takes no attestation. Sign-in is discoverable (no
   username): the authenticator's user handle — an HMAC of the account id under the install's key, so

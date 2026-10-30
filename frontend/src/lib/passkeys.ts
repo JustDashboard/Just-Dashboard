@@ -33,10 +33,49 @@ export function fromBase64Url(value: string): ArrayBuffer {
  */
 export type PasskeyPlace = { usable: true } | { usable: false; reason: string }
 
+const POLICY_FEATURE = "publickey-credentials-get"
+
+/** What to say, and what to change, where the page's policy forbids a passkey. */
+export const PASSKEY_POLICY_REASON = `This page's Permissions-Policy forbids passkeys, so the browser will not offer one. The proxy in front of this dashboard has to send ${POLICY_FEATURE}=(self).`
+
+type PolicyReader = {
+  allowsFeature?: (feature: string) => boolean
+  features?: () => string[]
+}
+
+/**
+ * Whether the document's Permissions-Policy leaves passkeys on. A browser that
+ * cannot say, or does not know the feature's name, is taken as allowing it:
+ * the refusal then arrives as the error `refusedByPolicy` reads.
+ */
+export function policyAllowsPasskeys(doc: {
+  permissionsPolicy?: PolicyReader
+  featurePolicy?: PolicyReader
+}) {
+  const policy = doc.permissionsPolicy ?? doc.featurePolicy
+  if (!policy?.allowsFeature || !policy.features?.().includes(POLICY_FEATURE)) return true
+  return policy.allowsFeature(POLICY_FEATURE)
+}
+
+/**
+ * Whether a NotAllowedError is the page's policy rather than the person. Both
+ * are the same error, and closing the prompt is a choice nobody should be told
+ * off for, so the only thing to tell them apart by is what the browser wrote.
+ */
+export function refusedByPolicy(err: unknown) {
+  return (
+    err instanceof Error &&
+    err.name === "NotAllowedError" &&
+    /permissions.?policy|not enabled in this document/i.test(err.message)
+  )
+}
+
 export function passkeyPlace(where: {
   hostname: string
   secure: boolean
   supported: boolean
+  /** The document's policy; only a page that can read it says no. */
+  allowedByPolicy?: boolean
 }): PasskeyPlace {
   if (!where.supported) return { usable: false, reason: "This browser has no passkeys." }
   const host = where.hostname.replace(/^\[|\]$/g, "")
@@ -49,6 +88,7 @@ export function passkeyPlace(where: {
   if (!where.secure) {
     return { usable: false, reason: "Passkeys need https, or http on localhost." }
   }
+  if (where.allowedByPolicy === false) return { usable: false, reason: PASSKEY_POLICY_REASON }
   return { usable: true }
 }
 
@@ -59,6 +99,7 @@ function placeSnapshot(): PasskeyPlace {
     hostname: window.location.hostname,
     secure: window.isSecureContext,
     supported: typeof window.PublicKeyCredential === "function",
+    allowedByPolicy: policyAllowsPasskeys(document as Parameters<typeof policyAllowsPasskeys>[0]),
   })
   return place
 }

@@ -8,6 +8,7 @@ import { relativeTime } from "@/lib/format"
 import { recentLabels } from "@/lib/recent-jobs"
 import { cn } from "@/lib/utils"
 import type { Job, JobLine } from "@/lib/types"
+import { useAuth } from "@/hooks/use-auth"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/state"
@@ -135,6 +136,7 @@ export function JobConsole({
   onCancel?: () => void
   className?: string
 }) {
+  const { can } = useAuth()
   const scrollRef = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
 
@@ -162,7 +164,7 @@ export function JobConsole({
             </span>
           )}
         </span>
-        {running && onCancel && (
+        {running && onCancel && (!job.capability || can(job.capability)) && (
           <Button size="xs" variant="ghost" className="text-destructive" onClick={onCancel}>
             <Slash className="size-3" />
             Stop

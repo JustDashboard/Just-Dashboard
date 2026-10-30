@@ -190,6 +190,7 @@ export function TwoFactorSection({ className }: { className?: string }) {
   const [codes, setCodes] = useState<string[] | null>(null)
   const [password, setPassword] = useState("")
   const [disabling, setDisabling] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const enrolled = Boolean(status?.user?.totpEnabled)
@@ -245,8 +246,10 @@ export function TwoFactorSection({ className }: { className?: string }) {
   const regenerate = async () => {
     setBusy(true)
     try {
-      const res = await post<{ recoveryCodes: string[] }>("/account/recovery-codes")
+      const res = await post<{ recoveryCodes: string[] }>("/account/recovery-codes", { password })
       setCodes(res.recoveryCodes)
+      setPassword("")
+      setRegenerating(false)
       notify.success("Recovery codes regenerated", {
         description: "The previous set no longer works.",
       })
@@ -345,6 +348,37 @@ export function TwoFactorSection({ className }: { className?: string }) {
             </Button>
           </div>
         </>
+      ) : regenerating ? (
+        <>
+          <Notice title="The old set stops working at once">
+            A recovery code passes for your authenticator, so a new set costs your password. An open
+            session is not enough.
+          </Notice>
+          <Field label="Current password" htmlFor="regenerate-pw" className="max-w-sm">
+            <Input
+              id="regenerate-pw"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </Field>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" disabled={busy || !password} onClick={regenerate} pending={busy}>
+              Regenerate recovery codes
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setRegenerating(false)
+                setPassword("")
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </>
       ) : enrolled ? (
         <>
           <Verdict on title="A code is asked for at every sign-in">
@@ -352,7 +386,12 @@ export function TwoFactorSection({ className }: { className?: string }) {
             fresh set and ends the old one at once.
           </Verdict>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" disabled={busy} onClick={regenerate}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setRegenerating(true)}
+            >
               Regenerate recovery codes
             </Button>
             {!required && (

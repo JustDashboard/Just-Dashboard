@@ -15,6 +15,10 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   per-account lockout), `apiLim` (600/120, per principal), `destrLim` (30/10, destructive routes).
   TOTP setup, enrollment confirmation and verification share a separate account-keyed `loginLim`
   bucket; changing IP or switching between these routes does not reset the second-factor budget.
+  A password asked for again from a session spends the same bucket (`Server.spendGuess`):
+  `POST /account/password`, `/account/2fa/disable`, `/account/recovery-codes` and a passkey
+  registration's begin. Five wrong codes for an account, authenticator or recovery, also lock its
+  second factor for fifteen minutes (`auth.countFailure`), answered `429 second_factor_locked`.
   A passkey sign-in's finish (`POST /auth/passkey/finish`) sits in the password sign-in's group and
   spends the same per-address `loginLim` budget; its begin only hands out a sealed challenge and has
   a budget of its own, `passkeyLim` (60/20 per address), so a sign-in page's autofill cannot exhaust
@@ -208,6 +212,11 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   network, and a live deployment's network is removed only through its removal plan. Prune removes only
   the reviewed IDs still removable, never through the Engine's own prune. See
   [guarded changes](../backend/docker-files-logs.md#network-ownership-dependencies-and-guarded-changes).
+- **Stopping a job.** `POST /jobs/{id}/cancel` asks for `service.control` on the route, the least any
+  job takes, and `handleJobCancel` then asks for what the job's own `jobs.Spec.Capability` names: the
+  capability of the route that started it. A job naming none, such as a record from before they were
+  named, takes `system.admin`. `TestEveryJobSpecNamesItsCapability` holds every spec in the backend to
+  naming one. It stays outside `s.destructive` on purpose: stopping is how a bad outcome is avoided.
 - **Saved network diagnostics.** Launch, read, export, compare and cancel require `system.admin`.
   The generic job list/get/stream/cancel routes apply that same gate to `network.diagnostic.*` jobs,
   so artifact access cannot bypass the feature route. Deletion and retention changes additionally

@@ -377,7 +377,8 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 		title = "Replacing the key of " + plan.ReplacesKeyOf
 	}
 	return s.startCertbotJob(w, r, jobs.Spec{
-		Kind: "certbot.issue", Title: title, Target: target, Timeout: 10 * time.Minute,
+		Capability: auth.CapSystemAdmin,
+		Kind:       "certbot.issue", Title: title, Target: target, Timeout: 10 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		if credentials != nil {
 			path, err := credentials.Save()
@@ -696,7 +697,8 @@ func (s *Server) handleCertRenew(w http.ResponseWriter, r *http.Request) error {
 		kept = req.Name + " is not due for renewal yet, so certbot left it as it was."
 	}
 	return s.startCertbotJob(w, r, jobs.Spec{
-		Kind: "certbot.renew", Title: title, Target: target, Timeout: 10 * time.Minute,
+		Capability: auth.CapSystemAdmin,
+		Kind:       "certbot.renew", Title: title, Target: target, Timeout: 10 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		if req.DryRun {
 			out.Status("A dry run performs the whole exchange against the staging authority and changes nothing on disk.")
@@ -729,7 +731,8 @@ func (s *Server) handleRenewalRun(w http.ResponseWriter, r *http.Request) error 
 	}
 	httpx.SetAudit(r, "certificates.renewal.run", service, map[string]any{"streamed": true})
 	return s.startCertbotJob(w, r, jobs.Spec{
-		Kind: "certbot.renewal", Title: "Running " + service, Target: service, Timeout: 15 * time.Minute,
+		Capability: auth.CapSystemAdmin,
+		Kind:       "certbot.renewal", Title: "Running " + service, Target: service, Timeout: 15 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		before, _ := proxysvc.CertbotSerials()
 		previous, running, err := proxysvc.RenewalInvocation(ctx, service)
@@ -915,7 +918,8 @@ func (s *Server) handleCertRevoke(w http.ResponseWriter, r *http.Request) error 
 	}
 	httpx.SetAudit(r, "certificates.revoke", req.Name, map[string]any{"streamed": true})
 	return s.startCertbotJob(w, r, jobs.Spec{
-		Kind: "certbot.revoke", Title: "Revoking " + req.Name, Target: req.Name,
+		Capability: auth.CapDestructive,
+		Kind:       "certbot.revoke", Title: "Revoking " + req.Name, Target: req.Name,
 		Timeout: 5 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		_, err := certbotJob(ctx, out, args, "")
@@ -960,7 +964,8 @@ func (s *Server) handleCertDelete(w http.ResponseWriter, r *http.Request) error 
 	httpx.SetAudit(r, "certificates.delete", target,
 		map[string]any{"force": req.Force, "servedBy": served, "streamed": true})
 	return s.startCertbotJob(w, r, jobs.Spec{
-		Kind: "certbot.delete", Title: "Deleting " + target, Target: target, Timeout: 5 * time.Minute,
+		Capability: auth.CapDestructive,
+		Kind:       "certbot.delete", Title: "Deleting " + target, Target: target, Timeout: 5 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		out.Status("certbot deletes the files and the renewal configuration and revokes nothing: a copy of the certificate elsewhere stays valid until it expires.")
 		for i, args := range runs {
@@ -1060,7 +1065,8 @@ func (s *Server) handleDNSCredentialsTest(w http.ResponseWriter, r *http.Request
 	}
 	httpx.SetAudit(r, "certificates.dns.credentials.test", provider, map[string]any{"domain": req.Domain, "streamed": true})
 	return s.startCertbotJob(w, r, jobs.Spec{
-		Kind: "certbot.dns-test", Title: "Testing the " + name + " credentials on " + req.Domain,
+		Capability: auth.CapSystemAdmin,
+		Kind:       "certbot.dns-test", Title: "Testing the " + name + " credentials on " + req.Domain,
 		Target: req.Domain, Timeout: 10 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		out.Status("A dry run: certbot writes the challenge record through %s, has the authority check it, and saves no certificate.", name)
@@ -1106,7 +1112,8 @@ func (s *Server) handleCertbotInstall(w http.ResponseWriter, r *http.Request) er
 	}
 	httpx.SetAudit(r, "certificates.certbot.install", pkg, map[string]any{"manager": name, "plugin": req.Plugin})
 	return s.startCertbotJob(w, r, jobs.Spec{
-		Kind: "certbot.install", Title: "Installing " + what, Target: pkg, Timeout: time.Hour,
+		Capability: auth.CapSystemAdmin,
+		Kind:       "certbot.install", Title: "Installing " + what, Target: pkg, Timeout: time.Hour,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		defer s.modules.updates.Invalidate()
 		if err := s.runPackageCommand(ctx, out, env, name, args); err != nil {

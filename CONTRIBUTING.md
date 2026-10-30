@@ -190,6 +190,8 @@ to the contribution terms above, including the additional licence grant to the p
   backwards, a removed passkey, an enrolled account still asked for its code), and
   `account-passkeys.spec.ts`, which uses Chrome's virtual authenticator over CDP at `localhost` —
   WebAuthn refuses the `127.0.0.1` the other specs use, so the spec opens the same server by name.
+  Browser specs do not pass through Caddy; `src/lib/passkeys.test.js` reads `deploy/Caddyfile` to hold
+  its `Permissions-Policy` to allowing passkeys.
 - Installer and terminal-admin changes also run `python3 scripts/test_manage.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.

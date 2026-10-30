@@ -23,7 +23,7 @@ func (s *Service) ResetPassword(ctx context.Context, userID int64, password stri
 	}
 	defer tx.Rollback()
 	res, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ?, must_change_pw = 0,
-		failed_count = 0, locked_until = 0 WHERE id = ?`, hash, userID)
+		failed_count = 0, locked_until = 0, totp_failed_count = 0, totp_locked_until = 0 WHERE id = ?`, hash, userID)
 	if err != nil {
 		return err
 	}
