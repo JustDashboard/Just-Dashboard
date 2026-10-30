@@ -188,7 +188,7 @@ func (s *Server) handleSuricata(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) handleSuricataRulesUpdate(w http.ResponseWriter, r *http.Request) error {
 	httpx.SetAudit(r, "suricata.rules.update", "", nil)
-	s.startJob(w, r, jobs.Spec{Kind: "suricata.rules", Title: "Updating Suricata's rules", Timeout: 12 * time.Minute},
+	s.startJob(w, r, jobs.Spec{Capability: auth.CapSystemAdmin, Kind: "suricata.rules", Title: "Updating Suricata's rules", Timeout: 12 * time.Minute},
 		func(ctx context.Context, out jobs.Emitter) error {
 			return s.modules.netsec.UpdateSuricataRules(ctx, out)
 		})
@@ -211,7 +211,7 @@ func (s *Server) handleSuricataInterface(w http.ResponseWriter, r *http.Request)
 		return httpx.BadRequest("%v", err)
 	}
 	httpx.SetAudit(r, "suricata.interface", plan.Interface, map[string]any{"previous": plan.Previous})
-	s.startJob(w, r, jobs.Spec{Kind: "suricata.interface", Title: "Moving Suricata's capture to " + plan.Interface,
+	s.startJob(w, r, jobs.Spec{Capability: auth.CapSystemAdmin, Kind: "suricata.interface", Title: "Moving Suricata's capture to " + plan.Interface,
 		Target: plan.Interface, Timeout: 6 * time.Minute},
 		func(ctx context.Context, out jobs.Emitter) error {
 			return s.modules.netsec.ApplySuricataInterface(ctx, plan, out)
@@ -221,7 +221,7 @@ func (s *Server) handleSuricataInterface(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleSuricataStart(w http.ResponseWriter, r *http.Request) error {
 	httpx.SetAudit(r, "suricata.start", "", nil)
-	s.startJob(w, r, jobs.Spec{Kind: "suricata.start", Title: "Starting Suricata", Timeout: 3 * time.Minute},
+	s.startJob(w, r, jobs.Spec{Capability: auth.CapSystemAdmin, Kind: "suricata.start", Title: "Starting Suricata", Timeout: 3 * time.Minute},
 		func(ctx context.Context, out jobs.Emitter) error {
 			return s.modules.netsec.StartSuricata(ctx, out)
 		})

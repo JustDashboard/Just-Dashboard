@@ -71,15 +71,46 @@ func (s *Service) validTOTPStep(sealed, code string) (int64, bool) {
 	return 0, false
 }
 
+// Codes are guessed one transaction at a time: the store's are immediate, so
+// reading the lock and counting a wrong code cannot interleave with another
+// guess. Each outlives its request, since a client that hangs up after its guess
+// has still spent it.
+func secondFactorContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+}
+
+// countBadCode keeps the failure the transaction exists to record, and says
+// what the caller answers: wrong, or wrong and now locked.
+func countBadCode(ctx context.Context, tx *sql.Tx, userID int64, wrong error) error {
+	locked, err := countFailure(ctx, tx, failedCodes, userID)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if locked {
+		return ErrSecondFactorLocked
+	}
+	return wrong
+}
+
 func (s *Service) verifySecondFactor(ctx context.Context, sessionID string, userID int64, code string) error {
+	ctx, cancel := secondFactorContext(ctx)
+	defer cancel()
 	tx, err := s.st.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	var sealed string
-	if err := tx.QueryRowContext(ctx, `SELECT totp_secret FROM users WHERE id = ? AND totp_enabled = 1 AND disabled = 0`, userID).Scan(&sealed); err != nil {
+	var lockedUntil int64
+	if err := tx.QueryRowContext(ctx, `SELECT totp_secret, totp_locked_until FROM users WHERE id = ? AND totp_enabled = 1 AND disabled = 0`, userID).Scan(&sealed, &lockedUntil); err != nil {
 		return ErrInvalidTOTP
+	}
+	// Asked before the code is looked at, so a right one reads like a wrong one.
+	if lockedUntil > time.Now().Unix() {
+		return ErrSecondFactorLocked
 	}
 	consumed := false
 	method := "totp"
@@ -108,9 +139,14 @@ func (s *Service) verifySecondFactor(ctx context.Context, sessionID string, user
 		consumed = n == 1
 	}
 	if !consumed {
-		return ErrInvalidTOTP
+		return countBadCode(ctx, tx, userID, ErrInvalidTOTP)
 	}
 	if err := elevateTx(ctx, tx, sessionID, userID, method); err != nil {
+		return err
+	}
+	// Only the code ends the count. A password or a passkey is what comes
+	// before it, and starting a new session must not buy more guesses.
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET totp_failed_count = 0 WHERE id = ?`, userID); err != nil {
 		return err
 	}
 	return tx.Commit()

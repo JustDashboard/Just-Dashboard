@@ -3,8 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -212,6 +218,102 @@ func TestJobRoutesRespectCapabilities(t *testing.T) {
 	}
 	if w := c.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/cancel", `{}`, nil); w.Code != http.StatusForbidden {
 		t.Errorf("readonly cancel = %d, want 403", w.Code)
+	}
+}
+
+// Stopping a job takes what starting it took, and a job naming nothing takes
+// the most there is.
+func TestStoppingAJobTakesTheCapabilityThatStartedIt(t *testing.T) {
+	s := testServer(t)
+	limited := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "operator", auth.RoleLimited)}
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "root-operator", auth.RoleAdmin)}
+	for _, tc := range []struct {
+		capability auth.Capability
+		limitedMay bool
+	}{
+		{auth.CapServiceControl, true},
+		{auth.CapDestructive, false},
+		{auth.CapSystemAdmin, false},
+		{"", false},
+	} {
+		t.Run("needs "+string(tc.capability), func(t *testing.T) {
+			job := s.modules.jobs.Start(jobs.Spec{Kind: "test", Title: "Running", Capability: tc.capability},
+				func(ctx context.Context, out jobs.Emitter) error {
+					<-ctx.Done()
+					return ctx.Err()
+				})
+			defer s.modules.jobs.Cancel(job.ID)
+			w := limited.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/cancel", `{}`, nil)
+			if tc.limitedMay {
+				if w.Code != http.StatusNoContent {
+					t.Fatalf("limited cancel = %d: %s", w.Code, w.Body.String())
+				}
+				return
+			}
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("limited cancel = %d, want 403", w.Code)
+			}
+			if got, _, _ := s.modules.jobs.Get(job.ID); got.Status != jobs.StatusRunning {
+				t.Fatalf("the refused cancel stopped it: %s", got.Status)
+			}
+			if w := admin.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/cancel", `{}`, nil); w.Code != http.StatusNoContent {
+				t.Fatalf("admin cancel = %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+// A job whose spec forgets the capability would take system.admin to stop
+// without anybody having decided that. Every spec has to say.
+func TestEveryJobSpecNamesItsCapability(t *testing.T) {
+	root := ".."
+	found := 0
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(string(src), "jobs.Spec{") {
+			return nil
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, src, 0)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			lit, ok := n.(*ast.CompositeLit)
+			if !ok {
+				return true
+			}
+			sel, ok := lit.Type.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "Spec" {
+				return true
+			}
+			if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "jobs" {
+				return true
+			}
+			found++
+			for _, elt := range lit.Elts {
+				if kv, ok := elt.(*ast.KeyValueExpr); ok {
+					if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "Capability" {
+						return true
+					}
+				}
+			}
+			t.Errorf("%s: a jobs.Spec names no Capability", fset.Position(lit.Pos()))
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found < 20 {
+		t.Errorf("found %d specs; the walk is not reading the backend", found)
 	}
 }
 

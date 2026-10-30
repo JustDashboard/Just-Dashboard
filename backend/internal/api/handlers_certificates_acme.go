@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -81,7 +82,8 @@ func (s *Server) handleCertAccountEmail(w http.ResponseWriter, r *http.Request) 
 	httpx.SetAudit(r, "certificates.account.email", account.Server,
 		map[string]any{"account": account.ID, "email": req.Email, "streamed": true})
 	return s.startCertbotJob(w, r, jobs.Spec{
-		Kind: "certbot.account", Title: "Changing the contact of the " + account.Authority + " account",
+		Capability: auth.CapSystemAdmin,
+		Kind:       "certbot.account", Title: "Changing the contact of the " + account.Authority + " account",
 		Target: account.Server, Timeout: 2 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		cmd, err := proxysvc.CertbotCommand(ctx, nil, args...)

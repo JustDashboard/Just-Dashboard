@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/docker/docker/errdefs"
 	"github.com/robfig/cron/v3"
@@ -113,7 +114,8 @@ func (s *Server) scheduledPITRBackup(id int64) {
 	}
 	base := audit.Entry{Actor: "system", Username: "schedule", Method: "SCHEDULE", Path: "pitr/" + a.Container}
 	_, started := s.startPITR(a.Container, jobs.Spec{
-		Kind: pitrJobPrefix(a.Container) + "backup", Title: "Base backup of " + a.Container,
+		Capability: auth.CapServiceControl,
+		Kind:       pitrJobPrefix(a.Container) + "backup", Title: "Base backup of " + a.Container,
 		Target: a.Container, Timeout: pitrBackupTimeout, StartedBy: "schedule",
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		srv := s.pitrServerNamed(ctx, a.Container)

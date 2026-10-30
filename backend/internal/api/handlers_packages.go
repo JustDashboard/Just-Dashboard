@@ -171,7 +171,8 @@ func (s *Server) handlePackageUpgrade(w http.ResponseWriter, r *http.Request) er
 		title = "Installing security updates with " + name
 	}
 	s.startJob(w, r, jobs.Spec{
-		Kind: "updates.apply", Title: title, Target: name, Timeout: 2 * time.Hour,
+		Capability: auth.CapDestructive,
+		Kind:       "updates.apply", Title: title, Target: name, Timeout: 2 * time.Hour,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		finish := s.modules.updates.BeginMutation()
 		defer finish()
@@ -209,7 +210,8 @@ func (s *Server) handlePackageRefresh(w http.ResponseWriter, r *http.Request) er
 	httpx.SetAudit(r, "system.packages.refresh", name, nil)
 
 	s.startJob(w, r, jobs.Spec{
-		Kind: "packages.refresh", Title: "Refreshing the package index with " + name,
+		Capability: auth.CapServiceControl,
+		Kind:       "packages.refresh", Title: "Refreshing the package index with " + name,
 		Target: name, Timeout: 15 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		finish := s.modules.updates.BeginMutation()
@@ -248,7 +250,8 @@ func (s *Server) handlePackageInstall(w http.ResponseWriter, r *http.Request) er
 	httpx.SetAudit(r, "system.packages.install", target, map[string]any{"manager": name})
 
 	s.startJob(w, r, jobs.Spec{
-		Kind: "packages.install", Title: "Installing " + target, Target: target,
+		Capability: auth.CapSystemAdmin,
+		Kind:       "packages.install", Title: "Installing " + target, Target: target,
 		Timeout: 1 * time.Hour,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		finish := s.modules.updates.BeginMutation()
@@ -303,7 +306,8 @@ func (s *Server) handlePackageRemove(w http.ResponseWriter, r *http.Request) err
 		title = "Removing " + target + " and its configuration"
 	}
 	s.startJob(w, r, jobs.Spec{
-		Kind: "packages.remove", Title: title, Target: target, Timeout: 1 * time.Hour,
+		Capability: auth.CapSystemAdmin,
+		Kind:       "packages.remove", Title: title, Target: target, Timeout: 1 * time.Hour,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		finish := s.modules.updates.BeginMutation()
 		defer finish()

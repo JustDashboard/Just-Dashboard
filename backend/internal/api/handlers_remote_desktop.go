@@ -160,7 +160,8 @@ func (s *Server) handleRemoteDesktopInstall(w http.ResponseWriter, r *http.Reque
 	}
 	httpx.SetAudit(r, "remote_desktop.engine.install", remotedesk.GuacdImage, nil)
 	spec := jobs.Spec{
-		Kind: "remote-desktop.install", Title: "Install Remote Desktop", Target: "guacd " + remotedesk.GuacdVersion,
+		Capability: auth.CapSystemAdmin,
+		Kind:       "remote-desktop.install", Title: "Install Remote Desktop", Target: "guacd " + remotedesk.GuacdVersion,
 		StartedBy: httpx.MustPrincipal(r).Username(), Timeout: 15 * time.Minute,
 	}
 	job, _ := s.modules.jobs.StartExclusive("remote-desktop.", spec, func(ctx context.Context, out jobs.Emitter) error {
