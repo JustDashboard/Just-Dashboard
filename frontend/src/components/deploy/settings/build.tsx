@@ -69,7 +69,6 @@ import {
 } from "@/components/deploy/deployment-defaults"
 import {
   RAILPACK_DEFAULT_VERSION,
-  RAILPACK_DESCRIPTION,
   RAILPACK_PROVIDERS,
   RECIPE_SHORT,
   railpackProviderLabel,
@@ -1231,9 +1230,10 @@ function BuildForm({
         {build.method === "railpack" && (
           <div className="animate-rise space-y-5">
             <FormNote>
-              {RAILPACK_DESCRIPTION} Railpack{" "}
-              {lastRailpack?.version ?? build.railpackVersion ?? RAILPACK_DEFAULT_VERSION} is pinned
-              by digest; the builder and runtime images its plan names are Railpack&apos;s own.
+              Railpack {lastRailpack?.version ?? build.railpackVersion ?? RAILPACK_DEFAULT_VERSION}{" "}
+              — the builder Railway and Coolify use — plans the build with its own detection and is
+              pinned by digest; the builder and runtime images its plan names are Railpack&apos;s
+              own.
             </FormNote>
             <FieldRow>
               <Field
@@ -1370,7 +1370,7 @@ function BuildForm({
                 id="build-command"
                 label="Build command"
                 value={build.buildCommand ?? ""}
-                hint="Empty runs the one Railpack's plan has."
+                placeholder="Railpack's plan"
                 error={errorFor("build-command")}
                 readOnly={!canEdit}
                 onChange={(buildCommand) => setBuild({ ...build, buildCommand })}
@@ -1379,11 +1379,7 @@ function BuildForm({
                 id="build-start"
                 label="Start command"
                 value={build.startCommand ?? ""}
-                hint={
-                  lastRailpack?.startCommand
-                    ? `Empty starts with \`${lastRailpack.startCommand}\`, as Railpack planned it last.`
-                    : "Empty starts the way Railpack's plan does."
-                }
+                placeholder={lastRailpack?.startCommand ?? "Railpack's plan"}
                 error={errorFor("build-start")}
                 readOnly={!canEdit}
                 onChange={(startCommand) => setBuild({ ...build, startCommand })}
@@ -1655,6 +1651,7 @@ function CommandField({
   hint,
   error,
   readOnly,
+  placeholder = "recipe default",
   onChange,
 }: {
   id: string
@@ -1663,6 +1660,8 @@ function CommandField({
   hint?: string
   error?: string
   readOnly: boolean
+  /** What runs when the field is empty. */
+  placeholder?: string
   onChange: (value: string) => void
 }) {
   return (
@@ -1677,7 +1676,7 @@ function CommandField({
           readOnly={readOnly}
           aria-invalid={Boolean(error)}
           className="font-mono"
-          placeholder="recipe default"
+          placeholder={placeholder}
           autoComplete="off"
           spellCheck={false}
           onChange={(event) => onChange(event.target.value)}
