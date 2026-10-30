@@ -517,6 +517,7 @@ export function Configure({
   }
 
   const current: ConfigureStepKey = created ? "done" : step === "done" ? "review" : step
+  const [opening, setOpening] = useState<{ section: PlanSection } | null>(null)
 
   /** The head of the screen, so a step change starts where the question is. */
   const toTop = () =>
@@ -551,21 +552,32 @@ export function Configure({
    */
   const openSection = (section: PlanSection) => {
     onStepChange(SECTION_STEPS[section])
-    // Two frames: one for the step being opened to render, one for the fold
-    // inside it to lay out before anything is scrolled to it.
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        const fold = SECTION_FOLDS[section]
-        if (fold) {
-          const element = document.getElementById(fold)
-          if (element instanceof HTMLDetailsElement) element.open = true
-        }
-        document
-          .getElementById(SECTION_IDS[section])
-          ?.scrollIntoView({ block: "start", behavior: "smooth" })
-      }),
-    )
+    setOpening({ section })
   }
+
+  // The step comes back through the address, and the router delivers that when
+  // it gets to it, so no count of frames is the moment its fields exist. This
+  // waits for the step itself, then one frame for the fold to lay out before
+  // anything is scrolled to it. A press is answered once: coming back to the
+  // step later must not open the fold again.
+  const answered = useRef<typeof opening>(null)
+  useEffect(() => {
+    if (!opening || answered.current === opening || current !== SECTION_STEPS[opening.section]) {
+      return
+    }
+    answered.current = opening
+    const { section } = opening
+    requestAnimationFrame(() => {
+      const fold = SECTION_FOLDS[section]
+      if (fold) {
+        const element = document.getElementById(fold)
+        if (element instanceof HTMLDetailsElement) element.open = true
+      }
+      document
+        .getElementById(SECTION_IDS[section])
+        ?.scrollIntoView({ block: "start", behavior: "smooth" })
+    })
+  }, [opening, current])
 
   const openRemedyField = (finding: DeploymentPreflightFinding) => {
     const section = sectionForField(finding.fieldId)
