@@ -216,100 +216,121 @@ func TestEngineCancellationInterruptsAdapterAndRecordsStepCleanup(t *testing.T) 
 	shutdownEngine(t, engine)
 }
 
+// crashMatrixStepLists are the step lists a run is planned with — a deploy's
+// and a promotion's, which starts at render_runtime with no build — so that
+// an interruption inside every step of each is covered. A promotion's
+// admission needs a staging release behind it; the engine and the reconciler
+// read only the steps, so the promotion's list is run here as a deploy's.
+var crashMatrixStepLists = []struct {
+	name  string
+	steps []StepKey
+}{
+	{"deploy", DefaultStepKeys},
+	{"promotion", PromotionStepKeys},
+}
+
 func TestRestartAtEveryStepUsesEvidenceWithoutDuplicatingSideEffects(t *testing.T) {
 	pure := map[StepKey]bool{
 		StepResolveSource: true, StepAnalyzePlan: true, StepRenderRuntime: true,
-		StepVerifyReadiness: true, StepVerifySmoke: true,
+		StepVerifyReadiness: true, StepVerifySmoke: true, StepReplayTraffic: true,
+		// A canary's window is rows and a route: the step is resumed, once.
+		StepCanary: true,
 	}
-	for _, interrupted := range DefaultStepKeys {
-		interrupted := interrupted
-		t.Run(string(interrupted), func(t *testing.T) {
-			f := newOrchestrationFixture(t)
-			environmentID := f.addEnvironment(t, "production", EnvironmentProduction)
-			run := f.enqueue(t, environmentID)
-			lease, err := f.runs.ClaimNext(context.Background(), "old-process", QueueBudget{}, time.Second)
-			if err != nil {
-				t.Fatal(err)
-			}
-			setup := NewEngine(f.runs, &recordingExecutor{}, nil, EngineConfig{}, nil)
-			for _, key := range DefaultStepKeys {
-				current, err := f.runs.Run(context.Background(), run.ID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := setup.advanceRunForStep(context.Background(), *lease, current.State, key); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := f.runs.TransitionStep(context.Background(), run.ID, key, lease.Token,
-					StepTransition{State: StepRunning}); err != nil {
-					t.Fatal(err)
-				}
-				if key == interrupted {
-					break
-				}
-				if _, err := f.runs.TransitionStep(context.Background(), run.ID, key, lease.Token,
-					StepTransition{State: StepPassed}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			f.advance(2 * time.Second)
+	for _, list := range crashMatrixStepLists {
+		for _, interrupted := range list.steps {
+			t.Run(list.name+"/"+string(interrupted), func(t *testing.T) {
+				testRestartAtStep(t, list.steps, interrupted, pure[interrupted])
+			})
+		}
+	}
+}
 
-			action := ReconcileComplete
-			terminal := RunSucceeded
-			if pure[interrupted] {
-				action = ReconcileResume
-			}
-			if interrupted == StepReleaseTask {
-				action = ReconcileFail
-				terminal = RunFailed
-			}
-			seen := make(chan ReconcileRequest, 1)
-			executor := &recordingExecutor{results: map[StepKey]StepResult{}}
-			engine := NewEngine(f.runs, executor, fixedReconciler{
-				decision: ReconcileResult{
-					Action: action, StepResult: StepResult{State: StepPassed},
-					TerminalCode: "interrupted_release_task",
-					Reason:       "Completion token was not recorded; refusing replay",
-				},
-				seen: seen,
-			}, EngineConfig{
-				WorkerID: "new-process", PollEvery: 5 * time.Millisecond, LeaseTTL: time.Minute,
-			}, nil)
-			if err := engine.Start(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			select {
-			case request := <-seen:
-				if request.Step == nil || request.Step.Key != interrupted {
-					t.Fatalf("reconciled step = %#v, want %s", request.Step, interrupted)
-				}
-			case <-time.After(2 * time.Second):
-				t.Fatal("expired run was not reconciled")
-			}
-			waitForRunState(t, f.runs, run.ID, terminal)
-			executed := executor.executed()
-			countInterrupted := 0
-			for _, key := range executed {
-				if key == interrupted {
-					countInterrupted++
-				}
-			}
-			switch {
-			case action == ReconcileResume && countInterrupted != 1:
-				t.Fatalf("safe resumed step executed %d times, want once", countInterrupted)
-			case action != ReconcileResume && countInterrupted != 0:
-				t.Fatalf("evidence-complete/non-idempotent step re-executed %d times", countInterrupted)
-			}
-			if interrupted == StepActivate {
-				for _, key := range executed {
-					if key == StepActivate {
-						t.Fatal("activation was duplicated after restart")
-					}
-				}
-			}
-			shutdownEngine(t, engine)
-		})
+func testRestartAtStep(t *testing.T, planned []StepKey, interrupted StepKey, pure bool) {
+	t.Helper()
+	f := newOrchestrationFixture(t)
+	environmentID := f.addEnvironment(t, "production", EnvironmentProduction)
+	run := f.enqueue(t, environmentID, func(req *RunRequest) { req.Steps = append([]StepKey(nil), planned...) })
+	lease, err := f.runs.ClaimNext(context.Background(), "old-process", QueueBudget{}, time.Second)
+	if err != nil {
+		t.Fatal(err)
 	}
+	setup := NewEngine(f.runs, &recordingExecutor{}, nil, EngineConfig{}, nil)
+	for _, key := range planned {
+		current, err := f.runs.Run(context.Background(), run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := setup.advanceRunForStep(context.Background(), *lease, current.State, key); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.runs.TransitionStep(context.Background(), run.ID, key, lease.Token,
+			StepTransition{State: StepRunning}); err != nil {
+			t.Fatal(err)
+		}
+		if key == interrupted {
+			break
+		}
+		if _, err := f.runs.TransitionStep(context.Background(), run.ID, key, lease.Token,
+			StepTransition{State: StepPassed}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.advance(2 * time.Second)
+
+	action := ReconcileComplete
+	terminal := RunSucceeded
+	if pure {
+		action = ReconcileResume
+	}
+	if interrupted == StepReleaseTask {
+		action = ReconcileFail
+		terminal = RunFailed
+	}
+	seen := make(chan ReconcileRequest, 1)
+	executor := &recordingExecutor{results: map[StepKey]StepResult{}}
+	engine := NewEngine(f.runs, executor, fixedReconciler{
+		decision: ReconcileResult{
+			Action: action, StepResult: StepResult{State: StepPassed},
+			TerminalCode: "interrupted_release_task",
+			Reason:       "Completion token was not recorded; refusing replay",
+		},
+		seen: seen,
+	}, EngineConfig{
+		WorkerID: "new-process", PollEvery: 5 * time.Millisecond, LeaseTTL: time.Minute,
+	}, nil)
+	if err := engine.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case request := <-seen:
+		if request.Step == nil || request.Step.Key != interrupted {
+			t.Fatalf("reconciled step = %#v, want %s", request.Step, interrupted)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expired run was not reconciled")
+	}
+	waitForRunState(t, f.runs, run.ID, terminal)
+	executed := executor.executed()
+	countInterrupted := 0
+	for _, key := range executed {
+		if key == interrupted {
+			countInterrupted++
+		}
+	}
+	switch {
+	case action == ReconcileResume && countInterrupted != 1:
+		t.Fatalf("safe resumed step executed %d times, want once", countInterrupted)
+	case action != ReconcileResume && countInterrupted != 0:
+		t.Fatalf("evidence-complete/non-idempotent step re-executed %d times", countInterrupted)
+	}
+	if interrupted == StepActivate {
+		for _, key := range executed {
+			if key == StepActivate {
+				t.Fatal("activation was duplicated after restart")
+			}
+		}
+	}
+	shutdownEngine(t, engine)
 }
 
 func waitForRunState(

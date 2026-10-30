@@ -1,0 +1,33 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.76.1"
+  },
+  "ReportID": "01a1869e-6cd5-7a60-ba4f-0b4f1b6f7fa2",
+  "CreatedAt": "2026-10-29T07:44:51.925684807Z",
+  "ArtifactID": "sha256:a7459573e17a4ade982784073cae71fcba3050a6ed8562049d7f0a29fba6a8a0",
+  "ArtifactName": "/scan/image.tar",
+  "ArtifactType": "container_image",
+  "Metadata": {
+    "Size": 8587264,
+    "OS": {
+      "Family": "alpine",
+      "Name": "3.22.7"
+    },
+    "ImageID": "sha256:24ab38714e948bd49d24d566e97c1c104b63f85c2e642685e72393b37cfb9862",
+    "DiffIDs": [
+      "sha256:be64570a34e4c5e361d1f5d9cb42b851e7f9a33a61f91c335b287c1c7868f921"
+    ],
+    "RepoTags": [
+      "alpine:3.22"
+    ],
+    "Reference": "alpine:3.22"
+  },
+  "Results": [
+    {
+      "Target": "/scan/image.tar (alpine 3.22.7)",
+      "Class": "os-pkgs",
+      "Type": "alpine"
+    }
+  ]
+}

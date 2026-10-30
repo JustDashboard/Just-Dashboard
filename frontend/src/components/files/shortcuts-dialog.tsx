@@ -31,6 +31,7 @@ const groups = [
     "Work with files",
     [
       ["Copy / Cut / Paste", "Ctrl/⌘+C / X / V"],
+      ["Paste files or text from your computer", "Ctrl/⌘+V"],
       ["New folder", "Ctrl/⌘+Shift+N"],
       ["Rename", "F2"],
       ["Delete with confirmation", "Delete"],

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -296,15 +297,29 @@ func (s *Server) handleDeploymentTrafficPulse(w http.ResponseWriter, r *http.Req
 // because the application logs nothing and a container that is silent because
 // it died four minutes ago look identical in a log tail, and this is the
 // reading that tells them apart.
+//
+// The answer is read from two places: the ring in memory, which has the
+// moment, and the store, which has the month. A restart of the dashboard
+// used to empty the record — the exit at four in the morning was gone by the
+// time anybody asked at nine — and the record now begins at RecordSince
+// rather than at the process.
 type deploymentLifecycle struct {
 	Status string `json:"status"`
 	Reason string `json:"reason,omitempty"`
 	// Watching reports whether the event stream is connected, so an empty
 	// feed can say "nothing happened" rather than leaving the reader to guess
 	// whether anybody was listening.
-	Watching bool            `json:"watching"`
-	Since    *time.Time      `json:"since,omitempty"`
-	Events   []dockerx.Event `json:"events"`
+	Watching bool `json:"watching"`
+	// Since is when this process connected to the stream: what the ring
+	// holds from. The record itself reaches back to RecordSince.
+	Since *time.Time `json:"since,omitempty"`
+	// RecordSince is the oldest event the store holds for any deployment —
+	// how far back the feed can see. Absent until the first event is kept.
+	RecordSince *time.Time `json:"recordSince,omitempty"`
+	// RetentionDays is how long an event is kept, so the footer can say what
+	// the record is rather than leave the reader to infer it.
+	RetentionDays int             `json:"retentionDays"`
+	Events        []dockerx.Event `json:"events"`
 }
 
 // deploymentEventKinds is what a deployment owns that the daemon emits events
@@ -313,29 +328,14 @@ type deploymentLifecycle struct {
 // below is what makes recognising one possible at all.
 var deploymentEventKinds = []string{"container", "network"}
 
-// ownsEvent reports whether an event happened to something this environment owns.
-//
-// A container says so itself: Docker puts an object's labels in the event's
-// actor attributes, so the dashboard's own namespace rides along on every
-// container event and the answer is a map lookup.
-//
-// A network does not. The daemon sends `name` and `type` for one and nothing
-// else — no labels, however they were created — so the same test silently drops
-// every network event, which is the whole of what including the kind would
-// otherwise achieve. What is left is the name, and that this dashboard chose:
-// `jd-e7-db-…` for a database network and `jd-preview-e7…` for a preview's both
-// carry the environment in them. The trailing separator is what keeps
-// environment 7 from claiming environment 70's.
+// ownsEvent reports whether an event happened to something this environment
+// owns: a container by the dashboard's labels on the event, a network by the
+// name this dashboard gave it, since the daemon sends a network's labels on
+// no event. The rule is dockerx's (Event.EnvironmentID), because the store
+// that keeps a deployment's events past this process asks the same question
+// of every event as it arrives, and two spellings of it would be two answers.
 func ownsEvent(event dockerx.Event, environmentID int64) bool {
-	if event.Owner["environment-id"] == strconv.FormatInt(environmentID, 10) {
-		return true
-	}
-	if event.Type != "network" {
-		return false
-	}
-	preview := fmt.Sprintf("jd-preview-e%d", environmentID)
-	return strings.HasPrefix(event.Name, fmt.Sprintf("jd-e%d-", environmentID)) ||
-		event.Name == preview || strings.HasPrefix(event.Name, preview+"-")
+	return event.OwnedBy(environmentID)
 }
 
 // lifecycleQuery is the question the Events view asks, in the two halves it is
@@ -387,12 +387,54 @@ func ownedByEnvironment(events []dockerx.Event, environmentID int64, since time.
 	return out
 }
 
+// deploymentLifecycleEvents is the feed's answer: the ring's events this
+// environment owns and the store's, as one list newest first with each event
+// once. The ring goes first because it is the one with the last few seconds
+// in it; the store is what reaches past the ring's bound and past the last
+// restart of this process. A store that cannot be read costs the history and
+// not the feed: the ring's answer stands alone, as it did before there was a
+// store.
 func (s *Server) deploymentLifecycleEvents(r *http.Request, environmentID int64, limit int) []dockerx.Event {
 	query := lifecycleQueryFrom(r.URL.Query())
-	return ownedByEnvironment(
+	if limit <= 0 {
+		limit = 100
+	}
+	recent := ownedByEnvironment(
 		s.modules.dockerEvents.Recent(eventScanWidth, query.kinds, query.search),
 		environmentID, query.since, limit,
 	)
+	kept, err := s.modules.deployEvents.Find(r.Context(), environmentID,
+		dockerx.EventFilter{Kinds: query.kinds, Search: query.search}, query.since, limit)
+	if err != nil {
+		s.Log.Warn("deployment events could not be read from the store", "environment", environmentID, "error", err)
+		return recent
+	}
+	return mergeLifecycleEvents(recent, kept, limit)
+}
+
+// mergeLifecycleEvents joins the ring's slice and the store's into one list,
+// newest first and at most limit long, with an event held by both counted
+// once. Two copies of one event agree on the daemon's nanosecond, its kind,
+// its action and the object it happened to, which is the key the browser
+// dedupes on as well.
+func mergeLifecycleEvents(recent, kept []dockerx.Event, limit int) []dockerx.Event {
+	seen := make(map[string]bool, len(recent)+len(kept))
+	out := make([]dockerx.Event, 0, len(recent)+len(kept))
+	for _, batch := range [][]dockerx.Event{recent, kept} {
+		for _, ev := range batch {
+			key := ev.Time.UTC().Format(time.RFC3339Nano) + "|" + ev.Type + "|" + ev.Action + "|" + ev.ID + "|" + ev.Name
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, ev)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Time.After(out[j].Time) })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
 
 // eventScanWidth is the whole ring: the owner filter below it is selective
@@ -415,10 +457,14 @@ func (s *Server) handleDeploymentLifecycle(w http.ResponseWriter, r *http.Reques
 	if !watchingSince.IsZero() {
 		result.Since = &watchingSince
 	}
+	result.RetentionDays = int(s.modules.deployEvents.Retention() / (24 * time.Hour))
+	if since, err := s.modules.deployEvents.Since(r.Context()); err == nil && !since.IsZero() {
+		result.RecordSince = &since
+	}
 	result.Events = s.deploymentLifecycleEvents(r, target.EnvironmentID, atoiDefault(r.URL.Query().Get("limit"), 100))
 	s.correlateDeploymentEvents(r, result.Events, target.Name)
 	if !running {
-		result.Reason = "The Docker event stream is not connected, so this list may be incomplete."
+		result.Reason = "The Docker event stream is not connected, so this list stops at the last event heard."
 	}
 	httpx.JSON(w, http.StatusOK, result)
 	return nil
@@ -502,6 +548,7 @@ const deployCorrelationWindow = 15 * time.Minute
 // is not there.
 func (s *Server) correlateDeploymentEvents(r *http.Request, events []dockerx.Event, project string) {
 	s.correlateEvents(r, events)
+	s.correlateSleepEvents(r, events, project)
 	project = strings.TrimSpace(project)
 	if project == "" {
 		return
@@ -551,7 +598,13 @@ func (s *Server) deploymentTarget(r *http.Request) (*deploy.DeploymentSummary, e
 	if err != nil {
 		return nil, err
 	}
-	summary, err := s.modules.deployRuns.DeploymentSummary(r.Context(), id, deploy.QueueBudget{
+	// ?environment= reads a staging environment's route and containers in
+	// place of production's; the summary refuses one of another project.
+	environmentID, err := environmentQuery(r)
+	if err != nil {
+		return nil, err
+	}
+	summary, err := s.modules.deployRuns.EnvironmentDeploymentSummary(r.Context(), id, environmentID, deploy.QueueBudget{
 		Heavy: s.Cfg.DeployHeavySlots,
 		Light: s.Cfg.DeployLightSlots,
 	})

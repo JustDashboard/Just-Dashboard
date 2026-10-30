@@ -7,7 +7,13 @@ import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
-import type { CertbotState, ErrorReport, SiteTrafficSummary, UpstreamReport } from "@/lib/types"
+import type {
+  CertbotState,
+  ErrorReport,
+  ProxyAlerts,
+  SiteTrafficSummary,
+  UpstreamReport,
+} from "@/lib/types"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext, PageState } from "@/components/page"
@@ -17,6 +23,7 @@ import { FactDot } from "@/components/metrics/host-identity"
 import { Status, type DotTone } from "@/components/status-dot"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useNow } from "@/components/deploy/vocabulary"
 import { useProxy } from "@/components/proxy/proxy-context"
@@ -25,11 +32,13 @@ import {
   EngineExtras,
   EngineIdentity,
   ModulesFact,
+  usePackageInstall,
   useEngineUnit,
 } from "@/components/proxy/engine"
 import { EngineLog } from "@/components/proxy/engine-log"
 import { useEngineControl } from "@/components/proxy/engine-control"
 import { EngineFailure } from "@/components/proxy/engine-failure"
+import { EngineSetup } from "@/components/proxy/engine-setup"
 import { PARTICIPLE, engineRun } from "@/components/proxy/engine-lifecycle"
 import { LiveTraffic } from "@/components/proxy/live-metrics"
 import { engineProduct } from "@/components/proxy/marks"
@@ -45,10 +54,16 @@ import {
   type Answer,
   type Reading,
 } from "@/components/proxy/freshness"
-import { overviewRoutes, routeKind, routeTarget } from "@/components/proxy/overview-routes"
+import {
+  isDefaultServer,
+  listenPorts,
+  overviewRoutes,
+  routeKind,
+  routeNames,
+  routeTarget,
+} from "@/components/proxy/overview-routes"
 import { upstreamLabel, upstreamsOf, upstreamTone } from "@/components/proxy/upstream-health"
 import { trafficLabel } from "@/components/proxy/site-traffic"
-import { AlertsPanel } from "@/components/proxy/alerts-panel"
 import { RecentChanges } from "@/components/proxy/activity"
 import { frontDoorLine, frontDoors } from "@/components/proxy/front-door"
 import { foldDualStack, privateNetworksHint, tallyReach } from "@/components/proxy/ports"
@@ -114,7 +129,14 @@ export default function ProxyOverviewPage() {
   const { can } = useAuth()
   const admin = can("system.admin")
   const engine = useEngineUnit(status)
-  const [alertsOpen, setAlertsOpen] = useState(false)
+  // What is firing, for the Alerts link's count: the rules themselves are
+  // their own page now, where they were a sheet over this one.
+  const alerts = usePoll(
+    (signal) => get<ProxyAlerts>("/proxy/alerts", undefined, signal),
+    60_000,
+    [],
+    { enabled: admin },
+  )
 
   const certbot = usePoll(
     (signal) => reading(get<CertbotState>("/certificates/certbot", undefined, signal)),
@@ -170,6 +192,7 @@ export default function ProxyOverviewPage() {
     configTest.refreshLast()
   }
   const control = useEngineControl({ status, unit: engine, onChanged: refreshAll })
+  const installer = usePackageInstall(refreshAll)
 
   // certbot being absent is a fact about the host, not a failure to report.
   const certbotGone =
@@ -359,35 +382,25 @@ export default function ProxyOverviewPage() {
       title: listeners && privateNetworksHint(reach),
     },
   ]
-  const inventory = facts.filter((fact) => fact.error || fact.text)
+  // With no engine, "0 sites, 0 on TLS · 0 certificates · 0 streams" says
+  // what the setup under the line says better; the open ports still matter.
+  // With one, a zero count of certificates or streams is dropped too: the
+  // Certificates block says "No certificates yet" with the way to issue one,
+  // and a host with no streams has nothing to open on Streams.
+  const none = (fact: Fact) =>
+    (fact.key === "certificates" && certificates?.length === 0) ||
+    (fact.key === "streams" && streamStatus?.streams.length === 0)
+  const inventory = facts
+    .filter((fact) => hasEngine || fact.key === "ports")
+    .filter((fact) => fact.error || (fact.text && !none(fact)))
   // A route's file name is the dashboard's; the name its visitors type is
   // what the Traffic and Errors rows lead with.
   const labelOf = (site: string) => hosts.find((v) => v.name === site)?.serverNames[0] ?? site
 
   return (
     <Page className="animate-rise">
-      <PageContext
-        title="Proxy & TLS"
-        className="justify-end"
-        actions={
-          <>
-            <Freshness
-              at={updatedAt}
-              refreshing={refreshing}
-              late={late}
-              onRefresh={refreshEverything}
-            />
-            {admin && (
-              <Button size="xs" variant="ghost" onClick={() => setAlertsOpen(true)}>
-                <Bell />
-                Alerts
-              </Button>
-            )}
-          </>
-        }
-      />
+      <PageContext title="Proxy & TLS" />
       {statusError && <ErrorState error={statusError} onRetry={refreshStatus} />}
-      {admin && <AlertsPanel open={alertsOpen} onOpenChange={setAlertsOpen} />}
 
       <EngineIdentity
         status={status}
@@ -401,31 +414,41 @@ export default function ProxyOverviewPage() {
         serviceBusy={control.pending}
         certbotVersion={renewal?.version}
         renewSource={renewal ? (renewal.renewSource ?? null) : undefined}
-        inventory={inventory
-          .map((fact) => (
-            <Fragment key={fact.key}>
-              <FactDot />
-              {fact.error ? (
-                <span className="font-medium text-warning" title={errorMessage(fact.error)}>
-                  {`couldn't read ${fact.key}`}
-                </span>
-              ) : (
-                <Link
-                  href={fact.href}
-                  title={fact.title}
-                  className={cn(
-                    "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
-                    fact.tone === "danger" && "font-medium text-destructive",
-                    fact.tone === "warning" && "font-medium text-warning",
-                  )}
-                >
-                  {fact.text}
-                </Link>
-              )}
-            </Fragment>
-          ))
-          .concat(status.nginx ? [<ModulesFact key="modules" />] : [])}
+        inventory={inventory.map((fact) => (
+          <Fragment key={fact.key}>
+            <FactDot />
+            {fact.error ? (
+              <span className="font-medium text-warning" title={errorMessage(fact.error)}>
+                {`couldn't read ${fact.key}`}
+              </span>
+            ) : (
+              <Link
+                href={fact.href}
+                title={fact.title}
+                className={cn(
+                  "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
+                  fact.tone === "danger" && "font-medium text-destructive",
+                  fact.tone === "warning" && "font-medium text-warning",
+                )}
+              >
+                {fact.text}
+              </Link>
+            )}
+          </Fragment>
+        ))}
+        modules={status.nginx && <ModulesFact admin={admin} installer={installer} />}
         verdict={verdict && <Status verdict={verdict.tone} label={verdict.label} />}
+        controls={
+          <>
+            <Freshness
+              at={updatedAt}
+              refreshing={refreshing}
+              late={late}
+              onRefresh={refreshEverything}
+            />
+            {admin && <AlertsLink alerts={alerts.error ? undefined : alerts.data} />}
+          </>
+        }
         actions={
           admin &&
           hasEngine && (
@@ -443,7 +466,7 @@ export default function ProxyOverviewPage() {
         }
       />
 
-      <EngineExtras status={status} admin={admin} onChanged={refreshAll} />
+      <EngineExtras status={status} admin={admin} installer={installer} />
 
       {engine.unit?.activeState === "failed" && !underWay && (
         <EngineFailure
@@ -454,166 +477,248 @@ export default function ProxyOverviewPage() {
         />
       )}
 
-      {/* The picture needs the sites; while they are read it holds its
+      {!hasEngine ? (
+        <EngineSetup status={status} admin={admin} onInstalled={refreshAll} />
+      ) : (
+        <>
+          {/* The picture needs the sites; while they are read it holds its
           height, and a failure is said once, where the routes are. */}
-      {hasEngine &&
-        (vhosts.loading ? (
-          <Skeleton className="h-72 w-full" />
-        ) : (
-          picture.domains.length > 0 && (
-            <RoutePicture
-              map={picture}
-              engine={status.nginx ? "nginx" : "Caddy"}
-              engineMark={engineProduct(status)}
-              engineTone={engineTone}
-              engineHint={doors && <span className="font-mono">{frontDoorLine(doors)}</span>}
-            />
-          )
-        ))}
-
-      {traffics && (
-        <LiveTraffic admin={admin} nginx={status.nginx} sites={siteTraffic} error={traffic.error} />
-      )}
-
-      <OverviewBand
-        traffics={traffics}
-        nginx={status.nginx}
-        traffic={{ sites: siteTraffic, error: traffic.error }}
-        certificates={{
-          list: certificates,
-          loading: certs.loading,
-          error: certs.error,
-          onRetry: certs.refresh,
-          certbot: status.certbot,
-        }}
-        errors={{ report: errorReport, error: nginxErrors.error }}
-        appOf={(site) => backends.get(site)}
-        labelOf={labelOf}
-      />
-
-      {/* Route destinations need room for both ends; verdicts fit in the rail. */}
-      <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_20rem] [&>*]:min-w-0">
-        <Panel plain>
-          <PanelHeader
-            title="Routes"
-            actions={
-              hosts.length > 0 && (
-                <div className="flex items-center gap-3">
-                  {admin && upstreamReport && (
-                    <Button size="xs" variant="ghost" onClick={checkUpstreams} pending={checking}>
-                      Check upstreams
-                    </Button>
-                  )}
-                  {/* The eight that need the reader most, and how many the Sites page has. */}
-                  {routes.total > routes.shown.length && (
-                    <span className="numeric text-hint text-muted-foreground">
-                      Showing {routes.shown.length} of {routes.total}
-                    </span>
-                  )}
-                  <Link
-                    href="/proxy/sites"
-                    className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
-                  >
-                    All sites <ArrowRight className="size-3" />
-                  </Link>
-                </div>
-              )
-            }
-          />
-          <PanelBody flush>
-            {vhosts.loading ? (
-              <div className="space-y-3 py-1">
-                <Skeleton className="h-4 w-64" />
-                <Skeleton className="h-4 w-48" />
-              </div>
-            ) : vhosts.error ? (
-              <ErrorState error={vhosts.error} onRetry={vhosts.refresh} className="mt-2" />
-            ) : hosts.length === 0 ? (
-              <EmptyState
-                icon={Globe}
-                title="Nothing configured yet"
-                description={
-                  status.nginx
-                    ? "Add a site to put a domain in front of something on this machine, or issue a certificate from the Certificates tab."
-                    : "No nginx sites, Caddyfile or shared Caddy ingress was found on this host."
-                }
-                className="mt-2"
-              />
+          {hasEngine &&
+            (vhosts.loading ? (
+              <Skeleton className="h-72 w-full" />
             ) : (
-              // Every row here is a site to open, which is the case §16 names:
-              // a list of destinations becomes a `ChoiceList` and gets the edge,
-              // on a reading page as much as on a flow one. Each leads with
-              // what its visitors reach, the engine in the tile's corner.
-              <ChoiceList aria-label="Sites" className="animate-rise">
-                {routes.shown.map((vhost) => {
-                  const target = routeTarget(vhost)
-                  const reached = upstreamsOf(upstreamReport, vhost.path)
-                  const load = trafficBySite.get(vhost.name)
-                  const backend = backends.get(vhost.name) ?? siteBackend(vhost, [])
-                  return (
-                    <ChoiceRow
-                      key={`${vhost.kind}:${vhost.name}:${vhost.path}`}
-                      href={target.href}
-                      verb={target.verb}
-                      className="gap-3 p-3.5"
-                      leading={<RouteMark vhost={vhost} backend={backend} />}
-                      title={<span className="text-title">{vhost.name}</span>}
-                      description={
-                        backend.kind === "app"
-                          ? `${routeKind(vhost)} → ${backend.name}`
-                          : routeKind(vhost)
-                      }
-                      trailing={<ServingStatus vhost={vhost} />}
-                    >
-                      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-hint text-muted-foreground">
-                        <SiteTLS vhost={vhost} />
-                        <span className="flex min-w-0 items-center gap-1.5 font-mono">
-                          <span className="truncate">
-                            {vhost.serverNames.join(", ") || "Default host"}
-                          </span>
-                          <ArrowRight aria-hidden className="size-3 shrink-0" />
-                          <span className="truncate text-foreground">
-                            {vhost.upstreams.join(", ") ||
-                              (backend.kind === "files"
-                                ? backend.address
-                                : "Served by configuration")}
-                          </span>
-                        </span>
-                        {load && <span className="numeric">{trafficLabel(load)}</span>}
-                        <span className="ml-auto font-mono">{vhost.listen.join(" · ")}</span>
-                      </div>
-                      {reached.length > 0 && (
-                        <ul aria-label="Upstreams" className="space-y-1 text-hint">
-                          {reached.map((t) => (
-                            <li
-                              key={`${t.line}:${t.address}`}
-                              className="flex flex-wrap items-center gap-x-2"
-                            >
-                              <span className="font-mono text-muted-foreground">{t.address}</span>
-                              <Status tone={upstreamTone(t.state)} label={upstreamLabel(t)} />
-                              {t.owner && <span className="text-muted-foreground">{t.owner}</span>}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </ChoiceRow>
-                  )
-                })}
-              </ChoiceList>
-            )}
-          </PanelBody>
-        </Panel>
+              picture.domains.length > 0 && (
+                <RoutePicture
+                  map={picture}
+                  engine={status.nginx ? "nginx" : "Caddy"}
+                  engineMark={engineProduct(status)}
+                  engineTone={engineTone}
+                  engineHint={
+                    doors && (
+                      <span className="font-mono">
+                        {frontDoorLine(doors, status.nginx ? "nginx" : "caddy")}
+                      </span>
+                    )
+                  }
+                />
+              )
+            ))}
 
-        <div className="min-w-0 space-y-8">
-          {/* A titled list on the page, not a box, for the reason the host
+          {traffics && (
+            <LiveTraffic
+              admin={admin}
+              nginx={status.nginx}
+              sites={siteTraffic}
+              error={traffic.error}
+            />
+          )}
+
+          <OverviewBand
+            traffics={traffics}
+            nginx={status.nginx}
+            traffic={{ sites: siteTraffic, error: traffic.error }}
+            certificates={{
+              list: certificates,
+              loading: certs.loading,
+              error: certs.error,
+              onRetry: certs.refresh,
+              certbot: status.certbot,
+            }}
+            errors={{ report: errorReport, error: nginxErrors.error }}
+            appOf={(site) => backends.get(site)}
+            labelOf={labelOf}
+          />
+
+          {/* Route destinations need room for both ends; verdicts fit in the rail. */}
+          <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_20rem] [&>*]:min-w-0">
+            <Panel plain>
+              <PanelHeader
+                title="Routes"
+                actions={
+                  hosts.length > 0 && (
+                    <div className="flex items-center gap-3">
+                      {admin && upstreamReport && (
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={checkUpstreams}
+                          pending={checking}
+                        >
+                          Check upstreams
+                        </Button>
+                      )}
+                      {/* The eight that need the reader most, and how many the Sites page has. */}
+                      {routes.total > routes.shown.length && (
+                        <span className="numeric text-hint text-muted-foreground">
+                          Showing {routes.shown.length} of {routes.total}
+                        </span>
+                      )}
+                      <Link
+                        href="/proxy/sites"
+                        className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
+                      >
+                        All sites <ArrowRight className="size-3" />
+                      </Link>
+                    </div>
+                  )
+                }
+              />
+              <PanelBody flush>
+                {vhosts.loading ? (
+                  <div className="space-y-3 py-1">
+                    <Skeleton className="h-4 w-64" />
+                    <Skeleton className="h-4 w-48" />
+                  </div>
+                ) : vhosts.error ? (
+                  <ErrorState error={vhosts.error} onRetry={vhosts.refresh} className="mt-2" />
+                ) : hosts.length === 0 ? (
+                  <EmptyState
+                    icon={Globe}
+                    title="Nothing configured yet"
+                    description={
+                      status.nginx
+                        ? "Add a site to put a domain in front of an app, a container or a folder on this machine."
+                        : "No nginx sites, Caddyfile or shared Caddy ingress was found on this host."
+                    }
+                    action={
+                      admin &&
+                      status.nginx && (
+                        <Button asChild size="sm">
+                          <Link href="/proxy/sites">
+                            Add a site <ArrowRight />
+                          </Link>
+                        </Button>
+                      )
+                    }
+                    className="mt-2"
+                  />
+                ) : (
+                  // Every row here is a site to open, which is the case §16 names:
+                  // a list of destinations becomes a `ChoiceList` and gets the edge,
+                  // on a reading page as much as on a flow one. Each leads with
+                  // what its visitors reach, the engine in the tile's corner.
+                  <ChoiceList aria-label="Sites" className="animate-rise">
+                    {routes.shown.map((vhost) => {
+                      const target = routeTarget(vhost)
+                      const reached = upstreamsOf(upstreamReport, vhost.path)
+                      const load = trafficBySite.get(vhost.name)
+                      const backend = backends.get(vhost.name) ?? siteBackend(vhost, [])
+                      const ports = listenPorts(vhost.listen)
+                      // The names are said once: where they are the route's own
+                      // name, the title already says them.
+                      const names = routeNames(vhost)
+                      const sayNames = names !== vhost.name
+                      const destination =
+                        vhost.upstreams.join(", ") ||
+                        (backend.kind === "files" ? backend.address : "served by configuration")
+                      return (
+                        <ChoiceRow
+                          key={`${vhost.kind}:${vhost.name}:${vhost.path}`}
+                          href={target.href}
+                          verb={target.verb}
+                          className="gap-3 px-3.5 py-3"
+                          leading={<RouteMark vhost={vhost} backend={backend} />}
+                          title={<span className="text-title">{vhost.name}</span>}
+                          description={
+                            // One line: what serves it, then the way a request
+                            // goes. The route sat on a second line of its own
+                            // with the listen addresses pushed to the far edge,
+                            // a card twice the height of what it said.
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              <span className="shrink-0">
+                                {/* The application by name, where it has one the
+                                    address after it does not already say. */}
+                                {backend.kind === "app" && !destination.includes(backend.name)
+                                  ? `${routeKind(vhost)} → ${backend.name}`
+                                  : routeKind(vhost)}
+                              </span>
+                              <span aria-hidden className="shrink-0">
+                                ·
+                              </span>
+                              <span
+                                className="flex min-w-0 items-center gap-1.5 font-mono"
+                                title={`${names} → ${destination}`}
+                              >
+                                {sayNames && (
+                                  <>
+                                    <span
+                                      className={cn(
+                                        "truncate",
+                                        // nginx's catch-all, said in words rather than as its `_`.
+                                        isDefaultServer(vhost) &&
+                                          names === "any host" &&
+                                          "font-sans",
+                                      )}
+                                    >
+                                      {names}
+                                    </span>
+                                    <ArrowRight aria-hidden className="size-3 shrink-0" />
+                                  </>
+                                )}
+                                <span className="truncate text-foreground">{destination}</span>
+                              </span>
+                            </span>
+                          }
+                          trailing={
+                            <span className="flex shrink-0 items-center gap-4">
+                              {load && (
+                                <span className="numeric text-hint text-muted-foreground max-md:hidden">
+                                  {trafficLabel(load)}
+                                </span>
+                              )}
+                              {ports.length > 0 && (
+                                <span
+                                  className="font-mono text-hint text-muted-foreground max-lg:hidden"
+                                  title={vhost.listen.join(" · ")}
+                                >
+                                  {ports.map((port) => `:${port}`).join(" ")}
+                                </span>
+                              )}
+                              <span className="max-sm:hidden">
+                                <SiteTLS vhost={vhost} />
+                              </span>
+                              <ServingStatus vhost={vhost} />
+                            </span>
+                          }
+                        >
+                          {reached.length > 0 && (
+                            <ul aria-label="Upstreams" className="space-y-1 text-hint">
+                              {reached.map((t) => (
+                                <li
+                                  key={`${t.line}:${t.address}`}
+                                  className="flex flex-wrap items-center gap-x-2"
+                                >
+                                  <span className="font-mono text-muted-foreground">
+                                    {t.address}
+                                  </span>
+                                  <Status tone={upstreamTone(t.state)} label={upstreamLabel(t)} />
+                                  {t.owner && (
+                                    <span className="text-muted-foreground">{t.owner}</span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </ChoiceRow>
+                      )
+                    })}
+                  </ChoiceList>
+                )}
+              </PanelBody>
+            </Panel>
+
+            <div className="min-w-0 space-y-8">
+              {/* A titled list on the page, not a box, for the reason the host
           overview's health list is: a frame around it would open the rail
           with a container. */}
 
-          {admin && <RecentChanges />}
-        </div>
-      </div>
+              {admin && <RecentChanges />}
+            </div>
+          </div>
 
-      <EngineLog status={status} />
+          <EngineLog status={status} />
+        </>
+      )}
       {control.dialog}
     </Page>
   )
@@ -642,19 +747,73 @@ function Freshness({
   const now = useNow(1000, at !== undefined && !refreshing && late.length === 0)
   return (
     <>
+      {/* The age is the button's tooltip: "Updated just now" spent the bar's
+          width on the one reading that is nearly always fine. A source that
+          has not answered is not fine, and says so. */}
       {late.length > 0 ? (
-        <span className="text-hint font-medium text-warning" title={late.join(", ")}>
+        <span className="px-1 text-hint font-medium text-warning" title={late.join(", ")}>
           {noAnswerLabel(late)}
         </span>
       ) : (
-        <span className="numeric text-hint text-muted-foreground">
+        // Still read out, so a screen reader hears how old the page is.
+        <span className="sr-only">
           {refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)}
         </span>
       )}
-      <Button size="xs" variant="ghost" onClick={onRefresh} pending={refreshing}>
-        <RefreshClockwise />
-        Refresh
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Refresh"
+            onClick={onRefresh}
+            pending={refreshing}
+          >
+            <RefreshClockwise className="size-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {refreshing
+            ? "Refreshing…"
+            : at !== undefined
+              ? `${updatedLabel(at, now)}. Read every source again`
+              : "Read every source again"}
+        </TooltipContent>
+      </Tooltip>
     </>
+  )
+}
+
+/**
+ * The way to the Alerts page, with what is firing counted in its tone: a
+ * bell with nothing beside it said nothing about whether anybody was being
+ * told something right now.
+ */
+function AlertsLink({ alerts }: { alerts?: ProxyAlerts }) {
+  const subjects = alerts?.subjects ?? []
+  const firing = subjects.filter((s) => s.state === "firing").length
+  const holding = subjects.filter((s) => s.state === "pending").length
+  return (
+    <Button asChild size="sm" variant="ghost">
+      <Link
+        href="/proxy/alerts"
+        aria-label={firing > 0 ? `Alerts, ${firing} firing` : "Alerts"}
+        className="gap-1.5"
+      >
+        <Bell className="size-3.5" />
+        Alerts
+        {firing > 0 ? (
+          <span className="numeric flex items-center gap-1 text-hint font-medium text-destructive">
+            <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-destructive" />
+            {firing}
+          </span>
+        ) : holding > 0 ? (
+          <span className="numeric flex items-center gap-1 text-hint font-medium text-warning">
+            <span aria-hidden className="size-1.5 rounded-full bg-warning" />
+            {holding}
+          </span>
+        ) : null}
+      </Link>
+    </Button>
   )
 }

@@ -198,6 +198,9 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		return readDetectionFile(path, max)
 	}
 	manifestFirst := func(name string) bool { return detectionInterestingName(name) || repoShapeFileName(name) }
+	// regularFiles counts what the walk saw, read or not: a repository with
+	// files detection recognises none of still has something to build.
+	regularFiles := 0
 	walkErr := walkDetectionTree(root, manifestFirst, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
@@ -241,6 +244,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
 			return nil
 		}
+		regularFiles++
 		name := strings.ToLower(entry.Name())
 		readiness.visit(path, filepath.ToSlash(rel))
 		state.observe(filepath.ToSlash(rel), name, path, entry)
@@ -777,6 +781,10 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	// A candidate the recipe would refuse is marked before the ranking
 	// chooses among them (recipe_preflight.go).
 	applyDetectedRecipeIssues(detectCtx, root, result.Candidates)
+	// Railpack where nothing else builds a directory, and its provider on
+	// every recipe candidate it could build instead (detect_railpack.go).
+	offerRailpack(&result, regularFiles > 0, shape.setAside, func(root string) []DetectedVariable { return scanner.variables(root, allRoots) })
+	annotateRailpackProviders(result.Candidates)
 	// The frontend and API a split repository pairs, by the ports and
 	// profiles the passes settled, and the ranking that selects the
 	// application.

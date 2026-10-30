@@ -3,7 +3,9 @@ package deploy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
@@ -34,6 +36,9 @@ type certificateStepEvidence struct {
 	Outcome string   `json:"outcome"`
 	Name    string   `json:"certificate,omitempty"`
 	Method  string   `json:"method,omitempty"`
+	// DNSProvider names whose saved credentials answered a wildcard's DNS
+	// challenge; the credentials themselves never reach the run.
+	DNSProvider string `json:"dnsProvider,omitempty"`
 	// AccountExisted distinguishes an order against an ACME account this host
 	// already had from one that registered a new account.
 	AccountExisted bool `json:"accountExisted,omitempty"`
@@ -55,7 +60,9 @@ func (e *NormalizedStepExecutor) provisionCertificate(
 	}
 	names := make([]string, 0, len(snapshot.Domains))
 	for _, domain := range snapshot.Domains {
-		if domain.HTTPS {
+		// Cloudflare terminates a tunnel's HTTPS; the route serves the name
+		// over plain HTTP to the connector, so there is nothing to issue.
+		if domain.HTTPS && !domain.Tunnel {
 			names = append(names, strings.ToLower(strings.TrimSpace(domain.Hostname)))
 		}
 	}
@@ -97,18 +104,45 @@ func (e *NormalizedStepExecutor) certificateStep(
 				ErrorMessage: err.Error(), Evidence: evidence,
 			}
 		}
+		// A wildcard this host cannot prove — no saved DNS credentials answer
+		// for its zone — is the same kind of answer: nothing the deployment
+		// did, something to save on the host, which the message names. The
+		// proxy serving the route is not a reason: the Docker Caddy ingress
+		// serves a copy of what certbot proves, as nginx serves the file.
+		if errors.Is(err, proxysvc.ErrCertificateWildcard) {
+			return StepResult{
+				State: StepUnavailable, ErrorCode: "certificate_wildcard_unavailable",
+				ErrorMessage: err.Error(), Evidence: evidence,
+			}
+		}
+		// certbot was somebody else's for longer than this step's bound:
+		// nothing the authority said and nothing to fix on the host, so the
+		// step says what it waited for and how long, in its own words
+		// rather than certbot's "another instance is already running".
+		var busy *proxysvc.CertbotBusyError
+		if errors.As(err, &busy) {
+			return StepResult{
+				State: StepFailed, ErrorCode: "certificate_certbot_busy",
+				ErrorMessage: fmt.Sprintf("the certificate step waited %s for certbot, which was busy with %s, and its time ran out; deploy again once that has finished",
+					busy.Waited.Round(time.Second), busy.Holder),
+				Evidence: evidence,
+			}
+		}
 		return StepResult{
 			State: StepFailed, ErrorCode: "certificate_issue_failed",
 			ErrorMessage: err.Error(), Evidence: evidence,
 		}
 	}
-	if result.Outcome == proxysvc.CertificateIssued {
+	switch {
+	case result.Outcome == proxysvc.CertificateIssued && result.DNSProvider != "":
+		log("status", "Issued "+result.Name+" over a DNS challenge through the saved "+result.DNSProvider+" credentials")
+	case result.Outcome == proxysvc.CertificateIssued:
 		log("status", "Issued "+result.Name+" over the "+result.Method+" challenge")
-	} else {
+	default:
 		log("status", "Reused the existing "+result.Name+" certificate")
 	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(certificateStepEvidence{
 		Domains: names, Outcome: string(result.Outcome), Name: result.Name,
-		Method: result.Method, AccountExisted: result.Registered,
+		Method: result.Method, DNSProvider: result.DNSProvider, AccountExisted: result.Registered,
 	})}
 }

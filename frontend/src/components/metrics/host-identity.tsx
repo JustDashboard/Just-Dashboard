@@ -49,6 +49,7 @@ export function HostIdentity({
   title,
   facts,
   aside,
+  bar,
   className,
 }: {
   /** A `product-logo` id; nothing names the host when it is undefined. */
@@ -60,13 +61,23 @@ export function HostIdentity({
   facts: React.ReactNode
   /** The right end of the line: the health verdict. */
   aside?: React.ReactNode
+  /**
+   * One compact bar holding the page's own controls as well as the line: the
+   * proxy overview opened on a row of three buttons over the line, a band of
+   * empty ground between them, and the operator asked for one bar.
+   */
+  bar?: boolean
   className?: string
 }) {
   return (
     <div
       data-slot="host-identity"
+      data-bar={bar || undefined}
       className={cn(
-        "flex min-w-0 flex-wrap items-center justify-between gap-x-10 gap-y-3 border-b border-hairline pb-6",
+        "flex min-w-0 flex-wrap items-center justify-between",
+        bar
+          ? "gap-x-6 gap-y-3 rounded-xl border bg-card px-4 py-3"
+          : "gap-x-10 gap-y-3 border-b border-hairline pb-6",
         className,
       )}
     >
@@ -79,15 +90,24 @@ export function HostIdentity({
           wide enough to make that happen on a laptop. It keeps 18rem of its
           own, though: with none, a wide aside on a tablet left the facts a
           word wide, one fact to a line, where the aside should go under. */}
-      <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 sm:flex sm:flex-[1_1_18rem]">
+      <div
+        className={cn(
+          "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-y-3 sm:flex sm:flex-[1_1_18rem]",
+          bar ? "gap-x-3" : "gap-x-4",
+        )}
+      >
         {logo ?? (
           <ProductLogo
             id={mark}
             fallback={fallback}
-            className="size-12 rounded-xl [&_img]:size-7"
+            className={
+              bar ? "size-10 rounded-lg [&_img]:size-6" : "size-12 rounded-xl [&_img]:size-7"
+            }
           />
         )}
-        <div className="contents sm:block sm:min-w-0 sm:space-y-1">
+        <div
+          className={cn("contents sm:block sm:min-w-0", bar ? "sm:space-y-0.5" : "sm:space-y-1")}
+        >
           <p className="min-w-0 truncate text-title font-semibold tracking-tight">{title}</p>
           <p className="col-span-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             {facts}

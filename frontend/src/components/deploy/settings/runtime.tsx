@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react"
 import Link from "next/link"
-import { ArrowLeftRight, Box, Globe, Pause, Servers } from "@/components/icons"
+import { ArrowLeftRight, Box, Gauge, Globe, Pause, Servers } from "@/components/icons"
 import { ApiError, refusedIndex } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -53,6 +53,30 @@ import {
   type ContainerPeaks,
 } from "@/components/deploy/settings/limit-field"
 import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { RollbackWatchForm } from "@/components/deploy/settings/rollback-watch"
+import {
+  REPLAY_DRAFT_FIELD_IDS,
+  REPLAY_FIELD_IDS,
+  ReplaySection,
+} from "@/components/deploy/settings/replay"
+import {
+  replayDraftOf,
+  replayPlanOf,
+  replayRefusal,
+  type ReplayDraft,
+} from "@/components/deploy/replay-model"
+import {
+  SLEEP_DRAFT_FIELD_IDS,
+  SLEEP_FIELD_IDS,
+  SleepSection,
+  sleepBlocker,
+} from "@/components/deploy/settings/sleep"
+import {
+  sleepDraftOf,
+  sleepPlanOf,
+  sleepRefusal,
+  type SleepDraft,
+} from "@/components/deploy/sleep-model"
 import { Segments } from "@/components/deploy/settings/segments"
 import {
   DEFAULT_GRACE_SECONDS,
@@ -68,6 +92,29 @@ import {
   savedChecks,
   type Check,
 } from "@/components/deploy/settings/health-checks"
+import {
+  MAX_REPLICAS,
+  effectiveReplicas,
+  replicaRefusal,
+  withReplicas,
+} from "@/components/deploy/replicas-model"
+import {
+  CANARY_PERCENT,
+  CANARY_SECONDS,
+  DEFAULT_CANARY_TERMS,
+  windowWords,
+  withStrategy,
+} from "@/components/deploy/canary-model"
+import {
+  DEFAULT_TMPFS_MB,
+  gpusWords,
+  readOnlyStartingPaths,
+  runtimeFlagsDraftOf,
+  runtimeFlagsLine,
+  runtimeFlagsOf,
+  type FlagsRefusal,
+  type RuntimeFlagsDraft,
+} from "@/components/deploy/runtime-flags-model"
 
 /**
  * How the release runs once it exists: the image and command, where it
@@ -82,7 +129,7 @@ import {
  * port or the host network cannot run two releases side by side, and
  * blue/green on such a plan used to be offered here and then refused at start.
  *
- * Two forms, two saves: Runtime (six sections, one PUT) and Health
+ * Two forms, two saves: Runtime (its sections, one PUT) and Health
  * checks. Each keeps its own draft keyed on its own saved value, so saving
  * one no longer restarts the other.
  *
@@ -97,12 +144,16 @@ type RuntimePlan = DeploymentConfiguration["runtime"]
 /**
  * The Runtime form's draft: the plan, with its three lists held as the text
  * the operator types — one entry per line — so a half-typed line survives a
- * visit to another page.
+ * visit to another page, and the traffic replay's terms, the sleep terms and
+ * the process flags as typed.
  */
 type RuntimeDraft = RuntimePlan & {
   commandText: string
   capabilitiesText: string
   devicesText: string
+  replayDraft: ReplayDraft
+  sleepDraft: SleepDraft
+  flagsDraft: RuntimeFlagsDraft
 }
 
 function linesOf(text: string) {
@@ -112,25 +163,59 @@ function linesOf(text: string) {
     .filter(Boolean)
 }
 
-function runtimeDraftOf(runtime: RuntimePlan): RuntimeDraft {
+/**
+ * The route's allowed addresses, response headers, sign-in, maintenance and
+ * error pages are in `runtime` but are the Domains page's to edit, so this
+ * form neither holds them nor writes them: a Runtime save keeps whatever the
+ * latest copy has.
+ */
+function runtimeDraftOf(saved: RuntimePlan): RuntimeDraft {
+  const runtime = { ...saved }
+  delete runtime.allowFrom
+  delete runtime.responseHeaders
+  delete runtime.forwardAuth
+  delete runtime.maintenance
+  delete runtime.errorPages
+  delete runtime.interceptErrors
+  delete runtime.replay
+  delete runtime.sleep
+  // Skew protection is set beside the rollback terms, which save it.
+  delete runtime.skewProtection
+  // The process flags are held as typed, in flagsDraft alone.
+  delete runtime.user
+  delete runtime.readOnlyRootfs
+  delete runtime.tmpfs
+  delete runtime.ulimits
+  delete runtime.sysctls
+  delete runtime.gpus
   return {
     ...runtime,
     commandText: (runtime.command ?? []).join("\n"),
     capabilitiesText: (runtime.capabilities ?? []).join("\n"),
     devicesText: (runtime.devices ?? []).join("\n"),
+    replayDraft: replayDraftOf(saved.replay),
+    sleepDraft: sleepDraftOf(saved.sleep),
+    flagsDraft: runtimeFlagsDraftOf(saved),
   }
 }
 
+/** The draft as the plan saves it; the flags' lines were read by `runtimeFlagsOf` first. */
 function runtimePlanOf(draft: RuntimeDraft): RuntimePlan {
   const plan: RuntimePlan & Partial<RuntimeDraft> = {
     ...draft,
     command: linesOf(draft.commandText),
     capabilities: linesOf(draft.capabilitiesText),
     devices: linesOf(draft.devicesText),
+    replay: replayPlanOf(draft.replayDraft),
+    sleep: sleepPlanOf(draft.sleepDraft),
+    ...runtimeFlagsOf(draft.flagsDraft).plan,
   }
   delete plan.commandText
   delete plan.capabilitiesText
   delete plan.devicesText
+  delete plan.replayDraft
+  delete plan.sleepDraft
+  delete plan.flagsDraft
   return plan
 }
 
@@ -160,6 +245,10 @@ const RUNTIME_FIELD_IDS: Record<string, string> = {
   "runtime.hostPort": "runtime-host-port",
   "runtime.bindAddress": "runtime-bind",
   "runtime.strategy": "runtime-strategy",
+  "runtime.canary": "runtime-strategy",
+  "runtime.canary.percent": "runtime-canary-percent",
+  "runtime.canary.durationSeconds": "runtime-canary-window",
+  "runtime.replicas": "runtime-replicas",
   "runtime.memoryMb": "runtime-memory",
   "runtime.cpus": "runtime-cpus",
   "runtime.pidsLimit": "runtime-pids",
@@ -170,7 +259,36 @@ const RUNTIME_FIELD_IDS: Record<string, string> = {
   "runtime.maxRequestBodyMb": "runtime-max-body",
   "runtime.capabilities": "runtime-capabilities",
   "runtime.devices": "runtime-devices",
+  "runtime.user": "runtime-user",
+  "runtime.readOnlyRootfs": "runtime-read-only",
+  "runtime.tmpfs": "runtime-tmpfs",
+  "runtime.ulimits": "runtime-ulimits",
+  "runtime.sysctls": "runtime-sysctls",
+  "runtime.gpus": "runtime-gpus",
+  "runtime.gpus.mode": "runtime-gpus",
+  "runtime.gpus.count": "runtime-gpu-count",
+  "runtime.gpus.deviceIds": "runtime-gpu-devices",
+  ...REPLAY_FIELD_IDS,
+  ...SLEEP_FIELD_IDS,
 }
+
+/** The same ids by the flags draft's own fields, for a line the form cannot read. */
+const FLAGS_DRAFT_FIELD_IDS: Record<FlagsRefusal["field"], string> = {
+  user: "runtime-user",
+  tmpfsText: "runtime-tmpfs",
+  ulimitsText: "runtime-ulimits",
+  sysctlsText: "runtime-sysctls",
+  gpuCount: "runtime-gpu-count",
+  gpuDevices: "runtime-gpu-devices",
+}
+
+/** The GPU choice's segments. */
+const GPU_MODES: { value: RuntimeFlagsDraft["gpuMode"]; label: string }[] = [
+  { value: "none", label: "None" },
+  { value: "all", label: "Every GPU" },
+  { value: "count", label: "A number" },
+  { value: "devices", label: "Named" },
+]
 
 /** Which section head a refused field belongs to, so that head says "Not saved". */
 const FIELD_SECTION: Record<string, string> = {
@@ -184,12 +302,25 @@ const FIELD_SECTION: Record<string, string> = {
   "runtime-cpus": "resources",
   "runtime-pids": "resources",
   "runtime-strategy": "releases",
+  "runtime-canary-percent": "releases",
+  "runtime-canary-window": "releases",
+  "runtime-replicas": "releases",
   "runtime-restart": "releases",
   "runtime-stop-signal": "shutdown",
   "runtime-grace": "shutdown",
   "runtime-drain": "shutdown",
   "runtime-capabilities": "access",
   "runtime-devices": "access",
+  "runtime-gpus": "access",
+  "runtime-gpu-count": "access",
+  "runtime-gpu-devices": "access",
+  "runtime-user": "process",
+  "runtime-read-only": "process",
+  "runtime-tmpfs": "process",
+  "runtime-ulimits": "process",
+  "runtime-sysctls": "process",
+  ...Object.fromEntries(Object.values(REPLAY_FIELD_IDS).map((id) => [id, "replay"])),
+  ...Object.fromEntries(Object.values(SLEEP_FIELD_IDS).map((id) => [id, "sleep"])),
 }
 
 function clampPort(value: string) {
@@ -257,6 +388,22 @@ export function RuntimeSettings({
             usage={usage}
             save={state.save}
           />
+          <RollbackWatchForm
+            projectId={projectId}
+            environmentId={environmentId}
+            blueGreen={
+              configuration.runtime.strategy === "blue_green" ||
+              configuration.runtime.strategy === "canary"
+            }
+            skew={{
+              saved: Boolean(configuration.runtime.skewProtection),
+              refusal: skewRefusal(configuration),
+              save: (on) =>
+                state.save({
+                  runtime: (latest) => ({ ...latest.runtime, skewProtection: on || undefined }),
+                }),
+            }}
+          />
           <HealthChecksForm projectId={projectId} configuration={configuration} save={state.save} />
         </>
       )}
@@ -265,6 +412,18 @@ export function RuntimeSettings({
 }
 
 type Save = ReturnType<typeof useConfiguration>["save"]
+
+/** Why the saved plan cannot keep visitors on their release (`validateSkewProtection`). */
+function skewRefusal(configuration: DeploymentEnvironmentConfiguration) {
+  if (configuration.runtime.strategy === "stop_first")
+    return "a stop-first release stops the previous one before the next starts"
+  const method = configuration.build.method
+  if (method === "compose" || method === "legacy_compose")
+    return "a Compose stack is never kept warm"
+  if (!configuration.domains.some((domain) => !domain.redirectTo))
+    return "it is a cookie the public route sets, and this plan has no domain"
+  return undefined
+}
 
 /**
  * One or two states for a section head, side by side, or nothing when there
@@ -278,9 +437,11 @@ function statuses(...items: React.ReactNode[]) {
 }
 
 /**
- * The Runtime form: six section heads — the image and command, where it
- * listens, what it may use, how releases replace each other, how it is
- * stopped, what it can reach — and one save, because one PUT writes all of it.
+ * The Runtime form: its section heads — the image and command, where it
+ * listens, what it may use, how releases replace each other, what a release
+ * is replayed before its cutover, what it does while nobody visits, how it is
+ * stopped, who it runs as and where it may write, what it can reach — and
+ * one save, because one PUT writes all of it.
  */
 function RuntimeForm({
   projectId,
@@ -303,6 +464,7 @@ function RuntimeForm({
   const [error, setError] = useState<string>()
   const [fieldError, setFieldError] = useState<{ id: string; message: string }>()
   const [accessOpen, setAccessOpen] = useState(false)
+  const [limitsOpen, setLimitsOpen] = useState(false)
   // The switch is on while there is a host port, and stays on while the
   // operator clears the field to type another: bound to the value alone, an
   // emptied field turned the switch off and unmounted the input being typed in.
@@ -326,8 +488,35 @@ function RuntimeForm({
   const pids = runtime.pidsLimit ?? 0
   const refusal = blueGreenRefusal(runtime, deployment.profile, method)
   const blueGreen = runtime.strategy === "blue_green"
-  const failsNext = blueGreen && Boolean(refusal)
+  const canary = runtime.strategy === "canary"
+  // A canary runs the candidate beside the live release as blue/green does,
+  // and shares the public route's requests, so it needs a domain as well.
+  const servesDomain = configuration.domains.some((domain) => !domain.redirectTo)
+  const canaryRefusal =
+    refusal ??
+    (servesDomain
+      ? undefined
+      : "a canary shares the public route's requests, and this plan has no domain")
+  const failsNext = (blueGreen && Boolean(refusal)) || (canary && Boolean(canaryRefusal))
+  const terms = runtime.canary ?? DEFAULT_CANARY_TERMS
+  const replicas = effectiveReplicas(runtime)
+  const replicasRefused = replicaRefusal(runtime, method)
+  // Saved with replicas, then given something only one container can hold:
+  // the server refuses the save, so the page says so before it is pressed.
+  const replicasFail = replicas > 1 && Boolean(replicasRefused)
   const portMark = portProduct(port)
+  const web = deployment.profile === "web" || deployment.profile === "static"
+  const compose = method === "compose" || method === "legacy_compose"
+  const flags = runtime.flagsDraft
+  const patchFlags = (fields: Partial<RuntimeFlagsDraft>) =>
+    draft.set((prev) => ({ ...prev, flagsDraft: { ...prev.flagsDraft, ...fields } }))
+  const flagsRead = runtimeFlagsOf(flags)
+  // Two sections share the draft: the GPUs are Container access's.
+  const savedFlags = runtimeFlagsDraftOf(configuration.runtime)
+  const flagsChanged = (fields: (keyof RuntimeFlagsDraft)[]) =>
+    fields.some((field) => flags[field] !== savedFlags[field])
+  const flagsLine = flagsRead.plan && runtimeFlagsLine(flagsRead.plan)
+  const gpus = flagsRead.plan?.gpus
 
   const submit = async () => {
     setError(undefined)
@@ -336,9 +525,43 @@ function RuntimeForm({
       setFieldError({ id: "runtime-host-port", message: "Use a port from 1 to 65535." })
       return false
     }
+    const replayRefused = replayRefusal(runtime.replayDraft)
+    if (replayRefused) {
+      setFieldError({
+        id: REPLAY_DRAFT_FIELD_IDS[replayRefused.field],
+        message: replayRefused.message,
+      })
+      return false
+    }
+    const sleepRefused = sleepRefusal(runtime.sleepDraft)
+    if (sleepRefused) {
+      setFieldError({
+        id: SLEEP_DRAFT_FIELD_IDS[sleepRefused.field],
+        message: sleepRefused.message,
+      })
+      return false
+    }
+    if (flagsRead.refusal) {
+      setFieldError({
+        id: FLAGS_DRAFT_FIELD_IDS[flagsRead.refusal.field],
+        message: flagsRead.refusal.message,
+      })
+      return false
+    }
     setSaving(true)
     try {
-      await save({ runtime: runtimePlanOf(runtime) })
+      await save({
+        runtime: (latest) => ({
+          ...runtimePlanOf(runtime),
+          allowFrom: latest.runtime.allowFrom,
+          responseHeaders: latest.runtime.responseHeaders,
+          forwardAuth: latest.runtime.forwardAuth,
+          maintenance: latest.runtime.maintenance,
+          errorPages: latest.runtime.errorPages,
+          interceptErrors: latest.runtime.interceptErrors,
+          skewProtection: latest.runtime.skewProtection,
+        }),
+      })
       // The lists go to the server one entry per line, trimmed; the draft
       // takes the same shape, or a stray blank line would read as an edit
       // the save did not make.
@@ -347,11 +570,18 @@ function RuntimeForm({
         commandText: linesOf(prev.commandText).join("\n"),
         capabilitiesText: linesOf(prev.capabilitiesText).join("\n"),
         devicesText: linesOf(prev.devicesText).join("\n"),
+        replayDraft: replayDraftOf(replayPlanOf(prev.replayDraft)),
+        sleepDraft: sleepDraftOf(sleepPlanOf(prev.sleepDraft)),
+        flagsDraft: runtimeFlagsDraftOf(runtimeFlagsOf(prev.flagsDraft).plan ?? {}),
       }))
       return true
     } catch (caught) {
-      if (caught instanceof ApiError && caught.field && RUNTIME_FIELD_IDS[caught.field]) {
-        setFieldError({ id: RUNTIME_FIELD_IDS[caught.field], message: caught.message })
+      // An entry of a list — a refused prefix, a writable path, a limit, a
+      // kernel parameter, a GPU — is named by its place in it; the field is
+      // the list.
+      const field = caught instanceof ApiError ? caught.field?.replace(/\[\d+\]/g, "") : undefined
+      if (caught instanceof ApiError && field && RUNTIME_FIELD_IDS[field]) {
+        setFieldError({ id: RUNTIME_FIELD_IDS[field], message: caught.message })
       } else if (caught instanceof ApiError && (caught.status === 422 || caught.status === 400)) {
         // The plan's own refusals — a credential in argv, a path outside the
         // source — name no field, so they are the form's sentence, not a toast.
@@ -371,6 +601,7 @@ function RuntimeForm({
   // here — so the fold latches open and does not snap shut again the moment
   // the next submit clears the error.
   const accessRefused = Boolean(errorFor("runtime-capabilities") || errorFor("runtime-devices"))
+  const limitsRefused = Boolean(errorFor("runtime-ulimits") || errorFor("runtime-sysctls"))
 
   const image = runtime.image?.trim()
 
@@ -675,8 +906,9 @@ function RuntimeForm({
         </FieldRow>
       </SettingSection>
 
-      {/* No state line: it said the restart policy back ("restarts unless
-          stopped") over the select that already says it. */}
+      {/* A state line only for replicas past one, the answer that is not the
+          expected one: it used to say the restart policy back ("restarts
+          unless stopped") over the select that already says it. */}
       <SettingSection
         id="releases"
         title="Releases"
@@ -690,13 +922,28 @@ function RuntimeForm({
             />
           ),
           settingStatus({
-            dirty: draft.changed(["strategy", "restartPolicy"]),
+            dirty: draft.changed(["strategy", "canary", "replicas", "restartPolicy"]),
             refused: refusedIn("releases"),
           }),
         )}
+        state={
+          canary || replicas > 1 ? (
+            <span
+              key={`${canary}-${terms.percent}-${terms.durationSeconds}-${replicas}`}
+              className="numeric block animate-rise"
+            >
+              {[
+                canary && `Canary on ${terms.percent}% for ${windowWords(terms.durationSeconds)}`,
+                replicas > 1 && `${replicas} replicas of each release`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          ) : undefined
+        }
       >
         <Field label="Release strategy" error={errorFor("runtime-strategy")}>
-          <ChoiceGrid id="runtime-strategy" columns={2} role="group" aria-label="Release strategy">
+          <ChoiceGrid id="runtime-strategy" columns={3} role="group" aria-label="Release strategy">
             <ChoiceCard
               verb="Release blue / green"
               title="Blue / green"
@@ -713,17 +960,35 @@ function RuntimeForm({
               }
               selected={blueGreen}
               disabled={!canEdit || Boolean(refusal)}
-              onClick={() => patch({ strategy: "blue_green" })}
+              onClick={() => draft.set((prev) => withStrategy(prev, "blue_green"))}
+            />
+            <ChoiceCard
+              verb="Release as a canary"
+              title="Canary"
+              mark={Gauge}
+              index={1}
+              description={
+                <>
+                  {canary && failsNext && (
+                    <span className="sr-only">Current strategy, unavailable. </span>
+                  )}
+                  Gives the new release a share of the requests beside the live one first, and
+                  removes it if it does worse.
+                </>
+              }
+              selected={canary}
+              disabled={!canEdit || Boolean(canaryRefusal)}
+              onClick={() => draft.set((prev) => withStrategy(prev, "canary"))}
             />
             <ChoiceCard
               verb="Release stop first"
               title="Stop first"
               mark={Pause}
-              index={1}
+              index={2}
               description="Stops the live release, then starts the new one — a moment of downtime."
               selected={runtime.strategy === "stop_first"}
               disabled={!canEdit}
-              onClick={() => patch({ strategy: "stop_first" })}
+              onClick={() => draft.set((prev) => withStrategy(prev, "stop_first"))}
             />
           </ChoiceGrid>
           {/* Said beside the choice it blocks, at full ink: on the card it was
@@ -731,7 +996,118 @@ function RuntimeForm({
               operator needed and the hardest to read. */}
           {refusal && (
             <FormNote tone={failsNext ? "warning" : "default"} className="animate-rise">
-              Blue / green is unavailable: {refusal}.
+              Blue / green and canary are unavailable: {refusal}.
+            </FormNote>
+          )}
+          {!refusal && canaryRefusal && (
+            <FormNote tone={canary ? "warning" : "default"} className="animate-rise">
+              Canary is unavailable: {canaryRefusal}.
+            </FormNote>
+          )}
+        </Field>
+        {canary && (
+          <div className="animate-rise space-y-4">
+            <FieldRow columns={2}>
+              <Field
+                label="Share of requests"
+                htmlFor="runtime-canary-percent"
+                info="Each request picks a release at random, so the new release's share holds per request. Its 5xx share and p95 are compared with the live release's over the same minutes, on the rollback terms below."
+                error={errorFor("runtime-canary-percent")}
+              >
+                <InputGroup>
+                  <InputGroupInput
+                    id="runtime-canary-percent"
+                    type="number"
+                    min={CANARY_PERCENT.min}
+                    max={CANARY_PERCENT.max}
+                    value={terms.percent}
+                    readOnly={!canEdit}
+                    aria-invalid={Boolean(errorFor("runtime-canary-percent"))}
+                    className="font-mono"
+                    onChange={(event) =>
+                      patch({ canary: { ...terms, percent: Number(event.target.value) || 0 } })
+                    }
+                  />
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupText>%</InputGroupText>
+                  </InputGroupAddon>
+                </InputGroup>
+              </Field>
+              <Field
+                label="Window"
+                htmlFor="runtime-canary-window"
+                info="How long the new release keeps its share before it is promoted or waits for you. A failing comparison aborts it at once, without waiting for the end."
+                error={errorFor("runtime-canary-window")}
+              >
+                <InputGroup>
+                  <InputGroupInput
+                    id="runtime-canary-window"
+                    type="number"
+                    min={CANARY_SECONDS.min / 60}
+                    max={CANARY_SECONDS.max / 60}
+                    value={Math.round(terms.durationSeconds / 60)}
+                    readOnly={!canEdit}
+                    aria-invalid={Boolean(errorFor("runtime-canary-window"))}
+                    className="font-mono"
+                    onChange={(event) =>
+                      patch({
+                        canary: {
+                          ...terms,
+                          durationSeconds: (Number(event.target.value) || 0) * 60,
+                        },
+                      })
+                    }
+                  />
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupText>minutes</InputGroupText>
+                  </InputGroupAddon>
+                </InputGroup>
+              </Field>
+            </FieldRow>
+            <OptionList>
+              <OptionRow
+                title="Promote on its own"
+                hint="At the end of a window it got through without doing worse, the new release goes live. Off, it keeps its share until you promote or abort it from the run."
+                checked={terms.autoPromote ?? false}
+                onCheckedChange={(autoPromote) =>
+                  patch({ canary: { ...terms, autoPromote: autoPromote || undefined } })
+                }
+                disabled={!canEdit}
+              />
+            </OptionList>
+          </div>
+        )}
+        <Field
+          label="Replicas"
+          info="Containers of each release that run side by side on this server, sharing the route's requests: the one with the fewest open connections gets the next. A cutover waits until every replica passes the readiness check, and a replica that stops answering is passed over for ten seconds. Each has the limits above of its own."
+          error={errorFor("runtime-replicas")}
+        >
+          <Segments
+            id="runtime-replicas"
+            label="Replicas"
+            value={String(replicas)}
+            options={Array.from({ length: MAX_REPLICAS }, (_, index) => ({
+              value: String(index + 1),
+              label: String(index + 1),
+              mono: true,
+              // One is always on offer: it is the way out of a refusal.
+              disabled: index > 0 && Boolean(replicasRefused),
+            }))}
+            disabled={!canEdit}
+            onChange={(value) => draft.set((prev) => withReplicas(prev, Number(value)))}
+          />
+          {replicasRefused && (
+            <FormNote tone={replicasFail ? "warning" : "default"} className="animate-rise">
+              {replicasFail ? "Will not save: " : "One replica only: "}
+              {replicasRefused}.
+            </FormNote>
+          )}
+          {!replicasRefused && replicas > 1 && memory > 0 && (
+            <FormNote className="animate-rise">
+              <span className="numeric">
+                {replicas} × {memory} MB = {replicas * memory} MB for the release
+              </span>
+              {blueGreen && ", twice that while a cutover runs both releases"}.
             </FormNote>
           )}
         </Field>
@@ -760,6 +1136,57 @@ function RuntimeForm({
           </Select>
         </Field>
       </SettingSection>
+
+      {/* A gate on the release, beside how releases replace each other: a
+          worker or a game server has no requests to replay, so it is drawn
+          only where there is traffic, or where a plan already turned it on. */}
+      {(web || runtime.replayDraft.enabled) && (
+        <ReplaySection
+          draft={runtime.replayDraft}
+          onChange={(fields) =>
+            draft.set((prev) => ({ ...prev, replayDraft: { ...prev.replayDraft, ...fields } }))
+          }
+          canEdit={canEdit}
+          errorFor={errorFor}
+          servesDomain={configuration.domains.some((domain) => !domain.redirectTo)}
+          stopFirst={runtime.strategy === "stop_first"}
+          status={settingStatus({
+            dirty: draft.changed(["replayDraft"]),
+            refused: refusedIn("replay"),
+          })}
+        />
+      )}
+
+      {/* What the release does while nobody visits: drawn where there are
+          visitors to wait for, or where a plan already turned it on. */}
+      {(web || runtime.sleepDraft.enabled) && (
+        <SleepSection
+          draft={runtime.sleepDraft}
+          onChange={(fields) =>
+            draft.set((prev) => ({ ...prev, sleepDraft: { ...prev.sleepDraft, ...fields } }))
+          }
+          canEdit={canEdit}
+          errorFor={errorFor}
+          blocker={sleepBlocker({
+            servesDomain: configuration.domains.some((domain) => !domain.redirectTo),
+            compose: method === "compose" || method === "legacy_compose",
+            hostNetwork: Boolean(runtime.hostNetwork),
+            replicas,
+            canary,
+            skewProtection: Boolean(configuration.runtime.skewProtection),
+            blockingCheck: configuration.checks.find(
+              (check) =>
+                check.phase === "readiness" &&
+                check.required &&
+                (check.kind === "docker_health" || check.kind === "public_route"),
+            ),
+          })}
+          status={settingStatus({
+            dirty: draft.changed(["sleepDraft"]),
+            refused: refusedIn("sleep"),
+          })}
+        />
+      )}
 
       {/* A head that says what the three fields add up to, since the defaults
           are not on any of them: the server stops a container with SIGTERM and
@@ -848,19 +1275,172 @@ function RuntimeForm({
         </FieldRow>
       </SettingSection>
 
+      {/* Who the process is and where it may write: the user, a read-only
+          root with the paths kept writable in memory, and behind the fold the
+          kernel's limits and parameters it starts with. A Compose stack's
+          file says these per service, so it gets the sentence and no fields. */}
+      <SettingSection
+        id="process"
+        title="Inside the container"
+        state={
+          flagsLine ? (
+            <span key={flagsLine} className="block animate-rise truncate" title={flagsLine}>
+              {flagsLine}
+            </span>
+          ) : undefined
+        }
+        status={settingStatus({
+          dirty: flagsChanged([
+            "user",
+            "readOnlyRootfs",
+            "tmpfsText",
+            "ulimitsText",
+            "sysctlsText",
+          ]),
+          refused: refusedIn("process"),
+        })}
+      >
+        {compose ? (
+          <FormNote>
+            A Compose stack sets its user, read-only root, tmpfs, ulimits, sysctls and GPUs per
+            service in its own file.
+          </FormNote>
+        ) : (
+          <>
+            <Field
+              label="Run as"
+              htmlFor="runtime-user"
+              info="The user the application's processes run as: a number with an optional group, such as 1000:1000, or a name the image defines. Empty runs the image's own user. What it writes into a volume belongs to it, and release tasks run as it too."
+              error={errorFor("runtime-user")}
+            >
+              <InputGroup className="sm:w-72">
+                <InputGroupInput
+                  id="runtime-user"
+                  value={flags.user}
+                  readOnly={!canEdit}
+                  aria-invalid={Boolean(errorFor("runtime-user"))}
+                  className="font-mono"
+                  placeholder="the image's user"
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => patchFlags({ user: event.target.value })}
+                />
+              </InputGroup>
+            </Field>
+            <OptionList>
+              <OptionRow
+                title="Read-only root filesystem"
+                hint="The application can write only to its volumes and to the paths kept writable below; a write anywhere else fails."
+                checked={flags.readOnlyRootfs}
+                onCheckedChange={(on) =>
+                  patchFlags({
+                    readOnlyRootfs: on,
+                    // Turned on with nowhere named, it starts from /tmp — and,
+                    // for a static site, where nginx writes — so the switch
+                    // alone is a plan the server saves.
+                    tmpfsText:
+                      on && !flags.tmpfsText.trim()
+                        ? readOnlyStartingPaths(method, configuration.build.outputDirectory).join(
+                            "\n",
+                          )
+                        : flags.tmpfsText,
+                  })
+                }
+                disabled={!canEdit}
+              >
+                <Field
+                  label="Writable paths"
+                  htmlFor="runtime-tmpfs"
+                  info={`One absolute path per line, optionally with its size: /tmp 128 MiB. Each is kept in memory, ${DEFAULT_TMPFS_MB} MiB unless it says, counts against the memory limit, and is empty again when the container restarts. Empty is /tmp alone.`}
+                  error={errorFor("runtime-tmpfs")}
+                >
+                  <Textarea
+                    id="runtime-tmpfs"
+                    value={flags.tmpfsText}
+                    onChange={(event) => patchFlags({ tmpfsText: event.target.value })}
+                    readOnly={!canEdit}
+                    aria-invalid={Boolean(errorFor("runtime-tmpfs"))}
+                    placeholder={"/tmp\n/var/cache/app 32 MiB"}
+                    className="min-h-20 font-mono sm:text-xs"
+                  />
+                </Field>
+              </OptionRow>
+            </OptionList>
+            {/* The field a refusal can name is behind the switch while it is off. */}
+            {!flags.readOnlyRootfs &&
+              (errorFor("runtime-tmpfs") || errorFor("runtime-read-only")) && (
+                <FormNote tone="danger" role="alert" className="animate-rise">
+                  {errorFor("runtime-tmpfs") || errorFor("runtime-read-only")}
+                </FormNote>
+              )}
+            {flags.readOnlyRootfs && errorFor("runtime-read-only") && (
+              <FormNote tone="danger" role="alert" className="animate-rise">
+                {errorFor("runtime-read-only")}
+              </FormNote>
+            )}
+            <Disclosure
+              quiet
+              summary="Ulimits and kernel parameters"
+              facts={`${plural(flagsRead.plan?.ulimits?.length ?? 0, "ulimit")} · ${plural(flagsRead.plan?.sysctls?.length ?? 0, "kernel parameter")}`}
+              open={limitsOpen || limitsRefused}
+              onOpenChange={setLimitsOpen}
+            >
+              <FieldRow>
+                <Field
+                  label="Ulimits"
+                  htmlFor="runtime-ulimits"
+                  info="The kernel limits each process starts with, one per line as name=soft:hard, or name=value for both: nofile, nproc, memlock, stack, core and the rest of Docker's names. -1 or unlimited is no limit where the kernel allows one; nofile stops at 1048576."
+                  error={errorFor("runtime-ulimits")}
+                >
+                  <Textarea
+                    id="runtime-ulimits"
+                    value={flags.ulimitsText}
+                    onChange={(event) => patchFlags({ ulimitsText: event.target.value })}
+                    readOnly={!canEdit}
+                    aria-invalid={Boolean(errorFor("runtime-ulimits"))}
+                    placeholder={"nofile=65536:65536\nmemlock=unlimited"}
+                    className="min-h-20 font-mono sm:text-xs"
+                  />
+                </Field>
+                <Field
+                  label="Kernel parameters"
+                  htmlFor="runtime-sysctls"
+                  info="sysctls, one per line as name=value, set in the container's own namespaces: net.*, fs.mqueue.* and the System V IPC limits (kernel.shmmax, kernel.sem…). Anything else is the server's and is refused, as net.* is on the host network."
+                  error={errorFor("runtime-sysctls")}
+                >
+                  <Textarea
+                    id="runtime-sysctls"
+                    value={flags.sysctlsText}
+                    onChange={(event) => patchFlags({ sysctlsText: event.target.value })}
+                    readOnly={!canEdit}
+                    aria-invalid={Boolean(errorFor("runtime-sysctls"))}
+                    placeholder={"net.core.somaxconn=1024\nnet.ipv4.tcp_keepalive_time=600"}
+                    className="min-h-20 font-mono sm:text-xs"
+                  />
+                </Field>
+              </FieldRow>
+            </Disclosure>
+          </>
+        )}
+      </SettingSection>
+
       <SettingSection
         id="access"
         title="Container access"
         status={statuses(
           runtime.privileged ? (
             <Status key="privileged" tone="danger" label="Privileged" className="animate-rise" />
+          ) : runtime.hostNetwork ? (
+            <Status key="host" tone="warning" label="Host network" className="animate-rise" />
           ) : (
-            runtime.hostNetwork && (
-              <Status key="host" tone="warning" label="Host network" className="animate-rise" />
+            gpus && (
+              <Status key="gpus" tone="warning" label={gpusWords(gpus)} className="animate-rise" />
             )
           ),
           settingStatus({
-            dirty: draft.changed(["privileged", "hostNetwork", "capabilitiesText", "devicesText"]),
+            dirty:
+              draft.changed(["privileged", "hostNetwork", "capabilitiesText", "devicesText"]) ||
+              flagsChanged(["gpuMode", "gpuCount", "gpuDevices", "gpuPreviews"]),
             refused: refusedIn("access"),
           }),
         )}
@@ -931,6 +1511,83 @@ function RuntimeForm({
             </Field>
           </FieldRow>
         </Disclosure>
+        {/* The server's GPUs are a device of the host's, so they sit with the
+            other ways out of the container; a Compose file asks for its own. */}
+        {!compose && (
+          <Field
+            label="GPUs"
+            info="NVIDIA GPUs through Docker's --gpus, with the gpu capability. The server needs the NVIDIA driver and the NVIDIA Container Toolkit; preflight says when Docker lists no nvidia runtime, and a start Docker refuses fails as GPUs not available. Every container of the release — each replica, a canary — gets the same."
+            error={errorFor("runtime-gpus")}
+          >
+            <Segments
+              id="runtime-gpus"
+              label="GPUs"
+              value={flags.gpuMode}
+              options={GPU_MODES}
+              disabled={!canEdit}
+              onChange={(gpuMode) => patchFlags({ gpuMode })}
+            />
+            {flags.gpuMode !== "none" && (
+              <div className="animate-rise space-y-3 pt-2">
+                {flags.gpuMode === "count" && (
+                  <Field
+                    label="How many"
+                    htmlFor="runtime-gpu-count"
+                    error={errorFor("runtime-gpu-count")}
+                  >
+                    <InputGroup className="sm:w-40">
+                      <InputGroupInput
+                        id="runtime-gpu-count"
+                        type="number"
+                        min={1}
+                        max={64}
+                        value={flags.gpuCount}
+                        readOnly={!canEdit}
+                        aria-invalid={Boolean(errorFor("runtime-gpu-count"))}
+                        className="font-mono"
+                        onChange={(event) => patchFlags({ gpuCount: event.target.value })}
+                      />
+                      <InputGroupAddon align="inline-end">
+                        <InputGroupText>GPUs</InputGroupText>
+                      </InputGroupAddon>
+                    </InputGroup>
+                  </Field>
+                )}
+                {flags.gpuMode === "devices" && (
+                  <Field
+                    label="Which"
+                    htmlFor="runtime-gpu-devices"
+                    info="Indexes or UUIDs as nvidia-smi -L lists them, separated by commas."
+                    error={errorFor("runtime-gpu-devices")}
+                  >
+                    <InputGroup className="sm:w-96">
+                      <InputGroupInput
+                        id="runtime-gpu-devices"
+                        value={flags.gpuDevices}
+                        readOnly={!canEdit}
+                        aria-invalid={Boolean(errorFor("runtime-gpu-devices"))}
+                        className="font-mono"
+                        placeholder="0, 1"
+                        autoComplete="off"
+                        spellCheck={false}
+                        onChange={(event) => patchFlags({ gpuDevices: event.target.value })}
+                      />
+                    </InputGroup>
+                  </Field>
+                )}
+                <OptionList>
+                  <OptionRow
+                    title="Pull request previews get them too"
+                    hint="Off, a preview of this environment runs without GPUs: it runs a branch nobody has deployed yet."
+                    checked={flags.gpuPreviews}
+                    onCheckedChange={(gpuPreviews) => patchFlags({ gpuPreviews })}
+                    disabled={!canEdit}
+                  />
+                </OptionList>
+              </div>
+            )}
+          </Field>
+        )}
       </SettingSection>
     </SettingForm>
   )

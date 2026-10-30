@@ -20,6 +20,13 @@ func (s *Server) handleDeploymentGitWatch(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return mapDeployError(err)
 	}
+	// The reading is an addition to the watch: a host that cannot be asked
+	// leaves it out rather than failing the section it sits in.
+	if s.modules.commitStatuses != nil {
+		if reading, err := s.modules.commitStatuses.Describe(r.Context(), projectID, environmentID); err == nil {
+			status.CommitStatus = reading
+		}
+	}
 	httpx.JSON(w, http.StatusOK, status)
 	return nil
 }
@@ -29,11 +36,19 @@ func (s *Server) handleDeploymentGitPolicyPut(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return err
 	}
-	var policy deploy.GitDeploymentPolicy
-	if err := httpx.DecodeJSON(r, &policy); err != nil {
+	var request gitPolicyWrite
+	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
-	httpx.SetAudit(r, "deploy.git.policy", fmt.Sprint(projectID), map[string]any{"environmentId": environmentID, "automatic": policy.Automatic})
+	policy := request.GitDeploymentPolicy
+	if request.PromotionOnly != nil {
+		policy.PromotionOnly = *request.PromotionOnly
+	} else if current, err := s.modules.deployRuns.GitDeploymentPolicy(r.Context(), projectID, environmentID); err == nil {
+		policy.PromotionOnly = current.PromotionOnly
+	}
+	httpx.SetAudit(r, "deploy.git.policy", fmt.Sprint(projectID), map[string]any{
+		"environmentId": environmentID, "automatic": policy.Automatic, "promotionOnly": policy.PromotionOnly,
+	})
 	updated, err := s.modules.deployRuns.SetGitDeploymentPolicy(r.Context(), projectID, environmentID, policy)
 	if err != nil {
 		return mapDeployError(err)
@@ -61,4 +76,12 @@ func (s *Server) dispatchGitDeployment(ctx context.Context, target deploy.GitWat
 	encoded, _ := json.Marshal(detail)
 	s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.git.change", Target: fmt.Sprint(target.ProjectID), Success: err == nil, Detail: string(encoded)})
 	return run, err
+}
+
+// gitPolicyWrite is the body of PUT …/git-policy. promotionOnly is optional:
+// a client that predates it keeps whatever the environment has rather than
+// switching it off by omission.
+type gitPolicyWrite struct {
+	deploy.GitDeploymentPolicy
+	PromotionOnly *bool `json:"promotionOnly"`
 }

@@ -51,6 +51,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { ArchivedProjects } from "@/components/deploy/archived-projects"
+import { FleetRightSize } from "@/components/deploy/right-size"
 import { ProjectCard, ProjectRow, runClock, stageOf } from "@/components/deploy/fleet-card"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { MiniReleasePath } from "@/components/deploy/run-pipeline"
@@ -468,6 +469,10 @@ function Fleet() {
               )}
             </div>
           )}
+
+          {/* After the projects: the limits worth changing are a question
+              about the fleet once its state has been read. */}
+          {deployments.length > 0 && <FleetRightSize />}
         </div>
       )}
       {dialog}
@@ -625,7 +630,10 @@ function InProgressPanel({
   )
 }
 
-/** The ways into the fleet, the same five `/deploy/new` opens on, one click nearer. */
+/**
+ * The ways into the fleet, one click nearer: the four sources `/deploy/new`
+ * opens on, and Compose, which opens its Docker tab where stacks are offered.
+ */
 const SOURCES: {
   key: string
   title: string
@@ -678,9 +686,9 @@ const SOURCES: {
 
 /**
  * No projects yet. The empty state says what goes here, drawn as the places a
- * project comes from, and under it the five ways in as the cards `/deploy/new`
- * opens on — lit, because each is a choice (§16), and each lands on its own
- * tab through `?source=`.
+ * project comes from, and under it the five ways in as cards — lit, because
+ * each is a choice (§16), and each lands on its tab of `/deploy/new` through
+ * `?source=`.
  */
 function FleetEmpty({ admin }: { admin: boolean }) {
   return (

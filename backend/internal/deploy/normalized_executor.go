@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/secretstore"
 )
 
 type DeploymentStepExecutor struct {
@@ -66,6 +69,50 @@ type NormalizedStepExecutor struct {
 	// reachability check after a publish, replaced in tests.
 	tailnet      TailnetPublisher
 	tailnetProbe func(context.Context, string) error
+	// tailnetCheck is the dashboard's API on loopback, which a tailnet
+	// gate asks about every request (tailnet_apps.go).
+	tailnetCheck string
+
+	// hostMemory reads available and total memory in bytes, for the warm
+	// release's memory floor; nil reads /proc/meminfo.
+	hostMemory func() (int64, int64)
+	// rehearser makes the throwaway database copies release tasks are
+	// rehearsed against (rehearsal.go); nil reports a rehearsal unavailable.
+	rehearser MigrationRehearser
+
+	// requests is the held request record the traffic replay reads its
+	// requests from (replay.go) and a canary's two releases are read from
+	// (canary.go); nil skips the replay, since there is no record on this
+	// host to replay from, and leaves a canary unjudged, decided by its
+	// window and the operator. replayClient is what the replay sends with,
+	// built once, or set by a test.
+	requests     RequestRecord
+	replayClient replayClient
+	replayOnce   sync.Once
+	// canaryPoll and canaryRead are how often a canary looks for a
+	// decision and reads the record; zero is the default.
+	canaryPoll time.Duration
+	canaryRead time.Duration
+
+	// dataPoints says where each linked database stands as a release goes
+	// live (data_rollback.go); nil records none.
+	dataPoints DataPointObserver
+
+	// tunnel routes a release's Cloudflare Tunnel domains as it goes live
+	// (tunnel.go); nil on a dashboard without the tunnel manager.
+	tunnel TunnelRouter
+	// sleeper stops idle environments and wakes them (sleep.go); a run that
+	// starts on one asleep wakes it first. Nil on a host that does not.
+	sleeper *Sleeper
+}
+
+// WithRequestRecord attaches the request record the traffic replay and a
+// canary read (replay.go, canary.go): the same held record the Logs page
+// and the rollback watch read, so the requests replayed and judged are the
+// ones the page shows.
+func (e *NormalizedStepExecutor) WithRequestRecord(record RequestRecord) *NormalizedStepExecutor {
+	e.requests = record
+	return e
 }
 
 func (e *NormalizedStepExecutor) WithNotifications(store *AutomationStore) *NormalizedStepExecutor {
@@ -188,6 +235,14 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 			return normalizedStepFailure(ErrPreviewApproval)
 		}
 	}
+	if request, ok := instantRollbackOf(execution.Run); ok {
+		return e.executeInstantRollback(ctx, execution, request)
+	}
+	e.endWarmWindow(ctx, execution)
+	e.endSleep(ctx, execution)
+	if failure := e.readSecretStores(ctx, execution); failure != nil {
+		return *failure
+	}
 	switch execution.Step.Key {
 	case StepResolveSource:
 		if err := validateImmutableExecutionSource(plan); err != nil {
@@ -211,6 +266,8 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 		return e.buildArtifact(ctx, execution, plan)
 	case StepRenderRuntime:
 		return e.renderRuntime(ctx, execution, plan)
+	case StepRehearseMigration:
+		return e.rehearseMigration(ctx, execution, plan)
 	case StepReleaseTask:
 		return e.runReleaseTasks(ctx, execution, plan)
 	case StepBackupGate:
@@ -223,6 +280,10 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 		return e.verifyChecks(ctx, execution, plan, "readiness")
 	case StepVerifySmoke:
 		return e.verifyChecks(ctx, execution, plan, "smoke")
+	case StepReplayTraffic:
+		return e.replayTraffic(ctx, execution, plan)
+	case StepCanary:
+		return e.runCanary(ctx, execution)
 	case StepActivate:
 		return e.activate(ctx, execution, plan)
 	case StepRetirePrevious:
@@ -238,6 +299,29 @@ func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExec
 		return StepResult{
 			State: StepUnavailable, ErrorCode: "unsupported_runtime",
 			ErrorMessage: fmt.Sprintf("normalized runtime step %s is not implemented yet", execution.Step.Key),
+		}
+	}
+}
+
+// executeInstantRollback runs the six steps an instant rollback takes.
+func (e *NormalizedStepExecutor) executeInstantRollback(ctx context.Context, execution StepExecution, request instantRollback) StepResult {
+	switch execution.Step.Key {
+	case StepStartCandidate:
+		return e.resumeWarmRelease(ctx, execution, request)
+	case StepVerifyReadiness:
+		return e.verifyWarmRelease(ctx, execution, request)
+	case StepActivate:
+		return e.activateWarmRelease(ctx, execution, request)
+	case StepRetirePrevious:
+		return e.retireRolledBackRelease(ctx, execution, request)
+	case StepRecordRelease:
+		return e.recordRelease(ctx, execution)
+	case StepNotify:
+		return e.notify(ctx, execution)
+	default:
+		return StepResult{
+			State: StepUnavailable, ErrorCode: "unsupported_runtime",
+			ErrorMessage: fmt.Sprintf("an instant rollback has no step %s", execution.Step.Key),
 		}
 	}
 }
@@ -303,8 +387,10 @@ func (e *NormalizedStepExecutor) notify(ctx context.Context, execution StepExecu
 	// through the same channels as successful ones. This step records which
 	// channels will hear about the outcome and keeps the scheduled-chain gate.
 	selected := 0
+	outcome := execution.Run
+	outcome.State = RunState(terminalState)
 	for _, channel := range channels {
-		if channel.Enabled && notificationEventSelected(channel.Events, notificationEventForState(RunState(terminalState))) {
+		if channel.Enabled && notificationEventSelected(channel.Events, notificationEventForRun(outcome)) {
 			selected++
 		}
 	}
@@ -330,6 +416,9 @@ func notificationEventSelected(events []string, want string) bool {
 			return true
 		}
 		if event == NotificationEventFinished && want != NotificationEventStarted {
+			return true
+		}
+		if event == NotificationEventFailed && want == NotificationEventRolledBack {
 			return true
 		}
 	}
@@ -362,6 +451,7 @@ func (e *NormalizedStepExecutor) analyzePlan(
 		Configuration: configuration, Evidence: plan.BuildEvidence,
 		BuildVariables: buildScopedNames(plan.Variables),
 		ProxySite:      deploymentRouteName(execution.Run.EnvironmentID),
+		EnvironmentID:  execution.Run.EnvironmentID,
 	}
 	live, liveErr := e.store.LiveRelease(ctx, execution.Run.EnvironmentID)
 	if liveErr == nil {
@@ -389,6 +479,13 @@ func (e *NormalizedStepExecutor) analyzePlan(
 	evaluation, err := evaluateDeployment(ctx, deployment, reading, e.preflight)
 	if err != nil {
 		return StepResult{State: StepUnavailable, ErrorCode: "preflight_unavailable", ErrorMessage: "deployment host evidence could not be refreshed"}
+	}
+	for index := range evaluation.Findings {
+		// A draft has no settings page yet; a run's plan does, and the
+		// finding about its missing gate leads to the control that adds one.
+		if evaluation.Findings[index].Code == "cutover_unverified" && evaluation.Findings[index].DeepLink == "" {
+			evaluation.Findings[index].DeepLink = fmt.Sprintf("/deploy/%d/settings/runtime#health-checks", execution.Run.ProjectID)
+		}
 	}
 	record := func(candidate DetectedCandidate) json.RawMessage {
 		return mustJSON(map[string]any{
@@ -448,9 +545,21 @@ func (e *NormalizedStepExecutor) prepareContext(
 			return normalizedStepFailure(err)
 		}
 	}
-	prepared, err := e.builder.PrepareWithin(ctx, source.Root, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag, names...)
+	builder := e.builder
+	if plan.Build.Method == BuildRailpack {
+		// Railpack's planner is configured by the plain RAILPACK_* build
+		// variables, as it is on Railway; every other value it gets by name.
+		builder = builder.withRailpackValues(railpackPlanValues(buildVariables, secret))
+	}
+	prepared, err := builder.PrepareWithin(ctx, source.Root, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag, names...)
 	if err != nil {
 		cleaned, cleanupErr := source.Cleanup()
+		var railpack *RailpackPrepareError
+		if errors.As(err, &railpack) {
+			result := e.railpackPrepareFailure(execution, plan, railpack, buildRedactor(buildLogRedactions(buildVariables, secret)))
+			result.Cleanup = mustJSON(map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)})
+			return result
+		}
 		result := normalizedStepFailure(err)
 		if errors.Is(err, ErrBuilderUnavailable) {
 			result = builderUnavailableFailure(err)
@@ -547,6 +656,9 @@ func (e *NormalizedStepExecutor) renderRuntime(
 	execution StepExecution,
 	plan *StoredExecutionPlan,
 ) StepResult {
+	if execution.Run.Operation == OperationPromote {
+		return e.renderPromotedRuntime(ctx, execution, plan)
+	}
 	if execution.Run.Operation == OperationRedeploy || execution.Run.Operation == OperationRollback {
 		targetReleaseID, err := operationTargetReleaseID(execution.Run)
 		if err != nil {
@@ -605,12 +717,53 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 	execution StepExecution,
 	plan *StoredExecutionPlan,
 ) StepResult {
+	if err := e.refuseShellTasksForReleaseOfPullRequest(ctx, execution.Run, plan.Build.ReleaseTasks); err != nil {
+		return promotionStepFailure(err)
+	}
+	if execution.Run.Operation == OperationPromote && !needsSourceTree(plan.Build.ReleaseTasks) {
+		// A promotion has no workspace of its own to clean up, and a task in
+		// the release image reads no checkout: the promoted commit is fetched
+		// only when a task runs in the dashboard's shell against its tree.
+		if len(plan.Build.ReleaseTasks) == 0 {
+			return StepResult{State: StepSkipped, Evidence: mustJSON(map[string]any{"reason": "no release tasks configured"})}
+		}
+		return e.runReleaseTasksIn(ctx, execution, plan, &MaterializedSource{})
+	}
 	source, _, err := e.materializedBuildRoot(ctx, execution.Run, plan)
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
+	return e.runReleaseTasksIn(ctx, execution, plan, source)
+}
+
+// cleanupReleaseSource removes the run's workspace, where it has one; a
+// promotion running only image tasks never made one.
+func cleanupReleaseSource(source *MaterializedSource) (bool, error) {
+	if source.Workspace == "" {
+		return true, nil
+	}
+	return source.Cleanup()
+}
+
+// needsSourceTree reports whether any task runs in the dashboard's shell,
+// which is the only runner that reads the materialized source.
+func needsSourceTree(tasks []ReleaseTaskConfig) bool {
+	for _, task := range tasks {
+		if task.Runner != ReleaseTaskRunnerImage {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *NormalizedStepExecutor) runReleaseTasksIn(
+	ctx context.Context,
+	execution StepExecution,
+	plan *StoredExecutionPlan,
+	source *MaterializedSource,
+) StepResult {
 	if len(plan.Build.ReleaseTasks) == 0 {
-		cleaned, cleanupErr := source.Cleanup()
+		cleaned, cleanupErr := cleanupReleaseSource(source)
 		if cleanupErr != nil {
 			return StepResult{
 				State: StepFailed, ErrorCode: "cleanup_incomplete", ErrorMessage: "release workspace cleanup failed",
@@ -628,7 +781,7 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 	}
 	image, imageRunner, err := e.releaseTaskImageRequest(ctx, execution, plan)
 	if err != nil {
-		_, _ = source.Cleanup()
+		_, _ = cleanupReleaseSource(source)
 		return normalizedStepFailure(err)
 	}
 	evidence := []ReleaseTaskEvidence{}
@@ -660,7 +813,7 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 		}
 		evidence = append(evidence, taskEvidence)
 		if taskErr != nil {
-			cleaned, cleanupErr := source.Cleanup()
+			cleaned, cleanupErr := cleanupReleaseSource(source)
 			state := StepFailed
 			code, message, cause := releaseTaskFailure(task, taskEvidence, taskErr, output.lines, plan.Variables)
 			if ctx.Err() != nil {
@@ -680,7 +833,7 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 			}
 		}
 	}
-	cleaned, cleanupErr := source.Cleanup()
+	cleaned, cleanupErr := cleanupReleaseSource(source)
 	if cleanupErr != nil {
 		return StepResult{
 			State: StepFailed, ErrorCode: "cleanup_incomplete", ErrorMessage: "release tasks passed but workspace cleanup failed",
@@ -864,19 +1017,14 @@ func decodeStoredPlanInputs(
 			})
 			continue
 		}
-		var config struct {
-			Hostname   string            `json:"hostname"`
-			HTTPS      bool              `json:"https"`
-			Protection *DomainProtection `json:"protection"`
-		}
+		var config PlannedDomain
 		if stored.ResourceKind != "proxy_site" || json.Unmarshal(stored.Config, &config) != nil ||
 			!strings.EqualFold(strings.TrimSpace(config.Hostname), strings.TrimSpace(stored.ResourceID)) {
 			return nil, nil, nil, fmt.Errorf("%w: domain dependency snapshot is inconsistent", ErrInvalidPlan)
 		}
-		domains = append(domains, PlannedDomain{
-			Hostname: config.Hostname, HTTPS: config.HTTPS, Ownership: stored.Ownership,
-			Protection: canonicalDomainProtection(config.Protection),
-		})
+		config.Ownership = stored.Ownership
+		config.Protection = canonicalDomainProtection(config.Protection)
+		domains = append(domains, config)
 	}
 	checks := make([]PlannedCheck, 0, len(plan.Checks))
 	for _, raw := range plan.Checks {
@@ -915,7 +1063,11 @@ func normalizedStepFailure(err error) StepResult {
 	var sourceFailure *SourceFailure
 	var buildFailure *dockerx.BuildError
 	var release toolchainVersionError
+	var storeFailure *secretstore.Failure
 	switch {
+	case errors.As(err, &storeFailure):
+		// The store's own answer, which never holds a value.
+		result.ErrorCode, result.ErrorMessage = "secret_store_unreadable", storeFailure.Error()
 	case errors.As(err, &sourceFailure):
 		result.ErrorCode, result.ErrorMessage = sourceFailure.Code, sourceFailure.Error()
 	case errors.Is(err, dockerx.ErrBuildTimeout):
@@ -1012,6 +1164,22 @@ func (r *NormalizedStepReconciler) Reconcile(ctx context.Context, request Reconc
 			return ReconcileResult{Action: ReconcileResume}
 		}
 		return ReconcileResult{Action: ReconcileFail, TerminalCode: "restart_evidence_missing", Reason: "candidate release evidence could not be read after restart"}
+	case StepRehearseMigration:
+		// A rehearsal changes nothing but a copy and a network of its own,
+		// which the step removes before it starts again: running it twice
+		// cannot touch production.
+		return ReconcileResult{Action: ReconcileResume}
+	case StepReplayTraffic:
+		// A replay sends reads to a candidate nothing routes to yet and
+		// changes nothing but its own evidence; running it twice costs the
+		// candidate the requests again and nobody anything.
+		return ReconcileResult{Action: ReconcileResume}
+	case StepCanary:
+		// The trial is rows and a route: the step finds the window it opened
+		// for this run and carries on to the same end, the route written
+		// again with the same bytes. A window that ended is the step's
+		// result as it was.
+		return ReconcileResult{Action: ReconcileResume}
 	case StepReleaseTask:
 		return ReconcileResult{
 			Action: ReconcileFail, TerminalCode: "restart_evidence_missing",

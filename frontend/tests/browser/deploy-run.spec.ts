@@ -619,6 +619,42 @@ test("visit and the ready block appear only when this run's release is the live 
     "href",
     "https://api.example.test/",
   )
+  // The fixture's plan carries a readiness check; nothing says otherwise.
+  await expect(page.getByText(/without a readiness check/)).toHaveCount(0)
+
+  // A release whose activation recorded that no readiness check gated it is
+  // said to have gone live on nothing but having started — in the outcome,
+  // with the way to add one, and on the Route stage's own line.
+  const ungatedSteps = steps.map((step) =>
+    step.key === "activate"
+      ? {
+          ...step,
+          state: "passed" as const,
+          evidence: {
+            releaseId: 20,
+            route: { name: "just-dashboard-env-12.conf" },
+            readinessGated: false,
+          },
+        }
+      : step,
+  )
+  await page.route("**/api/v1/deploy/7/runs/84", (route) =>
+    json(route, snapshot(live, ungatedSteps)),
+  )
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(
+      JSON.stringify({ type: "snapshot", data: snapshot(live, ungatedSteps), ts: Date.now() }),
+    )
+  })
+  await page.reload()
+  await expect(page.getByText("Your release is ready", { exact: true })).toBeVisible()
+  const outcome = page.getByRole("region", { name: "Outcome" })
+  await expect(outcome.getByText(/Went live without a readiness check/)).toBeVisible()
+  await expect(outcome.getByRole("link", { name: "Add one", exact: true })).toHaveAttribute(
+    "href",
+    "/deploy/7/settings/runtime#health-checks",
+  )
+  await expect(page.getByText(/no readiness check gated the cutover/).first()).toBeVisible()
 
   // A run whose release has since been superseded by a newer one gets a
   // different story entirely, and no Visit anywhere on the page.
@@ -850,4 +886,83 @@ test("is responsive from 390 to 1280 wide with no sideways scroll", async ({ pag
 
   await page.getByRole("list", { name: "Deployment steps" }).getByRole("button").first().click()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
+test("a Railpack prepare step reads as what Railpack decided", async ({ page }, testInfo) => {
+  await mockProject(page)
+  const railpack = {
+    version: "0.43.0",
+    image: `ghcr.io/railwayapp/railpack-frontend:v0.43.0@sha256:${"35".repeat(32)}`,
+    providers: ["node"],
+    packages: [{ name: "node", requested: "lts", resolved: "24.22.0", source: "railpack default" }],
+    steps: [
+      { name: "packages:mise", commands: ["install mise packages: node"] },
+      { name: "install", commands: ["mkdir -p /app/node_modules/.cache", "npm install"] },
+    ],
+    startCommand: "npm run start",
+    images: [
+      "ghcr.io/railwayapp/railpack-builder:mise-2026.10.14",
+      "ghcr.io/railwayapp/railpack-runtime:mise-2026.10.14",
+    ],
+    secrets: ["API_TOKEN"],
+    logs: [{ level: "warn", message: "No node package manager detected, using npm" }],
+    success: true,
+  }
+  const prepared = steps.map((step) =>
+    step.key === "prepare_context"
+      ? {
+          ...step,
+          evidence: {
+            buildRoot: "/var/lib/just-dashboard/deployment-workspaces/run-20/source",
+            prepared: {
+              method: "railpack",
+              toolchain: "node 24.22.0 · railpack 0.43.0",
+              dockerfile: ".just-dashboard/railpack-plan.json",
+              buildArgv: [
+                "docker",
+                "buildx",
+                "build",
+                "--build-arg",
+                `BUILDKIT_SYNTAX=${railpack.image}`,
+                ".",
+              ],
+              railpack,
+            },
+          },
+        }
+      : step,
+  )
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(JSON.stringify({ type: "snapshot", data: snapshot({}, prepared), ts: Date.now() }))
+  })
+  await page.goto("/deploy/7/runs/84")
+  await page
+    .getByRole("list", { name: "Deployment steps" })
+    .getByRole("button", { name: /Prepare build context/ })
+    .click()
+  const decided = page.getByRole("region", { name: "What Railpack decided" })
+  await expect(decided.getByText("0.43.0", { exact: true })).toBeVisible()
+  await expect(decided.getByText("Node.js", { exact: true })).toBeVisible()
+  await expect(decided.getByText("No node package manager detected, using npm")).toBeVisible()
+  await expect(
+    decided.getByRole("region", { name: "Packages Railpack resolved" }).getByText("node 24.22.0"),
+  ).toBeVisible()
+  await expect(decided.getByRole("region", { name: "Railpack's plan" })).toContainText(
+    "npm install",
+  )
+  await expect(decided.getByRole("region", { name: "Railpack's plan" })).toContainText(
+    "npm run start",
+  )
+  await expect(
+    decided.getByText("Railpack's builder, tagged by mise 2026.10.14", { exact: true }),
+  ).toBeVisible()
+  // Drawn once: the generic reading below leaves Railpack's record out.
+  const record = page.getByRole("region", { name: "Prepare build context" })
+  await expect(record.getByRole("region", { name: "Railpack", exact: true })).toHaveCount(0)
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.screenshot({ path: testInfo.outputPath("run-railpack-1280.png"), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath("run-railpack-390.png"), fullPage: true })
 })

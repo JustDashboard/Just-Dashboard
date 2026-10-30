@@ -57,6 +57,9 @@ var notablePlaces = []struct{ path, name, hint string }{
 // unreachable falls through to the first configured root, which always
 // resolves by definition.
 func (s *Service) Home() string {
+	if s.run != nil {
+		return hosted1(s, func(s *Service) string { return s.Home() })
+	}
 	candidates := []string{}
 	if h := os.Getenv("HOME"); h != "" {
 		candidates = append(candidates, h)
@@ -101,6 +104,9 @@ func (s *Service) homeDirs() []string {
 // Places is the rail: home, then the configured roots, then the accounts, then
 // the notable directories — each one checked, and each one listed once.
 func (s *Service) Places() []Place {
+	if s.run != nil {
+		return hosted1(s, func(s *Service) []Place { return s.Places() })
+	}
 	seen := map[string]bool{}
 	out := []Place{}
 	add := func(p Place) {
@@ -145,6 +151,9 @@ func (s *Service) Places() []Place {
 // directory names you are trying to remember — which is the reason people go
 // back to a shell, where tab has worked since 1983.
 func (s *Service) Complete(prefix string, limit int) []Entry {
+	if s.run != nil {
+		return hosted1(s, func(s *Service) []Entry { return s.Complete(prefix, limit) })
+	}
 	if limit <= 0 || limit > 200 {
 		limit = 60
 	}

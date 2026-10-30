@@ -4,7 +4,6 @@ import { SettingsGear, Shield, ShieldCheck, UserMinus } from "@/components/icons
 import { InitialsMark } from "@/components/account/user-avatar"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import type { SystemUser } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 /**
  * The host's accounts drawn as who they are (design-system §14): a person as
@@ -58,15 +57,31 @@ export function accountProduct(user: Pick<SystemUser, "username" | "system">) {
   return ACCOUNTS[name] ?? ACCOUNTS[name.split(/[-_]/)[0]]
 }
 
-/** Known group-based root access; direct sudoers rules are not inspected. */
-const ADMIN_GROUPS = new Set(["sudo", "wheel", "admin"])
+/** The products a group or a shell is, where one is. */
+const GROUP_PRODUCTS: Record<string, string> = {
+  docker: "docker",
+  lxd: "lxd",
+  lxc: "lxd",
+}
 
-export function isAdmin(user: Pick<SystemUser, "groups"> & Partial<Pick<SystemUser, "uid">>) {
-  return (
-    user.uid === 0 ||
-    user.groups.includes("docker") ||
-    user.groups.some((group) => ADMIN_GROUPS.has(group))
-  )
+const SHELL_PRODUCTS: Record<string, string> = {
+  bash: "shell-bash",
+  zsh: "shell-zsh",
+  fish: "shell-fish",
+}
+
+export function shellProduct(shell: string) {
+  return SHELL_PRODUCTS[shell.split("/").pop() ?? ""]
+}
+
+/** A login shell as what it is, bare at the line's height; nothing for one with no mark. */
+export function ShellGlyph({ shell, className }: { shell: string; className?: string }) {
+  const id = shellProduct(shell)
+  return id ? <ProductGlyph id={id} className={className} /> : null
+}
+
+export function groupProduct(name: string) {
+  return GROUP_PRODUCTS[name]
 }
 
 /** The account on the tile its list lines up on: a face for a person, a product or a glyph for the rest. */
@@ -75,47 +90,28 @@ export function AccountMark({
   size = "md",
 }: {
   user: Pick<SystemUser, "username" | "system" | "uid">
-  size?: "sm" | "md"
+  size?: "sm" | "md" | "lg"
 }) {
-  const box = size === "md" ? "size-9" : "size-8"
+  const box = size === "lg" ? "size-12 rounded-xl" : size === "md" ? "size-9" : "size-8"
   if (!user.system) return <InitialsMark name={user.username} size="md" className={box} />
   const glyph = user.uid === 0 ? Shield : user.uid === 65534 ? UserMinus : SettingsGear
   return <ProductLogo id={accountProduct(user)} size="sm" fallback={glyph} className={box} />
 }
 
 /**
- * An account's groups as one line, the ones that change what it can do first:
- * an administrator's group behind a shield, `docker` behind Docker's mark —
- * a member of it can mount the host's root into a container, which is root
- * by another name — and the rest after them, quieter.
+ * One group as a word, drawn as what it hands over: a sudo group behind a shield,
+ * docker and lxd behind their marks, and the rest as a plain word.
  */
-export function GroupList({ groups, className }: { groups: string[]; className?: string }) {
-  if (groups.length === 0) {
-    return <span className={cn("text-muted-foreground/60", className)}>no groups</span>
-  }
-  const admin = groups.filter((group) => ADMIN_GROUPS.has(group))
-  const docker = groups.filter((group) => group === "docker")
-  const rest = groups.filter((group) => !ADMIN_GROUPS.has(group) && group !== "docker")
+export function GroupWord({ name, sudo }: { name: string; sudo?: boolean }) {
+  const product = groupProduct(name)
   return (
-    <span
-      className={cn("inline-flex min-w-0 items-center gap-2", className)}
-      title={groups.join(", ")}
-    >
-      {admin.map((group) => (
-        <span key={group} className="inline-flex shrink-0 items-center gap-1 text-foreground">
-          <ShieldCheck aria-hidden className="size-3.5" />
-          {group}
-        </span>
-      ))}
-      {docker.map((group) => (
-        <span key={group} className="inline-flex shrink-0 items-center gap-1 text-foreground">
-          <ProductGlyph id="docker" />
-          {group}
-        </span>
-      ))}
-      {rest.length > 0 && (
-        <span className="min-w-0 truncate text-muted-foreground">{rest.join(", ")}</span>
-      )}
+    <span className="inline-flex shrink-0 items-center gap-1">
+      {product ? (
+        <ProductGlyph id={product} />
+      ) : sudo ? (
+        <ShieldCheck aria-hidden className="size-3.5 text-warning" />
+      ) : null}
+      {name}
     </span>
   )
 }

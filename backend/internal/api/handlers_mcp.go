@@ -15,7 +15,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// The MCP endpoint: an AI client's way to the databases its key was granted.
+// The MCP endpoint: an AI client's way to the databases and the deployments
+// its key was granted.
 //
 // It is POST /api/v1/mcp behind the network allowlist and the rate limit like
 // every route, and behind httpx.AuthenticateMCP rather than Authenticate: an
@@ -25,8 +26,9 @@ import (
 // runs what the key's owner could run through the dashboard's own routes —
 // the read surface's reads for anyone, a statement only for a role that may
 // run SQL, and a statement that changes data only where the key was granted
-// write, judged by authoriseSQL as the query route judges it. Every tool call
-// is audited as database.mcp.<tool>, its statement as a shape.
+// write, judged by authoriseSQL as the query route judges it. Every database
+// tool call is audited as database.mcp.<tool>, its statement as a shape. The
+// deployment tools are handlers_mcp_deploy.go's, audited as deploy.mcp.<tool>.
 
 // mcpBodyLimit bounds one message: a statement and its arguments, never a file.
 const mcpBodyLimit = 1 << 20
@@ -147,6 +149,17 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	p := httpx.MustPrincipal(r)
+	// What the key reaches decides what it is told and offered; it is read
+	// again on every request, so a grant taken away answers the next one.
+	var offer mcp.Offer
+	if req.Method == "initialize" || req.Method == "server/discover" || req.Method == "tools/list" {
+		grants, err := s.Auth.TokenConnections(r.Context(), p.TokenID)
+		if err != nil {
+			httpx.SkipAudit(r)
+			return mcpRefusal(w, req.ID, &mcp.Error{Code: mcp.CodeInternalError, Message: "the key's databases could not be read"})
+		}
+		offer = mcpOffer(p, grants)
+	}
 	switch {
 	case req.Method == "initialize" && !call.Modern:
 		// A client connecting is worth a line in the trail, the way opening
@@ -155,23 +168,21 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) error {
 			"key": p.Token.Name, "prefix": p.Token.Prefix,
 			"client": req.Client.Name, "clientVersion": req.Client.Version, "protocolVersion": call.Version,
 		})
-		return writeMCP(w, http.StatusOK, mcp.Response(req.ID, call.Initialize(mcp.Instructions)))
+		return writeMCP(w, http.StatusOK, mcp.Response(req.ID, call.Initialize(mcp.Instructions(offer))))
 	case req.Method == "server/discover" && call.Modern:
 		httpx.SkipAudit(r)
-		return writeMCP(w, http.StatusOK, mcp.Response(req.ID, call.Discover(mcp.Instructions)))
+		return writeMCP(w, http.StatusOK, mcp.Response(req.ID, call.Discover(mcp.Instructions(offer))))
 	case req.Method == "ping":
 		httpx.SkipAudit(r)
 		return writeMCP(w, http.StatusOK, mcp.Response(req.ID, call.Complete(map[string]any{})))
 	case req.Method == "tools/list":
 		httpx.SkipAudit(r)
-		grants, err := s.Auth.TokenConnections(r.Context(), p.TokenID)
-		if err != nil {
-			return mcpRefusal(w, req.ID, &mcp.Error{Code: mcp.CodeInternalError, Message: "the key's databases could not be read"})
-		}
-		query, write := mcpToolsFor(p, grants)
-		return writeMCP(w, http.StatusOK, mcp.Response(req.ID, call.Cached(map[string]any{"tools": mcp.Tools(query, write)}, 60_000)))
+		// The hand-written tools first, in their fixed order, then the ones
+		// generated from the deployment API, in the order of their routes.
+		tools := append(mcp.Tools(offer), mcp.OperationTools(offer, s.mcpOperations())...)
+		return writeMCP(w, http.StatusOK, mcp.Response(req.ID, call.Cached(map[string]any{"tools": tools}, 60_000)))
 	case req.Method == "tools/call":
-		if !mcp.Known(req.Name) {
+		if _, generated := s.mcpOperation(req.Name); !mcp.Known(req.Name) && !generated {
 			httpx.SkipAudit(r)
 			return mcpRefusal(w, req.ID, &mcp.Error{Code: mcp.CodeInvalidParams, Message: "Unknown tool: " + req.Name})
 		}

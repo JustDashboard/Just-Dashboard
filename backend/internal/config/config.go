@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/accountlink"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/remotedesk"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
@@ -55,13 +56,18 @@ type Config struct {
 	// not be skipped. Enrolment is still offered, still encouraged, and can be
 	// made compulsory again by setting this — but the default no longer
 	// decides on the operator's behalf.
-	Require2FA       bool
-	TerminalShell    string
-	TerminalUser     string
-	FileRoots        []string
-	LogRoots         []string
-	NginxDir         string
-	CaddyFile        string
+	Require2FA    bool
+	TerminalShell string
+	TerminalUser  string
+	FileRoots     []string
+	LogRoots      []string
+	NginxDir      string
+	CaddyFile     string
+	// IngressContainer names the Caddy container deployment domains are
+	// served through when discovery cannot choose it: one bound to a single
+	// address rather than every address, or an isolated acceptance stack's
+	// ingress on loopback. Empty discovers the public one.
+	IngressContainer string
 	ComposeRoots     []string
 	GitRoots         []string
 	DeployRoots      []string
@@ -96,6 +102,20 @@ type Config struct {
 	// the normal case: it is discovered by asking Docker where this stack was
 	// deployed from, which is a fact nobody has to keep in step with reality.
 	UpdateDir string
+
+	// AccountURL is the site this install may link to, as a bare origin, and
+	// AccountLink whether linking to it is permitted at all. Off, the Settings
+	// page offers nothing, the installer does not ask, the terminal command
+	// refuses, and a link already made goes quiet. Linking is something an
+	// operator does; this is how an operator who never wants it makes sure of
+	// that.
+	AccountURL  string
+	AccountLink bool
+
+	// UsagePing is whether this install may ever send the optional daily count
+	// to AccountURL. On, an administrator is still asked first and nothing goes
+	// until they say yes; off, nobody is asked and nothing is ever sent.
+	UsagePing bool
 }
 
 func Load() (*Config, error) {
@@ -124,6 +144,7 @@ func Load() (*Config, error) {
 		LogRoots:         envList("JD_LOG_ROOTS", "/var/log"),
 		NginxDir:         env("JD_NGINX_DIR", "/etc/nginx"),
 		CaddyFile:        env("JD_CADDYFILE", "/etc/caddy/Caddyfile"),
+		IngressContainer: env("JD_INGRESS_CONTAINER", ""),
 		ComposeRoots:     envList("JD_COMPOSE_ROOTS", "/opt,/srv,/home"),
 		GitRoots:         envList("JD_GIT_ROOTS", "/opt,/srv,/home,/root"),
 		DeployRoots:      deployRoots(l),
@@ -139,7 +160,10 @@ func Load() (*Config, error) {
 		UpdateRepo:       env("JD_UPDATE_REPO", selfupdate.DefaultRepo),
 		UpdateBranch:     env("JD_UPDATE_BRANCH", selfupdate.DefaultRef),
 		UpdateDir:        env("JD_UPDATE_DIR", ""),
+		AccountLink:      l.boolean("JD_ACCOUNT_LINK", true),
+		UsagePing:        l.boolean("JD_USAGE_PING", true),
 	}
+	c.AccountURL = l.accountURL()
 
 	// The dashboard is root-equivalent. It must never be reachable from the
 	// open internet, so an explicit network allowlist is mandatory. Binding
@@ -210,6 +234,18 @@ func (l *loader) boolean(k string, def bool) bool {
 		return def
 	}
 	return b
+}
+
+// accountURL reads JD_ACCOUNT_URL. A value that is not an origin is refused at
+// start rather than quietly replaced, because the site named here is the one
+// this install would hand a signing key to.
+func (l *loader) accountURL() string {
+	url, err := accountlink.ParseSiteURL(Env("JD_ACCOUNT_URL"))
+	if err != nil {
+		l.errs = append(l.errs, fmt.Sprintf("JD_ACCOUNT_URL=%q: %v", Env("JD_ACCOUNT_URL"), err))
+		return accountlink.DefaultSiteURL
+	}
+	return url
 }
 
 func (l *loader) duration(k string, def time.Duration) time.Duration {

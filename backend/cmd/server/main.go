@@ -27,6 +27,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/api"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/clihost"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
@@ -90,12 +91,30 @@ func main() {
 		if dataDir == "" {
 			dataDir = "/var/lib/just-dashboard"
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+		// Account commands are quick. Linking waits for a person to approve a
+		// code on another device, so it gets the time it asks for, and an
+		// interrupt ends the wait cleanly instead of leaving a request behind.
+		timeout := 30 * time.Second
+		if admin.LongRunning(os.Args[2:]) {
+			timeout = 70 * time.Minute
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		ctx, cancel := context.WithTimeout(ctx, timeout)
 		if err := admin.Run(ctx, dataDir, os.Args[2:], os.Stdin, os.Stdout, os.Stderr); err != nil {
+			cancel()
+			stop()
+			var exit *admin.ExitError
+			if errors.As(err, &exit) {
+				if exit.Msg != "" {
+					fmt.Fprintln(os.Stderr, exit.Msg)
+				}
+				os.Exit(exit.Code)
+			}
 			fmt.Fprintln(os.Stderr, "account command failed:", err)
 			os.Exit(1)
 		}
+		cancel()
+		stop()
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "--git-editor" {
@@ -301,6 +320,7 @@ func run(agentFlag, agentReset bool) error {
 		return fmt.Errorf("start background workers: %w", err)
 	}
 	go janitor(ctx, svc, log)
+	refreshHostCLI(log)
 
 	if cfg.AgentMode {
 		tlsCfg, err := agentTLS(identity)
@@ -480,4 +500,22 @@ func agentTLS(id *agent.Identity) (*tls.Config, error) {
 		MinVersion:   tls.VersionTLS12,
 		ClientAuth:   tls.RequestClientCert,
 	}, nil
+}
+
+// refreshHostCLI brings the server's /usr/local/bin/jd up to the jd built
+// beside this binary, when the one there is an older jd (internal/clihost).
+// The server's root is mounted at /host in the backend's container; anywhere
+// else there is nothing there and nothing happens.
+func refreshHostCLI(log *slog.Logger) {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	replaced, err := clihost.Refresh("/host", filepath.Join(filepath.Dir(exe), "jd"))
+	switch {
+	case err != nil:
+		log.Warn("could not update the server's jd", "path", clihost.Path, "err", err)
+	case replaced:
+		log.Info("updated the server's jd to this build", "path", clihost.Path)
+	}
 }

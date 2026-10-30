@@ -38,7 +38,74 @@ var (
 	// form. The parser skips that server whole: its server_name is the other
 	// name, which is not one of the site's domains.
 	canonicalMarkerRe = regexp.MustCompile(`^# Canonical host \((www|apex)\)`)
+	// hostRedirectMarkerRe opens each host redirect's server, and carries
+	// everything the parser needs to read the redirect back, because the
+	// server itself is skipped the same way.
+	// The scheme is named only where it differs from the site's own server:
+	// a plain-HTTP name on a TLS site, or an HTTPS name on a site whose
+	// served names are all plain.
+	hostRedirectMarkerRe = regexp.MustCompile(`^# Host redirect \((301|302|307|308)\): (\S+) is sent to (\S+)( over plain HTTP| over HTTPS)?\.$`)
+	// plainMarkerRe opens the server a TLS site serves its plain-HTTP names
+	// from. The parser skips that server whole, as it does a redirect's, and
+	// reads the names from the markers.
+	plainMarkerRe = regexp.MustCompile(`^# Plain HTTP: (\S+) is served without TLS\.$`)
 )
+
+// HostRedirect sends every request for From to the same path on To, one of
+// the site's own domains. Code is 301, 302, 307 or 308; zero is 308, which,
+// unlike 301, keeps a form's POST a POST.
+type HostRedirect struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Code int    `json:"code,omitempty"`
+	// Plain answers on port 80 alone while the site is TLS: the name has no
+	// certificate, and sends visitors to its domain over the scheme that
+	// domain is served on.
+	Plain bool `json:"plain,omitempty"`
+}
+
+// HostRedirectCode is the status a host redirect answers with.
+func (r HostRedirect) HostRedirectCode() int {
+	if r.Code == 0 {
+		return 308
+	}
+	return r.Code
+}
+
+// validateHostRedirects checks redirects against the names the site
+// serves: each comes from a name nothing else answers, to one the site does.
+func validateHostRedirects(domains []string, redirects []HostRedirect) error {
+	if len(redirects) > 16 {
+		return fmt.Errorf("at most 16 redirecting names")
+	}
+	served := map[string]bool{}
+	for _, d := range domains {
+		served[strings.ToLower(d)] = true
+	}
+	seen := map[string]bool{}
+	for _, r := range redirects {
+		from, to := strings.ToLower(r.From), strings.ToLower(r.To)
+		if !domainRe.MatchString(from) || strings.HasPrefix(from, "*.") {
+			return fmt.Errorf("%q is not a name that can redirect", r.From)
+		}
+		if served[from] {
+			return fmt.Errorf("%s is one of the site's domains and cannot also redirect", r.From)
+		}
+		if seen[from] {
+			return fmt.Errorf("%s redirects twice", r.From)
+		}
+		seen[from] = true
+		if !served[to] || strings.HasPrefix(to, "*.") {
+			return fmt.Errorf("%s has to redirect to one of the site's own domains, not %s", r.From, r.To)
+		}
+		switch r.Code {
+		case 0, 301, 302, 307, 308:
+		default:
+			return fmt.Errorf("a redirect answers 301, 302, 307 or 308, not %d", r.Code)
+		}
+	}
+	return nil
+}
 
 // redirectCode is the status a redirect site answers with. A spec from
 // before the code could be chosen has only Permanent.
@@ -133,6 +200,16 @@ func validateKinds(spec *SiteSpec) error {
 		}
 	default:
 		return fmt.Errorf("the canonical host is www, the bare name or neither")
+	}
+	if err := validateHostRedirects(spec.Domains, spec.HostRedirects); err != nil {
+		return err
+	}
+	for _, pair := range spec.canonicalPairs() {
+		for _, r := range spec.HostRedirects {
+			if strings.EqualFold(pair[0], r.From) {
+				return fmt.Errorf("%s is already sent to %s by the canonical host setting", r.From, pair[1])
+			}
+		}
 	}
 	if spec.Kind == "php" {
 		if !absPathRe.MatchString(spec.Root) {
@@ -272,6 +349,63 @@ func renderCanonicalServers(l *lines, spec *SiteSpec) {
 		l.add("    }")
 		l.add("    location / {")
 		l.add("        return 301 %s://%s$request_uri;", scheme, pair[1])
+		l.add("    }")
+		l.add("}")
+		l.blank()
+	}
+}
+
+// renderHostRedirectServers answers each redirecting name with a redirect
+// to its domain, the way renderCanonicalServers does for the derived names.
+// The marker line says the whole redirect, so the parser can skip the server
+// and still read it back.
+func renderHostRedirectServers(l *lines, spec *SiteSpec) {
+	tlsServed, _ := spec.servedByScheme()
+	for _, r := range spec.HostRedirects {
+		// The visitor is sent on over the scheme the domain is served on: a
+		// plain domain's redirect never points at an HTTPS it does not have.
+		scheme := "$scheme"
+		switch {
+		case spec.servesPlain(r.To):
+			scheme = "http"
+		case spec.TLS && spec.ForceHTTPS:
+			scheme = "https"
+		}
+		tls := spec.TLS && !r.Plain
+		over := ""
+		switch {
+		case spec.TLS && r.Plain:
+			over = " over plain HTTP"
+		case tls && len(tlsServed) == 0:
+			over = " over HTTPS"
+		}
+		l.add("# Host redirect (%d): %s is sent to %s%s.", r.HostRedirectCode(), r.From, r.To, over)
+		l.add("server {")
+		l.add("    listen 80;")
+		l.add("    listen [::]:80;")
+		if tls {
+			l.add("    listen 443 ssl;")
+			l.add("    listen [::]:443 ssl;")
+			if spec.HTTP2 {
+				l.add("    http2 on;")
+			}
+		}
+		l.add("    server_name %s;", r.From)
+		if tls {
+			l.add("    ssl_certificate     %s;", spec.CertPath)
+			l.add("    ssl_certificate_key %s;", spec.KeyPath)
+		}
+		l.blank()
+		// So the certificate covering this name can be issued and renewed.
+		root := "/var/www/html"
+		if spec.ManagedACME {
+			root = deploymentACMEWebroot
+		}
+		l.add("    location ^~ %s {", acmeChallengePath)
+		l.add("        root %s;", root)
+		l.add("    }")
+		l.add("    location / {")
+		l.add("        return %d %s://%s$request_uri;", r.HostRedirectCode(), scheme, r.To)
 		l.add("    }")
 		l.add("}")
 		l.blank()

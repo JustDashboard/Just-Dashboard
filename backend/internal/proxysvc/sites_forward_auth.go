@@ -1,6 +1,7 @@
 package proxysvc
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -51,6 +52,17 @@ var forwardAuthSources = map[string][2]string{
 	"custom":       {"remote_user", "remote_email"},
 }
 
+// forwardAuthResponseHeaders are the same headers by name, which is how
+// Caddy's copy_headers reads them.
+var forwardAuthResponseHeaders = map[string][2]string{
+	"authelia":     {"Remote-User", "Remote-Email"},
+	"authentik":    {"X-Authentik-Username", "X-Authentik-Email"},
+	"oauth2-proxy": {"X-Auth-Request-User", "X-Auth-Request-Email"},
+	"custom":       {"Remote-User", "Remote-Email"},
+}
+
+var errForwardAuthProvider = errors.New("single sign-on is through Authelia, Authentik, oauth2-proxy or a custom server")
+
 // forwardAuthHeaders are the request headers the application is told the
 // user in. Set in every forwarding location, they replace whatever the
 // visitor sent, and are left out where no check ran.
@@ -59,8 +71,8 @@ var forwardAuthHeaders = []string{"Remote-User", "Remote-Email"}
 // A check or sign-in address is a URL written unquoted into the file.
 var forwardAuthURLRe = regexp.MustCompile(`^https?://[A-Za-z0-9._~:/?&=%+-]+$`)
 
-func (spec *SiteSpec) ssoUserVar() string  { return NginxIdent(spec.Name) + "_sso_user" }
-func (spec *SiteSpec) ssoEmailVar() string { return NginxIdent(spec.Name) + "_sso_email" }
+func (spec *SiteSpec) ssoUserVar() string  { return spec.varIdent() + "_sso_user" }
+func (spec *SiteSpec) ssoEmailVar() string { return spec.varIdent() + "_sso_email" }
 
 // ssoEverywhere says whether the server checks every path by default.
 func (spec *SiteSpec) ssoEverywhere() bool {
@@ -86,6 +98,40 @@ func validForwardAuthURL(raw, what string) (*url.URL, error) {
 	return u, nil
 }
 
+// ValidForwardAuthProvider says whether single sign-on can be through this
+// provider.
+func ValidForwardAuthProvider(provider string) bool {
+	_, ok := forwardAuthSources[provider]
+	return ok
+}
+
+// ValidateForwardAuthCheck checks the address an auth server is asked at:
+// written unquoted into either proxy's file, so held to a closed set of
+// characters, and without a query, which nginx would pass on unchanged and
+// Caddy would drop.
+func ValidateForwardAuthCheck(raw string) error {
+	verify, err := validForwardAuthURL(raw, "check address")
+	if err != nil {
+		return err
+	}
+	if verify.RawQuery != "" || strings.Contains(raw, "?") {
+		return fmt.Errorf("the check address takes no query")
+	}
+	return nil
+}
+
+// ValidateForwardAuthSignIn checks the page a visitor without a session is
+// sent to. The proxy adds rd= itself.
+func ValidateForwardAuthSignIn(raw string) error {
+	if _, err := validForwardAuthURL(raw, "sign-in address"); err != nil {
+		return err
+	}
+	if strings.Contains(raw, "rd=") {
+		return fmt.Errorf("the sign-in address is given rd= itself — leave it off")
+	}
+	return nil
+}
+
 func validateForwardAuth(spec *SiteSpec) error {
 	f := spec.ForwardAuth
 	for _, loc := range spec.Locations {
@@ -104,25 +150,18 @@ func validateForwardAuth(spec *SiteSpec) error {
 	if f == nil {
 		return nil
 	}
-	if _, ok := forwardAuthSources[f.Provider]; !ok {
-		return fmt.Errorf("single sign-on is through Authelia, Authentik, oauth2-proxy or a custom server")
+	if !ValidForwardAuthProvider(f.Provider) {
+		return errForwardAuthProvider
 	}
 	if spec.Kind == "redirect" {
 		// `return` is answered before the access phase auth_request is in.
 		return fmt.Errorf("a redirect is answered before anyone could be asked to sign in")
 	}
-	verify, err := validForwardAuthURL(f.Verify, "check address")
-	if err != nil {
+	if err := ValidateForwardAuthCheck(f.Verify); err != nil {
 		return err
 	}
-	if verify.RawQuery != "" || strings.Contains(f.Verify, "?") {
-		return fmt.Errorf("the check address takes no query")
-	}
-	if _, err := validForwardAuthURL(f.SignIn, "sign-in address"); err != nil {
+	if err := ValidateForwardAuthSignIn(f.SignIn); err != nil {
 		return err
-	}
-	if strings.Contains(f.SignIn, "rd=") {
-		return fmt.Errorf("the sign-in address is given rd= itself — leave it off")
 	}
 	// The visitor's browser would send its password to the auth server as
 	// well, which reads an Authorization header as its own credentials; and
@@ -227,6 +266,9 @@ func renderForwardAuthLocation(l *lines, spec *SiteSpec) {
 	l.add("        proxy_set_header X-Forwarded-Host   $http_host;")
 	l.add("        proxy_set_header X-Forwarded-Uri    $request_uri;")
 	l.add("        proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;")
+	if spec.dropsCookies() {
+		l.add("        proxy_set_header Cookie             $%s;", spec.cookieVar())
+	}
 	if strings.HasPrefix(f.Verify, "https://") {
 		l.add("        proxy_ssl_server_name on;")
 	}
@@ -303,11 +345,11 @@ func (p *forwardAuthParse) directive(spec *SiteSpec, name, value, location strin
 		return true
 	case "auth_request_set":
 		fields := strings.Fields(value)
-		if len(fields) == 2 && fields[0] == "$"+spec.ssoUserVar() {
+		if len(fields) == 2 && spec.ownsVar(fields[0], "_sso_user") {
 			p.userSource = strings.TrimPrefix(fields[1], "$upstream_http_")
 			return true
 		}
-		return len(fields) == 2 && fields[0] == "$"+spec.ssoEmailVar()
+		return len(fields) == 2 && spec.ownsVar(fields[0], "_sso_email")
 	case "error_page":
 		target, ok := strings.CutPrefix(value, "401 =302 ")
 		if !ok || location != "" {
@@ -323,7 +365,7 @@ func (p *forwardAuthParse) directive(spec *SiteSpec, name, value, location strin
 		header, v, _ := strings.Cut(value, " ")
 		v = strings.TrimSpace(v)
 		return containsFold(forwardAuthHeaders, header) &&
-			(v == "$"+spec.ssoUserVar() || v == "$"+spec.ssoEmailVar())
+			(spec.ownsVar(v, "_sso_user") || spec.ownsVar(v, "_sso_email"))
 	}
 	return false
 }

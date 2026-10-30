@@ -1,0 +1,89 @@
+{
+  "id": "slash",
+  "version": "1.0.0",
+  "name": "Slash",
+  "category": "http",
+  "profile": "web",
+  "description": "Short links and shared bookmarks for a team: give a link a name, open it as s/<name> from the browser extension or the address bar, and organise links into collections that can be shared or kept private. One small container with its SQLite database on the data volume.",
+  "iconId": "globe",
+  "docsUrl": "https://github.com/yourselfhosted/slash#deploy-with-docker",
+  "access": {
+    "kind": "setup",
+    "note": "Slash starts with no account: the first account signed up becomes the administrator. Open the address yourself right after deploying and sign up before anyone else; then turn off \"Allow sign up\" in the workspace settings unless others should create accounts."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/yourselfhosted/slash",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "yourselfhosted/slash:0.5.3",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address the extension is configured with; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 5231,
+      "protocol": "tcp",
+      "purpose": "The web interface and the API the browser extension calls",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/var/opt/slash",
+      "purpose": "The SQLite database of users, shortcuts and collections",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 128,
+    "minMemoryMb": 64
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/healthz",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Slash migrates its database on start; back up the data volume before moving to a newer image.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:c80f1abdc3e0b5836bb8b074b16ff0539cd046a0a5154ceb1b87a1a6a612569d"
+    }
+  ]
+}

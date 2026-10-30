@@ -218,8 +218,9 @@ type FileRef struct {
 	// or had it open and did not close it cleanly.
 	WAL bool `json:"wal,omitempty"`
 	// Holder is whose file it is: self, container, deployment, compose,
-	// application, tool or system. The last two are state a program keeps for
-	// itself, which the page counts and does not list by default.
+	// application, backup, tool or system. The last three are a copy kept
+	// aside or state a program keeps for itself, which the page counts and
+	// does not list by default.
 	Holder     string   `json:"holder"`
 	Containers []string `json:"containers,omitempty"`
 	Volume     string   `json:"volume,omitempty"`
@@ -233,6 +234,7 @@ const (
 	HolderDeployment  = "deployment"
 	HolderCompose     = "compose"
 	HolderApplication = "application"
+	HolderBackup      = "backup"
 	HolderTool        = "tool"
 	HolderSystem      = "system"
 )

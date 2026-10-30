@@ -200,6 +200,14 @@ const uninstallRun = {
   updatedAt: now,
 }
 
+const usageBody = '{"version":"0.8.2","usedToday":true,"usedThisWeek":true}'
+const usagePing = {
+  enabled: true,
+  choice: "undecided",
+  siteUrl: "https://just-dashboard.com",
+  nextBody: usageBody,
+}
+
 async function mockApi(page: Page, report: unknown = update) {
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
@@ -208,6 +216,7 @@ async function mockApi(page: Page, report: unknown = update) {
     if (path === "/dashboard/config") return json(route, config)
     if (path === "/dashboard/uninstall") return json(route, { supported: true })
     if (path === "/dashboard/uninstall/plan") return json(route, uninstallPlan)
+    if (path === "/dashboard/usage-ping") return json(route, usagePing)
     if (path === "/dashboard/config/log") {
       return route.fulfill({ status: 200, contentType: "text/plain", body: wholeLog })
     }
@@ -374,6 +383,12 @@ test("the configuration page edits in place and says where it lives", async ({ p
   await expect(transcript.getByText("Applying Just Dashboard requested by operator")).toBeVisible()
   await expect(transcript.getByText("earlier output trimmed")).toHaveCount(0)
 
+  // The one pointer to linking the server to an account; the page itself is account-link.spec.ts.
+  await expect(page.getByRole("link", { name: "Settings → Connect" })).toHaveAttribute(
+    "href",
+    "/dashboard/link",
+  )
+
   await expect(page.getByText("unsaved change")).toHaveCount(0)
   await page.getByLabel("Port", { exact: true }).fill("9443")
   await expect(page.getByText("1 unsaved change")).toBeVisible()
@@ -531,3 +546,71 @@ for (const path of ["/dashboard", "/dashboard/configuration"] as const) {
     })
   }
 }
+
+test.describe("the usage count on Configuration", () => {
+  const panel = (page: Page) => page.locator("[data-slot=panel]", { hasText: "Usage count" })
+  const toggle = (page: Page) => panel(page).getByRole("switch", { name: "Count this server" })
+
+  async function withStatus(page: Page, initial: Record<string, unknown>) {
+    const world = { status: initial, puts: [] as unknown[] }
+    await mockApi(page)
+    await page.route("**/api/v1/dashboard/usage-ping", async (route) => {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON() as { on: boolean }
+        world.puts.push(body)
+        world.status = {
+          ...world.status,
+          choice: body.on ? "on" : "off",
+          ...(body.on ? { lastBody: usageBody, lastSentAt: now } : {}),
+        }
+      }
+      return json(route, world.status)
+    })
+    return world
+  }
+
+  test("it prints what it would send, and a yes takes effect with no Apply", async ({ page }) => {
+    const world = await withStatus(page, usagePing)
+    await page.goto("/dashboard/configuration")
+
+    await expect(toggle(page)).not.toBeChecked()
+    await expect(panel(page).getByText("Everything it would send:")).toBeVisible()
+    await expect(panel(page).getByText(usageBody)).toBeVisible()
+    await expect(panel(page).getByRole("link", { name: "See the totals" })).toHaveAttribute(
+      "href",
+      "https://just-dashboard.com/stats",
+    )
+    expect(world.puts).toEqual([])
+
+    await toggle(page).click()
+    await expect(toggle(page)).toBeChecked()
+    await expect(panel(page).getByText(/^Everything sent, /)).toBeVisible()
+    expect(world.puts).toEqual([{ on: true }])
+  })
+
+  test("a report that did not arrive says so and says it will try again", async ({ page }) => {
+    await withStatus(page, {
+      ...usagePing,
+      choice: "on",
+      lastError: "the site answered 502 Bad Gateway",
+    })
+    await page.goto("/dashboard/configuration")
+    await expect(toggle(page)).toBeChecked()
+    await expect(panel(page).getByText(/did not reach just-dashboard.com/)).toBeVisible()
+    await expect(panel(page).getByText(/502 Bad Gateway/)).toBeVisible()
+  })
+
+  test("switched off in .env, it names the switch and offers nothing", async ({ page }) => {
+    await withStatus(page, { ...usagePing, enabled: false, offBy: "JD_USAGE_PING" })
+    await page.goto("/dashboard/configuration")
+    await expect(panel(page).getByText("JD_USAGE_PING=false")).toBeVisible()
+    await expect(toggle(page)).toHaveCount(0)
+    await expect(panel(page).getByRole("link", { name: "See the totals" })).toHaveCount(0)
+  })
+
+  test("the version check says how often it really runs", async ({ page }) => {
+    await withStatus(page, usagePing)
+    await page.goto("/dashboard/configuration")
+    await expect(page.getByText(/every two hours and at most every five minutes/)).toBeVisible()
+  })
+})

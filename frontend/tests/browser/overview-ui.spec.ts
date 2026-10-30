@@ -321,6 +321,7 @@ test("the shortcuts start something, each counting what it adds to", async ({ pa
   const cards = shortcuts.locator("[data-slot=choice-card]")
   await expect(cards).toHaveText([
     /New project.*6 projects/,
+    /Add a site.*2 sites/,
     /Add a database.*4 databases/,
     /New shell.*3 open · operator/,
     /New drawing.*1 drawing/,
@@ -337,6 +338,12 @@ test("the shortcuts start something, each counting what it adds to", async ({ pa
   await cards.filter({ hasText: "New drawing" }).click()
   await expect(page).toHaveURL(/\/excalidraw\/9$/)
   expect(created).toEqual({ name: "Untitled drawing" })
+})
+
+test("a new site opens on the Sites page's form", async ({ page }) => {
+  await page.goto("/")
+  await page.locator("[data-slot=choice-card]", { hasText: "Add a site" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites/)
 })
 
 test("a new shell opens in the account's home", async ({ page }) => {

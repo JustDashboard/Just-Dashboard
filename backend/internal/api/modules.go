@@ -8,11 +8,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/accountlink"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/cftunnel"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice"
@@ -24,8 +27,10 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/githubapp"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/imagescan"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/logdrain"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netcapture"
@@ -38,12 +43,15 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/remotedesk"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/secretstore"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/tailnetgate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/uninstall"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/updates"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/usageping"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/version"
 )
 
@@ -56,6 +64,10 @@ type moduleSet struct {
 	docker       *dockerx.Client
 	dockerStats  *dockerx.StatsSampler
 	dockerEvents *dockerx.EventLog
+	// deployEvents is the part of the event stream a deployment owns, kept
+	// past this process: the ring empties on a restart, and "why did this
+	// restart at four" is asked at nine.
+	deployEvents *dockerx.EventStore
 	// What a compose stack was before it was changed. Docker keeps no
 	// history, so a rollback has no target and "what changed" has no answer
 	// unless the dashboard writes it down first.
@@ -76,6 +88,24 @@ type moduleSet struct {
 	uninstall     *uninstall.Service
 	certKeeper    *selfcfg.CertKeeper
 	proxy         *proxysvc.Service
+	// accountLink links this dashboard to a just-dashboard.com account. Nil in
+	// agent mode, where the only caller is the hub and nothing here applies.
+	accountLink *accountlink.Service
+	// usagePing is the optional daily count of servers. Nil in agent mode, for
+	// the reason accountLink is: an agent answers only to its hub.
+	usagePing *usageping.Service
+
+	// hostFiles is files with every operation run in the host's mount
+	// namespace. The Files page, and only it, uses it: its paths are typed by
+	// someone reading the server's tree in the terminal beside it, while the
+	// other callers resolve a path and then open it themselves, from here.
+	hostFiles *files.Service
+	// onHost is what moves hostFiles: hostexec.InHostMounts, warning once
+	// when the namespace cannot be entered.
+	onHost func(fn func())
+	// kernelRelease reads the running kernel's release; nil is
+	// sysinfo.KernelRelease, and a test hands it the kernel it is about.
+	kernelRelease func(context.Context) (string, error)
 	// proxyExtras is the proxy pages' own state; see modules_proxy.go.
 	proxyExtras proxyExtras
 	// requests holds what every deployment's ingress and every proxy site
@@ -83,17 +113,42 @@ type moduleSet struct {
 	// and live tail on a project's Logs page and a site's page is answered
 	// from it.
 	requests *accesslog.Store
+	// logDrains holds where deployments' output and requests are copied to;
+	// logDrainManager ships them, started with the server.
+	logDrains       *logdrain.Store
+	logDrainManager *logdrain.Manager
+	// secretStores are the connections to external secret managers that
+	// deployment variables reference.
+	secretStores *secretstore.Repository
 	// trafficAlerts watches the request record for the rules operators set,
 	// and tells the notification channels when one crosses its line;
-	// dbAlerts does the same for the databases' readings and their backups.
+	// dbAlerts does the same for the databases' readings and their backups,
+	// and hostAlerts for the machine's own: CPU, memory, filesystems,
+	// containers and every backup job.
 	trafficAlerts *deploy.TrafficAlertEvaluator
-	dbAlerts      *dbAlerts
-	dbs           *dbx.Manager
-	linuxUsers    *linuxusers.Service
-	netsec        *netsec.Service
+	// imageScans scans each release's image and its base images for known
+	// vulnerabilities after a build and daily while it is live; imageScanner
+	// is the scanner it runs, nil without Docker, which the panel reads its
+	// database's age from.
+	imageScans   *deploy.ImageScanWatcher
+	imageScanner *imagescan.Scanner
+	// rollbackWatcher reads every open warm-release window and rolls a
+	// release back, or removes the warm one, when the window says so.
+	rollbackWatcher *deploy.RollbackWatcher
+	// sleeper stops environments that sleep once nobody visits and wakes
+	// them on the next request (deploy/sleep.go).
+	sleeper    *deploy.Sleeper
+	dbAlerts   *dbAlerts
+	hostAlerts *hostAlerts
+	dbs        *dbx.Manager
+	linuxUsers *linuxusers.Service
+	netsec     *netsec.Service
 	// blocks records the remote addresses blocked from the connection table
 	// with why and until when, and lifts the ones that end.
 	blocks *netsec.Blocks
+	// tunnel is the Cloudflare Tunnel connection and its connector
+	// (cftunnel), the ingress a deployment's domain can be served through.
+	tunnel *cftunnel.Manager
 	// network changes the host's network: devices, routes, the gateway
 	// table, shaping, VPN and resolver. netsec keeps reading it for the
 	// posture; this is the half that writes.
@@ -107,19 +162,22 @@ type moduleSet struct {
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
-	jobs            *jobs.Manager
-	diagnostics     *netdiag.Service
-	captures        *netcapture.Service
-	captureNative   captureNativeOwner
-	flowAccounting  *netflows.Service
-	backupStore     *backups.Store
-	backupRunner    *backups.Runner
-	backupSched     *backups.Scheduler
-	deployStore     *deploy.Store
-	deployer        *deploy.Deployer
-	deployRuns      *deploy.OrchestrationStore
-	deployEngine    *deploy.Engine
-	deployPlanning  *deploy.PlanningStore
+	jobs           *jobs.Manager
+	diagnostics    *netdiag.Service
+	captures       *netcapture.Service
+	captureNative  captureNativeOwner
+	flowAccounting *netflows.Service
+	backupStore    *backups.Store
+	backupRunner   *backups.Runner
+	backupSched    *backups.Scheduler
+	deployStore    *deploy.Store
+	deployer       *deploy.Deployer
+	deployRuns     *deploy.OrchestrationStore
+	deployEngine   *deploy.Engine
+	deployPlanning *deploy.PlanningStore
+	// commitStatuses reports runs to GitHub, GitLab and Gitea/Forgejo, and
+	// says in Settings where they go and whether the host took them.
+	commitStatuses  *deploy.CommitStatusPublisher
 	deploySources   *deploy.HostSourceAnalyzer
 	deployPreflight *deploy.HostPreflightObserver
 	// deployChecker answers the advisory check and Detect again with the
@@ -136,9 +194,24 @@ type moduleSet struct {
 	// deployExecutor is the normalized release path, kept for the tailnet
 	// sweep Start runs once the engine is up.
 	deployExecutor *deploy.NormalizedStepExecutor
+	// promotionImages reads the images a promotion takes: deployArtifacts,
+	// unless a test puts a fake in its place.
+	promotionImages deploy.LocalImageReader
+	// rehearser makes the throwaway database copies release tasks are
+	// rehearsed against, and removes what a stopped process left behind.
+	rehearser *migrationRehearser
+	// dataCopies restores a database as of a release into a side copy on
+	// the deployment's network and removes it when its time is up.
+	dataCopies *dataCopyOwner
+	// previewBranches restores a preview's own copy of each database its
+	// environment gives previews a branch of, and removes it with the preview.
+	previewBranches *previewBranchOwner
 	// tailnet publishes preview environments on this host's Tailscale node
 	// through `tailscale serve`; the executor and the preview route share it.
 	tailnet deploy.TailnetPublisher
+	// tailnetGate is the route a tailnet-only deployment's gate asks about
+	// every request (handlers_tailnet_whois.go).
+	tailnetGate *tailnetgate.Handler
 	// pullRequests reads pull requests through the trusted GitHub identity
 	// for the deploy pages and the reconciler.
 	pullRequests *pullRequests
@@ -161,13 +234,17 @@ func (s *Server) initModules() {
 	// so a baseline older than this is dropped rather than averaged over.
 	s.modules.dockerStats = s.modules.docker.NewStatsSampler().WithMaxAge(statsMaxAge)
 	s.modules.dockerEvents = s.modules.docker.NewEventLog(s.Log)
+	s.modules.deployEvents = dockerx.NewEventStore(s.Store.DB, s.Log, s.Cfg.MetricsRetention)
 	s.modules.dockerDeploys = dockerx.NewDeploymentStore(s.Store.DB)
 	// The recorder gets a sampler of its own rather than the shared one: a
 	// series kept for a week is worth measuring over even intervals, and an
 	// operator refreshing the container table would otherwise keep shortening
 	// the window the next stored sample is differenced over.
 	s.modules.metrics = metrics.New(s.Store, s.Log, s.Cfg.MetricsInterval, s.Cfg.MetricsRetention).
-		WithContainers(s.modules.docker.NewStatsSampler())
+		WithContainers(s.modules.docker.NewStatsSampler()).
+		// The volumes deployments own, for the capacity forecast; read when
+		// the recorder samples, by which time the deploy modules exist.
+		WithVolumes(metrics.VolumeSamplerFunc(s.sampleDeploymentVolumes))
 	// Docker's disk accounting walks every layer and volume, which takes
 	// seconds on a busy host. Priming it here means the first operator to open
 	// the Volumes tab reads a warm cache instead of waiting for the walk.
@@ -189,6 +266,15 @@ func (s *Server) initModules() {
 		}
 	}
 	s.modules.files = files.New(s.Cfg.FileRoots)
+	var hostMountsWarning sync.Once
+	s.modules.onHost = func(fn func()) {
+		if err := hostexec.InHostMounts(fn); err != nil {
+			hostMountsWarning.Do(func() {
+				s.Log.Warn("the Files page is showing this container's filesystem, not the server's", "error", err)
+			})
+		}
+	}
+	s.modules.hostFiles = s.modules.files.OnHost(s.modules.onHost)
 	s.modules.gameVersions = gameserver.New()
 	s.modules.git = gitx.New(s.Cfg.GitRoots)
 	s.modules.github = ghx.New()
@@ -209,6 +295,7 @@ func (s *Server) initModules() {
 		Health:      s.healthURL(),
 		List:        s.listSiblings,
 		Log:         s.Log,
+		Adopted:     s.carryGitHubLogin,
 	})
 	// The settings half of the same idea, and it shares the update module's
 	// answer to "where is this install" rather than working it out again: two
@@ -228,7 +315,22 @@ func (s *Server) initModules() {
 	s.modules.certKeeper = selfcfg.NewCertKeeper(
 		s.Cfg.Site, s.Cfg.TLSMode, s.Cfg.DataDir, s.restartProxy, s.Log)
 	s.modules.proxy = proxysvc.NewWithDockerIngress(s.Cfg.NginxDir, s.Cfg.CaddyFile)
+	if s.Cfg.IngressContainer != "" {
+		s.modules.proxy = proxysvc.NewWithIngressContainer(s.Cfg.NginxDir, s.Cfg.CaddyFile, s.Cfg.IngressContainer)
+	}
+	// A deployment route on the name this dashboard is reached by is sent
+	// the dashboard's session cookie, whatever port either is on; the route
+	// takes it out of what the application is sent.
+	s.modules.proxy.WithDashboardHost(s.Cfg.Site)
+	// A deployment route's rate limit and edge rules count the visitor, so
+	// behind a proxy this dashboard trusts they read the address it forwards.
+	trusted := make([]string, 0, len(s.Cfg.TrustedProxies))
+	for _, network := range s.Cfg.TrustedProxies {
+		trusted = append(trusted, network.String())
+	}
+	s.modules.proxy.SetTrustedProxies(trusted)
 	s.modules.requests = accesslog.NewStore(s.openRequestRecord)
+	s.modules.logDrains = logdrain.NewStore(s.Store, s.Sealer)
 	s.modules.dbs = dbx.NewManager()
 	s.modules.linuxUsers = linuxusers.New()
 	s.modules.netsec = netsec.New()
@@ -254,6 +356,13 @@ func (s *Server) initModules() {
 	s.modules.netsec.UseOwnedFirewall(ownedFirewall{net: s.modules.network})
 	s.modules.ipam = netipam.New(s.Store, s.ipamInventory)
 	s.modules.jobs = jobs.New(s.Log)
+	// Package commands run as units of the host's systemd, so the Docker
+	// restart an upgrade can cause does not cut dpkg off halfway; any still
+	// running, or finished while nothing watched, are taken back here.
+	if err := s.modules.jobs.Detach(filepath.Join(s.Cfg.DataDir, "jobs")); err != nil {
+		s.Log.Warn("package commands will run under the dashboard, where a Docker restart can interrupt them", "error", err)
+	}
+	s.modules.jobs.Adopt(s.modules.updates.BeginMutation)
 	s.modules.diagnostics = netdiag.New(netdiag.NewStore(s.Store.DB), s.modules.jobs, s.executeNetworkProbe, netdiag.WithInvestigator(s.executeNetworkInvestigation))
 	s.modules.captureNative = netcapture.NewNative()
 	s.modules.captures = netcapture.New(s.Store.DB, s.modules.jobs, s.modules.captureNative.Capture)
@@ -266,6 +375,7 @@ func (s *Server) initModules() {
 		WithRecoveryChecker(&backupRecoveryChecker{server: s}).
 		WithDatabaseDumper(databaseDumper).
 		WithContainerPauser(&backupContainerPauser{docker: s.modules.docker}).
+		WithVolumeProvisioner(&backupVolumeProvisioner{docker: s.modules.docker}).
 		WithSQLiteSnapshotter(func(ctx context.Context, source, directory string) (string, error) {
 			dump, err := dbx.Dump(ctx, dbx.DriverSQLite, source, "", directory)
 			if err != nil {
@@ -280,7 +390,10 @@ func (s *Server) initModules() {
 	s.modules.deployRuns = deploy.NewOrchestrationStore(s.Store)
 	s.modules.deployDatabases = &deploymentDatabaseNetworks{server: s}
 	s.modules.poolers = &poolerKeeper{server: s}
-	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots).WithDatabaseURLResolver(s.modules.deployDatabases.ResolveVariable)
+	s.modules.secretStores = secretstore.NewRepository(s.Store, s.Sealer)
+	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots).
+		WithDatabaseURLResolver(s.modules.deployDatabases.ResolveVariable).
+		WithSecretStores(s.modules.secretStores)
 	s.modules.githubApp = githubapp.New(githubapp.NewStore(s.Store.DB, s.Sealer), s.modules.deployPlanning)
 	s.modules.deployPlanning.WithInstallationTokens(s.modules.githubApp)
 	s.modules.deployAutomation = deploy.NewAutomationStore(s.Store, s.Sealer)
@@ -296,14 +409,17 @@ func (s *Server) initModules() {
 		s.Cfg.DataDir,
 		s.modules.docker,
 		s.modules.proxy,
-	).WithFirewall(s.modules.netsec).WithDependencies(newDeploymentDependencyObserver(
+	).WithFirewall(s.modules.netsec).WithTailnet(preflightTailnet{server: s}).WithDependencies(newDeploymentDependencyObserver(
 		s.Store, s.modules.backupStore, s.modules.docker,
-	).withExtensionProbe(s.databaseExtensions))
+	).withExtensionProbe(s.databaseExtensions)).WithTunnel(s.tunnelObserver()).WithDNSRecords(s.dnsRecordObserver())
 	s.modules.deployChecker = deploy.NewDeploymentChecker(
 		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,
 	)
-	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker)
+	// The Railpack planner writes its plan into a folder Docker binds by
+	// path, which the data directory is on the server and in here alike.
+	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker).WithRailpackDir(filepath.Join(s.Cfg.DataDir, "railpack"))
 	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
+	s.modules.promotionImages = s.modules.deployArtifacts
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
 	s.modules.deployRuntime = runtimeOwner
 	s.modules.deployPreviews = deploy.NewPreviewQuarantineController(s.modules.deployRuns, runtimeOwner, s.modules.proxy,
@@ -311,6 +427,9 @@ func (s *Server) initModules() {
 			s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.preview.quarantine." + phase, Target: strconv.FormatInt(environmentID, 10), Success: success})
 		}, func(err error) { s.Log.Warn("preview isolation needs attention", "error", err) })
 	s.modules.tailnet = tailnetPublisher{serve: selfcfg.NewTailnetServe()}
+	s.modules.rehearser = &migrationRehearser{server: s}
+	s.modules.dataCopies = newDataCopyOwner(s, s.modules.rehearser)
+	s.modules.previewBranches = newPreviewBranchOwner(s, s.modules.rehearser)
 	normalizedExecutor := deploy.NewNormalizedStepExecutor(
 		s.modules.deployRuns,
 		s.modules.deployPlanning,
@@ -326,9 +445,26 @@ func (s *Server) initModules() {
 		// and activation still resolves an already-existing pair; what this
 		// join adds is that the run asks for one before it starts anything,
 		// instead of reaching a cutover that has nothing to serve.
-		WithCertificateIssuer(s.modules.proxy).
+		WithCertificateIssuer(auditedCertificateIssuer{issuer: s.modules.proxy, record: s.Audit.Record}).
 		WithNotifications(s.modules.deployAutomation).
-		WithTailnetPublisher(s.modules.tailnet)
+		WithTailnetPublisher(s.modules.tailnet).
+		// A tailnet-only environment that names its visitors is gated by
+		// a proxy that asks this API about every request.
+		WithTailnetGate(s.tailnetGateAPI()).
+		// Release tasks are rehearsed against copies the Databases owner
+		// makes from its own backups, when an environment asks for it.
+		WithMigrationRehearser(s.modules.rehearser).
+		// And where each linked database stands is recorded as a release
+		// goes live, for a copy of its data as of that release later.
+		WithDataPoints(releaseDataFacts{server: s}).
+		// A release's Cloudflare Tunnel names are routed as it goes live.
+		WithTunnelRouter(s.tunnelRouter())
+	if s.modules.requests != nil {
+		// The traffic replay and a canary's two releases read the same held
+		// record the Logs page and the rollback watch read, so what they
+		// replay and judge is what the page shows.
+		normalizedExecutor.WithRequestRecord(s.modules.requests)
+	}
 	s.modules.deployExecutor = normalizedExecutor
 	s.modules.deployEngine = deploy.NewEngine(
 		s.modules.deployRuns,
@@ -350,10 +486,20 @@ func (s *Server) initModules() {
 	// path's success step: a failed deployment is the one somebody most
 	// needs to hear about.
 	notifications := deploy.NewNotificationDispatcher(s.modules.deployAutomation, s.modules.deployRuns, s.dashboardEndpoint, s.Log)
+	forges := deploy.NewForgeClient(s.modules.deployPlanning)
+	s.modules.commitStatuses = deploy.NewCommitStatusPublisher(s.modules.deployRuns, githubStatusPoster{app: s.modules.githubApp, github: s.modules.github}, s.dashboardEndpoint, s.Log).
+		WithForges(forges)
+	s.modules.imageScans = s.newImageScanWatcher()
 	s.modules.deployEngine.WithObservers(
 		notifications,
-		deploy.NewCommitStatusPublisher(s.modules.deployRuns, githubStatusPoster{app: s.modules.githubApp, github: s.modules.github}, s.dashboardEndpoint, s.Log),
-		deploy.NewPullRequestCommenter(s.modules.deployRuns, s.modules.githubApp, s.dashboardEndpoint, s.Log),
+		// A build's release is scanned for known vulnerabilities once it
+		// is live, in the background; the run never waits for it.
+		s.modules.imageScans,
+		s.modules.commitStatuses,
+		deploy.NewPullRequestCommenter(s.modules.deployRuns, s.modules.githubApp, s.dashboardEndpoint, s.Log).WithForges(forges),
+		// What a run read from the secret stores is held for its own steps
+		// and dropped the moment it finishes.
+		s.modules.deployPlanning.SecretStoreRunObserver(),
 	)
 	s.modules.deploySchedule = deploy.NewAutomationScheduler(s.modules.deployAutomation, s.dispatchDeploymentSchedule).
 		WithSweep(notifications.RetryFailedDeliveries)
@@ -365,13 +511,59 @@ func (s *Server) initModules() {
 			return s.modules.deployAutomation.DeliverNotification(ctx, nil, channelID, envelope)
 		},
 		s.trafficAlertNames, s.Log)
+	// The windows read the same record the traffic alerts do, and ask for
+	// a rollback through the same enqueue an operator's press takes.
+	s.modules.rollbackWatcher = deploy.NewRollbackWatcher(normalizedExecutor, s.modules.requests,
+		s.enqueueAutomaticRollback, s.auditRollbackWatch, s.Log)
+	s.modules.tunnel = s.newTunnelManager()
+	// Idle minutes are counted from the same record, and the wake listens
+	// where this host's proxy reaches it.
+	s.modules.sleeper = deploy.NewSleeper(normalizedExecutor, s.modules.requests, s.auditSleep, s.Log)
 	s.modules.dbAlerts = s.newDBAlerts()
+	s.modules.hostAlerts = s.newHostAlerts()
 	s.modules.deployGit = deploy.NewGitWatcher(s.modules.deployRuns, s.modules.deploySources, s.dispatchGitDeployment)
 	s.modules.pullRequests = newPullRequests(s.modules.github, s.modules.githubApp, s.modules.git)
 	s.modules.previewReconciler = deploy.NewPreviewReconciler(s.modules.deployAutomation, s.modules.pullRequests, s.closePreviewTarget, s.Log)
 
+	s.initTailnetGate()
 	s.initProxyExtras()
 	s.initUninstall()
+	s.initAccountLink()
+	s.initUsagePing()
+}
+
+// initAccountLink makes the connector to a linked just-dashboard.com account.
+// It is built whether or not linking is switched on, because the Settings page
+// still has to say that it is off; with JD_ACCOUNT_LINK=false it opens no
+// connection and starts nothing.
+func (s *Server) initAccountLink() {
+	if s.Cfg.AgentMode {
+		return
+	}
+	s.modules.accountLink = accountlink.New(accountlink.Options{
+		Store: s.Store, Sealer: s.Sealer, Audit: s.Audit, Log: s.Log,
+		SiteURL: s.Cfg.AccountURL, Enabled: s.Cfg.AccountLink,
+		Host: newAccountHost(s), Version: version.Version,
+	})
+}
+
+// initUsagePing makes the optional daily count. JD_ACCOUNT_LINK=false turns it
+// off too: that switch tells an operator the server never contacts the site, and
+// a report sent there on a later yes would make that sentence untrue.
+func (s *Server) initUsagePing() {
+	if s.Cfg.AgentMode {
+		return
+	}
+	offBy := ""
+	switch {
+	case !s.Cfg.UsagePing:
+		offBy = "JD_USAGE_PING"
+	case !s.Cfg.AccountLink:
+		offBy = "JD_ACCOUNT_LINK"
+	}
+	s.modules.usagePing = usageping.New(usageping.Options{
+		Store: s.Store, Log: s.Log, SiteURL: s.Cfg.AccountURL, Version: version.Version, OffBy: offBy,
+	})
 }
 
 // tailnetPublisher adapts selfcfg's `tailscale serve` driver to the deploy
@@ -592,4 +784,19 @@ func (s *Server) dashboardEndpoint() string {
 	}
 	s.endpointCache, s.endpointCachedAt = endpoint, time.Now()
 	return endpoint
+}
+
+// carryGitHubLogin follows the install checkout's handover to the owner of
+// its directory: the checkout was using root's GitHub login, and without this
+// it would read signed out the moment it changed hands.
+func (s *Server) carryGitHubLogin(ctx context.Context, dir string) {
+	carried, err := s.modules.github.CarryLogin(ctx, dir)
+	if s.Log == nil {
+		return
+	}
+	if err != nil {
+		s.Log.Warn("could not carry the GitHub login to the install checkout's new owner", "dir", dir, "err", err)
+	} else if carried {
+		s.Log.Info("carried the GitHub login to the install checkout's new owner", "dir", dir)
+	}
 }

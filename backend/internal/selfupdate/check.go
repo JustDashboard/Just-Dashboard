@@ -13,14 +13,15 @@ import (
 
 // Asking the repository what the newest version is.
 //
-// This is the one place the dashboard talks to the internet on its own
-// initiative, which is worth being deliberate about: it is a root-equivalent
-// panel that most people run down a tunnel precisely so it touches nothing.
-// So the request is a single unauthenticated GET of one small file, it carries
-// nothing about the install but a version number in the user agent, it happens
-// four times a day rather than on every page load, and JD_UPDATE_CHECK=false
-// turns it off completely — with the changelog for the installed version
-// still readable, because that half is compiled in and needs no network.
+// The dashboard asks this without anybody having told it to, which is worth
+// being deliberate about: it is a root-equivalent panel that most people run
+// down a tunnel precisely so it touches nothing. So the request is a single
+// unauthenticated GET of one small file, it carries nothing about the install
+// but a version number in the user agent, it happens every two hours and at
+// most every five minutes while pages are being opened, rather than on every
+// page load, and JD_UPDATE_CHECK=false turns it off completely — with the
+// changelog for the installed version still readable, because that half is
+// compiled in and needs no network.
 //
 // raw.githubusercontent.com rather than the releases API, for the reason
 // ManifestPath gives: a release becomes a commit rather than a commit plus a
@@ -167,7 +168,7 @@ func (c *Checker) Start(ctx context.Context) {
 			}
 			if _, err := c.Refresh(ctx); err != nil {
 				// Logged at debug: a server behind a firewall would otherwise
-				// write a warning four times a day about a feature its
+				// write a warning every two hours about a feature its
 				// operator deliberately cannot use.
 				c.log.Debug("update check failed", "err", err, "url", c.URL())
 			}

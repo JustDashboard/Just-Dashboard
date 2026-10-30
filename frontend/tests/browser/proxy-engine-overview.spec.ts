@@ -8,6 +8,7 @@ import {
   nginxUnit,
   passingTest,
 } from "./fixtures/proxy/engine"
+import { modules as streamModules } from "./fixtures/proxy/streams"
 
 /**
  * The overview and the engine it drives, for the ways they told an operator
@@ -80,7 +81,7 @@ test("a source the overview cannot read is reported, never cleared", async ({ pa
   await expect(page.getByText("No certificates were found on this host.")).toHaveCount(0)
 
   sitesFail = false
-  await page.locator("[data-slot=page-context]").getByRole("button", { name: "Refresh" }).click()
+  await page.locator("[data-slot='host-identity']").getByRole("button", { name: "Refresh" }).click()
   await expect(
     page.getByRole("list", { name: "Sites" }).locator("[data-slot='choice-row']"),
   ).toHaveCount(3)
@@ -149,7 +150,9 @@ test("the overview says why when the proxy status cannot be read", async ({ page
 
   statusFails = false
   await page.getByRole("button", { name: "Try again" }).click()
-  await expect(page.locator("[data-slot='host-identity']").getByText("nginx/1.26.3")).toBeVisible()
+  await expect(
+    page.locator("[data-slot='host-identity']").getByText("1.26.3", { exact: true }),
+  ).toBeVisible()
   await expect(
     page.getByRole("alert").filter({ hasText: "The proxy status could not be read" }),
   ).toHaveCount(0)
@@ -527,7 +530,8 @@ test("an engine that won't start at boot says so, and Start at boot enables it",
   await expect(identity.getByText("won't start at boot")).toBeVisible()
   await identity.getByRole("button", { name: "Start at boot" }).click()
   await expect(page.getByText("nginx starts at boot")).toBeVisible()
-  await expect(identity.getByText("starts at boot", { exact: true })).toBeVisible()
+  // Starting at boot is the expected state, so the line no longer spends width on it.
+  await expect(identity.getByText("starts at boot", { exact: true })).toHaveCount(0)
   await expect(identity.getByText("won't start at boot")).toHaveCount(0)
   await expect(identity.getByRole("button", { name: "Start at boot" })).toHaveCount(0)
   expect(enabled).toEqual(["POST"])
@@ -672,7 +676,10 @@ test("a reader sees a failed engine's reason and journal, and none of its contro
 
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("won't start at boot")).toBeVisible()
-  await expect(identity.getByRole("button")).toHaveCount(0)
+  // The bar holds the page's own Refresh, which a reader may press; none of
+  // the engine's commands.
+  await expect(identity.getByRole("button")).toHaveCount(1)
+  await expect(identity.getByRole("button", { name: "Refresh" })).toBeVisible()
   await expect(page.getByText("nginx exited with an error")).toBeVisible()
   await expect(page.getByRole("button", { name: "Clear failed state" })).toHaveCount(0)
   await page.getByRole("button", { name: "Last 30 journal lines" }).click()
@@ -1013,7 +1020,7 @@ test("the header says how old the page is, and Refresh reads every source again"
   })
   await page.goto("/proxy")
 
-  const header = page.locator("[data-slot='page-context']")
+  const header = page.locator("[data-slot='host-identity']")
   // Fresh reads carry a few seconds' age at most — the clock runs on while a
   // busy machine renders.
   const fresh = header.getByText(/^Updated (just now|[5-9]s ago)$/)
@@ -1057,7 +1064,7 @@ test("the age is the oldest reading's, which is the five-minute certificate list
   // No certbot, so the certificate list is the only reading on a five-minute poll.
   await mockStatus(page, { ...availability, certbot: false })
   await page.goto("/proxy")
-  const header = page.locator("[data-slot='page-context']")
+  const header = page.locator("[data-slot='host-identity']")
   await expect(header.getByText(/^Updated (just now|[5-9]s ago)$/)).toBeVisible()
 
   // Answered, not only asked: until the answers land every reading is as
@@ -1109,7 +1116,7 @@ test("a source that never answers a refresh is named, and Refresh asks it again"
     return json(route, vhosts)
   })
   await page.goto("/proxy")
-  const header = page.locator("[data-slot='page-context']")
+  const header = page.locator("[data-slot='host-identity']")
   const refresh = header.getByRole("button", { name: "Refresh" })
   await expect(header.getByText(/^Updated (just now|[5-9]s ago)$/)).toBeVisible()
 
@@ -1161,8 +1168,8 @@ test("a status that fails after answering is reported rather than drawn as curre
   )
   await page.goto("/proxy")
   const identity = page.locator("[data-slot='host-identity']")
-  const header = page.locator("[data-slot='page-context']")
-  await expect(identity.getByText("nginx/1.26.3")).toBeVisible()
+  const header = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("1.26.3", { exact: true })).toBeVisible()
   await expect(header.getByText(/^Updated (just now|[5-9]s ago)$/)).toBeVisible()
   await page.clock.fastForward(20_000)
 
@@ -1170,7 +1177,7 @@ test("a status that fails after answering is reported rather than drawn as curre
   await header.getByRole("button", { name: "Refresh" }).click()
   // The engine line stays — it is the last answer — and the list says so.
   await expect(page.getByText("The proxy status could not be read")).toBeVisible()
-  await expect(identity.getByText("nginx/1.26.3")).toBeVisible()
+  await expect(identity.getByText("1.26.3", { exact: true })).toBeVisible()
   await expect(page.getByText(/all within limits/)).toHaveCount(0)
   // Every other source answered just now, but the engine line is still the
   // status's last answer, and the page is as old as that. It read "Updated
@@ -1193,14 +1200,14 @@ test("a service state that cannot be read is not drawn from its last answer", as
   )
   await page.goto("/proxy")
   const identity = page.locator("[data-slot='host-identity']")
-  await expect(identity.getByText(/running for/)).toBeVisible()
+  await expect(identity.getByText(/^up \d/)).toBeVisible()
 
   unitFails = true
-  await page.locator("[data-slot='page-context']").getByRole("button", { name: "Refresh" }).click()
+  await page.locator("[data-slot='host-identity']").getByRole("button", { name: "Refresh" }).click()
   const unread = identity.getByText("couldn't read nginx.service")
   await expect(unread).toBeVisible()
   await expect(unread).toHaveAttribute("title", "systemd did not answer")
-  await expect(identity.getByText(/running for/)).toHaveCount(0)
+  await expect(identity.getByText(/^up \d/)).toHaveCount(0)
   await expect(identity.getByText("no service unit")).toHaveCount(0)
 })
 
@@ -2164,4 +2171,217 @@ test("a raw editor cannot test or publish its buffer after working-state cleanup
   await page.keyboard.press("Control+s")
   expect(tests).toBe(0)
   expect(writes).toBe(0)
+})
+
+test("a host with no reverse proxy is asked to install nginx, certbot riding along", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockStatus(page, {
+    ...availability,
+    nginx: false,
+    nginxVersion: "",
+    caddy: false,
+    certbot: false,
+  })
+  await page.route("**/api/v1/packages/updates", (route) =>
+    json(route, {
+      available: true,
+      manager: "apt",
+      packages: [],
+      securityCount: 0,
+      securityFiltering: true,
+      rebootRequired: false,
+      lastChecked: new Date().toISOString(),
+    }),
+  )
+  const installs: string[][] = []
+  await page.route("**/api/v1/packages/install", (route) => {
+    installs.push(route.request().postDataJSON().packages)
+    return route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "internal", message: "stopped by the test" } }),
+    })
+  })
+  await page.goto("/proxy")
+
+  const setup = page.locator("[data-slot='engine-setup']")
+  await expect(
+    setup.getByRole("heading", { name: "Put nginx in front of this server" }),
+  ).toBeVisible()
+  await expect(setup.getByText("apt install nginx certbot python3-certbot-nginx")).toBeVisible()
+  // Nothing the host does not have yet is drawn empty beside the question.
+  await expect(page.getByRole("region", { name: "Certificates" })).toHaveCount(0)
+  await expect(page.getByText("Nothing configured yet")).toHaveCount(0)
+  // The identity line keeps what is true without an engine and drops its zeros.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText(/internet-facing/)).toBeVisible()
+  await expect(identity.getByText(/^0 sites/)).toHaveCount(0)
+
+  await setup.getByRole("button", { name: "Install nginx and certbot" }).click()
+  await expect.poll(() => installs).toEqual([["nginx", "certbot", "python3-certbot-nginx"]])
+
+  await setup.getByRole("switch", { name: "Also install certbot" }).click()
+  await expect(setup.getByText("apt install nginx", { exact: true })).toBeVisible()
+  await setup.getByRole("button", { name: "Install nginx", exact: true }).click()
+  await expect.poll(() => installs.at(-1)).toEqual(["nginx"])
+
+  await page.setViewportSize({ width: 390, height: 900 })
+  const overflow = await page
+    .locator("[data-slot='page']")
+    .evaluate((element) => element.scrollWidth > element.clientWidth + 1)
+  expect(overflow).toBe(false)
+})
+
+test("a host whose sites keep no access log says so once and claims no zero", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/traffic", (route) =>
+    json(route, {
+      observedAt: new Date().toISOString(),
+      sites: vhosts
+        .filter((v) => v.kind === "nginx")
+        .map((v) => ({
+          site: v.name,
+          file: v.path,
+          engine: "nginx",
+          status: "unavailable",
+          reason: "access_log off",
+          requests: 0,
+          errorRate: 0,
+          bytes: 0,
+          complete: true,
+          points: [],
+        })),
+    }),
+  )
+  await page.route("**/api/v1/proxy/errors?**", (route) =>
+    json(route, {
+      scope: "main",
+      path: "/var/log/nginx/error.log",
+      exists: true,
+      since: new Date().toISOString(),
+      complete: true,
+      lines: 0,
+      groups: [],
+    }),
+  )
+  await page.goto("/proxy")
+
+  await expect(
+    page.getByRole("region", { name: "Live traffic" }).getByText("No traffic to count yet"),
+  ).toBeVisible()
+  // The band does not say it a second time.
+  await expect(page.getByRole("region", { name: "Traffic", exact: true })).toHaveCount(0)
+  const errors = page.getByRole("region", { name: "Recent errors" })
+  await expect(errors).toContainText("nginx logged no errors this hour")
+  await expect(errors).not.toContainText("server errors this hour")
+  await expect(errors.getByText("Nothing failed in the last hour")).toHaveCount(0)
+  await expect(errors.getByText("No problems found", { exact: false })).toHaveCount(0)
+})
+
+test("one site without a log of its own is told why, and the quiet header drops its zeros", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const site = vhosts.find((v) => v.name === "legacy.example.com")!
+  await page.route("**/api/v1/proxy/vhosts", (route) => json(route, [site]))
+  await page.route("**/api/v1/certificates/", (route) => json(route, []))
+  await page.route("**/api/v1/proxy/traffic", (route) =>
+    json(route, {
+      observedAt: new Date().toISOString(),
+      sites: [
+        {
+          site: site.name,
+          file: site.path,
+          engine: "nginx",
+          status: "unavailable",
+          reason:
+            "This site writes no access log of its own, so its requests are mixed into nginx's shared one, which does not say which site each was for.",
+          requests: 0,
+          errorRate: 0,
+          bytes: 0,
+          complete: true,
+          points: [],
+        },
+      ],
+    }),
+  )
+  await page.route("**/api/v1/proxy/errors?**", (route) =>
+    json(route, {
+      scope: "main",
+      path: "/var/log/nginx/error.log",
+      exists: true,
+      since: new Date().toISOString(),
+      complete: true,
+      lines: 0,
+      groups: [],
+    }),
+  )
+  await page.goto("/proxy")
+
+  // The server's reason is the why, not a contradiction of our own sentence.
+  const live = page.getByRole("region", { name: "Live traffic" })
+  await expect(live).toContainText("mixed into nginx's shared one")
+  await expect(live).not.toContainText("writes no access log the dashboard can read")
+  await expect(live.getByRole("link", { name: "Open the legacy.example.com site" })).toBeVisible()
+  // Zero certificates and zero streams are the blocks' to say, not the line's.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByRole("link", { name: /^1 site, 0 on TLS$/ })).toBeVisible()
+  await expect(identity.getByText(/^0 certificates/)).toHaveCount(0)
+  await expect(identity.getByText(/^0 streams/)).toHaveCount(0)
+  // The error log's zero is said once, for the hour.
+  const errors = page.getByRole("region", { name: "Recent errors" })
+  await expect(errors.getByText("nginx logged no errors this hour")).toHaveCount(1)
+  await expect(errors.getByText("nginx logged nothing this hour")).toHaveCount(0)
+})
+
+test("a clean config test is a toast, and Show output opens the panel on it", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const runs = await mockTests(page, [passingTest])
+  await page.goto("/proxy")
+
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: "Test config" })
+    .click()
+  // A window-high panel holding one green line was all ground and no answer.
+  const toast = page.locator("[data-sonner-toast]").filter({ hasText: "nginx config is valid" })
+  await expect(toast).toContainText("A reload would succeed.")
+  const panel = page.getByRole("dialog", { name: "nginx config test" })
+  await expect(panel).toHaveCount(0)
+  expect(runs).toEqual(["nginx"])
+
+  // The output is the one thing left to read, so it opens unfolded.
+  await toast.getByRole("button", { name: "Show output" }).click()
+  await expect(panel.getByText("Valid", { exact: true })).toBeVisible()
+  await expect(panel.getByText(/test is successful/)).toBeVisible()
+  // Run from the open panel, it answers there.
+  await panel.getByRole("button", { name: "Test again" }).click()
+  await expect(panel.getByText("Valid", { exact: true })).toBeVisible()
+  expect(runs).toEqual(["nginx", "nginx"])
+})
+
+test("the modules sit beside the version, and one a package provides installs from the list", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/modules/**", (route) => json(route, streamModules))
+  const installs: unknown[] = []
+  await page.route("**/api/v1/packages/install", (route) => {
+    installs.push(route.request().postDataJSON())
+    return route.fulfill({ status: 500, contentType: "application/json", body: "{}" })
+  })
+  await page.goto("/proxy")
+
+  const identity = page.locator("[data-slot='host-identity']")
+  // In the line of facts it was the one item that wrapped, onto a row of its own.
+  const trigger = identity.getByRole("button", { name: /^1 module missing/ })
+  const title = identity.locator("p").filter({ hasText: "nginx" }).first()
+  await expect(title.getByRole("button", { name: /module missing/ })).toBeVisible()
+  await trigger.click()
+  const list = page.getByRole("list", { name: "nginx modules" })
+  await list.getByRole("button", { name: "Install stream (libnginx-mod-stream)" }).click()
+  await expect.poll(() => installs).toEqual([{ packages: ["libnginx-mod-stream"] }])
+  await expect(list).toHaveCount(0)
 })

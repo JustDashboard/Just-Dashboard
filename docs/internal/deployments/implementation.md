@@ -14,9 +14,14 @@ only renderer/executor/validation authority for their feature.
   The engine looks for work every 250 ms and on every `Notify`; `ClaimNext` first asks with a plain read
   whether anything is queued, so an idle queue never takes the IMMEDIATE write transaction the claim
   needs.
-- The only activation strategies are `blue_green` for an eligible proxy-owned stateless HTTP service and
-  `stop_first` for Compose, fixed-port, game and exclusive-storage workloads. A failed candidate cannot
-  replace the live release; ambiguous cutover evidence restores or stops for operator recovery.
+- The only activation strategies are `blue_green` for an eligible proxy-owned stateless HTTP service,
+  `canary` — blue/green with a trial between the checks and the cutover, the candidate on a share of the
+  live route's requests beside the live release ([canary releases](canary-and-replicas.md#canary-releases))
+  — and `stop_first` for Compose, fixed-port, game and exclusive-storage workloads. A failed candidate cannot
+  replace the live release; ambiguous cutover evidence restores or stops for operator recovery. Either
+  strategy can run a stateless release as `runtime.replicas` containers (1–8) behind one route
+  ([replicas](canary-and-replicas.md)); everything below that speaks of a release's container means
+  every one of them.
 - Events commit before publish and are monotonically sequenced per run. Reconnect resumes after a sequence;
   compacted history begins with a `resync` snapshot, and a slow subscriber is disconnected rather than
   allowed to stall execution. Streams replay all retained history in pages of at most 5,000 stored
@@ -41,11 +46,12 @@ only renderer/executor/validation authority for their feature.
   admin-authored stored release task (including migrated pre/post commands) with a resolved working
   directory and explicit scoped environment; a task with `runner: "image"` runs that command inside a
   throwaway container of the release's own image rather than in the dashboard's shell.
-- Creation is a revisioned, owner-scoped server draft. `GET /deploy/drafts` (session) lists the caller's
-  own uncommitted, unexpired drafts newest first — id, name from intent, a one-line source summary,
+- Creation is a revisioned, owner-scoped server draft. `GET /deploy/drafts` (session or deploy key; a deploy key lists
+  the drafts it made, recorded in `deploy_drafts.key_id`, and a session every draft of its account's, its keys'
+  included) lists the caller's own uncommitted, unexpired drafts newest first — id, name from intent, a one-line source summary,
   `currentStep`, `updatedAt`, `expiresAt` — so the new-project page can offer to resume one instead of
   starting a new setup over; a committed or expired draft has nothing left to resume and is excluded.
-  `DELETE /deploy/drafts/{draft}` (session, audited `deploy.draft.discard`) throws one away: every
+  `DELETE /deploy/drafts/{draft}` (session or deploy key, audited `deploy.draft.discard`) throws one away: every
   press of Import creates a draft, so an abandoned attempt would otherwise sit in that list for its
   whole thirty-day life and three tries at one repository would read as three pieces of unfinished
   work. Only the owner's own uncommitted setup can go — a committed draft is the record a project was
@@ -189,17 +195,24 @@ only renderer/executor/validation authority for their feature.
   link in a README points at. `?template=<blueprint id>` (only an identifier's shape is taken) and
   `?image=<reference>` arrive on those tabs with the blueprint chosen or the reference filled in, which
   is where the project step sends the upstream repository of an application the catalogue packages.
-  Reviewed blueprints deploy as image releases (below); game-server blueprints and blueprints that
-  install configuration files or downloaded artifacts stay preview-only, the catalogue names the
-  reason per blueprint, and direct API calls are refused with the same reason before deployment work
-  is persisted. The screens share `deployment-defaults.ts` and `deployment-findings.tsx` so a default
+  Reviewed blueprints deploy as image releases (below), the two Minecraft game servers included
+  ([game servers](game-servers.md)); a definition the release path cannot run — today only one that
+  downloads an artifact through a version source, with no pinned checksum — stays preview-only, the
+  catalogue names the reason per blueprint, and direct API calls are refused with the same reason
+  before deployment work is persisted. The screens share `deployment-defaults.ts` and `deployment-findings.tsx` so a default
   one flow relies on cannot be missing from the other, and a refused plan reads identically in both.
   Detected web and static plans carry a required HTTP readiness check: preflight raises
   `readiness_missing` as a *decision* for those profiles, so an empty check list made the most
   ordinary deployment there is unsavable over a control the operator was never shown. The check is the
   candidate's detected `readiness` — its path, whether any answer counts, Docker health for a
   Dockerfile `HEALTHCHECK` command, and a slow start's budget (recipes.md, "Readiness, workers and
-  start commands") — and GET `/` expecting a 2xx only when detection found nothing.
+  start commands") — and GET `/` expecting a 2xx only when detection found nothing. A service or a
+  published container (`service`, `image`) whose port detection knows is proposed a gate the same way
+  (`defaultChecks`, `checksForRuntime`): the image's own health where it declares one, HTTP on a
+  health path where the source names one, else a required TCP check on that port, as the catalogue's
+  starters carry; the proposal is a draft default, listed under Advanced and removable there, never
+  added to a saved plan. A readiness check is **not** required of those profiles: without one the
+  release deploys and preflight says what that costs, as a warning (`cutover_unverified`, below).
 - A draft route distinguishes why an id did not answer: `403 draft_forbidden` for another user's draft,
   `410 draft_expired` for one past `expiresAt`, and `404 draft_not_found` only for an id that names
   nothing at all — the first two used to collapse into the third, which hid an ownership refusal behind
@@ -222,9 +235,15 @@ only renderer/executor/validation authority for their feature.
   deterministic hostname is already a managed domain of another active project, the HMAC input gains a
   `#2`, `#3`, … counter and is recomputed until a free one is found. `covered` is whether a certificate
   already covers the name — the only thing activation accepts — and `certificateMethod` is the HTTP-01
-  challenge this host could issue one with. Both are reported so the screen can say what the run will do,
-  not so the operator has to do it. Asked about a hostname the operator typed (`?hostname=`), it also
-  answers `address`, this server's public IPv4, which is the A record the name needs, and — for
+  challenge this host could issue one with. For a typed wildcard (`?hostname=*.example.com`) asked by
+  `system.admin` it is `dns-01` with `certificateDnsProvider`, the provider whose saved credentials the
+  run would prove it with, or empty with the run's own refusal in `certificateIssue` — one decision,
+  `proxysvc.DeploymentDNSProvider`, answers both. Other roles get a sentence saying a DNS challenge
+  proves it, because the answer looks up the zone's nameservers for a name the caller chose, which
+  stays with administrators for the reason `resolves` does. Both are reported so the screen can say what the run
+  will do, not so the operator has to do it. Asked about a hostname the operator typed (`?hostname=`), it also
+  answers `address`, this server's public IPv4, which is the A record the name needs (once the name is
+  saved, the Domains settings' DNS record sheet can write it: [DNS records](dns-records.md)), and — for
   `system.admin` only — `resolves`, whether the name already points here, taken from the reverse
   proxy's own DNS check so the Domains sheet and the proxy page never disagree about one name. It is
   a pointer for the reason `nameTaken` is: a host with no public address cannot make the comparison,
@@ -243,14 +262,80 @@ only renderer/executor/validation authority for their feature.
   without certbot is `unavailable` (`certificate_unavailable`), which is terminal but is not a failure of
   the deployment's own work; a refused order is `failed` (`certificate_issue_failed`). Redeploy and
   rollback carry the step; restart and preview-remove do not, because neither applies a route.
-  Issuance is HTTP-01 only and never a wildcard — Let's Encrypt will not sign one that way — is bounded
-  at five minutes, is serialized against route application so two runs cannot race one account into a
-  rate limit, and passes `--keep-until-expiring` so a redeploy inside the renewal window asks the
-  authority for nothing. A first order on a host with no ACME account registers without a contact
-  address; an operator who wants expiry mail registers once on the Certificates page and every later
-  order reuses that account. certbot's exit code is not the evidence: the certificate is read back and
-  must cover the exact names before the step passes. Step evidence carries the lineage name, method and
-  outcome, never a key path or key material.
+  Reuse comes first, and covers wildcards both ways: a name under an existing wildcard (a preview's
+  `pr-7.preview.example.com` under `*.preview.example.com`) and a wildcard plan name an existing
+  certificate lists both ask the authority for nothing. Otherwise a plain name is ordered over HTTP-01,
+  and a plan with a wildcard among its names is ordered whole over DNS-01
+  (`proxysvc/deployment_certificate_dns.go`): only DNS proves a wildcard, and activation serves one
+  certificate for every name. The DNS challenge uses credentials the Certificates page already saved;
+  the run never asks for one and never reads one — certbot is handed the 0600 file's path, as the page
+  hands it. Credentials are kept per provider, not per zone, so the provider is the one the zone's
+  nameservers name (`*.ns.cloudflare.com` is Cloudflare, `ns-N.awsdns-N.*` Route 53, and so on through
+  the closed set; RFC 2136 servers are the operator's own and name nobody), failing that the single
+  provider with saved credentials and a plugin in the certbot that runs. No saved credentials, a zone
+  hosted by a provider that has none, its plugin missing, or two candidates the nameservers cannot tell
+  apart is `unavailable` (`certificate_wildcard_unavailable`) before certbot is asked: a wrong guess is a
+  failed validation the authority counts. The message names what to save and where — `Proxy →
+  Certificates → DNS challenge providers (/proxy/certificates)` — so it reads the same in a notification
+  or a commit status. The order runs through the Certificates page's certbot (`CertbotCommand`, the
+  host's when it has one, with the Route 53 environment), from the configured authority
+  (`JD_ACME_DIRECTORY`'s `--server`), bounded at five minutes plus the provider's propagation wait. The
+  lineage it leaves records the plugin and the credentials file in its renewal configuration, so
+  certbot's own schedule renews it like any lineage the page issued, and the page lists it with the
+  same renewal checks (a plugin that later goes missing is a `willFail`). A host whose deployments the
+  Docker Caddy ingress serves orders the wildcard the same way: the ingress serves a copy of the
+  lineage from a `*.zone` site with an explicit `tls`, and the dashboard refreshes that copy when
+  certbot renews — see the [ingress decision](caddy-ingress.md#wildcards). Every order a run places —
+  issued, or refused by the authority — is audited as `certificates.deployment.issue` (actor `system`;
+  the names, method, DNS provider and lineage, never a credential); a reuse or a refusal before
+  ordering changes nothing and is not. Preflight asks the same question for an uncovered wildcard on
+  either proxy: `certificate_automatic` naming the provider, or `certificate_wildcard_unavailable`,
+  blocked with the refusal and a deep link to `/proxy/certificates`; a covered one is
+  `certificate_available`.
+  HTTP-01 issuance (`issueDeploymentHTTP`) runs through the same certbot — whose plugins
+  `deploymentChallenge` reads, against probe directories, to choose webroot or standalone — names the
+  same directory (`deploymentHTTPIssueArgs` appends `ACMEDirectory.certbotArgs`), skips the public-DNS
+  check for a private authority as the Caddy path does, and is bounded at five minutes. Both are
+  serialized against route application so two
+  runs cannot race one account into a rate limit, and pass `--keep-until-expiring` so a redeploy inside
+  the renewal window asks the authority for nothing. **One certbot at a time** (`proxysvc/certbot_gate.go`):
+  certbot holds a lock on its configuration directory and a second certbot fails on it at once, so
+  every certbot the dashboard runs takes the one turn `HoldCertbot` hands out — the Certificates page's
+  jobs (`startCertbotJob` wraps every `certbot.` job's runner, renewals and the timer's service run
+  included) and a run's HTTP-01 and DNS-01 orders (`holdCertbotFor`). A run that finds the page's job
+  holding it waits, within the step's own five-minute bound (plus the propagation wait over DNS-01),
+  with a transcript line naming the holder — `Waiting for certbot, which is busy with Renewing
+  app.example.com (started by alice from the Certificates page); the certificate step continues when it
+  finishes` — and then re-checks for a covering certificate before ordering, since the job may have
+  issued exactly that; a wait that outlasts the bound fails the step as `certificate_certbot_busy`, in
+  the step's own words (what it waited for and for how long, and to deploy again once that has
+  finished), never certbot's "another instance is already running". The page's job is accepted as it
+  always was, and a job that finds a run ordering waits in its console the same way, naming the run;
+  two of the page's jobs are still kept apart by the job family's `409 certbot_busy`. The turn is taken
+  before the route lock, never inside it, because the job holding the turn reloads nginx under that
+  lock when it is done. What needs no certbot — a covering certificate, the Docker Caddy ingress, a
+  refusal — waits for nobody. certbot's own lock still arbitrates against what the dashboard does not
+  run, the renewal timer first among them. A first order on a host with no ACME account *with that directory*
+  (`acmeAccountExists`, which files accounts by directory as certbot does; any
+  entry under `accounts/` used to count on the HTTP path, so a host registered with Let's Encrypt
+  ordering from a private authority skipped registering and was refused for want of a contact)
+  registers without a contact address; an operator who wants expiry mail registers once on the
+  Certificates page and every later order reuses that account.
+  `TestLiveDeploymentHTTP01OrdersFromTheConfiguredDirectory` proves the HTTP-01 order against an
+  isolated Pebble: with a Let's Encrypt account already on disk, the run registers with Pebble, the
+  lineage's `server =` is Pebble's directory, the chain verifies against the root that Pebble minted,
+  and the next order finds Pebble's account rather than Let's Encrypt's. certbot's exit code is not the evidence:
+  the certificate is read back and must cover the exact names before the step passes. Step evidence
+  carries the lineage name, method, outcome and, over DNS, the provider's name — never a key path, key
+  material or a credential. `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run
+  TestLiveCertificateStepProvesAWildcardOverDNS01` and `./internal/proxysvc -run
+  TestLiveDeploymentWildcardIsProvedOverDNS01AndServed` prove it against Pebble validating real DNS-01
+  records in a BIND (`proxysvc/acmetest`): refused without credentials, issued with them, reused by a
+  preview — on an nginx host and, through a real `caddy:2-alpine` used by name, on the Docker Caddy
+  ingress — renewed by `certbot renew` from the lineage's own configuration, and served by nginx on
+  the wildcard's route and the preview's, chaining to that Pebble's root.
+  `TestLiveDockerCaddyServesAWildcardProvedOverDNS01` is the same journey served by the ingress, the
+  renewal refresh included ([ingress decision](caddy-ingress.md#renewal)).
   Before a new HTTP-01 order, a bounded DNS lookup rejects unresolved names and non-public destinations
   with a corrective message, including old saved sslip.io names based on a Tailscale address. Existing
   certificates are reused before this check, so private services can still use a certificate provisioned
@@ -397,7 +482,11 @@ only renderer/executor/validation authority for their feature.
   `build.nodeVersion` (the recipes that run the Node install, `nodeInstallRecipes`), `build.phpVersion`,
   `build.spaFallback`, `build.goPackage`, `build.cargoBin` (the binary a Rust recipe serves),
   `build.javaVersion` and `build.dotnetVersion` are additive plan fields, bounded by
-  `PlanConfiguration.Validate`.
+  `PlanConfiguration.Validate`, as are a Railpack build's `build.railpackVersion` (the reviewed
+  catalogue), `build.railpackProvider` and `build.railpackConfig` (`validateRailpackSettings`, cleared
+  by `canonicalConfiguration` for any other method); `railpack` is refused for a Compose, image,
+  template or imported source at the configuration save and at commit
+  (`refuseRailpackWithoutCheckout`).
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
   recorded on the build plan when a draft commits (`build.framework` on the configuration read) —
   the chosen candidate's, while the plan still builds that candidate's directory — so a later read,
@@ -607,7 +696,12 @@ only renderer/executor/validation authority for their feature.
   `deploy.source.detect`) reads the source again without writing, and Build settings' **Detect again**
   shows the same proposal, marks each field that differs and applies into the form's draft.
 - Normalized build execution uses the project-owned versioned recipe set or an explicit Dockerfile,
-  static, immutable-image, or Compose adapter. Reviewed base tags are resolved before rendering and every
+  static, immutable-image, Compose or Railpack adapter. Railpack (`build_railpack.go`,
+  [the recipe guide](recipes.md#railpack)) plans in prepare_context, in a one-shot container of the
+  pinned frontend image over the read-only checkout, and build_artifact builds the plan through the
+  same buildx path with that image as `BUILDKIT_SYNTAX`, so its image lands under the run's tag like a
+  recipe's and nothing after the build branches on the method; its build variables are BuildKit
+  secret mounts named in the plan, as the recipes' are. Reviewed base tags are resolved before rendering and every
   generated `FROM` is digest-pinned. Build secrets are BuildKit environment-backed secret mounts and
   never argv/build args; custom Dockerfiles with requested secrets, or a secret-named literal in an
   `ENV`/`ARG`, shell assignment, flag or heredoc (read over logical instructions, so a continuation line
@@ -636,7 +730,7 @@ only renderer/executor/validation authority for their feature.
   JSON bytes and verified digest, not a pointer back to mutable desired configuration.
 - Release tasks are named, bounded shell gates that run after the backup gate and before the candidate
   starts (`DefaultStepKeys` puts `backup_gate` first, so a migration never changes a database whose
-  required backup is unverified). A task with `runner: "image"` — the default for new tasks and for a
+  required backup is unverified, and `rehearse_migration` between them, below). A task with `runner: "image"` — the default for new tasks and for a
   release command detection read — runs once in a throwaway container of the candidate release's image
   (a Compose release's primary service image) through the runtime owner (`release_task_image.go`,
   `dockerx.RunToCompletion`): the runtime variables the release starts with plus the task's
@@ -645,7 +739,8 @@ only renderer/executor/validation authority for their feature.
   the release's resource limits and the plan's mounts (its volumes and binds, read-only where the plan
   says so, recorded in the task evidence as `mounts`) — a Heroku or Render release phase that sees the
   application's own data, so a migration or seed of SQLite on a volume reaches the file the release then
-  opens — but no ports, devices, capabilities or privilege, the image's entrypoint replaced by the
+  opens — as the release's user with its ulimits, but with no ports, devices, GPUs, capabilities or
+  privilege and neither its read-only root nor its kernel parameters, the image's entrypoint replaced by the
   command, and the container removed however the task ends. The task runs while the live release still
   serves from the same volume; a stop-first release stops it only when the candidate starts. The mounts
   are the frozen runtime plan's own — a bind source was resolved and authorised when the plan was saved,
@@ -675,9 +770,68 @@ only renderer/executor/validation authority for their feature.
   line that calls itself a warning. The code is the step's and the run's terminal code, the sentence
   joins the message, and the step evidence carries the cause (identifiers only) beside the task
   evidence.
+- Migration rehearsal (`deploy/rehearsal.go`, the Databases side in `api/deployment_rehearsal.go`) is
+  the `rehearse_migration` step, between `backup_gate` and `release_task`, so it runs only after the
+  backup it restores from has been verified and before any task touches production. It is off by
+  default and turned on per environment (`deploy_rehearsal_policies`, `GET`/`PUT
+  /deploy/{id}/environments/{env}/rehearsal`: the read for whoever reads the environment, a deploy key
+  included; the write `system.admin` with a session, audited as
+  `deploy.rehearsal.update`; a preview has no row). A run with no release tasks, or with rehearsal
+  off, skips the step with the reason. Otherwise the target is the managed database the tasks'
+  resolved variables address by its `db-<id>.jd.internal` or `db-<id>-pool.jd.internal` name — the
+  only one, or the one the terms name when they reach several, never a guess. The copy is the
+  production server's container spec on a fresh volume: its image, command and environment, its
+  read-only mounts, none of its writable ones (a socket directory, a log, the WAL-G tool volume and
+  archive), none of its ports, labels or networks, and for PostgreSQL its archiving removed and
+  `archive_mode=off` on the command line, which outranks the data directory, so a copy never writes
+  into production's archive. It runs on a network of its own (`jd-e<env>-run<run>-rehearsal`,
+  `Internal`, no gateway out) under the aliases the production database answers by, so the task's
+  `DATABASE_URL` reaches the copy unchanged. PostgreSQL with an active point-in-time archive is
+  recovered from it — WAL-G fetches the newest base backup and the copy replays the log to its end
+  (at most `WALArchiveTimeout`, a minute, behind production), then is removed and started again
+  without the archive, the WAL-G tool volume holding its key, or the recovery settings; anything else
+  is restored from the newest native dump a backup job made of that connection
+  (`backups.Store.LatestDatabaseDump`, `Runner.ExtractDatabaseDump`, the same extraction
+  `RestoreDatabase` uses; never an imported run's, whose connection ids are another server's): `pg_restore --no-owner --no-privileges --exit-on-error`, `psql -f` or
+  `mysql`, with the application's role made first when it is not the superuser. MySQL and MariaDB
+  restore from dumps only; any other engine is reported as not supported. The tasks then run through
+  the same release-task runtime as for real (`runImageReleaseTask` with `Rehearsal`), in the release
+  image with the same variables and timeout, but on the rehearsal network alone — never the project's
+  database networks, the preview network or the host's — with no mounts and a
+  `jd-e<env>-run<run>-rehearsal-task<n>` name. While a PostgreSQL task runs the copy's `pg_locks` is
+  read every 250 ms for sessions waiting and for locks that block an application's reads or writes
+  (ACCESS EXCLUSIVE, EXCLUSIVE, SHARE ROW EXCLUSIVE, SHARE) on user relations, and how long each was
+  held is the report's estimate of how long production will wait. The evidence (`RehearsalReport`)
+  records the database, the source (dump run and time, or the archive's recovered moment), restore
+  time, each task's duration, exit code and last output line, the locks, the isolation and whether the
+  copy was removed. A task that fails against the copy fails the step and the run as
+  `rehearsal_failed`, naming the task, the copy and its source and saying production was not
+  touched; `release_task` never starts. A rehearsal that cannot be carried out — no backup, a dump
+  over the size limit (`maxBackupMb`, default 2048) or a base backup unpacking to more, a restore past
+  `restoreTimeoutSeconds` (default 600), a shell-runner task, no reachable database, an engine without
+  a restore path — is `rehearsal_unavailable` and stops the release, or with `whenUnavailable: "warn"`
+  becomes a warning step and the release continues. Everything a rehearsal makes carries
+  `io.just-dashboard.rehearsal=<run id>` (the WAL-G tool volume too): the step removes its own
+  leftovers before it starts and everything after, however it ends; a resumed run makes its copy
+  again (`ReconcileResume`); and `Server.Start` removes every rehearsal before the engine resumes,
+  except a [copy of a release's data](data-aware-rollback.md) still within its lifetime, which carries
+  the same label with `copy-<id>` and is made by the same path (`prepareCopy`: the newest backup for a
+  rehearsal, a recorded dump run or archive moment for a data copy). The environment's network
+  reconciler leaves every rehearsal-labelled container where it is: it used to join a rehearsal's copy
+  and task, which carry the environment's label, to the deployment's database network on its next
+  pass, giving the internal network a way out and production's database the copy's name beside it.
+  Runtime observation never counts the copy (it has no release id) or its task (the release-task
+  label), and host container alerts leave both out. A promotion takes the same step in the same place
+  (`PromotionStepKeys`, [staging and promotion](staging-promotion.md)): production's tasks with
+  production's variables, so the copy is of the database production's values reach, run in the image
+  staging built; the step reads production's terms, never staging's, and ends the promotion as it
+  would a deploy. Build settings carries the terms under the release tasks (`settings/rehearsal.tsx`),
+  the Promote confirmation says the tasks are rehearsed first while the terms are on, and the run page
+  reads the report as figures (`run-rehearsal.tsx`).
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
-  retain-until windows, recent failed diagnostics, shared physical digests, and every environment under
-  an active deployment lease. Cleanup reports the reason for every retained row and removes a mutable
+  retain-until windows, recent failed diagnostics, shared physical digests, every environment under
+  an active deployment lease, and a staging release an unfinished promotion is about to take its image
+  from ([staging and promotion](staging-promotion.md)). Cleanup reports the reason for every retained row and removes a mutable
   Docker tag only after inspection proves it still names the recorded config/digest. A run that fails
   after `render_runtime` moves its candidate release to `failed` the moment the run itself reaches
   `failed`, `failed_activation`, `rolled_back` or `cancelled` — `TransitionRun` does it in the same
@@ -690,7 +844,11 @@ only renderer/executor/validation authority for their feature.
   never`. The release's container identity and readiness target is the primary service — the one the
   operator chose (`build.primaryService`), else the analysis's, which builds or publishes a port and is
   never a database — and a snapshot recorded before there was one keeps its first service. Compose interpolation receives only the frozen runtime scope through a temporary `0600` env
-  file which is deleted on every exit path.
+  file which is deleted on every exit path. A Compose release keeps no single image of its own: its
+  row records the first of its services' image artifacts, so decoding the snapshot requires that
+  digest to be one of the snapshot's services (`snapshotNamesReleaseImage`), where a container release
+  still has to name exactly its image — compared with the empty single image, every Compose release
+  had been refused at its first activation step.
 - Archived projects keep their original display name in additive `archived_name` storage while the
   unique database name becomes an internal tombstone. Archiving and upgrading previously archived
   projects release the live name without deleting history or resources. New projects from the same
@@ -703,7 +861,50 @@ only renderer/executor/validation authority for their feature.
   Docker's own unlimited default. Validation bounds them (16 MiB–4 TiB, 0.01–1024 CPUs, 16–1,048,576
   processes); preflight warns when a limit exceeds the host's available memory or CPU count; the Docker
   runtime owner passes them to container creation and release comparison labels them. Compose services keep
-  the limits their files declare.
+  the limits their files declare. What they should be is [right-sizing](right-sizing.md)'s read of the
+  environment's retained container samples (`GET …/environments/{env}/sizing`, `GET /deploy/sizing`);
+  applying its suggestion is this plan's ordinary configuration save, applied with the next release.
+- The runtime plan also carries the container's process flags (`deploy/runtime_flags.go`): `user`
+  (`uid[:gid]` or a name the image has; its shape is checked, the image says at start whether it knows
+  the name), `readOnlyRootfs` with `tmpfs` — the paths kept writable in memory, `/tmp` alone when a
+  read-only root names none, 64 MiB each unless sized (up to 16 GiB, at most 16 paths), mounted as Docker
+  mounts a tmpfs (`nosuid,nodev,noexec`) and charged to the container's memory —, `ulimits` (`{name, soft,
+  hard}` over Docker's fifteen names, soft ≤ hard, -1 for unlimited except nofile, nice and rtprio;
+  nofile 16–1,048,576, the kernel's default `fs.nr_open`), `sysctls` (`{name, value}`, only the set a
+  container has a namespace of its own for: `net.*`, `fs.mqueue.*` and the System V IPC limits, with
+  `net.*` refused on the host network) and `gpus` (`all`, a `count` of 1–64, or `devices` by index or UUID:
+  Docker's `DeviceRequests` with the `nvidia` driver and the `gpu` capability). `PlanConfiguration.Validate`
+  refuses a bad value with the field it is about (`runtime.ulimits[0]`, `runtime.gpus.count`…), so a draft,
+  a settings save, `jd config set` and a blueprint are refused alike; canonicalisation trims and orders
+  them and leaves an absent one out, so a plan saved before them keeps its digest. A Compose plan refuses
+  each, naming the key its file has for it (`user:`, `read_only:`, `tmpfs:`, `ulimits:`, `sysctls:`, a
+  device reservation). The read-only root's one conflict the plan shows is refused: a plan nginx serves (a
+  static site, or a recipe with an output directory) needs `/var/cache/nginx` and `/run` writable — a
+  tmpfs or a writable mount at or above each — because nginx makes its temporary directories and PID file
+  there at start; a tmpfs where a mount already is, `/`, `/proc` and `/sys` are refused too. Seeds write
+  into named volumes, which stay writable. The runtime owner hands the flags to every container of a
+  release — each replica, a canary's candidate, and the same container a wake starts again — and a release
+  task gets the user and the ulimits, so what a migration writes into a volume belongs to whoever the
+  application runs as, but not the read-only root, the kernel parameters or the GPUs. A container the
+  daemon created and then would not start is removed with the replicas already started, and the start's
+  refusal is named (`runtime_gpu_unavailable`, `runtime_ulimit_refused`, `runtime_sysctl_refused`,
+  `runtime_user_unknown`); a write the read-only root refuses once the application runs is
+  `runtime_rootfs_read_only`, with the path the program tried and the directory to make writable. A pull
+  request preview inherits the user, the read-only root, the limits and the kernel parameters, and gets
+  the GPUs only when `gpus.previews` says so ([preview isolation](preview-isolation.md)). The release
+  comparison lists `user`, `read-only root` (with its writable paths), `writable paths` (on a writable
+  root), `ulimits`, `sysctls` and `gpus`. Preflight says each back (`runtime_user`,
+  `runtime_read_only_root`, `runtime_tmpfs`, `runtime_ulimits`, `runtime_sysctls`, `runtime_gpus`), warns
+  when the writable paths can hold more than the memory limit (`runtime_tmpfs_exceeds_memory`), reads
+  `docker info`'s runtimes for a plan with GPUs and warns when there is no `nvidia` one
+  (`runtime_gpu_runtime_missing`; `runtime_gpu_runtime_unknown` when the daemon could not be asked), and
+  counts a GPU as advanced runtime authority. A deploy key may set the user, the read-only root, the
+  limits and the kernel parameters; a GPU is host authority to it, as a device is. A container imported
+  from this server brings its user, read-only root, tmpfs mounts (as writable paths, no longer as storage
+  to adopt), ulimits, sysctls and GPUs into the plan that adopts it. `dockerx.ContainerSpec` carries them
+  without a JSON name, so the Docker page's form cannot set them, and `SpecOf` reads them back, so a
+  container recreated from its own spec keeps them. Runtime settings edits them under *Inside the
+  container* — one entry per line as `docker run` writes them — and, for the GPUs, *Container access*.
 - A failed readiness or smoke gate first asks the runtime owner to diagnose the candidate: container
   state, exit code, OOM flag, restart count and a bounded log tail (200 lines, 32 KiB, most recent kept).
   The tail is written to the run transcript after redaction of every runtime variable value; step
@@ -713,7 +914,8 @@ only renderer/executor/validation authority for their feature.
   `cat /proc/net/tcp /proc/net/tcp6` inside its own container through the check runner's closed-argv
   exec (bounded output, only parsed addresses kept). `applicationOutputCause`
   (`runtime_output_cause.go`, the one table of runtime and release-task causes) then names one cause,
-  most specific first: the container's own OOM flag (`runtime_oom`), a missing table
+  most specific first: the container's own OOM flag (`runtime_oom`), a write a read-only root refused
+  (`runtime_rootfs_read_only`, read only on a plan whose root is read-only), a missing table
   (`schema_missing`), a refused schema push (`runtime_schema_push_refused`: Prisma's
   `--accept-data-loss` and "changes that cannot be executed", Drizzle's rename and data-loss prompts),
   a SQLite file it cannot open or write (`runtime_sqlite_not_writable`), a variable the application
@@ -781,6 +983,14 @@ only renderer/executor/validation authority for their feature.
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime
   variable values. Disabled, unavailable, warning, passed and failed remain distinct outcomes.
+  `game_handshake` (the Minecraft Java status handshake over TCP) and `udp_probe` (a datagram sent,
+  an answer beginning with an expected prefix received) run too; see [game servers](game-servers.md#readiness).
+  The closed kind list also names `dns`, `tls` and `backup_freshness`, which no runner
+  executes. Saving one (Settings or a draft's configuration) is refused with the reason and what to use
+  instead (`refuseUnrunnableChecks`): a `public_route` check on the https address, or a storage
+  dependency's backup requirement. `Validate` still accepts them, so a
+  plan stored with one keeps deploying; its check reports `check_owner_unavailable`, a warning unless
+  it is required.
   An HTTP check against the candidate introduces itself as the proxy does when the release has a
   domain — `Host`/`X-Forwarded-Host` the first domain that is not a wildcard, `X-Forwarded-Proto` its
   scheme, `X-Forwarded-For 127.0.0.1`, a browser's `Accept` — while connecting only to the candidate.
@@ -791,10 +1001,71 @@ only renderer/executor/validation authority for their feature.
   redirecting to the old public release or to a page that returns 500. `acceptAnyAnswer` checks accept
   the first answer below 500 other than 400 and 421 (what host allowlists answer); explicit
   expected-status lists retain exact-status, no-redirect behavior, and a check cannot set both.
-- Blue/green is limited to stateless proxy-owned HTTP candidates without fixed ports, host networking or
-  writable mounts; dynamic candidate ports are loopback-leased. Fixed-port, Compose, game and exclusive
-  writable-storage plans are honest `stop_first` deployments and advertise expected downtime. A route
-  moves only after required readiness/smoke checks pass.
+- Blue/green, and a canary, which is blue/green with a trial, are limited to stateless proxy-owned HTTP
+  candidates without fixed ports, host networking or writable mounts; dynamic candidate ports are
+  loopback-leased, one per replica. Fixed-port, Compose,
+  game and exclusive writable-storage plans are honest `stop_first` deployments, advertise expected
+  downtime and run one container per release (`replicaRefusal`). A route moves only after the plan's
+  required readiness/smoke checks pass on every replica of the candidate (one that fails removes the
+  whole candidate) — and a plan with none is cut over
+  to ungated: `verify_readiness` is skipped (`disabled`, with the reason in its evidence and a
+  transcript line saying the candidate counts as ready because it started), and `activate` records
+  `readinessGated: false` and writes, in the strategy's words, that traffic moved (or the release went
+  live) without a readiness check; the run page says it again on the Route stage's line and in the
+  outcome, with the way to the health-check settings. A readiness check is required only of a web or
+  static plan (`readiness_missing`, a decision, refused by a deploy's `analyze_plan`); a redeploy,
+  rollback or promotion has no `analyze_plan` and runs with whatever checks the plan carries. For every
+  other profile that serves — a service or published container on a port, a game server, a Compose
+  stack or anything behind a domain — preflight raises `cutover_unverified` as a warning
+  (`ungatedCutoverFinding`), with the port and strategy measured, field `checks`, and in a run's
+  preflight step a deep link to Settings → Runtime → Health checks; a worker is never asked. Not a
+  refusal: an existing plan without a check keeps deploying and is told what that costs.
+- Traffic replay (`deploy/replay.go`) is the `replay_traffic` step, after `verify_smoke` and before
+  `canary` and `activate` in `DefaultStepKeys` and `PromotionStepKeys` (a redeploy, a rollback and an
+  instant rollback do not take it): the last gate before anything is routed to the candidate, and the one that
+  asks it what visitors actually asked rather than one health path. It is the plan's
+  (`runtime.replay`: `enabled`, `requests` 1–500 with 0 for 50, `paths` up to 32 prefixes that begin
+  with `/`, `maxStatusDrift` 0–100 percent with 0 for 2, `latencyFactor` 1–10 with 0 for 2,
+  `timeoutSeconds` 1–300 with 0 for 60), off by default, validated with the other runtime fields
+  (`validateReplayPlan`), stored as nothing when it asks for nothing (`canonicalReplayPlan`, so a
+  switch turned on and off is no change), edited in Runtime settings beside the release strategy
+  (`settings/replay.tsx`) and listed in the release comparison as `traffic replay`. Off, a restart, a
+  host with no request record, a plan whose every domain redirects, an empty record or one with
+  nothing eligible each skip the step with the reason in its transcript and evidence; a record that
+  cannot be read is a warning and the release continues. Otherwise the step reads the same held
+  record the Logs page and the rollback watch read (`RequestRecord.Window` on the environment's route,
+  the last 24 hours, GET and HEAD, the newest 5,000 rows) and takes the newest distinct requests —
+  method, host, path and query — answered 2xx, 3xx or 4xx, leaving out 401, 403 and 407 (decided by who
+  asked), scanner probes (`accesslog.IsProbe`), a query that names a credential (`token`, `code`,
+  `state`, `sig`, …), a path or query with a control character, a space or non-ASCII, a host no served
+  domain names (wildcards by one label), and — where the record says which requests came over TLS, as
+  Caddy's does — a plain request for an HTTPS domain, which the ingress's redirect answered. A row
+  without a host (nginx's `combined`) is the first concrete served domain's. Each request is sent
+  only to the candidate's own address (`targetForRuntime`, the readiness checks' target), built from
+  the record alone: method, path and query, the recorded `Host` and `X-Forwarded-Host`, the scheme the
+  request came over as `X-Forwarded-Proto`, `X-Forwarded-For 127.0.0.1`, `X-JD-Replay: 1` for an
+  application that keeps replays out of its analytics, and no cookie, authorization or body — the
+  record holds none. Four at a time, ten seconds each, the whole within `timeoutSeconds`; no
+  environment proxy, no redirect followed (the record holds the live release's first answer), at
+  most 256 KiB of each answer read and discarded so the time is the answer's. A request the deadline
+  left unsent is unanswered (`out_of_time`). The verdict (`summarizeReplay`): nothing answered is
+  `unanswered`; a share of requests answered in another status class than the record, or not at all,
+  above `maxStatusDrift` is `status_drift`; the candidate's p95 over requests timed on both sides
+  (at least ten, nearest-rank, `accesslog.Percentile`) past `latencyFactor` × the recorded p95 and at
+  least 250 ms slower — the rollback watch's rule, `latencyRegressed` — is `latency`; a record without
+  durations (host nginx) is never judged on p95. A tripped verdict stops the candidate and restores a
+  stop-first predecessor through `stopCandidateAndRestore`, the failed health gate's own recovery, and
+  fails the run `replay_<code>` with nothing routed; the live release is not touched. The evidence
+  (`ReplayReport`) is the counts (read, eligible, sent, answered, drifted and their share), both p95s,
+  the target and domains, at most 50 drifted requests by method, path, query, both statuses and both
+  times, the verdict and the recovery — never an answer's body or a header. The transcript names each
+  drifted request and the verdict. An interrupted replay resumes (`ReconcileResume`): it sends reads to a
+  candidate nothing routes to and changes nothing but its own evidence. Preflight says what it will
+  hold the candidate to (`replay_before_cutover`, a pass) or that there is nothing to replay
+  (`replay_without_record`, a warning: no served domain, or no proxy for one). The run page draws the
+  report in the Verify stage (`run-replay.tsx`). It is not a load test: the latency rule compares one
+  pass over a cold candidate with what the ingress recorded, which includes the time to send the answer
+  to the visitor, so it catches a release that is several times slower, not one a few percent slower.
 - A managed route lets request bodies up to `runtime.maxRequestBodyMb` through (1–10240). Zero is each
   proxy's deployment default, which differs: nginx's own default is 1 MB, which refused a phone photo
   before the application saw it, so an nginx route always writes `client_max_body_size` (64 MB unless the
@@ -806,7 +1077,9 @@ only renderer/executor/validation authority for their feature.
   target. Apply/reload/verification failure restores, reloads and verifies that exact snapshot before a
   run may report recovery. The snapshot content is held only for compensation; persisted activation
   evidence carries its digest, not the configuration bytes. The rendered nginx route proxies each
-  request over a fresh upstream connection (no `upstream` block, so no upstream keepalive): under
+  request over a fresh upstream connection (no `upstream` block for one container, and a replicated
+  release's `upstream` block — `least_conn`, passive health, a 2-second connect timeout — carries no
+  `keepalive`, so no upstream keepalive either way): under
   sustained traffic in the high hundreds of requests a second the proxy's side of every closed
   connection sits in TIME_WAIT, its ephemeral ports run out after roughly half a minute, and every
   proxied request answers 502 until they drain. The cutover continuity test throttles its own
@@ -816,6 +1089,95 @@ only renderer/executor/validation authority for their feature.
   stop-first failure restarts the predecessor from its exact immutable runtime spec. Cancellation between
   persisted steps removes an uncommitted candidate, or finishes predecessor retirement after a committed
   cutover, and records sequenced cleanup evidence.
+- Metric-gated rollback keeps the release a blue/green cutover replaced **warm** instead of removing
+  it (`deploy/rollback_watch.go`, `rollback_executor.go`, `rollback_watcher.go`). `retire_previous`
+  drains it as before, then — when the environment's terms allow, the environment is not a preview,
+  both releases are the runtime owner's own containers rather than Compose stacks and the host still has
+  `max(256 MB, a tenth of its memory)` available (a canary's promotion is that cutover too) — records a window (`deploy_rollback_watches`, state
+  `watching`) and the predecessor's runtime `warm` in one leased transaction and only then `docker
+  pause`s it, every replica of it. With skew protection on (`runtime.skewProtection`,
+  [skew protection](canary-and-replicas.md#skew-protection)) it is kept **running** instead, since the
+  route still sends it the visitors it answered first: the window records `warm_running`, the watcher
+  resumes rather than pauses it, judges the new release on its own answers and counts the warm one's
+  (`warm_served_json`), and every end of the window takes it off the route before it is removed. A replicated warm release is one state (`warmStateOf`): any replica
+  gone is the release gone (`warm_lost`), one a Docker restart brought back running is paused again, and
+  resuming or removing it is every replica (`warmEach`). Paused rather than running:
+  the old release must not keep running schedulers, consumers or writes against a schema the new release
+  may have migrated, and a frozen process costs memory and nothing else; Docker counts it as not
+  running, so "exactly one release running" still holds. The step's evidence says `warm.kept` with the
+  window, or why not (`warm.reason`). A unique partial index allows one open window per environment, so
+  at most one release is ever warm. Terms are per environment (`deploy_rollback_policies`; no row is
+  `DefaultRollbackPolicy`: kept warm 10 minutes, automatic, 5 points over the old 5xx share or 2× its
+  p95 and at least 250 ms slower, over at least 20 requests) and are copied into the window when it
+  opens, so an edit applies from the next cutover. **On by default**: blue/green already runs both
+  containers at once for every cutover, so the peak memory is unchanged and only its duration grows,
+  the floor gives the memory back on a tight host (also re-checked on every pass of the window), and a
+  new run ends the window before it builds.
+  The watcher (`RollbackWatcher`, started after the engine, every 10 s) reads each open window: it
+  re-pauses a warm container a Docker restart brought back running, closes the window as `warm_lost`
+  when the container is gone and as `memory` below the floor, takes the warm release's baseline once
+  from the request record (its own traffic over the 30 minutes before the cutover, or since it went
+  live if later) and the watched release's reading since the cutover, and judges them with
+  `JudgeRollback`: nothing is decided over fewer than `minRequests` requests or fewer than five 5xx
+  answers; a baseline under `minRequests` is not trusted (the 5xx rule judges against a clean share, the
+  p95 rule does not judge); a record without durations (host nginx) never judges p95; a release with no
+  domain is never judged (`no_route`) — it is still kept warm for the button. A tripped verdict asks
+  for an instant rollback through the API's own enqueue (`enqueueAutomaticRollback`, trigger
+  `auto_rollback`, idempotency key `rollback-watch-<id>-<attempt>`, at most two automatic attempts per
+  window) and audits `deploy.release.auto_rollback` as `system`. A window that passes clean is closed
+  (`window_passed`): the warm container is resumed so it receives its stop signal, stopped and removed,
+  its runtime `retired` and its release `retired_at` — exactly the retirement it would have had — and
+  `deploy.release.warm_retired` is audited. Closing is a compare-and-set `watching → closing`, the same
+  row an instant rollback claims `watching → rolling_back`, so exactly one of them wins; a `closing`
+  window whose container could not be removed yet is retried on every pass.
+- An **instant rollback** is a `rollback` run with `{"instant":true,"watchId":…}` in its metadata and
+  six steps (`InstantRollbackSteps`): `start_candidate` claims the window under the run's lease and
+  resumes the warm container (the same container id, never recreated), `verify_readiness` runs the
+  warm release's own readiness checks against it, `activate` applies the warm release's own frozen
+  route (domains, redirects, headers, allow list, sign-in), runs its public-route checks, verifies the
+  route and moves the pointer in one transaction — the warm release `live` again with
+  `activated_at` now, the watched release `retained` with `rolled_back_at` and `rollback_reason` —,
+  `retire_previous` drains and removes the rolled-back release and closes the window `rolled_back`,
+  then `record_release` and `notify`. It takes a light slot at priority 1000 through the environment's
+  queue like every run, so nothing else is cutting over at the same moment; no release row is created,
+  because the release serving is the warm one with its own frozen configuration, and the release
+  history says so. A warm container that will not resume or fails its readiness check is removed and
+  the window closed `rollback_failed`; a refused route or commit restores the route, pauses the warm
+  container again and hands the window back. Every other run of the environment (except a scheduled
+  marker) ends an open window at its first step (`superseded`), so a deploy started during a window
+  never runs beside two warm releases and an instant rollback queued behind it finds the window closed.
+  Restart recovery: a window is only rows, so a restarted process's watcher resumes it where it was; an
+  instant rollback the engine ended as `restart_evidence_missing` is settled from the live pointer — if
+  it moved, the rolled-back release is removed and the window closed; if not, the route is put back on
+  the watched release, the warm container paused again and the window handed back to `watching`.
+  Cancellation does the same. `GET …/environments/{env}/rollback-watch` reads the terms and the latest
+  window; `PUT …/rollback-policy` (system admin, session) saves terms, audited
+  `deploy.rollback_policy.update`; `POST …/rollback-watch/rollback` is the instant rollback by hand
+  (destructive, ordinary confirmation, `409 no_warm_release` without a watching window, audited
+  `deploy.release.instant_rollback`); `POST …/rollback-watch/keep` (service control) ends the window now
+  and removes the warm container, audited `deploy.release.keep`. The read, the instant rollback and
+  keep are a deploy key's too (`jd status`, `jd rollback --instant`, `jd keep`); the terms stay a
+  session's. The live proof is
+  `TestLiveMetricGatedRollbackSwitchesBackToTheWarmRelease` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
+- **Scale to zero** ([sleep when idle](scale-to-zero.md), `deploy/sleep.go`): a plan's `runtime.sleep
+  {enabled, idleMinutes 5–1440 (15), wakeTimeoutSeconds 5–600 (60)}`, off by default and refused for a
+  Compose stack, host networking, a plan without a served domain, and a required `docker_health` or
+  `public_route` readiness check; the API also refuses it beside an enabled schedule that runs a
+  command in the container, and that schedule beside it. The `Sleeper` (after the engine, every minute)
+  stops the live container — not removed — once the route has served no request for the idle minutes,
+  read from the held request record, never while a run is queued or running, a warm release is watched,
+  the runtime was stopped by hand, or the wake is not listening; the stretch is a row of
+  `deploy_sleep_spans`, written before the route's `sleeping.on` switch and the stop. A release that
+  sleeps has a route that wakes it (`DeploymentRoute.Sleep`): a request meeting the switch, or the
+  application not answering, is held by the proxy while the dashboard — asked over a Unix socket only the
+  proxy reaches, answering only a peer that is nginx or Caddy — starts the container, waits for its own
+  readiness checks and answers with its address; the proxy then sends the request on as it came, or
+  serves the waking page past the hold (`min(wakeTimeoutSeconds, 30)`). Every run wakes a sleeping
+  environment at its first step (`endSleep`), a stop only ends the stretch. The idle decision, the sleep
+  and the wake are audited (`deploy.environment.idle`, `.sleep`, `.wake`) and are what the lifecycle
+  feed attributes the stop and the start to; the summary's `asleepSince` makes the project read Asleep
+  with Wake now (`POST …/sleep/wake`), the host's container alert reads it as fine and the availability
+  figure leaves it out. `GET …/environments/{env}/sleep` is the reading.
 - A failed build names its cause instead of `internal_error` and exec's `exit status 1`. `dockerx`
   reads buildx's plain progress as it streams (over `os.Pipe`s read to EOF, because a `StdoutPipe` is
   closed by `Wait` and dropped BuildKit's closing lines; once buildx has exited a read waits at most
@@ -854,13 +1216,76 @@ only renderer/executor/validation authority for their feature.
   `registry_auth_failed`, `builder_missing`) with the daemon's own bounded reason in the transcript — a
   .NET SDK image a `global.json` pin names that was never published is `dotnet_sdk_pin_unavailable`
   instead —, a JDK or .NET release the recipe refuses at prepare_context ends the run with preflight's
-  own code (`java_version_unsupported`, `gradle_wrapper_incompatible`, `dotnet_version_unsupported`), and
-  a candidate's start names `runtime_port_in_use`, `image_missing` and `mount_invalid` from Docker's
-  refusal without repeating it. A context deadline that reaches a step while its run is alive is
+  own code (`java_version_unsupported`, `gradle_wrapper_incompatible`, `dotnet_version_unsupported`), a
+  plan Railpack's planner refuses ends it with a cause in phase `plan` named from its info's error line
+  (`railpackPrepareCause`: `railpack_no_provider`, `railpack_start_command_missing`,
+  `railpack_package_unresolved`, `railpack_config_invalid`, `railpack_unavailable` for its transient
+  exit 75, else `railpack_plan_failed`), with the planner's output in the transcript and what it decided
+  beside the cause, and
+  a candidate's start names `runtime_port_in_use`, `image_missing`, `mount_invalid` and, for the process
+  flags, `runtime_gpu_unavailable`, `runtime_ulimit_refused`, `runtime_sysctl_refused` and
+  `runtime_user_unknown` from Docker's refusal without repeating it. A context deadline that reaches a step while its run is alive is
   `step_timeout`; only a cancelled context is a cancellation. The signature table and fixes are listed
   in [the recipe contract](recipes.md#failure-diagnosis).
+- A run that failed or rolled back can be asked about, on request only, of the provider an
+  administrator set up for the assistant ([the editor's assistant](../backend/databases-proxy-platform.md#the-editors-assistant)):
+  `POST /deploy/{id}/runs/{run}/diagnosis` (`service.control`, the assistant's own capability, and the
+  install's one budget of model calls and four answers at once; `api/handlers_deploy_diagnosis.go`).
+  What is sent is decided in `deploy/run_diagnosis.go` and is what the run's page already shows any
+  signed-in account: the run's outcome, the failed step (the run page's rule: the first failed or
+  blocked step of the latest attempts) with its code, message and the cause its evidence records —
+  a build's or release task's `cause`, a health gate's `diagnostics.cause` and its scalar readings of
+  the container — including the fix it offers; the settings the run used (`ExecutionPlan`: source
+  kind, branch and commit, build method, recipe, framework, versions, package manager, root, commands,
+  output, release tasks without their environment, runtime port, strategy and limits, checks); its
+  variables by name, scope and sensitivity, never a value; every step's state; and the end of the
+  transcript — the failed step's own last 170 non-blank lines and up to 30 written after it, each
+  without terminal escapes and cut at 400 bytes, 24 KiB in all, newest kept. The whole text is masked
+  again on the way out (`DiagnosisMasker`), because the transcript was masked when it was written with
+  the values the run had then: by value, every secret variable of the environment as it is now and as
+  the run had it, every plain one that carries credential material or looks like a key
+  (`tokenShaped`: twenty characters or more, one word, letters and digits, not an address or a
+  digest), what a `credential` or `database` reference points at in the store (the secret, the saved
+  address and its password), every saved deployment credential, the environment's trigger secrets and
+  a carried-over project's `deploy_env` values (`PlanningStore.DiagnosisSecrets`, which contacts
+  nothing; values under four characters are left, since masking them would mask ordinary words); and by
+  shape, a private key, a URL's password, an `Authorization` value, a value assigned to a name that
+  says password, secret, token or key, and the tokens of GitHub, GitLab, Slack, AWS, Anthropic and
+  OpenAI, Stripe, Google, npm, Hugging Face, Docker and JWTs. A variable that cannot be opened stops the
+  request with `409 diagnosis_unmasked` before anything is sent. The model is told the shape to answer in
+  (`DiagnosisSystemPrompt`: CAUSE, EVIDENCE quoted lines, numbered STEPS), and `ReadDiagnosisAnswer`
+  reads it leniently; a quoted line is kept only when it is a line that was sent (matched by its
+  sequence or its text, BuildKit's own step and cache lines left out, at most four, in transcript
+  order), and the rest are counted as `unmatched`. An answer in no shape is kept whole. The answer, the
+  exact masked text that was sent, the provider, model, tokens, who asked and when are kept in
+  `deploy_run_diagnoses` (one row per run, replaced by Ask again, gone with its run), which
+  `GET …/diagnosis` reads for any account that may read the run; a second press without `again` answers
+  the kept one and costs nothing, and a press while one is in flight is `409 diagnosis_running`. Every
+  press is audited as `deploy.run.diagnose` with the provider, model, tokens, lines sent, values masked
+  and outcome (`answered`, `kept`, `failed`, `unusable`, `unmasked`), never what was sent or answered.
+  Nothing the answer says is applied. The live check against a real model is
+  `TestLiveFailedBuildIsDiagnosedByARealModel` ([CONTRIBUTING](../../../CONTRIBUTING.md)).
+- A deployment's environment can be asked about as a conversation from the overview's **Diagnose**:
+  `POST /deploy/{id}/assistant` (`service.control` and a session; `api/handlers_deploy_operator.go`,
+  the tools and prompt in `assistant/operator.go`). The same provider and budget answer it; it begins
+  knowing what the overview shows and reads more — runs, a run's transcript, the live containers' last
+  lines, usage and the sizing verdict, container events, host alerts (`system.admin`), the firewall's
+  rules for the deployment's ports, pending security updates — only through tools whose every call the
+  person allows or declines first, each bounded, read with the person's role and masked by the
+  diagnosis's masker. It proposes a restart, redeploy, rollback, instant rollback, the suggested
+  limits or a maintenance switch through `propose_action`, which runs nothing: the page draws a card,
+  and its press is the request the project's own button makes to that action's route, with its
+  capability, confirmation and audit. See [the deployment operator](operator.md).
 - Deploy and force-build resolve the current desired revision (force-build disables cache); redeploy and
-  rollback clone only available immutable artifacts and traverse the same checks/cutover path; restart
+  rollback clone only available immutable artifacts and traverse the same checks/cutover path (a clone
+  carries its target's own source identity and promotion provenance; a rollback moves no data, and the
+  data step is separate: the rollback dialog can ask, once the rollback succeeds, for each linked
+  database restored as of the target release into a side copy — `POST …/releases/{release}/data-copies`
+  with `afterRunId` — never into production, see [data-aware rollback](data-aware-rollback.md)); promote takes a staging release's
+  exact image with production's current plan and variables, builds nothing, and runs a deploy's steps from
+  `render_runtime` on, the migration rehearsal included — or, into staging, an administrator-approved pull
+  request preview's exact image with staging's plan and variables, refused into production
+  ([staging and promotion](staging-promotion.md)); restart
   stops and starts the existing live runtime without creating a release, then verifies the plan's
   readiness and smoke checks against that live release before recording it. Rollback, stop and restart use
   the destructive capability and ordinary confirmation, not a typed phrase; because stop and restart share
@@ -918,7 +1343,7 @@ only renderer/executor/validation authority for their feature.
   rotation. Execution resolves external credential/database/domain/Compose-service references only through
   their owning stores; missing or ambiguous targets fail closed instead of reaching a workload as literal
   reference text. Run-scoped domain and Compose references use the frozen run plan/dependency snapshots.
-  `POST …/variables/import?dryRun=1` (the import's own tier: `system.admin`, session) takes the
+  `POST …/variables/import?dryRun=1` (the import's own tier: `system.admin`, session or deploy key) takes the
   import's body and writes nothing: it answers one verdict per name, in the order the names were
   written, with the line — `added`, `changed` (the value, sensitivity or scopes differ), `unchanged`,
   `skipped` (a name the body's `skip` list leaves out: the sheet sends `PORT` and `NODE_ENV`, which the
@@ -934,6 +1359,43 @@ only renderer/executor/validation authority for their feature.
   failed to parse must never fall through to the import. Both paths share `parseDotenvEntries`, and
   `components/deploy/settings/dotenv.ts` is that parser written again line for line, so the sheet
   can draw a preview while the server's is in flight, and the server's verdicts replace it.
+- Shared variables (`deploy/shared_variables.go`, table `deploy_shared_variables`) are values defined
+  once and read by reference: the server's as `${{server.NAME}}` from any project, a project's as
+  `${{project.NAME}}` from that project's environments only (a preview environment is one of them).
+  Nothing is injected by name — an environment reads a shared value only through a variable of its own,
+  with that variable's scopes, so a shared name never shadows or fills in one of the environment's. A
+  shared name starts with a letter (it is a reference target); a shared value is sealed like a
+  variable's, has no revisions, and is always a literal, so reference-shaped text in one is never followed
+  and shared values cannot chain or cycle across scopes. The reference is what a variable revision holds,
+  so a release freezes the reference and a run opens the value when it reads its variables, exactly as a
+  credential reference does: a change reaches a release through its next deploy, and a rollback to an
+  older release reads today's value. A run whose shared variable is gone fails closed rather than handing
+  the workload the reference's own text. Saving a variable that references one checks that it exists in that scope and refuses a plain
+  variable reading a secret one; a new project's wizard refuses `${{project.…}}` (the project does not
+  exist yet) and checks `${{server.…}}` before commit. Only values saved in `reference` mode are read as
+  shared references: a value saved before modes were recorded keeps the shape inference of the kinds that
+  existed then, so a legacy `${{server.X}}` stays the literal text it always was (`parseStoredReference`).
+  Routes: `GET /deploy/shared-variables` and `GET /deploy/{id}/shared-variables` list them masked with
+  every active variable that reads each (`usedBy`, with `waiting` where the environment's live release
+  started before the value last changed) for anyone who may read an environment's variables; `PUT …/{name}`
+  (create or change; an omitted value keeps the sealed one) is an administrator's in a session or a
+  deploy key's, like a variable's, and `GET …/{name}/reveal` a session's only; `DELETE …/{name}` is
+  `s.destructive` in a session or with a deploy key and
+  answers `409 shared_variable_in_use` naming each reader while any active environment's variable reads it.
+  Audited as `deploy.shared_variable.{create,update,reveal,delete}` with the scope and never the value. A
+  project's shared variables go with the project when it is purged.
+- Store references (`deploy/secret_store_references.go`, connections in `internal/secretstore`, table
+  `deploy_secret_stores`) read a value from Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager or Azure
+  Key Vault as `${{store.NAME/path#KEY}}` (`@N` pins a version; for the last two the path is the secret's
+  name, the key is optional and the version is the store's own id or staging label). They resolve through the same graph, as secret
+  literals, and only from a secret variable. A run reads every store it references at its first step
+  (`resolve_source`, a rollback's `render_runtime`, a restart's `start_candidate`; never a stop's),
+  fresh, keeps the values in memory for its own later steps, and fails as `secret_store_unreadable` in the
+  store's words with nothing touched when a store refuses. The transcript and `secretStoreReads` in the
+  run's metadata record each reference's version, never its value. A release freezes the reference, so a
+  rollback re-reads the store and says when the version differs from the restored release's; a pinned
+  version rolls back exactly. A preview reads only a store that allows previews. Contract, routes and
+  audit: [`secret-stores.md`](secret-stores.md).
 - Domains, persistent storage, backup jobs and database entries remain resources of Proxy, Docker,
   Backups and Databases. Deployments store typed ownership links and use read-only owner observations for
   domain conflicts, DNS, existing certificate pairs, ports, public binds, firewall policy and dependency
@@ -985,6 +1447,13 @@ only renderer/executor/validation authority for their feature.
   `deploy.release.pin`) sets `deploy_releases.pinned`, which `ArtifactRetentionPlan` already reads: a
   pinned release survives a prune plan regardless of its age or rank among the environment's other
   releases.
+- **The data point.** When a release goes live, `activate` records, right after the pointer commits,
+  where each database the environment links stood (`deploy_release_data_points`, once per release and
+  database): the activation moment when the server's point-in-time archive reaches back that far, else
+  the newest backup run holding its dump, else none with the reason. It is read from the store alone and
+  never fails the activation. The release list carries `dataPoints` and `dataCopy {eligible, reason}`,
+  the comparison both releases' points and `changes.dataPoint`; the rest is
+  [data-aware rollback](data-aware-rollback.md).
 - Remote Git production branches default to monitoring after the first explicit deployment,
   including existing projects. The environment's [automatic deployment policy](git-policy.md) supplies
   manual-only mode and shared include/exclude filters for polling and push hooks. `GitWatcher` checks refs every five seconds
@@ -1046,18 +1515,64 @@ only renderer/executor/validation authority for their feature.
   retry, redeploy or rollback. `GET /deploy/{id}/commits` still reads a legacy project's local checkout
   only; a normalized Git-URL project's private release mirror keeps only narrow per-revision snapshot
   refs, not a maintained branch tip, so listing its history cheaply from that mirror remains open.
+- **Deploy keys and `jd`.** A deploy key (`api_tokens.scope = 'deploy'`, `POST /tokens/deploy`, an
+  administrator's in a session) is admitted to the deployment routes `deployKeyRoutes` in
+  `api/deploy_keys.go` lists and to no other route; wherever this document gives a drafts,
+  configuration, source, Git policy, trigger, variable or shared-variable write the tier
+  "`system.admin`, session", a deploy key is admitted too, and every other session-only deployment route
+  (reveals, saved credentials, secret-store connections, pull-request merge/comment and previews,
+  schedules, alerts, channels, drains, adding and removing an environment, a route's maintenance and
+  error pages, the warm-release terms, the migration rehearsal's terms, a copy of a release's data —
+  asking for one, its address, keeping it longer, removing it and comparing it — the
+  typed-phrase removals) stays a session's and answers it `session_required`. The operating verbs an
+  ordinary key already had are the deploy key's as well: `POST …/promote` (a pull request preview's
+  image into staging too, which takes the administrator role the key carries; approving the preview's
+  commit stays a session's),
+  `POST …/rollback-watch/rollback` and `…/keep`, `PUT …/maintenance` (who is let past is the
+  configuration's `runtime.maintenance.bypassFrom`, applied by the next release), with the reads
+  `GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/maintenance`,
+  `…/pages/{page}`, `…/rehearsal`, `…/data-copies` (what each copy is of and until when, never its
+  sign-in) and `…/sizing`, and the fleet's `GET /deploy/sizing` narrowed to the key's deployments;
+  `GET /deploy/secret-stores`, an ordinary key's read, answers it
+  `key_scope`, since the list carries each connection's address and sign-in fields and every
+  deployment's variables that read a store, and the key cannot point a variable at one. Its writes are
+  held to what a person in a session could not be refused: a generate or rotate answers it without
+  `generatedValue`; a plan it commits, or an environment change it makes, may not carry host authority
+  (`hostAuthority`: a folder on the server, Docker Compose, privileged, host network, capabilities,
+  devices, the server's GPUs, a host path mounted, a release task without `runner: "image"`), and an environment that
+  already does, or whose variables read a `credential` reference, is changed by a person only (it may
+  still be deployed and have its variables set); a source may not gain a saved credential or send its
+  Git credential to another repository; a variable may not be pointed at a `credential`, `database` or
+  `store` reference (on a draft, checked at commit with `Draft.VariableReferences`, which reads a value's mode
+  as the commit stores it), nor, for a key narrowed to some deployments, at a `server` shared
+  variable. A key narrowed to chosen deployments
+  (`api_token_deployments`) lists and reaches only those. Drafts are every deploy key's own
+  (`deploy_drafts.key_id`; `AuthorizeDraftForKey`): a key never reads, changes, commits or discards a
+  session's or another key's, and a narrowed key's commit adds the deployment it creates to its grant
+  in the commit's transaction (`DraftCommitRequest.GrantToKey`), so the key reaches what it made;
+  duplicating is of a deployment the key reaches, and the draft is the key's. `GET /deploy/{id}/runs/{run}/transcript?after=&limit=`
+  reads a run's log lines after a sequence number, oldest first, with the run and its steps and
+  `{next, more}` (`OrchestrationStore.RunTranscriptAfter`): what the stream route sends over its socket,
+  for a client without one — `jd logs --follow` and `jd deploy --wait` poll it. The `jd` program itself
+  (`backend/cmd/jd`) is described in the README. Every route of this API is described as OpenAPI 3.1 at
+  `GET /deploy/openapi.json` (`.yaml`; `jd openapi`), generated from the router and the handlers' types
+  and kept honest by its tests — see [`../backend/deploy-api.md`](../backend/deploy-api.md). Typed
+  clients generated from it (`backend/internal/openapigen`) are committed in `sdk/`: a Go package
+  (`sdk/go`, its own module with no dependencies) and a TypeScript module over `fetch`
+  (`sdk/typescript`), a method or function per operation and a type per schema, held to the
+  description by `TestTheCommittedSDKsAreCurrent` (`JD_UPDATE_SDK=1` rewrites them).
 - Additional automation provider hooks verify each provider's exact raw-body signature before parsing and then fence
   event, repository, ref and delivery identity. The delivery row is reserved before preview or queue side
   effects, while legacy HMAC and scoped generic hooks retain their existing contracts. Environment branch/
   path policy applies to polling and provider/generic hooks; manual and rollback runs are not path-filtered.
-  `GET …/triggers/{trigger}/deliveries` (`system.admin`, session) reads the last 50 `deploy_webhook_deliveries`
+  `GET …/triggers/{trigger}/deliveries` (`system.admin`, session or deploy key) reads the last 50 `deploy_webhook_deliveries`
   rows for a trigger — delivery id, event, ref, decision, reason, run id, received at — or `?limit=` of
   them, 1 to 200 (anything else reads 50), and
   `POST …/triggers/{trigger}/rotate-secret` (same tier, audited `deploy.trigger.rotate_secret`) issues a new
   HMAC secret shown once, mirroring the legacy project's own secret rotation. The trigger list carries a
   summary of that log — each trigger's `lastDelivery` and `recent`, its last fourteen decisions oldest
   first, read for every trigger in one windowed statement (`AttachTriggerDeliveries`) — but only for a
-  session holding `system.admin`, the caller who could read the log itself; the list is readable by any
+  session or deploy key holding `system.admin`, the caller who could read the log itself; the list is readable by any
   account, and a read-only one still sees `lastStatus` alone. Absent means not allowed or never
   delivered, and the page then draws no strip rather than an error.
   A new *automatic* run only supersedes an older queued one in the same environment when its own
@@ -1088,7 +1603,15 @@ only renderer/executor/validation authority for their feature.
   refuses it afterward without any extra check, and the trigger's next delivery for that pull request
   inserts an independent new `pending` row at its own revision — a rejection does not follow it. They start without
   inherited variables, linked databases or release tasks; container mounts become fresh preview volumes on
-  a dedicated bridge. Compose and host-access plans currently fail closed. PR close retires only owned
+  a dedicated bridge. A Compose stack is isolated service by service — every service on the preview's
+  bridge alone, its mounts on preview volumes (a read-only file of the commit itself excepted), no secret,
+  fixed name or published port but the public service's loopback one — and a stack whose service needs the
+  server itself, a compatibility Compose plan and other host-access plans fail closed ([Compose
+  previews](preview-isolation.md#compose-previews)). An environment can give its previews a
+  [database branch](preview-isolation.md#database-branches) of a database it links — the preview's own
+  copy, restored from the newest backup through the rehearsal's `prepareCopy` onto the preview's database
+  network with a password made for it, chosen columns masked in their shape, never for a fork, removed with
+  the preview — and the preview's `${{database.N…}}` resolves to it. PR close retires only owned
   resources and archives after successful cleanup. Reopening waits for cleanup and a new approval
   generation; closing cancels queued/build work. Startup quarantines older unsafe previews, stops owned
   containers without deleting data, withdraws routes, and blocks old releases from activation. Failed
@@ -1110,7 +1633,11 @@ only renderer/executor/validation authority for their feature.
   identity cached two minutes, listings 30 s, four gh subprocesses at a time). `GET /deploy/{id}/pull-requests`
   answers `{repository, host, available, reason?, identity?, checkoutPath?, pulls[] (each with its
   preview), previews[], production {environmentId, automatic, intervalSeconds, awaitingFirstDeployment},
-  tailnet, compose, localCheckout, internalPort, releaseTasks}` — `reason` is one of `not_github`,
+  tailnet, compose, composePreview?, databaseBranches, localCheckout, internalPort, releaseTasks}` —
+  `databaseBranches` are the databases production gives its previews a branch of, each preview carries its
+  `branches`, `composePreview` is a
+  Compose project's `{public, services[], refusals[]}` and a live Compose preview carries its `services`
+  as Docker reports them — `reason` is one of `not_github`,
   `sign_in_required`, `app_not_installed`, `not_installed`; `previews` lists the open ones and a closed
   one only while its newest `preview_remove` run has not succeeded; a read GitHub refuses answers an
   error (`429 github_rate_limited` for a quota refusal — a 429, or a 403 or gh's text saying rate limit,
@@ -1129,7 +1656,11 @@ only renderer/executor/validation authority for their feature.
   `title`, `head_revision`, `variables_copied_revision` and `deploy_variable_revisions.copied_from_environment`,
   all in `store.addedColumns`. The activation step publishes the tailnet address after the route is
   verified and before the release pointer moves (`TailnetPublisher`, `selfcfg.TailnetServe`; step codes
-  `tailnet_unavailable`, `preview_port_missing`, `tailnet_publish_failed`, `tailnet_withdraw_failed`),
+  `tailnet_unavailable`, `preview_port_missing`, `tailnet_publish_failed`, `tailnet_withdraw_failed`) —
+  to the address's front on loopback, never to the container, since the address is a port of the name
+  the dashboard is reached by and the front keeps the dashboard's session cookie from the pull
+  request's code ([the dashboard's session cookie](tailnet-apps.md#the-dashboards-session-cookie);
+  `tailnet_gate_failed` when the front cannot be written) —
   restores the predecessor's mapping on a failed activation while the predecessor runs and otherwise
   withdraws its own and marks the row unpublished (`tailnetRestored`), and withdraws it on removal
   (`addressWithdrawn`) — restore and removal touch only a mapping whose upstream the address row
@@ -1137,17 +1668,54 @@ only renderer/executor/validation authority for their feature.
   loopback mappings in the range the address table does not vouch for (a port no preview owns, or an
   owned port serving another upstream; an operator's directory or funnel is never turned off) and
   unpublishes addresses nothing serves, quietly when the serve config is unreadable and no published
-  tailnet address exists; `PreviewReconciler` reads every open preview's pull
+  tailnet address exists, and `FrontTailnetAddresses` then moves an address an earlier release mapped
+  straight to its container behind its front; `PreviewReconciler` reads every open preview's pull
   request once a minute and closes the preview only on a decoded closed or merged state, recording a
   moved head as out of date. All of it in [preview isolation](preview-isolation.md#previews-from-the-dashboard).
   Outbound notifications are delivered by engine run observers for every terminal outcome and for run
-  start, through Discord, Slack, Telegram, e-mail or a signed webhook; a failed or cancelled run reaches
+  start, through Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover, e-mail or a
+  signed webhook; a failed or cancelled run reaches
   the same channels as a successful one. Credentials are sealed and never listed, deliveries record only
   a status class and are deduplicated per run and event, and a delivery failure never changes a run's
-  outcome. GitHub commit statuses ride the same hook. The channel list carries each channel's newest
+  outcome. Commit statuses and preview comments — on GitHub, GitLab, Gitea and Forgejo, the last two
+  written with a saved token for the host — ride the same hook, and the newest outcome of each is kept
+  for Settings. The channel list carries each channel's newest
   attempt and last fourteen outcomes, and each delivery the project and run it announced, so the
   page reads whether messages arrive without a request per channel. See
   [notifications](notifications.md).
+- Log drains copy each deployment container's output and the requests its ingress served to an
+  OpenTelemetry (OTLP/HTTP), Loki or JSON-lines endpoint while they happen, through
+  `logdrain.Manager`, started with the server: a follower per wanted container, a reader per wanted
+  request record, and a bounded, retried, gzip-compressed queue per drain whose status the page shows.
+  An OTLP drain's `traces` stream sends each request again as a span to `/v1/traces`, under the W3C
+  trace the ingress now sends the application (`DeploymentRoute.Trace`: Caddy's `request_header` and
+  `log_append`, nginx's `proxy_set_header` and log fields), so the application's own spans join it.
+  See [log drains](log-drains.md) and [trace context](request-observability.md#trace-context).
+- Each release's image, and the base images its recipe pinned, is read for known vulnerabilities by
+  Trivy in a container with no network, no capabilities and nobody's account
+  (`imagescan.ScanSpec`), after the build and daily while it is live (`deploy.ImageScanWatcher`, a run
+  observer that never holds a run up). The vulnerability database is fetched by the dashboard itself,
+  checked against its digest and copied into the `jd-image-scan-db` volume. One row per release keeps
+  the counts by severity, the fixable findings, the database's age and whether each pinned base's tag
+  now names a newer digest — `ReleaseUpdate`'s registry read, compared with the digest the release
+  pinned. A fixable finding at the environment's floor with a newer base is the `image_vulnerable`
+  host alert and the overview's Rebuild, which is the runs route's own `force_build` of the live
+  commit. See [image vulnerabilities](image-vulnerabilities.md).
+- An AI client reaches the deployments over the MCP endpoint when its key was given them
+  (`api_tokens.deploy_access`: none, `read`, `deploy`; every deployment, or only those chosen in
+  `api_token_deployments`, as a deploy key is narrowed). Six hand-written tools list deployments,
+  runs and releases, read a run's transcript tail (`OrchestrationStore.RunTranscriptTail`, the stored
+  and already masked `step.log` chunks, or a pre-engine run's bounded `deploy_runs.log`), and with
+  `deploy` queue a deploy or a rollback of a production environment through the same enqueue
+  functions and capability checks as the run and rollback routes. Beside them, for a key whose owner
+  turned them on (`api_tokens.mcp_operations`, off for every key made before them), every route the deploy
+  key table opens (`keyOpen`, `keyEvery`) is a tool generated from the OpenAPI description, named for
+  its operationId, and made through the router as the MCP key with the deploy key gate and every
+  handler's deploy key rule applied (`httpx.WithMCPDelegate`, `Principal.ViaMCP`): reads under `read`,
+  changes under `deploy`, the routes behind `s.destructive` only for an owner who may take
+  destructive actions. 100 tools generated, 113 tools in all; previews' approvals, reveals, saved
+  credentials and every other session-only route stay out. See
+  [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters
   managed environment labels at the daemon before inspecting matching containers once each — running
   or stopped, since the set is one environment's (`ListContainersWithLastRun`; the plain labelled
@@ -1243,8 +1811,9 @@ only renderer/executor/validation authority for their feature.
   unfiltered default response stays byte-identical to before these were added, apart from
   `currentStep` on a run that has not ended, which every read of the list now carries.
 - A blueprint deploys as an image release with reviewed defaults. `blueprint.DeploymentSupport`
-  decides per definition: game profiles, blueprints that ship configuration files, blueprints that
-  download an install-time artifact and UDP ports stay preview-only with a specific reason, exposed as
+  decides per definition: game profiles, install-time files (`write_file`), artifacts pinned by
+  checksum and UDP ports all deploy ([game servers](game-servers.md)); an artifact found through a
+  version source with no checksum stays preview-only with a specific reason, exposed as
   `deploymentSupported`/`unavailableReason` on the catalogue and detail responses and enforced by
   `DraftSourceConfig.ValidateForDeployment` at source save, preflight, commit, materialization, Git
   watching and queue admission (the stored source is re-validated, so a stale draft cannot enter the
@@ -1284,7 +1853,12 @@ only renderer/executor/validation authority for their feature.
   the operator links a job under Settings → Automation instead of a nightly `invalid_plan` failure. Preview
   volume names include a hash of the unnormalized name and blueprint id, Docker-socket mounts are linked
   and read-only, startup budgets use bounded retries, and Bedrock does not receive Java save commands.
-  UDP remains an explicit unsupported runtime protocol, never silently converted to TCP.
+  UDP is a runtime protocol only for a fixed, unrouted publication (`runtime.protocol: udp`, or
+  `tcp+udp` for one number on both, needs `hostPort` and refuses a domain), never silently converted
+  to TCP; a definition's direct primary
+  port is published on loopback until the operator chooses every interface, and its install files
+  and pinned artifacts become `runtime.seeds[]`, written into the managed volume by a helper before
+  the container starts (`runtime_seeds.go`, [game servers](game-servers.md)).
   HTTP tool templates use the web profile so their default candidate-first strategy is eligible.
   Retired definitions cannot create new projects; existing release operations retain their compatibility
   contract. The template chooser keeps its detail column during loading, displays retryable failures,
@@ -1305,15 +1879,201 @@ only renderer/executor/validation authority for their feature.
   next to a routed primary (Gitea's SSH, Syncthing's sync protocol) becomes an additional
   `runtime.ports[]` publication on its own number (see published ports below) instead of silently
   replacing the routed port; the primary always stays the one the proxy and the checks reach. The
-  catalogue ships 62 reviewed definitions, 57 of them offered (see "how the first sign-in works"
-  below for the five that are retired), every image reference resolved against
-  its registry (`docker manifest inspect`) and every deployable one started live:
-  `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks`
-  renders each definition from its fixture inputs, pulls the image, starts it through the real runtime
+  catalogue ships 162 reviewed definitions, 157 of them offered (see "how the first sign-in works"
+  below for the five that are retired; 56 are the multi-service templates of the next item). The
+  three counts the competitive report quotes — built in, deployable, Compose — are constants in
+  `blueprint/catalogue_counts.go`, and `catalogue_counts_test.go` fails when the shipped
+  definitions disagree, so they are bumped deliberately in the change that adds a template. Every
+  image reference resolved against its registry (`docker manifest inspect`) and every deployable one
+  started live. An image whose registry publishes no release tag (Excalidraw and BentoPDF on Docker
+  Hub ship only a moving `latest`) is pinned as `name:tag@sha256:…`, the content digest the
+  validator already admits, so the definition still names exactly one build; a newer build is a new
+  digest in the definition. The sweep: `TestLiveEveryBlueprintStartsAndAnswersItsOwnChecks` renders each single-image
+  definition from its fixture inputs, pulls the image, starts it through the real runtime
   owner with generated secrets, runs the definition's own readiness checks against the published
   loopback port (Mongo Express with a catalogue MongoDB beside it) and removes what it pulled;
   `JD_BLUEPRINT_ONLY=a,b` narrows it. Applications that validate the `Host` header (Homepage) are
   configured to accept any, since the proxy in front only ever forwards the domain.
+  Install-time files are not only a game server's: Glance's `glance.yml`, Garage's `garage.toml`
+  and the CouchDB settings Obsidian LiveSync checks for are written into their volumes before the
+  first start, each generated secret in them as the variable reference the seed helper fills in
+  (`validateRuntimeSeeds` refuses a credential-shaped line holding anything else), so the value is
+  in the file from the first start and a later rotation of the variable does not reach it. The
+  runtime starts every single-image container with Docker's init as PID 1, so an image whose own
+  init must be PID 1 — s6-overlay, as in Emby's and every linuxserver.io image — exits at once
+  (`s6-overlay-suexec: fatal: can only run as pid 1`) and cannot be a single-image template.
+- **Multi-service templates** (`blueprint/compose_validate.go`, `compose_render.go`,
+  `deploy/blueprint_source.go`). A definition that declares `services` (profile `compose`) is a
+  Compose template: an application with the database, cache or worker it needs, deployed through the
+  existing Compose release path rather than a runtime of its own, so backups, logs, requests, alerts,
+  domains and rollback treat it as any Compose deployment. Each service declares its image, role
+  (`app`, `worker`, `database`, `cache`), purpose, environment, ports, volumes, memory and CPU,
+  a Docker healthcheck and its start order (`dependsOn` with Compose's `healthy`, `started` or
+  `completed`); the top-level image, ports, volumes and resources stay empty. Environment values are
+  literal text with two typed references: `{{secret.<name>}}`, a secret the definition generates, and
+  `{{variable.<NAME>}}`, a plan variable an input writes or a startup operation sets. Both render as
+  `${NAME}` interpolations (literal dollars are doubled), so the rendered document holds no value and
+  is a function of the definition alone; a generated password two services share is one sealed
+  variable, generated at commit and handed to each through the release's private `0600` env file.
+  `Render` returns the document as `Plan.Compose` (inside the fixture digest) with `Plan.Services`,
+  the public service's image and port, and the stack's summed memory. The document publishes exactly
+  one port — the public service's proxy port, on `127.0.0.1` at a preference derived from the
+  template id (`TemplateHostPort`, moved by Compose's own port recovery when taken) — puts the public
+  service on Compose's `default` network and the private `internal` one, and every other service on
+  `internal` only, which is declared `internal: true` (no route out; a private service that sends mail
+  or downloads models declares `egress` and joins a separate `egress` network). The ingress joins the
+  public container on the first of its networks by name (`proxysvc.publishedTarget`), and `default`
+  sorts before `internal`, so the proxy facing the internet shares a network with the public service
+  and nothing behind it. Every service gets `mem_limit` (and `cpus`) from its own resources, a CMD-form
+  healthcheck and the capped `json-file` log every dashboard container gets. Validation refuses at
+  catalogue load — that is, at build time — fewer than two or more than eight services, a template
+  with no proxy port or two, a public service that is not an `app`, any `direct` or UDP port, the
+  Docker socket, a database without a data volume, a shared volume described two ways, a literal for a
+  credential-shaped variable (the Compose planner's `secretShapedKey` set and the single-image set
+  together) or a literal password inside a URL, a reference to a secret or variable nothing declares,
+  any other placeholder, a templated command or healthcheck, a healthcheck that is missing, untimed or
+  prefixed `CMD`/`CMD-SHELL`, a dependency cycle, a generated secret no service references,
+  privileges, configuration files, and install, release or stop operations. A secret's `alphabet`
+  (`hex`) becomes `PlannedVariable.generateFormat`.
+  A template deploys as `kind: compose, mode: blueprint` — `validModeForKind` allows the blueprint mode
+  under the Compose kind, and `blueprintSourceKindMatches` refuses a stack saved as a blueprint source or
+  an image saved as a Compose one (`BlueprintSourceKind` names the right one; the summary carries it as
+  `sourceKind`). Saving the source — the draft's source step and the settings source route alike —
+  stores the server's render in `composeFiles` (`WithTemplateDocuments`), replacing anything the
+  browser sent, and `validateForNewDeployment` refuses a document that is not that render. From then on
+  the stored document is the release: materialization writes it exactly as a pasted file, so a later
+  dashboard that no longer ships the version still redeploys it byte for byte
+  (`ValidateForDeployment` needs only the stored document), and moving to a newer version is a source
+  change that renders it. Detection (`analyzeComposeTemplate`) runs the same structural analysis and
+  Docker Compose validation as a pasted file over the render, and names the definition in
+  `SourceIdentity.template` (`id@version`; the render digest is `revision`, the document's is `digest`),
+  surfaced as `sourceTemplate` on the fleet summary and archived facts. The rendered configuration is a
+  Compose build whose `primaryService` is the public service, `runtime.internalPort` its proxy port,
+  stop-first, with the definition's variables, checks and domains; every variable the document
+  interpolates is planned, so preflight has no `compose_variable_*` decision left. `GET
+  /docker/templates` leaves stacks out. The template picker labels a stack on its card (`N services`),
+  lists its services with role, image, limit and the public one marked, adds up the footprint, and
+  states before the press what the stack does by itself: only the public service is reachable, the
+  rest publish nothing on a network with no route out, each deploy stops the stack first, shared
+  passwords are generated here, and a backup is a file copy of a running database rather than a dump.
+  A template is not a Git source, so it is never offered a pull-request preview, though a Compose
+  stack from a Git source is ([Compose previews](preview-isolation.md#compose-previews)). `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
+  through the real build step and runtime owner and requires every check to pass, every service's
+  healthcheck to report healthy, and only the public port to be published, on loopback.
+- **Templates added on this dashboard** (`blueprint/user.go`, `user_compose.go`,
+  `deploy/user_templates.go`, `template_from_plan.go`, `api/handlers_deploy_templates.go`). The
+  operator's own definitions, in blueprint's own schema, beside the built-ins. They are stored in
+  `deploy_templates` (`slug` — the definition's own id — `name`, `version`, `source` `compose`,
+  `deployment` or `import`, `definition_json`, `from_project_id`, created and updated by and at) and
+  never embedded: `CatalogueBuiltIn`, `CatalogueDeployable` and `CatalogueCompose` count the binary's
+  definitions only. Every added template's id is `user-<name>` (`blueprint.UserPrefix`; `UserID`
+  makes the slug from a name), the catalogue load refuses a built-in in that namespace and
+  `ParseUserTemplate` refuses an added template outside it, so neither can stand in for the other —
+  `?template=`, a source and a release name one or the other unambiguously, and an id the code keys
+  on (`mongo-express`, the Minecraft pair) can never be an added template's.
+  `PrepareUserTemplate` holds one to everything a built-in meets: `Validate` (what a built-in meets
+  at catalogue load), the built-in suite's own rules — each fixture renders, its digest recorded by
+  the server when the template is saved, since there is no reviewer to write it, and no input ships a
+  default for a credential-shaped name or variable — and four more a definition that did not ship
+  needs: it is not retired (it is deleted instead), not a game server (the console, players and
+  settings pages are written for the two Minecraft definitions), takes no privilege, host network,
+  capability, device or Docker socket (only a reviewed built-in may reach the host, and importing a
+  file must not be how a deployment gets one), and is at most 256 KiB. Then `DeploymentSupport`
+  must accept it and every fixture is planned through `RenderBlueprintPlan` — for a stack, the
+  Compose planner's own analysis — so a refusal comes when the template is saved, never after a
+  deployment was started from it. `TestUserTemplateValidationRefusesWhatABuiltInsDoes` walks the
+  built-ins' table of unsafe shapes (`unsafeShapes`) against added templates.
+  - From a pasted Compose file (`blueprint.FromCompose`): two or more services are a Compose
+    template, one is a single image (`FromImage`). What a template replaces is dropped (`restart`,
+    `container_name`, `labels`, `logging`, `networks`, `init`, `tty`); anything else it cannot carry
+    is refused by name — `build`, `privileged`, `user`, `entrypoint`, `env_file`, a bind mount (the
+    Docker socket included), an external volume, `secrets` or `configs`, replicas. Healthchecks
+    keep their argv (`CMD` dropped, `CMD-SHELL` or a string becomes `sh -c`), durations become
+    seconds, `depends_on` keeps its conditions, `mem_limit` or `deploy.resources.limits` the limit
+    (a default per role otherwise), and roles follow the image: a database (`postgres`, `mysql`,
+    `mariadb`, `mongo`, …), a cache (`redis`, `valkey`, `memcached`, …), the public service an
+    application, anything else a worker. The public service is the one named, else the only one
+    publishing a port, else the only one exposing one; its host port is dropped — the template
+    publishes it on loopback at `TemplateHostPort` behind the proxy — and a second publisher is
+    refused. Each `${VAR}` becomes the declared input or startup operation that sets VAR, else a
+    new input named after it (a secret input when the name is credential-shaped, a text input
+    defaulting to `${VAR:-x}`'s `x` otherwise); `$$` is a literal dollar, `${VAR:+…}` is refused,
+    and an interpolation anywhere but an environment value is refused. A password the file writes
+    out — under a credential-shaped name, or inside a URL's userinfo — becomes a secret the template
+    generates, one per distinct password however many services repeat it, named after the variable
+    that holds it, so the literal never reaches the definition. A domain input is always declared.
+    The metadata the schema requires defaults: access `open` (a template cannot know how an
+    application it has never seen signs people in, and open is the answer that warns), the docs and
+    upstream URL the public image's registry page (`ImageHomepage`), the maintainer the person who
+    added it, `reviewedAt` the day, `minimumDashboard` this version.
+  - From a deployment (`TemplateFromPlan`, Save as template): the live release's frozen plan
+    (`OrchestrationStore.ExecutionPlan` of the run that made it) with the plain literal values of
+    that run's frozen variable revisions (`FrozenPlainValues`, whose query keeps only
+    `sensitivity = 'plain'` literal rows before anything is decrypted, so a secret's value is never
+    opened). An image source is a single image — command, port, managed volumes renamed after where
+    they mount, published ports, memory and CPU, and its checks in the catalogue's vocabulary
+    (attempts times interval read back as the startup budget; the route, DNS, TLS and backup checks
+    belong to the deployment and are left out). A pasted Compose source goes through `FromCompose`
+    over the stored document, keeping only the variables it reads (`PruneUnread`). A template
+    source is the definition it rendered from under the new id, with this deployment's answers as
+    the defaults the next one is offered (never the domain, never a secret). A source built on this
+    server — Git, a folder, a Compose file read from either, an imported container — is refused, as
+    are privileges, GPUs and a host path, and the container's process flags (its user, a read-only
+    root, ulimits, sysctls), which a template's schema has no place for and whose silent loss would
+    run the next deployment as root on a writable root: they are named, to be cleared and set again
+    on the deployment made from the template. A secret variable, or a plain one with a credential-shaped name,
+    becomes a required secret input asked for on the next deployment's Variables screen; a plain
+    literal a text input defaulting to it; one naming the concrete domain a startup `set_variable`
+    from `{{input.domain}}` (the domain input then required); a reference or a value on several
+    lines an optional input. A fixed host port, and every published port whose host number differs
+    from the container's, becomes a bounded number input defaulting to it: `Port.hostInput` names
+    it, `Render` writes the answer as `RenderedPort.hostPort`, and `blueprintConfiguration`
+    publishes on it instead of the container's own number — additive, so every built-in renders to
+    the digest it records.
+  - Deploying one: the blueprint routes resolve an id through `PlanningStore.ResolveTemplate`, the
+    built-ins first and then the store. Every save of a source — the draft's source step and the
+    settings source route — first calls `WithUserTemplate`, which replaces whatever definition the
+    client sent with the stored one (`DraftSourceConfig.blueprintDefinition`, required for an
+    added template's id and refused for a built-in's) and refuses a version that is no longer the
+    template's. From then on `DraftSourceConfig.definition()` reads that frozen copy everywhere
+    `blueprint.GetVersion` was read — rendering, `ValidateForDeployment`, the secret-input checks,
+    materialization, detection — so an added template takes exactly the built-ins' planning,
+    validation, secrets and runtime path, and editing or deleting it changes what the next
+    deployment gets and nothing that already runs: a deployment renders and redeploys from its own
+    copy, and a duplicate copies it. Evidence and the rendered document's head comment say "this
+    dashboard's own" where a built-in's say "reviewed".
+  - Changing one: its id is its name in the catalogue and in every source, so an update keeps it,
+    and a definition that differs at the same version is the next patch version (the same
+    definition is no change). Removing one is destructive with an ordinary confirmation, and the
+    list says how many deployments' current sources name it.
+  - Routes: `GET /deploy/blueprints/` lists the offered built-ins, then the added templates, each
+    with `origin` (`builtin` or `user`); `/deploy/blueprints/{id}`, its versions and its render
+    resolve an added id. `GET /deploy/templates` lists the added templates with how each was made,
+    `GET /deploy/templates/{template}` reads one with its definition, and
+    `GET /deploy/templates/{template}/export` answers any template's definition — a built-in's too —
+    as a JSON file. `POST /deploy/templates` makes one from a Compose file and the declared inputs,
+    `POST /deploy/templates/from-deployment` from a deployment's live release (409 `no_live_release`
+    before it went live), and both answer a `dryRun` with the definition and whether its id is
+    taken, storing and auditing nothing. `POST /deploy/templates/import` takes a definition as it
+    was exported (an id outside the namespace is put in it, so an exported built-in becomes
+    `user-<id>`), `PUT /deploy/templates/{template}` replaces one, `DELETE` removes it. Writes take
+    what a draft takes, `system.admin` in a session, and the delete is inside `s.destructive` too;
+    the reads are as open as the catalogue. A deploy key reads all of them and is refused every
+    write with `whyTemplates` (keySession): a template is the operator's catalogue, which every
+    deployment is made from, not a deployment a key is narrowed to. Writes are audited as
+    `deploy.template.create` (with `source`, and for a deployment its id, environment and release),
+    `deploy.template.import`, `deploy.template.update` (with the previous version) and
+    `deploy.template.delete` (with how many deployments use it). Refusals answer 422
+    `invalid_template` in the catalogue's own words, 409 `template_exists`, 404 `template_not_found`.
+  - Pages: the picker's Your templates and its Yours chip, the Templates page and Save as template on
+    Settings → General ([feature map](../frontend/feature-map.md)). Tested by `blueprint/user_test.go`,
+    `deploy/user_templates_test.go` (a real store and run snapshot: nothing secret, no domain and no
+    volume name of the deployment survives, and the template plans for another address and port),
+    `api/handlers_deploy_templates_test.go` (every route, the secrecy proof through HTTP, the key and
+    role refusals), `templates.test.js`, `tests/browser/deploy-templates.spec.ts`, and
+    `TestLiveUserComposeTemplateStartsAndAnswersItsOwnChecks`, which makes an nginx-and-Redis template
+    through the call `POST /deploy/templates` makes, chooses it through the call every source save
+    makes, and brings it up through the Compose sweep's own harness (`liveComposeHarness`).
 - **How the first sign-in works**, declared rather than described. Every definition carries an
   `access` block: a closed `kind` — `setup` (the application asks the first visitor to create the
   account), `credentials` (a name from an input plus a password from a generated secret, both
@@ -1351,11 +2111,23 @@ only renderer/executor/validation authority for their feature.
   operation now).
 - Published ports. `runtime.ports[]` (`hostPort`, `containerPort`, `protocol` tcp/udp, optional
   `bindAddress`, every interface when empty) publishes container ports beside the routed one for
-  protocols a reverse proxy cannot carry. Validation bounds each, refuses a repeated host port per
+  protocols a reverse proxy cannot carry. The fixed primary itself may be UDP, or TCP and UDP on
+  one number (`runtime.protocol` `udp` or `tcp+udp`), published once per protocol on
+  `runtime.bindAddress`, and a published port clashes with it only within the same protocol. Validation bounds each, refuses a repeated host port per
   protocol (including the fixed `hostPort`) and refuses them with host networking; preflight observes
   each as a port conflict; a plan with any is stop-first only (`validateRuntimeActivationStrategy` and the
   preflight strategy finding); previews drop them; the release comparison lists them; the runtime owner
   maps each in addition to the leased routed port. The Domains settings show them as **Also published**.
+- Edge rules, rate limit and CrowdSec. `runtime.edgeRules[]` (ordered `{name, match, action}`;
+  the first rule a request meets decides), `runtime.rateLimit` (`{requests, per, burst}` per client
+  address) and `runtime.crowdSec` are the public route's, kept canonical by `canonicalConfiguration`
+  and validated by `validateRouteRules` with the other route rules (`runtime.edgeRules`,
+  `runtime.rateLimit` in a refusal); a tailnet-only environment refuses them. nginx renders maps and
+  first-match returns, `limit_req` with 429 and Retry-After, and a CrowdSec `geo` list; Caddy renders
+  named matchers each excluding the rules before it and the imported CrowdSec list, and has no
+  rate-limit module, so its limit is the host's gateway limit the Domains page offers. The request
+  record names the deciding rule (`er=` / `edge_rule`) and the requests summary counts each. See
+  [edge rules](edge-rules.md).
 - Password protection. `domains[].protection` (`username`, `password` on write, `hash` at rest) puts
   HTTP basic authentication in front of a deployment's public route without the application knowing.
   `sealDomainProtection` bcrypts the password once at the API boundary (configuration save and the draft
@@ -1366,13 +2138,137 @@ only renderer/executor/validation authority for their feature.
   `auth_basic` with an htpasswd file beside the site written before the site and removed with it. The
   Domains settings and the public-address step offer **Ask visitors for a password**; the overview tags a
   protected domain. Previews inherit the plan's protection.
+- Domain redirects and route rules. `domains[].redirectTo` names another of the plan's hostnames
+  (`redirectCode` 301, 302, 307 or 308; empty is 308) that this one sends visitors to, with the path and
+  query kept, instead of serving the application: the www. a bare domain keeps for old links, or the
+  reverse. `validateDomainRedirects` refuses a redirect to itself, to a name the plan lacks, to or from a
+  wildcard, or to a name that redirects too, and a plan in which no name serves. `runtime.allowFrom`
+  (addresses and ranges, kept in `proxysvc.NormalizeAccessEntry`'s spelling, at most 64) is the only
+  place the route answers, with 403 for everyone else ahead of any password; `runtime.responseHeaders`
+  (at most 32) are set on every answer and replace the application's header of the same name. Headers are
+  checked by the rules a Proxy site's are (`proxysvc.ValidateDeploymentHeaders`, on the nginx spelling a
+  deployment gets), so quotes, `$`, `;`, braces and the connection's own headers are refused before either
+  proxy sees them. The redirect is kept in the domain's dependency row only when present, and the two
+  runtime fields only when non-empty, so a plan without them keeps its digest. Activation hands the proxy
+  the redirecting names apart from the served ones (`DeploymentRoute.Redirects`); its certificate is
+  resolved for every HTTPS name the route answers (`TLSHostnames`), and public-route checks ask only the
+  served names, each on its own scheme. nginx writes each redirecting name a server of its own marked `# Host redirect (<code>): …`,
+  which keeps the ACME path and which the site parser reads back; Caddy writes it a site block of its own
+  with `redir`. The release comparison lists the redirect on the domain's line and the two runtime fields
+  as their own. The Domains settings offer **Redirect to another domain** in each row's menu and an
+  **Access and headers** form under the list, which writes only those two runtime fields and the sign-in
+  below; the Runtime form neither holds nor writes them.
+- Per-domain TLS and HSTS. Each `domains[].https` is honoured on its own: the route is TLS as soon as
+  one domain is HTTPS (`DeploymentRoute.TLS`, `ForceHTTPS`), and the domains with HTTPS off are its
+  `PlainHostnames`, served over plain HTTP with no certificate, no redirect to HTTPS and no HSTS, whatever
+  the other names on the route do. Before this one HTTPS domain made every name on the route TLS with a
+  forced redirect, and activation asked for a certificate covering the plain names too. Activation now
+  resolves the certificate for `TLSHostnames` alone, and the certificate step was already issuing for the
+  HTTPS domains alone. nginx writes the plain names a server of their own on port 80, after the site's
+  own, marked `# Plain HTTP: <name> is served without TLS.` (one marker per name, read back by the site
+  parser as `SiteSpec.PlainDomains`), and a redirecting plain name a server on port 80 alone marked
+  `… over plain HTTP`; a redirecting HTTPS name on a route whose served names are all plain keeps its
+  443 listen and is marked `… over HTTPS`, from which the parser reads the site's TLS and, from that
+  skipped server, its certificate and HTTP/2. A redirect sends visitors on over the scheme its target is
+  served on. Caddy writes the HTTPS names one site block and the plain names another with `http://`
+  addresses, the same handling in each, because Caddy refuses a `tls` directive beside an `http://`
+  address; a plain redirecting name is an `http://` block with `redir http://…`. The reconcile pass
+  repairs `reverse_proxy` and `forward_auth` in every block. `runtime.hsts` (`maxAge` seconds, absent is
+  six months, 300 to 63072000; `includeSubDomains`; `preload`, which needs a year and the subdomains —
+  `proxysvc.ValidateDeploymentHSTS`, the bounds a Proxy site's HSTS control is held to; field
+  `runtime.hsts`) sends `Strict-Transport-Security` on every HTTPS answer: nginx `add_header … always`
+  in the TLS server with `proxy_hide_header Strict-Transport-Security` in every server, Caddy a line of
+  the HTTPS block's deferred `header` block with `-Strict-Transport-Security` in the plain block, so the
+  route's policy replaces the application's own and a plain name is sent none. It is off until chosen,
+  because the policy outlives a mistake, and it is carried to a route only while the route is TLS.
+  A custom response header named `Strict-Transport-Security` is refused with the control named.
+  Preflight's `hsts` finding (`proxy`, `runtime.hsts`) says which served domains receive it and which plain
+  ones do not, and warns when no served domain is HTTPS, since then nobody does. The release comparison
+  lists `hsts` as the header's value or `off`. The Domains settings offer **HSTS** under Access and headers
+  while a served domain is HTTPS, or while a policy is saved so it stays removable, with the lifetimes,
+  subdomains and preload confirmation the Proxy site form has, and each served domain's row says whether
+  plain HTTP is redirected to HTTPS or served as asked. Previews copy the policy with the other rules.
+- Route sign-in. `runtime.forwardAuth` (`provider` authelia, authentik, oauth2-proxy or custom;
+  `verify`, the auth server's check address; `signIn`, the page a visitor without a session is sent to;
+  `previewsOnly`) has the public route ask an auth server about every request before the application
+  sees it, the way a Proxy site's single sign-on does, and it is held to the same rules
+  (`proxysvc.ValidForwardAuthProvider`, `ValidateForwardAuthCheck`, `ValidateForwardAuthSignIn`; fields
+  `runtime.forwardAuth.provider|verify|signIn`). A 2xx lets the request through with the user handed on
+  as `Remote-User` and `Remote-Email`, replacing whatever the visitor sent; a 401 sends the visitor to
+  `signIn` with `rd=` set to the address they asked for; anything else, the server not answering
+  included, refuses the request. It is the route's, like the address list: the allow list refuses first
+  (403), then the sign-in, and redirecting names answer before either, since they serve nothing.
+  `validateRouteSignIn` refuses, on a route the sign-in gates, a domain password (the browser would send
+  it to the auth server as its own credentials; field `runtime.forwardAuth`) and a served name without
+  HTTPS (the session cookie would cross networks in clear, and Authelia refuses to answer for one). A
+  preview's plan is a copy of production's runtime, so previews sign in too; `previewsOnly` keeps this
+  environment's own route open and gates only the previews (`RuntimePlanConfig.SignInGate`: the gate is
+  on a plan marked `previewIsolation`, which a preview's always is). A preview's tailnet address is not
+  a public route and is not gated. Activation (`publicRoute`) hands the proxy the release snapshot's gate
+  as `DeploymentRoute.ForwardAuth`, so a rollback restores the sign-in its release had. nginx renders it as
+  the site feature on every path; Caddy as `forward_auth` asking the same check address with the same
+  headers ([Caddy ingress](caddy-ingress.md#sign-in)), so one address answers on either proxy. The field
+  is kept only when set, so a plan without it keeps its digest; the release comparison lists it as
+  **sign-in**. A `public_route` smoke check meets the sign-in redirect like any visitor, so on a gated
+  route give it an expected status of 302 or accept any answer. The **Access and headers** form's
+  **Require sign-in** offers the Proxy page's four presets (`lib/sso-providers.ts`), **Here and on
+  previews** or **Previews only**, and names a password or plain-HTTP name the server would refuse before
+  the save (`settings/route-access.ts`).
+- Tailnet-only environments. `runtime.tailnet` publishes an environment on this host's tailnet and
+  nowhere else, from the previews' own address range and table, with no public domain and no public
+  certificate; `runtime.tailnet.allow` (Tailscale logins and tags) makes the front every tailnet address
+  has a gate — nginx's `auth_request` or the dashboard's own loopback Caddy's `forward_auth` — that asks
+  `GET /api/v1/tailnet/whois` about every request, which asks tailscaled who holds the address it came
+  from. Previews and staging inherit the list. See [tailnet-only deployments](tailnet-apps.md).
+- The dashboard's session cookie stays the dashboard's. It is `__Host-jd_session`, which a browser
+  sends to no other name, so a preview domain or a deployment's own domain never sees it; a tailnet
+  address's front and a deployment route on the dashboard's own name (`JD_SITE`) take it out of the
+  request, since a browser sends a cookie to every port of its name
+  ([the dashboard's session cookie](tailnet-apps.md#the-dashboards-session-cookie)).
+- Maintenance and error pages. Maintenance is a switch beside the live route, not a plan field, so it
+  applies at once and no release turns it on or off. Every route a release writes carries the check
+  (`DeploymentRoute.Maintenance`, rendered on nginx as a Proxy site's maintenance behind
+  `SiteMaintenance.Switch`, on Caddy as a `file` matcher), and the check looks on every request for
+  `maintenance.on` in the route's pages folder: `<nginxDir>/jd-pages/<route>/` on nginx,
+  `/config/just-dashboard/pages/<route without .conf>/` inside the Docker Caddy ingress. Turning it on
+  writes that file and turning it off removes it (`proxysvc.SetDeploymentMaintenance`, under the
+  service lock): nothing is reloaded and the route's bytes never change, so the switch never rewrites a
+  route outside activation, never meets a cutover's snapshot, verify and restore, and survives the next
+  release, a rollback and a cutover in the middle of which it was turned. Turning it on is refused
+  (`ErrMaintenanceUnready`, 409 `no_public_route` or `maintenance_unready`) for an environment with no
+  route and for a route written before the switch existed, which gets the check with its next
+  deployment; turning it off is always allowed. While on, every visitor gets the maintenance page with a 503
+  except the ACME challenge and the plan's `runtime.maintenance.bypassFrom` (addresses and ranges in
+  `NormalizeAccessEntry`'s spelling, at most 64); `runtime.maintenance.retryAfter` (0–86400, 0 sends
+  none) is the `Retry-After`. It is decided before the password and the sign-in and after the address
+  list, on both proxies, so a refused address is still refused and nobody signs in to read the page.
+  `runtime.errorPages` (404, 502, 503, 504) answer those codes with the route's own page, and
+  `runtime.interceptErrors` gives the application's own answers with them the page too (refused with
+  a sign-in, whose 401s it would replace). Those three plan fields are kept only when set, so a plan
+  without them keeps its digest, and change with the next deployment like the rest of the plan; the
+  release comparison lists them as **let past maintenance**, **maintenance retry after** and **error
+  pages**. Activation writes the pages a route serves that it has no file for, from the ones Proxy
+  ships, before the route, and route removal takes the folder, switch included. A page is edited at
+  `GET`/`PUT /deploy/{id}/environments/{env}/pages/{page}` (`maintenance`, `404`, `502`, `503`, `504`;
+  the write is `system.admin` in a session, at most 256 KiB, audited `deploy.page`) and served from the
+  next answer. The switch is `GET`/`PUT /deploy/{id}/environments/{env}/maintenance` `{on}`, the write
+  behind `s.destructive` as stopping a deployment and a Proxy site's maintenance are, audited
+  `deploy.maintenance` with the outcome; a deploy key reaches the switch and reads a page
+  (`jd maintenance APP on|off`, whose `--bypass` writes `runtime.maintenance.bypassFrom` through the
+  configuration first), while a page's write stays a session's. Readiness and smoke checks dial the candidate directly and are
+  untouched; a `public_route` check, which goes through the route and would read the maintenance page,
+  is not run while the switch is on and records `maintenance` as its code, so a release can be deployed
+  during a migration window. The Domains settings show the switch as its own **Maintenance** form,
+  which the save bar applies immediately (the destructive capability), and **Maintenance page and error
+  pages** under it for the plan fields and the page editor (`settings/route-pages.ts`).
 - The [GitHub App](github-app.md): one App per dashboard through the manifest flow, installation tokens
   for private clones through a `github_app` credential per installation, triggers on `delivery: "app"`
   fed by the App's single webhook (`POST /api/v1/hooks/github-app`, routed by repository through the
   same `dispatchAutomationEvent` decision as the per-trigger hooks), statuses posted as the App where it
   is installed, and one edited-in-place comment per preview on its pull request.
 - `GET /deploy/{id}/insights?days=N` (7–365, default 30) computes delivery figures from persisted runs
-  only: release runs (`deploy`, `redeploy`, `force_build`, `rollback`) that reached a terminal state,
+  only: release runs (`deploy`, `redeploy`, `force_build`, `rollback`, `promote`) that reached a terminal
+  state, production's and its previews' (a staging environment's runs are read with `?environment=`),
   success rate over decided runs, median and p95 claim-to-finish duration of successful releases,
   successful releases per week, mean time from a failed release's end to the next successful one,
   the current failure streak, a per-day series with zero-filled days, and the five most common terminal
@@ -1389,12 +2285,17 @@ only renderer/executor/validation authority for their feature.
   database port, no stateful workload without persistence, no download without https plus a size limit and
   a checksum or declared version source, no uncontained path, no privilege without a stated reason, and a
   render fixture whose digest CI recomputes. The container form's starting points are rendered from the
-  same catalogue through `GET /docker/templates`; there is no second template list.
+  same catalogue's built-ins through `GET /docker/templates`; there is no second template list. A
+  template added on this dashboard is held to the same rules and a few more, and deploys from the copy
+  its source froze (see "Templates added on this dashboard" above).
 - `internal/gameserver` holds the game-specific adapters. The console runs one command through the
   container's own client as separate argv and refuses anything carrying a shell metacharacter, newline or
   NUL *before* it looks at whether a container is running. Player identities come from the server's own
   reply; a server whose reply cannot be parsed reports "not supported" rather than an empty list. The
   settings editor writes only keys the blueprint declares and retains unrelated raw lines and comments.
+  The console is RCON, which a definition declares as its `rcon` port: Bedrock has none, so its
+  console and player list say so (`consoleReason`, `409 console_unsupported`) instead of failing.
+  `JavaStatusHandshake` is the bounded Server List Ping the `game_handshake` check runs.
   Public reads include only declared editable properties, excluding RCON and plugin credentials. Parsing
   understands escaped separators, Unicode escapes and continued lines; duplicate declarations use the
   last value and edits update every duplicate. Changed values escape backslashes and numeric bounds
@@ -1405,7 +2306,9 @@ only renderer/executor/validation authority for their feature.
 - `deploy_credentials` rows are managed under `/deploy/credentials` (`system.admin`, session, every mutation
   audited): `GET` lists `{id, name, kind, target, username?, createdAt, updatedAt, lastUsedAt?, usedBy,
   usedByProjectIds?}` without the secret — `usedByProjectIds` names, sorted, the projects behind
-  `usedBy`, read from the same join so the two can never describe different sets, and since `usedBy`
+  `usedBy`, read from the same join so the two can never describe different sets (a provider token's
+  `reportsForProjectIds`, the projects whose GitLab or Gitea statuses it writes, is computed apart and is
+  not `usedBy`; see [notifications](notifications.md#what-settings-shows)), and since `usedBy`
   counts environments a project with two on one credential is one id and two in the count; an
   archived project drops out of both. `POST`/`PUT` seal the secret with the same `auth.Sealer` the
   variables use and validate
@@ -1433,7 +2336,7 @@ only renderer/executor/validation authority for their feature.
   from this environment, so an agent identity cannot be tried either. A draft's source step and the
   source-change route below both refuse a `credentialId` that names no row before saving, rather than
   waiting for detection to discover it.
-- `PUT /deploy/{id}/environments/{env}/source` (`system.admin`, session, audited `deploy.source.update`)
+- `PUT /deploy/{id}/environments/{env}/source` (`system.admin`, session or deploy key, audited `deploy.source.update`)
   changes a committed project's source without touching the live release: the same `DraftSourceConfig` shape
   a draft's source step uses, plus the caller's current `revision`. The handler validates it with
   `ValidateForDeployment`, runs the exact read-only inspection a draft's detect step runs
@@ -1448,7 +2351,8 @@ only renderer/executor/validation authority for their feature.
   source revision alone is what makes it report a `source` pending change, and the Git watcher already keys
   its cursor on the desired source's own config digest, so a changed URL/ref/subdirectory resets that cursor
   and the very next poll reports `branch_changed` on its own.
-- `POST /deploy/{id}/duplicate` `{name}` (`system.admin`, session, audited `deploy.project.duplicate`) creates
+- `POST /deploy/{id}/duplicate` `{name}` (`system.admin`, session or a deploy key that reaches the deployment, the draft then
+  being the key's own, audited `deploy.project.duplicate`) creates
   a draft pre-filled from the project's current desired source and configuration — the same draft the
   new-project page resumes with `?draft=`, landing at the `configuration` step with no `detection` yet, so
   the operator still runs detect/preflight/commit like any other draft. `PlanningStore.Duplicate` copies the
@@ -1461,7 +2365,8 @@ only renderer/executor/validation authority for their feature.
   would otherwise hand it the source project's own live volume. A linked or observed dependency, and a
   bind-path mount, are left exactly as saved: nothing about their identity is owned by lifecycle re-derivation.
 - Closed vocabularies, route capabilities/confirmations/audit actions, retention limits and error codes
-  are contracts. Change one only with an ADR plus migration and exhaustive transition/route tests.
+  are contracts. Change one only with an ADR plus migration and exhaustive transition/route tests. The
+  `promote` operation's record is the Decisions section of [staging and promotion](staging-promotion.md).
 
 ## Public deployment ingress
 
@@ -1479,12 +2384,43 @@ renders `tls { issuer acme { dir … trusted_roots … } }`, the bundle is copie
 `/config/just-dashboard/acme-root.pem` in the container before the route is written, the issued chain
 is verified against those roots when it is read back, and the public-DNS precheck is skipped for a
 private authority (public DNS says nothing about it; Let's Encrypt and its staging twin still require the
-name to resolve here). certbot issuance adds `--server <directory>` for a non-staging override. The
+name to resolve here). Every certbot order the dashboard places — the Certificates page's, a run's
+HTTP-01 and DNS-01 — adds `--server <directory>` for any directory but Let's Encrypt's production one
+(certbot's own default, left unnamed so a `--dry-run` still goes to staging), checks for an account
+under that directory, and skips the public-DNS check for a private authority; `CertbotCommand` hands
+every certbot it runs the bundle as `REQUESTS_CA_BUNDLE`, which is how python-requests, and so certbot,
+trusts a private listener. The
 journey is proven end to end by `TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory`: an isolated
 Caddy on loopback ports and a Pebble that validates nothing (`PEBBLE_VA_ALWAYS_VALID=1`) on one Docker
 network; the certificate is issued, verified against Pebble's freshly minted root, reused on the second
 request, and served on a route whose chain verifies the same way — everything Let's Encrypt would do
 differently is the validation Pebble skipped and the roots browsers trust.
+
+A domain can instead be served through **Cloudflare Tunnel** (`domains[i].tunnel`): a host with no public
+address or open port runs Cloudflare's connector, cloudflared, as the managed container
+`just-dashboard-cloudflared`, connected from Proxy › Tunnel with a pasted token (sealed) or a tunnel
+created with the Cloudflare API token saved for DNS-01. Such a name skips the public-IP DNS precheck and
+the certificate step — Cloudflare terminates TLS — and the route serves it over plain HTTP on the
+private network the connector shares with the ingress; activation sets the tunnel's ingress rules and
+the name's proxied CNAME to `<tunnel>.cfargotunnel.com` before the public-route checks. The tunnel's
+health is cloudflared's own (its `/ready` and its log), and the host alert kind **Tunnel down** tells the
+channels when the connector loses the edge. See [Cloudflare Tunnel](cloudflare-tunnel.md).
+
+A domain's **DNS record** is written from here with the credentials the Certificates page saved for
+DNS-01 (`dnsrecords`, `api/handlers_deploy_dns_record.go`): an `A` and an `AAAA` to the host's first
+public address of each family — the addresses preflight compares — or for a tunnel's name a proxied
+`CNAME` to `<tunnel>.cfargotunnel.com` with the tunnel's own comment, in the longest zone any saved
+provider's credentials reach (Cloudflare, Route 53, DigitalOcean, Google Cloud DNS, Linode, OVH and Gandi
+through their documented REST APIs, RFC 2136 through a signed DNS UPDATE over TCP). `GET
+/deploy/{id}/domains/{domain}/dns-record` is the dry run — what the zone holds, what a write does, through
+which credential and zone — and `POST` writes it; both are `system.admin` in a session and refused to a
+deploy key, the write audited as `deploy.domain.record`. Nothing is deleted: a CNAME where an address is
+wanted, or a set a one-record-per-value provider would have to shrink, is a refusal in words, and a
+record this dashboard did not write is replaced only with `replace`. What was written is kept in
+`deploy_dns_records` (who, when, which provider and zone), which is how the sheet tells a record managed
+here from one that is not. When a planned name does not resolve where it should, preflight adds
+`dns_record_writable` (the Domains sheet's **Create the record** as its fix) or `dns_record_missing`
+beside `dns_unverified`. See [DNS records](dns-records.md).
 
 ## Deployment topology
 
@@ -1539,7 +2475,9 @@ non-document responses, plus Permissions-Policy. Caddy rewrites
 `X-Forwarded-For` to the real client address (what makes `JD_TRUSTED_PROXIES` safe); `flush_interval -1`
 and zero read/write timeouts keep the long-lived streams alive. The backend container runs `privileged`,
 `pid: host`, `network_mode: host` with the Docker socket and real host paths mounted **at their real
-names** — remove a mount and the file manager silently browses the container's own empty filesystem.
+names** — remove a mount and git discovery, compose scanning and the other path-taking features
+silently operate on the container's own empty filesystem. The Files page alone does not depend on them:
+it runs in the host's mount namespace.
 
 ## Deployment workspace
 
@@ -1688,9 +2626,14 @@ variable snapshots; the list reads the settings drift of its newest run when tha
 so a variable given another scope counts, and goes by the plan revision alone for older rows, as the
 project header's and the fleet's Retry does), Cancel (never during activation or a rollback) and,
 under the release's own name, What changed in this release (a comparison with
-the release before it), Compare with live (a sheet), Roll back to this release (a retained release,
-through a two-step dialog that names the domains, draws the swap and says what a rollback does not
-restore) and Pin or Unpin. Older runs load on request through the `before` cursor. Runtime draws the
+the release before it, with each linked database's data point), Compare with live (a sheet), Roll back
+to this release (a retained release, through a two-step dialog that names the domains, draws the swap,
+says what a rollback does not restore and offers, off by default, the database as of that release in a
+side copy once the rollback is over), Restore data as of this release (a release with a restorable data
+point, `system.admin`) and Pin or Unpin. A release's row carries its data point as a tag, and the
+Data copies panel above the list holds the copies with their address, the comparison with the live
+database, Keep 1 more hour, Restore in place (a link to the database's own restore) and Remove now
+([data-aware rollback](data-aware-rollback.md)). Older runs load on request through the `before` cursor. Runtime draws the
 managed services as cards of their image's product, joined with Docker's container list, its stats
 every ten seconds and an hour of history, the volumes every five minutes (for sizes and which
 container uses one), the saved connections and the policy's backup job with its runs — every join
@@ -1715,8 +2658,8 @@ platform, changed in place through
 `PUT …/environments/{env}/source` and checked before it is saved) and Automatic deployment: the Git
 policy with a picture of what a push does, the last decision and the GitHub commit-status switch.
 None of the settings pages opens on a row of figures; each section's head says what it currently
-is. Build is the builder — every recipe, a Dockerfile or a static site
-— the package manager, the commands, the image and the build variables as one form and the release
+is. Build is the builder — every recipe, a Dockerfile, a static site or Railpack (its provider and
+configuration file) — the package manager, the commands, the image and the build variables as one form and the release
 tasks, reorderable and
 each with its last run, as another; choosing a builder that is not a recipe clears the recipe's
 versions, secrets and package manager, which the plan would otherwise refuse; the Build and Image
@@ -1787,7 +2730,14 @@ commit for a remote Git source whose drift names no source change, a plain deplo
 moved to another branch or repository is never asked for the old commit), Retry moves to the menu as
 "Retry with the settings it used", and one line under the failure says what changed. A run that failed
 with `source_revision_unavailable` offers Deploy the branch head the same way, since its commit cannot
-be fetched again. Under that the run is two parts with no strip between them. The build console paints
+be fetched again. Under a run that failed or rolled back, *Ask why it failed* (`run-diagnosis.tsx`)
+asks the assistant's provider about it — never unasked, and quieter than the failure, whose own fix
+stays the command. Before the press one line says which model, where the question goes and what of the
+run, with secret values masked; an administrator whose assistant is off sets it up there in the
+assistant's settings sheet. The answer is the likely cause, the transcript lines it quoted (each a line
+the run wrote, opening the build logs at it), what to try, who asked and when, and *What was sent* folded
+under it with the exact text; *Ask again* replaces it. An account without `service.control` sees an answer
+somebody asked for, and nothing else. Under that the run is two parts with no strip between them. The build console paints
 its lines through the painter the dashboard's own transcripts use (`components/transcript-line.tsx`),
 numbers them, strips terminal escapes, groups each step's lines under a sticky rule, filters by stage
 and errors (with a count), shows the time since the run began, wraps, follows, copies and downloads

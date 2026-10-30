@@ -8,6 +8,7 @@ import {
   Key,
   Plus,
   RefreshClockwise,
+  Rocket,
   Slash,
   Trash,
 } from "@/components/icons"
@@ -32,6 +33,7 @@ import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Select,
@@ -60,11 +62,28 @@ import { expired, expiringSoon, usableKeys } from "@/components/account/access"
 import { KeyMap } from "@/components/account/key-map"
 import {
   clientConfig,
+  deploymentsWithin,
   grantList,
   grantsOf,
   grantsWithin,
 } from "@/components/database/fleet/mcp-server"
 import { UserAvatar, displayNameOf } from "@/components/account/user-avatar"
+import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
+import { Segments } from "@/components/deploy/settings/segments"
+import { ProjectMark } from "@/components/deploy/project-mark"
+import { useProjects } from "@/hooks/use-projects"
+import {
+  CLI_DOWNLOAD,
+  CLI_ON_SERVER,
+  DEPLOY_KEY_CAN,
+  DEPLOY_KEY_CANNOT,
+  DEPLOY_KEY_HOST_RULE,
+  OPENAPI_DESCRIPTION,
+  deployKeyBody,
+  deployKeyReady,
+  deployReach,
+  jdLogin,
+} from "@/components/account/deploy-keys"
 
 export function useApiKeys() {
   return usePoll((signal) => get<ApiToken[]>("/tokens/", undefined, signal), 30000)
@@ -96,6 +115,7 @@ export function keyProducts(tokens: ApiToken[]) {
 
 export function curlExample(origin: string, key = "vpsd_…", scope?: ApiToken["scope"]) {
   if (scope === "mcp") return clientConfig("claude-code", origin, key)
+  if (scope === "deploy") return jdLogin(origin, key)
   const path = scope === "metrics.read" ? "metrics/databases" : "system/host"
   return `curl -H "Authorization: Bearer ${key}" ${origin}/api/v1/${path}`
 }
@@ -104,24 +124,34 @@ export function curlExample(origin: string, key = "vpsd_…", scope?: ApiToken["
 export function scopeWords(token: ApiToken) {
   if (token.scope === "metrics.read") return "metrics only"
   if (token.scope === "mcp") return "MCP only"
+  if (token.scope === "deploy") return "deploy only"
   return undefined
 }
 
 /**
  * What an MCP key's replacement reaches: the databases the key reaches that a
- * key can still be given. One protected since, or forgotten, is refused every
- * call already, and the server would refuse the whole list for it.
+ * key can still be given, and the deployments as the key had them — the
+ * grant, and the deployments it was narrowed to, so a replacement is never a
+ * key that reaches more, and the generated tools only if the key had them. A
+ * database protected since, or forgotten, is refused
+ * every call already, and the server would refuse the whole list for it.
  */
 async function replacementGrants(token: ApiToken | undefined, role: Role) {
   const saved = await get<DbConnection[]>("/databases/")
   const open = new Set(saved.filter((conn) => !conn.readOnly).map((conn) => conn.id))
-  const grants = grantList(grantsWithin(grantsOf(token), role !== "readonly")).filter((grant) =>
-    open.has(grant.connectionId),
+  const connections = grantList(grantsWithin(grantsOf(token), role !== "readonly")).filter(
+    (grant) => open.has(grant.connectionId),
   )
-  if (grants.length === 0) {
+  const deployments = deploymentsWithin(token?.deployments, role !== "readonly")
+  if (connections.length === 0 && deployments === "") {
     throw new Error("None of the databases this key reaches can be given to a key any more.")
   }
-  return grants
+  return {
+    connections,
+    deployments,
+    deploymentIds: deployments === "" ? [] : [...(token?.deploymentIds ?? [])],
+    operations: deployments !== "" && (token?.operations ?? false),
+  }
 }
 
 /** The one line a key's state comes down to. */
@@ -182,6 +212,11 @@ function KeyRow({
               </span>
             )}
             <span className="hidden shrink-0 sm:inline">made {calendarDate(token.createdAt)}</span>
+            {/* Which deployments is the first thing asked of a deploy key that
+                leaked, so the row answers it without opening anything. */}
+            {token.scope === "deploy" && (
+              <span className="hidden shrink-0 sm:inline">· {deployReach(token)}</span>
+            )}
           </span>
           <span className="block md:hidden">
             <span style={{ color: ROLE_HUE[token.role] }}>{can}</span> · {usage}
@@ -584,6 +619,12 @@ export const EXPIRY = [
  * cards only avoid a pointless round trip. The name's field carries the mark
  * the key will be drawn with, so "github-actions" shows GitHub's as it is
  * typed.
+ *
+ * An administrator is also offered a deploy key, the kind `jd` and a CI
+ * pipeline run on, as a second card beside the ordinary one: the choice is
+ * between two kinds of credential, each with its sentence (§4). Only an
+ * administrator may mint one — the server asks for an administrator's
+ * session — so nobody else is shown a choice that would bounce.
  */
 /** Kept outside the empty/list switch so refreshing the first key cannot lose its secret. */
 function KeyDialog({
@@ -609,13 +650,28 @@ function KeyDialog({
       ? replacementRoles(replacement.role, status?.user?.role ?? "readonly")[0]
       : "readonly",
   )
+  const [kind, setKind] = useState<KeyKind>(replacement?.scope === "deploy" ? "deploy" : "api")
+  const [every, setEvery] = useState(true)
+  const [chosen, setChosen] = useState<ReadonlySet<number>>(new Set())
   const [ttl, setTtl] = useState("90")
   const [secret, setSecret] = useState<string | null>(null)
   const generation = useRef(0)
   const [busy, setBusy] = useState(false)
 
+  const admin = status?.user?.role === "admin"
   const allowed = replacementRoles(replacement?.role ?? "admin", status?.user?.role ?? "readonly")
-  const scope = replacement?.scope || undefined
+  // The kind of key being made: a replacement is always the kind it replaces.
+  const scope = replacement
+    ? replacement.scope || undefined
+    : kind === "deploy"
+      ? "deploy"
+      : undefined
+  const deploying = scope === "deploy"
+  const ready = deploying
+    ? replacement
+      ? name.trim() !== ""
+      : deployKeyReady(name, every, chosen)
+    : name.trim() !== ""
 
   const revokePrevious = () => {
     if (!replacement) return
@@ -637,27 +693,37 @@ function KeyDialog({
   }
 
   const create = async () => {
-    if (pending.current || !name.trim()) return
+    if (pending.current || !ready) return
     pending.current = true
     const request = generation.current
     setBusy(true)
     try {
       // A replacement is made the same way as the key it replaces: a key limited
       // to one job is never replaced by one that can do what its owner can,
-      // and an MCP key's replacement reaches the same databases at its role.
+      // an MCP key's replacement reaches the same databases at its role, and a
+      // deploy key's the same deployments — there is no route to re-point one.
       const res =
         scope === "mcp"
           ? await post<{ secret: string }>("/tokens/mcp", {
               name: name.trim(),
               role,
               ttlDays: Number(ttl),
-              connections: await replacementGrants(replacement, role),
+              ...(await replacementGrants(replacement, role)),
             })
-          : await post<{ secret: string }>("/tokens/", {
-              name: name.trim(),
-              ...(scope ? { scope } : { role }),
-              ttlDays: Number(ttl),
-            })
+          : scope === "deploy"
+            ? await post<{ secret: string }>(
+                "/tokens/deploy",
+                deployKeyBody(
+                  name,
+                  ttl,
+                  replacement ? (replacement.deploymentIds ?? []) : every ? [] : [...chosen],
+                ),
+              )
+            : await post<{ secret: string }>("/tokens/", {
+                name: name.trim(),
+                ...(scope ? { scope } : { role }),
+                ttlDays: Number(ttl),
+              })
       if (request === generation.current) setSecret(res.secret)
       onDone()
     } catch (err) {
@@ -674,6 +740,9 @@ function KeyDialog({
     setSecret(null)
     setName("")
     setRole("readonly")
+    setKind("api")
+    setEvery(true)
+    setChosen(new Set())
     setTtl("90")
   }
 
@@ -703,7 +772,7 @@ function KeyDialog({
               <Button onClick={close}>Done</Button>
             </>
           ) : (
-            <Button onClick={create} disabled={!name.trim() || busy} pending={busy}>
+            <Button onClick={create} disabled={!ready || busy} pending={busy}>
               {replacement ? "Create replacement" : "Create key"}
             </Button>
           )
@@ -742,9 +811,11 @@ function KeyDialog({
               hint={
                 scope === "mcp"
                   ? "Adds the dashboard to Claude Code. Databases → MCP server has Cursor's and VS Code's."
-                  : scope
-                    ? "Send the key as a bearer token. This one returns the recorded database metrics."
-                    : "Send the key as a bearer token on any request. This one returns what the Overview shows."
+                  : scope === "deploy"
+                    ? `Signs jd in with this key. On this server jd is already at ${CLI_ON_SERVER}; in CI, set JD_URL and JD_KEY instead.`
+                    : scope
+                      ? "Send the key as a bearer token. This one returns the recorded database metrics."
+                      : "Send the key as a bearer token on any request. This one returns what the Overview shows."
               }
               trailing={
                 <Button
@@ -759,6 +830,7 @@ function KeyDialog({
             >
               <Well className="break-all">{curlExample(origin, secret, scope)}</Well>
             </Field>
+            {deploying && <CliDownload />}
           </div>
         ) : (
           <fieldset disabled={busy} className="min-w-0 space-y-5">
@@ -783,15 +855,33 @@ function KeyDialog({
                   autoFocus
                   disabled={busy}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="github-actions"
+                  placeholder={kind === "deploy" ? "jd-laptop" : "github-actions"}
                 />
               </div>
             </Field>
+            {!replacement && admin && <KindChoice value={kind} onChange={setKind} />}
             {scope === "mcp" ? (
               <Notice title="Opens the MCP endpoint only">
-                The replacement reaches the same databases as the key it replaces, and opens nothing
-                else on this dashboard.
+                The replacement reaches the same databases and deployments as the key it replaces,
+                and opens nothing else on this dashboard.
               </Notice>
+            ) : scope === "deploy" ? (
+              <>
+                {replacement ? (
+                  <Notice title="Reaches the same deployments">
+                    The replacement reaches {deployReach(replacement)}, as the key it replaces does,
+                    and nothing outside Deployments.
+                  </Notice>
+                ) : (
+                  <DeploymentChoice
+                    every={every}
+                    onEvery={setEvery}
+                    chosen={chosen}
+                    onChosen={setChosen}
+                  />
+                )}
+                <DeployKeyReach />
+              </>
             ) : scope ? (
               <Notice title="Reads database metrics only">
                 The replacement is limited the same way: it can scrape the metrics endpoint and
@@ -829,16 +919,254 @@ function KeyDialog({
                 ))}
               </ToggleGroup>
             </Field>
-            <FormNote>
-              A key can do at most what your role can, and never more than it could at the time — if
-              your account is demoted or disabled, every key it made goes with it. Keys cannot
-              change passwords, make other keys or manage accounts; those need a real sign-in.
-              {replacement && " A replacement can keep or narrow the previous key’s role."}
-            </FormNote>
+            {deploying ? (
+              <FormNote>
+                A deploy key works only while your account is an administrator: if it is demoted or
+                disabled, the key goes with it. Every change it makes is in the audit log under its
+                name.
+              </FormNote>
+            ) : (
+              <FormNote>
+                A key can do at most what your role can, and never more than it could at the time —
+                if your account is demoted or disabled, every key it made goes with it. Keys cannot
+                change passwords, make other keys or manage accounts; those need a real sign-in.
+                {replacement && " A replacement can keep or narrow the previous key’s role."}
+              </FormNote>
+            )}
           </fieldset>
         )}
       </Modal>
       {dialog}
     </>
+  )
+}
+
+type KeyKind = "api" | "deploy"
+
+/** The two kinds of key an administrator may make, as the sentence each one means. */
+const KINDS: { value: KeyKind; title: string; hint: string; Mark: typeof Key }[] = [
+  {
+    value: "api",
+    title: "API key",
+    hint: "Calls the whole API as the role you give it, from scripts and tools.",
+    Mark: Key,
+  },
+  {
+    value: "deploy",
+    title: "Deploy key",
+    hint: "For jd and CI: ships and configures deployments, and reaches nothing else.",
+    Mark: Rocket,
+  },
+]
+
+/**
+ * Which kind of key, drawn as `RoleChoice` draws a role: cards with their
+ * sentence, since the difference is the sentence.
+ */
+function KindChoice({ value, onChange }: { value: KeyKind; onChange: (kind: KeyKind) => void }) {
+  return (
+    <fieldset className="min-w-0 space-y-1.5">
+      <legend className="mb-1.5 text-body font-medium">Kind</legend>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {KINDS.map(({ value: kind, title, hint, Mark }) => {
+          const selected = value === kind
+          return (
+            <ChoiceCard
+              key={kind}
+              selected={selected}
+              onClick={() => onChange(kind)}
+              className="min-h-0 flex-row items-center gap-3 px-3 py-2.5"
+            >
+              <Mark
+                aria-hidden
+                className={cn("size-4 shrink-0", selected ? "text-brand" : "text-muted-foreground")}
+              />
+              <span className="flex min-w-0 flex-col">
+                <ChoiceCardTitle>{title}</ChoiceCardTitle>
+                <ChoiceCardHint>{hint}</ChoiceCardHint>
+              </span>
+            </ChoiceCard>
+          )
+        })}
+      </div>
+    </fieldset>
+  )
+}
+
+/**
+ * Which deployments a deploy key reaches, or an MCP key's deployment grant:
+ * all of them, the ones made later included, or the ones ticked — a key for
+ * one repository's pipeline that leaks then reaches that one application, not
+ * the server's every one. The list is the fleet the deployment pages read,
+ * drawn as each project draws itself there.
+ */
+export function DeploymentChoice({
+  every,
+  onEvery,
+  chosen,
+  onChosen,
+  label = "Deployments",
+  idPrefix = "deploy-key",
+}: {
+  every: boolean
+  onEvery: (every: boolean) => void
+  chosen: ReadonlySet<number>
+  onChosen: (chosen: ReadonlySet<number>) => void
+  label?: string
+  idPrefix?: string
+}) {
+  const projects = useProjects()
+  const [query, setQuery] = useState("")
+  const fleet = [...projects.values()].sort((a, b) => a.name.localeCompare(b.name))
+  const words = query.trim().toLocaleLowerCase()
+  const shown = words ? fleet.filter((d) => d.name.toLocaleLowerCase().includes(words)) : fleet
+  const toggle = (id: number, on: boolean) => {
+    const next = new Set(chosen)
+    if (on) next.add(id)
+    else next.delete(id)
+    onChosen(next)
+  }
+  return (
+    <Field
+      label={label}
+      hint={
+        every
+          ? "Every deployment on this server, including the ones made after the key."
+          : chosen.size === 0
+            ? "Tick at least one. A key limited to some deployments also reaches the ones it creates."
+            : `Only ${plural(chosen.size, "deployment")}, and the ones the key creates from its own drafts.`
+      }
+    >
+      <div className="min-w-0 space-y-2">
+        <Segments
+          label="Which deployments the key reaches"
+          fill
+          value={every ? "every" : "some"}
+          onChange={(next) => onEvery(next === "every")}
+          options={[
+            { value: "every", label: "Every deployment" },
+            { value: "some", label: "Only these" },
+          ]}
+        />
+        {!every &&
+          (fleet.length === 0 ? (
+            <EmptyNote>There are no deployments to choose from yet.</EmptyNote>
+          ) : (
+            <>
+              {fleet.length > 6 && (
+                <SearchInput
+                  aria-label="Search deployments"
+                  placeholder="Search deployments…"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              )}
+              <ul
+                aria-label="Deployments"
+                className="max-h-64 divide-y divide-hairline overflow-y-auto rounded-lg border"
+              >
+                {shown.map((deployment) => {
+                  const id = `${idPrefix}-${deployment.id}`
+                  return (
+                    <li key={deployment.id} className="flex min-w-0 items-center gap-3 px-3 py-2.5">
+                      <Checkbox
+                        id={id}
+                        checked={chosen.has(deployment.id)}
+                        onCheckedChange={(checked) => toggle(deployment.id, checked === true)}
+                      />
+                      <label
+                        htmlFor={id}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-body"
+                      >
+                        <ProjectMark deployment={deployment} size="xs" />
+                        <span className="truncate font-medium">{deployment.name}</span>
+                        <span className="truncate text-hint text-muted-foreground">
+                          {deployment.environmentName}
+                        </span>
+                      </label>
+                    </li>
+                  )
+                })}
+                {shown.length === 0 && (
+                  <li className="px-3 py-2.5">
+                    <EmptyNote>No deployment matches this search.</EmptyNote>
+                  </li>
+                )}
+              </ul>
+            </>
+          ))}
+      </div>
+    </Field>
+  )
+}
+
+/**
+ * What a deploy key does and never does, as two short lists rather than a
+ * paragraph: the second list is the one read when deciding whether to put
+ * the key in a pipeline at all, so it is not a clause at the end of the first.
+ */
+function DeployKeyReach() {
+  return (
+    <div className="min-w-0 space-y-3">
+      <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+        <ReachList title="It can" items={DEPLOY_KEY_CAN} mark={Check} />
+        <ReachList title="It can’t" items={DEPLOY_KEY_CANNOT} mark={Slash} />
+      </div>
+      <FormNote>{DEPLOY_KEY_HOST_RULE}</FormNote>
+    </div>
+  )
+}
+
+function ReachList({
+  title,
+  items,
+  mark: Mark,
+}: {
+  title: string
+  items: string[]
+  mark: typeof Check
+}) {
+  return (
+    <section className="min-w-0 space-y-1.5" aria-label={title}>
+      <h3 className="text-body font-medium">{title}</h3>
+      <ul className="space-y-1">
+        {items.map((item) => (
+          <li key={item} className="flex min-w-0 gap-2 text-hint text-muted-foreground">
+            <Mark aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+            <span className="min-w-0">{item}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+/**
+ * `jd` for another machine: the dashboard serves the build it ships for its
+ * own Linux, so the link is only as wide as that. Any other system builds it
+ * from the repository.
+ */
+function CliDownload() {
+  return (
+    <FormNote>
+      Another Linux machine of this server’s architecture can{" "}
+      <a href={CLI_DOWNLOAD} download="jd" className="text-brand hover:underline">
+        download jd
+      </a>{" "}
+      from this dashboard; for anything else, build it from the repository with{" "}
+      <span className="font-mono">go build ./cmd/jd</span> in{" "}
+      <span className="font-mono">backend</span>. Generate a client from the dashboard’s{" "}
+      {/* A new tab: following it here would leave the dialog that shows the
+          secret once. */}
+      <a
+        href={OPENAPI_DESCRIPTION}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-brand hover:underline"
+      >
+        OpenAPI description
+      </a>{" "}
+      of the deployment API.
+    </FormNote>
   )
 }

@@ -376,3 +376,36 @@ func TestDetectionProposalComparesOnlyThePlansOwnRoot(t *testing.T) {
 		t.Fatalf("a Dockerfile at the plan's root = %#v", proposal)
 	}
 }
+
+// The run's own preflight carries the warning for a plan nothing gates, as a
+// warning step rather than a failure, with the way to the control that adds
+// a check: a draft has no settings page yet, a run's plan does.
+func TestAnalyzePlanWarnsAboutAnUngatedCutoverAndLinksItsSettings(t *testing.T) {
+	fixture := newReleaseStoreFixture(t)
+	fixture.setProfile(t, ProfileService)
+	fixture.addPlanWithRuntime(t, 1, strings.Repeat("a", 40), RuntimePlanConfig{
+		InternalPort: 8080, BindAddress: "127.0.0.1", Strategy: StrategyStopFirst,
+		Command: []string{}, Capabilities: []string{}, Devices: []string{}, Mounts: []RuntimeMount{},
+	})
+	run, _ := fixture.claimedRun(t, 1)
+	plan, err := fixture.runs.ExecutionPlan(context.Background(), *run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &NormalizedStepExecutor{store: fixture.runs, preflight: readyObserver()}
+	result := executor.analyzePlan(context.Background(), StepExecution{Run: *run}, plan)
+	if result.State != StepWarning {
+		t.Fatalf("analyze_plan = %#v", result)
+	}
+	var evidence struct {
+		Findings []PreflightFinding `json:"findings"`
+	}
+	if err := json.Unmarshal(result.Evidence, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	item := findingByCode(evidence.Findings, "cutover_unverified")
+	want := fmt.Sprintf("/deploy/%d/settings/runtime#health-checks", fixture.projectID)
+	if item == nil || item.Severity != PreflightWarning || item.DeepLink != want {
+		t.Fatalf("cutover_unverified = %+v, want a warning linking %s", item, want)
+	}
+}

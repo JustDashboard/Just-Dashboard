@@ -39,6 +39,17 @@ func (s *PlanningStore) Duplicate(
 	sourceProjectID, ownerUserID int64,
 	ownerUsername, name string,
 ) (*Draft, error) {
+	return s.DuplicateForKey(ctx, sourceProjectID, ownerUserID, ownerUsername, name, 0)
+}
+
+// DuplicateForKey is Duplicate for a deploy key (keyID 0 is a session's): the
+// draft is the key's own, as one it opened itself would be.
+func (s *PlanningStore) DuplicateForKey(
+	ctx context.Context,
+	sourceProjectID, ownerUserID int64,
+	ownerUsername, name string,
+	keyID int64,
+) (*Draft, error) {
 	intent := DraftIntentConfig{Name: strings.TrimSpace(name)}
 	var environmentID int64
 	if err := s.db.QueryRowContext(ctx, `
@@ -91,7 +102,7 @@ func (s *PlanningStore) Duplicate(
 
 	now := s.now().UTC()
 	draft := &Draft{
-		ID: auth.RandomToken(18), OwnerUserID: ownerUserID, OwnerUsername: ownerUsername,
+		ID: auth.RandomToken(18), OwnerUserID: ownerUserID, OwnerUsername: ownerUsername, KeyID: keyID,
 		CurrentStep: DraftConfiguration, Revision: 1,
 		Data:      DraftData{Intent: &intent, Source: &source, Configuration: &plan},
 		Findings:  []PreflightFinding{},
@@ -103,10 +114,10 @@ func (s *PlanningStore) Duplicate(
 	}
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO deploy_drafts(
-		  id, owner_user_id, owner_username, current_step, revision, data_json,
+		  id, owner_user_id, owner_username, key_id, current_step, revision, data_json,
 		  findings_json, plan_preview, created_at, updated_at, expires_at)
-		VALUES(?, ?, ?, ?, ?, ?, '[]', '', ?, ?, ?)`,
-		draft.ID, draft.OwnerUserID, draft.OwnerUsername, draft.CurrentStep, draft.Revision,
+		VALUES(?, ?, ?, ?, ?, ?, ?, '[]', '', ?, ?, ?)`,
+		draft.ID, draft.OwnerUserID, draft.OwnerUsername, draft.KeyID, draft.CurrentStep, draft.Revision,
 		string(data), now.Unix(), now.Unix(), draft.ExpiresAt.Unix()); err != nil {
 		return nil, err
 	}

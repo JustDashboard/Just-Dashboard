@@ -44,6 +44,7 @@ import type {
   DeploymentDraftSource,
   DeploymentEnvironmentConfiguration,
   DeploymentGitWatch,
+  DeploymentPromotion,
   DeploymentRelease,
   DeploymentSourceKind,
   DeploymentEngineRun,
@@ -56,6 +57,7 @@ import type {
   DeploymentSummary,
   DeployProject,
   NotificationChannel,
+  RailpackProvider,
   ReleaseListChange,
   WorkloadProfile,
 } from "@/lib/types"
@@ -197,6 +199,7 @@ const OPERATION_LABELS: Record<string, string> = {
   redeploy: "Redeploy",
   force_build: "Rebuild",
   rollback: "Rollback",
+  promote: "Promote",
   restart: "Restart",
   stop: "Stop",
   start: "Start",
@@ -206,15 +209,45 @@ const OPERATION_LABELS: Record<string, string> = {
   scheduled_action: "Scheduled",
   import_adopt: "Adopt",
   remove_managed: "Remove resources",
+  instant_rollback: "Instant rollback",
 }
 
 export function operationLabel(operation: string) {
   return OPERATION_LABELS[operation] ?? humanize(operation)
 }
 
+/**
+ * The operation a run's steps are named for. An instant rollback is a
+ * rollback run that resumes the warm release instead of starting a new one
+ * (`deploy/rollback_executor.go`), and its steps say so.
+ */
+export function stepOperation(
+  run: Pick<DeploymentEngineRun, "operation"> & { metadata?: Record<string, unknown> },
+) {
+  return run.operation === "rollback" && run.metadata?.instant === true
+    ? "instant_rollback"
+    : run.operation
+}
+
+/**
+ * The staging release a promotion run takes its image from, as the run's
+ * metadata records it, or undefined for any other run.
+ */
+export function runPromotion(
+  run: Pick<DeploymentEngineRun, "operation" | "metadata">,
+): DeploymentPromotion | undefined {
+  if (run.operation !== "promote") return undefined
+  const promotion = run.metadata?.promotion as DeploymentPromotion | undefined
+  return promotion && typeof promotion.releaseNumber === "number" ? promotion : undefined
+}
+
 /** "#12 Deploy" — the run's name wherever it is listed. */
-export function runTitle(run: Pick<DeploymentEngineRun, "runNumber" | "operation">) {
-  return `#${run.runNumber} ${operationLabel(run.operation)}`
+export function runTitle(
+  run: Pick<DeploymentEngineRun, "runNumber" | "operation"> & {
+    metadata?: Record<string, unknown>
+  },
+) {
+  return `#${run.runNumber} ${operationLabel(stepOperation(run))}`
 }
 
 const TRIGGER_LABELS: Record<string, string> = {
@@ -231,6 +264,7 @@ const TRIGGER_LABELS: Record<string, string> = {
   preview: "preview",
   rollback: "rollback",
   migration: "migration",
+  auto_rollback: "automatically",
 }
 
 /**
@@ -398,7 +432,14 @@ export function useNow(intervalMs = 1000, enabled = true) {
 // ---------------------------------------------------------------------------
 
 export type ProjectState =
-  "deploying" | "ready" | "failed" | "unhealthy" | "stopped" | "not_deployed" | "archived"
+  | "deploying"
+  | "ready"
+  | "failed"
+  | "unhealthy"
+  | "stopped"
+  | "asleep"
+  | "not_deployed"
+  | "archived"
 
 const PROJECT_LABELS: Record<ProjectState, string> = {
   deploying: "Deploying",
@@ -406,6 +447,7 @@ const PROJECT_LABELS: Record<ProjectState, string> = {
   failed: "Failed",
   unhealthy: "Unhealthy",
   stopped: "Stopped",
+  asleep: "Asleep",
   not_deployed: "Not deployed",
   archived: "Archived",
 }
@@ -416,6 +458,8 @@ const PROJECT_TONES: Record<ProjectState, DotTone> = {
   failed: "danger",
   unhealthy: "danger",
   stopped: "stopped",
+  // Not down: the next request wakes it.
+  asleep: "notice",
   not_deployed: "stopped",
   archived: "stopped",
 }
@@ -440,6 +484,9 @@ export function projectState(
   if (archived) return "archived"
   if (summary.activeRun) return "deploying"
   if (!summary.liveReleaseId) return runFailed(summary.lastRun?.state) ? "failed" : "not_deployed"
+  // Asleep by design before stopped: its container is down, and the next
+  // request starts it.
+  if (summary.asleepSince && !summary.stopped) return "asleep"
   if (summary.stopped || runtimeStopped(runtime, summary.liveReleaseId)) return "stopped"
   // A failed run newer than the live release is news; a failure the live
   // release has since replaced is history and lives on the Deployments tab.
@@ -647,7 +694,8 @@ export function projectProduct(
     | "recipe"
     | "framework"
     | "images"
-  >,
+  > &
+    Partial<Pick<DeploymentSummary, "sourceTemplate">>,
   configuration?: Pick<DeploymentEnvironmentConfiguration, "build" | "source">,
   blueprint?: Pick<BlueprintSummary, "id" | "image">,
 ): string | undefined {
@@ -661,8 +709,11 @@ export function projectProduct(
       return imageProduct(
         summary.sourceRepository || configuration?.source?.image || summary.sourceRef || "",
       )
-    case "compose":
-      return "docker-compose"
+    case "compose": {
+      // A stack rendered from a reviewed template is that application.
+      const id = blueprint?.id ?? summary.sourceTemplate?.split("@")[0]
+      return hasProductLogo(id) ? id : "docker-compose"
+    }
     case "import":
       return imageProducts(summary.images ?? []).find((id) => id !== "docker")
     default: {
@@ -689,7 +740,8 @@ export function sourceProduct(
   summary: Pick<
     DeploymentSummary,
     "sourceKind" | "sourceRef" | "sourceRepository" | "sourceRemote"
-  >,
+  > &
+    Partial<Pick<DeploymentSummary, "sourceTemplate">>,
   source?: Pick<DeploymentDraftSource, "url" | "provider" | "mode" | "image" | "blueprintId">,
 ): string | undefined {
   switch (summary.sourceKind) {
@@ -702,8 +754,11 @@ export function sourceProduct(
       )
     case "image":
       return imageProduct(summary.sourceRepository || source?.image || summary.sourceRef || "")
-    case "compose":
-      return "docker-compose"
+    case "compose": {
+      const id =
+        source?.mode === "blueprint" ? source.blueprintId : summary.sourceTemplate?.split("@")[0]
+      return hasProductLogo(id) ? id : "docker-compose"
+    }
     case "blueprint": {
       const id = source?.blueprintId ?? summary.sourceRef?.split("@")[0]
       return hasProductLogo(id) ? id : undefined
@@ -930,6 +985,53 @@ export const BUILD_METHOD_SHORT: Record<DeploymentBuildMethod, string> = {
   compose: "Compose",
   none: "No build",
   legacy_compose: "Compose",
+  railpack: "Railpack",
+}
+
+/** The Railpack release a plan that names none builds with (build_railpack.go). */
+export const RAILPACK_DEFAULT_VERSION = "0.43.0"
+
+/**
+ * Railpack's one-line description, where the recipes, a Dockerfile and a static site are
+ * offered: what it is and whose detection decides, since that is the difference.
+ */
+export const RAILPACK_DESCRIPTION =
+  "Railpack, the builder Railway and Coolify use: its own detection plans the build, pinned to a reviewed release."
+
+/** Railpack's providers by the language a reader knows them as, in the order of the recipes. */
+export const RAILPACK_PROVIDERS: [RailpackProvider, string][] = [
+  ["node", "Node.js, Bun and front-end apps"],
+  ["python", "Python"],
+  ["golang", "Go"],
+  ["rust", "Rust"],
+  ["java", "Java (Maven or Gradle)"],
+  ["dotnet", ".NET"],
+  ["deno", "Deno"],
+  ["php", "PHP"],
+  ["ruby", "Ruby"],
+  ["elixir", "Elixir"],
+  ["gleam", "Gleam"],
+  ["cpp", "C/C++"],
+  ["zig", "Zig"],
+  ["staticfile", "Static files (Staticfile)"],
+  ["shell", "Shell script (start.sh)"],
+]
+
+/**
+ * The line under the build method: for Railpack, what it is and the provider it would
+ * read the directory as; the other methods say what they are in their own options.
+ */
+export function buildMethodHint(method: DeploymentBuildMethod, provider?: string) {
+  if (method !== "railpack") return undefined
+  return provider
+    ? `${RAILPACK_DESCRIPTION} It reads this directory as ${railpackProviderLabel(provider)}.`
+    : RAILPACK_DESCRIPTION
+}
+
+/** A provider's short name: "Node.js", "Go", "C/C++". */
+export function railpackProviderLabel(provider: string | undefined) {
+  const label = RAILPACK_PROVIDERS.find(([value]) => value === provider)?.[1]
+  return label?.replace(/ \(.*\)$/, "").replace(/,.*$/, "") ?? provider
 }
 
 export function frameworkLabel(value: string) {
@@ -1057,7 +1159,11 @@ export function sourceLine(
         mono: true,
       }
     case "compose":
-      return { kind: "compose", primary: "Compose stack", secondary: deployment.sourceRef }
+      return {
+        kind: "compose",
+        primary: "Compose stack",
+        secondary: deployment.sourceTemplate ?? deployment.sourceRef,
+      }
     case "blueprint":
       return { kind: "blueprint", primary: deployment.sourceRef || "Template" }
     default:
@@ -1108,6 +1214,10 @@ export function autoDeployReading(
   watch: DeploymentGitWatch,
 ): { tone: DotTone; label: string; interval?: number } | undefined {
   if (watch.status === "not_applicable") return undefined
+  // A push never deploys production once it takes only promotions.
+  if (watch.status === "promotion_only" || watch.policy?.promotionOnly) {
+    return { tone: "stopped", label: "Promotions only" }
+  }
   const automatic = watch.policy?.automatic ?? watch.automatic
   if (["unavailable", "stale", "policy_conflict"].includes(watch.status)) {
     // A branch the watcher could not read says why when git's answer did.
@@ -1354,13 +1464,19 @@ export const LINK_STATUS: Record<
 export const RELEASE_GROUPS = [
   { label: "Source", keys: ["resolve_source", "acquire_source", "analyze_plan"] },
   { label: "Build", keys: ["prepare_context", "build_artifact"] },
-  { label: "Release", keys: ["render_runtime", "backup_gate", "release_task"] },
+  {
+    label: "Release",
+    keys: ["render_runtime", "backup_gate", "rehearse_migration", "release_task"],
+  },
   // Its own node rather than a detail of Release: a deployment publishing a
   // name for the first time spends real seconds here talking to a certificate
   // authority, and a progress line that reads "Release" throughout looks stuck.
   { label: "Certificate", keys: ["provision_certificate"] },
   { label: "Start", keys: ["start_candidate"] },
-  { label: "Verify", keys: ["verify_readiness", "verify_smoke"] },
+  // The traffic replay and a canary are the candidate verified against
+  // real traffic before the cutover — recorded requests replayed, then a
+  // share of the live route's beside the live release: the last of Verify.
+  { label: "Verify", keys: ["verify_readiness", "verify_smoke", "replay_traffic", "canary"] },
   { label: "Route", keys: ["activate", "retire_previous", "record_release", "notify"] },
 ] as const
 
@@ -1459,10 +1575,13 @@ const STEP_LABELS: Record<string, string> = {
   render_runtime: "Render runtime",
   release_task: "Release task",
   backup_gate: "Backup check",
+  rehearse_migration: "Migration rehearsal",
   provision_certificate: "Certificate",
   start_candidate: "Start new release",
   verify_readiness: "Readiness checks",
   verify_smoke: "Smoke checks",
+  replay_traffic: "Traffic replay",
+  canary: "Canary",
   activate: "Switch traffic",
   retire_previous: "Retire previous release",
   record_release: "Record release",
@@ -1479,9 +1598,20 @@ const LIVE_RELEASE_STEPS: Record<string, string> = {
   start: "Start live release",
 }
 
+// An instant rollback takes three of the release path's steps against the
+// warm release and the one it replaces rather than a new one.
+const INSTANT_ROLLBACK_STEPS: Record<string, string> = {
+  start_candidate: "Resume warm release",
+  activate: "Switch traffic back",
+  retire_previous: "Remove rolled-back release",
+}
+
 export function stepName(key: string, operation?: string) {
   if (key === "start_candidate" && operation && LIVE_RELEASE_STEPS[operation]) {
     return LIVE_RELEASE_STEPS[operation]
+  }
+  if (operation === "instant_rollback" && INSTANT_ROLLBACK_STEPS[key]) {
+    return INSTANT_ROLLBACK_STEPS[key]
   }
   return STEP_LABELS[key] ?? sentence(key)
 }

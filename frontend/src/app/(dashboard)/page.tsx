@@ -19,6 +19,7 @@ import type {
   TerminalList,
   TrafficPulse,
   UpdateReport,
+  VHost,
 } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
@@ -39,6 +40,7 @@ import { lastFleet, readFleet } from "@/components/database/fleet/read"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import { ProjectCard } from "@/components/deploy/fleet-card"
 import { sortFleet } from "@/components/deploy/fleet"
+import { UsagePingQuestion } from "@/components/overview/usage-ping-question"
 import { ActivityPanel } from "@/components/overview/activity"
 import { BackupsPanel, DatabasesPanel } from "@/components/overview/data"
 import {
@@ -157,6 +159,8 @@ export default function OverviewPage() {
   return (
     <Page className="animate-rise">
       <PageContext title={host.hostname} />
+
+      <UsagePingQuestion />
 
       {/* What this machine is, in one line: the distribution drawn as
           itself, then what it runs on. The uptime, process count and cores
@@ -385,6 +389,14 @@ function useModuleReads(
       [],
       { enabled: shows("proxy") },
     ),
+    // Only for the Add a site shortcut's count, so only for an account that
+    // is shown it: the list is the Proxy section's own read.
+    sites: usePoll<VHost[]>(
+      (signal) => get<VHost[]>("/proxy/vhosts", undefined, signal),
+      300_000,
+      [],
+      { enabled: shows("proxy") && can("system.admin") },
+    ),
     exposure: usePoll<Exposure>(
       (signal) => get<Exposure>("/exposure", undefined, signal),
       60_000,
@@ -480,6 +492,16 @@ function shortcutsFor(
         detail: counted(reads.fleet.data?.deployments.length, "project"),
         fallback: SHORTCUT_GLYPH.deploy,
         href: "/deploy/new",
+      },
+    // The Sites page opens its form on a new site from ?new=1, as a port or a
+    // container with nothing in front of it already links there.
+    shows("proxy") &&
+      admin && {
+        key: "site",
+        label: "Add a site",
+        detail: counted(reads.sites.data?.length, "site"),
+        fallback: SHORTCUT_GLYPH.site,
+        href: "/proxy/sites?new=1",
       },
     shows("databases") &&
       admin && {

@@ -15,16 +15,23 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   per-account lockout), `apiLim` (600/120, per principal), `destrLim` (30/10, destructive routes).
   TOTP setup, enrollment confirmation and verification share a separate account-keyed `loginLim`
   bucket; changing IP or switching between these routes does not reset the second-factor budget.
+  A passkey sign-in's finish (`POST /auth/passkey/finish`) sits in the password sign-in's group and
+  spends the same per-address `loginLim` budget; its begin only hands out a sealed challenge and has
+  a budget of its own, `passkeyLim` (60/20 per address), so a sign-in page's autofill cannot exhaust
+  the password's. Registering a passkey re-checks the password and code on the account-keyed
+  second-factor bucket.
 - **Capabilities, not roles** (`auth/roles.go`): `read`, `service.control`, `file.write`, `terminal`,
   `destructive`, `system.admin`, `metrics.read`, held by `admin`/`limited`/`readonly`. Gate with
   `httpx.RequireCapability` so adding a role later cannot silently widen an endpoint.
   `httpx.RequireSession` additionally blocks API tokens from human-only routes (password change,
-  minting tokens, account management).
+  minting tokens, account management). The one key it lets by is a deploy key that the deploy key
+  table admitted to that very route (below); for every other key the rule is unchanged.
 - **A scoped API key** (`api_tokens.scope`, minted with `scope: "metrics.read"` on `POST /tokens` or
   from Databases → Metrics export) holds one capability and nothing else. `Authenticate` refuses it
-  on every group with `403 key_scope`; `AuthenticateScoped` admits it for
-  `GET /api/v1/metrics/databases` alone, which sits outside the `/databases` tree for that reason and
-  also refuses a browser session (`httpx.RequireToken`, `403 token_required`).
+  on every group with `403 key_scope`; `AuthenticateScoped` admits it for the two scrapes alone,
+  `GET /api/v1/metrics/databases` and `GET /api/v1/metrics/deployments`, which sit outside the
+  `/databases` and `/deploy` trees for that reason and also refuse a browser session
+  (`httpx.RequireToken`, `403 token_required`).
 - **An MCP key** (`api_tokens.scope = 'mcp'`, minted on `POST /tokens/mcp` or from Databases → MCP
   server) narrows *where* a key goes rather than what its role may do. `Authenticate` and
   `AuthenticateScoped` both refuse it with `403 key_scope`, so it opens no route but
@@ -33,9 +40,44 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   `403 key_scope`, and a `WWW-Authenticate: Bearer` challenge naming no authorization server. Inside
   the endpoint the principal carries the key's role (narrowed to its owner's) with no capability
   scope, and every tool call
-  is held to the databases `api_token_connections` grants the key, read again on each call; see
+  is held to the databases `api_token_connections` grants the key, read again on each call, and to
+  its deployment grant (`api_tokens.deploy_access`, narrowed to chosen deployments in
+  `api_token_deployments` as a deploy key is), read with the key. A tool generated from the
+  deployment API (offered only to a key whose owner turned them on, `api_tokens.mcp_operations`) is a
+  second request made inside the process through the root router, with no
+  credential and the MCP key's principal in its context (`httpx.WithMCPDelegate`): it passes the same
+  layers, and the feature group's `AuthenticateFeatures` admits it only as the deploy key gate admits
+  a deploy key, marking it `Principal.ViaMCP` (every other group refuses it); see
   [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
-- **`httpx.AuditMutations`** records every state-changing request. WebSocket routes are GET and
+- **A deploy key** (`api_tokens.scope = 'deploy'`, minted on `POST /tokens/deploy` by an administrator
+  in a session, or from Account → API keys) is what `jd` and CI use, and it **deliberately reopens
+  part of the session-only surface**: the deployment writes that were a session's alone — drafts,
+  configuration, source, Git policy, triggers, variables and shared variables — answer it, and so do
+  the operating verbs an ordinary key had (promote, the warm release's instant rollback and keep, the
+  maintenance switch) with their reads. It holds
+  the administrator role, narrowed to its owner's now. `Authenticate`, `AuthenticateScoped` and
+  `AuthenticateMCP` refuse it with `403 key_scope`; the feature group authenticates with
+  `httpx.AuthenticateFeatures(s.deployKeyGate(root), …)`, which asks the router itself which route
+  the request will reach (`chi.Routes.Find`) and answers from `deployKeyRoutes` in
+  `api/deploy_keys.go`: a listed route admits the key (setting `Principal.DeployRoute`, which is what
+  `RequireSession` honours), a line marked session-only answers `403 session_required` with its
+  reason, and anything unlisted — including any route added later until it is given a line — answers
+  `403 key_scope`. A refusal is audited as `auth.deploy_key.refused` with the key, because it happens
+  before the group's audit middleware. Reveals, saved credentials, the GitHub-speaking pull-request
+  verbs, preview approval, the typed-phrase removals, the warm-release and rehearsal terms, a copy of a
+  release's data, what a linked database gives previews and a preview's database branch refreshed,
+  and a route's pages stay session-only for it. A key narrowed to
+  chosen deployments (`api_token_deployments`, read with the key on every request) reaches only
+  routes whose `{id}` it was given and whose `{env}` belongs to that deployment, and none marked
+  `every` (server shared variables, fleet-wide reads); `GET /deploy/` lists only its deployments. A
+  deploy key's drafts are its own (`deploy_drafts.key_id`; `deploymentDraftForPrincipal` holds the key
+  to them), and the deployment a narrowed key's commit creates joins its grant in the commit's
+  transaction. The handlers hold what a deploy key writes: generated values are withheld, and a
+  plan or environment change that would reach the host, redirect a saved credential, or point a
+  variable at a credential, database or secret store is refused with `session_required` (see
+  [invariant 4](../security/invariants.md)).
+- **`httpx.AuditMutations`** records every state-changing request, with the API key's id and name
+  (`audit_log.key_id`, `key_name`) when the request carried one. WebSocket routes are GET and
   long-lived, so they call `s.recordAudit(...)` at open time — the event is "a terminal was opened".
 - **`httpx.RequireCSRF`** requires `X-JD-CSRF: 1` on every browser-session mutation, including login
   and partial 2FA sessions. The header makes a same-site sibling origin preflight, and this application
@@ -58,9 +100,13 @@ password and revokes existing sessions; the sign-in page then signs straight bac
 password, through any required second factor. Password change has its own
 authentication middleware so it cannot bypass an outstanding second factor.
 
-Two deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname) and
+Three deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname),
 `/api/v1/hooks/deploy/{hookID}` (HMAC over the raw body, still allowlisted, still audited so
-enumerating hook ids is not silent).
+enumerating hook ids is not silent), and `GET /api/v1/tailnet/whois`, which a tailnet-only
+deployment's gate asks about every request: still behind the allowlist, outside the API rate limit,
+and answering only a loopback caller that no other proxy forwarded — the dashboard's own Caddy says it
+did in `X-Forwarded-For` — with every refusal audited as `deploy.tailnet.refused`
+([tailnet-only deployments](../deployments/tailnet-apps.md#the-whois-route)).
 
 ## Handler conventions
 
@@ -243,6 +289,18 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   resolving a name the caller chose is traffic the caller directs, and the reverse proxy's own DNS check,
   which it reuses, is kept at that capability. For anyone else the lookup never runs and the field is
   absent, never `false`.
+- **The server map.** `GET /map` is one read open to every account that summarises many list routes,
+  so it answers each account with what those routes would: the shells only for `terminal`; the
+  computers, the dashboard's accounts, the Linux accounts, the alert rules and the VPN only for
+  `system.admin` — neither read for nor sent to anybody else — and the API keys the account's own
+  unless it holds `system.admin`, as `GET /tokens` decides (`filterServerMap`). It sends no value
+  those routes keep back (environment, DSNs, channel URLs). Its lines come from reads open to every
+  role — the databases topology, the ports list's socket owners, the deployments' configuration — and
+  a line goes only between two things the account is shown; a deployment's sealed variables are opened
+  server-side only to read a typed `${{database.…}}` or `${{domain.…}}` reference's target, and no
+  value of one is sent. `GET`/`PUT`/`DELETE /map/layout` are the
+  account's own arrangement behind `RequireSession`, open to every role and audited
+  (`map.layout.save`, `map.layout.reset`). See [the server map](../server-map.md#who-sees-what).
 
 #### Redis: one route, any command
 

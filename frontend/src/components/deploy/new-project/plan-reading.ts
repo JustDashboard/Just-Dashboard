@@ -5,7 +5,12 @@ import {
   hasProductLogo,
   imageProduct,
 } from "@/components/product-logo"
-import { frameworkLabel, humanize, sourceProduct } from "@/components/deploy/vocabulary"
+import {
+  frameworkLabel,
+  humanize,
+  railpackProviderLabel,
+  sourceProduct,
+} from "@/components/deploy/vocabulary"
 import type { WizardErrors } from "@/components/deploy/deployment-defaults"
 import type { ConfigureFlow, ConfigureStepKey } from "@/components/deploy/new-project/draft"
 import type { PlanSection } from "@/components/deploy/new-project/plan-sections"
@@ -23,6 +28,8 @@ export function checkTarget(check: Check) {
   }
   if (config.path) return `GET ${config.path}${config.acceptAnyAnswer ? " (any answer)" : ""}`
   if (check.kind === "docker_health") return "the image's HEALTHCHECK"
+  if (check.kind === "game_handshake") return `a Minecraft status handshake on ${config.port}`
+  if (check.kind === "udp_probe") return `an answered datagram on ${config.port}/udp`
   if (config.command?.length) return config.command.join(" ")
   if (config.port) return `a connection on ${config.port}`
   return check.kind
@@ -156,7 +163,10 @@ export function planGroups({
   const runtime = configuration.runtime
   const worker = profile === "worker"
   const compose = source.kind === "compose" || build.method === "compose"
-  const builds = build.method !== "image" && build.method !== "none"
+  // A template, single image or stack, is the application it reviews; a
+  // stack from one pulls each service's image rather than building any.
+  const template = source.mode === "blueprint"
+  const builds = build.method !== "image" && build.method !== "none" && !template
   const port = runtime.internalPort ?? 0
   const revision = flow.detection?.source?.revision ?? flow.detection?.source?.digest
 
@@ -176,7 +186,7 @@ export function planGroups({
   const runtimeId =
     source.kind === "image"
       ? imageProduct(source.image ?? "")
-      : source.kind === "blueprint"
+      : template && hasProductLogo(source.blueprintId)
         ? source.blueprintId
         : compose
           ? "docker-compose"
@@ -196,8 +206,11 @@ export function planGroups({
     reading: flow.sourceLabel,
     // A template is the version of it this dashboard reviewed, which says more
     // than the digest its image resolved to.
-    ...(source.kind === "blueprint"
-      ? { code: flow.detection?.source?.ref, codeKind: "name" as const }
+    ...(template
+      ? {
+          code: flow.detection?.source?.template ?? flow.detection?.source?.ref,
+          codeKind: "name" as const,
+        }
       : { ref: branch || revision ? { branch, revision } : undefined }),
     tone: flow.detection?.unavailable ? "warning" : "default",
   }
@@ -215,10 +228,12 @@ export function planGroups({
     reading: builds
       ? build.method === "recipe"
         ? `Automatic recipe${build.recipe ? ` · ${frameworkLabel(framework ?? build.recipe)}` : ""}`
-        : humanize(build.method)
+        : build.method === "railpack"
+          ? `Railpack · ${build.railpackProvider ? `${railpackProviderLabel(build.railpackProvider)} provider` : "its own detection"}`
+          : humanize(build.method)
       : source.kind === "import"
         ? "Adopted as it runs"
-        : source.kind === "blueprint"
+        : template
           ? "No build · a reviewed template"
           : "No build · pulled at its digest",
     code: builds
@@ -418,4 +433,22 @@ export function planGroups({
     { step: "variables", label: "Variables", rows: [variablesRow] },
     { step: "review", label: "Review", rows: review },
   ]
+}
+
+/**
+ * The named volumes a Compose source's services mount, as detection read them
+ * (`name:/target`): what a stack keeps between releases. Bind mounts and
+ * anonymous volumes are left out, because they are not the stack's to keep.
+ */
+export function composeNamedVolumes(flow: Pick<ConfigureFlow, "detection" | "configuration">) {
+  if (flow.configuration.build.method !== "compose") return []
+  const volumes: { service: string; name: string; target: string }[] = []
+  for (const service of flow.detection?.compose?.services ?? []) {
+    for (const mount of service.mounts) {
+      const [name, target] = mount.split(":")
+      if (name && target && /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(name))
+        volumes.push({ service: service.name, name, target })
+    }
+  }
+  return volumes
 }

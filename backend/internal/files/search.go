@@ -70,6 +70,9 @@ func (s *Service) Search(ctx context.Context, opts SearchOptions) ([]SearchHit, 
 }
 
 func (s *Service) SearchDetailed(ctx context.Context, opts SearchOptions) (*SearchResult, error) {
+	if s.run != nil {
+		return hosted2(s, func(s *Service) (*SearchResult, error) { return s.SearchDetailed(ctx, opts) })
+	}
 	started := time.Now()
 	root, err := s.Resolve(opts.Root)
 	if err != nil {

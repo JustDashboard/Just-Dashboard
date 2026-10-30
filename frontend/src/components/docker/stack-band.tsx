@@ -5,6 +5,7 @@ import { rowReveal } from "@/components/icon-action"
 import { useNow } from "@/components/deploy/vocabulary"
 import { HUE, LiveBytes, LiveFigure } from "@/components/overview/readings"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph, imageProduct, imageProducts } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -14,7 +15,12 @@ import { cn } from "@/lib/utils"
 import { cores } from "@/components/procs/shared"
 import { ago } from "@/components/procs/units"
 import { ShareBar, shade } from "@/components/procs/workloads"
-import { stackLane, type StackChange, type StackLine } from "@/components/docker/stack-readings"
+import {
+  DASHBOARD_STACK,
+  stackLane,
+  type StackChange,
+  type StackLine,
+} from "@/components/docker/stack-readings"
 
 /** How many stacks each block names; the rest of the machine is one muted span. */
 const SHOWN = 5
@@ -225,13 +231,18 @@ function sum<T>(list: T[], value: (item: T) => number) {
   return list.reduce((total, item) => total + value(item), 0)
 }
 
-/** A stack as the products it runs, at a line's height: the one it is named for. */
+/**
+ * A stack as the products it runs, at a line's height: the one it is named for.
+ * The dashboard's own stack is the dashboard, not the Caddy its images lead with.
+ */
 function StackGlyph({ line }: { line: StackLine }) {
   const images = line.stack.services.map((s) => s.image).filter(Boolean)
   const product = images.length > 0 ? imageProducts(images)[0] : "docker-compose"
   return (
     <span className="flex size-4 shrink-0 items-center justify-center">
-      {product ? (
+      {line.stack.name === DASHBOARD_STACK ? (
+        <LogoGlyph small className="h-3.5 w-auto text-brand" />
+      ) : product ? (
         <ProductGlyph id={product} className="size-3.5" />
       ) : (
         <Layers aria-hidden className="size-3.5 text-muted-foreground" />

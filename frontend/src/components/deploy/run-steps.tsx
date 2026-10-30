@@ -35,6 +35,12 @@ import {
 } from "@/components/deploy/vocabulary"
 import { Segment } from "@/components/deploy/run-pipeline"
 import { FindingRow } from "@/components/deploy/deployment-findings"
+import { rehearsalOf } from "@/components/deploy/rehearsal-model"
+import { RehearsalView } from "@/components/deploy/run-rehearsal"
+import { replayOf } from "@/components/deploy/replay-model"
+import { ReplayView } from "@/components/deploy/run-replay"
+import { railpackOf, withoutRailpack } from "@/components/deploy/railpack-model"
+import { RailpackView } from "@/components/deploy/run-railpack"
 import {
   runValidationFindings,
   findingFixAction,
@@ -112,6 +118,53 @@ function drawnElsewhere(step: DeploymentStep): string[] {
       return ["findings", "candidate", "candidateSource"]
     case "prepare_context":
       return ["source"]
+    case "rehearse_migration":
+      // The report is drawn as one (`RehearsalView`); a skipped step's
+      // reason has no report and is read as a fact.
+      return rehearsalOf(step.evidence)
+        ? [
+            "rehearsed",
+            "reason",
+            "database",
+            "source",
+            "restoreMs",
+            "tasks",
+            "locks",
+            "isolation",
+            "cleanedUp",
+            "totalMs",
+          ]
+        : []
+    case "replay_traffic":
+      // Every replay records a report, the ones that did not run with only
+      // their reason, and `ReplayView` draws either.
+      return replayOf(step.evidence)
+        ? [
+            "replayed",
+            "reason",
+            "domains",
+            "target",
+            "read",
+            "eligible",
+            "requests",
+            "answered",
+            "drifted",
+            "driftPercent",
+            "maxStatusDrift",
+            "latencyFactor",
+            "latencyRecorded",
+            "latencyJudged",
+            "recordedP95",
+            "candidateP95",
+            "verdict",
+            "drifts",
+            "concurrency",
+            "timeoutSeconds",
+            "timedOut",
+            "durationMs",
+            "recovery",
+          ]
+        : []
     case "build_artifact": {
       const result = step.evidence?.result
       const artifacts =
@@ -482,6 +535,11 @@ function Inspector({
   const seconds = stepSeconds(step, now)
   const evidence = step.evidence ?? {}
   const preflight = step.key === "analyze_plan" ? preflightOf(evidence) : undefined
+  const rehearsal = step.key === "rehearse_migration" ? rehearsalOf(evidence) : undefined
+  const replay = step.key === "replay_traffic" ? replayOf(evidence) : undefined
+  // What Railpack decided is drawn as one, and left out of the generic reading.
+  const railpack = railpackOf(step)
+  const reading = railpack ? withoutRailpack(evidence) : evidence
   const tail = rows.filter((row) => row.stepId === step.id).slice(-TAIL)
   const recorded = Object.keys(evidence).length > 0
   const name = stepName(step.key, operation)
@@ -537,6 +595,9 @@ function Inspector({
       )}
 
       {preflight && <PreflightChecks projectId={projectId} {...preflight} />}
+      {rehearsal && <RehearsalView step={step} report={rehearsal} />}
+      {replay && <ReplayView step={step} report={replay} />}
+      {railpack && <RailpackView evidence={railpack} />}
 
       {tail.length > 0 && (
         <figure className="min-w-0 overflow-hidden rounded-lg border border-hairline bg-surface-sunken">
@@ -558,7 +619,7 @@ function Inspector({
       )}
 
       {recorded ? (
-        <EvidenceView evidence={evidence} omit={drawnElsewhere(step)} />
+        <EvidenceView evidence={reading} omit={drawnElsewhere(step)} />
       ) : (
         <p className="text-body text-muted-foreground">
           {step.state === "pending"

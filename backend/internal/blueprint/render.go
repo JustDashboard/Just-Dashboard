@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 )
 
 var ErrInvalidInput = errors.New("blueprint input is invalid")
@@ -25,6 +26,9 @@ type RenderedVariable struct {
 	Required    bool   `json:"required,omitempty"`
 	Length      int    `json:"length,omitempty"`
 	Label       string `json:"label,omitempty"`
+	// Format is the generated secret's alphabet when it is not letters and
+	// digits ("hex").
+	Format string `json:"format,omitempty"`
 }
 
 type RenderedPort struct {
@@ -34,6 +38,9 @@ type RenderedPort struct {
 	Exposure string `json:"exposure"`
 	Purpose  string `json:"purpose"`
 	Primary  bool   `json:"primary,omitempty"`
+	// HostPort is the host port a direct port's HostInput chose; zero means
+	// the port is published on its own number.
+	HostPort int `json:"hostPort,omitempty"`
 }
 
 type RenderedVolume struct {
@@ -54,6 +61,19 @@ type RenderedCheck struct {
 	Port           int       `json:"port,omitempty"`
 	Command        []string  `json:"command,omitempty"`
 	TimeoutSeconds int       `json:"timeoutSeconds,omitempty"`
+	Payload        string    `json:"payload,omitempty"`
+	Expect         string    `json:"expect,omitempty"`
+}
+
+// RenderedFile is an install-time file. Its inputs are already substituted;
+// a generated secret it needs is the reference {{variable.NAME}} to the sealed
+// variable that holds it, filled in only by the helper that writes the file,
+// so the plan and its digest still hold no value. Format "properties" means
+// substituted values are escaped as a Java properties file reads them.
+type RenderedFile struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	Format  string `json:"format,omitempty"`
 }
 
 // Plan is the secret-free normalized result of rendering. Two renders of the
@@ -77,10 +97,17 @@ type Plan struct {
 	Domains          []string           `json:"domains,omitempty"`
 	Acceptances      []Acceptance       `json:"acceptances,omitempty"`
 	Artifacts        []RenderedArtifact `json:"artifacts,omitempty"`
+	InstallFiles     []RenderedFile     `json:"installFiles,omitempty"`
 	Files            []ConfigFile       `json:"files,omitempty"`
 	Automation       []Automation       `json:"automation,omitempty"`
 	Security         Security           `json:"security"`
-	Digest           string             `json:"digest"`
+	// Services and Compose are a Compose template's: what each service is,
+	// and the document the release runs. Compose holds no value, only
+	// interpolations of the deployment's variables, so it is part of the
+	// digest a fixture pins like everything else here.
+	Services []RenderedService `json:"services,omitempty"`
+	Compose  string            `json:"compose,omitempty"`
+	Digest   string            `json:"digest"`
 }
 
 // Acceptance records that the operator agreed to a specific linked document.
@@ -94,10 +121,14 @@ type Acceptance struct {
 // RenderedArtifact is an install-time download with a fixed authoritative host
 // and either a checksum or a declared version source.
 type RenderedArtifact struct {
+	// Path is where in a declared volume the verified bytes are placed.
+	Path          string `json:"path,omitempty"`
 	URL           string `json:"url"`
 	Checksum      string `json:"checksum,omitempty"`
 	VersionSource string `json:"versionSource,omitempty"`
 	MaxBytes      int64  `json:"maxBytes"`
+	// TimeoutSeconds bounds the download; zero is the helper's default.
+	TimeoutSeconds int `json:"timeoutSeconds,omitempty"`
 }
 
 // Render turns a blueprint version plus operator inputs into a normalized plan.
@@ -162,7 +193,7 @@ func Render(blueprint *Blueprint, inputs map[string]string) (*Plan, error) {
 	for _, secret := range blueprint.Secrets {
 		variables[secret.Variable] = RenderedVariable{
 			Name: secret.Variable, Sensitivity: "secret", Generated: true,
-			Length: secret.Length, Label: secret.Label,
+			Length: secret.Length, Label: secret.Label, Format: secret.Alphabet,
 		}
 	}
 
@@ -186,9 +217,29 @@ func Render(blueprint *Blueprint, inputs map[string]string) (*Plan, error) {
 				return nil, expandErr
 			}
 			plan.Artifacts = append(plan.Artifacts, RenderedArtifact{
-				URL: url, Checksum: operation.Checksum, VersionSource: operation.Value, MaxBytes: operation.MaxBytes,
+				Path: operation.Path, URL: url, Checksum: operation.Checksum, VersionSource: operation.Value,
+				MaxBytes: operation.MaxBytes, TimeoutSeconds: operation.TimeoutSeconds,
 			})
 		}
+	}
+	secretVariables := map[string]string{}
+	for _, secret := range blueprint.Secrets {
+		secretVariables[secret.Name] = secret.Variable
+	}
+	for _, operation := range blueprint.Operations.Install {
+		if operation.Kind != OperationWriteFile {
+			continue
+		}
+		file := RenderedFile{Path: operation.Path}
+		if strings.HasSuffix(operation.Path, ".properties") {
+			file.Format = "properties"
+		}
+		content, contentErr := expandFile(operation.Content, values, secretVariables, file.Format)
+		if contentErr != nil {
+			return nil, contentErr
+		}
+		file.Content = content
+		plan.InstallFiles = append(plan.InstallFiles, file)
 	}
 	for _, operation := range blueprint.Operations.Stop {
 		switch operation.Kind {
@@ -208,8 +259,16 @@ func Render(blueprint *Blueprint, inputs map[string]string) (*Plan, error) {
 		plan.Variables = append(plan.Variables, variables[name])
 	}
 
+	declaredPorts := blueprint.Ports
+	if blueprint.IsCompose() {
+		// The release follows the public service: its ports are the ones the
+		// route and the readiness checks reach.
+		if public := blueprint.PublicService(); public != nil {
+			declaredPorts = public.Ports
+		}
+	}
 	portsByName := map[string]int{}
-	for _, port := range blueprint.Ports {
+	for _, port := range declaredPorts {
 		internal := port.Internal
 		if override, found := values["port-"+port.Name]; found && override != "" {
 			parsed, convErr := strconv.Atoi(override)
@@ -219,10 +278,17 @@ func Render(blueprint *Blueprint, inputs map[string]string) (*Plan, error) {
 			internal = parsed
 		}
 		portsByName[port.Name] = internal
-		plan.Ports = append(plan.Ports, RenderedPort{
+		rendered := RenderedPort{
 			Name: port.Name, Internal: internal, Protocol: strings.ToLower(port.Protocol),
 			Exposure: port.Exposure, Purpose: port.Purpose, Primary: port.Primary,
-		})
+		}
+		if port.HostInput != "" {
+			// resolveInputs held the value to the input's own 1-65535 bounds.
+			if host, convErr := strconv.Atoi(values[port.HostInput]); convErr == nil && host > 0 {
+				rendered.HostPort = host
+			}
+		}
+		plan.Ports = append(plan.Ports, rendered)
 	}
 	for _, volume := range blueprint.Volumes {
 		plan.Volumes = append(plan.Volumes, RenderedVolume{
@@ -234,7 +300,7 @@ func Render(blueprint *Blueprint, inputs map[string]string) (*Plan, error) {
 		rendered := RenderedCheck{
 			Name: check.Name, Kind: check.Kind, Phase: check.Phase, Required: check.Required,
 			Path: check.Path, Command: append([]string(nil), check.Command...),
-			TimeoutSeconds: check.TimeoutSeconds,
+			TimeoutSeconds: check.TimeoutSeconds, Payload: check.Payload, Expect: check.Expect,
 		}
 		if check.Port != "" {
 			rendered.Port = portsByName[check.Port]
@@ -243,6 +309,11 @@ func Render(blueprint *Blueprint, inputs map[string]string) (*Plan, error) {
 	}
 	plan.Files = append([]ConfigFile(nil), blueprint.Files...)
 	plan.Automation = append([]Automation(nil), blueprint.Automation...)
+	if blueprint.IsCompose() {
+		if err := renderComposeTemplate(blueprint, plan); err != nil {
+			return nil, err
+		}
+	}
 
 	digest, err := planDigest(plan)
 	if err != nil {
@@ -398,4 +469,62 @@ func expand(template string, values map[string]string) (string, error) {
 		return "", fmt.Errorf("%w: template contains an unsupported placeholder", ErrInvalidInput)
 	}
 	return expanded, nil
+}
+
+// expandFile renders an install file. An input becomes its value, escaped for
+// the file's format; a secret becomes a reference to the variable that holds
+// it. A value that itself spells a placeholder is refused: the helper fills
+// every {{variable.NAME}} it finds, so a server name typed as one would put
+// the console password in the server list.
+func expandFile(template string, values, secrets map[string]string, format string) (string, error) {
+	var failure error
+	expanded := contentPlaceholderRE.ReplaceAllStringFunc(template, func(match string) string {
+		parts := contentPlaceholderRE.FindStringSubmatch(match)
+		if parts[1] == "secret" {
+			variable, found := secrets[parts[2]]
+			if !found {
+				failure = fmt.Errorf("%w: file references undeclared secret %q", ErrInvalidInput, parts[2])
+				return ""
+			}
+			return "{{variable." + variable + "}}"
+		}
+		value, found := values[parts[2]]
+		if !found {
+			failure = fmt.Errorf("%w: file references undeclared input %q", ErrInvalidInput, parts[2])
+			return ""
+		}
+		if strings.Contains(value, "{{") || strings.Contains(value, "}}") {
+			failure = fmt.Errorf("%w: %q cannot contain braces that spell a placeholder", ErrInvalidInput, parts[2])
+			return ""
+		}
+		if format == "properties" {
+			return EscapeProperty(value)
+		}
+		return value
+	})
+	if failure != nil {
+		return "", failure
+	}
+	return expanded, nil
+}
+
+// EscapeProperty writes a value the way java.util.Properties reads it back:
+// a backslash doubled, anything outside ASCII as a \uXXXX escape, so a
+// server that still reads its file as Latin-1 and one that reads UTF-8 both
+// see the same text.
+func EscapeProperty(value string) string {
+	var builder strings.Builder
+	for _, r := range value {
+		switch {
+		case r == '\\':
+			builder.WriteString(`\\`)
+		case r > 0x7e:
+			for _, unit := range utf16.Encode([]rune{r}) {
+				fmt.Fprintf(&builder, `\u%04x`, unit)
+			}
+		default:
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
 }

@@ -174,6 +174,9 @@ type GitWatchStatus struct {
 	IntervalSeconds int                 `json:"intervalSeconds"`
 	Reason          string              `json:"reason,omitempty"`
 	Policy          GitDeploymentPolicy `json:"policy"`
+	// CommitStatus says where releases are reported and how the host took
+	// the last one; the route fills it, the watch itself does not.
+	CommitStatus *CommitStatusReading `json:"commitStatus,omitempty"`
 }
 
 type gitWatchCursor struct {
@@ -193,7 +196,7 @@ func (s *OrchestrationStore) gitWatchTargets(ctx context.Context, projectID, env
 		FROM deploy_environments e JOIN deploy_projects p ON p.id = e.project_id
 		JOIN deploy_sources src ON src.environment_id = e.id AND src.revision = e.desired_revision
 		JOIN deploy_build_plans b ON b.environment_id = e.id AND b.revision = e.desired_revision
-		WHERE p.archived_at = 0 AND e.archived_at = 0 AND e.kind = 'production'
+		WHERE p.archived_at = 0 AND e.archived_at = 0 AND e.kind IN ('production', 'staging')
 		  AND b.method <> 'legacy_compose' AND (? = 0 OR p.id = ?) AND (? = 0 OR e.id = ?)
 		ORDER BY e.id`, projectID, projectID, environmentID, environmentID)
 	if err != nil {
@@ -252,7 +255,11 @@ func (s *OrchestrationStore) GitWatchStatus(ctx context.Context, projectID, envi
 	if status.Branch == "" {
 		status.Branch = "main"
 	}
-	status.Automatic = policy.Automatic && !policy.Conflict
+	status.Automatic = policy.Automatic && !policy.Conflict && !policy.PromotionOnly
+	if policy.PromotionOnly {
+		status.Status, status.Reason = "promotion_only", "promotion_only"
+		return status, nil
+	}
 	if !policy.Automatic {
 		status.Status, status.Reason = "manual_only", "manual_only"
 		return status, nil
@@ -440,6 +447,12 @@ func (w *GitWatcher) evaluate(ctx context.Context, target GitWatchTarget, expect
 	}
 	target.PolicyKey = policy.Key()
 	d := &GitDeploymentDecision{Target: target, Revision: cursor.Revision, Reason: cursor.Reason, RunID: cursor.RunID, cursor: cursor, record: true}
+	// A push never deploys production once it takes only promotions; the
+	// branch is staging's to follow.
+	if policy.PromotionOnly {
+		d.Reason = "promotion_only"
+		return d, nil
+	}
 	if !policy.Automatic {
 		d.Reason = "manual_only"
 		return d, nil

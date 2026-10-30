@@ -572,218 +572,244 @@ export function RepoWorkspace({
             face, and — across a rule — who those verbs act as. The menu and
             the account were ghosts between outlined buttons, and with nothing
             lifting any more they read as loose labels in the middle of the
-            strip; every control here now shares one height and one face. */}
-          <PaneHeader className="h-auto min-h-12 flex-wrap gap-x-2 gap-y-1.5 px-2 py-1.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  className="shrink-0 text-muted-foreground hover:text-foreground"
-                  aria-label="Back to repositories"
-                  onClick={onBack}
-                >
-                  <ArrowLeft className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Back to all repositories</TooltipContent>
-            </Tooltip>
-            <RepoMark repo={repo} size="sm" />
-            {Object.keys(fileDrafts).length > 0 && (
-              <Button
-                size="xs"
-                variant="ghost"
-                className="text-warning"
-                title="Drafts stay in this tab until saved or discarded"
-                onClick={() => setPreview({ kind: "file", path: Object.keys(fileDrafts)[0] })}
-              >
-                {Object.keys(fileDrafts).length} unsaved{" "}
-                {Object.keys(fileDrafts).length === 1 ? "file" : "files"}
-              </Button>
-            )}
-            <div className="min-w-0 shrink">
-              <p className="flex min-w-0 items-center gap-2">
-                <span className="truncate text-body font-semibold" title={repo.path}>
-                  {repo.name}
-                </span>
-                {repo.worktree && <Tag className="shrink-0">worktree</Tag>}
-              </p>
-              <p className="flex min-w-0 items-center gap-1.5 text-micro text-muted-foreground">
-                {forge && forgeMark && (
-                  <>
-                    <ProductGlyph id={forgeMark} className="size-3" />
-                    {forge.url ? (
-                      <a
-                        href={forge.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="max-w-[14rem] truncate text-foreground/75 hover:text-foreground hover:underline"
-                      >
-                        {forge.slug}
-                      </a>
-                    ) : (
-                      <span className="max-w-[14rem] truncate">{forge.slug}</span>
-                    )}
-                    <span aria-hidden>·</span>
-                  </>
-                )}
-                {repo.worktree && repo.main ? (
-                  <button
-                    type="button"
-                    onClick={() => router.push(`/git?repo=${encodeURIComponent(repo.main!)}`)}
-                    className="truncate font-mono hover:text-foreground hover:underline"
-                    title={`Open the main checkout at ${repo.main}`}
+            strip; every control here now shares one height and one face.
+
+            Narrower than one row holds — a phone, a laptop beside a sidebar —
+            it folds on purpose rather than wrapping wherever the next control
+            ran out of room, which stacked it four rows deep on a phone with
+            half of each row empty. The fold is two full rows: who, with the
+            menu and the account at its end, then where HEAD is stretched
+            beside the sync verbs. The path goes when there is a remote to
+            name instead; it stays on the title's tooltip. */}
+          <PaneHeader className="@container h-auto min-h-12 px-2 py-1.5">
+            <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 @4xl:flex">
+              <div className="flex min-w-0 items-center gap-2 @4xl:flex-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      className="shrink-0 text-muted-foreground hover:text-foreground"
+                      aria-label="Back to repositories"
+                      onClick={onBack}
+                    >
+                      <ArrowLeft className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Back to all repositories</TooltipContent>
+                </Tooltip>
+                <RepoMark repo={repo} size="sm" />
+                {Object.keys(fileDrafts).length > 0 && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    className="text-warning"
+                    title="Drafts stay in this tab until saved or discarded"
+                    onClick={() => setPreview({ kind: "file", path: Object.keys(fileDrafts)[0] })}
                   >
-                    worktree of {repo.main}
-                  </button>
-                ) : (
-                  <span className="truncate font-mono" title={repo.path}>
-                    {repo.path}
-                  </span>
+                    {Object.keys(fileDrafts).length} unsaved{" "}
+                    {Object.keys(fileDrafts).length === 1 ? "file" : "files"}
+                  </Button>
                 )}
-              </p>
-            </div>
+                <div className="min-w-0 shrink">
+                  <p className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-body font-semibold" title={repo.path}>
+                      {repo.name}
+                    </span>
+                    {repo.worktree && <Tag className="shrink-0">worktree</Tag>}
+                  </p>
+                  <p className="flex min-w-0 items-center gap-1.5 text-micro text-muted-foreground">
+                    {forge && forgeMark && (
+                      <>
+                        <ProductGlyph id={forgeMark} className="size-3" />
+                        {forge.url ? (
+                          <a
+                            href={forge.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="max-w-[14rem] truncate text-foreground/75 hover:text-foreground hover:underline"
+                          >
+                            {forge.slug}
+                          </a>
+                        ) : (
+                          <span className="max-w-[14rem] truncate">{forge.slug}</span>
+                        )}
+                        <span
+                          aria-hidden
+                          className={cn(!(repo.worktree && repo.main) && "hidden @4xl:inline")}
+                        >
+                          ·
+                        </span>
+                      </>
+                    )}
+                    {repo.worktree && repo.main ? (
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/git?repo=${encodeURIComponent(repo.main!)}`)}
+                        className="truncate font-mono hover:text-foreground hover:underline"
+                        title={`Open the main checkout at ${repo.main}`}
+                      >
+                        worktree of {repo.main}
+                      </button>
+                    ) : (
+                      <span
+                        className={cn(
+                          "truncate font-mono",
+                          forge && forgeMark && "hidden @4xl:inline",
+                        )}
+                        title={repo.path}
+                      >
+                        {repo.path}
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
 
-            <span className="min-w-2 flex-1" />
-
-            <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
-              {/* Where HEAD is: a button into Branches, carrying how far it has
+              <div className="order-1 col-span-2 flex min-w-0 items-center gap-2 @4xl:order-none">
+                {/* Where HEAD is: a button into Branches, carrying how far it has
                 drifted. What it tracks is the tooltip, because "will this push
                 go where I think" is decided there and nowhere else. */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => pick("branches")}
-                    className={cn(
-                      "max-w-[18rem] min-w-0 gap-1.5 px-2.5",
-                      head.detached && "text-destructive",
-                    )}
-                  >
-                    <SourceBranch
-                      className={cn(
-                        "size-3.5",
-                        head.detached ? "text-destructive" : "text-muted-foreground",
-                      )}
-                    />
-                    <span className="min-w-0 truncate font-mono text-xs">
-                      {branchLabel(head.branch, head.detached)}
-                    </span>
-                    {head.detached && <Tag tone="danger">detached</Tag>}
-                    {head.gone && <Tag tone="danger">gone</Tag>}
-                    <AheadBehind ahead={head.ahead} behind={head.behind} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {head.empty
-                    ? "No commits yet"
-                    : head.detached
-                      ? "HEAD is detached — switch or manage branches"
-                      : head.gone
-                        ? `${head.upstream} is gone — switch or manage branches`
-                        : head.upstream
-                          ? `Tracks ${head.upstream} — switch or manage branches`
-                          : "No upstream yet — push publishes it"}
-                </TooltipContent>
-              </Tooltip>
-
-              {/* Fetch, pull and push as one control: three verbs on one
-                remote, read as a set. Push keeps the command face — it is
-                the one that sends anything anywhere. */}
-              <div
-                role="group"
-                aria-label="Sync with the remote"
-                className="flex h-8 items-stretch overflow-hidden rounded-md border border-input bg-control"
-              >
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       size="sm"
-                      variant="ghost"
-                      className="h-full rounded-none px-2.5"
-                      disabled={!!busy}
-                      pending={busy === "Fetched"}
-                      onClick={() =>
-                        void run("Fetched", () =>
-                          post<GitResult>("/git/fetch", undefined, {
-                            query: { ...q, prune: true },
-                          }),
-                        ).catch(() => undefined)
-                      }
+                      variant="outline"
+                      onClick={() => pick("branches")}
+                      className={cn(
+                        "min-w-0 flex-1 justify-start gap-1.5 px-2.5 @4xl:max-w-[18rem] @4xl:flex-none",
+                        head.detached && "text-destructive",
+                      )}
                     >
-                      <RefreshClockwise className="size-4" />
-                      <span className="hidden md:inline">Fetch</span>
+                      <SourceBranch
+                        className={cn(
+                          "size-3.5",
+                          head.detached ? "text-destructive" : "text-muted-foreground",
+                        )}
+                      />
+                      <span className="min-w-0 truncate font-mono text-xs">
+                        {branchLabel(head.branch, head.detached)}
+                      </span>
+                      {head.detached && <Tag tone="danger">detached</Tag>}
+                      {head.gone && <Tag tone="danger">gone</Tag>}
+                      <AheadBehind ahead={head.ahead} behind={head.behind} />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    Check the remote for new commits without changing your files
+                    {head.empty
+                      ? "No commits yet"
+                      : head.detached
+                        ? "HEAD is detached — switch or manage branches"
+                        : head.gone
+                          ? `${head.upstream} is gone — switch or manage branches`
+                          : head.upstream
+                            ? `Tracks ${head.upstream} — switch or manage branches`
+                            : "No upstream yet — push publishes it"}
                   </TooltipContent>
                 </Tooltip>
-                {canControl && (
-                  <>
-                    <span aria-hidden className="w-px bg-input" />
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-full rounded-none px-2.5"
-                          disabled={!!busy}
-                          pending={busy === "Pulled"}
-                          onClick={() =>
-                            void run("Pulled", () =>
-                              post<GitResult>("/git/pull", undefined, { query: q }),
-                            ).catch((err) => setPullBlockedBy(pullBlocked(err)))
-                          }
-                        >
-                          <ChevronDoubleDown className="size-4" />
-                          <span className="hidden md:inline">Pull</span>
-                          {head.behind > 0 && <ChipCount>{head.behind}</ChipCount>}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        Bring the latest committed changes down from the remote (fast-forward only)
-                      </TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          size="sm"
-                          className="h-full rounded-none px-2.5"
-                          disabled={!!busy}
-                          pending={busy === "Pushed"}
-                          onClick={() =>
-                            void run("Pushed", () =>
-                              post<GitResult>("/git/push", undefined, { query: q }),
-                            ).catch(() => undefined)
-                          }
-                        >
-                          <ChevronDoubleUp className="size-4" />
-                          <span className="hidden md:inline">Push</span>
-                          {head.ahead > 0 && <ChipCount>{head.ahead}</ChipCount>}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Send your committed changes up to the remote</TooltipContent>
-                    </Tooltip>
-                  </>
-                )}
+
+                {/* Fetch, pull and push as one control: three verbs on one
+                remote, read as a set. Push keeps the command face — it is
+                the one that sends anything anywhere. */}
+                <div
+                  role="group"
+                  aria-label="Sync with the remote"
+                  className="flex h-8 shrink-0 items-stretch overflow-hidden rounded-md border border-input bg-control"
+                >
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-full rounded-none px-2.5"
+                        disabled={!!busy}
+                        pending={busy === "Fetched"}
+                        onClick={() =>
+                          void run("Fetched", () =>
+                            post<GitResult>("/git/fetch", undefined, {
+                              query: { ...q, prune: true },
+                            }),
+                          ).catch(() => undefined)
+                        }
+                      >
+                        <RefreshClockwise className="size-4" />
+                        <span className="hidden @lg:inline">Fetch</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Check the remote for new commits without changing your files
+                    </TooltipContent>
+                  </Tooltip>
+                  {canControl && (
+                    <>
+                      <span aria-hidden className="w-px bg-input" />
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-full rounded-none px-2.5"
+                            disabled={!!busy}
+                            pending={busy === "Pulled"}
+                            onClick={() =>
+                              void run("Pulled", () =>
+                                post<GitResult>("/git/pull", undefined, { query: q }),
+                              ).catch((err) => setPullBlockedBy(pullBlocked(err)))
+                            }
+                          >
+                            <ChevronDoubleDown className="size-4" />
+                            <span className="hidden @lg:inline">Pull</span>
+                            {head.behind > 0 && <ChipCount>{head.behind}</ChipCount>}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          Bring the latest committed changes down from the remote (fast-forward
+                          only)
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="sm"
+                            className="h-full rounded-none px-2.5"
+                            disabled={!!busy}
+                            pending={busy === "Pushed"}
+                            onClick={() =>
+                              void run("Pushed", () =>
+                                post<GitResult>("/git/push", undefined, { query: q }),
+                              ).catch(() => undefined)
+                            }
+                          >
+                            <ChevronDoubleUp className="size-4" />
+                            <span className="hidden @lg:inline">Push</span>
+                            {head.ahead > 0 && <ChipCount>{head.ahead}</ChipCount>}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          Send your committed changes up to the remote
+                        </TooltipContent>
+                      </Tooltip>
+                    </>
+                  )}
+                </div>
               </div>
 
-              <VerbMenu
-                verbs={more}
-                label="More git actions"
-                trigger={
-                  <Button size="icon-sm" variant="outline" aria-label="More git actions">
-                    <MoreHorizontal className="size-4" />
-                  </Button>
-                }
-              />
+              <div className="flex items-center gap-2">
+                <VerbMenu
+                  verbs={more}
+                  label="More git actions"
+                  trigger={
+                    <Button size="icon-sm" variant="outline" aria-label="More git actions">
+                      <MoreHorizontal className="size-4" />
+                    </Button>
+                  }
+                />
 
-              <span aria-hidden className="mx-0.5 hidden h-5 w-px bg-hairline sm:block" />
+                <span aria-hidden className="mx-0.5 hidden h-5 w-px bg-hairline @4xl:block" />
 
-              <GitHubAccountControl repoPath={repo.path} status={github} compact />
-              <GitHelp compact />
+                <GitHubAccountControl repoPath={repo.path} status={github} compact="fit" />
+                <GitHelp compact />
+              </div>
             </div>
           </PaneHeader>
 

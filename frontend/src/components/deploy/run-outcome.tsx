@@ -15,7 +15,12 @@ import { StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { TranscriptRow } from "@/components/transcript-line"
 import { Button } from "@/components/ui/button"
-import { formatDuration, stepName, stepSeconds } from "@/components/deploy/vocabulary"
+import {
+  formatDuration,
+  stepName,
+  stepOperation,
+  stepSeconds,
+} from "@/components/deploy/vocabulary"
 import { causeHeadline, causeTitle } from "@/components/deploy/failure-cause"
 import type { ConsoleRow } from "@/components/deploy/build-console"
 import { StepTile } from "@/components/deploy/run-evidence"
@@ -109,7 +114,7 @@ export function RunFailure({
               <p className="numeric text-xs text-muted-foreground">
                 {rolledBack ? "Stopped at " : "Failed at "}
                 <span className="font-medium text-foreground">
-                  {stepName(step.key, run.operation)}
+                  {stepName(step.key, stepOperation(run))}
                 </span>
                 {` · step ${reached} of ${steps.length}`}
                 {seconds !== undefined && ` · after ${formatDuration(seconds)}`}
@@ -155,7 +160,7 @@ export function RunFailure({
         <div className="space-y-3 px-4 pb-4">
           {tail.length > 0 && (
             <ol
-              aria-label={`Last lines from ${step ? stepName(step.key, run.operation) : "the run"}`}
+              aria-label={`Last lines from ${step ? stepName(step.key, stepOperation(run)) : "the run"}`}
               className="overflow-hidden rounded-md border border-hairline bg-surface-sunken py-1.5 font-mono text-xs leading-6"
             >
               {tail.map((row) => (
@@ -196,6 +201,7 @@ export function RunReady({
   release,
   liveRelease,
   projectId,
+  ungated = false,
 }: {
   live: boolean
   /** The run was a Stop that succeeded. */
@@ -208,6 +214,8 @@ export function RunReady({
   release?: DeploymentRelease
   liveRelease?: DeploymentRelease
   projectId: number
+  /** The run's activation recorded that no readiness check gated the cutover. */
+  ungated?: boolean
 }) {
   const serving = live && (!stopped || startedSince)
   return (
@@ -263,6 +271,17 @@ export function RunReady({
               )}
               {release && <span className="numeric">Release #{release.number}</span>}
               {release?.activatedAt && <span>live since {relativeTime(release.activatedAt)}</span>}
+            </p>
+          )}
+          {serving && ungated && (
+            <p className="text-xs text-warning">
+              Went live without a readiness check: nothing verified it before the cutover.{" "}
+              <Link
+                href={`/deploy/${projectId}/settings/runtime#health-checks`}
+                className="rounded-sm underline underline-offset-2 focus-ring"
+              >
+                Add one
+              </Link>
             </p>
           )}
         </div>

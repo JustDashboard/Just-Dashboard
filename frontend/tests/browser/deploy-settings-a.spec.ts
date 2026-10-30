@@ -124,6 +124,105 @@ test.describe("General settings", () => {
     expect(policy.watchExclude).toEqual(["docs/**"])
   })
 
+  test("names the host commit statuses go to, and says what it refused", async ({ page }) => {
+    await mockProject(page)
+    const now = Date.now()
+    const readings = [
+      {
+        provider: "gitlab",
+        product: "gitlab",
+        host: "gitlab.example.test",
+        repository: "platform/shop",
+        context: "just-dashboard/production",
+        ready: false,
+        reason:
+          "Save a provider token for gitlab.example.test under Deployments → Credentials to report here.",
+      },
+      {
+        provider: "gitlab",
+        product: "gitlab",
+        host: "gitlab.example.test",
+        repository: "platform/shop",
+        context: "just-dashboard/production",
+        credential: "gitlab-ci",
+        ready: true,
+        lastStatus: {
+          provider: "gitlab",
+          state: "success",
+          revision: "9f3c2a1d".padEnd(40, "0"),
+          ok: false,
+          message:
+            "the token may not write here (403): it needs the api scope and at least the Developer role",
+          at: new Date(now - 60_000).toISOString(),
+        },
+      },
+      {
+        provider: "gitea",
+        product: "forgejo",
+        host: "git.example.test",
+        repository: "acme/shop",
+        context: "just-dashboard/production",
+        credential: "forgejo-ci",
+        ready: true,
+        lastStatus: {
+          provider: "gitea",
+          state: "success",
+          revision: "9f3c2a1d".padEnd(40, "0"),
+          ok: true,
+          at: new Date(now - 5 * 60_000).toISOString(),
+        },
+      },
+    ]
+    let reading = readings[0]
+    await page.route("**/api/v1/deploy/7/environments/12/git-watch", (route) =>
+      json(route, {
+        automatic: true,
+        branch: "main",
+        status: "watching",
+        intervalSeconds: 5,
+        policy: {
+          automatic: true,
+          commitStatuses: true,
+          watchInclude: [],
+          watchExclude: [],
+          revision: 1,
+        },
+        commitStatus: reading,
+      }),
+    )
+    await page.goto("/deploy/7/settings/general")
+    const gitCard = page.getByRole("form", { name: "Automatic deployment" })
+
+    // No token for the host: the switch is named for GitLab, and the line
+    // under it says what to save and where.
+    await expect(gitCard.getByRole("switch", { name: /GitLab commit status/ })).toBeVisible()
+    const missing = gitCard.getByText(/Save a provider token for/)
+    await expect(missing).toContainText("gitlab.example.test")
+    await expect(missing.getByRole("link", { name: "Credentials" })).toHaveAttribute(
+      "href",
+      "/deploy/credentials",
+    )
+
+    // The host refused the last status: its reason, in full.
+    reading = readings[1]
+    await page.reload()
+    await expect(
+      gitCard.getByText(
+        "GitLab refused the last status from gitlab-ci: the token may not write here (403)",
+        { exact: false },
+      ),
+    ).toBeVisible()
+
+    // Forgejo took it: one quiet line, the outcome and the token it used.
+    reading = readings[2]
+    await page.reload()
+    await expect(gitCard.getByRole("switch", { name: /Forgejo commit status/ })).toBeVisible()
+    const reported = gitCard.getByText(/^Reported 5m/)
+    await expect(reported).toContainText("succeeded on")
+    await expect(reported).toContainText("9f3c2a1")
+    await expect(reported).toContainText("with forgejo-ci")
+  })
+
   test("says what the last check decided under the picture, not in the head", async ({ page }) => {
     await mockProject(page)
     await page.route("**/api/v1/deploy/7/environments/12/git-watch", (route) =>
@@ -197,9 +296,9 @@ test.describe("Build settings", () => {
 
     // Every recipe the backend builds is offered — the select this replaced
     // had three of eight — and the saved one is the lit card: fifteen
-    // recipes, a Dockerfile and a static site.
+    // recipes, a Dockerfile, a static site and Railpack.
     const builder = buildCard.getByRole("group", { name: "Builder" })
-    await expect(builder.getByRole("button")).toHaveCount(17)
+    await expect(builder.getByRole("button")).toHaveCount(18)
     await expect(builder.getByRole("button", { name: /^Node\.js/ })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -321,7 +420,7 @@ test.describe("Runtime settings", () => {
     // next deployment finds out, and the choice cannot be taken again.
     await expect(
       runtimeCard.getByText(
-        "Blue / green is unavailable: /data is writable — two releases cannot share it.",
+        "Blue / green and canary are unavailable: /data is writable — two releases cannot share it.",
       ),
     ).toBeVisible()
     await expect(runtimeCard.getByText("Will fail on the next deployment")).toBeVisible()
@@ -348,6 +447,92 @@ test.describe("Runtime settings", () => {
     await page.setViewportSize({ width: 390, height: 844 })
     expect(await overflow(page)).toBeLessThanOrEqual(1)
     await page.screenshot({ path: test.info().outputPath("runtime-390.png"), fullPage: true })
+  })
+
+  test("replicas are offered only to a stateless plan, and save as a count", async ({ page }) => {
+    const writes: Array<Record<string, unknown>> = []
+    await mockProject(page)
+    const runtimeCard = page.getByRole("form", { name: "Runtime" })
+    const replicas = runtimeCard.getByRole("radiogroup", { name: "Replicas" })
+
+    // The fixture's writable /data mount is what only one container can
+    // hold: one replica is all that is offered, and the reason is beside it.
+    await page.goto("/deploy/7/settings/runtime")
+    await expect(
+      runtimeCard.getByText(
+        "One replica only: /data is writable, and replicas would write to it at the same time.",
+      ),
+    ).toBeVisible()
+    await expect(replicas.getByRole("radio", { name: "1", exact: true })).toBeEnabled()
+    await expect(replicas.getByRole("radio", { name: "2", exact: true })).toBeDisabled()
+    await expect(replicas.getByRole("radio", { name: "8", exact: true })).toBeDisabled()
+
+    // Without the mount the plan is stateless, and a count is a count.
+    await mockProject(page, { runtimePlan: { mounts: [] } })
+    await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+      if (route.request().method() === "PUT")
+        writes.push(route.request().postDataJSON() as Record<string, unknown>)
+      await route.fallback()
+    })
+    await page.goto("/deploy/7/settings/runtime")
+    await expect(runtimeCard.getByText(/^One replica only/)).toHaveCount(0)
+    await runtimeCard.getByLabel("Memory limit").fill("256")
+    await replicas.getByRole("radio", { name: "3", exact: true }).click()
+    await expect(runtimeCard.getByText("3 replicas of each release")).toBeVisible()
+    await expect(
+      runtimeCard.getByText("3 × 256 MB = 768 MB for the release", { exact: false }),
+    ).toBeVisible()
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await runtimeCard
+      .locator("#releases")
+      .screenshot({ path: test.info().outputPath("replicas-1280.png") })
+    await saveSettings(page)
+    await expectSaved(page)
+    const saved = writes.at(-1) as { runtime: Record<string, unknown> }
+    expect(saved.runtime.replicas).toBe(3)
+
+    // One again is the field left out, as the server writes it back.
+    await replicas.getByRole("radio", { name: "1", exact: true }).click()
+    await saveSettings(page)
+    await expectSaved(page)
+    expect("replicas" in (writes.at(-1) as { runtime: Record<string, unknown> }).runtime).toBe(
+      false,
+    )
+    await page.setViewportSize({ width: 390, height: 844 })
+    expect(await overflow(page)).toBeLessThanOrEqual(1)
+  })
+
+  test("a replicas refusal from the server lands on the replicas field", async ({ page }) => {
+    await mockProject(page, { runtimePlan: { mounts: [] } })
+    await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+      if (route.request().method() === "PUT")
+        return route.fulfill({
+          status: 422,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "invalid_plan",
+              message:
+                "2 replicas need a stateless release: host port 8080 can be held by one container at a time",
+              field: "runtime.replicas",
+            },
+          }),
+        })
+      await route.fallback()
+    })
+    await page.goto("/deploy/7/settings/runtime")
+    const runtimeCard = page.getByRole("form", { name: "Runtime" })
+    await runtimeCard
+      .getByRole("radiogroup", { name: "Replicas" })
+      .getByRole("radio", { name: "2", exact: true })
+      .click()
+    await saveSettings(page)
+    await expect(
+      runtimeCard.getByText(
+        "2 replicas need a stateless release: host port 8080 can be held by one container at a time",
+      ),
+    ).toBeVisible()
+    await expect(runtimeCard.getByText("Not saved", { exact: true })).toBeVisible()
   })
 
   test("adds and saves a health check", async ({ page }) => {
@@ -427,7 +612,7 @@ test.describe("Runtime settings, drafts and refusals", () => {
     // Why blue/green fails is said beside the choice, at full ink.
     await expect(
       runtimeCard.getByText(
-        "Blue / green is unavailable: /data is writable — two releases cannot share it.",
+        "Blue / green and canary are unavailable: /data is writable — two releases cannot share it.",
       ),
     ).toBeVisible()
 
@@ -931,5 +1116,64 @@ test.describe("Build settings for static output and Python", () => {
     expect(saved.build.dockerfile).toBe("deploy/Dockerfile")
     expect(saved.build.recipe).toBeUndefined()
     expect(saved.build.pythonVersion).toBeUndefined()
+  })
+
+  test("Railpack is offered beside the recipes with its provider and configuration file", async ({
+    page,
+  }) => {
+    const writes: Array<Record<string, unknown>> = []
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+      if (route.request().method() === "PUT")
+        writes.push(route.request().postDataJSON() as Record<string, unknown>)
+      await route.fallback()
+    })
+
+    await page.goto("/deploy/7/settings/build")
+    const buildCard = page.getByRole("form", { name: "Build" })
+    const builder = buildCard.getByRole("group", { name: "Builder" })
+    await builder.getByRole("button", { name: /^Railpack/ }).click()
+    await expect(builder.getByRole("button", { name: /^Railpack/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    // What decides the build, and what it pins and what it does not.
+    await expect(buildCard.getByText(/the builder Railway and Coolify use/)).toBeVisible()
+    await expect(
+      buildCard.getByText(/pinned by digest; the builder and runtime images/),
+    ).toBeVisible()
+    // The recipe's own fields leave with it; Railpack serves static output itself.
+    await expect(buildCard.getByRole("group", { name: "Package manager" })).toHaveCount(0)
+    await expect(buildCard.getByLabel("Output directory")).toHaveCount(0)
+
+    await buildCard.getByLabel("Provider").click()
+    await page.getByRole("option", { name: "Python" }).click()
+    await buildCard.getByLabel("Configuration file").fill("../railpack.json")
+    await saveSettings(page)
+    await expect(buildCard.getByText(/Name a \.json file inside the root directory/)).toBeVisible()
+    expect(writes).toHaveLength(0)
+
+    await buildCard.getByLabel("Configuration file").fill("deploy/railpack.json")
+    await saveSettings(page)
+    await expectSaved(page)
+    const saved = writes.at(-1) as { build: Record<string, unknown> }
+    expect(saved.build.method).toBe("railpack")
+    expect(saved.build.railpackProvider).toBe("python")
+    expect(saved.build.railpackConfig).toBe("deploy/railpack.json")
+    expect(saved.build.recipe).toBeUndefined()
+    expect(saved.build.packageManager).toBeUndefined()
+    expect(saved.build.outputDirectory).toBeUndefined()
+
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.screenshot({
+      path: test.info().outputPath("build-railpack-1280.png"),
+      fullPage: true,
+    })
+    await page.setViewportSize({ width: 390, height: 844 })
+    expect(await overflow(page)).toBeLessThanOrEqual(1)
+    await page.screenshot({
+      path: test.info().outputPath("build-railpack-390.png"),
+      fullPage: true,
+    })
   })
 })

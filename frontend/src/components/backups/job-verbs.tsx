@@ -65,9 +65,26 @@ export function useJobVerbs({
 
   const testTarget = async (job: BackupJob) => {
     try {
-      const res = await post<{ ok: boolean; error?: string }>(`/backups/${job.id}/test`)
-      if (res.ok) notify.success(`${job.name}: destination is reachable and writable`)
+      const res = await post<{
+        ok: boolean
+        error?: string
+        hostKeyFingerprint?: string
+        hostKeyPinned?: boolean
+      }>(`/backups/${job.id}/test`)
+      // A server reached for the first time is pinned to the key it showed;
+      // saying the fingerprint is what lets that be compared with the
+      // server's own before the first archive goes to it.
+      const pinned = res.hostKeyPinned
+        ? `Pinned the server's host key ${res.hostKeyFingerprint}`
+        : undefined
+      if (res.ok)
+        notify.success(`${job.name}: destination is reachable and writable`, {
+          description: pinned,
+          // Long enough to compare the fingerprint with the server's own.
+          duration: pinned ? 20000 : undefined,
+        })
       else notify.error(`${job.name}: destination unreachable`, res.error)
+      if (res.hostKeyPinned) refresh()
     } catch (err) {
       notify.error("Could not test the destination", err)
     }
@@ -75,9 +92,14 @@ export function useJobVerbs({
 
   const remove = (job: BackupJob) =>
     confirm({
-      title: "Delete backup job",
-      confirmLabel: "Delete",
-      description: (
+      title: job.imported ? "Remove imported job" : "Delete backup job",
+      confirmLabel: job.imported ? "Remove" : "Delete",
+      description: job.imported ? (
+        <p>
+          Removes this server&apos;s records of <b>{job.name}</b>. The archives stay at the
+          destination, and can be imported again.
+        </p>
+      ) : (
         <p>
           Removes the schedule for <b>{job.name}</b>. Archives already taken are kept where they
           are.
@@ -92,6 +114,29 @@ export function useJobVerbs({
   return (job: BackupJob): Verb[] => {
     const running = job.lastRun?.status === "running"
     const out: Verb[] = []
+    // An imported job records archives another server wrote: there is
+    // nothing to run, schedule or edit, only where it reads them and the
+    // records themselves to drop.
+    if (job.imported) {
+      if (admin) {
+        out.push(
+          {
+            key: "test",
+            label: "Test destination",
+            icon: CloudUpload,
+            run: () => void testTarget(job),
+          },
+          {
+            key: "delete",
+            label: "Remove imported job",
+            icon: Trash,
+            danger: true,
+            run: () => void remove(job),
+          },
+        )
+      }
+      return out
+    }
     if (can("service.control")) {
       out.push({
         key: "run",

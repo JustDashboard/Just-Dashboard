@@ -97,6 +97,10 @@ func loadCatalog() {
 			catalogErr = fmt.Errorf("builtin/%s: %w", entry.Name(), parseErr)
 			return
 		}
+		if IsUserID(parsed.ID) {
+			catalogErr = fmt.Errorf("builtin/%s: %q is the namespace of templates added on a dashboard, which a built-in cannot use", entry.Name(), UserPrefix)
+			return
+		}
 		expected := parsed.ID + ".json"
 		if entry.Name() != expected {
 			catalogErr = fmt.Errorf("builtin/%s declares id %q; the file must be named %s", entry.Name(), parsed.ID, expected)
@@ -131,29 +135,23 @@ func loadCatalog() {
 // DeploymentSupport says whether this dashboard can deploy a blueprint end to
 // end, and when it cannot, exactly why. A blueprint is deployed as an
 // immutable image release: its inputs become variables, its secrets are
-// generated at commit, its volumes become managed storage and its checks gate
-// activation. What that release path cannot yet do is write configuration
-// files or downloaded artifacts into a volume before the container starts, or
-// run the game-server integration; those blueprints stay in the catalogue as
-// previews and say so.
+// generated at commit, its volumes become managed storage, its install files
+// and pinned artifacts are written into those volumes by a helper before the
+// container starts, its direct ports are published on the plan's bind address
+// whichever protocol they speak, and its checks gate activation. A game server
+// is that release with the console, players and settings screens on top.
+//
+// What remains refused is the one thing the release path cannot honestly do:
+// place a download whose bytes nobody pinned. An artifact found through a
+// version source is resolved at deploy time, and the helper has nothing to
+// verify it against.
 func DeploymentSupport(blueprint *Blueprint) (bool, string) {
 	if blueprint == nil {
 		return false, "Blueprint is unavailable."
 	}
-	if blueprint.Profile == ProfileGame {
-		return false, "Game servers deploy through the reviewed game-server integration, which is not available in this release."
-	}
-	if len(blueprint.Files) > 0 {
-		return false, "This blueprint installs configuration files before start, which runtime materialization does not support yet."
-	}
 	for _, operation := range blueprint.Operations.Startup {
-		if operation.Kind == OperationFetchArtifact {
-			return false, "This blueprint downloads an install-time artifact, which runtime materialization does not support yet."
-		}
-	}
-	for _, port := range blueprint.Ports {
-		if strings.ToLower(port.Protocol) == "udp" {
-			return false, "UDP ports are not supported by the deployment runtime yet."
+		if operation.Kind == OperationFetchArtifact && operation.Checksum == "" {
+			return false, "This blueprint downloads an artifact found through a version source, which the deployment helper cannot verify against a pinned checksum."
 		}
 	}
 	return true, ""
@@ -181,6 +179,26 @@ type Summary struct {
 	MemoryMB            int      `json:"memoryMb"`
 	RequiresAcceptance  bool     `json:"requiresAcceptance,omitempty"`
 	Privileged          bool     `json:"privileged,omitempty"`
+	// SourceKind is the deployment source this blueprint is deployed as:
+	// "blueprint" for one reviewed image, "compose" for a multi-service
+	// template that runs through the Compose release path. Image and
+	// MemoryMB are then the public service's image and the whole stack's
+	// footprint, and Services lists what the stack runs.
+	SourceKind string           `json:"sourceKind"`
+	Services   []ServiceSummary `json:"services,omitempty"`
+	// Origin is "builtin" for a definition shipped with the dashboard and
+	// "user" for one added on it (user.go), which is read from the id.
+	Origin string `json:"origin"`
+}
+
+// ServiceSummary is one service of a Compose template as the picker lists it.
+type ServiceSummary struct {
+	Name     string      `json:"name"`
+	Role     ServiceRole `json:"role"`
+	Purpose  string      `json:"purpose"`
+	Image    string      `json:"image"`
+	MemoryMB int         `json:"memoryMb"`
+	Public   bool        `json:"public,omitempty"`
 }
 
 func Summarize(blueprint *Blueprint) Summary {
@@ -197,6 +215,27 @@ func Summarize(blueprint *Blueprint) Summary {
 	for _, input := range blueprint.Inputs {
 		if input.Kind == InputAccept {
 			summary.RequiresAcceptance = true
+		}
+	}
+	summary.SourceKind = "blueprint"
+	summary.Origin = OriginBuiltIn
+	if IsUserID(blueprint.ID) {
+		summary.Origin = OriginUser
+	}
+	if blueprint.IsCompose() {
+		summary.SourceKind = "compose"
+		summary.MemoryMB = 0
+		public := blueprint.PublicService()
+		for _, service := range blueprint.Services {
+			isPublic := public != nil && service.Name == public.Name
+			if isPublic {
+				summary.Image = service.Image.Reference
+			}
+			summary.MemoryMB += service.Resources.MemoryMB
+			summary.Services = append(summary.Services, ServiceSummary{
+				Name: service.Name, Role: service.Role, Purpose: service.Purpose,
+				Image: service.Image.Reference, MemoryMB: service.Resources.MemoryMB, Public: isPublic,
+			})
 		}
 	}
 	return summary

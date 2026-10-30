@@ -1,4 +1,4 @@
-import type { DbCredentialServer, DbDriver, DbFleet } from "@/lib/types"
+import type { DbCredentialServer, DbDriver, DbFleet, DbKernelProblem } from "@/lib/types"
 import type { DbInstance, DbInventory, DbInventoryScan } from "@/components/database/fleet/types"
 
 /**
@@ -17,6 +17,11 @@ export type FoundAction =
   | { kind: "open" }
   /** A container that is down: starting it is what makes it connectable. */
   | { kind: "start-container"; id: string }
+  /**
+   * MongoDB 8 on a kernel it refuses to start on: recreating its container
+   * with the mitigation is what makes it start. Asked first.
+   */
+  | { kind: "kernel-mitigation"; container: string; problem: DbKernelProblem }
   /** A unit of the engine's own that is down. */
   | { kind: "start-unit"; unit: string }
   /** Nothing to press here; the place that owns it is one link away. */
@@ -55,6 +60,14 @@ function parentOf(path: string) {
   return cut > 0 ? path.slice(0, cut) : "/"
 }
 
+/**
+ * The name a row is titled with. An anonymous Docker volume is named by 64 hex
+ * digits, which is a row of noise; Docker's own listings cut an ID to twelve.
+ */
+export function instanceName(instance: DbInstance): string {
+  return /^[0-9a-f]{64}$/.test(instance.name) ? instance.name.slice(0, 12) : instance.name
+}
+
 /** Docker's and systemd's words for a server that exists and is not serving. */
 const STARTABLE = new Set(["exited", "created", "dead", "inactive", "failed"])
 
@@ -62,10 +75,19 @@ const STARTABLE = new Set(["exited", "created", "dead", "inactive", "failed"])
  * The one thing to do with a found instance. `hostAccount` is whether the
  * engine lets the dashboard make its own account from this machine — the
  * second way in to a native server that authenticates local connections by
- * the operating-system user.
+ * the operating-system user. `kernel` is what the inventory said of it, where
+ * it is a MongoDB this kernel keeps from starting: Start would only start it
+ * failing again.
  */
-export function foundAction(instance: DbInstance, hostAccount = false): FoundAction {
+export function foundAction(
+  instance: DbInstance,
+  hostAccount = false,
+  kernel?: DbKernelProblem,
+): FoundAction {
   if (instance.self) return { kind: "none" }
+  if (kernel?.fixable && instance.container?.id) {
+    return { kind: "kernel-mitigation", container: instance.container.id, problem: kernel }
+  }
   if (instance.connectable && instance.driver !== "") {
     if (instance.kind === "file") return { kind: "open" }
     switch (instance.credentials) {
@@ -103,6 +125,8 @@ export function foundActionWords(
       return { verb: `Start ${name}`, word: "Start container" }
     case "start-unit":
       return { verb: `Start ${name}`, word: "Start service" }
+    case "kernel-mitigation":
+      return { verb: `Apply the kernel mitigation to ${name}`, word: "Apply mitigation" }
     case "look":
       return { verb: `${action.label} ${name}`, word: action.label }
     case "none":
@@ -164,10 +188,14 @@ export function privateState(instance: DbInstance): boolean {
 export type FoundShelves = {
   /** Servers, running first, in the inventory's own order. */
   servers: DbInstance[]
-  /** Database files, data directories and files inside containers. */
+  /** Database files an application keeps, and files inside containers. */
   files: DbInstance[]
   /** Files that are a program's own state: counted, behind a fold. */
   kept: DbInstance[]
+  /** Copies kept aside — a backup, the dashboard's store under its own name elsewhere. */
+  backups: DbInstance[]
+  /** Data directories no server runs on: what a removed server left behind. */
+  leftover: DbInstance[]
   /** What the operator said to leave alone. */
   ignored: DbInstance[]
   /** Ignored keys whose instance is no longer on the machine. */
@@ -184,20 +212,32 @@ const READINESS: Record<FoundAction["kind"], number> = {
   credentials: 1,
   "start-container": 2,
   "start-unit": 2,
+  "kernel-mitigation": 2,
   look: 3,
   none: 3,
 }
 
 /**
  * Everything discovery found that no saved connection points at, on the
- * shelves the list draws. Servers stand in the order they can be connected —
+ * shelves the list draws. Only servers and the files an application keeps are
+ * listed as things to take; a program's own state, a copy kept aside, a data
+ * directory with no server and what the operator ignored are set aside behind
+ * one fold, because on a real server they outnumbered what anybody came for. Servers stand in the order they can be connected —
  * the ones a press connects first, then the ones that want a password, then
  * what has to be started, then what nothing here can open — and otherwise the
  * inventory's order is kept inside each: it is stable between polls, so a row
  * moves only when what it needs has changed.
  */
 export function foundShelves(inventory: DbInventory | undefined): FoundShelves {
-  const shelves: FoundShelves = { servers: [], files: [], kept: [], ignored: [], gone: [] }
+  const shelves: FoundShelves = {
+    servers: [],
+    files: [],
+    kept: [],
+    backups: [],
+    leftover: [],
+    ignored: [],
+    gone: [],
+  }
   if (!inventory) return shelves
   const present = new Set<string>()
   for (const instance of inventory.instances) {
@@ -205,11 +245,15 @@ export function foundShelves(inventory: DbInventory | undefined): FoundShelves {
     if (instance.connections.length > 0) continue
     if (instance.ignored) shelves.ignored.push(instance)
     else if (privateState(instance)) shelves.kept.push(instance)
+    else if (instance.file?.holder === "backup") shelves.backups.push(instance)
+    else if (instance.kind === "data") shelves.leftover.push(instance)
     else if (instance.kind === "server") shelves.servers.push(instance)
     else shelves.files.push(instance)
   }
   shelves.gone = inventory.ignored.filter((key) => !present.has(key))
-  shelves.servers.sort((a, b) => READINESS[foundAction(a).kind] - READINESS[foundAction(b).kind])
+  const readiness = (one: DbInstance) =>
+    READINESS[foundAction(one, false, inventory?.kernelProblems?.[one.key]).kind]
+  shelves.servers.sort((a, b) => readiness(a) - readiness(b))
   return shelves
 }
 

@@ -356,7 +356,7 @@ func validateVariableWrite(request VariableWriteRequest) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if (reference.Kind == "credential" || reference.Kind == "database") && request.Sensitivity != "secret" {
+		if (reference.Kind == "credential" || reference.Kind == "database" || reference.Kind == StoreReferenceKind) && request.Sensitivity != "secret" {
 			return "", fmt.Errorf("%w: %s references must be secret", ErrInvalidVariable, reference.Kind)
 		}
 	}
@@ -384,7 +384,7 @@ func (s *PlanningStore) RevealVariable(ctx context.Context, projectID, environme
 			continue
 		}
 		result := &VariableReveal{Name: name, Value: value.value}
-		if reference, parseErr := ParseVariableReference(value.value); parseErr == nil && value.valueMode != "literal" {
+		if reference, ok := parseStoredReference(value.value, value.valueMode); ok {
 			result.Reference = &reference
 		}
 		return result, nil
@@ -403,7 +403,7 @@ func (s *PlanningStore) LiteralVariableValues(ctx context.Context, projectID, en
 	}
 	literal := map[string]string{}
 	for _, value := range values {
-		if _, parseErr := ParseVariableReference(value.value); parseErr == nil && value.valueMode != "literal" {
+		if _, ok := parseStoredReference(value.value, value.valueMode); ok {
 			continue
 		}
 		literal[value.name] = value.value
@@ -423,6 +423,15 @@ func (s *PlanningStore) PutVariable(
 	value, err := validateVariableWrite(request)
 	if err != nil {
 		return nil, err
+	}
+	if request.Reference != "" {
+		reference, _ := ParseVariableReference(request.Reference)
+		if err := s.checkSharedReference(ctx, projectID, name, request.Sensitivity, reference); err != nil {
+			return nil, err
+		}
+		if err := s.checkStoreReference(ctx, environmentID, name, request.Sensitivity, reference); err != nil {
+			return nil, err
+		}
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -737,9 +746,31 @@ func (s *PlanningStore) CopyEnvironmentVariables(
 	if err != nil {
 		return nil, nil, err
 	}
+	// A reference to a database the preview holds a branch of resolves to
+	// the branch (preview_branches.go), so it is copied like a value; every
+	// other reference names production's own resources.
+	branched := map[int64]bool{}
+	branchRows, err := tx.QueryContext(ctx, `SELECT DISTINCT connection_id FROM deploy_preview_branches
+		WHERE environment_id = ? AND state IN ('waiting', 'restoring', 'ready')`, toEnvironmentID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for branchRows.Next() {
+		var id int64
+		if err := branchRows.Scan(&id); err != nil {
+			branchRows.Close()
+			return nil, nil, err
+		}
+		branched[id] = true
+	}
+	branchRows.Close()
 	copied, skipped = []string{}, []string{}
 	for _, value := range values {
-		if (value.valueMode != "literal" && strings.HasPrefix(value.value, "${{")) || own[value.name] {
+		reference := value.valueMode != "literal" && strings.HasPrefix(value.value, "${{")
+		if reference && branched[previewBranchReferenceTx(ctx, tx, value.value)] {
+			reference = false
+		}
+		if reference || own[value.name] {
 			skipped = append(skipped, value.name)
 			continue
 		}
@@ -964,7 +995,7 @@ func variableViews(values []storedVariableValue) []DeploymentVariable {
 			CreatedAt: value.createdAt, EnvironmentID: value.environmentID,
 			DesiredRevision: value.desiredRevision,
 		}
-		if reference, err := ParseVariableReference(value.value); err == nil && value.valueMode != "literal" {
+		if reference, ok := parseStoredReference(value.value, value.valueMode); ok {
 			view.Reference = &reference
 		}
 		result = append(result, view)
@@ -1032,7 +1063,8 @@ func ResolveVariableGraphWithModes(values map[string]string, modes map[string]st
 		state[name] = 1
 		stack = append(stack, name)
 		resolvedValue, leafSecret := value, false
-		if reference, err := ParseVariableReference(value); err == nil && modes[name] != "literal" {
+		if reference, ok := parseStoredReference(value, modes[name]); ok {
+			var err error
 			if reference.Kind == "variable" {
 				resolvedValue, leafSecret, err = visit(reference.Target)
 				if err != nil {
@@ -1263,19 +1295,14 @@ func (s *PlanningStore) EnvironmentConfiguration(
 		}
 		dependency.Config = json.RawMessage(config)
 		if dependency.Kind == "domain" {
-			var domain struct {
-				Hostname   string            `json:"hostname"`
-				HTTPS      bool              `json:"https"`
-				Protection *DomainProtection `json:"protection"`
-			}
+			var domain PlannedDomain
 			if json.Unmarshal(dependency.Config, &domain) != nil {
 				rows.Close()
 				return nil, fmt.Errorf("%w: domain dependency is malformed", ErrInvalidPlan)
 			}
-			result.Domains = append(result.Domains, PlannedDomain{
-				Hostname: domain.Hostname, HTTPS: domain.HTTPS, Ownership: dependency.Ownership,
-				Protection: canonicalDomainProtection(domain.Protection),
-			})
+			domain.Ownership = dependency.Ownership
+			domain.Protection = canonicalDomainProtection(domain.Protection)
+			result.Domains = append(result.Domains, domain)
 		} else {
 			result.Dependencies = append(result.Dependencies, dependency)
 		}
@@ -1345,6 +1372,9 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	if err := configuration.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
+	if err := refuseUnrunnableChecks(configuration.Checks); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -1370,6 +1400,14 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 		if err := validatePreviewPlan(environmentID, configuration.Build, configuration.Runtime); err != nil {
 			return nil, err
 		}
+	}
+	var sourceKind SourceKind
+	if err := tx.QueryRowContext(ctx, `
+		SELECT kind FROM deploy_sources WHERE environment_id = ? AND revision = ?`, environmentID, current).Scan(&sourceKind); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if err := refuseRailpackWithoutCheckout(sourceKind, configuration.Build); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
 	var previousBuildJSON string
 	if err := tx.QueryRowContext(ctx, `
@@ -1432,11 +1470,7 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 		}
 	}
 	for _, domain := range configuration.Domains {
-		domainConfig := map[string]any{"hostname": domain.Hostname, "https": domain.HTTPS}
-		if domain.Protection != nil {
-			domainConfig["protection"] = domain.Protection
-		}
-		config := mustJSON(domainConfig)
+		config := mustJSON(domain.domainConfig())
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO deploy_dependencies(environment_id, release_id, kind, ownership, resource_kind, resource_id, config_json, created_at)
 			VALUES(?, 0, 'domain', ?, 'proxy_site', ?, ?, ?)`, environmentID, domain.Ownership,
@@ -1526,7 +1560,16 @@ func (s *PlanningStore) saveEnvironmentSource(
 	detection *DetectionResult,
 ) (*EnvironmentConfiguration, *DetectionProposal, error) {
 	fail := func(err error) (*EnvironmentConfiguration, *DetectionProposal, error) { return nil, nil, err }
-	source = canonicalSourceConfig(source)
+	// A template source is saved as this dashboard's render of the version it
+	// names, which is also how a deployment moves to a newer version.
+	source, err := s.WithUserTemplate(ctx, canonicalSourceConfig(source))
+	if err != nil {
+		return fail(err)
+	}
+	source, err = source.WithTemplateDocuments()
+	if err != nil {
+		return fail(err)
+	}
 	if err := source.ValidateForDeployment(); err != nil {
 		return fail(err)
 	}

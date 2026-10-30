@@ -97,6 +97,13 @@ services:
       JD_UPDATE_REPO: ${JD_UPDATE_REPO:-JustDashboard/Just-Dashboard}
       JD_UPDATE_BRANCH: ${JD_UPDATE_BRANCH:-main}
       JD_UPDATE_DIR: ${JD_UPDATE_DIR:-}
+      # Linking this server to a just-dashboard.com account. Nothing is sent
+      # until an administrator links it (Settings, install.sh, or
+      # scripts/manage.sh link); false switches the feature off outright. The
+      # URL is an origin: https, or http for localhost while developing the site.
+      JD_ACCOUNT_LINK: ${JD_ACCOUNT_LINK:-true}
+      JD_ACCOUNT_URL: ${JD_ACCOUNT_URL:-https://just-dashboard.com}
+      JD_USAGE_PING: ${JD_USAGE_PING:-true}
       JD_LOG_LEVEL: ${JD_LOG_LEVEL:-info}
     volumes:
       # Root-equivalent access. Everything that reaches it is authenticated,
@@ -105,9 +112,10 @@ services:
       - /:/host:rslave
       # The dashboard addresses the server by its real paths, so the
       # directories it manages have to appear here under those same paths.
-      # Without this the file manager, git discovery and compose-stack
-      # scanning quietly operate on this container's own empty filesystem
-      # while appearing to browse the server. Narrow this list if you have
+      # Without this git discovery, compose-stack scanning and the other
+      # path-taking features quietly operate on this container's own empty
+      # filesystem while appearing to browse the server. (The Files page
+      # runs in the host's mount namespace and sees every path regardless.) Narrow this list if you have
       # narrowed JD_FILE_ROOTS and friends to match.
       - /home:/home
       - /opt:/opt

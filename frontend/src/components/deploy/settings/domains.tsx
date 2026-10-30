@@ -1,12 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import {
   ArrowUpRight,
   Copy,
+  CornerUpRight,
   External,
   Globe,
   Key,
@@ -14,20 +15,32 @@ import {
   LockOpen,
   Plus,
   RefreshClockwise,
+  Servers,
   Trash,
   Warning,
 } from "@/components/icons"
-import { ApiError, get, refusedIndex } from "@/lib/api"
+import { ApiError, get, put, refusedIndex } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { plural } from "@/lib/format"
+import { plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
+import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentDomainRoute,
   DeploymentEnvironmentConfiguration,
+  DeploymentErrorPage,
+  DeploymentForwardAuth,
   DeploymentHostnameSuggestion,
+  DeploymentMaintenanceSwitch,
+  DeploymentPageName,
+  DeploymentRedirectCode,
+  DeploymentRouteHSTS,
+  DeploymentTailnetAddress,
+  Exposure,
+  ForwardAuthProvider,
 } from "@/lib/types"
+import { SSO_PROVIDERS, chooseSsoProvider, ssoPreset } from "@/lib/sso-providers"
 import { Field, FieldCheck, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo, issuerProduct } from "@/components/product-logo"
@@ -39,6 +52,13 @@ import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
@@ -46,7 +66,8 @@ import {
 } from "@/components/ui/input-group"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { HttpsToggle } from "@/components/deploy/https-toggle"
-import { CertificateStatus, ROUTE_LABEL, ROUTE_TONE } from "@/components/deploy/vocabulary"
+import { Tag } from "@/components/tag"
+import { CertificateStatus, ROUTE_LABEL, ROUTE_TONE, hostOf } from "@/components/deploy/vocabulary"
 import {
   SettingForm,
   SettingSection,
@@ -56,6 +77,41 @@ import {
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import { OwnershipSelect } from "@/components/deploy/settings/mounts"
 import { useProject } from "@/components/deploy/project-context"
+import { EdgeRulesForm } from "@/components/deploy/settings/edge-rules"
+import { DNSRecordPanel } from "@/components/deploy/settings/dns-record-panel"
+import {
+  HSTS_DEFAULT_MAX_AGE,
+  HSTS_MAX_AGES,
+  HSTS_PRELOAD_MAX_AGE,
+  HeaderListField,
+  ListField,
+} from "@/components/proxy/site-form"
+import { PAGE_LABEL, PageEditor } from "@/components/proxy/page-editor"
+import { useConfirm } from "@/components/confirm-dialog"
+import {
+  hstsOffered,
+  hstsPolicyState,
+  routeAccessState,
+  savedHSTS,
+  signInConflicts,
+  withPreload,
+} from "@/components/deploy/settings/route-access"
+import {
+  readTailnetEntry,
+  tailnetAccessState,
+  tailnetBlockers,
+  tailnetRuntime,
+  tailnetSwitchClears,
+} from "@/components/deploy/settings/tailnet-access"
+import {
+  ERROR_PAGES,
+  errorPagesState,
+  maintenancePolicyState,
+  maintenanceState,
+  maintenanceUnready,
+  retryAfterOf,
+  routeMaintenanceOf,
+} from "@/components/deploy/settings/route-pages"
 
 /**
  * Domains — the hostnames this environment answers on.
@@ -88,6 +144,17 @@ type DomainValue = DeploymentEnvironmentConfiguration["domains"][number]
 /** A hostname is made by the project or linked to it; it is never only watched. */
 const DOMAIN_OWNERSHIP: DomainValue["ownership"][] = ["managed", "linked"]
 
+/**
+ * The answers a redirecting name can give, permanent first. 308 and 307 keep
+ * a form's POST a POST; 301 and 302 are for clients older than that.
+ */
+const REDIRECT_CODES: [DeploymentRedirectCode, string][] = [
+  [308, "Permanent · 308"],
+  [301, "Permanent · 301"],
+  [307, "Temporary · 307"],
+  [302, "Temporary · 302"],
+]
+
 export function DomainsSettings({
   projectId,
   environmentId,
@@ -98,8 +165,332 @@ export function DomainsSettings({
   const state = useConfiguration(projectId, environmentId)
   return (
     <SettingsPage state={state}>
-      {(configuration) => <DomainsForm configuration={configuration} save={state.save} />}
+      {(configuration) => (
+        <>
+          {/* A tailnet-only environment has no public route, so it has no
+              domains, and none of the rules below can be saved beside it. */}
+          {!configuration.runtime.tailnet && (
+            <DomainsForm configuration={configuration} save={state.save} />
+          )}
+          <TailnetForm configuration={configuration} save={state.save} />
+          {/* Rules for a route that does not exist yet would be a form with
+              nothing to act on; one already saved stays editable. */}
+          {(configuration.domains.length > 0 ||
+            Boolean(configuration.runtime.allowFrom?.length) ||
+            Boolean(configuration.runtime.responseHeaders?.length) ||
+            Boolean(configuration.runtime.forwardAuth) ||
+            Boolean(configuration.runtime.hsts)) && (
+            <RouteRulesForm configuration={configuration} save={state.save} />
+          )}
+          {(configuration.domains.length > 0 ||
+            Boolean(configuration.runtime.edgeRules?.length) ||
+            Boolean(configuration.runtime.rateLimit) ||
+            Boolean(configuration.runtime.crowdSec)) && (
+            <EdgeRulesForm configuration={configuration} save={state.save} />
+          )}
+          {(configuration.domains.length > 0 ||
+            Boolean(configuration.runtime.maintenance) ||
+            Boolean(configuration.runtime.errorPages?.length)) && (
+            <>
+              <MaintenanceForm projectId={projectId} environmentId={environmentId} />
+              <RoutePagesForm
+                configuration={configuration}
+                save={state.save}
+                projectId={projectId}
+                environmentId={environmentId}
+              />
+            </>
+          )}
+        </>
+      )}
     </SettingsPage>
+  )
+}
+
+type TailnetDraft = { on: boolean; allow: string[] }
+
+/**
+ * Tailnet only — the environment answers on this server's tailnet address
+ * and nowhere else, the way a pull request preview does: tailscale serve
+ * maps one port of the tailnet to it, with the tailnet's own certificate and
+ * no public domain. Beside the public domains, because it is the other answer
+ * to the question the page asks: where does this environment answer.
+ *
+ * Who may open it is the list under the switch, Tailscale logins and tags,
+ * each read as the server reads it before it is added. Empty is the whole
+ * tailnet. A list puts a gate in front of the application that asks the
+ * dashboard about every request, and the dashboard asks tailscaled.
+ *
+ * Turning it on takes away, with the same save, what only a public route
+ * has — the domains, the sign-in, the address list, the headers — and says
+ * so before the save, rather than leaving the server to refuse it one field
+ * at a time.
+ */
+function TailnetForm({
+  configuration,
+  save,
+}: {
+  configuration: DeploymentEnvironmentConfiguration
+  save: ReturnType<typeof useConfiguration>["save"]
+}) {
+  const { can } = useAuth()
+  const project = useProject()
+  // A preview's plan is a copy of the environment it previews: its list is
+  // set there, and a change here would be undone at the next head.
+  const preview = Boolean(configuration.runtime.previewIsolation)
+  const canAdmin = can("system.admin") && !preview
+  const savedTailnet = configuration.runtime.tailnet
+  const saved: TailnetDraft = { on: Boolean(savedTailnet), allow: savedTailnet?.allow ?? [] }
+  const draft = useSettingDraft(`deploy.${project.projectId}.settings.tailnet`, saved)
+  const value = draft.value
+  const [saving, setSaving] = useState(false)
+  const [refusal, setRefusal] = useState<string>()
+  const live = project.operations?.tailnet
+  const clears = value.on && !savedTailnet ? tailnetSwitchClears(configuration) : []
+  const blockers = value.on ? tailnetBlockers(configuration.runtime) : []
+
+  const onSave = async () => {
+    setSaving(true)
+    setRefusal(undefined)
+    try {
+      await save({
+        ...(value.on ? { domains: [] } : {}),
+        runtime: (latest) => tailnetRuntime(latest.runtime, value.on ? value.allow : undefined),
+      })
+      return true
+    } catch (error) {
+      if (error instanceof ApiError && error.field?.startsWith("runtime.tailnet")) {
+        setRefusal(error.message)
+      } else {
+        notify.error("Could not save the tailnet setting", error)
+      }
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <SettingForm
+      name="Tailnet"
+      onSave={onSave}
+      dirty={draft.dirty}
+      changes={draft.changes}
+      saving={saving}
+      canEdit={canAdmin}
+      onDiscard={() => {
+        setRefusal(undefined)
+        draft.discard()
+      }}
+    >
+      <SettingSection
+        title="Tailnet"
+        state={tailnetAccessState(value.on ? { allow: value.allow } : undefined)}
+        status={settingStatus({ dirty: draft.dirty, refused: Boolean(refusal) })}
+      >
+        <OptionList>
+          <OptionRow
+            title="Tailnet only"
+            hint="Answers on this server's tailnet address and nowhere else, as pull request previews do: no public domain, no public certificate, and only devices on your tailnet reach it."
+            checked={value.on}
+            disabled={!canAdmin}
+            onCheckedChange={(on) => draft.set({ ...value, on })}
+          >
+            {value.on && (
+              <div className="flex flex-col gap-4">
+                <TailnetAddress live={live} saved={Boolean(savedTailnet)} />
+                <TailnetAllowField
+                  values={value.allow}
+                  onChange={(allow) => draft.set({ ...value, allow })}
+                  disabled={!canAdmin}
+                />
+                <FormNote>
+                  {value.allow.length > 0
+                    ? "Every request is checked first: the dashboard asks Tailscale who holds the address it came from, and anyone not listed is answered 403. The application is told X-Tailnet-Login and X-Tailnet-User, and never what the visitor sent."
+                    : "The tailnet is the fence: everyone on it can open the application, as with a preview. List logins or tags to admit only them."}
+                </FormNote>
+                {preview && (
+                  <FormNote>A preview takes this from the environment it previews.</FormNote>
+                )}
+                {clears.length > 0 && (
+                  <FormNote tone="warning">
+                    Saving also takes away {clears.join(", ")}: a tailnet-only environment has no
+                    public route.
+                  </FormNote>
+                )}
+                {blockers.map((blocker) => (
+                  <FormNote key={blocker} tone="warning">
+                    It cannot be tailnet-only while {blocker}. Change that under{" "}
+                    <Link
+                      href={`/deploy/${project.projectId}/settings/runtime`}
+                      className="underline underline-offset-4"
+                    >
+                      Runtime
+                    </Link>{" "}
+                    first.
+                  </FormNote>
+                ))}
+                {refusal && (
+                  <FormNote role="alert" tone="danger">
+                    {refusal}
+                  </FormNote>
+                )}
+              </div>
+            )}
+          </OptionRow>
+        </OptionList>
+      </SettingSection>
+    </SettingForm>
+  )
+}
+
+/**
+ * The address the environment has on the tailnet, as its live release has
+ * it: a link with Tailscale's mark, or that it gets one on the next
+ * deployment — the port is chosen then and kept.
+ */
+function TailnetAddress({
+  live,
+  saved,
+}: {
+  live: DeploymentTailnetAddress | undefined
+  saved: boolean
+}) {
+  const host = live?.url ? hostOf(live.url) : undefined
+  const [tone, label]: [DotTone, string] = !saved
+    ? ["notice", "Not saved yet"]
+    : !host
+      ? ["notice", "Gets its address on the next deployment"]
+      : live?.published
+        ? ["running", "Published on the tailnet"]
+        : ["warning", "Not reachable · redeploy"]
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <ProductLogo size="sm" id="tailscale" fallback={Globe} />
+      <div className="min-w-0 space-y-1">
+        {host ? (
+          <a
+            href={live?.url}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open ${host}`}
+            className="flex max-w-full min-w-0 items-center gap-1.5 rounded-sm font-mono text-sm font-medium focus-ring hover:underline"
+          >
+            <span className="truncate">{host}</span>
+            <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+          </a>
+        ) : (
+          <p className="text-sm font-medium text-muted-foreground">Address on the tailnet</p>
+        )}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+          <Status key={label} tone={tone} label={label} className="animate-rise" />
+          {live?.gate && live.allow.length > 0 && (
+            <span className="text-muted-foreground">
+              {live.gate === "caddy"
+                ? "Checked by the dashboard's own Caddy on loopback"
+                : "Checked by this server's nginx"}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Who may open the environment: Tailscale logins and tags, each read the
+ * way the server reads it as it is typed, so an entry that would be refused
+ * never reaches the list. A login is kept in lower case, since providers do
+ * not agree on one; a tag as written, since the tailnet's policy compares
+ * tags exactly.
+ */
+function TailnetAllowField({
+  values,
+  onChange,
+  disabled,
+}: {
+  values: string[]
+  onChange: (values: string[]) => void
+  disabled: boolean
+}) {
+  const [typed, setTyped] = useState("")
+  const [problem, setProblem] = useState<string>()
+  const add = () => {
+    const read = readTailnetEntry(typed, values)
+    if ("error" in read) {
+      setProblem(read.error)
+      return
+    }
+    onChange([...values, read.entry])
+    setTyped("")
+    setProblem(undefined)
+  }
+  return (
+    <Field
+      label="Who may open it"
+      htmlFor="tailnet-allow"
+      hint="Tailscale logins and tags. Empty lets everyone on the tailnet in."
+      info="A login is the account a person signs in to Tailscale with, alice@example.com or alice@github. A tag is a machine's ACL tag, tag:ci; a tagged machine is admitted by its tags alone."
+      error={problem}
+    >
+      <div className="space-y-2">
+        {values.length > 0 && (
+          <ul aria-label="Admitted on the tailnet" className="flex flex-wrap items-center gap-1.5">
+            {values.map((value) => (
+              <li key={value}>
+                <Tag mono className="gap-1.5 pr-0.5">
+                  {value}
+                  {!disabled && (
+                    <IconAction
+                      type="button"
+                      label={`Remove ${value}`}
+                      size="icon-xs"
+                      className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
+                      onClick={() => onChange(values.filter((entry) => entry !== value))}
+                    >
+                      <Trash />
+                    </IconAction>
+                  )}
+                </Tag>
+              </li>
+            ))}
+          </ul>
+        )}
+        {!disabled && (
+          <div className="flex items-center gap-2">
+            <Input
+              id="tailnet-allow"
+              value={typed}
+              onChange={(event) => {
+                setTyped(event.target.value)
+                setProblem(undefined)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  add()
+                }
+              }}
+              placeholder="alice@example.com or tag:ci"
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={Boolean(problem)}
+              className="font-mono text-xs"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={add}
+              disabled={!typed.trim()}
+              aria-label="Add to who may open it"
+            >
+              <Plus className="size-3.5" />
+            </Button>
+          </div>
+        )}
+      </div>
+    </Field>
   )
 }
 
@@ -126,6 +517,20 @@ function DomainsForm({
     false,
   )
   const [rowError, setRowError] = useState<{ index: number; message: string }>()
+  // The name whose DNS record sheet is open. A preflight finding's Create the
+  // record opens the page on it (`?record=`), and the address is then dropped
+  // so a reload does not open it again.
+  const search = useSearchParams()
+  const asked = canAdmin ? search.get("record") : null
+  const [recordFor, setRecordFor] = useState<string | undefined>(asked ?? undefined)
+  const [answered, setAnswered] = useState(asked)
+  if (asked !== answered) {
+    setAnswered(asked)
+    if (asked) setRecordFor(asked)
+  }
+  useEffect(() => {
+    if (asked) router.replace(window.location.pathname, { scroll: false })
+  }, [asked, router])
   const observed =
     project.operations?.domains.status === "available" ? project.operations.domains : undefined
   const routes = observed?.domains
@@ -197,13 +602,48 @@ function DomainsForm({
         icon: LockClosed,
         run: () => router.push(route.certificateLink!),
       })
+    // A saved name's record, read and written with the DNS credentials saved
+    // under Certificates; an unsaved one has nothing on the server to ask.
+    if (canAdmin && saved.has(domain.hostname.toLowerCase()))
+      verbs.push({
+        key: "dns-record",
+        label: "Open the DNS record",
+        icon: Servers,
+        run: () => setRecordFor(domain.hostname),
+      })
+    const target = servedNames(domains).find((name) => name !== domain.hostname)
+    if (canAdmin && !domain.redirectTo && target)
+      verbs.push({
+        key: "redirect",
+        label: "Redirect to another domain",
+        icon: CornerUpRight,
+        run: () => update(index, { redirectTo: target, redirectCode: undefined }),
+      })
+    if (canAdmin && domain.redirectTo)
+      verbs.push({
+        key: "serve",
+        label: "Serve the application here",
+        icon: Globe,
+        run: () => update(index, { redirectTo: undefined, redirectCode: undefined }),
+      })
     if (canAdmin)
       verbs.push({
         key: "remove",
         label: "Remove",
         icon: Trash,
         danger: true,
-        run: () => setDomains(domains.filter((_, i) => i !== index)),
+        // A name redirecting to the one removed would point nowhere, so it
+        // goes back to serving the application rather than failing the save.
+        run: () =>
+          setDomains(
+            domains
+              .filter((_, i) => i !== index)
+              .map((item) =>
+                item.redirectTo === domain.hostname
+                  ? { ...item, redirectTo: undefined, redirectCode: undefined }
+                  : item,
+              ),
+          ),
       })
     return verbs
   }
@@ -280,6 +720,7 @@ function DomainsForm({
                   unsaved={!saved.has(domain.hostname.toLowerCase())}
                   canAdmin={canAdmin}
                   error={rowError?.index === index ? rowError.message : undefined}
+                  targets={servedNames(domains).filter((name) => name !== domain.hostname)}
                   verbs={verbsFor(domain, index)}
                   onChange={(next) => update(index, next)}
                 />
@@ -307,6 +748,12 @@ function DomainsForm({
           )}
         </SettingSection>
       </SettingForm>
+
+      <DNSRecordPanel
+        projectId={project.projectId}
+        hostname={recordFor}
+        onOpenChange={(open) => !open && setRecordFor(undefined)}
+      />
 
       <AddDomainPanel
         open={adding}
@@ -336,6 +783,7 @@ function DomainRow({
   canAdmin,
   error,
   index,
+  targets,
   verbs,
   onChange,
 }: {
@@ -346,6 +794,8 @@ function DomainRow({
   canAdmin: boolean
   error?: string
   index: number
+  /** The other names that serve the application, which this one may redirect to. */
+  targets: string[]
   verbs: Verb[]
   onChange: (next: Partial<DomainValue>) => void
 }) {
@@ -363,10 +813,14 @@ function DomainRow({
   // row still asks for what the route serves. Turn HTTPS on or off and the
   // live answer is about to stop being true, so the row says what the next
   // deployment does instead of contradicting its own toggle.
-  const httpsChanging = Boolean(route) && domain.https !== route?.https
-  const liveCertificate = route && !unsaved && !httpsChanging ? route : undefined
+  // A name served through Cloudflare Tunnel has no certificate here at all:
+  // Cloudflare's edge terminates its HTTPS, and the route serves it plain to
+  // the connector, so the live certificate readings say nothing about it.
+  const tunnel = Boolean(domain.tunnel)
+  const httpsChanging = !tunnel && Boolean(route) && domain.https !== route?.https
+  const liveCertificate = route && !unsaved && !httpsChanging && !tunnel ? route : undefined
 
-  const issuer = issuerProduct(liveCertificate?.certificateIssuer)
+  const issuer = tunnel ? "cloudflare" : issuerProduct(liveCertificate?.certificateIssuer)
 
   const setProtection = (next: Partial<NonNullable<DomainValue["protection"]>>) =>
     protection && onChange({ protection: { ...protection, ...next } })
@@ -399,6 +853,29 @@ function DomainRow({
             11px beside 12px readings, two baselines for one row of facts. */}
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           <Status key={routeLabel} tone={routeTone} label={routeLabel} className="animate-rise" />
+          {domain.redirectTo && (
+            <span
+              key={domain.redirectTo}
+              className="flex min-w-0 animate-rise items-center gap-1 text-muted-foreground"
+            >
+              <CornerUpRight aria-hidden className="size-3 shrink-0" />
+              <span className="truncate">
+                Redirects to <span className="font-mono">{domain.redirectTo}</span>
+              </span>
+            </span>
+          )}
+          {/* Each name is served on its own scheme: an HTTPS name sends its
+              plain-HTTP visitors on, a plain one is served as asked, whatever
+              the other names on the route do — so the row says which. */}
+          {!domain.redirectTo && (
+            <span key={tunnel ? "tunnel" : scheme} className="animate-rise text-muted-foreground">
+              {tunnel
+                ? "Through Cloudflare Tunnel · HTTPS at Cloudflare's edge"
+                : domain.https
+                  ? "Plain HTTP is redirected to HTTPS"
+                  : "Plain HTTP, no redirect"}
+            </span>
+          )}
           {/* The issuer is the row's mark, so the line carries the state and the
               days left and not the issuer's glyph a second time. */}
           {route && !unsaved && httpsChanging && (
@@ -433,24 +910,33 @@ function DomainRow({
         <ToggleGroup
           type="multiple"
           variant="outline"
-          value={[domain.https && "https", protection && "password"].filter(
+          value={[domain.https && "https", protection && "password", tunnel && "tunnel"].filter(
             (value): value is string => Boolean(value),
           )}
-          onValueChange={(values) =>
+          onValueChange={(values) => {
+            // Through the tunnel is HTTPS by definition — Cloudflare's edge
+            // answers the visitor — so turning it on turns HTTPS on with it.
+            const through = values.includes("tunnel")
             onChange({
-              https: values.includes("https"),
+              https: through || values.includes("https"),
               protection: values.includes("password")
                 ? (protection ?? { username: "", password: "" })
                 : undefined,
+              tunnel: through || undefined,
             })
-          }
+          }}
           disabled={!canAdmin}
           className="shrink-0"
         >
           <ToggleGroupItem
             value="https"
             aria-label={`HTTPS on ${host}`}
-            className="h-11 gap-1.5 text-body data-[state=off]:text-muted-foreground sm:h-9"
+            // Held on, not greyed out: the name is HTTPS, at Cloudflare's edge.
+            disabled={tunnel}
+            className={cn(
+              "h-11 gap-1.5 text-body data-[state=off]:text-muted-foreground sm:h-9",
+              tunnel && canAdmin && "disabled:cursor-default disabled:opacity-100",
+            )}
           >
             <LockClosed
               className={cn(
@@ -473,6 +959,21 @@ function DomainRow({
             />
             Password
           </ToggleGroupItem>
+          {/* A wildcard is not routed through a tunnel: each name is a route
+              and a record of its own at Cloudflare. */}
+          {(tunnel || !host.startsWith("*.")) && (
+            <ToggleGroupItem
+              value="tunnel"
+              aria-label={`Cloudflare Tunnel on ${host}`}
+              className="h-11 gap-1.5 text-body data-[state=off]:text-muted-foreground sm:h-9"
+            >
+              <ProductGlyph
+                id="cloudflare"
+                className={cn("transition-opacity", !tunnel && "opacity-50 grayscale")}
+              />
+              Tunnel
+            </ToggleGroupItem>
+          )}
         </ToggleGroup>
         <OwnershipSelect
           value={domain.ownership}
@@ -529,6 +1030,65 @@ function DomainRow({
           </div>
         </div>
       )}
+      {domain.redirectTo && (
+        <div className="col-span-full min-w-0 animate-rise pl-11">
+          <div className="ml-1 border-l border-hairline pl-4">
+            <FieldRow>
+              <Field
+                label="Sends visitors to"
+                htmlFor={`domain-redirect-${index}`}
+                info="Every path and query on this name is answered with a redirect to the same path on the other. It serves no application of its own."
+              >
+                <Select
+                  value={domain.redirectTo}
+                  onValueChange={(redirectTo) => onChange({ redirectTo })}
+                  disabled={!canAdmin}
+                >
+                  <SelectTrigger id={`domain-redirect-${index}`} className="w-full font-mono">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* The saved target stays listed even once it has stopped
+                        serving, so the field shows what the server refused. */}
+                    {[...new Set([domain.redirectTo, ...targets])].map((name) => (
+                      <SelectItem key={name} value={name} className="font-mono">
+                        {name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field
+                label="Answer"
+                htmlFor={`domain-redirect-code-${index}`}
+                info="Browsers remember a permanent redirect, so use a temporary one while trying it out."
+              >
+                <Select
+                  value={String(domain.redirectCode ?? 308)}
+                  onValueChange={(code) =>
+                    onChange({
+                      redirectCode:
+                        code === "308" ? undefined : (Number(code) as DeploymentRedirectCode),
+                    })
+                  }
+                  disabled={!canAdmin}
+                >
+                  <SelectTrigger id={`domain-redirect-code-${index}`} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REDIRECT_CODES.map(([code, label]) => (
+                      <SelectItem key={code} value={String(code)}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </FieldRow>
+          </div>
+        </div>
+      )}
       {error && (
         <p role="alert" className="col-span-full animate-rise pl-11 text-hint text-destructive">
           {error}
@@ -549,6 +1109,13 @@ function certificateReading(suggestion: DeploymentHostnameSuggestion): {
   if (suggestion.covered) return { tone: "running", label: "HTTPS ready" }
   if (suggestion.certificateMethod) return { tone: "notice", label: "Certificate on deploy" }
   return { tone: "warning", label: "HTTPS unavailable" }
+}
+
+/** The tunnel's answer for a typed name: routed through it on the deploy, or not. */
+function tunnelReading(suggestion: DeploymentHostnameSuggestion): { tone: DotTone; label: string } {
+  return suggestion.covered
+    ? { tone: "running", label: "Through the tunnel" }
+    : { tone: "warning", label: "Tunnel unavailable" }
 }
 
 /** The challenge a certificate would be issued over, as the product that answers it. */
@@ -594,6 +1161,7 @@ function AddDomainPanel({
 }) {
   const [hostname, setHostname] = useSessionState("deploy.settings.domains.add.hostname", "")
   const [https, setHttps] = useSessionState("deploy.settings.domains.add.https", true)
+  const [tunnel, setTunnel] = useSessionState("deploy.settings.domains.add.tunnel", false)
   const [guarded, setGuarded] = useState(false)
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
@@ -604,34 +1172,54 @@ function AddDomainPanel({
   const reset = () => {
     setHostname("")
     setHttps(true)
+    setTunnel(false)
     setGuarded(false)
     setUsername("")
     setPassword("")
     setSuggestion(undefined)
   }
 
-  const check = async () => {
+  // The newest question asked. Leaving the field asks one and the tunnel
+  // switch, pressed straight after, asks another; only the newest answer is
+  // the sheet's, whichever arrives last.
+  const asked = useRef(0)
+  const check = async (through = tunnel) => {
     const value = hostname.trim().toLowerCase()
     if (!value) return
+    const question = ++asked.current
     setChecking(true)
     try {
-      setSuggestion(
-        await get<DeploymentHostnameSuggestion>("/deploy/hostname", { hostname: value }),
-      )
+      const answer = await get<DeploymentHostnameSuggestion>("/deploy/hostname", {
+        hostname: value,
+        ...(through ? { tunnel: "1" } : {}),
+      })
+      if (question === asked.current) setSuggestion(answer)
     } catch {
       // The saved answer stays on screen; the deploy itself is what settles this.
     } finally {
-      setChecking(false)
+      if (question === asked.current) setChecking(false)
     }
   }
 
   const typed = hostname.trim().toLowerCase()
-  const matches = suggestion?.hostname.toLowerCase() === typed
-  const answer = https && matches && suggestion ? certificateReading(suggestion) : undefined
-  const method = matches ? suggestion?.certificateMethod : undefined
+  // An answer is this sheet's only while it was asked the question the sheet
+  // now asks: a tunnel's answer says nothing about a certificate here, and
+  // the certificate's says nothing about a tunnel.
+  const matches =
+    suggestion?.hostname.toLowerCase() === typed && (suggestion.method === "tunnel") === tunnel
+  const answer =
+    matches && suggestion
+      ? tunnel
+        ? tunnelReading(suggestion)
+        : https
+          ? certificateReading(suggestion)
+          : undefined
+      : undefined
+  const method = matches && !tunnel ? suggestion?.certificateMethod : undefined
   const glyph = method ? METHOD_PRODUCT[method] : undefined
-  const ordered = https && suggestion && !suggestion.covered ? method : undefined
-  const record = matches && suggestion?.address ? `A  ${typed}  →  ${suggestion.address}` : ""
+  const ordered = https && !tunnel && suggestion && !suggestion.covered ? method : undefined
+  const record =
+    matches && !tunnel && suggestion?.address ? `A  ${typed}  →  ${suggestion.address}` : ""
   const incomplete = guarded && (!username.trim() || password.length < 8)
 
   const add = async () => {
@@ -640,8 +1228,9 @@ function AddDomainPanel({
     try {
       await onAdd({
         hostname: typed,
-        https,
+        https: https || tunnel,
         ownership: "managed",
+        ...(tunnel ? { tunnel: true } : {}),
         ...(guarded ? { protection: { username: username.trim(), password } } : {}),
       })
       reset()
@@ -684,7 +1273,11 @@ function AddDomainPanel({
         <Field
           label="Hostname"
           htmlFor="add-domain-hostname"
-          info="Point a DNS record for the name at this server first. Check reads where it points and whether a certificate can be issued for it."
+          info={
+            tunnel
+              ? "The name's zone must be on Cloudflare. Its route and CNAME to the tunnel are set as the release goes live, with the Cloudflare credentials saved under Certificates."
+              : "Point a DNS record for the name at this server first. Check reads where it points and whether a certificate can be issued for it."
+          }
           // Once checked, what the check found is the Status at the label's
           // edge, the method under the field and the record under that — the
           // server's sentence would be all three again.
@@ -722,7 +1315,7 @@ function AddDomainPanel({
               className="font-mono"
             />
             <InputGroupAddon align="inline-end" className="gap-0 p-0">
-              <HttpsToggle checked={https} onChange={setHttps} />
+              {!tunnel && <HttpsToggle checked={https} onChange={setHttps} />}
               <InputGroupButton
                 aria-label="Check this hostname"
                 pending={checking}
@@ -765,7 +1358,21 @@ function AddDomainPanel({
           </div>
         )}
 
-        {https && matches && suggestion && !suggestion.covered && !method && (
+        {tunnel && matches && suggestion && (
+          <p
+            key={suggestion.detail}
+            className="animate-rise text-hint leading-relaxed text-muted-foreground"
+          >
+            {suggestion.detail}{" "}
+            {!suggestion.covered && !typed.startsWith("*.") && (
+              <Link href="/proxy/tunnel" className="text-foreground underline underline-offset-4">
+                Open Cloudflare Tunnel
+              </Link>
+            )}
+          </p>
+        )}
+
+        {https && !tunnel && matches && suggestion && !suggestion.covered && !method && (
           <Notice
             tone="warning"
             icon={Warning}
@@ -777,6 +1384,15 @@ function AddDomainPanel({
         )}
 
         <OptionList>
+          <OptionRow
+            title="Serve through Cloudflare Tunnel"
+            hint="Cloudflare's edge answers the name and HTTPS, and the connector on this host brings the requests here: no record points at this server and no port is opened."
+            checked={tunnel}
+            onCheckedChange={(next) => {
+              setTunnel(next)
+              void check(next)
+            }}
+          />
           <OptionRow
             title="Ask visitors for a password"
             checked={guarded}
@@ -817,5 +1433,812 @@ function AddDomainPanel({
         </OptionList>
       </div>
     </SidePanel>
+  )
+}
+
+/** The names that serve the application rather than redirect, in list order. */
+function servedNames(domains: DomainValue[]) {
+  return domains.filter((domain) => !domain.redirectTo).map((domain) => domain.hostname)
+}
+
+type RouteRules = {
+  allowFrom: string[]
+  responseHeaders: { name: string; value: string }[]
+  forwardAuth?: DeploymentForwardAuth
+  hsts?: DeploymentRouteHSTS
+}
+
+type SignInField = "provider" | "verify" | "signIn"
+
+/** Which of the form's fields a refusal names, and which sign-in field. */
+function refusedRule(
+  field: string | undefined,
+): { rule: keyof RouteRules; part?: SignInField } | undefined {
+  if (field?.startsWith("runtime.allowFrom")) return { rule: "allowFrom" }
+  if (field?.startsWith("runtime.responseHeaders")) return { rule: "responseHeaders" }
+  if (field?.startsWith("runtime.hsts")) return { rule: "hsts" }
+  if (field?.startsWith("runtime.forwardAuth")) {
+    const part = field.slice("runtime.forwardAuth.".length) as SignInField
+    return {
+      rule: "forwardAuth",
+      part: ["provider", "verify", "signIn"].includes(part) ? part : undefined,
+    }
+  }
+  return undefined
+}
+
+/** The sign-in as the plan keeps it, trimmed, or nothing when it is off. */
+function savedSignIn(gate: DeploymentForwardAuth | undefined): DeploymentForwardAuth | undefined {
+  if (!gate) return undefined
+  return {
+    provider: gate.provider,
+    verify: gate.verify.trim(),
+    signIn: gate.signIn.trim(),
+    ...(gate.previewsOnly ? { previewsOnly: true } : {}),
+  }
+}
+
+/**
+ * Who reaches the domains above, and what every answer carries: the route's
+ * allowed addresses, its sign-in, its HSTS and its response headers. They
+ * are the route's rather than a hostname's — the proxy serves every name
+ * from one site — so they are one form under the list instead of a control
+ * repeated on every row. They are listed in the order a request meets them:
+ * the address list refuses first, then the sign-in, then the headers are set
+ * on whatever is answered. HSTS is one of those headers, sent on the HTTPS
+ * domains alone, so it is offered only while one serves the application —
+ * or while a policy is saved and has to stay removable.
+ *
+ * They live in the plan's runtime, beside the upload limit, and this form
+ * writes only those four fields of it, so a Runtime save never undoes them
+ * and this save never undoes a Runtime edit.
+ */
+function RouteRulesForm({
+  configuration,
+  save,
+}: {
+  configuration: DeploymentEnvironmentConfiguration
+  save: ReturnType<typeof useConfiguration>["save"]
+}) {
+  const { can } = useAuth()
+  const canAdmin = can("system.admin")
+  const project = useProject()
+  const saved: RouteRules = {
+    allowFrom: configuration.runtime.allowFrom ?? [],
+    responseHeaders: configuration.runtime.responseHeaders ?? [],
+    forwardAuth: configuration.runtime.forwardAuth,
+    hsts: configuration.runtime.hsts,
+  }
+  const draft = useSettingDraft(`deploy.${project.projectId}.settings.route-rules`, saved)
+  const rules = draft.value
+  const [saving, setSaving] = useState(false)
+  const [refusal, setRefusal] = useState<{
+    rule: keyof RouteRules
+    part?: SignInField
+    message: string
+  }>()
+  const preview = Boolean(configuration.runtime.previewIsolation)
+
+  const onSave = async () => {
+    setSaving(true)
+    setRefusal(undefined)
+    try {
+      await save({
+        runtime: (latest) => ({
+          ...latest.runtime,
+          allowFrom: rules.allowFrom.length > 0 ? rules.allowFrom : undefined,
+          responseHeaders: rules.responseHeaders.length > 0 ? rules.responseHeaders : undefined,
+          forwardAuth: savedSignIn(rules.forwardAuth),
+          hsts: savedHSTS(rules.hsts),
+        }),
+      })
+      return true
+    } catch (error) {
+      const refused = error instanceof ApiError ? refusedRule(error.field) : undefined
+      if (error instanceof ApiError && refused) {
+        setRefusal({ ...refused, message: error.message })
+      } else {
+        notify.error("Could not save access and headers", error)
+      }
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <SettingForm
+      name="Access and headers"
+      onSave={onSave}
+      dirty={draft.dirty}
+      changes={draft.changes}
+      saving={saving}
+      canEdit={canAdmin}
+      onDiscard={() => {
+        setRefusal(undefined)
+        draft.discard()
+      }}
+    >
+      <SettingSection
+        title="Access and headers"
+        state={routeAccessState(rules.allowFrom, rules.forwardAuth, preview)}
+        status={settingStatus({ dirty: draft.dirty, refused: Boolean(refusal) })}
+      >
+        <ListField
+          id="route-allow-from"
+          label="Only these addresses"
+          placeholder="203.0.113.7 or 10.0.0.0/8"
+          values={rules.allowFrom}
+          onChange={(allowFrom) => draft.set({ ...rules, allowFrom })}
+          hint="Anyone else is refused with 403, before the password or the sign-in is asked for. Empty lets everyone in."
+          error={refusal?.rule === "allowFrom" ? refusal.message : undefined}
+          disabled={!canAdmin}
+        />
+        <RouteSignIn
+          gate={rules.forwardAuth}
+          onChange={(forwardAuth) => draft.set({ ...rules, forwardAuth })}
+          conflicts={signInConflicts(configuration.domains, rules.forwardAuth, preview)}
+          refusal={refusal?.rule === "forwardAuth" ? refusal : undefined}
+          disabled={!canAdmin}
+        />
+        {hstsOffered(configuration.domains, rules.hsts) && (
+          <RouteHSTS
+            hsts={rules.hsts}
+            domains={configuration.domains}
+            onChange={(hsts) => draft.set({ ...rules, hsts })}
+            refusal={refusal?.rule === "hsts" ? refusal.message : undefined}
+            disabled={!canAdmin}
+          />
+        )}
+        <HeaderListField
+          id="route-response-headers"
+          label="Response headers"
+          values={rules.responseHeaders}
+          onChange={(responseHeaders) => draft.set({ ...rules, responseHeaders })}
+          hint="Set on every answer, replacing a header of the same name the application sends."
+          error={refusal?.rule === "responseHeaders" ? refusal.message : undefined}
+          disabled={!canAdmin}
+        />
+      </SettingSection>
+    </SettingForm>
+  )
+}
+
+/**
+ * HSTS: Strict-Transport-Security on every HTTPS answer the route gives,
+ * with the same lifetimes, subdomains and preload a Proxy site's control
+ * offers, because it is the same header. A domain served over plain HTTP is
+ * never sent it, and the row says which domains are. Preload is behind a
+ * confirmation, as it is on the Proxy page: once a browser ships with the
+ * name built in, removing the header changes nothing for months.
+ */
+function RouteHSTS({
+  hsts,
+  domains,
+  onChange,
+  refusal,
+  disabled,
+}: {
+  hsts: DeploymentRouteHSTS | undefined
+  domains: DeploymentEnvironmentConfiguration["domains"]
+  onChange: (hsts: DeploymentRouteHSTS | undefined) => void
+  refusal?: string
+  disabled: boolean
+}) {
+  const { confirm, dialog } = useConfirm()
+  const https = domains.filter((domain) => domain.https && !domain.redirectTo)
+  const plain = domains.filter((domain) => !domain.https && !domain.redirectTo)
+  const maxAge = hsts?.maxAge || HSTS_DEFAULT_MAX_AGE
+  const listed = HSTS_MAX_AGES.some((age) => age.value === maxAge)
+  const update = (patch: Partial<DeploymentRouteHSTS>) => hsts && onChange({ ...hsts, ...patch })
+  const askPreload = () =>
+    hsts &&
+    confirm({
+      title: "Ask browsers to preload HSTS",
+      description: (
+        <>
+          The header will carry <code className="font-mono">preload</code>, which lets{" "}
+          {https[0]?.hostname ?? "the domain"} be submitted to the list browsers ship with. Once it
+          is in, every subdomain must serve HTTPS, and leaving the list takes months of browser
+          releases. The policy is raised to at least a year and covers subdomains, as the list
+          requires.
+        </>
+      ),
+      confirmLabel: "Turn on preload",
+      action: async () => onChange(withPreload(hsts)),
+    })
+  const sentOn =
+    https.length > 0
+      ? `Sent on ${https.map((domain) => domain.hostname).join(", ")}`
+      : "Sent on no domain until one serves the application over HTTPS"
+  const notOn =
+    plain.length > 0
+      ? `; ${plain.map((domain) => domain.hostname).join(", ")} ${plain.length === 1 ? "is" : "are"} served over plain HTTP and not sent it.`
+      : "."
+  return (
+    <OptionList>
+      <OptionRow
+        title="HSTS"
+        hint={`Tells browsers never to use plain HTTP for the HTTPS domains above again. Hard to undo — a mistake sticks for as long as the policy says. ${sentOn}${notOn}`}
+        checked={Boolean(hsts)}
+        disabled={disabled}
+        onCheckedChange={(on) => onChange(on ? { includeSubDomains: true } : undefined)}
+      >
+        {hsts && (
+          <div className="space-y-3">
+            <Field
+              label="Remember for"
+              htmlFor="route-hsts-max-age"
+              hint="Start short while checking every subdomain works over HTTPS, then raise it."
+              trailing={
+                <Status
+                  key={hstsPolicyState(hsts)}
+                  tone="running"
+                  label={hstsPolicyState(hsts)}
+                  className="animate-rise"
+                />
+              }
+            >
+              <Select
+                value={String(maxAge)}
+                onValueChange={(value) =>
+                  update({
+                    maxAge: Number(value) === HSTS_DEFAULT_MAX_AGE ? undefined : Number(value),
+                  })
+                }
+                disabled={disabled}
+              >
+                <SelectTrigger id="route-hsts-max-age" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {!listed && <SelectItem value={String(maxAge)}>{`${maxAge} seconds`}</SelectItem>}
+                  {HSTS_MAX_AGES.map((age) => (
+                    <SelectItem
+                      key={age.value}
+                      value={String(age.value)}
+                      disabled={hsts.preload && age.value < HSTS_PRELOAD_MAX_AGE}
+                    >
+                      {age.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <OptionList>
+              <OptionRow
+                title="Include subdomains"
+                hint="Every name under the HTTPS domains must serve HTTPS too, including ones on other servers."
+                checked={Boolean(hsts.includeSubDomains)}
+                disabled={disabled}
+                onCheckedChange={(on) =>
+                  update({
+                    includeSubDomains: on || undefined,
+                    preload: on ? hsts.preload : undefined,
+                  })
+                }
+              />
+              <OptionRow
+                title="Preload"
+                hint="Lets the domain be built into browsers. Needs a year and subdomains; very slow to undo."
+                checked={Boolean(hsts.preload)}
+                disabled={disabled}
+                onCheckedChange={(on) => (on ? askPreload() : update({ preload: undefined }))}
+              />
+            </OptionList>
+            {refusal && (
+              <FormNote role="alert" tone="danger">
+                {refusal}
+              </FormNote>
+            )}
+          </div>
+        )}
+      </OptionRow>
+      {dialog}
+    </OptionList>
+  )
+}
+
+/**
+ * Require sign-in: the route asks an auth server about every request, the
+ * way a Proxy site's single sign-on does, with the same four servers and
+ * the same two addresses. What a deployment adds is who it is for — this
+ * environment and its previews, or its previews alone — since a preview's
+ * plan is a copy of this one.
+ */
+function RouteSignIn({
+  gate,
+  onChange,
+  conflicts,
+  refusal,
+  disabled,
+}: {
+  gate: DeploymentForwardAuth | undefined
+  onChange: (gate: DeploymentForwardAuth | undefined) => void
+  conflicts: string[]
+  refusal?: { part?: SignInField; message: string }
+  disabled: boolean
+}) {
+  const preset = ssoPreset(gate?.provider)
+  const update = (patch: Partial<DeploymentForwardAuth>) => gate && onChange({ ...gate, ...patch })
+  return (
+    <OptionList>
+      <OptionRow
+        title="Require sign-in"
+        hint="Every request is checked with Authelia, Authentik, oauth2-proxy or another server first. A visitor without a session is sent to sign in and brought back; if the server refuses or does not answer, so does the site."
+        checked={Boolean(gate)}
+        disabled={disabled}
+        onCheckedChange={(on) =>
+          onChange(
+            on ? { provider: "authelia", verify: SSO_PROVIDERS[0].verify, signIn: "" } : undefined,
+          )
+        }
+      >
+        {gate && (
+          <div className="flex flex-col gap-3">
+            <ToggleGroup
+              type="single"
+              aria-label="Auth server"
+              value={gate.provider}
+              onValueChange={(value) =>
+                value && update(chooseSsoProvider(gate, value as ForwardAuthProvider))
+              }
+              variant="outline"
+              size="sm"
+              className="w-full flex-wrap"
+              disabled={disabled}
+            >
+              {SSO_PROVIDERS.map((provider) => (
+                <ToggleGroupItem
+                  key={provider.value}
+                  value={provider.value}
+                  className="flex-1 text-hint"
+                >
+                  {provider.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            <Field
+              label="Check address"
+              htmlFor="route-sso-verify"
+              hint="Where the proxy asks about each request, with the visitor's headers and the address they asked for. On Caddy, an address on 127.0.0.1 is reached through the container that publishes it."
+              error={refusal?.part === "verify" ? refusal.message : undefined}
+            >
+              <Input
+                id="route-sso-verify"
+                value={gate.verify}
+                onChange={(event) => update({ verify: event.target.value.trim() })}
+                placeholder={preset.verify || "http://127.0.0.1:8080/verify"}
+                className="font-mono text-hint"
+                disabled={disabled}
+              />
+            </Field>
+            <Field
+              label="Sign-in page"
+              htmlFor="route-sso-signin"
+              hint="A visitor without a session is sent here, with rd= set to the address they asked for."
+              error={refusal?.part === "signIn" ? refusal.message : undefined}
+            >
+              <Input
+                id="route-sso-signin"
+                value={gate.signIn}
+                onChange={(event) => update({ signIn: event.target.value.trim() })}
+                placeholder={preset.signIn}
+                className="font-mono text-hint"
+                disabled={disabled}
+              />
+            </Field>
+            <ToggleGroup
+              type="single"
+              aria-label="Who signs in"
+              value={gate.previewsOnly ? "previews" : "everywhere"}
+              onValueChange={(value) =>
+                value && update({ previewsOnly: value === "previews" || undefined })
+              }
+              variant="outline"
+              size="sm"
+              className="w-full"
+              disabled={disabled}
+            >
+              <ToggleGroupItem value="everywhere" className="flex-1 text-hint">
+                Here and on previews
+              </ToggleGroupItem>
+              <ToggleGroupItem value="previews" className="flex-1 text-hint">
+                Previews only
+              </ToggleGroupItem>
+            </ToggleGroup>
+            <FormNote>
+              The application is sent Remote-User and Remote-Email, taken from the server&apos;s{" "}
+              {preset.sends}, and never the visitor&apos;s own. Names that redirect answer before
+              anyone is asked to sign in.
+            </FormNote>
+            {conflicts.map((conflict) => (
+              <FormNote key={conflict} tone="warning">
+                {conflict}
+              </FormNote>
+            ))}
+            {refusal && (!refusal.part || refusal.part === "provider") && (
+              <FormNote role="alert" tone="danger">
+                {refusal.message}
+              </FormNote>
+            )}
+          </div>
+        )}
+      </OptionRow>
+    </OptionList>
+  )
+}
+
+/**
+ * Maintenance — the switch. It is not part of the plan: every route a release
+ * writes carries the check, and a file beside the route turns it on, which
+ * both proxies look for on every request. So this save applies at once,
+ * without a deployment and without the route being written again, and
+ * neither a rollback nor the next release turns it on or off. Who is let
+ * past and what the 503 says are the route's, in the form under it.
+ */
+function MaintenanceForm({
+  projectId,
+  environmentId,
+}: {
+  projectId: number
+  environmentId: number
+}) {
+  const { can } = useAuth()
+  // It takes the application away from its visitors, as stopping it does,
+  // and the server asks the same capability.
+  const canSwitch = can("destructive")
+  const path = `/deploy/${projectId}/environments/${environmentId}/maintenance`
+  const live = usePoll(
+    (signal) => get<DeploymentMaintenanceSwitch>(path, undefined, signal),
+    15_000,
+    [path],
+  )
+  const switched = live.data
+  const draft = useSettingDraft(`deploy.${projectId}.settings.maintenance`, {
+    on: switched?.on ?? false,
+  })
+  const [saving, setSaving] = useState(false)
+  const [refusal, setRefusal] = useState<string>()
+  const unready = maintenanceUnready(switched)
+
+  const onSave = async () => {
+    setSaving(true)
+    setRefusal(undefined)
+    try {
+      await put<DeploymentMaintenanceSwitch>(path, { on: draft.value.on })
+      live.refresh()
+      return true
+    } catch (error) {
+      setRefusal(error instanceof Error ? error.message : String(error))
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <SettingForm
+      name="Maintenance"
+      onSave={onSave}
+      dirty={draft.dirty}
+      changes={draft.changes}
+      saving={saving}
+      canEdit={canSwitch}
+      applies="immediately"
+      onDiscard={() => {
+        setRefusal(undefined)
+        draft.discard()
+      }}
+    >
+      <SettingSection
+        id="maintenance"
+        title="Maintenance"
+        state={
+          <span>
+            {maintenanceState(switched)}
+            {switched?.on && switched.since && (
+              <>
+                {" · turned on "}
+                <time dateTime={switched.since} title={timestamp(switched.since)}>
+                  {relativeTime(switched.since)}
+                </time>
+              </>
+            )}
+          </span>
+        }
+        status={
+          draft.dirty || refusal ? (
+            settingStatus({ dirty: draft.dirty, refused: Boolean(refusal) })
+          ) : switched?.on ? (
+            <Status key="on" tone="warning" label="In maintenance" className="animate-rise" />
+          ) : null
+        }
+      >
+        <OptionList>
+          <OptionRow
+            title="Answer with the maintenance page"
+            hint="Every visitor gets the maintenance page with a 503 as soon as this is saved, without a deployment, except the addresses let past below. Certificate renewals keep working."
+            tone={draft.value.on ? "warning" : "default"}
+            checked={draft.value.on}
+            disabled={!canSwitch || (!draft.value.on && !switched?.ready)}
+            onCheckedChange={(on) => draft.set({ on })}
+          />
+        </OptionList>
+        {unready && <FormNote>{unready}</FormNote>}
+        {live.error && !switched && (
+          <FormNote tone="warning">The live route could not be read: {live.error.message}</FormNote>
+        )}
+        {refusal && (
+          <FormNote role="alert" tone="danger">
+            {refusal}
+          </FormNote>
+        )}
+      </SettingSection>
+    </SettingForm>
+  )
+}
+
+type RoutePages = {
+  retryAfter: string
+  bypassFrom: string[]
+  errorPages: DeploymentErrorPage[]
+  interceptErrors: boolean
+}
+
+/** What a page's code is for, under its switch. */
+const ERROR_PAGE_HINT: Record<DeploymentErrorPage, string> = {
+  404: "A path with nothing behind it.",
+  502: "The application is down or starting. The page shipped for it retries every 5 seconds.",
+  503: "The application says it cannot take requests.",
+  504: "The application took longer than the proxy waits to answer.",
+}
+
+/** Which of the form's fields a refusal names. */
+function refusedPage(field: string | undefined): keyof RoutePages | undefined {
+  if (field?.startsWith("runtime.maintenance.retryAfter")) return "retryAfter"
+  if (field?.startsWith("runtime.maintenance.bypassFrom")) return "bypassFrom"
+  if (field?.startsWith("runtime.errorPages")) return "errorPages"
+  if (field?.startsWith("runtime.interceptErrors")) return "interceptErrors"
+  return undefined
+}
+
+/**
+ * The maintenance page and the error pages: who is let past while the switch
+ * above is on, what its 503 tells clients, and which answers get a page of
+ * the route's own rather than the proxy's. They are written into the route,
+ * so they apply with the next deployment, like the rest of the plan. The
+ * pages themselves are files beside the route that either proxy reads on
+ * every answer, so editing one applies at once.
+ */
+function RoutePagesForm({
+  configuration,
+  save,
+  projectId,
+  environmentId,
+}: {
+  configuration: DeploymentEnvironmentConfiguration
+  save: ReturnType<typeof useConfiguration>["save"]
+  projectId: number
+  environmentId: number
+}) {
+  const { can } = useAuth()
+  const canAdmin = can("system.admin")
+  const { runtime } = configuration
+  const saved: RoutePages = {
+    retryAfter: runtime.maintenance?.retryAfter ? String(runtime.maintenance.retryAfter) : "",
+    bypassFrom: runtime.maintenance?.bypassFrom ?? [],
+    errorPages: runtime.errorPages ?? [],
+    interceptErrors: runtime.interceptErrors ?? false,
+  }
+  const draft = useSettingDraft(`deploy.${projectId}.settings.route-pages`, saved)
+  const pages = draft.value
+  const [saving, setSaving] = useState(false)
+  const [finding, setFinding] = useState(false)
+  const [refusal, setRefusal] = useState<{ field: keyof RoutePages; message: string }>()
+  const [editing, setEditing] = useState<DeploymentPageName | null>(null)
+  const retryAfter = retryAfterOf(pages.retryAfter)
+  const signsIn = Boolean(runtime.forwardAuth)
+  const set = (patch: Partial<RoutePages>) => draft.set({ ...pages, ...patch })
+
+  const onSave = async () => {
+    setSaving(true)
+    setRefusal(undefined)
+    try {
+      await save({
+        runtime: (latest) => ({
+          ...latest.runtime,
+          maintenance: routeMaintenanceOf(retryAfter ?? undefined, pages.bypassFrom),
+          errorPages: pages.errorPages.length > 0 ? pages.errorPages : undefined,
+          interceptErrors: pages.errorPages.length > 0 && pages.interceptErrors ? true : undefined,
+        }),
+      })
+      return true
+    } catch (error) {
+      const field = error instanceof ApiError ? refusedPage(error.field) : undefined
+      if (error instanceof ApiError && field) setRefusal({ field, message: error.message })
+      else notify.error("Could not save the pages", error)
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const addMyAddress = async () => {
+    setFinding(true)
+    try {
+      const { client } = await get<Exposure>("/exposure")
+      if (!client) {
+        notify.error("The dashboard could not tell which address you come from")
+        return
+      }
+      if (!pages.bypassFrom.includes(client)) set({ bypassFrom: [...pages.bypassFrom, client] })
+    } catch (error) {
+      notify.error("Could not read your address", error)
+    } finally {
+      setFinding(false)
+    }
+  }
+
+  const editable: DeploymentPageName[] = [
+    "maintenance",
+    ...ERROR_PAGES.filter((code) => saved.errorPages.includes(code)).map(
+      (code) => String(code) as DeploymentPageName,
+    ),
+  ]
+
+  return (
+    <>
+      <SettingForm
+        name="Maintenance page and error pages"
+        onSave={onSave}
+        dirty={draft.dirty}
+        changes={draft.changes}
+        saving={saving}
+        invalid={retryAfter === null}
+        canEdit={canAdmin}
+        onDiscard={() => {
+          setRefusal(undefined)
+          draft.discard()
+        }}
+      >
+        <SettingSection
+          title="Maintenance page"
+          state={maintenancePolicyState(runtime.maintenance)}
+          status={settingStatus({
+            dirty: draft.changed(["retryAfter", "bypassFrom"]),
+            refused: refusal?.field === "retryAfter" || refusal?.field === "bypassFrom",
+          })}
+        >
+          <ListField
+            id="route-maintenance-bypass"
+            label="Let these addresses past"
+            placeholder="203.0.113.7 or 10.0.0.0/8"
+            values={pages.bypassFrom}
+            onChange={(bypassFrom) => set({ bypassFrom })}
+            hint="They reach the application as usual while maintenance is on, so you can check it before visitors come back."
+            error={refusal?.field === "bypassFrom" ? refusal.message : undefined}
+            disabled={!canAdmin}
+          />
+          {canAdmin && (
+            <div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={addMyAddress}
+                pending={finding}
+              >
+                Add my address
+              </Button>
+              <FormNote className="mt-1.5">
+                The address this browser reaches the dashboard from, which is the one the deployment
+                sees only when both are reached the same way.
+              </FormNote>
+            </div>
+          )}
+          <Field
+            label="Retry after"
+            htmlFor="route-maintenance-retry"
+            hint="Seconds the 503 tells clients and crawlers to wait. Empty or 0 sends no Retry-After."
+            error={
+              retryAfter === null
+                ? "Whole seconds, at most 86400 (a day)."
+                : refusal?.field === "retryAfter"
+                  ? refusal.message
+                  : undefined
+            }
+          >
+            <Input
+              id="route-maintenance-retry"
+              value={pages.retryAfter}
+              inputMode="numeric"
+              placeholder="0"
+              onChange={(event) => set({ retryAfter: event.target.value })}
+              className="w-32 font-mono text-xs"
+              disabled={!canAdmin}
+            />
+          </Field>
+        </SettingSection>
+        <SettingSection
+          title="Error pages"
+          state={errorPagesState(runtime.errorPages ?? [], runtime.interceptErrors ?? false)}
+          status={settingStatus({
+            dirty: draft.changed(["errorPages", "interceptErrors"]),
+            refused: refusal?.field === "errorPages" || refusal?.field === "interceptErrors",
+          })}
+        >
+          <OptionList>
+            {ERROR_PAGES.map((code) => (
+              <OptionRow
+                key={code}
+                title={`Own ${PAGE_LABEL[String(code) as DeploymentPageName]} page`}
+                hint={ERROR_PAGE_HINT[code]}
+                checked={pages.errorPages.includes(code)}
+                disabled={!canAdmin}
+                onCheckedChange={(on) =>
+                  set({
+                    errorPages: ERROR_PAGES.filter((c) =>
+                      c === code ? on : pages.errorPages.includes(c),
+                    ),
+                  })
+                }
+              />
+            ))}
+            {pages.errorPages.length > 0 && (
+              <OptionRow
+                title="Replace the application's own error pages"
+                hint={
+                  signsIn
+                    ? "Not with sign-in on: the application's own 401s would be replaced as well."
+                    : "Without it only the errors the proxy produces itself get these pages; with it, the application's answers with those codes do too."
+                }
+                checked={pages.interceptErrors}
+                disabled={!canAdmin || (signsIn && !pages.interceptErrors)}
+                onCheckedChange={(interceptErrors) => set({ interceptErrors })}
+              />
+            )}
+          </OptionList>
+          {refusal && (refusal.field === "errorPages" || refusal.field === "interceptErrors") && (
+            <FormNote role="alert" tone="danger">
+              {refusal.message}
+            </FormNote>
+          )}
+          {canAdmin && (
+            <div className="flex flex-wrap gap-2">
+              {editable.map((name) => (
+                <Button
+                  key={name}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setEditing(name)}
+                >
+                  Edit {PAGE_LABEL[name]}
+                </Button>
+              ))}
+            </div>
+          )}
+          <FormNote>
+            Saved pages are served from the next answer that uses them. Which pages the route
+            answers with, and who is let past, change with the next deployment.
+          </FormNote>
+        </SettingSection>
+      </SettingForm>
+      {canAdmin && (
+        <PageEditor
+          key={editing ?? "none"}
+          open={editing !== null}
+          onOpenChange={(open) => !open && setEditing(null)}
+          site={
+            configuration.domains.find((domain) => !domain.redirectTo)?.hostname ??
+            "this deployment"
+          }
+          page={editing ?? "maintenance"}
+          path={`/deploy/${projectId}/environments/${environmentId}/pages/${editing ?? "maintenance"}`}
+          server="the proxy"
+        />
+      )}
+    </>
   )
 }

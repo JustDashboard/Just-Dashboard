@@ -36,6 +36,8 @@ type deploymentPlan struct {
 	ProxySite   string
 	RuntimeID   string
 	RuntimeKind string
+	// EnvironmentID names whose tailnet address preflight reports.
+	EnvironmentID int64
 }
 
 // sourceReading is what reading the commit's tree produced.
@@ -67,7 +69,7 @@ func readDeploymentSource(ctx context.Context, root string, plan deploymentPlan)
 		reading.detection = &detection
 	}
 	switch plan.Configuration.Build.Method {
-	case BuildRecipe, BuildDockerfile, BuildStatic:
+	case BuildRecipe, BuildDockerfile, BuildStatic, BuildRailpack:
 		reading.dryRun = true
 		if err := dryRunBuild(ctx, root, plan.Configuration.Build, plan.BuildVariables); err != nil {
 			reading.refusal = checkoutRefusalFor(err, root)
@@ -179,6 +181,7 @@ func evaluateDeployment(
 	request := preflightObservationRequest(draft, configuration)
 	request.ExistingProxySite = plan.ProxySite
 	request.ExistingRuntimeID, request.ExistingRuntimeKind = plan.RuntimeID, plan.RuntimeKind
+	request.EnvironmentID = plan.EnvironmentID
 	observation, err := observer.Observe(ctx, request)
 	if err != nil {
 		return deploymentEvaluation{}, err
@@ -448,7 +451,7 @@ func (c *DeploymentChecker) desiredPlan(ctx context.Context, projectID, environm
 	plan := &deploymentPlan{
 		Source: canonicalSourceConfig(*desired.Source), Identity: *desired.Identity, Profile: profile,
 		Configuration: configuration, Evidence: evidence, BuildVariables: buildVariables,
-		ProxySite: deploymentRouteName(environmentID),
+		ProxySite: deploymentRouteName(environmentID), EnvironmentID: environmentID,
 	}
 	live, err := c.runs.LiveRelease(ctx, environmentID)
 	switch {

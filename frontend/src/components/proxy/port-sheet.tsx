@@ -9,6 +9,7 @@ import type { PortIdentification } from "@/lib/types"
 import { Field, FormSection } from "@/components/form"
 import { Detail, DetailList } from "@/components/page"
 import { ProductLogo, portProduct } from "@/components/product-logo"
+import { DashboardMark } from "@/components/backups/marks"
 import {
   ownerLabel,
   ownerLinks,
@@ -77,7 +78,11 @@ export function PortSheet({
       title={
         socket ? (
           <>
-            <ProductLogo id={portProduct(socket.port)} size="sm" fallback={Router} />
+            {socket.self ? (
+              <DashboardMark />
+            ) : (
+              <ProductLogo id={portProduct(socket.port)} size="sm" fallback={Router} />
+            )}
             <span className="numeric font-mono">{socket.port}</span>
             <span className="text-hint text-muted-foreground uppercase">{socket.protocol}</span>
             <span className="truncate">{ownerTitle(socket)}</span>

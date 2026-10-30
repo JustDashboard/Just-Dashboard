@@ -12,6 +12,7 @@ import type {
   TCPPoint,
   UploadProfile,
 } from "@/lib/network-traffic"
+import type { ForwardAuthProvider } from "./proxy/types-siteform"
 
 export type Capability =
   | "read"
@@ -2374,6 +2375,31 @@ export type MongoCollectionInfo = {
   stats?: Record<string, unknown>
 }
 
+export type PasswordState = "set" | "locked" | "none" | "empty" | "unknown"
+
+export type SignInRoute = { allowed: boolean; why?: string }
+
+export type RootRoute = {
+  kind: "uid0" | "sudo" | "group"
+  via?: string
+  noPassword?: boolean
+  limited?: boolean
+  ruleId?: string
+  file?: string
+  /** False for a rule that asks for a password the account does not have. */
+  usable: boolean
+}
+
+export type PasswordAging = {
+  lastChanged?: string
+  mustChange: boolean
+  minDays?: number
+  maxDays?: number
+  warnDays?: number
+  inactiveDays?: number
+  expiresOn?: string
+}
+
 export type SystemUser = {
   username: string
   uid: number
@@ -2382,13 +2408,30 @@ export type SystemUser = {
   home: string
   shell: string
   groups: string[]
+  primaryGroup?: string
   system: boolean
   locked: boolean
   noPassword: boolean
   lastLogin?: string
   lastLoginFrom?: string
   sshKeyCount: number
+  /** A key source that could not be read, so the count is a floor. */
+  keysUnknown?: boolean
   canLogin: boolean
+  password: PasswordState
+  disabled: boolean
+  /** Closed by its password's age rules, which clearing an expiry does not undo. */
+  passwordDead?: boolean
+  expiresOn?: string
+  aging: PasswordAging
+  signIn: { password: SignInRoute; key: SignInRoute }
+  rootRoutes: RootRoute[]
+  protected: boolean
+}
+
+export type SystemUserDetail = SystemUser & {
+  failedAttempts: { available: boolean; count: number }
+  shells: string[]
 }
 
 export type SSHKey = {
@@ -2399,7 +2442,143 @@ export type SSHKey = {
   bits?: number
   options?: string
   raw: string
+  weak?: string
+  lastUsed?: string
+  lastUsedFrom?: string
+  /** A key in a file this page does not write: sshd reads it, and it cannot be changed here. */
+  file?: string
 }
+
+export type SudoRule = {
+  id: string
+  file: string
+  line: number
+  text: string
+  who: string[]
+  runAs: string
+  commands: string[]
+  noPassword: boolean
+  full: boolean
+  asRoot: boolean
+  managed: boolean
+}
+
+export type SudoLevel = "none" | "password" | "nopassword"
+
+export type SudoGrant = { level: SudoLevel; commands: string[] }
+
+export type AccountSudo = { rules: SudoRule[]; managed: SudoGrant }
+
+export type AccountSession = {
+  user: string
+  tty: string
+  from: string
+  loginTime?: string
+  idle?: string
+  pid?: number
+  command?: string
+  isSsh: boolean
+}
+
+export type AccountProcess = {
+  pid: number
+  cpu: number
+  memory: number
+  seconds: number
+  name: string
+}
+
+export type AccountActivity = {
+  sessions: AccountSession[]
+  processes: number
+  busiest: AccountProcess[]
+  cronJobs: number
+}
+
+export type AccountLogin = {
+  kind: string
+  user: string
+  tty: string
+  from: string
+  loginTime?: string
+  endTime?: string
+  duration?: string
+  active: boolean
+}
+
+export type AccountSudoEvent = {
+  at: string
+  runAs: string
+  command: string
+  failed: boolean
+  reason?: string
+}
+
+export type AccountHistory = {
+  logins: AccountLogin[]
+  failed: AccountLogin[]
+  sudo: AccountSudoEvent[]
+}
+
+export type AccountRemoval = {
+  username: string
+  home: string
+  homeExists: boolean
+  homeBytes: number
+  homeUnsafe: boolean
+  processes: number
+  cronJobs: boolean
+  sshKeys: number
+  sudoRules: SudoRule[]
+  elsewhere: string[]
+  elsewhereTruncated: boolean
+  /** Another account with this one's number: only the name can be removed. */
+  sharesNumber?: string
+  blocked?: string
+}
+
+export type AccountLimits = {
+  cpuPercent: number
+  memoryBytes: number
+  tasks: number
+  systemd: boolean
+  quota?: { mount: string; usedBytes: number; softBytes: number; hardBytes: number }
+}
+
+export type SystemGroup = {
+  name: string
+  gid: number
+  members: string[]
+  primary: string[]
+  system: boolean
+  rootEquivalent: boolean
+  sudoRules: SudoRule[]
+  protected: boolean
+}
+
+export type AccountDefaults = {
+  passwordMaxDays: number
+  passwordMinDays: number
+  passwordWarnDays: number
+  shell: string
+  inactiveDays: number
+  quality: { available: boolean; minLength: number; minClasses: number }
+  skel: { name: string; bytes: number; dir: boolean }[]
+  shells: string[]
+}
+
+export type AccountTemplate = {
+  id: string
+  name: string
+  builtin: boolean
+  shell: string
+  groups: string[]
+  sudo: SudoLevel
+  system: boolean
+  noHome: boolean
+}
+
+export type BulkResults = { results: { username: string; error?: string }[] }
 
 export type FirewallRule = {
   number?: number
@@ -2771,13 +2950,23 @@ export type BackupJob = {
   name: string
   sources: string[]
   excludes: string[]
-  targetKind: "local" | "s3" | "b2"
+  targetKind: "local" | "s3" | "b2" | "sftp" | "rclone"
   target: {
     bucket?: string
     region?: string
     endpoint?: string
     prefix?: string
+    /** The directory here, on the SFTP server, or inside the rclone remote. */
     path?: string
+    /** SFTP: the server and account. */
+    host?: string
+    port?: number
+    username?: string
+    /** SFTP: the host key pinned the first time the server was reached. */
+    hostKey?: string
+    hostKeyFingerprint?: string
+    /** rclone: the remote's backend, read from its sealed configuration (drive, onedrive…). */
+    remoteType?: string
   }
   schedule: string
   retention: number
@@ -2801,6 +2990,24 @@ export type BackupJob = {
   /** New archives are sealed to the server's backup key before they are written. */
   encrypt?: boolean
   recovery?: BackupRecoveryPlan
+  /**
+   * Adopted from what a destination holds: the record of another server's job
+   * (or this one's before a rebuild). It never runs, is never scheduled, and
+   * its archives are never pruned from here.
+   */
+  imported?: boolean
+  origin?: BackupJobOrigin
+}
+
+/** What an imported job was on the server it came from. */
+export type BackupJobOrigin = {
+  /** The install's identity, a random value made once per install. */
+  id: string
+  host?: string
+  jobId: number
+  jobName: string
+  /** Archives this install wrote whose records it no longer had. */
+  thisServer?: boolean
 }
 
 /** The server's backup key, by its public half; the secret never leaves but by export. */
@@ -2812,6 +3019,8 @@ export type BackupArchiveKey = {
   exportedAt?: string
   encryptingJobs: number
   encryptedArchives: number
+  /** Keys brought from other servers to open what they sealed; nothing new is sealed to them. */
+  imported?: { recipient: string; importedAt: string }[]
 }
 
 export type BackupResourceKind =
@@ -2862,6 +3071,20 @@ export type BackupRestoreResult = {
   bytes: number
   skipped?: string[]
   targets?: string[]
+  /** What a restore in place made first: "volume NAME", or a directory. */
+  created?: string[]
+}
+
+/** Where one recorded source goes in a restore in place on this host, and what it makes first. */
+export type BackupRestoreTarget = {
+  archivePath: string
+  path: string
+  target: string
+  kind: "path" | "volume"
+  volume?: string
+  exists: boolean
+  creates?: "volume" | "directory"
+  refused?: string
 }
 
 export type BackupDatabaseDump = {
@@ -2881,10 +3104,28 @@ export type BackupManifest = {
   /** Over the bytes the destination holds: the ciphertext, for an encrypted archive. */
   artifactDigest: string
   complete: boolean
-  sources?: { path: string; archivePath: string }[]
+  sources?: BackupManifestSource[]
   databaseDumps?: BackupDatabaseDump[]
   pausedContainers?: string[]
   encryption?: BackupArchiveEncryption
+  artifactBytes?: number
+  /** The install, job and run that took the archive; written since 0.8.2. */
+  origin?: {
+    id: string
+    host?: string
+    jobId: number
+    jobName: string
+    runId: number
+    startedAt: string
+  }
+}
+
+export type BackupManifestSource = {
+  path: string
+  archivePath: string
+  /** "volume" for a Docker volume's directory; absent for a path. */
+  kind?: "volume"
+  volume?: string
 }
 
 /** How an archive was sealed: age, to the key whose public half is `recipient`. */
@@ -2937,6 +3178,10 @@ export type BackupRun = {
   duration?: string
   manifest?: BackupManifest
   restoreVerification?: BackupRestoreVerification
+  /** Adopted from a destination; its artifact is the destination's object. */
+  imported?: boolean
+  /** A copy the import kept on this server, read first while it is there. */
+  localCopy?: string
 }
 
 export type DeployProject = {
@@ -2966,6 +3211,7 @@ export type DeploymentFacts = {
   sourceKind?: DeploymentSourceKind
   sourceRef?: string
   sourceRepository?: string
+  sourceTemplate?: string
   buildMethod?: DeploymentBuildMethod
   recipe?: DeploymentRecipe
   framework?: string
@@ -3102,6 +3348,7 @@ export type DeploymentBuildEvidence = {
       dockerfileDigest?: string
       targetPlatform?: string
       cachePolicy?: string
+      railpack?: RailpackEvidence
     }
   }
 }
@@ -3115,7 +3362,8 @@ export type DeploymentBuildEvidence = {
  */
 export type DeploymentFailureCause = {
   code: string
-  phase?: "install" | "build" | "output_check" | "setup" | "dockerfile" | "base_image" | "pull"
+  phase?:
+    "install" | "build" | "output_check" | "setup" | "dockerfile" | "base_image" | "pull" | "plan"
   command?: string
   exitCode?: number
   subjects?: string[]
@@ -3133,7 +3381,8 @@ export type DeploymentFailureCause = {
  * The one plan change a cause's evidence supports. `set_build` and
  * `set_runtime` replace the field with `value`; `add_variable` creates the
  * variable in `scope`; `variable_scope` adds `scope` to an existing one;
- * `review` opens a field whose right value the output cannot prove.
+ * `review` opens a field whose right value the output cannot prove;
+ * `dns_record` opens a domain's DNS record sheet on Domains settings.
  */
 export type DeploymentCauseFix = {
   kind:
@@ -3143,7 +3392,8 @@ export type DeploymentCauseFix = {
     | "variable_scope"
     | "remove_variable_scope"
     | "review"
-  /** `configuration.build.packageManager`, `runtime.internalPort`, `variables.NAME`, `dependencies`. */
+    | "dns_record"
+  /** `configuration.build.packageManager`, `runtime.internalPort`, `variables.NAME`, `dependencies`, `domains.HOST`. */
   field: string
   value?: string
   scope?: string
@@ -3168,6 +3418,33 @@ export type DeploymentSettingsChange = {
   change: "changed" | "added" | "removed" | "scope"
   before?: string
   after?: string
+}
+
+/**
+ * `GET`/`POST /deploy/{id}/runs/{run}/diagnosis`: the last answer the
+ * assistant's provider gave about a failed run, kept with it.
+ */
+export type DeploymentRunDiagnosis = {
+  runId: number
+  provider: "anthropic" | "openai"
+  model: string
+  modelLabel: string
+  answer: {
+    cause?: string
+    /** Transcript lines the answer quoted, as the transcript has them. */
+    evidence: { seq: number; text: string }[]
+    steps: string[]
+    /** Lines it quoted that the run never printed, which are left out. */
+    unmatched?: number
+    /** The whole answer, for one that kept to no shape. */
+    text: string
+  }
+  /** Exactly what went to the provider, already masked. */
+  sent: string
+  sentLines: number
+  masked: number
+  createdBy: string
+  createdAt: string
 }
 
 export type DeploymentRunSnapshot = {
@@ -3203,6 +3480,10 @@ export type DeploymentRuntimeService = {
   exitCode?: number
   /** The kernel killed it for exceeding its memory. */
   oomKilled?: boolean
+  /** Which of its release's replicas it is, from 1; absent for a release of one container. */
+  replica?: number
+  /** How many replicas its release runs; absent for a release of one container. */
+  replicas?: number
 }
 
 export type DeploymentRuntimeServices = {
@@ -3261,6 +3542,85 @@ export type BlueprintSummary = {
   memoryMb: number
   requiresAcceptance?: boolean
   privileged?: boolean
+  /**
+   * The source kind it deploys as: one reviewed image, or a multi-service
+   * template that runs through the Compose release path — then `image` is
+   * the public service's, `memoryMb` the whole stack's limits added up, and
+   * `services` what the stack runs.
+   */
+  sourceKind?: "blueprint" | "compose"
+  services?: BlueprintServiceSummary[]
+  /**
+   * Shipped with the dashboard, or added on it — a template from a Compose
+   * file, a deployment saved as one, or an imported file. An added
+   * template's id is always `user-<name>`, so it never stands in for a
+   * built-in.
+   */
+  origin?: "builtin" | "user"
+}
+
+/** How a template added on this dashboard was made. */
+export type DeploymentTemplateSource = "compose" | "deployment" | "import"
+
+/** One template added on this dashboard, as `GET /deploy/templates` lists it. */
+export type UserTemplate = {
+  id: string
+  name: string
+  version: string
+  source: DeploymentTemplateSource
+  /** The deployment a template was saved from; it may have been removed since. */
+  fromDeploymentId?: number
+  summary: BlueprintSummary
+  /** How many deployments' sources name it. Each runs its own copy. */
+  deployments: number
+  createdBy: string
+  createdAt: string
+  updatedBy: string
+  updatedAt: string
+}
+
+export type UserTemplateDetail = UserTemplate & { definition: BlueprintDetail }
+
+/** A dry run's answer: the definition a file or a deployment makes, not stored. */
+export type TemplatePreview = {
+  definition: BlueprintDetail
+  summary: BlueprintSummary
+  /** Whether a template already has this id, so saving would be refused. */
+  exists: boolean
+}
+
+export type BlueprintServiceRole = "app" | "worker" | "database" | "cache"
+
+/** One service of a multi-service template as the catalogue lists it. */
+export type BlueprintServiceSummary = {
+  name: string
+  role: BlueprintServiceRole
+  purpose: string
+  image: string
+  memoryMb: number
+  /** The one service routed to the deployment's domain. */
+  public?: boolean
+}
+
+/** One service as the definition declares it, on the detail endpoint. */
+export type BlueprintService = {
+  name: string
+  role: BlueprintServiceRole
+  purpose: string
+  image: { reference: string; tagPolicy: string; command?: string[] }
+  ports?: {
+    name: string
+    internal: number
+    protocol: string
+    purpose: string
+    exposure: "proxy" | "internal"
+    primary?: boolean
+  }[]
+  volumes?: { name: string; target: string; purpose: string; data: boolean; backup: boolean }[]
+  resources: { memoryMb: number; minMemoryMb: number; cpus?: number }
+  dependsOn?: { service: string; condition: "healthy" | "started" | "completed" }[]
+  /** A private service that may reach the internet. */
+  egress?: boolean
 }
 
 export type BlueprintChoice = {
@@ -3329,6 +3689,8 @@ export type BlueprintDetail = Omit<
   | "reviewedAt"
   | "requiresAcceptance"
   | "privileged"
+  | "sourceKind"
+  | "services"
 > & {
   retired?: string
   image: {
@@ -3367,6 +3729,8 @@ export type BlueprintDetail = Omit<
   files?: BlueprintConfigFile[]
   automation?: BlueprintAutomation[]
   update: { detector: string; versionSource?: string; notes?: string; backupFirst?: boolean }
+  /** A multi-service template's services; the top-level image is then empty. */
+  services?: BlueprintService[]
 }
 
 export type GameImportPreview = {
@@ -3412,6 +3776,24 @@ export type GamePlayers = {
   observedAt: string
 }
 
+/**
+ * Where a game server's players connect, read from the live release: the
+ * port and protocol, the bind address, and what the host firewall does with
+ * it. `firewall` is "admits" (an allow rule matches), "drops" (on, refusing
+ * by default, nothing matches), "off", "open" (accepts by default) or
+ * "unknown" with a reason.
+ */
+export type GameReach = {
+  port: number
+  /** One number on both for a server that signals over TCP and plays over UDP. */
+  protocol: "tcp" | "udp" | "tcp+udp"
+  bind: string
+  public: boolean
+  firewall: "admits" | "drops" | "off" | "open" | "unknown"
+  reason?: string
+  editable?: boolean
+}
+
 export type GameOverview = {
   status: "available" | "unavailable"
   reason?: string
@@ -3421,6 +3803,9 @@ export type GameOverview = {
   address?: string
   players?: GamePlayers
   console: boolean
+  /** Why the game has no console of its own (Bedrock has no RCON). */
+  consoleReason?: string
+  reach?: GameReach
   files: BlueprintConfigFile[]
 }
 
@@ -3559,6 +3944,21 @@ export type DeploymentOperations = {
     reason?: string
     items: DeploymentDependencyItem[]
   }
+  /** The tailnet address and who may open it, for a release that is tailnet-only. */
+  tailnet?: DeploymentTailnetAddress
+}
+
+/** A tailnet-only environment as its live release and its address record have it. */
+export type DeploymentTailnetAddress = {
+  url?: string
+  port?: number
+  /** The mapping is in place for the live release. */
+  published: boolean
+  /** Who may open it; empty is everyone on the tailnet. */
+  allow: string[]
+  /** The proxy that asks who every visitor is, for a release that names them. */
+  gate?: "nginx" | "caddy"
+  gateRunning?: boolean
 }
 
 export type ReleaseFieldChange = {
@@ -3601,6 +4001,8 @@ export type ReleaseComparison = {
     domains: ReleaseListChange[]
   }
   artifacts: ReleaseArtifactStatus[]
+  /** Each release's recorded data point, per linked database. */
+  dataPoints?: { from: ReleaseDataPoint[]; to: ReleaseDataPoint[] }
 }
 
 export type ReleaseUpdateStatus = {
@@ -3630,7 +4032,7 @@ export type DeploymentSummary = {
   desiredRevision: number
   liveReleaseId?: number
   livePlanRevision?: number
-  strategy: "blue_green" | "stop_first"
+  strategy: DeploymentStrategy
   expectedDowntime: boolean
   sourceKind: DeploymentSourceKind
   buildMethod: DeploymentBuildMethod
@@ -3643,6 +4045,8 @@ export type DeploymentSummary = {
   pendingChanges: boolean
   /** The live release's runtime was stopped on purpose and waits for Start. */
   stopped?: boolean
+  /** When the live release was put to sleep, while it is asleep by design and the next request wakes it. */
+  asleepSince?: string
   /** Services in the live release's runtime: one, or a Compose stack's count. */
   serviceCount?: number
   lastRun?: DeploymentEngineRun
@@ -3652,6 +4056,12 @@ export type DeploymentSummary = {
   sourceRepository?: string
   /** A Git source's remote without userinfo: `https://host/path` or `git@host:path`. */
   sourceRemote?: string
+  /**
+   * The reviewed template (`id@version`) the deployment was made from: a
+   * blueprint source's definition, or the multi-service template a Compose
+   * source was rendered from.
+   */
+  sourceTemplate?: string
   recipe?: DeploymentRecipe
   /** What detection recognised the source as (`nextjs`, `vite`, `django`…), recorded at creation. */
   framework?: string
@@ -3684,6 +4094,8 @@ export type DeploymentGitPolicy = {
   watchInclude: string[]
   watchExclude: string[]
   commitStatuses?: boolean
+  /** Production refuses every build and takes only releases promoted from staging. */
+  promotionOnly?: boolean
   revision: number
   inherited?: boolean
   conflict?: boolean
@@ -3697,7 +4109,143 @@ export type DeploymentGitWatch = {
   intervalSeconds: number
   reason?: string
   policy?: DeploymentGitPolicy
+  commitStatus?: DeploymentCommitStatus
 }
+
+/** The last thing written back to the Git host: a commit status or a preview comment. */
+export type DeploymentForgeReport = {
+  provider: string
+  repository?: string
+  revision?: string
+  /** pending/success/failure/error for a status; building/ready/failed/removed/cancelled for a comment. */
+  state: string
+  runId?: number
+  ok: boolean
+  /** Why the host did not take it, in words the operator can act on. */
+  message?: string
+  at: string
+}
+
+/** Where an environment's releases are reported, as whom, and how the last one went. */
+export type DeploymentCommitStatus = {
+  /** github, gitlab or gitea (Gitea and Forgejo share one API); absent when nothing is reported. */
+  provider?: "github" | "gitlab" | "gitea" | "git"
+  /** What to call the host: github, gitlab, gitea, forgejo or codeberg. */
+  product?: string
+  host?: string
+  repository?: string
+  /** The status's name on the host, `just-dashboard/<environment>`. */
+  context?: string
+  /** The saved token a GitLab or Gitea status is written with. */
+  credential?: string
+  ready: boolean
+  reason?: string
+  lastStatus?: DeploymentForgeReport
+  lastComment?: DeploymentForgeReport
+}
+
+/** Where deployments' output and requests are copied to: an OTLP collector, a Loki, or a JSON-lines endpoint. */
+export type LogDrainKind = "otlp" | "loki" | "http"
+/** Traces are the requests again, as OpenTelemetry spans; only an `otlp` drain takes them. */
+export type LogDrainStream = "output" | "requests" | "traces"
+
+export type LogDrain = {
+  id: number
+  name: string
+  kind: LogDrainKind
+  endpoint: string
+  enabled: boolean
+  streams: LogDrainStream[]
+  /** Empty sends every project, including ones created later. */
+  projects: number[]
+  /** Where the drain's service shows a trace, with `{traceId}` for the id; the request console links to it. */
+  traceUrl?: string
+  /** The headers the drain sends, by name; their values are sealed and never read back. */
+  headerNames: string[]
+  createdAt: string
+  updatedAt: string
+  status: {
+    shipped: number
+    dropped: number
+    batches: number
+    lastSuccessAt?: string
+    lastError?: string
+    lastErrorAt?: string
+    /** Waiting in memory for the next delivery. */
+    queued: number
+  }
+}
+
+/**
+ * A connection to an external secret manager that deployment variables read
+ * as `${{store.NAME/path#KEY}}`. Vault and OpenBao share the KV version 2
+ * API; Infisical signs in with a Universal Auth machine identity; Doppler
+ * with a service token; AWS Secrets Manager with an access key pair (SigV4);
+ * Azure Key Vault with an application's client credentials. The last two
+ * keep whole secrets, read as `${{store.NAME/secret-name}}` or, for a field
+ * of a JSON value, `${{store.NAME/secret-name#KEY}}`.
+ */
+export type SecretStoreKind = "vault" | "openbao" | "infisical" | "doppler" | "aws" | "azure"
+
+export type SecretStoreSettings = {
+  /** Vault and OpenBao: where the KV version 2 engine is mounted ("secret"). */
+  mount?: string
+  namespace?: string
+  auth?: "token" | "approle"
+  authMount?: string
+  /** Infisical: the project id and environment slug a reference reads in. */
+  project?: string
+  environment?: string
+  /** AWS: the region the Secrets Manager endpoint is derived from. */
+  region?: string
+  /** Azure: the vault's name (its host), the tenant signed in to, the cloud. */
+  vaultName?: string
+  tenantId?: string
+  cloud?: "public" | "usgov" | "china"
+  /** Azure: a sign-in authority other than the cloud's own. */
+  authority?: string
+  /** A PEM certificate authority for a self-hosted store's TLS. */
+  caCert?: string
+}
+
+/** When something was tried against a store and what it answered. */
+export type SecretStoreOutcome = { at: string; ok: boolean; message: string }
+
+/** An environment variable that references a store. */
+export type SecretStoreUse = {
+  projectId: number
+  projectName: string
+  environmentId: number
+  environmentName: string
+  environmentKind: string
+  variable: string
+  /** The reference's target, `name/path#KEY`. */
+  reference: string
+}
+
+export type SecretStore = {
+  id: number
+  name: string
+  kind: SecretStoreKind
+  address: string
+  /** Where the store is reached: the address, or what the region or vault name derives. */
+  endpoint: string
+  settings: SecretStoreSettings
+  /** The credentials that are set, by name; their values are sealed and never read back. */
+  credentialNames: string[]
+  /** A pull request preview's variables may read this store. */
+  allowPreviews: boolean
+  createdBy: string
+  updatedBy: string
+  createdAt: string
+  updatedAt: string
+  test?: SecretStoreOutcome
+  lastRead?: SecretStoreOutcome
+  usedBy: SecretStoreUse[]
+}
+
+/** What Test found: the store's own words, and a probe's version. */
+export type SecretStoreTest = { ok: boolean; message: string; version?: string }
 
 /** One page of a project's run history, newest first. */
 export type DeploymentRunsPage = {
@@ -3756,6 +4304,107 @@ export type DeploymentInsights = {
   topFailures: { code: string; count: number }[]
 }
 
+/**
+ * Where a promoted release's image came from: the release it was promoted
+ * from — staging's, or for staging a pull request preview's — and the local
+ * image id the container is created from.
+ */
+export type DeploymentPromotion = {
+  environmentId: number
+  environmentName: string
+  releaseId: number
+  releaseNumber: number
+  runId: number
+  imageId: string
+  imageDigest: string
+  sourceRevision?: string
+  /** Absent on a record from before previews could be promoted, which is staging's. */
+  sourceKind?: "staging" | "preview"
+  /** The pull request a preview's image was built from, and who approved its commit. */
+  preview?: DeploymentPromotedPreview
+}
+
+export type DeploymentPromotedPreview = {
+  number: number
+  url?: string
+  repository?: string
+  headRepository?: string
+  approvedBy: string
+}
+
+/** The newest promotion of a preview's image into staging, as the preview's row reads it. */
+export type DeploymentPreviewPromotion = {
+  runId: number
+  runNumber: number
+  state: DeploymentRunState
+  environmentId: number
+  releaseNumber: number
+  sourceRevision?: string
+  requestedAt: string
+  endedAt?: string
+}
+
+/** One of a deployment's long-lived environments, for the environment switcher. */
+export type DeploymentEnvironment = {
+  id: number
+  name: string
+  slug: string
+  kind: "production" | "staging"
+  desiredRevision: number
+  liveReleaseId?: number
+  /** Production refuses builds and takes only releases promoted from staging. */
+  promotionOnly?: boolean
+  createdAt: string
+}
+
+/** What adding staging copied from production, what it left behind, and why. */
+export type DeploymentStagingCopy = {
+  environment: DeploymentEnvironment
+  copied: string[]
+  skipped: { name: string; kind: string; reason: string }[]
+  adjusted: string[]
+}
+
+/** The Promote confirmation's read: the exact image and how the target differs. */
+export type DeploymentPromotionPreview = {
+  source: {
+    /** "staging" into production, or "preview" into staging. */
+    kind: "staging" | "preview"
+    environmentId: number
+    environmentName: string
+    release: DeploymentRelease
+    imageId: string
+    imageDigest: string
+    imageSizeBytes: number
+    imagePresent: boolean
+    /** The pull request behind a preview source. */
+    preview?: {
+      number: number
+      title?: string
+      url?: string
+      author?: string
+      headRepository?: string
+      fork: boolean
+      approvedBy?: string
+      approvalState?: string
+    }
+  }
+  target: {
+    environmentId: number
+    environmentName: string
+    liveRelease?: DeploymentRelease
+    desiredRevision: number
+    activeRuns: number
+    promotionOnly: boolean
+    pendingChanges: { kind: string; name: string; change: string }[]
+    releaseTasks: string[]
+    /** Production's terms rehearse those tasks on a restored copy first. */
+    rehearsal: boolean
+  }
+  detail: ReleaseComparison["detail"]
+  blockers: { code: string; message: string }[]
+}
+
 export type DeploymentRelease = {
   id: number
   projectId: number
@@ -3763,18 +4412,241 @@ export type DeploymentRelease = {
   number: number
   runId: number
   predecessorReleaseId?: number
-  state: "candidate" | "live" | "retained"
+  state: "candidate" | "live" | "retained" | "failed" | "retired"
   planRevision: number
   sourceRevision?: string
   imageDigest?: string
   configDigest: string
   variablesDigest: string
-  strategy: "blue_green" | "stop_first"
+  strategy: DeploymentStrategy
   expectedDowntime: boolean
   createdAt: string
   activatedAt?: string
   retiredAt?: string
   pinned: boolean
+  /** Set on a release an instant rollback took traffic away from. */
+  rolledBackAt?: string
+  rollbackReason?: string
+  /** Set when the image was promoted — from staging, or into staging from a preview — rather than built here. */
+  promotion?: DeploymentPromotion
+  /**
+   * Where each linked database stood when this release went live
+   * (`deploy/data_rollback.go`): the moment its point-in-time archive recovers
+   * to, or the newest dump that covered it. Absent on a release that went
+   * live before this was recorded, or with no linked database.
+   */
+  dataPoints?: ReleaseDataPoint[]
+  /** Whether "Restore data as of this release" is offered, and why not. */
+  dataCopy?: { eligible: boolean; reason?: string }
+}
+
+/** One linked database's state at the moment a release went live. */
+export type ReleaseDataPoint = {
+  connectionId: number
+  /** The connection's name when the point was recorded. */
+  name: string
+  engine: string
+  kind: "pitr" | "dump" | "none"
+  /** pitr: the moment the archive recovers to; dump: when its backup run started. */
+  at?: string
+  backupRunId?: number
+  backupJobId?: number
+  archiveId?: number
+  /** kind none: why there is nothing to restore a copy from. */
+  reason?: string
+  recordedAt: string
+}
+
+export type DataCopyState = "waiting" | "restoring" | "ready" | "failed" | "skipped" | "removed"
+
+/**
+ * A linked database restored from a release's data point into a throwaway
+ * container beside production, on the deployment's network. Its credentials
+ * are read by a session alone (`…/data-copies/{copy}/url`) and never ride here.
+ */
+export type DataCopy = {
+  id: number
+  projectId: number
+  environmentId: number
+  releaseId: number
+  releaseNumber: number
+  connectionId: number
+  name: string
+  engine: string
+  database: string
+  state: DataCopyState
+  source: {
+    kind: "pitr" | "dump"
+    at?: string
+    backupRunId?: number
+    backupJobId?: number
+    archiveId?: number
+  }
+  /** pitr: the moment the copy actually reached. */
+  recoveredTo?: string
+  /** The rollback run it waits for before restoring. */
+  afterRunId?: number
+  /** The copy's name on the deployment's network, e.g. db-5-copy-3.jd.internal. */
+  host?: string
+  port?: number
+  network?: string
+  expiresAt?: string
+  createdBy: string
+  createdAt: string
+  readyAt?: string
+  endedAt?: string
+  reason?: string
+  restoreMs?: number
+}
+
+export type DataCopyConnection = {
+  url: string
+  host: string
+  port: number
+  user: string
+  database: string
+}
+
+/** The copy's tables beside the live database's, with their row counts. */
+export type DataCopyComparison = {
+  copyId: number
+  database: string
+  tables: {
+    schema: string
+    name: string
+    copyRows: number | null
+    liveRows: number | null
+    estimated?: boolean
+    only?: "copy" | "live"
+  }[]
+  /** More tables than the server compares. */
+  truncated: boolean
+  copyError?: string
+  liveError?: string
+  readAt: string
+}
+
+/**
+ * An environment's terms for keeping the previous release warm after a
+ * blue/green cutover (`deploy/rollback_watch.go`).
+ */
+export type RollbackPolicy = {
+  keepWarm: boolean
+  windowSeconds: number
+  automatic: boolean
+  /** Percentage points over the previous release's 5xx share. */
+  errorRateMargin: number
+  /** Multiple of the previous release's p95. */
+  latencyFactor: number
+  minRequests: number
+  updatedBy?: string
+  updatedAt?: string
+}
+
+export type RollbackReading = {
+  requests: number
+  failures: number
+  /** A share, 0–1. */
+  errorRate: number
+  p95?: number
+  from: string
+  until: string
+}
+
+export type RollbackVerdictCode =
+  "no_route" | "no_record" | "not_enough_requests" | "within_baseline" | "error_rate" | "latency"
+
+export type RollbackVerdict = {
+  code: RollbackVerdictCode
+  judged: boolean
+  tripped: boolean
+  reason: string
+  latencyJudged: boolean
+}
+
+export type RollbackWatchState = "watching" | "rolling_back" | "rolled_back" | "closing" | "closed"
+
+/** How one release replaces the next: candidate first, stopping first, or tried as a canary between. */
+export type DeploymentStrategy = "blue_green" | "stop_first" | "canary"
+
+/** A canary plan's trial (`deploy.CanaryTerms`). */
+export type DeploymentCanaryTerms = {
+  /** The candidate's share of the requests, 1–50. */
+  percent: number
+  /** How long the trial lasts, 60–3600. */
+  durationSeconds: number
+  /** Cut over at the end of a trial that compared well, rather than waiting for an operator. */
+  autoPromote?: boolean
+}
+
+/** One canary trial, as GET …/canary reads it (`deploy.CanaryWindow`). */
+export type DeploymentCanary = {
+  id: number
+  projectId: number
+  environmentId: number
+  runId: number
+  releaseId: number
+  liveReleaseId: number
+  percent: number
+  durationSeconds: number
+  autoPromote: boolean
+  policy: RollbackPolicy
+  state: "running" | "holding" | "promoted" | "aborted"
+  /** An operator's promote or abort, asked for and not yet carried out. */
+  decision?: "promote" | "abort"
+  decidedBy?: string
+  startedAt: string
+  endsAt: string
+  live?: RollbackReading
+  candidate?: RollbackReading
+  verdict?: RollbackVerdict
+  checkedAt?: string
+  endReason?: string
+  endMessage?: string
+  endedAt?: string
+  releaseNumber: number
+  liveReleaseNumber: number
+}
+
+export type DeploymentCanaryResponse = { canary: DeploymentCanary | null }
+
+export type RollbackWatch = {
+  id: number
+  projectId: number
+  environmentId: number
+  runId: number
+  releaseId: number
+  warmReleaseId: number
+  warmRuntimeId: string
+  state: RollbackWatchState
+  policy: RollbackPolicy
+  cutoverAt: string
+  expiresAt: string
+  baseline?: RollbackReading
+  observed?: RollbackReading
+  verdict?: RollbackVerdict
+  checkedAt?: string
+  rollbackRunId?: number
+  attempts: number
+  endReason?: string
+  endMessage?: string
+  endedAt?: string
+  createdAt: string
+  releaseNumber: number
+  warmReleaseNumber: number
+  /**
+   * The warm release is kept running, not paused, because skew protection
+   * still sends it the visitors it answered first.
+   */
+  warmRunning?: boolean
+  /** What the running warm release answered since the cutover. */
+  warmServed?: RollbackReading
+}
+
+export type RollbackWatchResponse = {
+  policy: RollbackPolicy
+  watch: RollbackWatch | null
+  preview: boolean
 }
 
 export type DeploymentTrigger = {
@@ -3934,6 +4806,72 @@ export type DeploymentPreview = {
   liveReleaseId?: number
   address?: DeploymentPreviewAddress
   lastRun?: DeploymentRecentRun
+  /** A live Compose preview's services as Docker reports them; absent for a single container. */
+  services?: DeploymentRuntimeServices
+  /** The newest promotion of this preview's image into staging, however it ended. */
+  promotion?: DeploymentPreviewPromotion
+  /** The preview's own copies of databases production gives previews a branch of. */
+  branches?: PreviewDatabaseBranch[]
+}
+
+/** What a linked database gives an environment's previews (`deploy/preview_branches.go`). */
+export type PreviewBranchMode = "none" | "branch" | "masked"
+
+export type PreviewBranchPolicy = {
+  connectionId: number
+  mode: PreviewBranchMode
+  /** table.column or schema.table.column, overwritten in their shape on the copy. */
+  maskedColumns: string[]
+  updatedBy?: string
+  updatedAt?: string
+}
+
+/** A preview's own copy of a linked database, restored from its newest backup. */
+export type PreviewDatabaseBranch = {
+  id: number
+  environmentId: number
+  connectionId: number
+  name: string
+  engine?: string
+  database?: string
+  mode: PreviewBranchMode
+  maskedColumns: string[]
+  state: "waiting" | "restoring" | "ready" | "failed" | "removed"
+  /** "dump" for a backup job's native dump, "pitr" for a point-in-time recovery. */
+  source: { kind: string; backupRunId?: number; takenAt?: string; bytes?: number; method?: string }
+  recoveredTo?: string
+  host?: string
+  port?: number
+  maskedRows?: number
+  reason?: string
+  restoreMs?: number
+  requestedBy?: string
+  createdAt: string
+  readyAt?: string
+  endedAt?: string
+}
+
+/** One service of a Compose stack, and what its preview gets in place of production's. */
+export type ComposePreviewService = {
+  name: string
+  /** The service the preview's route and tailnet address reach; the only one that answers. */
+  public: boolean
+  /** Ports production publishes on the host; the preview publishes none of them. */
+  ports: string[]
+  /** Mount targets that start empty on storage of the preview's own. */
+  volumes: string[]
+  /** Read-only files of the commit itself the preview mounts. */
+  checkout: string[]
+  /** Read-only paths of this server the preview does not get. */
+  leftOut: string[]
+}
+
+/** What a preview of a Compose stack gets, service by service, and what refuses one. */
+export type ComposePreviewFacts = {
+  public: string
+  services: ComposePreviewService[]
+  /** What no preview may have; any one refuses the preview. */
+  refusals: string[]
 }
 
 /** A deploy project's pull requests on GitHub, joined to the previews built from them. */
@@ -3955,8 +4893,12 @@ export type ProjectPullRequests = {
     awaitingFirstDeployment: boolean
   }
   tailnet: TailscaleIdentity
-  /** The production build is a Compose stack, which previews cannot isolate. */
+  /** The production build is a Compose stack; `composePreview` says what its preview gets. */
   compose: boolean
+  /** Present for a Compose stack: each service's isolation, and what refuses a preview. */
+  composePreview?: ComposePreviewFacts
+  /** The databases production gives its previews a branch of; a fork's preview gets none. */
+  databaseBranches?: (PreviewBranchPolicy & { name: string; driver?: string })[]
   /** The production source is a local checkout, which has no remote to fetch a pull request from. */
   localCheckout: boolean
   /** The runtime plan's internal port; 0 means nothing to publish. */
@@ -4019,10 +4961,15 @@ export type DeploymentHostnameSuggestion = {
   /** Whether a certificate on this host already covers it — the only thing activation accepts. */
   covered: boolean
   certificateName?: string
-  /** The HTTP-01 challenge this host could issue one with now, if any. */
-  certificateMethod?: "nginx" | "webroot" | "standalone" | "caddy"
+  /**
+   * The HTTP-01 challenge this host could issue one with now, if any — or, for a
+   * wildcard, `dns-01` through the saved credentials of `certificateDnsProvider`.
+   */
+  certificateMethod?: "nginx" | "webroot" | "standalone" | "caddy" | "dns-01"
+  certificateDnsProvider?: string
   certificateIssue?: string
-  method: "wildcard" | "sslip" | "custom" | "none"
+  /** `tunnel` answers a name asked about with `tunnel=1`: whether a tunnel can serve it. */
+  method: "wildcard" | "sslip" | "custom" | "none" | "tunnel"
   detail: string
   /** This server's public IPv4 — for a typed hostname, what its A record should name. */
   address?: string
@@ -4038,6 +4985,87 @@ export type DeploymentHostnameSuggestion = {
    * about project names at all.
    */
   nameTaken?: boolean
+}
+
+/** One record set: a name, a type, and every value the name holds of it. */
+export type DeploymentDNSRecordSet = {
+  name: string
+  type: "A" | "AAAA" | "CNAME"
+  values: string[]
+  /** Seconds; 1 is Cloudflare's automatic, which a proxied record has. */
+  ttl: number
+  /** Cloudflare's edge answers for the name: a tunnel's CNAME always is. */
+  proxied?: boolean
+  comment?: string
+}
+
+/** A set's line of a DNS record plan: what the zone holds and what a write does. */
+export type DeploymentDNSRecordChange = {
+  type: DeploymentDNSRecordSet["type"]
+  name: string
+  /** `conflict` blocks the write; `stale` is said and left alone, since nothing is deleted. */
+  action: "create" | "update" | "keep" | "conflict" | "stale"
+  current: string[]
+  want: string[]
+  currentTtl?: number
+  ttl?: number
+  proxied?: boolean
+  detail: string
+  /** The set as the zone holds it now is the one this dashboard wrote. */
+  ours: boolean
+}
+
+/** A set this dashboard wrote into the zone, with who and when. */
+export type DeploymentDNSRecordManaged = {
+  type: DeploymentDNSRecordSet["type"]
+  values: string[]
+  ttl: number
+  provider: string
+  zone: string
+  createdBy: string
+  createdAt: string
+  updatedBy: string
+  updatedAt: string
+  /** The zone still holds what was written. */
+  current: boolean
+}
+
+/**
+ * `GET /deploy/{id}/domains/{domain}/dns-record`, the dry run, and the POST
+ * that writes it: what the name should hold (A and AAAA to this server, or a
+ * proxied CNAME to the tunnel), what its zone holds, and through which saved
+ * DNS credential and zone it is written.
+ */
+export type DeploymentDNSRecordPlan = {
+  hostname: string
+  environmentId: number
+  environment: string
+  tunnel: boolean
+  want: DeploymentDNSRecordSet[]
+  provider?: string
+  providerKey?: string
+  zone?: string
+  account?: string
+  candidates: { key: string; provider: string; zone?: string; error?: string }[]
+  problems: string[]
+  changes: DeploymentDNSRecordChange[]
+  writable: boolean
+  ready: boolean
+  /** The write would change a record this dashboard did not write; it is sent with `replace`. */
+  foreign: boolean
+  refusal?: string
+  refusalCode?:
+    | "no_public_address"
+    | "tunnel_not_connected"
+    | "no_credentials"
+    | "no_zone"
+    | "ambiguous"
+    | "tunnel_zone"
+    | "provider_error"
+    | "conflict"
+  summary: string
+  managed: DeploymentDNSRecordManaged[]
+  written?: DeploymentDNSRecordChange[]
 }
 
 export type DeploymentDraftSource = {
@@ -4304,6 +5332,11 @@ export type DeploymentStaticSite = {
 
 export type DeploymentDetectionCandidate = {
   dockerfile?: string
+  /**
+   * The Railpack provider that would build this directory: beside a recipe, the choice
+   * offered next to it; on a Railpack candidate, the one it builds with.
+   */
+  railpackProvider?: RailpackProvider
   goVersion?: string
   packageManager?: NodePackageManager
   packageManagers?: NodePackageManager[]
@@ -4627,6 +5660,8 @@ export type DeploymentDetection = {
     dirty?: boolean
     composeFiles?: string[]
     services?: string[]
+    /** The multi-service template (`id@version`) a Compose source was rendered from. */
+    template?: string
   }
   candidates: DeploymentDetectionCandidate[]
   compose?: {
@@ -4683,11 +5718,81 @@ export type DeploymentDetection = {
 }
 
 export type DeploymentBuildMethod =
-  "recipe" | "dockerfile" | "static" | "image" | "compose" | "none" | "legacy_compose"
+  "recipe" | "dockerfile" | "static" | "image" | "compose" | "none" | "legacy_compose" | "railpack"
+
+/** The providers Railpack has: the values its provider setting, like railpack.json's, takes. */
+export type RailpackProvider =
+  | "cpp"
+  | "deno"
+  | "dotnet"
+  | "elixir"
+  | "gleam"
+  | "golang"
+  | "java"
+  | "node"
+  | "php"
+  | "python"
+  | "ruby"
+  | "rust"
+  | "shell"
+  | "staticfile"
+  | "zig"
+
+/**
+ * What Railpack decided for a run, from its info and its plan: the release (pinned by
+ * digest), the providers it detected, the packages it resolved, the steps of its plan
+ * and the images that plan builds from, as Railpack names them.
+ */
+export type RailpackEvidence = {
+  version: string
+  image: string
+  provider?: RailpackProvider
+  providers: string[]
+  configFile?: string
+  packages: { name: string; requested?: string; resolved?: string; source?: string }[]
+  steps: { name: string; commands: string[] }[]
+  startCommand?: string
+  images: string[]
+  secrets?: string[]
+  facts?: Record<string, string>
+  logs?: { level: "error" | "warn" | "info" | "suggestion"; message: string }[]
+  success: boolean
+}
 
 export type DeploymentOwnership = "managed" | "linked" | "observed"
 
 /** A container port published on the host next to the routed one: Gitea's SSH, Syncthing's sync protocol. */
+/** A route's request rate per client address, with the burst let through at once. */
+export type DeploymentRateLimit = { requests: number; per: "second" | "minute"; burst?: number }
+
+export type DeploymentEdgeMethod = "DELETE" | "GET" | "HEAD" | "OPTIONS" | "PATCH" | "POST" | "PUT"
+
+/** What a request has to meet, every condition at once. */
+export type DeploymentEdgeMatch = {
+  pathPrefix?: string
+  pathRegex?: string
+  methods?: DeploymentEdgeMethod[]
+  /** Matched ignoring case. */
+  userAgent?: string
+  clientFrom?: string[]
+}
+
+/**
+ * What a matching request gets: refused 403, answered with a status and
+ * nothing else, let through without asking the rules after it, or redirected.
+ */
+export type DeploymentEdgeAction =
+  | { kind: "block"; status?: 403 }
+  | { kind: "status"; status: number }
+  | { kind: "allow" }
+  | { kind: "redirect"; location: string; code: 301 | 302 | 307 | 308 }
+
+export type DeploymentEdgeRule = {
+  name: string
+  match: DeploymentEdgeMatch
+  action: DeploymentEdgeAction
+}
+
 export type DeploymentPublishedPort = {
   hostPort: number
   containerPort: number
@@ -4697,7 +5802,62 @@ export type DeploymentPublishedPort = {
 
 export type DeploymentRestartPolicy = "unless-stopped" | "always" | "on-failure" | "no"
 
-export type NotificationChannelKind = "webhook" | "discord" | "slack" | "telegram" | "email"
+/** The limits Docker sets with --ulimit (`deploy.UlimitNames`). */
+export type DeploymentUlimitName =
+  | "core"
+  | "cpu"
+  | "data"
+  | "fsize"
+  | "locks"
+  | "memlock"
+  | "msgqueue"
+  | "nice"
+  | "nofile"
+  | "nproc"
+  | "rss"
+  | "rtprio"
+  | "rttime"
+  | "sigpending"
+  | "stack"
+
+export interface DeploymentUlimit {
+  name: DeploymentUlimitName
+  soft: number
+  hard: number
+}
+
+export interface DeploymentTmpfs {
+  path: string
+  sizeMb?: number
+}
+
+export interface DeploymentSysctl {
+  name: string
+  value: string
+}
+
+/** Every GPU, a number of them, or the ones named by index or UUID. */
+export type DeploymentGPUMode = "all" | "count" | "devices"
+
+export interface DeploymentGPUs {
+  mode: DeploymentGPUMode
+  count?: number
+  deviceIds?: string[]
+  /** A pull request preview of the environment gets them too. */
+  previews?: boolean
+}
+
+export type NotificationChannelKind =
+  | "webhook"
+  | "discord"
+  | "slack"
+  | "telegram"
+  | "email"
+  | "ntfy"
+  | "gotify"
+  | "pushover"
+  | "mattermost"
+  | "teams"
 
 export type NotificationEvent = "run.started" | "run.succeeded" | "run.failed" | "run.cancelled"
 
@@ -4748,6 +5908,14 @@ export type NotificationChannelConfig = {
   smtpSecurity?: "starttls" | "tls" | "none"
   from?: string
   to?: string[]
+  /** An ntfy or Gotify server's base URL; ntfy's defaults to https://ntfy.sh. */
+  serverUrl?: string
+  /** The ntfy topic. */
+  topic?: string
+  /** An ntfy access token, a Gotify application token or a Pushover application token. */
+  token?: string
+  /** The Pushover user or group key. */
+  userKey?: string
 }
 
 export type NotificationDelivery = {
@@ -4808,6 +5976,12 @@ export type DeploymentConfiguration = {
     target?: string
     /** The Compose service readiness and the release's container follow; empty keeps detection's. */
     primaryService?: string
+    /** A Railpack build's release from the reviewed catalogue; empty is the dashboard's current one. */
+    railpackVersion?: string
+    /** The provider Railpack is told to use instead of detecting one. */
+    railpackProvider?: RailpackProvider
+    /** The configuration file Railpack reads, relative to the root; empty is railpack.json. */
+    railpackConfig?: string
     noCache?: boolean
     secrets?: { variable: string; step: BuildSecretStep }[]
     releaseTasks?: {
@@ -4828,7 +6002,9 @@ export type DeploymentConfiguration = {
     hostPort?: number
     ports?: DeploymentPublishedPort[]
     bindAddress?: string
-    strategy: "blue_green" | "stop_first"
+    strategy: DeploymentStrategy
+    /** A canary plan's trial: its share of the requests, its window, and whether it promotes itself. */
+    canary?: DeploymentCanaryTerms
     privileged?: boolean
     hostNetwork?: boolean
     capabilities?: string[]
@@ -4837,6 +6013,25 @@ export type DeploymentConfiguration = {
     cpus?: number
     pidsLimit?: number
     restartPolicy?: DeploymentRestartPolicy
+    /** The user the process runs as, `uid[:gid]` or a name the image has; empty is the image's own. */
+    user?: string
+    /** The root filesystem is mounted read-only; the tmpfs paths (default /tmp) stay writable. */
+    readOnlyRootfs?: boolean
+    /** Paths kept writable in memory, each at its size in MiB (empty is 64). */
+    tmpfs?: DeploymentTmpfs[]
+    /** Kernel limits each process starts with; -1 is unlimited where the limit allows it. */
+    ulimits?: DeploymentUlimit[]
+    /** Kernel parameters of the container's own namespaces: net.*, fs.mqueue.*, the IPC limits. */
+    sysctls?: DeploymentSysctl[]
+    /** The server's NVIDIA GPUs; a preview gets them only when `previews` says so. */
+    gpus?: DeploymentGPUs
+    /** Containers of each release side by side behind the route, 2 to 8; empty is one. */
+    replicas?: number
+    /**
+     * Keeps each visitor on the release that first answered them while it is
+     * kept warm, by the jd_release cookie. The rollback terms' to edit.
+     */
+    skewProtection?: boolean
     /** The signal that asks the container to stop; empty is the image's own, SIGTERM. */
     stopSignal?: string
     /** Seconds the container has to exit after that signal before it is killed; empty is 10. */
@@ -4845,6 +6040,36 @@ export type DeploymentConfiguration = {
     drainSeconds?: number
     /** The largest request body the route lets through, in MB; empty is 64. */
     maxRequestBodyMb?: number
+    /** The only addresses and ranges the public route answers; empty answers everyone. */
+    allowFrom?: string[]
+    /** Set on every answer the public route gives, replacing the application's own. */
+    responseHeaders?: { name: string; value: string }[]
+    /** An auth server asked about every request before the public route answers it. */
+    forwardAuth?: DeploymentForwardAuth
+    /** What the route's maintenance does while it is on; whether it is on is the switch's. */
+    maintenance?: DeploymentRouteMaintenance
+    /** The codes the public route answers with a page of its own. */
+    errorPages?: DeploymentErrorPage[]
+    /** Gives the application's own answers with those codes the page too. */
+    interceptErrors?: boolean
+    /** Strict-Transport-Security on every HTTPS answer; absent sends none. */
+    hsts?: DeploymentRouteHSTS
+    /** Requests one client address may make; past it the route answers 429. */
+    rateLimit?: DeploymentRateLimit
+    /** Decided in order at the proxy; the first rule a request meets decides it. */
+    edgeRules?: DeploymentEdgeRule[]
+    /** Refuses the addresses CrowdSec's local engine has banned. */
+    crowdSec?: boolean
+    /**
+     * Published on this host's tailnet and nowhere else, as a preview is: no
+     * public domain and no public certificate. Absent is an ordinary
+     * environment.
+     */
+    tailnet?: DeploymentRouteTailnet
+    /** Recorded requests replayed against the candidate before the cutover; absent is off. */
+    replay?: ReplayPlan
+    /** The container is stopped while nobody visits and the next request starts it; absent is off. */
+    sleep?: SleepPlan
     mounts?: {
       source: string
       target: string
@@ -4896,6 +6121,83 @@ export type DeploymentPlannedDomain = {
   https: boolean
   ownership: "managed" | "linked"
   protection?: DeploymentDomainProtection
+  /** Another of the plan's hostnames this one sends visitors to, instead of serving the app. */
+  redirectTo?: string
+  /** Empty is 308, permanent and keeping the method. */
+  redirectCode?: DeploymentRedirectCode
+  /**
+   * Served through the connected Cloudflare Tunnel rather than at this
+   * server's address: Cloudflare terminates HTTPS, nothing is issued here,
+   * and the name's route and CNAME are set as the release goes live.
+   */
+  tunnel?: boolean
+}
+
+export type DeploymentRedirectCode = 301 | 302 | 307 | 308
+
+/**
+ * A tailnet-only publication. `allow`, when it names anybody, is who may open
+ * it — Tailscale logins (alice@example.com, compared without case) and ACL
+ * tags (tag:ci, compared exactly) — and the proxy then asks the dashboard
+ * about every request; empty lets everyone on the tailnet in. Previews
+ * inherit it with the rest of the plan.
+ */
+export type DeploymentRouteTailnet = {
+  allow?: string[]
+}
+
+/**
+ * Sign-in in front of a deployment's public route: a Proxy site's single
+ * sign-on on every path, which previews inherit with the rest of the plan.
+ */
+export type DeploymentForwardAuth = {
+  provider: ForwardAuthProvider
+  /** The auth server's check endpoint, asked with nginx's auth_request convention. */
+  verify: string
+  /** Where a visitor without a session is sent, with rd= set to the address they asked for. */
+  signIn: string
+  /** Leaves this environment's route open and gates only the previews made from it. */
+  previewsOnly?: boolean
+}
+
+/**
+ * A deployment route's HSTS policy, sent on its HTTPS domains alone and held
+ * to the bounds a Proxy site's control is: max-age in seconds (absent is six
+ * months; five minutes to two years), the subdomains too, and preload, which
+ * needs a year and the subdomains.
+ */
+export type DeploymentRouteHSTS = {
+  maxAge?: number
+  includeSubDomains?: boolean
+  preload?: boolean
+}
+
+/** What a deployment's maintenance does while it is on. */
+export type DeploymentRouteMaintenance = {
+  /** Seconds the 503 tells clients and crawlers to wait; empty sends no Retry-After. */
+  retryAfter?: number
+  /** The addresses and ranges that reach the application as usual while it is on. */
+  bypassFrom?: string[]
+}
+
+export type DeploymentErrorPage = 404 | 502 | 503 | 504
+
+/** A page a deployment's route answers with: its maintenance page or an error page. */
+export type DeploymentPageName = "maintenance" | "404" | "502" | "503" | "504"
+
+/**
+ * GET/PUT /deploy/{id}/environments/{env}/maintenance: the switch beside the
+ * live route, which the route reads on every request.
+ */
+export type DeploymentMaintenanceSwitch = {
+  driver: "nginx" | "caddy"
+  /** The environment has a route on the proxy at all. */
+  route: boolean
+  /** The route carries the check, so the switch acts at once. */
+  ready: boolean
+  on: boolean
+  /** When it was turned on (RFC 3339). */
+  since?: string
 }
 
 export type DeploymentVariable = {
@@ -4911,6 +6213,39 @@ export type DeploymentVariable = {
   createdAt: string
   environmentId: number
   desiredRevision: number
+}
+
+/**
+ * A value defined once and read by any environment whose own variable
+ * references it: the server's as `${{server.NAME}}` by every project, a
+ * project's as `${{project.NAME}}` by that project's environments. The list
+ * never carries the value; `usedBy` names every variable that reads it.
+ */
+export type DeploymentSharedVariable = {
+  scope: "server" | "project"
+  projectId?: number
+  name: string
+  sensitivity: "plain" | "secret"
+  masked: string
+  valueDigest: string
+  /** The literal a variable holds to read this one. */
+  reference: string
+  updatedBy: string
+  createdAt: string
+  updatedAt: string
+  usedBy: DeploymentSharedVariableUse[]
+}
+
+export type DeploymentSharedVariableUse = {
+  projectId: number
+  projectName: string
+  environmentId: number
+  environmentName: string
+  environmentKind: string
+  /** The environment's own variable that holds the reference. */
+  variable: string
+  /** Its live release started before the value last changed, so it runs the earlier one until it deploys again. */
+  waiting: boolean
 }
 
 /**
@@ -4969,9 +6304,325 @@ export type DeploymentDatabaseLink = {
   hostname: string
   /** The connection has a pooler, so `${{database.N.pooled}}` resolves. */
   pooler?: boolean
+  /** What the environment's previews get of it: nothing, a branch, or a masked branch. */
+  previews?: PreviewBranchPolicy
   status: "pending" | "connected" | "stale" | "unavailable"
   detail?: string
   checkedAt?: string
+}
+
+/**
+ * An environment's migration rehearsal terms (`deploy/rehearsal.go`): before
+ * its release tasks run against production, they run against a copy of the
+ * database restored from its newest backup.
+ */
+export type RehearsalPolicy = {
+  enabled: boolean
+  /** The database to rehearse against when the tasks reach several; 0 is the only one. */
+  connectionId: number
+  /** What a rehearsal that cannot be carried out does to the release. */
+  whenUnavailable: "block" | "warn"
+  restoreTimeoutSeconds: number
+  maxBackupMb: number
+  updatedBy?: string
+  updatedAt?: string
+}
+
+/** A severity as the scanner names it, worst first. */
+export type VulnerabilitySeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN"
+
+/**
+ * An environment's vulnerability scanning terms (`deploy/image_scan.go`):
+ * whether its releases' images are scanned, and the lowest severity the
+ * panel lists, the releases list counts and the alert is raised at.
+ */
+export type ImageScanPolicy = {
+  enabled: boolean
+  severityFloor: Exclude<VulnerabilitySeverity, "UNKNOWN">
+  updatedBy?: string
+  updatedAt?: string
+}
+
+export type VulnerabilityCounts = {
+  critical: number
+  high: number
+  medium: number
+  low: number
+  unknown: number
+}
+
+/** One vulnerability in one package of a release's image. */
+export type VulnerabilityFinding = {
+  id: string
+  package: string
+  installed: string
+  /** The version that fixes it; absent while no fix is published. */
+  fixed?: string
+  severity: VulnerabilitySeverity
+  title?: string
+  url?: string
+  /** The OS packages ("alpine 3.12.12") or a lock file, with a Compose service in front. */
+  target: string
+  class?: string
+  /** A base the release was built on carries it too, so a newer base may fix it. */
+  fromBase?: boolean
+}
+
+/** One image a scan read: the release's own, or a base it was pinned on. */
+export type ImageScanTarget = {
+  kind: "release" | "base"
+  service?: string
+  reference: string
+  digest?: string
+  state: "scanned" | "failed"
+  reason?: string
+  os?: string
+  endOfLife?: boolean
+  counts: VulnerabilityCounts
+  scannedAt?: string
+}
+
+/** A base the release was pinned on, against what its tag names in the registry now. */
+export type ReleaseBaseUpdate = {
+  reference: string
+  pinned?: string
+  current?: string
+  state: "current" | "outdated" | "unknown" | "local"
+  reason?: string
+  checkedAt?: string
+}
+
+/** A release's latest scan, read at its environment's floor. */
+export type ImageScan = {
+  releaseId: number
+  releaseNumber: number
+  environmentId: number
+  state: "queued" | "scanning" | "scanned" | "failed"
+  reason?: string
+  trigger?: "build" | "schedule" | "manual"
+  scanner?: string
+  databaseUpdatedAt?: string
+  databaseAgeHours?: number
+  floor: ImageScanPolicy["severityFloor"]
+  summary: {
+    counts: VulnerabilityCounts
+    fixableCounts: VulnerabilityCounts
+    /** The fixable findings at or above the floor, worst first. */
+    fixable: VulnerabilityFinding[]
+    /** The findings at or above the floor nobody has published a fix for. */
+    unfixed: VulnerabilityFinding[]
+    truncated?: boolean
+  }
+  targets: ImageScanTarget[]
+  baseUpdates: ReleaseBaseUpdate[]
+  /** A base's tag names a newer image than the release was pinned on. */
+  newerBase: boolean
+  /** A build re-pins the bases (a recipe, static, Dockerfile or Compose build). */
+  rebuildable: boolean
+  requestedAt?: string
+  startedAt?: string
+  finishedAt?: string
+}
+
+/** A release's scan as its row in the releases list says it. */
+export type ImageScanBadge = {
+  releaseId: number
+  state: ImageScan["state"]
+  floor: ImageScanPolicy["severityFloor"]
+  counts: VulnerabilityCounts
+  /** Findings at or above the floor. */
+  atFloor: number
+  /** Of those, the ones with a published fix. */
+  fixable: number
+  newerBase: boolean
+  scannedAt?: string
+}
+
+/** GET /deploy/{id}/environments/{env}/vulnerabilities. */
+export type ImageScanReading = {
+  policy: ImageScanPolicy
+  /** Whether this host has a scanner (Docker) at all; `reason` says why not. */
+  available: boolean
+  reason?: string
+  scanner: string
+  database: {
+    installed: boolean
+    updatedAt?: string
+    nextUpdate?: string
+    ageHours?: number
+    lastError?: string
+    source?: string
+  }
+  /** The release the scan is of: the live one unless another was asked for. */
+  releaseId?: number
+  scan: ImageScan | null
+  /** The run the Rebuild button asks for, through the runs route. */
+  rebuild?: { operation: "force_build"; sourceRevision?: string }
+  rebuildReason?: string
+  releases: ImageScanBadge[]
+}
+
+/** The rehearse_migration step's evidence. */
+export type RehearsalReport = {
+  rehearsed: boolean
+  /** Why it was not rehearsed. */
+  reason?: string
+  database?: {
+    connectionId: number
+    name: string
+    engine: "postgres" | "mysql" | "mariadb" | string
+    database: string
+    image: string
+  }
+  source?: {
+    kind: "pitr" | "dump"
+    backupRunId?: number
+    takenAt?: string
+    bytes?: number
+    method?: string
+  }
+  restoreMs?: number
+  tasks: { name: string; durationMs: number; exitCode: number; error?: string }[]
+  locks: {
+    read: boolean
+    samples: number
+    maxWaiting: number
+    waitedMs: number
+    held: { relation: string; mode: string; heldMs: number }[]
+  }
+  isolation?: { network: string; internal: boolean; published: boolean; volumesMounted: boolean }
+  cleanedUp: boolean
+  totalMs: number
+}
+
+/**
+ * A plan's traffic replay terms (`deploy/replay.go`): before the cutover, the
+ * last distinct GET and HEAD requests the access log recorded for the
+ * environment's domains are sent to the candidate and its answers compared
+ * with the live release's. An absent number is the server's default.
+ */
+/**
+ * A plan's scale-to-zero terms (`deploy/sleep.go`): the live release's
+ * container is stopped once its route has served no request for the idle
+ * minutes, and the next request is held while it starts again. An absent
+ * number is the server's default.
+ */
+export type SleepPlan = {
+  enabled: boolean
+  /** Minutes without a request before it sleeps; absent is 15, 5 to 1440. */
+  idleMinutes?: number
+  /** How long a wake waits for the readiness checks; absent is 60 seconds, 5 to 600. */
+  wakeTimeoutSeconds?: number
+}
+
+/** One stretch an environment spent asleep. */
+export type SleepSpan = {
+  id: number
+  environmentId: number
+  releaseId: number
+  containerId?: string
+  idleMinutes: number
+  reason: string
+  lastRequestAt?: string
+  sleptAt: string
+  /** Absent while it is asleep now. */
+  wokeAt?: string
+  /** request, manual (Wake now), run, or repair (found started outside a wake). */
+  wakeTrigger?: string
+  /** The host a request asked for, the run, or who pressed Wake now. */
+  wakeDetail?: string
+  wakeSeconds?: number
+  wakeError?: string
+}
+
+/** GET …/environments/{env}/sleep. */
+export type SleepStatus = {
+  /** The live release's terms, the ones in force. */
+  enabled: boolean
+  idleMinutes: number
+  wakeTimeoutSeconds: number
+  holdSeconds: number
+  state: "off" | "awake" | "asleep" | "waking"
+  since?: string
+  reason?: string
+  lastRequestAt?: string
+  sleepsAt?: string
+  switch?: { driver: string; ready: boolean; on: boolean; since?: string }
+  /** The last seven days, newest first. */
+  recent: SleepSpan[]
+  asleepSeconds: number
+}
+
+/** What a wake came to. */
+export type WakeOutcome = {
+  status: number
+  upstream?: string
+  reason: string
+  seconds?: number
+}
+
+export type ReplayPlan = {
+  enabled: boolean
+  /** Distinct requests replayed, newest first; absent is 50, at most 500. */
+  requests?: number
+  /** Only recorded paths under one of these prefixes; absent replays every path. */
+  paths?: string[]
+  /** The percent of replayed requests whose status class may differ; absent is 2. */
+  maxStatusDrift?: number
+  /** What the candidate's p95 may be of the recorded p95; absent is 2. */
+  latencyFactor?: number
+  /** The whole replay's time limit; absent is 60 seconds. */
+  timeoutSeconds?: number
+}
+
+/** One replayed request the candidate answered in another status class, or not at all. */
+export type ReplayDrift = {
+  method: string
+  path: string
+  query?: string
+  recordedStatus: number
+  /** 0 is no answer, with `error` saying why. */
+  candidateStatus: number
+  error?: string
+  recordedMs?: number
+  candidateMs?: number
+}
+
+/** The replay_traffic step's evidence. */
+export type ReplayReport = {
+  replayed: boolean
+  /** Why it was not replayed. */
+  reason?: string
+  domains?: string[]
+  /** The candidate's own address the requests were sent to. */
+  target?: string
+  read: number
+  eligible: number
+  requests: number
+  answered: number
+  drifted: number
+  driftPercent: number
+  maxStatusDrift: number
+  latencyFactor: number
+  latencyRecorded: boolean
+  latencyJudged: boolean
+  recordedP95?: number
+  candidateP95?: number
+  verdict: {
+    code: "within_drift" | "status_drift" | "latency" | "unanswered" | ""
+    tripped: boolean
+    reason: string
+  }
+  drifts: ReplayDrift[]
+  concurrency: number
+  timeoutSeconds: number
+  timedOut: boolean
+  durationMs: number
+  recovery?: {
+    candidateStopped: boolean
+    runtimeRestored: boolean
+    routeRestored: boolean
+  }
 }
 
 /** A saved database a variable names by its address rather than a link. */
@@ -5153,6 +6804,11 @@ export type DeploymentCredential = {
   usedBy: number
   /** The projects behind `usedBy`, ascending; `usedBy` counts environments, so it can be larger. */
   usedByProjectIds?: number[]
+  /**
+   * The projects whose commit statuses and preview comments a provider token
+   * writes. Nothing deploys through it, so this does not count as `usedBy`.
+   */
+  reportsForProjectIds?: number[]
 }
 
 /**
@@ -5198,6 +6854,12 @@ export type AuditEntry = {
   status: number
   success: boolean
   detail: string
+  /**
+   * The API key a row was written by, when one made the request: an
+   * ordinary key, an MCP key or a deploy key alike. Absent for a session.
+   */
+  keyId?: number
+  keyName?: string
 }
 
 export type ApiToken = {
@@ -5207,17 +6869,34 @@ export type ApiToken = {
   prefix: string
   role: Role
   /**
-   * The one capability the key is limited to, or `mcp` for a key that opens
-   * the MCP endpoint alone; empty for an ordinary key.
+   * The one capability the key is limited to, `mcp` for a key that opens the
+   * MCP endpoint alone, or `deploy` for a key that reaches the deployment
+   * routes alone; empty for an ordinary key.
    */
-  scope?: "" | "metrics.read" | "mcp"
+  scope?: "" | "metrics.read" | "mcp" | "deploy"
   createdAt: string
   expiresAt?: string
   lastUsedAt?: string
   revoked: boolean
   /** The databases an MCP key reaches. Every other key has none. */
   connections?: ApiTokenConnection[]
+  /** What an MCP key may do with the deployments; absent is nothing. */
+  deployments?: ApiTokenDeployments
+  /**
+   * The deployments a deploy key, or an MCP key's deployment grant, is
+   * limited to. Absent or empty is every deployment, including the ones made
+   * after the key.
+   */
+  deploymentIds?: number[]
+  /**
+   * Whether an MCP key is offered the tools generated from the deployment
+   * API under its grant; absent for every key made before them.
+   */
+  operations?: boolean
 }
+
+/** An MCP key's deployment grant: nothing, read them, or also deploy and roll back. */
+export type ApiTokenDeployments = "" | "read" | "deploy"
 
 /** One database an MCP key reaches, to read only or to change as well. */
 export type ApiTokenConnection = {
@@ -5242,7 +6921,8 @@ export type DbMetricsExport = {
 }
 
 export type SessionInfo = {
-  authMethod?: "unknown" | "password" | "totp" | "recovery"
+  authMethod?:
+    "unknown" | "password" | "totp" | "recovery" | "passkey" | "passkey+totp" | "passkey+recovery"
   id: string
   userId: number
   twoFactorPassed: boolean
@@ -6450,6 +8130,23 @@ export type DbFleetEntry = DbConnection & {
    * backup job run that dumped it, whichever is later. Absent for never.
    */
   lastBackup?: string
+  /** A MongoDB 8 server that cannot start on this kernel as it is. Absent otherwise. */
+  kernelProblem?: DbKernelProblem
+}
+
+/**
+ * MongoDB 8 on Linux 6.19 to 7.0.13, which it refuses to start on without
+ * `GLIBC_TUNABLES=glibc.pthread.rseq=1` (MongoDB SERVER-121912).
+ */
+export type DbKernelProblem = {
+  /** The alert, in a few words. */
+  message: string
+  /** What applying it does, or where the compose file has to say it. */
+  detail: string
+  kernel: string
+  release: string
+  /** `POST /databases/{id}/kernel-mitigation` applies it. */
+  fixable: boolean
 }
 
 export type DbFleet = {
@@ -6812,6 +8509,74 @@ export type DashboardConfigReport = {
 }
 
 /**
+ * What a linked site may be shown and ask for. Mirrors internal/accountlink: the scope is
+ * chosen here, enforced here, and the site only draws the controls the reported scope allows.
+ */
+export type AccountLinkScope = "observe" | "operate" | "maintain"
+
+/**
+ * The optional daily count of servers. Mirrors `GET /dashboard/usage-ping`. `enabled` is false when
+ * `offBy` names a switch in `.env`; the bodies are the report's exact bytes.
+ */
+export type UsagePingStatus = {
+  enabled: boolean
+  offBy?: "JD_USAGE_PING" | "JD_ACCOUNT_LINK"
+  choice: "undecided" | "on" | "off"
+  siteUrl: string
+  nextBody: string
+  lastBody?: string
+  lastSentAt?: string
+  lastError?: string
+}
+
+/**
+ * This server's link to a just-dashboard.com account. Mirrors the `/dashboard/link` routes;
+ * optional fields are omitted by the backend when absent, never `null`.
+ */
+export type AccountLinkStatus = {
+  /** JD_ACCOUNT_LINK. When false the page explains the switch and offers no action. */
+  enabled: boolean
+  /** JD_ACCOUNT_URL, e.g. "https://just-dashboard.com". */
+  siteUrl: string
+  state: "unlinked" | "pending" | "linked"
+  /** This server's key fingerprint, "21fe:31df:a154:a261". Absent until the identity exists. */
+  fingerprint?: string
+  /** Present only while state is "pending". */
+  request?: {
+    userCode: string
+    approveUrl: string
+    expiresAt: string
+    scope: AccountLinkScope
+  }
+  /** Present only while state is "linked". */
+  link?: {
+    serverId: string
+    /** The site account's label, an e-mail address. */
+    owner: string
+    scope: AccountLinkScope
+    linkedAt: string
+    /** Dashboard username, or "cli". */
+    linkedBy: string
+    lastHeartbeatAt?: string
+    /** The last failed exchange with the site; cleared by the next success. */
+    lastError?: string
+    lastCommand?: {
+      id: string
+      kind: string
+      status: "succeeded" | "failed" | "refused"
+      issuedBy: string
+      at: string
+    }
+    siteKeys: { kid: string; fingerprint: string; notAfter?: string }[]
+    updatePolicy?: { auto: "off" | "patch" | "all"; window: { start: string; end: string } }
+    /** The exact JSON body of the last heartbeat sent, so the page shows what is shared. */
+    lastSnapshot?: Record<string, unknown>
+  }
+  /** Why the most recent link request ended without a link, so the page can say so. */
+  lastOutcome?: { result: "denied" | "expired" | "failed"; at: string; message?: string }
+}
+
+/**
  * Removing the dashboard from the server. Mirrors internal/uninstall.
  *
  * The phases are in the order they run: the first two in the backend while it
@@ -7083,6 +8848,16 @@ export type RequestEntry = {
   /** Absent where the format carries no duration — nginx's stock `combined` does not. */
   durationMs?: number
   tls?: boolean
+  /**
+   * The W3C trace context the ingress sent the application with this request
+   * (`traceparent`), and the client's span it continued. Absent on a route
+   * rendered before the ingress sent one, and on every Proxy site.
+   */
+  traceId?: string
+  spanId?: string
+  parentSpanId?: string
+  /** The Tailscale login (or a tagged machine's tags) a tailnet gate admitted. */
+  user?: string
 }
 
 export type RequestFacet = {
@@ -7181,6 +8956,8 @@ export type RequestSummary = {
   /** Refused paths that look like scanning, and the clients that asked for several. */
   probes: RequestFacet[]
   scanners: RequestFacet[]
+  /** How many requests each edge rule decided in the window; absent from older servers. */
+  edgeRules?: RequestFacet[]
   audience?: RequestAudience
   buckets: RequestBucket[]
   bucketSeconds: number
@@ -7300,8 +9077,46 @@ export type DeploymentLifecycle = {
   reason?: string
   /** Whether the event stream is connected, so an empty feed can explain itself. */
   watching: boolean
+  /** When this process connected to the stream; the record itself reaches back to `recordSince`. */
   since?: string
+  /**
+   * The oldest event the dashboard keeps for any deployment: how far back the
+   * feed can see. The record survives a restart of the dashboard; absent until
+   * the first event has been kept.
+   */
+  recordSince?: string
+  /** How long an event is kept. */
+  retentionDays: number
   events: DockerEvent[]
+}
+
+/** The figure over one span of time ending now (`deploy/availability.go`). */
+export type AvailabilityWindow = {
+  /** "24h", "7d" or "30d". */
+  window: string
+  seconds: number
+  /** Live-release time inside the window the record covers: what `ratio` is over. 0 means no figure. */
+  observedSeconds: number
+  downSeconds: number
+  incidents: number
+  /** 1 - down/observed, 0..1; absent while nothing was observed. */
+  ratio?: number
+  /** How much of the window the event record reaches back over. */
+  coverageSeconds: number
+}
+
+/** How much of the last day, week and month a deployment's live release was up. */
+export type DeploymentAvailability = {
+  status: "available" | "unavailable"
+  reason?: string
+  observedAt: string
+  /** When the event record began, for any deployment. */
+  recordSince?: string
+  /** The number of the release live now. */
+  liveRelease?: number
+  /** Whether the record says the live release is down at this moment. */
+  down: boolean
+  windows: AvailabilityWindow[]
 }
 
 /*
@@ -9467,4 +11282,95 @@ export type NetworkConfirmationView = {
   available: boolean
   owned: boolean
   change: NetworkChangeStatus | null
+}
+
+// ---------------------------------------------------------------------------
+// The server map: one summary of everything the dashboard manages.
+//
+// These mirror api/handlers_map.go. Each kind is read from the source its own
+// page reads, summarised to what a box on the map draws — a name, a state, one
+// fact and the page that manages it — so one request draws the whole server.
+// ---------------------------------------------------------------------------
+
+/** A thing's state as the map colours it: measured, never guessed. */
+export type MapTone = "ok" | "warning" | "danger" | "idle" | "unknown"
+
+export type MapItem = {
+  /** Stable across readings: `container:<id>`, `project:12`, `domain:shop.example.com`. */
+  id: string
+  name: string
+  /** The product its logo is drawn from, where one is known. */
+  product?: string
+  /** A deployment's project, whose website's icon draws it. */
+  projectId?: number
+  /** An icon the dashboard serves for it — a project's website's favicon. */
+  icon?: string
+  tone: MapTone
+  /** The state in a word or two: "running", "exited (137)", "answers", "failed". */
+  state: string
+  /** One more fact: an image, a size, when it last ran. */
+  detail?: string
+  /** The page that manages it. */
+  href: string
+  /** What the inspector lists under it: a few label and value pairs. */
+  facts?: MapFact[]
+}
+
+/** Two things wired together, and how the server knows: a label, a route, a mount. */
+export type MapLink = {
+  from: string
+  to: string
+  /** How the server knows the two are joined, the surest way where it knows several. */
+  via: string
+  /** The other ways it knows the same pair is joined; one line is drawn for all of them. */
+  also?: string[]
+}
+
+export type MapFact = { label: string; value: string; tone?: MapTone }
+
+export type MapKindReading = {
+  key: string
+  /** How many exist; `items` may hold fewer where the list was capped. */
+  total: number
+  items: MapItem[]
+  /**
+   * read: the list arrived. unread: its source failed, and `reason` says why —
+   * never drawn as empty. limited: this role is shown part of it. absent: this
+   * server does not run the module (no PM2, no Docker), so there is no shelf.
+   */
+  state: "read" | "unread" | "limited" | "absent"
+  reason?: string
+  /** A kind summarised rather than listed — packages, services — says it in facts. */
+  facts?: MapFact[]
+}
+
+export type ServerMap = {
+  host: {
+    hostname: string
+    platform?: string
+    platformVersion?: string
+    kernel?: string
+    uptimeSeconds?: number
+  }
+  kinds: MapKindReading[]
+  links: MapLink[]
+  checkedAt: string
+}
+
+export type MapLayoutResponse = { layout: unknown; updatedAt?: string }
+
+/**
+ * A passkey of the signed-in account: a WebAuthn credential that stands in
+ * for its password at sign-in. `rpId` is the host name it signs in at.
+ */
+export type Passkey = {
+  id: number
+  name: string
+  rpId: string
+  createdAt: string
+  /** Zero time when it has never signed in. */
+  lastUsedAt: string
+  /** Backed up by a password manager or a phone's keychain rather than held on one device. */
+  synced: boolean
+  transports: string[]
 }

@@ -78,6 +78,7 @@ import { cn } from "@/lib/utils"
  * fetched from its own site; `public/logos/NOTICE` says from where.
  */
 const LOGOS: Record<string, string> = {
+  activepieces: "activepieces.svg",
   actual: "actual-budget.svg",
   adguard: "adguard-home.svg",
   adminer: "adminer.svg",
@@ -87,27 +88,33 @@ const LOGOS: Record<string, string> = {
   android: "android.svg",
   angular: "angular.svg",
   ansible: "ansible.svg",
+  anythingllm: "anythingllm.svg",
   apache: "apache.svg",
   apple: "apple.svg",
   arch: "arch.svg",
   arm: "arm.svg",
   astro: "astro.svg",
   audiobookshelf: "audiobookshelf.svg",
+  authentik: "authentik.svg",
   aws: "aws.svg",
   azure: "azure.svg",
   // No collection draws SQL Edge a mark of its own: it is the SQL Server
   // engine built for small machines, and is drawn as the engine it is.
   "azure-sql-edge": "sqlserver.svg",
   backblaze: "backblaze.svg",
+  bentopdf: "bentopdf.svg",
   beszel: "beszel.svg",
   bing: "bing.svg",
   bitbucket: "bitbucket.svg",
   brave: "brave.svg",
+  budibase: "budibase.svg",
   bun: "bun.svg",
   c: "c.svg",
   caddy: "caddy.svg",
   cassandra: "cassandra.svg",
   centos: "centos.svg",
+  changedetection: "changedetection.svg",
+  chroma: "chroma.svg",
   chrome: "chrome.svg",
   claude: "claude.svg",
   clickhouse: "clickhouse.svg",
@@ -115,6 +122,7 @@ const LOGOS: Record<string, string> = {
   cockroachdb: "cockroachdb.svg",
   "code-server": "code-server.webp",
   codeberg: "codeberg.svg",
+  convertx: "convertx.webp",
   couchdb: "couchdb.svg",
   cplusplus: "cplusplus.svg",
   crowdsec: "crowdsec.svg",
@@ -123,20 +131,26 @@ const LOGOS: Record<string, string> = {
   curl: "curl.svg",
   cyberchef: "cyberchef.svg",
   dart: "dart.svg",
+  dashy: "dashy.webp",
   debian: "debian.svg",
   deno: "deno.svg",
   directus: "directus.svg",
+  "directus-postgres": "directus.svg",
   discord: "discord.svg",
   django: "django.svg",
   docker: "docker.svg",
   "docker-compose": "docker-compose.webp",
+  docmost: "docmost.webp",
+  documenso: "documenso.svg",
   docusaurus: "docusaurus.svg",
   docuseal: "docuseal.svg",
+  doppler: "doppler.svg",
   dotnet: "dotnet.svg",
   dozzle: "dozzle.svg",
   drawio: "drawio.svg",
   duckdb: "duckdb.svg",
   duckduckgo: "duckduckgo.svg",
+  duplicati: "duplicati.svg",
   edge: "edge.svg",
   elasticsearch: "elasticsearch.svg",
   eleventy: "eleventy.svg",
@@ -152,22 +166,29 @@ const LOGOS: Record<string, string> = {
   fedora: "fedora.svg",
   ferretdb: "ferretdb.svg",
   filebrowser: "filebrowser.svg",
+  "firefly-iii": "firefly-iii.svg",
   firefox: "firefox.svg",
   firehol: "firehol.webp",
   flask: "flask.svg",
+  flowise: "flowise.svg",
   forgejo: "forgejo.svg",
   freshrss: "freshrss.svg",
   gatsby: "gatsby.svg",
+  ghost: "ghost.webp",
   git: "git.svg",
   gitea: "gitea.svg",
+  "gitea-postgres": "gitea.svg",
   github: "github.svg",
   gitlab: "gitlab.svg",
+  glitchtip: "glitchtip.svg",
   go: "go.svg",
   google: "google.svg",
   "google-cloud": "google-cloud.svg",
+  gotenberg: "gotenberg.webp",
   gotify: "gotify.svg",
   gradio: "gradio.svg",
   grafana: "grafana.svg",
+  grist: "grist.svg",
   guacamole: "guacamole.svg",
   h3: "h3.svg",
   harbor: "harbor.svg",
@@ -175,9 +196,12 @@ const LOGOS: Record<string, string> = {
   headscale: "headscale.svg",
   healthchecks: "healthchecks.svg",
   "home-assistant": "home-assistant.svg",
+  homarr: "homarr.svg",
+  homebox: "homebox.svg",
   homepage: "homepage.webp",
   hono: "hono.svg",
   html5: "html5.svg",
+  infisical: "infisical.svg",
   influxdb: "influxdb.svg",
   intel: "intel.svg",
   "it-tools": "it-tools.svg",
@@ -188,31 +212,49 @@ const LOGOS: Record<string, string> = {
   jupyter: "jupyter.svg",
   jwt: "jwt.svg",
   kafka: "kafka.svg",
+  karakeep: "karakeep.svg",
   kavita: "kavita.svg",
+  keycloak: "keycloak.svg",
+  kimai: "kimai.svg",
   koa: "koa.svg",
   kotlin: "kotlin.svg",
   kubernetes: "kubernetes.svg",
   laravel: "laravel.svg",
   "lets-encrypt": "lets-encrypt.svg",
+  librechat: "librechat.svg",
+  librespeed: "librespeed.svg",
+  libretranslate: "libretranslate.svg",
   linkding: "linkding.svg",
   linkedin: "linkedin.svg",
+  linkwarden: "linkwarden.webp",
   linux: "linux.svg",
+  lxd: "lxd.svg",
   linuxmint: "linuxmint.svg",
+  listmonk: "listmonk.svg",
+  "lobe-chat": "lobe-chat.svg",
   lua: "lua.svg",
   mailgun: "mailgun.svg",
+  mailpit: "mailpit.svg",
   mariadb: "mariadb.svg",
+  matomo: "matomo.svg",
+  mattermost: "mattermost.svg",
   meilisearch: "meilisearch.svg",
   memcached: "memcached.svg",
   memos: "memos.webp",
   metabase: "metabase.svg",
+  "metabase-postgres": "metabase.svg",
+  metube: "metube.svg",
+  "microsoft-teams": "microsoft-teams.svg",
   "minecraft-bedrock": "minecraft.webp",
   "minecraft-java": "minecraft.webp",
+  miniflux: "miniflux.svg",
   minio: "minio.svg",
   "mongo-express": "mongodb.svg",
   mongodb: "mongodb.svg",
   mullvad: "mullvad.svg",
   mysql: "mysql.svg",
   n8n: "n8n.svg",
+  "n8n-postgres": "n8n.svg",
   nats: "nats.svg",
   navidrome: "navidrome.svg",
   neo4j: "neo4j.svg",
@@ -220,6 +262,7 @@ const LOGOS: Record<string, string> = {
   nestjs: "nestjs.svg",
   netfilter: "netfilter.webp",
   nextcloud: "nextcloud.svg",
+  "nextcloud-mariadb": "nextcloud.svg",
   nextjs: "nextjs.svg",
   nginx: "nginx.svg",
   "nginx-static": "nginx.svg",
@@ -234,15 +277,19 @@ const LOGOS: Record<string, string> = {
   opengist: "opengist.svg",
   opensearch: "opensearch.svg",
   opensuse: "opensuse.svg",
+  pairdrop: "pairdrop.webp",
   openvpn: "openvpn.svg",
   opera: "opera.svg",
   oracle: "oracle.svg",
+  "paperless-ngx": "paperless-ngx.svg",
   perl: "perl.svg",
   pgadmin: "pgadmin.svg",
   pgvector: "postgresql.svg",
   php: "php.svg",
   phpmyadmin: "phpmyadmin.svg",
   pihole: "pi-hole.svg",
+  planka: "planka.svg",
+  plausible: "plausible.svg",
   pm2: "pm2.svg",
   pnpm: "pnpm-light.svg",
   portainer: "portainer.svg",
@@ -253,7 +300,9 @@ const LOGOS: Record<string, string> = {
   posthog: "posthog.svg",
   postman: "postman.svg",
   powershell: "powershell.svg",
+  privatebin: "privatebin.svg",
   prometheus: "prometheus.svg",
+  pushover: "pushover.svg",
   python: "python.svg",
   qdrant: "qdrant.svg",
   qemu: "qemu.svg",
@@ -262,6 +311,7 @@ const LOGOS: Record<string, string> = {
   quay: "quay.svg",
   r: "r.svg",
   rabbitmq: "rabbitmq.svg",
+  rallly: "rallly.svg",
   react: "react.svg",
   "react-router": "react-router.svg",
   reddit: "reddit.svg",
@@ -281,6 +331,11 @@ const LOGOS: Record<string, string> = {
   // The language, never a process: a shell at its prompt keeps its glyph
   // in the process table and the terminal, where a logo would be a guess.
   shellscript: "bash.svg",
+  // A login shell on an account. Not `bash`: a process list has hundreds, and
+  // processProduct must keep saying a shell is nothing.
+  "shell-bash": "bash-light.svg",
+  "shell-fish": "fish.svg",
+  "shell-zsh": "zsh.svg",
   shlink: "shlink.svg",
   slack: "slack.svg",
   solid: "solid.svg",
@@ -316,18 +371,23 @@ const LOGOS: Record<string, string> = {
   "uptime-kuma": "uptime-kuma.svg",
   v8: "v8.svg",
   valkey: "valkey.svg",
+  vault: "vault.svg",
   vaultwarden: "vaultwarden.svg",
   vim: "vim.svg",
   vite: "vitejs.svg",
   vitepress: "vitepress.svg",
   vivaldi: "vivaldi.svg",
   vuejs: "vuejs.svg",
+  wakapi: "wakapi.svg",
   wallabag: "wallabag.svg",
   webhook: "webhook.svg",
   whoami: "traefik.svg",
+  wikijs: "wikijs.svg",
   windows: "windows.svg",
   wireguard: "wireguard.svg",
+  wordpress: "wordpress.svg",
   x: "x.svg",
+  yamtrack: "yamtrack.svg",
   yarn: "yarn.svg",
   ycombinator: "ycombinator.svg",
   yugabytedb: "yugabytedb.svg",
@@ -953,10 +1013,12 @@ export function buildMethodProduct(
  * A notification channel as the service it posts to. A signed webhook is
  * drawn with the webhook's own mark — the protocol's, which misattributes
  * nothing — unless `webhookProduct` can say whose it is; e-mail is a protocol
- * with no mark and keeps its glyph.
+ * with no mark and keeps its glyph. Teams is Microsoft's, and its file is
+ * named so.
  */
 export function channelProduct(kind: NotificationChannelKind): string | undefined {
-  return kind === "email" ? undefined : kind
+  if (kind === "email") return undefined
+  return kind === "teams" ? "microsoft-teams" : kind
 }
 
 /** The services whose own host a webhook URL can point at. */
@@ -1109,7 +1171,8 @@ export function ProductLogo({
    * the product's file, which stands in where it does not load.
    */
   favicon?: string
-  size?: "sm" | "md"
+  /** `lg` is the server map's: a system's own mark at the head of its diagram. */
+  size?: "sm" | "md" | "lg"
   /**
    * The glyph for a thing that is no product — a volume, a network — so it
    * still takes the tile and lines up with the rows that have a logo.
@@ -1127,7 +1190,7 @@ export function ProductLogo({
       aria-hidden="true"
       className={cn(
         "flex shrink-0 items-center justify-center rounded-lg border border-hairline bg-background",
-        size === "sm" ? "size-8" : "size-10",
+        size === "sm" ? "size-8" : size === "lg" ? "size-12 rounded-xl" : "size-10",
         className,
       )}
     >
@@ -1140,11 +1203,14 @@ export function ProductLogo({
         <img
           src={src}
           alt=""
-          className={cn("object-contain", size === "sm" ? "size-4.5" : "size-6")}
+          className={cn(
+            "object-contain",
+            size === "sm" ? "size-4.5" : size === "lg" ? "size-7" : "size-6",
+          )}
           onError={() => setFailed((paths) => [...paths, src])}
         />
       ) : (
-        <Fallback className="size-4 text-muted-foreground" />
+        <Fallback className={cn("text-muted-foreground", size === "lg" ? "size-5.5" : "size-4")} />
       )}
     </span>
   )

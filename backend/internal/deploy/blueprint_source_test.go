@@ -106,7 +106,10 @@ func TestGameBlueprintsAreHonestlyStopFirstAndPublishTheirOwnPort(t *testing.T) 
 	if plan.Configuration.Runtime.Strategy != StrategyStopFirst {
 		t.Fatalf("strategy = %q", plan.Configuration.Runtime.Strategy)
 	}
-	if plan.Configuration.Runtime.HostPort != 25565 || plan.Configuration.Runtime.BindAddress != "0.0.0.0" {
+	// The port is the game's own, on loopback until the operator publishes
+	// it: preflight's game_loopback_only says what that takes.
+	if plan.Configuration.Runtime.HostPort != 25565 || plan.Configuration.Runtime.BindAddress != "127.0.0.1" ||
+		plan.Configuration.Runtime.Protocol != "tcp" {
 		t.Fatalf("runtime = %#v", plan.Configuration.Runtime)
 	}
 	// The RCON port is internal and must never reach the host.
@@ -179,7 +182,7 @@ func TestBlueprintPlansCarryGeneratedSecretsByNameOnly(t *testing.T) {
 			}
 		}
 		plan, renderErr := RenderBlueprintPlan(DraftSourceConfig{
-			Kind: SourceBlueprint, Mode: SourceModeBlueprint,
+			Kind: BlueprintSourceKind(entry), Mode: SourceModeBlueprint,
 			BlueprintID: entry.ID, BlueprintVersion: entry.Version, BlueprintInputs: inputs,
 		}, "secret-probe")
 		if renderErr != nil {
@@ -301,10 +304,15 @@ func TestEveryTemplateDeploysFromWhatTheNewProjectPageCanFillIn(t *testing.T) {
 	// template that is broken — but the list is short on purpose: a new
 	// definition joining it is a new template nobody can deploy in one press.
 	typed := map[string][]string{
-		"pgadmin":    {"admin-email"},
-		"directus":   {"admin-email"},
-		"nocodb":     {"admin-email"},
-		"open-webui": {"admin-email"},
+		"pgadmin":           {"admin-email"},
+		"directus":          {"admin-email"},
+		"directus-postgres": {"admin-email"},
+		"nocodb":            {"admin-email"},
+		"open-webui":        {"admin-email"},
+		"authentik":         {"admin-email"},
+		"planka":            {"admin-email"},
+		"budibase":          {"admin-email"},
+		"kimai":             {"admin-email"},
 	}
 	definitions, err := blueprint.Catalog()
 	if err != nil {
@@ -320,6 +328,11 @@ func TestEveryTemplateDeploysFromWhatTheNewProjectPageCanFillIn(t *testing.T) {
 				if input.Kind == blueprint.InputDomain {
 					inputs[input.Name] = "app-2f9c1a.203-0-113-7.sslip.io"
 				}
+				// An agreement is the box the panel shows beside its link;
+				// ticking it is the operator's one press, not a typed value.
+				if input.Kind == blueprint.InputAccept {
+					inputs[input.Name] = "true"
+				}
 			}
 			for _, name := range typed[definition.ID] {
 				// Stood in for here so the rest of the render is still checked;
@@ -327,7 +340,7 @@ func TestEveryTemplateDeploysFromWhatTheNewProjectPageCanFillIn(t *testing.T) {
 				inputs[name] = "operator@example.com"
 			}
 			plan, err := RenderBlueprintPlan(DraftSourceConfig{
-				Kind: SourceBlueprint, Mode: SourceModeBlueprint,
+				Kind: BlueprintSourceKind(definition), Mode: SourceModeBlueprint,
 				BlueprintID: definition.ID, BlueprintVersion: definition.Version,
 				BlueprintInputs: inputs,
 			}, definition.ID)
@@ -339,7 +352,7 @@ func TestEveryTemplateDeploysFromWhatTheNewProjectPageCanFillIn(t *testing.T) {
 			}
 			draft := &Draft{Data: DraftData{
 				Intent: &DraftIntentConfig{Name: definition.ID, Profile: plan.Detection.Candidates[0].Profile},
-				Source: &DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint,
+				Source: &DraftSourceConfig{Kind: BlueprintSourceKind(definition), Mode: SourceModeBlueprint,
 					BlueprintID: definition.ID, BlueprintVersion: definition.Version, BlueprintInputs: inputs},
 				Detection: &plan.Detection, Configuration: &plan.Configuration,
 			}}

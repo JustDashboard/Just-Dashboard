@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -103,6 +105,9 @@ func (a *HostSourceAnalyzer) Analyze(ctx context.Context, source DraftSourceConf
 			Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID,
 		}, nil
 	case SourceModeBlueprint:
+		if source.Kind == SourceCompose {
+			return a.analyzeComposeTemplate(ctx, source)
+		}
 		plan, err := RenderBlueprintPlan(source, "")
 		if err != nil {
 			return DetectionResult{}, err
@@ -116,6 +121,32 @@ func (a *HostSourceAnalyzer) Analyze(ctx context.Context, source DraftSourceConf
 	default:
 		return DetectionResult{}, ErrUnsupportedSource
 	}
+}
+
+// analyzeComposeTemplate reads a multi-service template the way a pasted
+// Compose file is read — the structural analysis, then Docker Compose itself
+// as the final parser, then each service image's platforms from its registry —
+// and names the reviewed definition it was rendered from. What it analyses is
+// always this dashboard's render of the version the source names, never a
+// document the caller sent.
+func (a *HostSourceAnalyzer) analyzeComposeTemplate(ctx context.Context, source DraftSourceConfig) (DetectionResult, error) {
+	plan, err := RenderBlueprintPlan(source, "")
+	if err != nil {
+		return DetectionResult{}, err
+	}
+	result, err := a.analyzeCompose(ctx, source, plan.ComposeFiles, "")
+	if err != nil {
+		return DetectionResult{}, err
+	}
+	if result.Compose == nil || result.Compose.Digest != plan.Detection.Source.Digest {
+		return DetectionResult{}, fmt.Errorf("%w: the template's Compose analysis changed while it was read", ErrInvalidPlan)
+	}
+	result.Compose.PrimaryService = plan.Detection.Compose.PrimaryService
+	result.Source.Revision = plan.Detection.Source.Revision
+	result.Source.Template = plan.Detection.Source.Template
+	result.Candidates = plan.Detection.Candidates
+	result.SelectedID = plan.Detection.SelectedID
+	return result, nil
 }
 
 // resolveBlueprintImage gives a rendered blueprint the immutable image digest
@@ -1328,6 +1359,12 @@ func containerImportPreview(source DraftSourceConfig, spec *dockerx.ContainerSpe
 		}
 	}
 	for _, mount := range spec.Mounts {
+		// Memory is not storage to adopt: a tmpfs is one of the plan's
+		// writable paths, at the size it had.
+		if mount.Type == "tmpfs" {
+			configuration.Runtime.Tmpfs = append(configuration.Runtime.Tmpfs, RuntimeTmpfs{Path: mount.Target, SizeMB: mount.SizeMB})
+			continue
+		}
 		ownership := OwnershipObserved
 		configuration.Runtime.Mounts = append(configuration.Runtime.Mounts, RuntimeMount{
 			Source: mount.Source, Target: mount.Target, ReadOnly: mount.ReadOnly, Ownership: ownership,
@@ -1336,6 +1373,7 @@ func containerImportPreview(source DraftSourceConfig, spec *dockerx.ContainerSpe
 	for _, device := range spec.Devices {
 		configuration.Runtime.Devices = append(configuration.Runtime.Devices, device.Host)
 	}
+	importedRuntimeFlags(&configuration.Runtime, spec)
 	observed := map[string]any{
 		"name": spec.Name, "image": image, "command": command,
 		"environmentNames": variableNames(configuration.Variables), "ports": spec.Ports,
@@ -1353,6 +1391,30 @@ func containerImportPreview(source DraftSourceConfig, spec *dockerx.ContainerSpe
 		Kind: "container", ResourceID: source.ResourceID, Name: spec.Name, Source: source,
 		Configuration: canonicalConfiguration(configuration), Observed: observedJSON,
 		Unsupported: unsupported, Warnings: warnings, WouldChange: []string{},
+	}
+}
+
+// importedRuntimeFlags carries the process flags the container ran with
+// into the plan that adopts it, so the release that replaces it runs as it
+// did: the user, the read-only root, its ulimits and kernel parameters, and
+// its GPUs. Adoption validates them as it validates the rest.
+func importedRuntimeFlags(runtime *RuntimePlanConfig, spec *dockerx.ContainerSpec) {
+	runtime.User, runtime.ReadOnlyRootfs = spec.User, spec.ReadOnly
+	for _, limit := range spec.Ulimits {
+		runtime.Ulimits = append(runtime.Ulimits, RuntimeUlimit{Name: UlimitName(limit.Name), Soft: limit.Soft, Hard: limit.Hard})
+	}
+	for _, name := range slices.Sorted(maps.Keys(spec.Sysctls)) {
+		runtime.Sysctls = append(runtime.Sysctls, RuntimeSysctl{Name: name, Value: spec.Sysctls[name]})
+	}
+	if gpus := spec.GPUs; gpus != nil {
+		switch {
+		case len(gpus.DeviceIDs) > 0:
+			runtime.GPUs = &RuntimeGPUs{Mode: GPUDevices, DeviceIDs: slices.Clone(gpus.DeviceIDs)}
+		case gpus.Count > 0:
+			runtime.GPUs = &RuntimeGPUs{Mode: GPUCount, Count: gpus.Count}
+		case gpus.Count < 0:
+			runtime.GPUs = &RuntimeGPUs{Mode: GPUAll}
+		}
 	}
 }
 

@@ -1,0 +1,89 @@
+{
+  "id": "dashy",
+  "version": "1.0.0",
+  "name": "Dashy",
+  "category": "http",
+  "profile": "web",
+  "description": "A start page configured from one YAML file: sections of links with icons, status checks and themes, editable from the page itself or in the file it keeps on its volume.",
+  "iconId": "globe",
+  "docsUrl": "https://dashy.to/docs/",
+  "access": {
+    "kind": "open",
+    "note": "Dashy has no login until you give it one: the first visit opens the default page, and the configuration editor on it is open to anyone who reaches the address. Add users under Settings → Authentication (the page writes them into conf.yml on the volume) or keep the domain behind the dashboard's password protection."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/Lissy93/dashy",
+    "reviewedAt": "2026-10-28",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "lissy93/dashy:4.9.8",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; the address other people open; nothing else here changes when it does."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8080,
+      "protocol": "tcp",
+      "purpose": "The page and the configuration API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "user-data",
+      "target": "/app/user-data",
+      "purpose": "conf.yml and the icons and backgrounds uploaded to the page",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/",
+      "timeoutSeconds": 90
+    }
+  ],
+  "operations": {
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "The configuration is one YAML file the new version reads as it is; a fresh volume gets the image's default conf.yml, an existing one is kept."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:b622cd7bdf3490f5ca4730daca66975b77ed54b1c375c518e11ed2333c3ea2b6"
+    }
+  ]
+}

@@ -53,6 +53,9 @@ export type ServiceLine = {
   health?: string
 }
 
+/** The compose project the dashboard itself runs as: `name:` in the shipped docker-compose.yml. */
+export const DASHBOARD_STACK = "just-dashboard"
+
 export type StackLine = {
   stack: ComposeStack
   bucket: StackBucket

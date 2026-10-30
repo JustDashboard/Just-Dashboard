@@ -42,6 +42,7 @@ test("every named static destination has a mounted page", () => {
     "/proxy/ports",
     "/proxy/config",
     "/proxy/traffic",
+    "/proxy/tunnel",
     "/docker/containers",
     "/docker/images",
     "/docker/volumes",

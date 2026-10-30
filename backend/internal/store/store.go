@@ -22,7 +22,7 @@ type Store struct {
 // whether a pre-rename data directory should be adopted.
 const DatabaseFile = "vpsd.db"
 
-const schema = networkProbeSchema + remoteDesktopSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
+const schema = dnsRecordSchema + deployTemplateSchema + cloudflareTunnelSchema + sleepSchema + runDiagnosisSchema + rehearsalSchema + dataRollbackSchema + previewBranchSchema + imageScanSchema + rollbackWatchSchema + canarySchema + deployEventSchema + serverMapSchema + sharedVariableSchema + secretStoreSchema + passkeySchema + accountLinkSchema + networkProbeSchema + remoteDesktopSchema + hostAlertSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -78,8 +78,17 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   role         TEXT NOT NULL,
   -- '' opens every route the key's role allows; a capability such as
   -- 'metrics.read' opens only the routes that name it; 'mcp' opens the MCP
-  -- endpoint and reaches only the databases api_token_connections grants it.
+  -- endpoint and reaches only the databases api_token_connections grants it;
+  -- 'deploy' opens the deployment routes its table lists, and only the
+  -- deployments api_token_deployments names when it names any.
   scope        TEXT NOT NULL DEFAULT '',
+  -- What an MCP key may do with the deployments: '' nothing, 'read' read
+  -- them and their runs, 'deploy' also queue deploys and rollbacks.
+  deploy_access TEXT NOT NULL DEFAULT '',
+  -- Whether an MCP key is offered the tools generated from the deployment
+  -- API beside the hand-written ones, under its deploy_access: 0 for every
+  -- key made before they existed, so none gains them with an upgrade.
+  mcp_operations INTEGER NOT NULL DEFAULT 0,
   created_at   INTEGER NOT NULL,
   expires_at   INTEGER NOT NULL DEFAULT 0,
   last_used_at INTEGER NOT NULL DEFAULT 0,
@@ -100,7 +109,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
   path      TEXT NOT NULL DEFAULT '',
   status    INTEGER NOT NULL DEFAULT 0,
   success   INTEGER NOT NULL DEFAULT 1,
-  detail    TEXT NOT NULL DEFAULT ''
+  detail    TEXT NOT NULL DEFAULT '',
+  -- The API key behind the request, when one was: which of an account's keys
+  -- acted is the question a leaked key raises, and the account alone cannot
+  -- answer it. The name is copied, so a key deleted later still reads.
+  key_id    INTEGER NOT NULL DEFAULT 0,
+  key_name  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
@@ -129,6 +143,18 @@ CREATE TABLE IF NOT EXISTS api_token_connections (
   PRIMARY KEY (token_id, connection_id)
 );
 CREATE INDEX IF NOT EXISTS idx_api_token_connections_conn ON api_token_connections(connection_id);
+
+-- The deployments a deploy key reaches. None is every deployment: a key for
+-- one pipeline names its own, a key for an operator's laptop names none. The
+-- project is deliberately not a foreign key: a deployment deleted for good
+-- leaves its row behind, so a key that reached only it goes on reaching
+-- nothing, where a cascade would have emptied the list into "everything".
+CREATE TABLE IF NOT EXISTS api_token_deployments (
+  token_id   INTEGER NOT NULL REFERENCES api_tokens(id) ON DELETE CASCADE,
+  project_id INTEGER NOT NULL,
+  PRIMARY KEY (token_id, project_id)
+);
+CREATE INDEX IF NOT EXISTS idx_api_token_deployments_project ON api_token_deployments(project_id);
 
 -- Databases brought over from another server. A replication import outlives the
 -- request that started it by hours, so it is a row: the target keeps the
@@ -569,6 +595,8 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
   pause_containers TEXT NOT NULL DEFAULT '[]',
   revision    INTEGER NOT NULL DEFAULT 1,
   encrypt     INTEGER NOT NULL DEFAULT 0,
+  imported    INTEGER NOT NULL DEFAULT 0,
+  origin_json TEXT NOT NULL DEFAULT '',
   created_at  INTEGER NOT NULL
 );
 
@@ -582,7 +610,9 @@ CREATE TABLE IF NOT EXISTS backup_runs (
   size_bytes INTEGER NOT NULL DEFAULT 0,
   log        TEXT NOT NULL DEFAULT '',
   trigger    TEXT NOT NULL DEFAULT 'manual',
-  manifest_json TEXT NOT NULL DEFAULT '{}'
+  manifest_json TEXT NOT NULL DEFAULT '{}',
+  imported   INTEGER NOT NULL DEFAULT 0,
+  local_copy TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_backup_runs_job ON backup_runs(job_id, started_at DESC);
 
@@ -766,6 +796,8 @@ CREATE TABLE IF NOT EXISTS deploy_releases (
   activated_at           INTEGER NOT NULL DEFAULT 0,
   retired_at             INTEGER NOT NULL DEFAULT 0,
   pinned                 INTEGER NOT NULL DEFAULT 0,
+  rolled_back_at         INTEGER NOT NULL DEFAULT 0,
+  rollback_reason        TEXT NOT NULL DEFAULT '',
   UNIQUE(environment_id, release_number)
 );
 CREATE INDEX IF NOT EXISTS idx_deploy_release_environment
@@ -1038,6 +1070,32 @@ CREATE TABLE IF NOT EXISTS deploy_git_watches (
   checked_at     INTEGER NOT NULL DEFAULT 0
 );
 
+-- Log drains: where deployments' output and requests are copied to. The
+-- headers (a drain's credentials) are sealed in config_enc; the status row
+-- is what the drain has shipped and how its last delivery went.
+CREATE TABLE IF NOT EXISTS deploy_log_drains (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL UNIQUE,
+  kind          TEXT NOT NULL,
+  endpoint      TEXT NOT NULL,
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  streams_json  TEXT NOT NULL DEFAULT '["output","requests"]',
+  projects_json TEXT NOT NULL DEFAULT '[]',
+  config_enc    TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS deploy_log_drain_status (
+  drain_id        INTEGER PRIMARY KEY REFERENCES deploy_log_drains(id) ON DELETE CASCADE,
+  shipped         INTEGER NOT NULL DEFAULT 0,
+  dropped         INTEGER NOT NULL DEFAULT 0,
+  batches         INTEGER NOT NULL DEFAULT 0,
+  last_success_at INTEGER NOT NULL DEFAULT 0,
+  last_error      TEXT NOT NULL DEFAULT '',
+  last_error_at   INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS deploy_git_policies (
   environment_id  INTEGER PRIMARY KEY REFERENCES deploy_environments(id) ON DELETE CASCADE,
   automatic       INTEGER NOT NULL DEFAULT 1,
@@ -1045,7 +1103,27 @@ CREATE TABLE IF NOT EXISTS deploy_git_policies (
   exclude_json    TEXT NOT NULL DEFAULT '[]',
   commit_statuses INTEGER NOT NULL DEFAULT 1,
   revision        INTEGER NOT NULL DEFAULT 1,
-  updated_at      INTEGER NOT NULL DEFAULT 0
+  updated_at      INTEGER NOT NULL DEFAULT 0,
+  -- Production can refuse every build and take only staging's promotions;
+  -- shipped without it through addedColumns.
+  promotion_only  INTEGER NOT NULL DEFAULT 0
+);
+
+-- The last thing written back to the Git host for an environment: one row
+-- for its commit status and one for its preview comment, so Settings can say
+-- whether the host accepted it instead of leaving a refusal in the log.
+CREATE TABLE IF NOT EXISTS deploy_forge_reports (
+  environment_id INTEGER NOT NULL REFERENCES deploy_environments(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL,
+  provider       TEXT NOT NULL DEFAULT '',
+  repository     TEXT NOT NULL DEFAULT '',
+  revision       TEXT NOT NULL DEFAULT '',
+  state          TEXT NOT NULL DEFAULT '',
+  run_id         INTEGER NOT NULL DEFAULT 0,
+  ok             INTEGER NOT NULL DEFAULT 0,
+  message        TEXT NOT NULL DEFAULT '',
+  reported_at    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (environment_id, kind)
 );
 
 CREATE TABLE IF NOT EXISTS deploy_database_networks (
@@ -1124,6 +1202,9 @@ CREATE TABLE IF NOT EXISTS deploy_drafts (
   id                   TEXT PRIMARY KEY,
   owner_user_id        INTEGER NOT NULL,
   owner_username       TEXT NOT NULL,
+  -- The deploy key that made the draft, or 0 for a session: a key's drafts
+  -- are its own, and it reaches no other.
+  key_id               INTEGER NOT NULL DEFAULT 0,
   current_step         TEXT NOT NULL DEFAULT 'intent',
   revision             INTEGER NOT NULL DEFAULT 1,
   data_json            TEXT NOT NULL DEFAULT '{}',
@@ -1349,6 +1430,22 @@ CREATE TABLE IF NOT EXISTS metric_mount_samples (
 );
 -- Pruning walks by time across every mount, which the primary key cannot serve.
 CREATE INDEX IF NOT EXISTS idx_mount_samples_ts ON metric_mount_samples(ts);
+
+-- Named volumes' sizes, recorded by the same sampler at a slower pace
+-- (metrics.VolumeInterval) and only for the volumes a deployment owns.
+--
+-- A volume's size is a point on a line, not a reading: "the uploads volume is
+-- 38 GB" is the size of the thing, and only its growth since last week says
+-- whether the disk under it has a month left or a day. Docker's disk walk is
+-- what measures a volume, which is why this is sampled every quarter of an
+-- hour and not every fifteen seconds. Pruned past JD_METRICS_RETENTION.
+CREATE TABLE IF NOT EXISTS metric_volume_samples (
+  ts         INTEGER NOT NULL,
+  name       TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (name, ts)
+);
+CREATE INDEX IF NOT EXISTS idx_volume_samples_ts ON metric_volume_samples(ts);
 
 -- Per-container utilisation, recorded by the same sampler.
 --
@@ -1607,6 +1704,15 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Backup jobs learned to encrypt their archives. A job that predates the
 	// setting keeps writing what it always wrote until somebody turns it on.
 	{"backup_jobs", "encrypt", "INTEGER NOT NULL DEFAULT 0"},
+	// A job and its runs can be imported from what a destination holds: the
+	// archives another server (or this one, before a rebuild) wrote there.
+	// Everything that existed before is this server's own.
+	{"backup_jobs", "imported", "INTEGER NOT NULL DEFAULT 0"},
+	{"backup_jobs", "origin_json", "TEXT NOT NULL DEFAULT ''"},
+	{"backup_runs", "imported", "INTEGER NOT NULL DEFAULT 0"},
+	// An imported run may keep a copy of its archive on this server; the
+	// destination's object stays where it was either way.
+	{"backup_runs", "local_copy", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_preview_approvals", "generation", "INTEGER NOT NULL DEFAULT 1"},
 	// A preview started from the dashboard's "Test this pull request" rather
 	// than from a webhook remembers where it came from, the pull request's
@@ -1649,6 +1755,9 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Commit statuses default on: an environment that already deploys from
 	// GitHub gains them without an edit, and the policy editor can turn them off.
 	{"deploy_git_policies", "commit_statuses", "INTEGER NOT NULL DEFAULT 1"},
+	// Production may take only promotions from staging. Every policy saved
+	// before builds as it always did.
+	{"deploy_git_policies", "promotion_only", "INTEGER NOT NULL DEFAULT 0"},
 	// 0.6.7 keeps the shipped project/run rows as stable compatibility
 	// identities while normalized environments, releases, steps and events
 	// grow beside them. Every legacy row receives a usable zero/default before
@@ -1659,6 +1768,7 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"deploy_projects", "archived_name", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_drafts", "environment_enc", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_drafts", "adoption_enc", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_drafts", "key_id", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_runs", "environment_id", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_runs", "run_number", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_runs", "source_revision", "TEXT NOT NULL DEFAULT ''"},
@@ -1742,6 +1852,13 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"metric_container_samples", "mem_limited", "INTEGER DEFAULT NULL"},
 	{"metric_container_samples", "cpu_total", "INTEGER DEFAULT NULL"},
 	{"metric_container_samples", "sample_time", "REAL DEFAULT NULL"},
+	// The CFS scheduler's cumulative periods and the periods it throttled the
+	// container in, NULL for a container without a CPU limit (it has no
+	// periods) and for every row from before they were kept: throttling is
+	// what a CPU limit set too low does, and a mean CPU figure under the limit
+	// hides it entirely.
+	{"metric_container_samples", "cpu_periods", "INTEGER DEFAULT NULL"},
+	{"metric_container_samples", "cpu_throttled", "INTEGER DEFAULT NULL"},
 
 	// Inode exhaustion fills a filesystem that reports free space, and is
 	// invisible in a used-bytes percentage.
@@ -1788,6 +1905,31 @@ var addedColumns = []struct{ table, column, spec string }{
 	// An API key can be narrowed to one capability, such as reading the
 	// exported database metrics. Every key that existed before is unscoped.
 	{"api_tokens", "scope", "TEXT NOT NULL DEFAULT ''"},
+	// An MCP key can be given the deployments as well as databases. Every
+	// key made before reaches none of them.
+	{"api_tokens", "deploy_access", "TEXT NOT NULL DEFAULT ''"},
+	// An MCP key can be offered the tools generated from the deployment API.
+	// Every key made before them is not: it keeps the hand-written tools it
+	// had, and its owner turns the generated ones on.
+	{"api_tokens", "mcp_operations", "INTEGER NOT NULL DEFAULT 0"},
+	// A release taken back by an instant rollback says when and why: the
+	// reading that decided it, or the operator who pressed it. Every release
+	// made before was never rolled back this way.
+	{"deploy_releases", "rolled_back_at", "INTEGER NOT NULL DEFAULT 0"},
+	{"deploy_releases", "rollback_reason", "TEXT NOT NULL DEFAULT ''"},
+	// The audit trail names the API key behind a request. Rows written
+	// before it name only the account, as they always did.
+	{"audit_log", "key_id", "INTEGER NOT NULL DEFAULT 0"},
+	{"audit_log", "key_name", "TEXT NOT NULL DEFAULT ''"},
+	// Skew protection keeps a window's warm release running rather than
+	// paused, and the watcher reads how many requests it still answers. A
+	// window opened before either is a paused one that served nobody.
+	{"deploy_rollback_watches", "warm_running", "INTEGER NOT NULL DEFAULT 0"},
+	{"deploy_rollback_watches", "warm_served_json", "TEXT NOT NULL DEFAULT 'null'"},
+	// A drain that exports traces may name where its service shows one, a
+	// link the request console draws beside a request's trace id. Drains
+	// made before had no traces to link to.
+	{"deploy_log_drains", "trace_url", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on

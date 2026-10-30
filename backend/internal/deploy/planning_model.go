@@ -16,6 +16,10 @@ import (
 	"time"
 
 	"github.com/distribution/reference"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/blueprint"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/tailnetgate"
 )
 
 type DraftStep string
@@ -50,9 +54,13 @@ const (
 )
 
 type Draft struct {
-	ID                 string             `json:"id"`
-	OwnerUserID        int64              `json:"ownerUserId"`
-	OwnerUsername      string             `json:"ownerUsername"`
+	ID            string `json:"id"`
+	OwnerUserID   int64  `json:"ownerUserId"`
+	OwnerUsername string `json:"ownerUsername"`
+	// KeyID is the deploy key that made the draft, or 0 for a session. A
+	// key's drafts are its own: it reaches the ones it made and no other,
+	// however they are owned (AuthorizeDraftForKey).
+	KeyID              int64              `json:"keyId,omitempty"`
 	CurrentStep        DraftStep          `json:"currentStep"`
 	Revision           int                `json:"revision"`
 	Data               DraftData          `json:"data"`
@@ -142,6 +150,12 @@ type DraftSourceConfig struct {
 	// fields. They are the only thing that varies between two deployments of
 	// the same reviewed blueprint version.
 	BlueprintInputs map[string]string `json:"blueprintInputs,omitempty"`
+	// BlueprintDefinition is a template added on this dashboard, frozen into
+	// the source when it is saved (PlanningStore.WithUserTemplate): the
+	// definition this deployment renders from on every later run, whatever
+	// becomes of the stored template. A built-in has none; it is re-resolved
+	// from the catalogue the binary ships.
+	BlueprintDefinition json.RawMessage `json:"blueprintDefinition,omitempty"`
 }
 
 type SourceIdentity struct {
@@ -167,6 +181,10 @@ type SourceIdentity struct {
 	// id rather than a registry manifest, and a release takes it from the
 	// daemon instead of pulling it.
 	Local bool `json:"local,omitempty"`
+	// Template is the reviewed multi-service template (`id@version`) a
+	// Compose source's document was rendered from, and empty for every other
+	// source. A blueprint source names its definition in Ref instead.
+	Template string `json:"template,omitempty"`
 }
 
 type DetectionConfidence string
@@ -214,6 +232,11 @@ type DetectedCandidate struct {
 	// any path it has no file for with index.html.
 	SPAFallback   bool   `json:"spaFallback,omitempty"`
 	PythonVersion string `json:"pythonVersion,omitempty"`
+	// RailpackProvider is the Railpack provider that would build this
+	// candidate's directory: beside a recipe, the choice the build step
+	// offers next to it; on a Railpack candidate, the one it builds with
+	// (detect_railpack.go).
+	RailpackProvider string `json:"railpackProvider,omitempty"`
 	// UnpinnedDependencies records that the manifest names dependencies
 	// without exact versions, so a rebuild may install different ones.
 	UnpinnedDependencies bool                `json:"unpinnedDependencies,omitempty"`
@@ -567,6 +590,15 @@ type BuildPlanConfig struct {
 	// files decide (planning_compiled.go).
 	JavaVersion   string `json:"javaVersion,omitempty"`
 	DotnetVersion string `json:"dotnetVersion,omitempty"`
+	// RailpackVersion, RailpackProvider and RailpackConfig are a Railpack
+	// build's settings (build_railpack.go): the release from the reviewed
+	// catalogue (empty for the dashboard's current one, pinned by digest),
+	// the provider Railpack is told to use instead of detecting one, and
+	// the configuration file it reads, relative to the root directory
+	// (empty for railpack.json, read when the repository has one).
+	RailpackVersion  string `json:"railpackVersion,omitempty"`
+	RailpackProvider string `json:"railpackProvider,omitempty"`
+	RailpackConfig   string `json:"railpackConfig,omitempty"`
 }
 
 // BuildSecretConfig names a variable and the reviewed recipe stages in which
@@ -612,6 +644,11 @@ type RuntimePlanConfig struct {
 	Capabilities       []string        `json:"capabilities,omitempty"`
 	Devices            []string        `json:"devices,omitempty"`
 	Mounts             []RuntimeMount  `json:"mounts,omitempty"`
+	// Seeds are written into the plan's managed volumes by a helper
+	// container before the release's own container starts: install-time
+	// files a definition renders, and downloads verified against their pinned
+	// digest (runtime_seeds.go). Each is written only where nothing is yet.
+	Seeds []RuntimeSeed `json:"seeds,omitempty"`
 	// Resource limits are optional caps handed to the container runtime. Zero
 	// means unlimited, which is Docker's own default; the plan carries them so a
 	// release snapshot pins exactly what the candidate was allowed to use.
@@ -619,9 +656,173 @@ type RuntimePlanConfig struct {
 	CPUs          float64 `json:"cpus,omitempty"`
 	PidsLimit     int64   `json:"pidsLimit,omitempty"`
 	RestartPolicy string  `json:"restartPolicy,omitempty"`
+	// User, ReadOnlyRootfs with its Tmpfs paths, Ulimits, Sysctls and GPUs
+	// are the container's process flags (runtime_flags.go): who it runs as,
+	// where it may write, the kernel's limits and parameters it starts with,
+	// and the server's GPUs. Each is absent until set, so a plan made before
+	// them keeps its digest.
+	User           string          `json:"user,omitempty"`
+	ReadOnlyRootfs bool            `json:"readOnlyRootfs,omitempty"`
+	Tmpfs          []RuntimeTmpfs  `json:"tmpfs,omitempty"`
+	Ulimits        []RuntimeUlimit `json:"ulimits,omitempty"`
+	Sysctls        []RuntimeSysctl `json:"sysctls,omitempty"`
+	GPUs           *RuntimeGPUs    `json:"gpus,omitempty"`
+	// Replicas is how many containers of each release run side by side
+	// behind the route, 1 to MaxRuntimeReplicas; zero is one. Only a
+	// stateless release has more than one (replicaRefusal), and the limits
+	// above are each container's own.
+	Replicas int `json:"replicas,omitempty"`
+	// Canary is the trial a canary-strategy plan's candidate gets before the
+	// cutover: its share of the requests, for how long, and whether it is
+	// promoted on its own when it compares well (canary.go).
+	Canary *CanaryTerms `json:"canary,omitempty"`
+	// SkewProtection keeps each visitor on the release that first answered
+	// them while it is kept warm, by the jd_release cookie (skew.go).
+	SkewProtection bool `json:"skewProtection,omitempty"`
 	// MaxRequestBodyMB is the largest request body the managed route lets
 	// through, in megabytes. Zero is DefaultMaxRequestBodyMB.
 	MaxRequestBodyMB int `json:"maxRequestBodyMb,omitempty"`
+	// AllowFrom, when it names any address or range, is the only place the
+	// public route answers; everyone else gets 403. The plan keeps each
+	// entry in its canonical spelling.
+	AllowFrom []string `json:"allowFrom,omitempty"`
+	// ResponseHeaders are set on every answer the public route gives,
+	// replacing any header of the same name the application sent.
+	ResponseHeaders []RouteHeader `json:"responseHeaders,omitempty"`
+	// RateLimit is how many requests one client address may make to the
+	// public route; past it the route answers 429 with Retry-After. On the
+	// Docker Caddy ingress, which has no rate-limit module, it is enforced
+	// on the host instead (proxysvc/deployment_edge.go, edge-rules.md).
+	RateLimit *RouteRateLimit `json:"rateLimit,omitempty"`
+	// EdgeRules are decided in order at the proxy before the application
+	// is asked; the first a request meets decides it. Kept canonical
+	// (proxysvc.CanonicalEdgeRules).
+	EdgeRules []RouteEdgeRule `json:"edgeRules,omitempty"`
+	// CrowdSec refuses, at the route, the addresses CrowdSec's local engine
+	// has banned, from a list the dashboard refreshes from its decisions.
+	CrowdSec bool `json:"crowdSec,omitempty"`
+	// ForwardAuth has the public route ask an auth server about every
+	// request first, so only people who sign in reach the application.
+	ForwardAuth *RouteForwardAuth `json:"forwardAuth,omitempty"`
+	// Maintenance is who still reaches the application while the public
+	// route is in maintenance, and how long its 503 tells clients to wait.
+	// Whether it is in maintenance is not the plan's: that is a switch on
+	// the live route, turned at once from the Domains settings, so a
+	// rollback or a new release never turns it on or off.
+	Maintenance *RouteMaintenance `json:"maintenance,omitempty"`
+	// ErrorPages are the codes the public route answers with a page of its
+	// own rather than the proxy's stock one: 404, 502, 503 or 504.
+	// InterceptErrors gives the application's own answers with those codes
+	// the page as well.
+	ErrorPages      []int `json:"errorPages,omitempty"`
+	InterceptErrors bool  `json:"interceptErrors,omitempty"`
+	// HSTS asks browsers to keep to HTTPS on the route's HTTPS domains:
+	// Strict-Transport-Security on every HTTPS answer. Nil sends none,
+	// which is where a plan starts, because the policy outlives a mistake
+	// for as long as it says. A domain served over plain HTTP is never sent
+	// it, so the control only means something once a served domain is HTTPS.
+	HSTS *RouteHSTS `json:"hsts,omitempty"`
+	// Replay is the traffic replay before the cutover (replay.go): the last
+	// real GET and HEAD requests the access log holds, sent to the candidate
+	// and compared with the live release's answers. Nil is off, which is
+	// where a plan starts: it costs a deployment the requests it replays.
+	Replay *ReplayPlan `json:"replay,omitempty"`
+	// Sleep stops the live release's container after this many idle
+	// minutes and has the next request start it again (sleep.go). Nil is
+	// off, which is where a plan starts: a sleeping application's first
+	// visitor waits for it.
+	Sleep *SleepPlan `json:"sleep,omitempty"`
+	// Tailnet publishes the environment on this host's tailnet and nowhere
+	// else, the way a pull request preview is published: tailscale serve
+	// maps one port of the tailnet address to it, and it has no public
+	// domain and no public certificate. Nil is an ordinary environment.
+	Tailnet *RouteTailnet `json:"tailnet,omitempty"`
+}
+
+// RouteTailnet is a tailnet-only publication (tailnet-apps.md). Allow, when
+// it names anybody, is who may open it — Tailscale logins (alice@example.com,
+// compared without case) and ACL tags (tag:ci, compared exactly) — and the
+// proxy then asks the dashboard about every request, which asks tailscaled
+// who holds the address it came from. An empty Allow lets everyone on the
+// tailnet in, as a preview's address does: the tailnet is its fence.
+//
+// A preview's plan is a copy of this one, so a preview of an environment
+// that names its visitors names the same ones.
+type RouteTailnet struct {
+	Allow []string `json:"allow,omitempty"`
+}
+
+// IdentityAware says the publication decides who may open it by their
+// tailnet identity, which is what puts the proxy between the tailnet and
+// the application.
+func (t *RouteTailnet) IdentityAware() bool { return t != nil && len(t.Allow) > 0 }
+
+// RouteHSTS is the public route's Strict-Transport-Security policy: MaxAge
+// seconds (zero is six months; at least five minutes, at most two years),
+// the subdomains too with IncludeSubDomains, and Preload to be built into
+// browsers, which needs a year and the subdomains, as the browsers' list
+// does. The bounds are the ones a Proxy site's HSTS control is held to.
+type RouteHSTS struct {
+	MaxAge            int  `json:"maxAge,omitempty"`
+	IncludeSubDomains bool `json:"includeSubDomains,omitempty"`
+	Preload           bool `json:"preload,omitempty"`
+}
+
+// proxy is the policy as the proxy renders and checks it.
+func (h RouteHSTS) proxy() proxysvc.DeploymentHSTS {
+	return proxysvc.DeploymentHSTS{MaxAge: h.MaxAge, IncludeSubDomains: h.IncludeSubDomains, Preload: h.Preload}
+}
+
+// RouteMaintenance is what the public route's maintenance does while it is
+// on.
+type RouteMaintenance struct {
+	// RetryAfter is the seconds the 503 tells clients and crawlers to wait;
+	// 0 sends no Retry-After.
+	RetryAfter int `json:"retryAfter,omitempty"`
+	// BypassFrom are the addresses and ranges that reach the application as
+	// usual while it is in maintenance, kept in their canonical spelling.
+	BypassFrom []string `json:"bypassFrom,omitempty"`
+}
+
+// RouteEdgeRule and RouteRateLimit are the proxy's own shapes: both ingress
+// drivers render them, and a second copy here would be a second set of
+// bounds to keep in step.
+type (
+	RouteEdgeRule  = proxysvc.EdgeRule
+	RouteRateLimit = proxysvc.DeploymentRateLimit
+)
+
+// RouteHeader is one response header the public route sets.
+type RouteHeader struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// RouteForwardAuth is the sign-in in front of the public route: Authelia,
+// Authentik, oauth2-proxy or another server answering nginx's auth_request
+// convention, asked at Verify, with SignIn the page a visitor without a
+// session is sent to. The application is told who signed in as Remote-User
+// and Remote-Email.
+//
+// A preview's plan is a copy of this one, so its previews sign in too.
+// PreviewsOnly keeps this environment's own route open and gates only the
+// previews made from it: Vercel's default, where production is public and
+// the work in progress is not.
+type RouteForwardAuth struct {
+	Provider     string `json:"provider"`
+	Verify       string `json:"verify"`
+	SignIn       string `json:"signIn"`
+	PreviewsOnly bool   `json:"previewsOnly,omitempty"`
+}
+
+// SignInGate is the sign-in on this plan's own route, or nil: a gate for
+// previews only is on a preview's plan, which is the copy marked
+// PreviewIsolation, and on no other.
+func (r RuntimePlanConfig) SignInGate() *RouteForwardAuth {
+	if r.ForwardAuth == nil || (r.ForwardAuth.PreviewsOnly && !r.PreviewIsolation) {
+		return nil
+	}
+	return r.ForwardAuth
 }
 
 // PublishedPort is a container port published on the host next to the routed
@@ -635,6 +836,36 @@ type PublishedPort struct {
 	// BindAddress is the host interface. Empty publishes on every interface,
 	// which is what a port a proxy cannot front exists for.
 	BindAddress string `json:"bindAddress,omitempty"`
+}
+
+// effectiveProtocol is the primary port's protocol as checks and the
+// runtime's own binding read it: UDP only where the plan says the port is
+// UDP alone, which validation allows only for a fixed, unrouted publication.
+// A "tcp+udp" port is reached over TCP.
+func (c RuntimePlanConfig) effectiveProtocol() string {
+	if c.Protocol == "udp" {
+		return "udp"
+	}
+	return "tcp"
+}
+
+// publishedProtocols are the protocols the primary port is published with:
+// one, or both for a server that signals over TCP and plays over UDP on the
+// same number.
+func (c RuntimePlanConfig) publishedProtocols() []string {
+	switch c.Protocol {
+	case "udp":
+		return []string{"udp"}
+	case "tcp+udp":
+		return []string{"tcp", "udp"}
+	}
+	return []string{"tcp"}
+}
+
+// portLabel names the primary publication the way a firewall rule does:
+// 25565/tcp, 19132/udp, or 19132/tcp+udp for both.
+func (c RuntimePlanConfig) portLabel() string {
+	return strconv.Itoa(c.HostPort) + "/" + strings.Join(c.publishedProtocols(), "+")
 }
 
 func (p PublishedPort) effectiveProtocol() string {
@@ -735,6 +966,42 @@ type PlannedDomain struct {
 	// Protection asks the proxy for a password before it serves this
 	// deployment. It applies to the deployment's route as a whole.
 	Protection *DomainProtection `json:"protection,omitempty"`
+	// RedirectTo is another of the plan's hostnames that this one sends
+	// visitors to, path and query kept, instead of serving the application:
+	// www.example.com to example.com, or the reverse. RedirectCode is 301,
+	// 302, 307 or 308; zero is 308.
+	RedirectTo   string `json:"redirectTo,omitempty"`
+	RedirectCode int    `json:"redirectCode,omitempty"`
+	// Tunnel serves the name through Cloudflare Tunnel (tunnel.go) rather
+	// than at this server's public address: Cloudflare terminates its HTTPS,
+	// and the route serves it over plain HTTP to the connector alone.
+	Tunnel bool `json:"tunnel,omitempty"`
+}
+
+// Redirects says whether the domain sends visitors to another rather than
+// serving the application.
+func (d PlannedDomain) Redirects() bool { return d.RedirectTo != "" }
+
+// domainConfig is the domain as its dependency row stores it. The redirect
+// is written only when there is one, so a domain saved before redirects
+// existed keeps the bytes, and the digest, it had.
+func (d PlannedDomain) domainConfig() map[string]any {
+	config := map[string]any{"hostname": d.Hostname, "https": d.HTTPS}
+	if d.Protection != nil {
+		config["protection"] = d.Protection
+	}
+	if d.RedirectTo != "" {
+		config["redirectTo"] = d.RedirectTo
+		if d.RedirectCode != 0 {
+			config["redirectCode"] = d.RedirectCode
+		}
+	}
+	// Written only when set, as the redirect is, so a domain saved before
+	// the tunnel existed keeps its bytes and its digest.
+	if d.Tunnel {
+		config["tunnel"] = true
+	}
+	return config
 }
 
 type PlanConfiguration struct {
@@ -944,6 +1211,25 @@ func (c DraftSourceConfig) Validate() error {
 		}
 	case SourceModeBlueprint:
 		allowed = sourceFieldSet("blueprintId", "blueprintVersion", "blueprintInputs")
+		if blueprint.IsUserID(c.BlueprintID) {
+			// A template added here deploys from the definition saved with
+			// the source, never from one a client chose to send, which is
+			// why the saves replace it from the store before this runs.
+			allowed["blueprintDefinition"] = true
+			if len(c.BlueprintDefinition) == 0 || len(c.BlueprintDefinition) > blueprint.MaxUserTemplateBytes {
+				return fmt.Errorf("%w: the template %s is not saved with this source; choose it again", ErrInvalidSource, c.BlueprintID)
+			}
+		}
+		if c.Kind == SourceCompose {
+			// A Compose template stores the document rendered from it
+			// (WithTemplateDocuments), which every release then runs.
+			allowed["composeFiles"] = true
+			if len(c.ComposeFiles) > 0 {
+				if _, err := analyzeComposeDocuments(c.ComposeFiles); err != nil {
+					return err
+				}
+			}
+		}
 		if c.BlueprintID == "" || c.BlueprintVersion == "" || len(c.BlueprintID) > 128 ||
 			len(c.BlueprintVersion) > 128 || strings.ContainsAny(c.BlueprintID+c.BlueprintVersion, "\x00\r\n") {
 			return fmt.Errorf("%w: blueprint id and version are required", ErrInvalidSource)
@@ -986,6 +1272,7 @@ func (c DraftSourceConfig) firstUnexpectedField(allowed map[string]bool) string 
 		{"platform", c.Platform != ""}, {"composeFiles", len(c.ComposeFiles) != 0}, {"resourceId", c.ResourceID != ""},
 		{"blueprintId", c.BlueprintID != ""}, {"blueprintVersion", c.BlueprintVersion != ""},
 		{"blueprintInputs", len(c.BlueprintInputs) != 0},
+		{"blueprintDefinition", len(c.BlueprintDefinition) != 0},
 	}
 	for _, field := range present {
 		if field.set && !allowed[field.name] {
@@ -1030,7 +1317,7 @@ func validModeForKind(kind SourceKind, mode SourceMode) bool {
 		return mode == SourceModeImageReference
 	case SourceCompose:
 		return mode == SourceModeComposePaste || mode == SourceModeComposeUpload ||
-			mode == SourceModeComposeGit || mode == SourceModeComposeLocal
+			mode == SourceModeComposeGit || mode == SourceModeComposeLocal || mode == SourceModeBlueprint
 	case SourceBlueprint:
 		return mode == SourceModeBlueprint
 	case SourceImport:
@@ -1289,6 +1576,9 @@ func (c PlanConfiguration) Validate() error {
 	if c.Build.PrimaryService != "" && (c.Build.Method != BuildCompose || !validComposeServiceName(c.Build.PrimaryService)) {
 		return invalidField("build.primaryService", "a primary service names one service of a Compose stack")
 	}
+	if err := validateRailpackSettings(c.Build); err != nil {
+		return err
+	}
 	for _, path := range []string{c.Build.RootDirectory, c.Build.Dockerfile} {
 		if path != "" && !safeRelativePath(path) {
 			return fmt.Errorf("build paths must remain inside the source root")
@@ -1330,7 +1620,21 @@ func (c PlanConfiguration) Validate() error {
 			return fmt.Errorf("runtime command passes credential material through argv; use a scoped variable")
 		}
 	}
-	if c.Runtime.Protocol != "" && c.Runtime.Protocol != "tcp" {
+	switch c.Runtime.Protocol {
+	case "", "tcp":
+	case "udp", "tcp+udp":
+		// A UDP server is published on its own port and never routed: no
+		// proxy in front of the dashboard carries a datagram, and leasing a
+		// loopback port for one would publish it where nothing can reach it.
+		// "tcp+udp" is one number on both, for a server that signals over
+		// TCP and plays over UDP (Bedrock's NetherNet).
+		if c.Runtime.InternalPort == 0 || c.Runtime.HostPort == 0 || c.Runtime.HostNetwork {
+			return invalidField("runtime.protocol", "a UDP service is published on a fixed host port; set the host port and the container port")
+		}
+		if len(c.Domains) > 0 {
+			return invalidField("runtime.protocol", "a UDP service cannot be routed to a domain; the proxy carries HTTP")
+		}
+	default:
 		return fmt.Errorf("runtime protocol %q is not supported by this release", c.Runtime.Protocol)
 	}
 	if c.Runtime.InternalPort < 0 || c.Runtime.InternalPort > 65535 {
@@ -1355,7 +1659,7 @@ func (c PlanConfiguration) Validate() error {
 			return invalidField(field, "host networking already exposes every port; remove the published ports or the host network")
 		}
 		key := port.effectiveProtocol() + ":" + strconv.Itoa(port.HostPort)
-		if publishedHostPorts[key] || (port.effectiveProtocol() == "tcp" && port.HostPort == c.Runtime.HostPort) {
+		if publishedHostPorts[key] || (slices.Contains(c.Runtime.publishedProtocols(), port.effectiveProtocol()) && port.HostPort == c.Runtime.HostPort) {
 			return invalidField(field, "host port %d/%s is published twice", port.HostPort, port.effectiveProtocol())
 		}
 		publishedHostPorts[key] = true
@@ -1386,6 +1690,21 @@ func (c PlanConfiguration) Validate() error {
 	if !validRestartPolicy(c.Runtime.RestartPolicy) {
 		return fmt.Errorf("runtime restart policy must be one of %s", strings.Join(RestartPolicies, ", "))
 	}
+	if err := validateReplicas(c.Build.Method, c.Runtime); err != nil {
+		return err
+	}
+	if err := validateCanary(c); err != nil {
+		return err
+	}
+	if err := validateSkewProtection(c); err != nil {
+		return err
+	}
+	if err := validateReplayPlan(c.Runtime.Replay); err != nil {
+		return err
+	}
+	if err := validateSleepPlan(c); err != nil {
+		return err
+	}
 	seenMountTargets := map[string]bool{}
 	for index, mount := range c.Runtime.Mounts {
 		source := strings.TrimSpace(mount.Source)
@@ -1399,6 +1718,9 @@ func (c PlanConfiguration) Validate() error {
 		}
 		seenMountTargets[target] = true
 	}
+	if err := validateRuntimeSeeds(c); err != nil {
+		return err
+	}
 	for _, capability := range c.Runtime.Capabilities {
 		if !capabilityRE.MatchString(capability) {
 			return fmt.Errorf("runtime capability is invalid")
@@ -1408,6 +1730,9 @@ func (c PlanConfiguration) Validate() error {
 		if !filepath.IsAbs(device) || strings.ContainsAny(device, "\x00\r\n") {
 			return fmt.Errorf("runtime device is invalid")
 		}
+	}
+	if err := validateRuntimeFlags(c); err != nil {
+		return err
 	}
 	seenVariables := map[string]bool{}
 	variableScopes := map[string]map[string]bool{}
@@ -1596,6 +1921,257 @@ func (c PlanConfiguration) Validate() error {
 		if err := domain.Protection.validate(fmt.Sprintf("domains[%d].protection", index)); err != nil {
 			return err
 		}
+		if domain.Tunnel && strings.HasPrefix(hostname, "*.") {
+			return invalidField(fmt.Sprintf("domains[%d].tunnel", index), "a wildcard is not routed through Cloudflare Tunnel here: it needs a wildcard record and certificate of its own at Cloudflare; route each name")
+		}
+	}
+	if err := validateDomainRedirects(c.Domains); err != nil {
+		return err
+	}
+	// Every request a tunnel brings reaches the route from its connector's
+	// address, not the visitor's, so a list of allowed addresses would refuse
+	// every visitor of the name or, with the connector listed, let all of
+	// them in. Cloudflare's own rules are where that name is fenced.
+	if len(c.Runtime.AllowFrom) > 0 && len(tunnelHostnames(c.Domains)) > 0 {
+		return invalidField("runtime.allowFrom", "allowed addresses cannot fence a name served through Cloudflare Tunnel: every request reaches this host from the tunnel's connector, not from the visitor's address; fence that name with Cloudflare Access or a WAF rule at Cloudflare instead")
+	}
+	if err := validateRouteRules(c.Runtime); err != nil {
+		return err
+	}
+	if err := validateRouteSignIn(c); err != nil {
+		return err
+	}
+	return validateRouteTailnet(c)
+}
+
+// validateRouteTailnet checks a tailnet-only publication. It has no public
+// route, so nothing that only a public route carries may come with it, and
+// nothing may publish the container anywhere but loopback: an address on
+// every interface, a fixed or extra host port or the host's network would
+// each put the application where the tailnet does not fence it.
+func validateRouteTailnet(c PlanConfiguration) error {
+	tailnet := c.Runtime.Tailnet
+	if tailnet == nil {
+		return nil
+	}
+	if len(tailnet.Allow) > tailnetgate.MaxAllow {
+		return invalidField("runtime.tailnet.allow", "at most %d logins and tags", tailnetgate.MaxAllow)
+	}
+	seen := map[string]bool{}
+	for index, entry := range tailnet.Allow {
+		field := fmt.Sprintf("runtime.tailnet.allow[%d]", index)
+		canonical, _, err := tailnetgate.Canonical(entry)
+		if err != nil {
+			return invalidField(field, "%v", err)
+		}
+		if seen[canonical] {
+			return invalidField(field, "%s is listed twice", canonical)
+		}
+		seen[canonical] = true
+	}
+	if len(c.Domains) > 0 {
+		return invalidField("runtime.tailnet", "a tailnet-only environment has no public domain; remove %s first", c.Domains[0].Hostname)
+	}
+	public := ""
+	switch {
+	case c.Runtime.ForwardAuth != nil:
+		public = "a sign-in"
+	case len(c.Runtime.AllowFrom) > 0:
+		public = "allowed addresses"
+	case len(c.Runtime.ResponseHeaders) > 0:
+		public = "response headers"
+	case len(c.Runtime.EdgeRules) > 0:
+		public = "edge rules"
+	case c.Runtime.RateLimit != nil:
+		public = "a rate limit"
+	case c.Runtime.CrowdSec:
+		public = "the CrowdSec list"
+	case c.Runtime.HSTS != nil:
+		public = "HSTS"
+	case c.Runtime.Maintenance != nil:
+		public = "a maintenance page"
+	case len(c.Runtime.ErrorPages) > 0 || c.Runtime.InterceptErrors:
+		public = "error pages"
+	}
+	if public != "" {
+		return invalidField("runtime.tailnet", "%s belongs to the public route, which a tailnet-only environment does not have; remove it first", public)
+	}
+	switch {
+	case c.Runtime.HostNetwork:
+		return invalidField("runtime.tailnet", "on the host's network the application answers on every address, not on the tailnet alone")
+	case c.Runtime.HostPort != 0 || len(c.Runtime.Ports) > 0:
+		return invalidField("runtime.tailnet", "a fixed or extra host port would publish the application past the tailnet; remove it")
+	case c.Runtime.BindAddress != "" && c.Runtime.BindAddress != "127.0.0.1":
+		return invalidField("runtime.tailnet", "a tailnet-only environment publishes its container on loopback alone; bind it to 127.0.0.1")
+	case c.Runtime.InternalPort == 0 && c.Build.Method != BuildCompose:
+		return invalidField("runtime.tailnet", "the tailnet address forwards to the port the application listens on; set it under Runtime")
+	}
+	return nil
+}
+
+// validateRouteSignIn checks the sign-in in front of the public route: an
+// auth server and a sign-in page either proxy can write, and, on a route it
+// gates, nothing that would undo it. A password is refused because the
+// browser would send it to the auth server as well, which reads an
+// Authorization header as its own credentials; a name served over plain
+// HTTP because its session cookie would cross every network in clear, which
+// is also why Authelia refuses to answer for one. A plan whose sign-in is
+// for its previews alone gates nothing here, unless it is a preview's.
+func validateRouteSignIn(c PlanConfiguration) error {
+	gate := c.Runtime.ForwardAuth
+	if gate == nil {
+		return nil
+	}
+	if !proxysvc.ValidForwardAuthProvider(gate.Provider) {
+		return invalidField("runtime.forwardAuth.provider", "sign-in is through Authelia, Authentik, oauth2-proxy or another server")
+	}
+	if err := proxysvc.ValidateForwardAuthCheck(gate.Verify); err != nil {
+		return invalidField("runtime.forwardAuth.verify", "%v", err)
+	}
+	if err := proxysvc.ValidateForwardAuthSignIn(gate.SignIn); err != nil {
+		return invalidField("runtime.forwardAuth.signIn", "%v", err)
+	}
+	if c.Runtime.SignInGate() == nil {
+		return nil
+	}
+	for _, domain := range c.Domains {
+		if domain.Protection != nil {
+			return invalidField("runtime.forwardAuth", "%s asks for a password, which signing in replaces; remove the password first", domain.Hostname)
+		}
+		if !domain.HTTPS && !domain.Redirects() {
+			return invalidField("runtime.forwardAuth", "%s is served over plain HTTP; signing in needs HTTPS, so the session cookie is never sent in clear", domain.Hostname)
+		}
+	}
+	return nil
+}
+
+// validateDomainRedirects checks that every redirect lands on a domain that
+// serves the application: a name of this plan, not a wildcard, and not
+// itself a redirect, so a visitor is never sent round in a chain.
+func validateDomainRedirects(domains []PlannedDomain) error {
+	byName := map[string]PlannedDomain{}
+	for _, domain := range domains {
+		byName[strings.ToLower(strings.TrimSpace(domain.Hostname))] = domain
+	}
+	served := 0
+	for index, domain := range domains {
+		field := fmt.Sprintf("domains[%d].redirectTo", index)
+		if !domain.Redirects() {
+			served++
+			if domain.RedirectCode != 0 {
+				return invalidField(fmt.Sprintf("domains[%d].redirectCode", index), "a redirect code needs a domain to redirect to")
+			}
+			continue
+		}
+		hostname := strings.ToLower(strings.TrimSpace(domain.Hostname))
+		target := strings.ToLower(strings.TrimSpace(domain.RedirectTo))
+		if strings.HasPrefix(hostname, "*.") {
+			return invalidField(field, "a wildcard domain cannot redirect")
+		}
+		destination, ok := byName[target]
+		switch {
+		case target == hostname:
+			return invalidField(field, "%s cannot redirect to itself", domain.Hostname)
+		case !ok:
+			return invalidField(field, "%s has to redirect to another of this deployment's domains", domain.Hostname)
+		case strings.HasPrefix(target, "*."):
+			return invalidField(field, "%s cannot redirect to a wildcard", domain.Hostname)
+		case destination.Redirects():
+			return invalidField(field, "%s redirects to %s, which redirects too; point it at a domain that serves the application", domain.Hostname, domain.RedirectTo)
+		}
+		switch domain.RedirectCode {
+		case 0, 301, 302, 307, 308:
+		default:
+			return invalidField(fmt.Sprintf("domains[%d].redirectCode", index), "a redirect answers 301, 302, 307 or 308")
+		}
+	}
+	if len(domains) > 0 && served == 0 {
+		return invalidField("domains", "at least one domain has to serve the application rather than redirect")
+	}
+	return nil
+}
+
+// validateRouteRules checks the public route's allowed addresses and
+// response headers by the rules Proxy holds its own sites to.
+func validateRouteRules(runtime RuntimePlanConfig) error {
+	if len(runtime.AllowFrom) > proxysvc.MaxDeploymentAllow {
+		return invalidField("runtime.allowFrom", "at most %d allowed addresses", proxysvc.MaxDeploymentAllow)
+	}
+	seen := map[string]bool{}
+	for index, entry := range runtime.AllowFrom {
+		normalized, err := proxysvc.NormalizeAccessEntry(entry)
+		if err != nil {
+			return invalidField(fmt.Sprintf("runtime.allowFrom[%d]", index), "%v", err)
+		}
+		if seen[normalized] {
+			return invalidField(fmt.Sprintf("runtime.allowFrom[%d]", index), "%s is listed twice", normalized)
+		}
+		seen[normalized] = true
+	}
+	headers := make([]proxysvc.HeaderValue, 0, len(runtime.ResponseHeaders))
+	for _, header := range runtime.ResponseHeaders {
+		headers = append(headers, proxysvc.HeaderValue{Name: header.Name, Value: header.Value})
+	}
+	if err := proxysvc.ValidateDeploymentHeaders(headers); err != nil {
+		return invalidField("runtime.responseHeaders", "%v", err)
+	}
+	if h := runtime.HSTS; h != nil {
+		if err := proxysvc.ValidateDeploymentHSTS(h.proxy()); err != nil {
+			return invalidField("runtime.hsts", "%v", err)
+		}
+	}
+	if err := proxysvc.ValidateEdgeRules(runtime.EdgeRules); err != nil {
+		return invalidField("runtime.edgeRules", "%v", err)
+	}
+	if limit := runtime.RateLimit; limit != nil {
+		if err := proxysvc.ValidateRateLimit(*limit); err != nil {
+			return invalidField("runtime.rateLimit", "%v", err)
+		}
+	}
+	return validateRoutePages(runtime)
+}
+
+// validateRoutePages checks the public route's maintenance and error pages
+// by the rules Proxy holds a site's to.
+func validateRoutePages(runtime RuntimePlanConfig) error {
+	if m := runtime.Maintenance; m != nil {
+		if m.RetryAfter < 0 || m.RetryAfter > proxysvc.MaxRetryAfter {
+			return invalidField("runtime.maintenance.retryAfter", "retry after is between 0 and %d seconds", proxysvc.MaxRetryAfter)
+		}
+		if len(m.BypassFrom) > proxysvc.MaxDeploymentAllow {
+			return invalidField("runtime.maintenance.bypassFrom", "at most %d addresses can be let past maintenance", proxysvc.MaxDeploymentAllow)
+		}
+		seen := map[string]bool{}
+		for index, entry := range m.BypassFrom {
+			field := fmt.Sprintf("runtime.maintenance.bypassFrom[%d]", index)
+			normalized, err := proxysvc.NormalizeAccessEntry(entry)
+			if err != nil {
+				return invalidField(field, "%v", err)
+			}
+			if seen[normalized] {
+				return invalidField(field, "%s is listed twice", normalized)
+			}
+			seen[normalized] = true
+		}
+	}
+	seen := map[int]bool{}
+	for index, code := range runtime.ErrorPages {
+		field := fmt.Sprintf("runtime.errorPages[%d]", index)
+		if !slices.Contains(proxysvc.ErrorPageCodes(), code) {
+			return invalidField(field, "an error page can be set for 404, 502, 503 or 504, not %d", code)
+		}
+		if seen[code] {
+			return invalidField(field, "the %d page is listed twice", code)
+		}
+		seen[code] = true
+	}
+	if runtime.InterceptErrors && len(runtime.ErrorPages) == 0 {
+		return invalidField("runtime.interceptErrors", "choose a page to replace the application's error pages with")
+	}
+	// A preview's plan is a copy of this one, so a sign-in for previews
+	// alone would meet the replaced pages there.
+	if runtime.InterceptErrors && runtime.ForwardAuth != nil {
+		return invalidField("runtime.interceptErrors", "with the application's own error responses replaced, its own 401s would be sent to sign in; turn one of them off")
 	}
 	return nil
 }
@@ -1622,6 +2198,9 @@ type VariableReference struct {
 }
 
 func ParseVariableReference(value string) (VariableReference, error) {
+	if reference, isStore, err := parseStoreReference(value); isStore {
+		return reference, err
+	}
 	if !plannedReferenceRE.MatchString(value) {
 		return VariableReference{}, fmt.Errorf("%w: malformed typed reference", ErrInvalidVariable)
 	}
@@ -1634,6 +2213,10 @@ func ParseVariableReference(value string) (VariableReference, error) {
 	case "variable":
 		if ValidateEnvKey(target) != nil {
 			return VariableReference{}, fmt.Errorf("%w: variable reference target is invalid", ErrInvalidVariable)
+		}
+	case SharedScopeServer, SharedScopeProject:
+		if !sharedVariableNameRE.MatchString(target) {
+			return VariableReference{}, fmt.Errorf("%w: shared variable reference target is invalid", ErrInvalidVariable)
 		}
 	case "credential", "domain", "service", "database":
 		// A reference target is a name or an id. It is never a path, and a
@@ -1755,7 +2338,7 @@ func validDetectedDatabaseEngine(engine string) bool {
 
 func validBuildMethod(method BuildMethod) bool {
 	switch method {
-	case BuildRecipe, BuildDockerfile, BuildStatic, BuildImage, BuildCompose, BuildNone, BuildLegacyCompose:
+	case BuildRecipe, BuildDockerfile, BuildStatic, BuildImage, BuildCompose, BuildNone, BuildLegacyCompose, BuildRailpack:
 		return true
 	default:
 		return false
@@ -1763,7 +2346,7 @@ func validBuildMethod(method BuildMethod) bool {
 }
 
 func validStrategy(strategy ReleaseStrategy) bool {
-	return strategy == StrategyBlueGreen || strategy == StrategyStopFirst
+	return strategy == StrategyBlueGreen || strategy == StrategyStopFirst || strategy == StrategyCanary
 }
 
 func validOwnership(ownership OwnershipMode) bool {
@@ -1772,7 +2355,7 @@ func validOwnership(ownership OwnershipMode) bool {
 
 func validCheckKind(kind string) bool {
 	switch kind {
-	case "http", "tcp", "docker_health", "command", "public_route", "dns", "tls", "game_handshake", "backup_freshness":
+	case "http", "tcp", "docker_health", "command", "public_route", "dns", "tls", "game_handshake", "backup_freshness", "udp_probe":
 		return true
 	default:
 		return false
@@ -1796,11 +2379,15 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 	identity := detection.Source
 	for _, value := range []string{
 		identity.Remote, identity.Repository, identity.Ref, identity.Revision,
-		identity.Digest, identity.OS, identity.Architecture, identity.LocalPath,
+		identity.Digest, identity.OS, identity.Architecture, identity.LocalPath, identity.Template,
 	} {
 		if len(value) > 4096 || strings.ContainsAny(value, "\x00\r\n") {
 			return fmt.Errorf("%w: source identity is malformed", ErrInvalidPlan)
 		}
+	}
+	if identity.Template != "" && (source.Mode != SourceModeBlueprint || source.Kind != SourceCompose ||
+		identity.Template != source.BlueprintID+"@"+source.BlueprintVersion) {
+		return fmt.Errorf("%w: template identity does not match the saved source", ErrInvalidPlan)
 	}
 	if identity.Remote != "" {
 		if normalized, _, err := normalizeGitRemote(identity.Remote); err != nil || normalized != identity.Remote {
@@ -1864,6 +2451,7 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			(candidate.Root != "" && !safeRelativePath(candidate.Root)) || len(candidate.Root) > 4096 ||
 			len(candidate.Framework) > 128 || len(candidate.Recipe) > 32 ||
 			(candidate.Recipe != "" && !validRecipe(candidate.Recipe)) ||
+			(candidate.RailpackProvider != "" && !slices.Contains(railpackProviders, candidate.RailpackProvider)) ||
 			len(candidate.PythonVersion) > 16 || (candidate.PythonVersion != "" && !pythonRecipeVersionRE.MatchString(candidate.PythonVersion)) ||
 			len(candidate.Variables) > 64 || len(candidate.Databases) > 8 ||
 			len(candidate.BuildCommand) > 4096 ||
@@ -2217,6 +2805,9 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 	if c.Build.Method != BuildCompose {
 		c.Build.PrimaryService = ""
 	}
+	if c.Build.Method != BuildRailpack {
+		c.Build.RailpackVersion, c.Build.RailpackProvider, c.Build.RailpackConfig = "", "", ""
+	}
 	if c.Build.Secrets == nil {
 		c.Build.Secrets = []BuildSecretConfig{}
 	}
@@ -2272,9 +2863,97 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 	for index := range c.Domains {
 		c.Domains[index].Hostname = strings.ToLower(strings.TrimSpace(c.Domains[index].Hostname))
 		c.Domains[index].Protection = canonicalDomainProtection(c.Domains[index].Protection)
+		c.Domains[index].RedirectTo = strings.ToLower(strings.TrimSpace(c.Domains[index].RedirectTo))
+		// Cloudflare's edge answers a tunnel's name over HTTPS whatever the
+		// origin speaks, so it is one.
+		if c.Domains[index].Tunnel {
+			c.Domains[index].HTTPS = true
+		}
+	}
+	// Spelled the way the proxy writes them, so 10.0.0.1/32 and 10.0.0.1 are
+	// one entry and an edit that changes nothing changes no digest. Empty
+	// lists stay absent for the same reason.
+	for index, entry := range c.Runtime.AllowFrom {
+		if normalized, err := proxysvc.NormalizeAccessEntry(entry); err == nil {
+			c.Runtime.AllowFrom[index] = normalized
+		}
+	}
+	if len(c.Runtime.AllowFrom) == 0 {
+		c.Runtime.AllowFrom = nil
+	}
+	for index := range c.Runtime.ResponseHeaders {
+		c.Runtime.ResponseHeaders[index].Name = strings.TrimSpace(c.Runtime.ResponseHeaders[index].Name)
+		c.Runtime.ResponseHeaders[index].Value = strings.TrimSpace(c.Runtime.ResponseHeaders[index].Value)
+	}
+	if len(c.Runtime.ResponseHeaders) == 0 {
+		c.Runtime.ResponseHeaders = nil
+	}
+	if gate := c.Runtime.ForwardAuth; gate != nil {
+		// A copy, so canonicalising never writes through to the caller's plan.
+		trimmed := RouteForwardAuth{
+			Provider: strings.TrimSpace(gate.Provider), Verify: strings.TrimSpace(gate.Verify),
+			SignIn: strings.TrimSpace(gate.SignIn), PreviewsOnly: gate.PreviewsOnly,
+		}
+		c.Runtime.ForwardAuth = &trimmed
+	}
+	c.Runtime.Maintenance = canonicalRouteMaintenance(c.Runtime.Maintenance)
+	if t := c.Runtime.Tailnet; t != nil {
+		// A copy, so canonicalising never writes through to the caller's
+		// plan; an entry that does not read is kept as written for
+		// validation to name.
+		allow := make([]string, 0, len(t.Allow))
+		for _, entry := range t.Allow {
+			if canonical, _, err := tailnetgate.Canonical(entry); err == nil {
+				entry = canonical
+			}
+			allow = append(allow, entry)
+		}
+		if len(allow) == 0 {
+			allow = nil
+		}
+		c.Runtime.Tailnet = &RouteTailnet{Allow: allow}
+	}
+	if h := c.Runtime.HSTS; h != nil {
+		// A copy, so canonicalising never writes through to the caller's plan.
+		policy := *h
+		c.Runtime.HSTS = &policy
+	}
+	c.Runtime.Replay = canonicalReplayPlan(c.Runtime.Replay)
+	c.Runtime.Sleep = canonicalSleepPlan(c.Runtime.Sleep)
+	canonicalRuntimeFlags(&c.Runtime)
+	// A copy, so canonicalising never writes through to the caller's plan.
+	c.Runtime.EdgeRules = proxysvc.CanonicalEdgeRules(c.Runtime.EdgeRules)
+	if limit := c.Runtime.RateLimit; limit != nil {
+		canonical := *limit
+		canonical.Per = strings.ToLower(strings.TrimSpace(canonical.Per))
+		c.Runtime.RateLimit = &canonical
+	}
+	// In the order the proxy writes them, and absent when there are none, so
+	// a plan that never chose a page keeps the bytes and the digest it had.
+	if len(c.Runtime.ErrorPages) == 0 {
+		c.Runtime.ErrorPages = nil
+	} else {
+		c.Runtime.ErrorPages = slices.Sorted(slices.Values(c.Runtime.ErrorPages))
 	}
 	sort.Slice(c.Domains, func(i, j int) bool { return c.Domains[i].Hostname < c.Domains[j].Hostname })
 	return c
+}
+
+// canonicalRouteMaintenance is the plan's maintenance spelled the way the
+// proxy writes it, as a copy, or nothing when it asks for nothing: a plan
+// that never set it keeps the bytes and the digest it had.
+func canonicalRouteMaintenance(m *RouteMaintenance) *RouteMaintenance {
+	if m == nil || (m.RetryAfter == 0 && len(m.BypassFrom) == 0) {
+		return nil
+	}
+	out := RouteMaintenance{RetryAfter: m.RetryAfter}
+	for _, entry := range m.BypassFrom {
+		if normalized, err := proxysvc.NormalizeAccessEntry(entry); err == nil {
+			entry = normalized
+		}
+		out.BypassFrom = append(out.BypassFrom, entry)
+	}
+	return &out
 }
 
 func canonicalSourceConfig(source DraftSourceConfig) DraftSourceConfig {

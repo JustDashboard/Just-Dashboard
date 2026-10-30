@@ -67,6 +67,14 @@ export const CAUSE_TITLES: Record<string, string> = {
   build_disk_full: "Disk full during build",
   build_dockerfile_invalid: "Dockerfile does not parse",
   build_timeout: "Build timed out",
+  build_apt_package_missing: "Debian package not found",
+  railpack_no_provider: "Railpack found nothing to build",
+  railpack_start_command_missing: "No start command for Railpack",
+  railpack_package_unresolved: "Railpack could not resolve a version",
+  railpack_config_invalid: "Railpack configuration unreadable",
+  railpack_unavailable: "Railpack could not fetch its tools",
+  railpack_plan_failed: "Railpack could not plan the build",
+  railpack_package_install_failed: "Package install failed",
   build_failed: "Build failed",
   builder_missing: "Docker Buildx missing",
   builder_unavailable: "Builder unavailable",
@@ -86,6 +94,15 @@ export const CAUSE_TITLES: Record<string, string> = {
   runtime_port_in_use: "Port already in use",
   image_missing: "Image missing",
   mount_invalid: "Mount cannot be created",
+  runtime_gpu_unavailable: "GPUs not available to Docker",
+  runtime_ulimit_refused: "Process limit refused",
+  runtime_sysctl_refused: "Kernel parameter refused",
+  runtime_user_unknown: "User not in the image",
+  rehearsal_failed: "Migration failed on a copy of the database",
+  rehearsal_unavailable: "Migration could not be rehearsed",
+  replay_status_drift: "Candidate answered recorded requests differently",
+  replay_latency: "Candidate slower on recorded requests",
+  replay_unanswered: "Candidate did not answer recorded requests",
   schema_missing: "Database schema not applied",
   runtime_oom: "Application ran out of memory",
   runtime_prisma_engine_missing: "Prisma engine cannot load",
@@ -106,6 +123,7 @@ export const CAUSE_TITLES: Record<string, string> = {
   runtime_port_mismatch: "Application listens on another port",
   runtime_start_exited: "Start command exited",
   runtime_errors_hidden: "Application errors are not logged",
+  runtime_rootfs_read_only: "Application writes to the read-only root",
   runtime_sqlite_not_writable: "SQLite database not writable",
   runtime_master_key_invalid: "Credentials cannot be decrypted",
   runtime_auth_untrusted_host: "Host not trusted by Auth.js",
@@ -122,6 +140,7 @@ export const CAUSE_TITLES: Record<string, string> = {
   release_task_timeout: "Release task timed out",
   release_task_failed: "Release task failed",
   step_timeout: "Step timed out",
+  secret_store_unreadable: "Secret store unreadable",
 }
 
 /** A terminal or step code in the reader's words: its cause title, else the code as a sentence. */
@@ -188,6 +207,10 @@ export function causeHeadline(cause: DeploymentFailureCause) {
       return subject ? `Application listens on port ${subject}` : causeTitle(cause.code)
     case "schema_missing":
       return cause.table ? `Table ${cause.table} does not exist` : causeTitle(cause.code)
+    case "build_apt_package_missing":
+      return subject ? `Debian has no package ${subject}` : causeTitle(cause.code)
+    case "railpack_package_install_failed":
+      return subject ? `${subject} could not be installed` : causeTitle(cause.code)
   }
   return causeTitle(cause.code)
 }
@@ -241,6 +264,12 @@ export function fixTarget(
 ): { href: string; label: string } | undefined {
   const base = `/deploy/${projectId}/settings`
   const field = fix.field
+  // A domain's missing record, which saved DNS credentials can write: the
+  // Domains settings open on its sheet, whose button is the same words.
+  if (fix.kind === "dns_record" && field.startsWith("domains.")) {
+    const record = new URLSearchParams({ record: fix.value || field.slice("domains.".length) })
+    return { href: `${base}/domains?${record}`, label: "Create the record" }
+  }
   if (field.startsWith("variables.")) {
     const name = field.slice("variables.".length)
     const query = new URLSearchParams({ variable: name })
@@ -322,6 +351,10 @@ export function fixTarget(
       }
     case "rootDirectory":
       return { href: commands, label: "Review the root directory" }
+    case "railpackProvider":
+      return { href: `${base}/build#build`, label: "Choose Railpack's provider" }
+    case "railpackConfig":
+      return { href: `${base}/build#build`, label: "Review the Railpack configuration file" }
     case "releaseTasks":
       return { href: `${base}/build#release-tasks`, label: "Review the release tasks" }
   }

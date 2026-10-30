@@ -28,9 +28,18 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	location := ""
 	var current *SiteLocation
 	rootLocationUpstream := ""
+	// sleepUpstream is the application's address a sleeping deployment
+	// route sets at server level and forwards to through a variable.
+	sleepUpstream := ""
 	rootLocationWS := false
 	sawTLSListen := false
 	sawPlainRedirect := false
+	// A redirecting name served over HTTPS on a site whose own server is
+	// plain: the site is TLS, and every served name is a plain-HTTP one.
+	sawTLSRedirect := false
+	// The names the plain-HTTP markers carry, which the skipped server
+	// answers and the site's own server does not.
+	plainNames := []string{}
 	sawAccessLog := false
 	sawGzip := false
 	sawBuffering := false
@@ -73,6 +82,20 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			} else if raw == "}" {
 				depth--
 				kinds.skipServer = depth > 0
+			} else {
+				// A certificate only a skipped server names is still the
+				// site's, and so is its HTTP/2: a redirecting name served
+				// over HTTPS on a site whose own server is plain has nowhere
+				// else to name them. The first named wins, as the site's own
+				// server names the same ones.
+				switch directive, value := cutDirective(raw); {
+				case directive == "ssl_certificate" && spec.CertPath == "":
+					spec.CertPath = value
+				case directive == "ssl_certificate_key" && spec.KeyPath == "":
+					spec.KeyPath = value
+				case directive == "http2" && value == "on":
+					spec.HTTP2 = true
+				}
 			}
 			return
 		}
@@ -120,6 +143,12 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				return
 			}
 		}
+		if m := maintSwitchRe.FindStringSubmatch(raw); m != nil {
+			maintenance().Switch = true
+			spec.PagesDir = m[1]
+			depth++
+			return
+		}
 		if maintIfRe.MatchString(raw) {
 			maintenance().On = true
 			depth++
@@ -146,8 +175,14 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				current = nil
 				return
 			}
-			// The check's location is the renderer's too.
-			if location == forwardAuthURI && m[1] == "=" {
+			// The check's location is the renderer's too, and so is the one
+			// a switched maintenance answers from.
+			if (location == forwardAuthURI || location == maintenanceAnswerURI || location == wakeURI) && m[1] == "=" {
+				current = nil
+				return
+			}
+			// A sleeping route's wake is the renderer's as well.
+			if strings.HasPrefix(location, "@jd_") {
 				current = nil
 				return
 			}
@@ -191,6 +226,14 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		}
 
 		directive, value := cutDirective(raw)
+		if strings.HasPrefix(location, "@jd_") {
+			return
+		}
+		if directive == "set" && location == "" && depth == 1 {
+			if fields := strings.Fields(value); len(fields) == 2 && sleepVarRe.MatchString(fields[0]) {
+				sleepUpstream = fields[1]
+			}
+		}
 		if limits.directive(directive, value, location, current, len(spec.Locations)-1) {
 			return
 		}
@@ -204,7 +247,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			switch {
 			case directive == "alias":
 				spec.PagesDir = filepath.Dir(value)
-			case directive == "add_header" && strings.HasPrefix(value, "Retry-After "):
+			case directive == "add_header" && strings.HasPrefix(value, "Retry-After ") && location == pageURI("maintenance"):
 				maintenance().RetryAfter = parseSeconds(strings.Fields(value)[1])
 			}
 			return
@@ -364,6 +407,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				rootTries, _ = strconv.Atoi(value)
 			}
 		case "proxy_set_header":
+			if traceHeaderLine(value) {
+				spec.Trace = true
+			}
 			if host, ok := strings.CutPrefix(value, "Host "); ok && current == nil {
 				switch host = strings.TrimSpace(host); host {
 				case "$host":
@@ -464,6 +510,21 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			kinds.skipServer = true
 			continue
 		}
+		if m := hostRedirectMarkerRe.FindStringSubmatch(raw); m != nil && depth == 0 {
+			code, _ := strconv.Atoi(m[1])
+			spec.HostRedirects = append(spec.HostRedirects, HostRedirect{From: m[2], To: m[3], Code: code, Plain: m[4] == " over plain HTTP"})
+			sawTLSRedirect = sawTLSRedirect || m[4] == " over HTTPS"
+			kinds.skipServer = true
+			continue
+		}
+		if m := plainMarkerRe.FindStringSubmatch(raw); m != nil && depth == 0 {
+			if !seenDomains[m[1]] {
+				seenDomains[m[1]] = true
+				plainNames = append(plainNames, m[1])
+			}
+			kinds.skipServer = true
+			continue
+		}
 		if sso.comment(raw) {
 			continue
 		}
@@ -486,6 +547,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		}
 	}
 
+	if sleepUpstream != "" && sleepVarRe.MatchString(strings.TrimPrefix(rootLocationUpstream, "http://")) {
+		rootLocationUpstream = "http://" + sleepUpstream
+	}
 	spec.Upstream = rootLocationUpstream
 	pools.settle(spec, rootRetryOn, rootTries)
 	spec.WebSockets = rootLocationWS
@@ -520,6 +584,17 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// its upstream whatever try_files a hand-written file put beside it.
 	spec.SPA = spec.SPA && spec.Kind == "static"
 	spec.ForceHTTPS = sawTLSListen && sawPlainRedirect
+	// The plain-HTTP names are the site's domains too, after the ones its
+	// own server answers; on a site whose own server is plain and whose
+	// redirecting names are HTTPS, every served name is a plain one.
+	if sawTLSRedirect && !sawTLSListen {
+		spec.TLS = true
+		spec.PlainDomains = append([]string(nil), spec.Domains...)
+	}
+	if len(plainNames) > 0 {
+		spec.Domains = append(spec.Domains, plainNames...)
+		spec.PlainDomains = append(spec.PlainDomains, plainNames...)
+	}
 	// A file with a plain-HTTP redirect block and nothing else is a redirect
 	// site; one that also serves something is a TLS site forcing HTTPS.
 	if spec.Kind == "proxy" && spec.Upstream == "" && spec.Pool == nil && spec.Root == "" && sawPlainRedirect {
@@ -533,6 +608,11 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	headers.settle(spec)
 	access.settle(spec)
 	sso.settle(spec)
+	// A switched check is written whichever way the file has it, so the
+	// file, not the check, says whether maintenance is on.
+	if spec.Maintenance != nil && spec.Maintenance.Switch {
+		spec.Maintenance.On = false
+	}
 	// Extra locations that ended up with neither an upstream nor a root are
 	// something this form cannot express; dropping them is better than
 	// offering to save a location that proxies nowhere.
@@ -632,8 +712,15 @@ func accessLogFormat(value string) string {
 var (
 	maintGeoRe = regexp.MustCompile(`^\$jd_\w+_maint_ip\s*\{$`)
 	maintIfRe  = regexp.MustCompile(`^if\s*\(\$jd_\w+_maint\)\s*\{$`)
-	pageURIRe  = regexp.MustCompile(`^/__jd/(maintenance|\d{3})\.html$`)
+	pageURIRe  = regexp.MustCompile(`^/__jd/(maintenance|waking|\d{3})\.html$`)
+	// sleepVarRe is the variable a sleeping deployment route forwards
+	// through (deployment_sleep.go).
+	sleepVarRe = regexp.MustCompile(`^\$jd_\w+_up$`)
 )
+
+// maintSwitchRe is the test for the file a switched maintenance follows, in
+// the folder the site's pages are served from.
+var maintSwitchRe = regexp.MustCompile(`^if\s*\(-f\s+(/\S+)/maintenance\.on\)\s*\{$`)
 
 // pageFromURI is the page a location serves, when it is one of the site's.
 func pageFromURI(location string) (string, bool) {

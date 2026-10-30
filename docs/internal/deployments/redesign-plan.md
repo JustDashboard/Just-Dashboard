@@ -8,8 +8,9 @@ brand-coloured command buttons, typography, flat surfaces, status vocabulary and
 Use existing components and APIs where possible; the backend remains the authority for execution,
 secrets, resource ownership, confirmation and audit.
 
-The referenced `docs/plans/0.6.7-deployments/` directory is absent from this checkout. The checked-in
-implementation documentation, security invariants and source contracts govern this change.
+The checked-in implementation documentation, security invariants and source contracts govern this
+change. This file is a dated record: each section describes the pages as they were on its date, and a
+later section says what replaced them.
 
 ## Delivery plan
 
@@ -58,7 +59,8 @@ removes the containers:
   transcript keeps its frame because it is a scrolling console.
 - **Archive:** a plain list with the search in its toolbar.
 
-`deploy-ui.spec.ts` passes unchanged (56 checks) against these surfaces.
+`deploy-ui.spec.ts` passed unchanged (56 checks) against these surfaces; it was retired in the
+rebuild of 2026-09-17 below.
 
 ## Acceptance evidence
 
@@ -79,8 +81,8 @@ must be described as unavailable, never fabricated as a successful deployment or
 | Focused settings | Dedicated build, runtime, variables, domains, storage, dependencies, automation and lifecycle views. Editors use sheets; resource pickers use names; secret masking and destructive confirmations remain covered. Game console output has numbered lines and raw settings use disclosure. |
 
 Desktop and mobile renders were inspected for project cards, source import, setup, the overview,
-completed build transcript, runtime services and settings. Browser captures are produced by
-`frontend/tests/browser/deploy-ui.spec.ts`, including `fleet-grid.png`, `create-desktop.png`,
+completed build transcript, runtime services and settings. Browser captures were produced by
+`frontend/tests/browser/deploy-ui.spec.ts` (retired on 2026-09-17), including `fleet-grid.png`, `create-desktop.png`,
 `configure-mobile.png`, `overview-desktop.png`, `completed-build-mobile.png` and
 `build-settings-desktop.png`.
 
@@ -124,7 +126,7 @@ screens below live in `frontend/src/components/deploy/` and are covered by
 | Route | Screen |
 | --- | --- |
 | `/deploy` | Projects: in-progress runs, search, state chips, a grid of project cards (or rows) with the workload mark, the address, the branch and commit subject, the Compose service count and one status word (until 2026-09-24; see "Life and colour"). `?view=archived` lists archived projects with Restore and Delete permanently. |
-| `/deploy/notifications` | The fleet-level notification channels (Discord, Slack, Telegram, e-mail, signed webhook) with test delivery, pause, history and removal. |
+| `/deploy/notifications` | The fleet-level notification channels (Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover, e-mail, signed webhook) with test delivery, pause, history and removal. |
 | `/deploy/new` | One page: unfinished setups to resume, a source strip (Git repository, Docker — "Docker image" until 2026-10-06 — Template, Database; Compose until 2026-10-05) and a configure form (four steps beside a rail of the plan since 2026-10-05) (name, type, build & output settings, environment variables, database, public address, an Advanced disclosure) that ends in Deploy or Save only. `?draft=` resumes a draft and `?mode=advanced` opens Advanced. |
 | `/deploy/[id]` | The project shell (one compact header: the address, status word, the one command, a verbs menu, a facts row; its pages are the sidebar's third level, not a tab strip) and the Overview: the production block with the site preview and its facts, findings that need attention, recent deployments, live usage (until 2026-09-24; see "Life and colour"). |
 | `/deploy/[id]/deployments` | Success and weekly frequency over releases per day, median release and recovery time over release time per day beside it, why releases failed under both, and counted underlined status filters above the run rows — status, duration, title, commit subject, branch · sha · trigger · time — with Roll back, Compare with live, Pin, Retry and Cancel behind each row, and older pages on request. Filter and environment changes preserve the results' height for the page visit so the controls and shell scroll position stay steady. |
@@ -201,8 +203,10 @@ tokens; see `docs/internal/frontend/design-system.md` §11):
   only — bound to the recorded website address, one host, one megabyte, remembered for an hour
   (`project-mark.tsx`, `handlers_deploy_favicon.go`).
 - **Notifications:** the projects on the left, this server in the middle and a mark per channel on
-  the right, with dashed rings an administrator presses to add a kind not yet set up, drawn on the
-  page's own ground rather than in a frame; the cards under it are the list.
+  the right, with dashed rings an administrator presses to add a kind not yet set up — the first
+  few in the picker's order, until the column holds five, since ten rings stood taller than the
+  rest of the picture — drawn on the page's own ground rather than in a frame; the cards under it
+  are the list.
 - **Projects:** cards land one after another, a card whose run is in progress carries a light
   around its frame and a seven-dot release path beside its state; the in-progress rows carry the
   same dots. **New project:** "Start with something ready" is a bento of the five other ways in.
@@ -398,7 +402,8 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
   fourteen runs as a strip and who started the last one — or, while a run is in flight, a light
   round the card and the stage it is at. Their verbs are the project header's own. The search also
   finds a product, a framework, an image or a commit subject. The empty fleet offers the five
-  sources as cards; the archive draws each project as what it deployed, at a step of opacity, with
+  sources as cards, each opening its tab of `/deploy/new` (Compose opens Docker, where stacks are
+  offered, whichever tab was used last); the archive draws each project as what it deployed, at a step of opacity, with
   its source and how many variables deleting it would lose, and deleting one asks for its name and
   lists what goes and what stays on the server.
 - **Credentials** opens on the GitHub App's own section — its state, its picture, its setup a

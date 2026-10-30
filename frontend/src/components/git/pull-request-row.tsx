@@ -1,8 +1,8 @@
 "use client"
 
-import { External } from "@/components/icons"
+import { ArrowCircleUp, External } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
-import { previewStatus } from "@/lib/pull-requests"
+import { previewPromotionStatus, previewStatus } from "@/lib/pull-requests"
 import type { DeploymentPreview, GitPullRequest } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ChoiceRow } from "@/components/flow"
@@ -46,6 +46,7 @@ export function PullRequestRow({
   compact,
   index,
   className,
+  children,
 }: {
   pull: GitPullRequest
   /** The preview built from it, where the caller holds one apart from `pull.preview`. */
@@ -63,9 +64,12 @@ export function PullRequestRow({
   compact?: boolean
   index?: number
   className?: string
+  /** What the row carries under its line: a Compose preview's services. */
+  children?: React.ReactNode
 }) {
   const built = preview ?? pull.preview
   const status = previewStatus(built)
+  const promoted = previewPromotionStatus(built)
   const reachable = Boolean(built && built.state === "open" && built.address?.published)
   const when = pull.updatedAt ?? pull.createdAt
 
@@ -81,6 +85,16 @@ export function PullRequestRow({
       {!compact && <CommentCount count={pull.comments} />}
       <ChecksMark checks={pull.checks} label={!compact} />
       {status && <Status className="text-hint" tone={status.tone} label={status.label} />}
+      {/* The preview's image went on to staging, the step after testing it:
+          a property of the preview once it has, a state while it is going. */}
+      {promoted &&
+        (promoted.tone === "running" ? (
+          <Tag icon={ArrowCircleUp} data-slot="preview-promotion">
+            {promoted.label}
+          </Tag>
+        ) : (
+          <Status className="text-hint" tone={promoted.tone} label={promoted.label} />
+        ))}
       {compact && <ForgeFace login={pull.author} provider="github" size="xs" />}
       {reachable &&
         built &&
@@ -139,6 +153,8 @@ export function PullRequestRow({
         ) : undefined
       }
       onSelect={onOpen ?? (() => window.open(pull.url, "_blank", "noopener"))}
-    />
+    >
+      {children}
+    </ChoiceRow>
   )
 }

@@ -32,8 +32,9 @@ export type ConfirmRequest = {
    * The exact phrase the server expects echoed in X-Confirm.
    *
    * Optional. Only permanent deployment project deletion, deleting an entire
-   * database, Docker stack removal and deleting a Git checkout from the server
-   * use it. The server checks these phrases.
+   * database, Docker stack removal, deleting a Git checkout from the server and
+   * deleting a host account's home with no archive use it. The server checks
+   * these phrases.
    *
    * Whatever is set here, the server re-decides. This is a guard against a
    * slip, never the enforcement point.

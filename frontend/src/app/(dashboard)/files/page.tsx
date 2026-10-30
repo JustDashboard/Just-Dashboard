@@ -87,6 +87,13 @@ import {
   type Verb,
 } from "@/components/files/file-actions"
 import { usePrompt } from "@/components/files/prompt-dialog"
+import {
+  pastedFileName,
+  pastedTextName,
+  readPaste,
+  writeClip,
+  type HeldClip,
+} from "@/components/files/os-clipboard"
 import { inspectUpload } from "@/components/files/upload-plan"
 import { useConflicts, type ConflictPolicy } from "@/components/files/conflict-dialog"
 import {
@@ -138,7 +145,7 @@ import {
 type SortKey = "name" | "size" | "modified" | "owner" | "mode"
 type Sort = { key: SortKey; dir: "asc" | "desc" }
 type ViewMode = "list" | "grid"
-type Clip = { mode: "cut" | "copy"; paths: string[] }
+type Clip = HeldClip
 type FolderVisit = { active: string | null; selected: string[]; scroll: number; view: ViewMode }
 
 const RAIL = { base: 264, min: 200, max: 440 }
@@ -227,6 +234,10 @@ export default function FilesPage() {
   const restored = useRef<string | null>(null)
   const focusAfterNavigation = useRef(false)
   const nameTyping = useRef({ query: "", time: 0, dir: path })
+  // Set by the shortcut and taken by the copy, cut or paste event it causes,
+  // so only a shortcut the listing owns reaches the system clipboard.
+  const pendingClip = useRef<Clip | null>(null)
+  const pendingPaste = useRef(false)
 
   // Polled gently: a file that arrived by scp, a deploy that wrote a release,
   // a log that rotated — the listing used to show none of it until the
@@ -704,9 +715,8 @@ export default function FilesPage() {
     return [...moved]
   }
 
-  const paste = async () => {
-    if (!clip || !path) return
-    const held = clip
+  const paste = async (held: Clip | null = clip) => {
+    if (!held || !path) return
     const moved = await movePaths(held.paths, path, held.mode === "cut" ? "move" : "copy")
     if (held.mode === "cut") {
       const remaining = held.paths.filter((path) => !moved.includes(path))
@@ -1127,17 +1137,28 @@ export default function FilesPage() {
         setSelected(new Set(entries.map((e) => e.path)))
         return
       }
+      // Copy, cut and paste are left to the browser so their clipboard events
+      // can reach the system clipboard; the timer covers one that sends none.
       if (mod && (key === "c" || key === "x") && canWrite) {
         const paths = selected.size > 0 ? [...selected] : activeEntry ? [activeEntry.path] : []
         if (paths.length > 0) {
-          event.preventDefault()
-          cutCopy(key === "c" ? "copy" : "cut", paths)
+          const held: Clip = { mode: key === "c" ? "copy" : "cut", paths }
+          pendingClip.current = held
+          setTimeout(() => {
+            if (pendingClip.current !== held) return
+            pendingClip.current = null
+            cutCopy(held.mode, held.paths)
+          })
         }
         return
       }
-      if (mod && key === "v" && canWrite && clip) {
-        event.preventDefault()
-        void paste()
+      if (mod && key === "v" && canWrite && path) {
+        pendingPaste.current = true
+        setTimeout(() => {
+          if (!pendingPaste.current) return
+          pendingPaste.current = false
+          void paste()
+        })
         return
       }
       if (mod || event.altKey) return
@@ -1230,8 +1251,61 @@ export default function FilesPage() {
         }
       }
     }
+    const onClipWrite = (event: ClipboardEvent) => {
+      const held = pendingClip.current
+      if (!held || !event.clipboardData) return
+      pendingClip.current = null
+      event.preventDefault()
+      writeClip(event.clipboardData, held)
+      cutCopy(held.mode, held.paths)
+    }
+    const onPaste = (event: ClipboardEvent) => {
+      if (!pendingPaste.current || !path) return
+      pendingPaste.current = false
+      const pasted = readPaste(event.clipboardData, clip)
+      if (!pasted) return
+      event.preventDefault()
+      const dir = path
+      const at = new Date()
+      if (pasted.kind === "paths") void paste(pasted.clip)
+      else if (pasted.kind === "locations") {
+        notify.warning("The browser passed on where the files are, not the files", {
+          description: "Drag them onto the listing, or use Upload, to send them.",
+        })
+      } else if (pasted.kind === "text") {
+        const name = pastedTextName(at)
+        const file = new File([pasted.text], name, { type: "text/plain" })
+        void handleIncoming([{ file, rel: name }], dir)
+      } else {
+        // Read now: the clipboard's files are gone once this event returns.
+        void collectTransfer(event.clipboardData!).then((incoming) => {
+          if (incoming.length === 0) {
+            notify.warning("Nothing on the clipboard can be pasted here", {
+              description: "A copied folder cannot be pasted; drag it onto the listing instead.",
+            })
+            return
+          }
+          return handleIncoming(
+            incoming.map((item) => {
+              const name = pastedFileName(item.file.name, item.file.type, at)
+              if (name === item.file.name) return item
+              return { file: new File([item.file], name, { type: item.file.type }), rel: name }
+            }),
+            dir,
+          )
+        })
+      }
+    }
     window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    window.addEventListener("copy", onClipWrite)
+    window.addEventListener("cut", onClipWrite)
+    window.addEventListener("paste", onPaste)
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      window.removeEventListener("copy", onClipWrite)
+      window.removeEventListener("cut", onClipWrite)
+      window.removeEventListener("paste", onPaste)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeEntry,
@@ -1286,6 +1360,9 @@ export default function FilesPage() {
             {
               "--jd-files-rail": `${railPx}px`,
               "--jd-files-inspector": `${inspectorPx}px`,
+              // Not a Panel, so it declares the ground its sticky table header
+              // is opaque with; without it the rows show through the header.
+              "--panel-ground": "var(--card)",
             } as React.CSSProperties
           }
           className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card"

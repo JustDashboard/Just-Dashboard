@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { hold } from "./database-fixture"
-import { dockerlessInventory, mockFleet, refusal } from "./database-fleet-fixture"
+import { dockerInventory, dockerlessInventory, mockFleet, refusal } from "./database-fleet-fixture"
 
 /**
  * The section-wide pages of Databases: the control center, the map and Add a
@@ -370,6 +370,55 @@ test.describe("the control center", () => {
     await expect(foundRow(page, "postgresql@17-main")).toBeVisible()
   })
 
+  test("a MongoDB this kernel keeps from starting is fixed from its own card", async ({ page }) => {
+    const problem = {
+      message: "MongoDB cannot start on this kernel; apply the mitigation",
+      detail:
+        "MongoDB 8.0.34 refuses to start on Linux 7.0.0-1017-azure (MongoDB SERVER-121912). Applying the mitigation recreates its container with GLIBC_TUNABLES=glibc.pthread.rseq=1, on the same volumes.",
+      kernel: "7.0.0-1017-azure",
+      release: "8.0.34",
+      fixable: true,
+    }
+    const server = await mockFleet(page, {
+      fleet: {
+        5: {
+          ok: false,
+          state: "unreachable",
+          error: "server selection error: connection refused",
+          kernelProblem: problem,
+        },
+      },
+    })
+    server.answer("POST /databases/5/kernel-mitigation", () => ({
+      body: { container: "app-db", kernel: problem.kernel, release: problem.release, warnings: [] },
+    }))
+    await page.goto("/databases")
+
+    // The reason where a failure is said, not the dial it refused, and the
+    // fix in its foot where Start would be.
+    const app = card(page, "app")
+    await expect(app.locator("[data-slot=fleet-error]")).toHaveText(problem.message)
+    await expect(app.locator("[data-slot=fleet-error]")).toHaveAttribute("title", problem.detail)
+    await expect(app).not.toContainText("connection refused")
+    // Only that card offers it, on its foot and in its menu.
+    await expect(page.getByRole("button", { name: /Apply the kernel mitigation/ })).toHaveCount(1)
+    await app.getByRole("button", { name: "Actions for app" }).click()
+    await expect(page.getByRole("menuitem", { name: "Apply kernel mitigation" })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await app.getByRole("button", { name: "Apply the kernel mitigation to app" }).click()
+
+    // Asked first, in what it does, then carried out once.
+    const dialog = page.getByRole("dialog")
+    await expect(dialog).toContainText("GLIBC_TUNABLES=glibc.pthread.rseq=1")
+    await expect(dialog).toContainText("Linux 7.0.14 and later do not need it")
+    await dialog.getByRole("button", { name: "Apply" }).click()
+    await expect.poll(() => server.bodies("POST /databases/5/kernel-mitigation")).toEqual([{}])
+    await expect(page.getByText("app was recreated with the kernel mitigation")).toBeVisible()
+    // And it says it is starting, not offering the fix again, until it answers.
+    await expect(app).toContainText("Starting…")
+    await expect(page.getByRole("button", { name: /Apply the kernel mitigation/ })).toHaveCount(0)
+  })
+
   test("forty databases fit the page, as cards and as a table", async ({ page }) => {
     const server = await mockFleet(page)
     server.answer("GET /databases/fleet", () => ({
@@ -719,6 +768,65 @@ test.describe("the control center", () => {
 })
 
 test.describe("found on this server", () => {
+  test("a MongoDB that never started on this kernel is recreated with the mitigation, asked first", async ({
+    page,
+  }) => {
+    const inventory = dockerInventory()
+    const mysql = inventory.instances.find((one) => one.key === "docker:old-mysql")!
+    const problem = {
+      message: "MongoDB cannot start on this kernel; apply the mitigation",
+      detail:
+        "MongoDB 8.0.34 refuses to start on Linux 7.0.0-1017-azure (MongoDB SERVER-121912). Applying the mitigation recreates its container with GLIBC_TUNABLES=glibc.pthread.rseq=1, on the same volumes.",
+      kernel: "7.0.0-1017-azure",
+      release: "8.0.34",
+      fixable: true,
+    }
+    inventory.instances.push({
+      ...mysql,
+      key: "docker:orders-mongo",
+      name: "orders-mongo",
+      engine: "mongodb",
+      driver: "mongodb",
+      flavor: "mongodb",
+      label: "MongoDB",
+      state: "restarting",
+      reason: "the container is restarting",
+      container: {
+        ...mysql.container!,
+        id: "c-mongo",
+        name: "orders-mongo",
+        image: "mongo:8.0",
+        status: "Restarting (1) 4 seconds ago",
+      },
+    })
+    const server = await mockFleet(page, {
+      inventory: Object.assign(inventory, { kernelProblems: { "docker:orders-mongo": problem } }),
+    })
+    server.answer("POST /databases/kernel-mitigation", () => ({
+      body: {
+        container: "orders-mongo",
+        kernel: problem.kernel,
+        release: problem.release,
+        warnings: [],
+      },
+    }))
+    await page.goto("/databases")
+
+    // Said as the reason it does not start, with the fix as its one press.
+    await expect(foundRow(page, "orders-mongo")).toContainText(problem.message)
+    await page.getByRole("button", { name: "Apply the kernel mitigation to orders-mongo" }).click()
+    const dialog = page.getByRole("dialog")
+    await expect(dialog).toContainText("GLIBC_TUNABLES=glibc.pthread.rseq=1")
+    await expect(dialog).toContainText("mongo:8.0")
+    await dialog.getByRole("button", { name: "Apply" }).click()
+    await expect
+      .poll(() => server.bodies("POST /databases/kernel-mitigation"))
+      .toEqual([{ container: "c-mongo" }])
+    await expect(
+      page.getByText("orders-mongo was recreated with the kernel mitigation"),
+    ).toBeVisible()
+  })
+
   test("lists what is not connected with the one thing to do about each", async ({ page }) => {
     await mockFleet(page)
     await page.goto("/databases")
@@ -766,8 +874,11 @@ test.describe("found on this server", () => {
     await expect(foundRow(page, "data.db")).toContainText("/srv/app")
     await expect(foundRow(page, "data.db")).not.toContainText("/srv/app/data.db")
 
-    // The dashboard's own store is counted behind a fold, with no way to connect it.
-    await found.getByText("Kept by other programs").click()
+    // The dashboard's own store is counted behind the one fold of what is
+    // set aside, with no way to connect it.
+    await expect(found.getByText("1 kept by other programs", { exact: false })).toBeVisible()
+    await found.getByText("Set aside", { exact: true }).click()
+    await found.getByRole("button", { name: /^Other programs/ }).click()
     await expect(foundRow(page, "vpsd.db")).toContainText("never connected")
     await expect(found.getByRole("button", { name: "Open vpsd.db" })).toHaveCount(0)
   })
@@ -967,10 +1078,12 @@ test.describe("found on this server", () => {
     await expect
       .poll(() => server.bodies("POST /databases/inventory/ignore"))
       .toEqual([{ key: "docker:sessions", ignored: true }])
-    await page.getByText("Ignored", { exact: true }).click()
+    await page.getByText("Set aside", { exact: true }).click()
+    await page.getByRole("button", { name: /^Ignored/ }).click()
     await expect(page.getByRole("button", { name: "Stop ignoring sessions" })).toBeVisible()
-    // A key whose server is gone can still be taken off the list.
-    await page.getByRole("button", { name: "Stop ignoring docker:long-gone" }).click()
+    // Keys whose server is gone are counted, not listed, and forgotten together.
+    await expect(page.getByText("1 ignored item is no longer on this server.")).toBeVisible()
+    await page.getByRole("button", { name: "Forget it" }).click()
     await expect
       .poll(() => server.bodies("POST /databases/inventory/ignore").at(-1))
       .toEqual({
@@ -1591,9 +1704,10 @@ for (const [label, viewport] of [
     await page.goto("/databases")
     await expect(card(page, "shop")).toBeVisible()
     await keepsTheRules(page, "/databases", "reading")
-    await page.getByText("Ignored", { exact: true }).click()
-    await page.getByText("Kept by other programs").click()
-    await keepsTheRules(page, "/databases with its folds open", "reading")
+    await page.getByText("Set aside", { exact: true }).click()
+    await keepsTheRules(page, "/databases with what is set aside open", "reading")
+    await page.getByRole("button", { name: /^Ignored/ }).click()
+    await keepsTheRules(page, "/databases with the ignored ones shown", "reading")
 
     await card(page, "shop").getByRole("button", { name: "Actions for shop" }).click()
     await page.getByRole("menuitem", { name: "Forget" }).click()

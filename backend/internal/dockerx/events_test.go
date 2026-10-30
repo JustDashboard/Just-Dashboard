@@ -134,3 +134,28 @@ func TestNetworkEventsCarryTheContainerTheyMoved(t *testing.T) {
 		t.Fatalf("container start carried a container: %+v", ev)
 	}
 }
+
+// An event missing from the buffer is evidence only for a moment the log was
+// listening and still holds: not before the stream connected, and not once
+// the ring has overwritten that far back.
+func TestEventLogCoversOnlyWhatItStillHolds(t *testing.T) {
+	log := recorded(Event{Type: "container", Action: "start", Name: "web", ID: webID})
+	at := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
+	if log.Covers(at) {
+		t.Fatal("a log that never connected covers nothing")
+	}
+	log.running, log.since = true, at.Add(-time.Hour)
+	if !log.Covers(at) || log.Covers(at.Add(-2*time.Hour)) {
+		t.Fatal("a connected log covers from when it connected")
+	}
+	for i := 0; i < eventBufferSize; i++ {
+		log.record(Event{Type: "container", Action: "start", Name: "web", ID: webID, Time: at.Add(time.Duration(i+1) * time.Minute)})
+	}
+	if log.Covers(at) || !log.Covers(at.Add(2*time.Minute)) {
+		t.Fatal("a full ring covers only back to its oldest event")
+	}
+	log.running = false
+	if log.Covers(at.Add(2 * time.Minute)) {
+		t.Fatal("a disconnected log is not listening")
+	}
+}

@@ -50,6 +50,20 @@ type Release struct {
 	ActivatedAt          *time.Time      `json:"activatedAt,omitempty"`
 	RetiredAt            *time.Time      `json:"retiredAt,omitempty"`
 	Pinned               bool            `json:"pinned"`
+	// RolledBackAt and RollbackReason are set on a release an instant
+	// rollback took traffic away from: the reading that decided it, or who
+	// pressed the button. The release itself stays retained and deployable.
+	RolledBackAt   *time.Time `json:"rolledBackAt,omitempty"`
+	RollbackReason string     `json:"rollbackReason,omitempty"`
+	// Promotion is set on a release whose image was promoted from staging
+	// rather than built for this environment, read from its provenance.
+	Promotion *ReleasePromotion `json:"promotion,omitempty"`
+	// DataPoints is where each linked database could be brought back to as
+	// of this release going live, and DataCopy whether a copy of it as it was
+	// is offered (data_rollback.go). Both are read with an environment's
+	// release list.
+	DataPoints []ReleaseDataPoint   `json:"dataPoints,omitempty"`
+	DataCopy   *DataCopyEligibility `json:"dataCopy,omitempty"`
 }
 
 type ReleaseArtifact struct {
@@ -118,6 +132,12 @@ type CandidateReleaseInput struct {
 	RuntimeDigest    string
 	BlueprintID      string
 	BlueprintVersion string
+	// SourceIdentity, when set, is where the artifact really came from: the
+	// release a rollback clones, or the staging release a promotion takes
+	// its image from. Otherwise it is the run's own plan identity.
+	SourceIdentity *SourceIdentity
+	// Promotion records the staging release a promoted image came from.
+	Promotion *ReleasePromotion
 }
 
 type ReleaseWithArtifacts struct {
@@ -159,7 +179,8 @@ func (s *OrchestrationStore) EnvironmentReleases(
 	if limit <= 0 || limit > 200 {
 		limit = 30
 	}
-	if _, err := s.EnvironmentExecutionTarget(ctx, projectID, environmentID); err != nil {
+	target, err := s.EnvironmentExecutionTarget(ctx, projectID, environmentID)
+	if err != nil {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT `+releaseColumns+`
@@ -177,7 +198,24 @@ func (s *OrchestrationStore) EnvironmentReleases(
 		}
 		releases = append(releases, *release)
 	}
-	return releases, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	ids := make([]int64, 0, len(releases))
+	for _, release := range releases {
+		ids = append(ids, release.ID)
+	}
+	points, err := s.ReleaseDataPoints(ctx, ids...)
+	if err != nil {
+		return nil, err
+	}
+	for index := range releases {
+		releases[index].DataPoints = points[releases[index].ID]
+		eligibility := DataCopyEligibilityFor(target.Kind, releases[index], releases[index].DataPoints)
+		releases[index].DataCopy = &eligibility
+	}
+	return releases, nil
 }
 
 func (s *OrchestrationStore) ExecutionPlan(ctx context.Context, run EngineRun) (*StoredExecutionPlan, error) {
@@ -220,6 +258,14 @@ func (s *OrchestrationStore) ExecutionPlan(ctx context.Context, run EngineRun) (
 			return nil, fmt.Errorf("%w: run source revision does not match a remote Git source", ErrInvalidPlan)
 		}
 		plan.SourceIdentity.Revision = run.SourceRevision
+		plan.SourceDigest = digestBytes([]byte(sourceConfig), mustJSON(plan.SourceIdentity))
+	}
+	if run.Operation == OperationPromote {
+		identity, err := promotedSourceIdentityTx(ctx, s.db, run)
+		if err != nil {
+			return nil, err
+		}
+		plan.SourceIdentity = *identity
 		plan.SourceDigest = digestBytes([]byte(sourceConfig), mustJSON(plan.SourceIdentity))
 	}
 	if !validBuildMethod(plan.Build.Method) || !validStrategy(plan.Runtime.Strategy) {
@@ -328,15 +374,23 @@ func (s *OrchestrationStore) CreateCandidateRelease(
 			imageDigest = artifact.Digest
 		}
 	}
-	sourceIdentity, _ := json.Marshal(plan.SourceIdentity)
-	provenance := mustJSON(map[string]any{
+	identity := plan.SourceIdentity
+	if input.SourceIdentity != nil {
+		identity = *input.SourceIdentity
+	}
+	sourceIdentity, _ := json.Marshal(identity)
+	recorded := map[string]any{
 		"actor": run.Actor, "operation": run.Operation, "trigger": run.Trigger,
 		"sourceDigest": plan.SourceDigest, "buildDigest": plan.BuildDigest,
 		"runtimeDigest": input.RuntimeDigest, "builder": input.Prepared,
 		"variables": plan.Variables, "dependencies": plan.Dependencies, "checks": plan.Checks,
 		"detection": plan.BuildEvidence, "expectedDowntime": plan.ExpectedDowntime,
 		"planInputsDigest": plan.PlanInputsDigest,
-	})
+	}
+	if input.Promotion != nil {
+		recorded["promotion"] = input.Promotion
+	}
+	provenance := mustJSON(recorded)
 
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -385,7 +439,7 @@ func (s *OrchestrationStore) CreateCandidateRelease(
 		VALUES(?, ?, ?, ?, ?, 'candidate', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ProjectID, run.EnvironmentID, releaseNumber, run.ID, predecessor,
 		run.PlanRevision, plan.SourceID, plan.BuildPlanID, plan.RuntimePlanID,
-		immutableSourceRevision(plan.SourceIdentity), string(sourceIdentity), imageDigest,
+		immutableSourceRevision(identity), string(sourceIdentity), imageDigest,
 		input.RuntimeDigest, variablesDigest, plan.Runtime.Strategy, boolInt(plan.ExpectedDowntime), string(provenance),
 		input.BlueprintID, input.BlueprintVersion, now.Unix())
 	if err != nil {
@@ -494,16 +548,26 @@ func (s *OrchestrationStore) CloneCandidateRelease(
 		return nil, fmt.Errorf("%w: selected release has no runtime snapshot", ErrArtifactMissing)
 	}
 	var provenance struct {
-		Builder PreparedBuild `json:"builder"`
+		Builder   PreparedBuild     `json:"builder"`
+		Promotion *ReleasePromotion `json:"promotion"`
 	}
 	if err := json.Unmarshal(target.Release.Provenance, &provenance); err != nil {
 		return nil, fmt.Errorf("%w: selected release provenance is malformed", ErrArtifactMissing)
 	}
-	return s.CreateCandidateRelease(ctx, run, claimToken, CandidateReleaseInput{
+	input := CandidateReleaseInput{
 		Artifacts: artifacts, Prepared: provenance.Builder,
 		RuntimeSnapshot: runtimeSnapshot, RuntimeDigest: target.Release.ConfigDigest,
 		BlueprintID: target.Release.BlueprintID, BlueprintVersion: target.Release.BlueprintVersion,
-	})
+		Promotion: provenance.Promotion,
+	}
+	// A clone is the exact release, so it names the source that release
+	// named. For a promoted release that is staging's commit and image,
+	// which production's own plan identity would misstate.
+	var identity SourceIdentity
+	if json.Unmarshal(target.Release.SourceIdentity, &identity) == nil && identity.Kind != "" {
+		input.SourceIdentity = &identity
+	}
+	return s.CreateCandidateRelease(ctx, run, claimToken, input)
 }
 
 func (s *OrchestrationStore) Release(ctx context.Context, releaseID int64) (*ReleaseWithArtifacts, error) {
@@ -547,6 +611,14 @@ type ReleaseComparison struct {
 	Changes       map[string]bool         `json:"changes"`
 	Detail        ReleaseDetailComparison `json:"detail"`
 	Artifacts     []ReleaseArtifactStatus `json:"artifacts"`
+	// DataPoints is where each release's linked databases stood when it went
+	// live: what a copy of either release's data would be restored from.
+	DataPoints ReleaseDataPointComparison `json:"dataPoints"`
+}
+
+type ReleaseDataPointComparison struct {
+	From []ReleaseDataPoint `json:"from"`
+	To   []ReleaseDataPoint `json:"to"`
 }
 
 func (s *OrchestrationStore) CompareReleases(ctx context.Context, fromID, toID int64) (*ReleaseComparison, error) {
@@ -561,6 +633,17 @@ func (s *OrchestrationStore) CompareReleases(ctx context.Context, fromID, toID i
 	if from.Release.EnvironmentID != to.Release.EnvironmentID {
 		return nil, fmt.Errorf("%w: releases belong to different environments", ErrInvalidPlan)
 	}
+	points, err := s.ReleaseDataPoints(ctx, fromID, toID)
+	if err != nil {
+		return nil, err
+	}
+	dataPoints := ReleaseDataPointComparison{From: points[fromID], To: points[toID]}
+	if dataPoints.From == nil {
+		dataPoints.From = []ReleaseDataPoint{}
+	}
+	if dataPoints.To == nil {
+		dataPoints.To = []ReleaseDataPoint{}
+	}
 	return &ReleaseComparison{FromReleaseID: fromID, ToReleaseID: toID, Changes: map[string]bool{
 		"source":    from.Release.SourceRevision != to.Release.SourceRevision,
 		"build":     releaseBuildFingerprint(from.Artifacts) != releaseBuildFingerprint(to.Artifacts),
@@ -568,7 +651,33 @@ func (s *OrchestrationStore) CompareReleases(ctx context.Context, fromID, toID i
 		"variables": from.Release.VariablesDigest != to.Release.VariablesDigest,
 		"strategy":  from.Release.Strategy != to.Release.Strategy,
 		"downtime":  from.Release.ExpectedDowntime != to.Release.ExpectedDowntime,
-	}}, nil
+		"dataPoint": dataPointsDiffer(dataPoints.From, dataPoints.To),
+	}, DataPoints: dataPoints}, nil
+}
+
+// dataPointsDiffer says whether two releases would bring their data back to
+// different places: a different point for any database either recorded.
+func dataPointsDiffer(from, to []ReleaseDataPoint) bool {
+	key := func(point ReleaseDataPoint) string {
+		at := ""
+		if point.At != nil {
+			at = point.At.UTC().Format(time.RFC3339)
+		}
+		return fmt.Sprintf("%s|%s|%d|%d", point.Kind, at, point.BackupRunID, point.ArchiveID)
+	}
+	if len(from) != len(to) {
+		return true
+	}
+	seen := map[int64]string{}
+	for _, point := range from {
+		seen[point.ConnectionID] = key(point)
+	}
+	for _, point := range to {
+		if previous, ok := seen[point.ConnectionID]; !ok || previous != key(point) {
+			return true
+		}
+	}
+	return false
 }
 
 func artifactInputFingerprint(artifacts []ReleaseArtifactInput) string {
@@ -631,9 +740,10 @@ func (s *OrchestrationStore) ArtifactRetentionPlan(ctx context.Context, now time
 		SELECT a.id, a.release_id, a.kind, a.reference, a.digest, a.metadata_json,
 		       a.size_bytes, a.retain_until, a.state, a.created_at,
 		       r.environment_id, r.release_number, r.state, r.pinned,
-		       e.live_release_id,
+		       e.live_release_id, e.kind,
 		       EXISTS(SELECT 1 FROM deploy_queue_leases q JOIN deploy_runs dr ON dr.id = q.run_id
-		               WHERE dr.environment_id = r.environment_id)
+		               WHERE dr.environment_id = r.environment_id),
+		       `+promotionRetainedWhere("r")+`
 		  FROM deploy_release_artifacts a
 		  JOIN deploy_releases r ON r.id = a.release_id
 		  JOIN deploy_environments e ON e.id = r.environment_id
@@ -646,25 +756,25 @@ func (s *OrchestrationStore) ArtifactRetentionPlan(ctx context.Context, now time
 	type item struct {
 		artifact                             ReleaseArtifact
 		environmentID, number, liveReleaseID int64
-		releaseState                         string
-		pinned, active                       bool
+		releaseState, environmentKind        string
+		pinned, active, promoting            bool
 	}
 	items := []item{}
 	for rows.Next() {
 		var current item
 		var metadata string
 		var retainUntil, createdAt int64
-		var pinned, active int
+		var pinned, active, promoting int
 		if err := rows.Scan(&current.artifact.ID, &current.artifact.ReleaseID, &current.artifact.Kind,
 			&current.artifact.Reference, &current.artifact.Digest, &metadata, &current.artifact.SizeBytes,
 			&retainUntil, &current.artifact.State, &createdAt, &current.environmentID, &current.number,
-			&current.releaseState, &pinned, &current.liveReleaseID, &active); err != nil {
+			&current.releaseState, &pinned, &current.liveReleaseID, &current.environmentKind, &active, &promoting); err != nil {
 			return nil, err
 		}
 		current.artifact.Metadata = json.RawMessage(metadata)
 		current.artifact.RetainUntil = unixTimePtr(retainUntil)
 		current.artifact.CreatedAt = unixTime(createdAt)
-		current.pinned, current.active = pinned != 0, active != 0
+		current.pinned, current.active, current.promoting = pinned != 0, active != 0, promoting != 0
 		items = append(items, current)
 	}
 	if err := rows.Err(); err != nil {
@@ -688,6 +798,15 @@ func (s *OrchestrationStore) ArtifactRetentionPlan(ctx context.Context, now time
 		switch {
 		case current.active:
 			decision.Retain, decision.Reason = true, "environment has an active build or activation lease"
+		case current.promoting:
+			// The run is queued, so no lease protects it yet; without this a
+			// prune between the request and the render step would leave the
+			// promotion with nothing to promote. A preview's image goes to
+			// staging; staging's to production.
+			decision.Retain, decision.Reason = true, "source of an unfinished promotion to production"
+			if current.environmentKind == string(EnvironmentPreview) {
+				decision.Reason = "source of an unfinished promotion to staging"
+			}
 		case current.artifact.ReleaseID == current.liveReleaseID || current.releaseState == "live":
 			decision.Retain, decision.Reason = true, "current live release"
 		case current.pinned:
@@ -773,6 +892,7 @@ func (s *OrchestrationStore) reserveArtifactPrune(ctx context.Context, artifactI
 		        WHERE target.id = ?
 		          AND (
 		            tr.pinned = 1 OR tr.id = te.live_release_id OR tr.state = 'candidate'
+		            OR `+promotionRetainedWhere("tr")+`
 		            OR EXISTS(
 		                 SELECT 1 FROM deploy_release_artifacts shared
 		                 JOIN deploy_releases sr ON sr.id = shared.release_id
@@ -780,7 +900,8 @@ func (s *OrchestrationStore) reserveArtifactPrune(ctx context.Context, artifactI
 		                WHERE shared.kind = target.kind AND shared.digest = target.digest
 		                  AND (target.kind = 'image' OR shared.reference = target.reference)
 		                  AND shared.id <> target.id AND shared.state = 'available'
-		                  AND (sr.pinned = 1 OR sr.id = e.live_release_id OR sr.state = 'candidate')
+		                  AND (sr.pinned = 1 OR sr.id = e.live_release_id OR sr.state = 'candidate'
+		                       OR `+promotionRetainedWhere("sr")+`)
 		               )
 		          )
 		       )`, artifactID).Scan(&active, &retained); err != nil {
@@ -812,25 +933,27 @@ id, project_id, environment_id, release_number, run_id, predecessor_release_id,
 state, plan_revision, source_id, build_plan_id, runtime_plan_id, source_revision,
 source_identity_json, image_digest, config_digest, variables_digest, strategy, expected_downtime,
 provenance_json, blueprint_id, blueprint_version, created_at, activated_at,
-retired_at, pinned`
+retired_at, pinned, rolled_back_at, rollback_reason`
 
 func scanRelease(row scanner) (*Release, error) {
 	var release Release
 	var sourceIdentity, provenance string
-	var createdAt, activatedAt, retiredAt int64
+	var createdAt, activatedAt, retiredAt, rolledBackAt int64
 	var pinned, expectedDowntime int
 	if err := row.Scan(&release.ID, &release.ProjectID, &release.EnvironmentID, &release.Number,
 		&release.RunID, &release.PredecessorReleaseID, &release.State, &release.PlanRevision,
 		&release.SourceID, &release.BuildPlanID, &release.RuntimePlanID, &release.SourceRevision,
 		&sourceIdentity, &release.ImageDigest, &release.ConfigDigest, &release.VariablesDigest,
 		&release.Strategy, &expectedDowntime, &provenance, &release.BlueprintID, &release.BlueprintVersion,
-		&createdAt, &activatedAt, &retiredAt, &pinned); err != nil {
+		&createdAt, &activatedAt, &retiredAt, &pinned, &rolledBackAt, &release.RollbackReason); err != nil {
 		return nil, err
 	}
 	release.SourceIdentity, release.Provenance = json.RawMessage(sourceIdentity), json.RawMessage(provenance)
 	release.CreatedAt, release.ActivatedAt, release.RetiredAt = unixTime(createdAt), unixTimePtr(activatedAt), unixTimePtr(retiredAt)
+	release.RolledBackAt = unixTimePtr(rolledBackAt)
 	release.Pinned = pinned != 0
 	release.ExpectedDowntime = expectedDowntime != 0
+	release.Promotion = promotionFromProvenance(release.Provenance)
 	return &release, nil
 }
 

@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // rewriteTransport sends every request to one test server while recording the
@@ -24,14 +26,15 @@ type rewriteTransport struct {
 }
 
 type recordedRequest struct {
-	URL  string
-	Body string
+	URL    string
+	Body   string
+	Header http.Header
 }
 
 func (t *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	body, _ := io.ReadAll(req.Body)
 	t.mu.Lock()
-	t.requests = append(t.requests, recordedRequest{URL: req.URL.String(), Body: string(body)})
+	t.requests = append(t.requests, recordedRequest{URL: req.URL.String(), Body: string(body), Header: req.Header.Clone()})
 	t.mu.Unlock()
 	target, _ := url.Parse(t.server.URL)
 	clone := req.Clone(req.Context())
@@ -77,6 +80,32 @@ func TestNotificationChannelValidationMatrix(t *testing.T) {
 		{"email auth without tls", NotificationKindEmail, "", NotificationConfig{SMTPHost: "smtp.example.test", SMTPSecurity: SMTPSecurityNone, SMTPUsername: "ops", SMTPPassword: "pw", From: "a@example.test", To: []string{"b@example.test"}}, true, ""},
 		{"email no recipients", NotificationKindEmail, "", NotificationConfig{SMTPHost: "smtp.example.test", From: "a@example.test"}, true, ""},
 		{"email bad host", NotificationKindEmail, "", NotificationConfig{SMTPHost: "smtp host", From: "a@example.test", To: []string{"b@example.test"}}, true, ""},
+		{"ntfy default server", NotificationKindNtfy, "", NotificationConfig{Topic: "deploys-7Qx"}, false, "https://ntfy.sh/••••"},
+		{"ntfy own server and token", NotificationKindNtfy, "", NotificationConfig{ServerURL: "https://push.example.test/ntfy/", Topic: "ops", Token: "tk_AgQdq7mVBoFD37zQVN29RhuMzNIz2"}, false, "https://push.example.test/ntfy/••••"},
+		{"ntfy plain http without a token", NotificationKindNtfy, "", NotificationConfig{ServerURL: "http://ntfy.lan", Topic: "ops"}, false, "http://ntfy.lan/••••"},
+		{"ntfy token over plain http", NotificationKindNtfy, "", NotificationConfig{ServerURL: "http://ntfy.lan", Topic: "ops", Token: "tk_AgQdq7mVBoFD37zQVN29RhuMzNIz2"}, true, ""},
+		{"ntfy token over loopback", NotificationKindNtfy, "", NotificationConfig{ServerURL: "http://127.0.0.1:8090", Topic: "ops", Token: "tk_AgQdq7mVBoFD37zQVN29RhuMzNIz2"}, false, "http://127.0.0.1:8090/••••"},
+		{"ntfy prefix is not loopback", NotificationKindNtfy, "", NotificationConfig{ServerURL: "http://127.example.test", Topic: "ops", Token: "tk_AgQdq7mVBoFD37zQVN29RhuMzNIz2"}, true, ""},
+		{"ntfy bad topic", NotificationKindNtfy, "", NotificationConfig{Topic: "two words"}, true, ""},
+		{"ntfy bad token", NotificationKindNtfy, "", NotificationConfig{Topic: "ops", Token: "password"}, true, ""},
+		{"ntfy sign-in in the url", NotificationKindNtfy, "", NotificationConfig{ServerURL: "https://user:pw@ntfy.example.test", Topic: "ops"}, true, ""},
+		{"gotify ok", NotificationKindGotify, "", NotificationConfig{ServerURL: "https://gotify.example.test/", Token: "AbCdEf.GhIj-K_l"}, false, "https://gotify.example.test"},
+		{"gotify plain http", NotificationKindGotify, "", NotificationConfig{ServerURL: "http://gotify.lan", Token: "AbCdEf.GhIj-K_l"}, true, ""},
+		{"gotify loopback", NotificationKindGotify, "", NotificationConfig{ServerURL: "http://localhost:8070", Token: "AbCdEf.GhIj-K_l"}, false, "http://localhost:8070"},
+		{"gotify no token", NotificationKindGotify, "", NotificationConfig{ServerURL: "https://gotify.example.test"}, true, ""},
+		{"gotify no server", NotificationKindGotify, "", NotificationConfig{Token: "AbCdEf.GhIj-K_l"}, true, ""},
+		{"pushover ok", NotificationKindPushover, "", NotificationConfig{Token: "azGDORePK8gMaC0QOYAMyEEuzJnyUi", UserKey: "uQiRzpo4DXghDmr9QzzfQu27cmVRsG"}, false, "Pushover user uQi••••"},
+		{"pushover short key", NotificationKindPushover, "", NotificationConfig{Token: "azGDORePK8gMaC0QOYAMyEEuzJnyUi", UserKey: "uQiRzpo4"}, true, ""},
+		{"mattermost ok", NotificationKindMattermost, "", NotificationConfig{WebhookURL: "https://chat.example.test/hooks/xi3sdq8j1fdjtpe4xoye5mz1ar"}, false, "https://chat.example.test/hooks/••••"},
+		{"mattermost subpath", NotificationKindMattermost, "", NotificationConfig{WebhookURL: "https://example.test/mattermost/hooks/xi3sdq8j1fdjtpe4xoye5mz1ar"}, false, "https://example.test/mattermost/hooks/••••"},
+		{"mattermost loopback http", NotificationKindMattermost, "", NotificationConfig{WebhookURL: "http://127.0.0.1:8065/hooks/xi3sdq8j1fdjtpe4xoye5mz1ar"}, false, "http://127.0.0.1:8065/hooks/••••"},
+		{"mattermost remote http", NotificationKindMattermost, "", NotificationConfig{WebhookURL: "http://chat.example.test/hooks/xi3sdq8j1fdjtpe4xoye5mz1ar"}, true, ""},
+		{"mattermost not a hook", NotificationKindMattermost, "", NotificationConfig{WebhookURL: "https://chat.example.test/api/v4/posts"}, true, ""},
+		{"teams workflows", NotificationKindTeams, "", NotificationConfig{WebhookURL: "https://prod-12.westus.logic.azure.com:443/workflows/8a1f/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=SIGNATURE"}, false, "https://prod-12.westus.logic.azure.com/workflows/••••"},
+		{"teams power platform", NotificationKindTeams, "", NotificationConfig{WebhookURL: "https://default1234.56.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/8a1f/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=SIGNATURE"}, false, "https://default1234.56.environment.api.powerplatform.com/workflows/••••"},
+		{"teams without sig", NotificationKindTeams, "", NotificationConfig{WebhookURL: "https://prod-12.westus.logic.azure.com/workflows/8a1f/triggers/manual/paths/invoke"}, true, ""},
+		{"teams retired connector", NotificationKindTeams, "", NotificationConfig{WebhookURL: "https://contoso.webhook.office.com/webhookb2/abc/IncomingWebhook/def/ghi"}, true, ""},
+		{"teams elsewhere", NotificationKindTeams, "", NotificationConfig{WebhookURL: "https://example.test/workflows/1?sig=x"}, true, ""},
 		{"unknown kind", "pager", "", NotificationConfig{}, true, ""},
 	}
 	for _, tc := range cases {
@@ -100,6 +129,22 @@ func TestNotificationChannelValidationMatrix(t *testing.T) {
 		resolved, err := validateNotificationChannel(NotificationKindEmail, "", NotificationConfig{SMTPHost: "smtp.example.test", SMTPSecurity: SMTPSecurityTLS, From: "a@example.test", To: []string{"b@example.test"}}, nil)
 		if err != nil || resolved.Config.SMTPPort != 465 {
 			t.Fatalf("port = %d, err = %v", resolved.Config.SMTPPort, err)
+		}
+	})
+	t.Run("update keeps every stored push setting when omitted", func(t *testing.T) {
+		existing := NotificationConfig{ServerURL: "https://push.example.test", Topic: "ops", Token: "tk_AgQdq7mVBoFD37zQVN29RhuMzNIz2"}
+		resolved, err := validateNotificationChannel(NotificationKindNtfy, "", NotificationConfig{}, &existing)
+		if err != nil || !reflect.DeepEqual(resolved.Config, existing) {
+			t.Fatalf("resolved = %+v, err = %v", resolved.Config, err)
+		}
+		resolved, err = validateNotificationChannel(NotificationKindNtfy, "", NotificationConfig{Topic: "deploys"}, &existing)
+		if err != nil || resolved.Config.Topic != "deploys" || resolved.Config.Token != existing.Token || resolved.Config.ServerURL != existing.ServerURL {
+			t.Fatalf("resolved = %+v, err = %v", resolved.Config, err)
+		}
+		pushover := NotificationConfig{Token: "azGDORePK8gMaC0QOYAMyEEuzJnyUi", UserKey: "uQiRzpo4DXghDmr9QzzfQu27cmVRsG"}
+		resolved, err = validateNotificationChannel(NotificationKindPushover, "", NotificationConfig{}, &pushover)
+		if err != nil || !reflect.DeepEqual(resolved.Config, pushover) {
+			t.Fatalf("resolved = %+v, err = %v", resolved.Config, err)
 		}
 	})
 	t.Run("update keeps stored credential when omitted", func(t *testing.T) {
@@ -228,6 +273,43 @@ func TestRenderDatabaseAlertNamesTheDatabaseAndReading(t *testing.T) {
 	if !strings.Contains(string(mail), "Open it in Just Dashboard: https://dash.example.test/databases/3/alerts") ||
 		strings.Contains(string(mail), "Open the run") {
 		t.Fatalf("a database alert's mail sends its reader to a run:\n%s", mail)
+	}
+}
+
+func TestRenderHostAlertNamesTheSubjectServerAndReading(t *testing.T) {
+	since := time.Date(2026, 10, 25, 4, 5, 0, 0, time.UTC)
+	envelope := NotificationEnvelope{
+		Event: NotificationEventHostFiring, URL: "https://dash.example.test/metrics/alerts",
+		Host: &HostAlertEnvelope{
+			Kind: "disk_filling", Subject: "/var", Label: "/var", Server: "web-01",
+			Detail: "93% of /var is used (186.0 GB of 200.0 GB); the line is 90%.", Since: since,
+		},
+	}
+	message := renderNotification(envelope)
+	if message.Title != "Disk filling up — /var" || message.Summary != envelope.Host.Detail ||
+		strings.Join(flattenFields(message.Fields), "|") != "Filesystem=/var|Server=web-01|Since=2026-10-25 04:05 UTC" {
+		t.Fatalf("disk alert message = %+v", message)
+	}
+	envelope.Event = NotificationEventHostRecovered
+	if recovered := renderNotification(envelope); recovered.Title != "Resolved: "+message.Title || recovered.Emoji != "✅" {
+		t.Fatalf("disk recovery message = %+v", recovered)
+	}
+	// A CPU rule's subject is the server itself, so it is not named twice.
+	envelope.Event = NotificationEventHostFiring
+	envelope.Host = &HostAlertEnvelope{Kind: "cpu_high", Subject: "cpu", Label: "web-01", Server: "web-01", Detail: "CPU averaged 97%.", Test: true}
+	cpu := renderNotification(envelope)
+	if cpu.Title != "[test] CPU high — web-01" || strings.Join(flattenFields(cpu.Fields), "|") != "Server=web-01" {
+		t.Fatalf("cpu alert message = %+v", cpu)
+	}
+	envelope.Host = &HostAlertEnvelope{Kind: "container_down", Label: "shop-api-1", Server: "web-01"}
+	if container := renderNotification(envelope); container.Title != "Container down — shop-api-1" ||
+		flattenFields(container.Fields)[0] != "Container=shop-api-1" {
+		t.Fatalf("container alert message = %+v", container)
+	}
+	_, mail := emailMessage(NotificationConfig{From: "ops@example.test", To: []string{"team@example.test"}}, message, since)
+	if !strings.Contains(string(mail), "Open it in Just Dashboard: https://dash.example.test/metrics/alerts") ||
+		strings.Contains(string(mail), "Open the run") {
+		t.Fatalf("a host alert's mail sends its reader to a run:\n%s", mail)
 	}
 }
 
@@ -397,6 +479,184 @@ func TestProviderKindsPostTheirDocumentedPayloads(t *testing.T) {
 		if strings.Contains(encoded, "secretToken") || strings.Contains(encoded, "SECRET") || strings.Contains(encoded, "AAExampleTokenValue") {
 			t.Fatalf("listing leaks a credential: %s", encoded)
 		}
+	}
+}
+
+func TestPushAndChatKindsPostTheirDocumentedPayloads(t *testing.T) {
+	f := newAutomationFixture(t)
+	server := okServer(t)
+	transport := &rewriteTransport{server: server}
+	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
+	envelope := NotificationEnvelope{Event: NotificationEventFailed, State: string(RunFailed), RunID: 12, RunNumber: 12, ProjectName: "shop", EnvironmentName: "Production", Operation: "deploy", Trigger: "manual", Actor: "admin", TerminalReason: "build_failed: *exit* [1]", URL: "https://dash.example.test/deploy/1/runs/12", SentAt: time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)}
+	writes := []NotificationWrite{
+		{Name: "ntfy", Kind: NotificationKindNtfy, Config: NotificationConfig{ServerURL: "https://push.example.test", Topic: "secretTopic", Token: "tk_AgQdq7mVBoFD37zQVN29RhuMzNIz2"}},
+		{Name: "gotify", Kind: NotificationKindGotify, Config: NotificationConfig{ServerURL: "https://gotify.example.test/sub/", Token: "AsecretGotify_1"}},
+		{Name: "pushover", Kind: NotificationKindPushover, Config: NotificationConfig{Token: "azGDORePK8gMaC0QOYAMyEEuzJnyUi", UserKey: "uQiRzpo4DXghDmr9QzzfQu27cmVRsG"}},
+		{Name: "mattermost", Kind: NotificationKindMattermost, Config: NotificationConfig{WebhookURL: "https://chat.example.test/hooks/xi3sdq8j1fdjtpe4xoye5mz1ar"}},
+		{Name: "teams", Kind: NotificationKindTeams, Config: NotificationConfig{WebhookURL: "https://prod-12.westus.logic.azure.com:443/workflows/8a1f/triggers/manual/paths/invoke?api-version=2016-06-01&sv=1.0&sig=TEAMSSIG"}},
+	}
+	for _, write := range writes {
+		write.Enabled = true
+		channel, secret, err := f.automation.CreateNotificationChannel(context.Background(), write)
+		if err != nil {
+			t.Fatalf("%s: %v", write.Kind, err)
+		}
+		if secret != "" {
+			t.Fatalf("%s returned a signing secret", write.Kind)
+		}
+		if err := f.automation.DeliverNotification(context.Background(), client, channel.ID, envelope); err != nil {
+			t.Fatalf("%s delivery: %v", write.Kind, err)
+		}
+	}
+	requests := transport.recorded()
+	if len(requests) != len(writes) {
+		t.Fatalf("requests = %d", len(requests))
+	}
+
+	ntfy := requests[0]
+	var ntfyBody struct {
+		Topic    string `json:"topic"`
+		Title    string `json:"title"`
+		Message  string `json:"message"`
+		Priority int    `json:"priority"`
+		Click    string `json:"click"`
+		Actions  []struct {
+			Action, Label, URL string
+		} `json:"actions"`
+	}
+	if err := json.Unmarshal([]byte(ntfy.Body), &ntfyBody); err != nil || ntfy.URL != "https://push.example.test/" || ntfyBody.Topic != "secretTopic" ||
+		!strings.Contains(ntfyBody.Title, "Run #12 failed") || !strings.Contains(ntfyBody.Message, "Reason: build_failed") || ntfyBody.Priority != 4 ||
+		ntfyBody.Click != envelope.URL || len(ntfyBody.Actions) != 1 || ntfyBody.Actions[0].Action != "view" {
+		t.Fatalf("ntfy posted %s to %s (%v)", ntfy.Body, ntfy.URL, err)
+	}
+	if ntfy.Header.Get("Authorization") != "Bearer tk_AgQdq7mVBoFD37zQVN29RhuMzNIz2" {
+		t.Fatalf("ntfy authorization = %q", ntfy.Header.Get("Authorization"))
+	}
+
+	gotify := requests[1]
+	var gotifyBody struct {
+		Title    string         `json:"title"`
+		Message  string         `json:"message"`
+		Priority int            `json:"priority"`
+		Extras   map[string]any `json:"extras"`
+	}
+	if err := json.Unmarshal([]byte(gotify.Body), &gotifyBody); err != nil || gotify.URL != "https://gotify.example.test/sub/message" || gotifyBody.Priority != 8 ||
+		!strings.Contains(gotifyBody.Message, "Open the run: "+envelope.URL) || gotifyBody.Extras["client::notification"] == nil {
+		t.Fatalf("gotify posted %s to %s (%v)", gotify.Body, gotify.URL, err)
+	}
+	if gotify.Header.Get("X-Gotify-Key") != "AsecretGotify_1" || strings.Contains(gotify.URL, "AsecretGotify_1") {
+		t.Fatalf("gotify key travelled as %q in %s", gotify.Header.Get("X-Gotify-Key"), gotify.URL)
+	}
+
+	pushover := requests[2]
+	var pushoverBody struct {
+		Token, User, Title, Message, URL string
+		URLTitle                         string `json:"url_title"`
+		Priority                         int    `json:"priority"`
+		Timestamp                        int64  `json:"timestamp"`
+	}
+	if err := json.Unmarshal([]byte(pushover.Body), &pushoverBody); err != nil || pushover.URL != "https://api.pushover.net/1/messages.json" ||
+		pushoverBody.Token != "azGDORePK8gMaC0QOYAMyEEuzJnyUi" || pushoverBody.User != "uQiRzpo4DXghDmr9QzzfQu27cmVRsG" || pushoverBody.Priority != 1 ||
+		pushoverBody.URL != envelope.URL || pushoverBody.URLTitle != "Open the run" || pushoverBody.Timestamp != envelope.SentAt.Unix() {
+		t.Fatalf("pushover posted %s to %s (%v)", pushover.Body, pushover.URL, err)
+	}
+
+	mattermost := requests[3]
+	var mattermostBody struct {
+		Attachments []struct {
+			Color, Title, Text string
+			TitleLink          string `json:"title_link"`
+			Fields             []struct{ Title, Value string }
+		} `json:"attachments"`
+	}
+	if err := json.Unmarshal([]byte(mattermost.Body), &mattermostBody); err != nil || mattermost.URL != "https://chat.example.test/hooks/xi3sdq8j1fdjtpe4xoye5mz1ar" || len(mattermostBody.Attachments) != 1 {
+		t.Fatalf("mattermost posted %s to %s (%v)", mattermost.Body, mattermost.URL, err)
+	}
+	attachment := mattermostBody.Attachments[0]
+	var reason string
+	for _, field := range attachment.Fields {
+		if field.Title == "Reason" {
+			reason = field.Value
+		}
+	}
+	if attachment.Color != "#ef4444" || attachment.TitleLink != envelope.URL || reason != `build\_failed: \*exit\* \[1\]` {
+		t.Fatalf("mattermost attachment = %+v", attachment)
+	}
+
+	teams := requests[4]
+	var teamsBody struct {
+		Type        string `json:"type"`
+		Attachments []struct {
+			ContentType string `json:"contentType"`
+			Content     struct {
+				Type    string `json:"type"`
+				Body    []map[string]any
+				Actions []struct{ Type, Title, URL string }
+			} `json:"content"`
+		} `json:"attachments"`
+	}
+	if err := json.Unmarshal([]byte(teams.Body), &teamsBody); err != nil || teamsBody.Type != "message" || len(teamsBody.Attachments) != 1 ||
+		teamsBody.Attachments[0].ContentType != "application/vnd.microsoft.card.adaptive" || teamsBody.Attachments[0].Content.Type != "AdaptiveCard" {
+		t.Fatalf("teams posted %s (%v)", teams.Body, err)
+	}
+	card := teamsBody.Attachments[0].Content
+	if card.Body[0]["color"] != "attention" || len(card.Actions) != 1 || card.Actions[0].URL != envelope.URL || !strings.Contains(teams.URL, "sig=TEAMSSIG") {
+		t.Fatalf("teams card = %+v to %s", card, teams.URL)
+	}
+
+	channels, err := f.automation.ListNotificationChannels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, channel := range channels {
+		encoded := string(mustJSON(channel))
+		for _, secret := range []string{"secretTopic", "tk_AgQ", "AsecretGotify_1", "azGDORe", "uQiRzpo4DX", "xi3sdq8j", "TEAMSSIG", "8a1f"} {
+			if strings.Contains(encoded, secret) {
+				t.Fatalf("listing leaks %q: %s", secret, encoded)
+			}
+		}
+	}
+}
+
+func TestPushKindsRaisePriorityOnlyForBadNews(t *testing.T) {
+	good := renderNotification(NotificationEnvelope{Event: NotificationEventSucceeded, State: string(RunSucceeded), ProjectName: "shop"})
+	bad := renderNotification(NotificationEnvelope{Event: NotificationEventHostFiring, Host: &HostAlertEnvelope{Kind: "disk_filling", Label: "/var", Detail: "92% used"}})
+	priority := func(body []byte) int {
+		var payload struct {
+			Priority int `json:"priority"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		return payload.Priority
+	}
+	if priority(ntfyPayload("ops", good)) != 3 || priority(ntfyPayload("ops", bad)) != 4 {
+		t.Fatal("ntfy priorities")
+	}
+	if priority(gotifyPayload(good)) != 5 || priority(gotifyPayload(bad)) != 8 {
+		t.Fatal("gotify priorities")
+	}
+	if priority(pushoverPayload(NotificationConfig{}, good, time.Now())) != 0 || priority(pushoverPayload(NotificationConfig{}, bad, time.Now())) != 1 {
+		t.Fatal("pushover priorities")
+	}
+}
+
+func TestPushoverAndNtfyStayWithinTheirLimits(t *testing.T) {
+	long := renderNotification(NotificationEnvelope{Event: NotificationEventFailed, State: string(RunFailed), ProjectName: strings.Repeat("ш", 400), TerminalReason: strings.Repeat("é", 5000)})
+	var pushover struct{ Title, Message string }
+	if err := json.Unmarshal(pushoverPayload(NotificationConfig{}, long, time.Now()), &pushover); err != nil {
+		t.Fatal(err)
+	}
+	if n := len([]rune(pushover.Title)); n > pushoverTitleLimit {
+		t.Fatalf("pushover title is %d characters", n)
+	}
+	if n := len([]rune(pushover.Message)); n > pushoverMessageLimit {
+		t.Fatalf("pushover message is %d characters", n)
+	}
+	var ntfy struct{ Message string }
+	if err := json.Unmarshal(ntfyPayload("ops", long), &ntfy); err != nil {
+		t.Fatal(err)
+	}
+	if len(ntfy.Message) > ntfyMessageLimit || !utf8.ValidString(ntfy.Message) {
+		t.Fatalf("ntfy message is %d bytes, valid %v", len(ntfy.Message), utf8.ValidString(ntfy.Message))
 	}
 }
 

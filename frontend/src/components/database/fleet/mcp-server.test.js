@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
   clientConfig,
+  chosenDeployments,
+  deploymentsWithin,
   grantList,
   grantsOf,
   grantsWithin,
@@ -84,5 +86,48 @@ describe("grantSummary", () => {
     expect(grantSummary({ connections: [{ connectionId: 99, access: "read" }] }, nameOf)).toBe(
       "no databases",
     )
+  })
+})
+
+describe("deployments", () => {
+  const nameOf = (id) => ({ 1: "shop" })[id]
+
+  test("are said after the databases, or alone", () => {
+    expect(
+      grantSummary(
+        { connections: [{ connectionId: 1, access: "read" }], deployments: "deploy" },
+        nameOf,
+      ),
+    ).toBe("reads shop, deploys")
+    expect(grantSummary({ connections: [], deployments: "read" }, nameOf)).toBe("reads deployments")
+    expect(grantSummary({ connections: [], deployments: "" }, nameOf)).toBe("no databases")
+  })
+
+  test("count the ones a key was narrowed to", () => {
+    expect(
+      grantSummary({ connections: [], deployments: "deploy", deploymentIds: [4] }, nameOf),
+    ).toBe("deploys 1 deployment")
+    expect(
+      grantSummary(
+        {
+          connections: [{ connectionId: 1, access: "read" }],
+          deployments: "read",
+          deploymentIds: [4, 9],
+        },
+        nameOf,
+      ),
+    ).toBe("reads shop, reads 2 deployments")
+  })
+
+  test("are sent as the ones chosen, or none for every one", () => {
+    expect(chosenDeployments("read", false, new Set([9, 4]))).toEqual([4, 9])
+    expect(chosenDeployments("deploy", true, new Set([9, 4]))).toEqual([])
+    expect(chosenDeployments("", false, new Set([9]))).toEqual([])
+  })
+
+  test("narrow to reading for an owner who can no longer deploy", () => {
+    expect(deploymentsWithin("deploy", false)).toBe("read")
+    expect(deploymentsWithin("deploy", true)).toBe("deploy")
+    expect(deploymentsWithin(undefined, true)).toBe("")
   })
 })

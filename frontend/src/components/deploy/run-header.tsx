@@ -3,9 +3,11 @@
 import Link from "next/link"
 import { Stopwatch } from "@/components/icons"
 import { plural, relativeTime, timestamp } from "@/lib/format"
+import { promotionOrigin } from "@/lib/pull-requests"
 import { cn } from "@/lib/utils"
 import type {
   DeploymentEngineRun,
+  DeploymentPromotion,
   DeploymentRelease,
   DeploymentStep,
   DeploymentSummary,
@@ -16,7 +18,6 @@ import { AuthorMark, BranchChip, ShortSha } from "@/components/git/marks"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { RunActorMark } from "@/components/deploy/run-marks"
 import {
-  RunStatus,
   formatDuration,
   isActiveRun,
   operationLabel,
@@ -24,12 +25,14 @@ import {
   runDurationSeconds,
   runRef,
   runRevision,
+  RunStatus,
   runSubject,
   runTriggerLine,
   shortIdentity,
   shortRevision,
   sourceProduct,
   stepName,
+  stepOperation,
 } from "@/components/deploy/vocabulary"
 
 /**
@@ -60,6 +63,7 @@ export function RunHeader({
   steps,
   now,
   rollsBackTo,
+  promotion,
   projectId,
   verbs,
 }: {
@@ -76,11 +80,14 @@ export function RunHeader({
   now: number
   /** The release number a rollback run returns to. */
   rollsBackTo?: number
+  /** The release a promotion takes its image from: staging's, or a pull request preview's. */
+  promotion?: DeploymentPromotion
   projectId: number
   /** What can be done to the run, at the line's end. */
   verbs: React.ReactNode
 }) {
   const commit = runCommit(run)
+  const origin = promotionOrigin(promotion)
   const kind = deployment?.sourceKind
   const git = kind === "git" || kind === "local"
   const branch = runRef(run, deployment?.sourceRef || configured)
@@ -136,7 +143,7 @@ export function RunHeader({
           <RunStatus state={run.state} operation={run.operation} live />
           {working && (
             <TextShimmer className="font-medium">
-              {stepName(working.key, run.operation)}
+              {stepName(working.key, stepOperation(run))}
             </TextShimmer>
           )}
           <span className="inline-flex items-center gap-1.5 text-muted-foreground">
@@ -184,6 +191,31 @@ export function RunHeader({
         <span className="numeric">{slot}</span>
         {rollsBackTo !== undefined && (
           <span className="numeric">rolls back to release #{rollsBackTo}</span>
+        )}
+        {/* Where the image comes from, since a promotion built nothing: the
+            staging release — or for staging, the pull request whose preview
+            built it, at its commit — and the image's own id, which the
+            target runs. */}
+        {promotion && origin && (
+          <span data-slot="run-promotion" className="inline-flex min-w-0 items-center gap-1.5">
+            <Link
+              href={`/deploy/${projectId}/runs/${promotion.runId}`}
+              className="numeric rounded-sm focus-ring hover:text-foreground hover:underline"
+              title={origin.approvedBy ? `Approved by ${origin.approvedBy}` : undefined}
+            >
+              {origin.kind === "preview" ? (
+                <>
+                  promoted from {origin.from}
+                  {origin.sha && <span className="font-mono"> ({origin.sha})</span>}
+                </>
+              ) : (
+                <>from {origin.from}</>
+              )}
+            </Link>
+            <span className="truncate font-mono" title={promotion.imageId}>
+              image {shortIdentity(promotion.imageId)}
+            </span>
+          </span>
         )}
         {run.retryOfRunId && (
           <Link

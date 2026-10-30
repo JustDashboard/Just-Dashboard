@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -58,6 +59,8 @@ type HostObservation struct {
 	Domains       []DomainObservation     `json:"domains"`
 	Firewall      FirewallObservation     `json:"firewall"`
 	Dependencies  []DependencyObservation `json:"dependencies"`
+	// Tailnet is this host on its tailnet, for a plan published there alone.
+	Tailnet *TailnetObservation `json:"tailnet,omitempty"`
 	// ReplacesRuntime says a live release is being replaced, so the data a
 	// plan keeps already exists; only a first release starts it empty.
 	ReplacesRuntime bool `json:"replacesRuntime,omitempty"`
@@ -70,6 +73,28 @@ type HostObservation struct {
 	// EmulationObserved says /proc could be read at all (preflight_image.go).
 	Emulators         []string `json:"emulators,omitempty"`
 	EmulationObserved bool     `json:"emulationObserved,omitempty"`
+
+	// Tunnel is the Cloudflare Tunnel connection, observed when a domain is
+	// to be served through one (tunnel.go).
+	Tunnel *TunnelObservation `json:"tunnel,omitempty"`
+
+	// GPURuntime is the daemon's OCI runtimes, observed for a plan that asks
+	// for GPUs (runtime_flags.go).
+	GPURuntime *GPURuntimeObservation `json:"gpuRuntime,omitempty"`
+
+	// Railpack is the pinned Railpack image, observed for a Railpack plan.
+	Railpack *RailpackObservation `json:"railpack,omitempty"`
+}
+
+// GPURuntimeObservation is whether Docker on this server lists the NVIDIA
+// runtime the Container Toolkit registers, which is what gives a container
+// the GPUs it asks for. Observed is false when `docker info` could not be
+// read, and Detail says why.
+type GPURuntimeObservation struct {
+	Observed bool     `json:"observed"`
+	NVIDIA   bool     `json:"nvidia"`
+	Runtimes []string `json:"runtimes,omitempty"`
+	Detail   string   `json:"detail,omitempty"`
 }
 
 type DomainObservation struct {
@@ -82,8 +107,17 @@ type DomainObservation struct {
 	CertificateAvailable  bool     `json:"certificateAvailable"`
 	CertificateAutomation bool     `json:"certificateAutomation"`
 	CertificateName       string   `json:"certificateName,omitempty"`
-	Conflict              bool     `json:"conflict"`
-	Detail                string   `json:"detail,omitempty"`
+	// CertificateDNSProvider is, for a wildcard no certificate covers yet,
+	// whose saved credentials the release would prove it with, and
+	// CertificateRefusal why it cannot be proved here at all.
+	CertificateDNSProvider string `json:"certificateDnsProvider,omitempty"`
+	CertificateRefusal     string `json:"certificateRefusal,omitempty"`
+	Conflict               bool   `json:"conflict"`
+	Detail                 string `json:"detail,omitempty"`
+	// Record is, for a name the lookup says does not reach where it
+	// should, the record it needs and whether saved credentials can write
+	// it (preflight_dns_record.go).
+	Record *DNSRecordObservation `json:"record,omitempty"`
 }
 
 type FirewallObservation struct {
@@ -138,6 +172,45 @@ type ObservationRequest struct {
 	DatabaseExtensions []string
 	// ReleaseTaskTools are the programs host release tasks run.
 	ReleaseTaskTools []string
+	// Tailnet asks about this host's tailnet, for a tailnet-only plan;
+	// EnvironmentID, when the environment exists, whose address it has.
+	Tailnet       bool
+	EnvironmentID int64
+	// RailpackImage asks whether the pinned Railpack image is here or can
+	// be pulled, for a Railpack plan (preflight_railpack.go).
+	RailpackImage string
+	// NeedsGPU asks which runtimes the daemon offers, for a plan that asks
+	// for GPUs.
+	NeedsGPU bool
+}
+
+// TailnetObservation is what preflight says about the address a tailnet-only
+// environment will have (tailnet-apps.md).
+type TailnetObservation struct {
+	// Usable is a running Tailscale with a MagicDNS name; Detail says why
+	// not, in a sentence for the operator.
+	Usable   bool   `json:"usable"`
+	Hostname string `json:"hostname,omitempty"`
+	// HTTPS is the tailnet issuing certificates, which decides whether
+	// tailscale serve answers https:// or http:// on the port.
+	HTTPS  bool   `json:"https"`
+	Detail string `json:"detail,omitempty"`
+	// URL and Port are the environment's address when it already has one;
+	// NextPort is the port its first publish would take now.
+	URL      string `json:"url,omitempty"`
+	Port     int    `json:"port,omitempty"`
+	NextPort int    `json:"nextPort,omitempty"`
+	// Gate is the proxy that would check who opens it: nginx, or caddy for
+	// the dashboard's loopback Caddy, which GateRunning says is up.
+	Gate        string `json:"gate,omitempty"`
+	GateRunning bool   `json:"gateRunning,omitempty"`
+}
+
+// PreflightTailnet observes the tailnet for preflight. Read-only: it asks
+// tailscaled what this node is and what it serves, and the address table
+// what the environment holds; nothing is published or started.
+type PreflightTailnet interface {
+	ObserveTailnet(ctx context.Context, environmentID int64) TailnetObservation
 }
 
 // PreflightObserver is intentionally read-only. A test double can prove
@@ -154,7 +227,15 @@ type HostPreflightObserver struct {
 	proxy      PlanningProxy
 	firewall   PlanningFirewall
 	resources  PlanningDependencies
+	tailnet    PreflightTailnet
 	volumeRoot string
+	tunnel     TunnelObserver
+	dnsRecords DNSRecordObserver
+}
+
+func (o *HostPreflightObserver) WithTailnet(tailnet PreflightTailnet) *HostPreflightObserver {
+	o.tailnet = tailnet
+	return o
 }
 
 type PlanningFirewall interface {
@@ -176,6 +257,12 @@ type PlanningDatabaseExtensions interface {
 type PlanningProxy interface {
 	Availability(context.Context) proxysvc.Availability
 	ListVHosts(context.Context) ([]proxysvc.VHost, error)
+}
+
+// wildcardIssuer is the optional half of PlanningProxy that says how a run
+// would prove a wildcard, without ordering anything.
+type wildcardIssuer interface {
+	DeploymentDNSProvider(context.Context, string) (proxysvc.DNSProvider, error)
 }
 
 func (o *HostPreflightObserver) WithFirewall(firewall PlanningFirewall) *HostPreflightObserver {
@@ -206,6 +293,12 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 		Facilities: map[string]FacilityObservation{}, Paths: []PathObservation{}, Ports: []PortObservation{},
 		Domains: []DomainObservation{}, Dependencies: []DependencyObservation{}, OS: runtime.GOOS, Architecture: runtime.GOARCH,
 		ReplacesRuntime: request.ExistingRuntimeID != "",
+	}
+	if request.Tailnet && o.tailnet != nil {
+		tailnetCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		tailnet := o.tailnet.ObserveTailnet(tailnetCtx, request.EnvironmentID)
+		cancel()
+		observation.Tailnet = &tailnet
 	}
 	if request.NeedsGit {
 		observation.Facilities["git"] = FacilityObservation{Available: hostexec.Available("git")}
@@ -240,6 +333,12 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	}
 	if request.NeedsBuildx || request.NeedsCompose {
 		observation.Emulators, observation.EmulationObserved = observeEmulators()
+	}
+	if request.NeedsGPU {
+		observation.GPURuntime = o.observeGPURuntime(ctx)
+	}
+	if request.RailpackImage != "" {
+		observation.Railpack = o.observeRailpack(ctx, request.RailpackImage)
 	}
 	observeReleaseTaskTools(request.ReleaseTaskTools, observation.Facilities)
 	if len(request.Domains) > 0 {
@@ -307,16 +406,40 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 						break
 					}
 				}
+				// A wildcard no certificate covers is asked about what the
+				// release would ask: whose saved DNS credentials prove it,
+				// or why nothing can. A covered one is reused on either
+				// proxy — the Docker Caddy ingress serves a copy of the
+				// lineage, as nginx serves the file — so it is not asked.
+				if issuer, ok := o.proxy.(wildcardIssuer); ok && planned.HTTPS &&
+					strings.HasPrefix(strings.ToLower(planned.Hostname), "*.") &&
+					!domain.CertificateAvailable {
+					wildcardCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+					if provider, err := issuer.DeploymentDNSProvider(wildcardCtx, strings.ToLower(planned.Hostname)); err != nil {
+						domain.CertificateRefusal = err.Error()
+					} else {
+						domain.CertificateDNSProvider = provider.Name
+					}
+					cancel()
+				}
 				if check.Error != "" {
 					domain.Detail = "DNS lookup did not return usable evidence"
 				} else {
 					domain.Detail = check.Summary
 				}
+				domain.Record = o.observeDNSRecord(ctx, planned, check.PointsHere, check.BehindProxy)
 				domains[index] = domain
 			}()
 		}
 		wait.Wait()
 		observation.Domains = append(observation.Domains, domains...)
+		for _, planned := range request.Domains {
+			if planned.Tunnel && o.tunnel != nil {
+				name, connected := o.tunnel(ctx)
+				observation.Tunnel = &TunnelObservation{Name: name, Connected: connected}
+				break
+			}
+		}
 	}
 	for _, requested := range uniqueSorted(request.Paths) {
 		pathObservation := PathObservation{Path: requested}
@@ -410,6 +533,23 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 		observation.AvailableDisk = int64(stat.Bavail) * int64(stat.Bsize)
 	}
 	return observation, nil
+}
+
+// observeGPURuntime reads the daemon's runtimes, read-only.
+func (o *HostPreflightObserver) observeGPURuntime(ctx context.Context) *GPURuntimeObservation {
+	lister, ok := o.docker.(interface {
+		ContainerRuntimes(context.Context) ([]string, error)
+	})
+	if !ok {
+		return &GPURuntimeObservation{Detail: "Docker's runtimes cannot be read here"}
+	}
+	runtimesCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	runtimes, err := lister.ContainerRuntimes(runtimesCtx)
+	if err != nil {
+		return &GPURuntimeObservation{Detail: "docker info could not be read"}
+	}
+	return &GPURuntimeObservation{Observed: true, NVIDIA: slices.Contains(runtimes, "nvidia"), Runtimes: runtimes}
 }
 
 func (o *HostPreflightObserver) existingDeploymentPorts(
@@ -522,12 +662,13 @@ func PreflightDraftWithSource(
 func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) ObservationRequest {
 	source := draft.Data.Source
 	request := ObservationRequest{
-		NeedsGit:     source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit,
-		NeedsGitLFS:  source.IncludeLFS && (source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit),
-		NeedsDocker:  configuration.Build.Method != BuildNone,
-		NeedsBuildx:  buildMethodNeedsBuildx(configuration.Build.Method, draft.Data.Detection.Compose),
-		NeedsCompose: configuration.Build.Method == BuildCompose || configuration.Build.Method == BuildLegacyCompose,
-		Paths:        []string{}, Ports: []PortObservation{},
+		NeedsGit:      source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit,
+		NeedsGitLFS:   source.IncludeLFS && (source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit),
+		NeedsDocker:   configuration.Build.Method != BuildNone,
+		NeedsBuildx:   buildMethodNeedsBuildx(configuration.Build.Method, draft.Data.Detection.Compose),
+		NeedsCompose:  configuration.Build.Method == BuildCompose || configuration.Build.Method == BuildLegacyCompose,
+		RailpackImage: railpackObservedImage(configuration.Build),
+		Paths:         []string{}, Ports: []PortObservation{},
 		Domains:      append([]PlannedDomain(nil), configuration.Domains...),
 		Dependencies: append([]PlannedDependency(nil), configuration.Dependencies...),
 	}
@@ -540,9 +681,11 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 		}
 	}
 	if configuration.Runtime.HostPort != 0 {
-		request.Ports = append(request.Ports, PortObservation{
-			Address: configuration.Runtime.BindAddress, Port: configuration.Runtime.HostPort, Protocol: "tcp",
-		})
+		for _, protocol := range configuration.Runtime.publishedProtocols() {
+			request.Ports = append(request.Ports, PortObservation{
+				Address: configuration.Runtime.BindAddress, Port: configuration.Runtime.HostPort, Protocol: protocol,
+			})
+		}
 	}
 	for _, port := range configuration.Runtime.Ports {
 		request.Ports = append(request.Ports, PortObservation{
@@ -576,6 +719,8 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 	request.Ports = uniquePorts(request.Ports)
 	request.ReleaseTaskTools = releaseTaskHostTools(configuration.Build.ReleaseTasks)
 	request.NeedsFirewall = publicRuntimeBind(configuration.Runtime) && len(request.Ports) > 0
+	request.Tailnet = configuration.Runtime.Tailnet != nil
+	request.NeedsGPU = configuration.Runtime.GPUs != nil
 	return request
 }
 
@@ -735,6 +880,7 @@ func preflightFindings(
 				facility.name, ""))
 		}
 	}
+	findings = append(findings, railpackFindings(draft, configuration, observation)...)
 	for _, path := range observation.Paths {
 		switch {
 		case !path.Contained:
@@ -775,6 +921,15 @@ func preflightFindings(
 	for _, planned := range configuration.Domains {
 		observed, ok := domainEvidence[planned.Hostname]
 		field := "domains." + planned.Hostname
+		if planned.Tunnel {
+			// This server's public address, and a certificate for it, say
+			// nothing about a name Cloudflare serves through the tunnel.
+			findings = append(findings, tunnelFindings(planned, observation, field)...)
+			if item, ok := dnsRecordFinding(planned, domainEvidence[planned.Hostname].Record, field); ok {
+				findings = append(findings, item)
+			}
+			continue
+		}
 		if !ok {
 			item := finding("dns_unverified", PreflightUnavailable,
 				"Domain evidence is unavailable", planned.Hostname,
@@ -835,7 +990,26 @@ func preflightFindings(
 				"The public route and HTTP certificate challenge will not reach this server.",
 				"Update DNS or explicitly accept the delayed cutover.", "proxy", field))
 		}
-		if planned.HTTPS && !observed.CertificateAvailable && observed.CertificateAutomation {
+		if item, ok := dnsRecordFinding(planned, observed.Record, field); ok {
+			findings = append(findings, item)
+		}
+		if planned.HTTPS && observed.CertificateRefusal != "" {
+			item := finding("certificate_wildcard_unavailable", PreflightBlocked,
+				"Wildcard certificate cannot be issued here", planned.Hostname,
+				"A wildcard is proved only over a DNS challenge, and this host has nothing that can answer one for this name.",
+				observed.CertificateRefusal, "certificates", field)
+			item.DeepLink = "/proxy/certificates"
+			findings = append(findings, item)
+		} else if planned.HTTPS && !observed.CertificateAvailable && observed.CertificateDNSProvider != "" {
+			item := finding("certificate_automatic", PreflightPass,
+				"HTTPS certificate will be issued during the release",
+				planned.Hostname+"; DNS challenge through "+observed.CertificateDNSProvider,
+				"No certificate covers this wildcard yet; the release proves it over a DNS challenge with the "+
+					observed.CertificateDNSProvider+" credentials saved under Certificates before it starts the candidate, and certbot renews it with them.",
+				"", "certificates", field)
+			item.DeepLink = "/proxy/certificates"
+			findings = append(findings, item)
+		} else if planned.HTTPS && !observed.CertificateAvailable && observed.CertificateAutomation {
 			// Not a blocker any more, because the release itself closes it:
 			// `provision_certificate` orders one over HTTP-01 before the
 			// candidate starts. What is measured here is the capability — a
@@ -870,6 +1044,9 @@ func preflightFindings(
 			"Docker-published ports may bypass ordinary firewall expectations.",
 			"Prefer loopback behind the proxy unless public exposure is intentional.", "docker", "runtime.bindAddress"))
 	}
+	if item, ok := gameReachFinding(draft.Data.Intent.Profile, configuration.Runtime); ok {
+		findings = append(findings, item)
+	}
 	if request := preflightObservationRequest(draft, configuration); request.NeedsFirewall {
 		switch {
 		case !observation.Firewall.Available:
@@ -900,7 +1077,8 @@ func preflightFindings(
 		}
 	}
 	advanced := configuration.Runtime.Privileged || configuration.Runtime.HostNetwork ||
-		len(configuration.Runtime.Capabilities) > 0 || len(configuration.Runtime.Devices) > 0
+		len(configuration.Runtime.Capabilities) > 0 || len(configuration.Runtime.Devices) > 0 ||
+		configuration.Runtime.GPUs != nil
 	for _, mount := range configuration.Runtime.Mounts {
 		if mount.Source == "/var/run/docker.sock" {
 			advanced = true
@@ -919,9 +1097,9 @@ func preflightFindings(
 	} else if advanced {
 		findings = append(findings, finding("advanced_runtime", PreflightWarning,
 			"Runtime has host-equivalent options", "", "The container can affect more of the server than an ordinary workload.",
-			"Review privileged, network, capability, device, and mount settings.", "security", "runtime"))
+			"Review privileged, network, capability, device, GPU and mount settings.", "security", "runtime"))
 	}
-	if configuration.Runtime.Strategy == StrategyBlueGreen {
+	if configuration.Runtime.Strategy.startsBeside() {
 		eligibleProfile := draft.Data.Intent.Profile == ProfileWeb || draft.Data.Intent.Profile == ProfileStatic
 		exclusiveStorage := false
 		for _, mount := range configuration.Runtime.Mounts {
@@ -936,9 +1114,18 @@ func preflightFindings(
 				"Use stop-first or remove the exclusive requirement.", "deploy", "runtime.strategy"))
 		} else {
 			findings = append(findings, finding("strategy_blue_green", PreflightPass,
-				"Candidate-first activation is eligible", "blue_green", "The old release can remain live through verification.",
+				"Candidate-first activation is eligible", string(configuration.Runtime.Strategy), "The old release can remain live through verification.",
 				"", "deploy", "runtime.strategy"))
 		}
+	}
+	if item, ok := canaryFinding(configuration); ok {
+		findings = append(findings, item)
+	}
+	if item, ok := skewFinding(configuration); ok {
+		findings = append(findings, item)
+	}
+	if item, ok := replicasFinding(configuration.Build.Method, configuration.Runtime); ok {
+		findings = append(findings, item)
 	}
 	resolvedVariables, _, variableErr := ResolveVariableGraphWithModes(draft.variableValues(configuration), draft.variableModes(configuration), nil)
 	if variableErr != nil {
@@ -978,8 +1165,14 @@ func preflightFindings(
 			"Choose a readiness check", "", "Traffic must not move to an unverified candidate.",
 			"Add HTTP, TCP, or Docker-health readiness.", "deploy", "checks"))
 	}
+	if item, ok := ungatedCutoverFinding(draft.Data.Intent.Profile, configuration); ok {
+		findings = append(findings, item)
+	}
 	findings = append(findings, readinessPreflightFindings(draft, configuration)...)
+	findings = append(findings, replayFindings(configuration, observation)...)
+	findings = append(findings, sleepFindings(configuration, observation)...)
 	findings = withoutSupersededHostFindings(append(findings, networkFindings(draft, configuration)...))
+	findings = append(findings, tailnetFindings(configuration, observation.Tailnet)...)
 	persistentStorage := len(configuration.Runtime.Mounts)
 	if detection.Compose != nil {
 		for _, service := range detection.Compose.Services {
@@ -1067,6 +1260,7 @@ func preflightFindings(
 			"Docker caps the container at the host's CPU count; the extra allowance has no effect.",
 			"Lower the limit to at most the host CPU count.", "metrics", "runtime.cpus"))
 	}
+	findings = append(findings, runtimeFlagFindings(configuration, observation)...)
 	findings = append(findings, buildMemoryFindings(planned, configuration, observation)...)
 	findings = append(findings, platformVariableFindings(configuration, resolvedVariables)...)
 	if planned != nil && configuration.Build.Method == BuildRecipe && configuration.Build.Recipe == "node" {
@@ -1088,7 +1282,7 @@ func preflightFindings(
 
 func buildMethodNeedsBuildx(method BuildMethod, compose *ComposeAnalysis) bool {
 	switch method {
-	case BuildRecipe, BuildDockerfile, BuildStatic:
+	case BuildRecipe, BuildDockerfile, BuildStatic, BuildRailpack:
 		return true
 	case BuildCompose:
 		if compose != nil {
@@ -1183,6 +1377,29 @@ func uniquePorts(values []PortObservation) []PortObservation {
 		return result[i].Protocol < result[j].Protocol
 	})
 	return result
+}
+
+// gameReachFinding says what a game server's loopback default means: it
+// starts and answers its own checks, and nobody on another machine can join.
+// Publishing it is two decisions this dashboard leaves to the operator — the
+// bind address under Runtime, and the firewall rule the existing firewall
+// review then asks for — so the finding names both instead of making either.
+func gameReachFinding(profile WorkloadProfile, runtime RuntimePlanConfig) (PreflightFinding, bool) {
+	if profile != ProfileGame || runtime.HostPort == 0 || publicRuntimeBind(runtime) {
+		return PreflightFinding{}, false
+	}
+	port := runtime.portLabel()
+	bind := runtime.BindAddress
+	if bind == "" {
+		bind = "127.0.0.1"
+	}
+	item := finding("game_loopback_only", PreflightWarning,
+		"Players on other machines cannot join yet", port+" on "+bind,
+		"The game server is published on loopback, so it starts and answers its checks but only this server can connect to it.",
+		"To let players join, choose every interface under Runtime → Bind address; preflight then checks that the firewall admits "+port+", which you allow from the Firewall page.",
+		"deploy", "runtime.bindAddress")
+	item.DeepLink = "/network/firewall"
+	return item, true
 }
 
 func publicRuntimeBind(runtime RuntimePlanConfig) bool {
@@ -1294,6 +1511,8 @@ func exactPlan(draft *Draft, configuration PlanConfiguration) ExactPlan {
 			action.Action = "render runtime configuration"
 		case StepReleaseTask:
 			action.Action = "run stored release task when configured"
+		case StepRehearseMigration:
+			action.Action = "rehearse release tasks against a restored copy of the database when turned on"
 		case StepBackupGate:
 			action.Action = "verify required backup evidence"
 		case StepProvisionCertificate:
@@ -1310,6 +1529,13 @@ func exactPlan(draft *Draft, configuration PlanConfiguration) ExactPlan {
 			action.Action = "run readiness checks"
 		case StepVerifySmoke:
 			action.Action = "run smoke and public-route checks"
+		case StepReplayTraffic:
+			action.Action = "replay recorded requests against the candidate when turned on"
+		case StepCanary:
+			action.Action = "try the candidate on a share of the live route's requests when the strategy is canary"
+			if terms := configuration.Runtime.Canary; configuration.Runtime.Strategy == StrategyCanary && terms != nil {
+				action.Arguments = []string{fmt.Sprintf("%d%%", terms.Percent), fmt.Sprintf("%ds", terms.DurationSeconds)}
+			}
 		case StepActivate:
 			action.Action = "activate candidate using " + string(configuration.Runtime.Strategy)
 		case StepRetirePrevious:
@@ -1360,12 +1586,14 @@ func stepOwner(step StepKey) string {
 		return "builder"
 	case StepStartCandidate, StepRetirePrevious:
 		return "docker"
-	case StepActivate:
+	case StepActivate, StepCanary:
 		return "proxy/docker"
 	case StepProvisionCertificate:
 		return "certificates"
 	case StepBackupGate:
 		return "backups"
+	case StepRehearseMigration:
+		return "databases"
 	default:
 		return "deploy"
 	}
@@ -1374,7 +1602,7 @@ func stepOwner(step StepKey) string {
 func stepChangesState(step StepKey) bool {
 	switch step {
 	case StepAcquireSource, StepPrepareContext, StepBuildArtifact, StepReleaseTask,
-		StepProvisionCertificate, StepStartCandidate, StepActivate, StepRetirePrevious,
+		StepProvisionCertificate, StepStartCandidate, StepCanary, StepActivate, StepRetirePrevious,
 		StepRecordRelease, StepNotify:
 		return true
 	default:

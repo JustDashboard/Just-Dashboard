@@ -165,6 +165,44 @@ test("runtime services link to the exact Docker containers and stacks", async ({
   await expect(page).toHaveURL(/\/docker\/stacks\/jd-e12$/)
 })
 
+test("a replicated release reads as its replicas on the overview and the runtime page", async ({
+  page,
+}, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  const replica = (index: number, state: string, health: string) => ({
+    containerId: `replica${index}`.padEnd(12, "0"),
+    name: index === 1 ? "jd-e12-r20" : `jd-e12-r20-${index}`,
+    releaseId: 20,
+    liveRelease: true,
+    state,
+    health,
+    imageId: "sha256:abc",
+    replica: index,
+    replicas: 3,
+  })
+  const runtime: DeploymentRuntimeServices = {
+    status: "available",
+    observedAt: now,
+    services: [
+      replica(1, "running", "healthy"),
+      replica(2, "running", "unhealthy"),
+      replica(3, "running", "healthy"),
+    ],
+  }
+  await mockProject(page, { normalized: true, runtime })
+  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/.*\/stats\/stream/, () => {})
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/deploy/7")
+  const wiring = page.getByRole("list", { name: "How the project is wired" })
+  await expect(wiring.getByText("2 of 3 replicas healthy")).toBeVisible()
+  await wiring.screenshot({ path: testInfo.outputPath("replicas-overview-1280.png") })
+
+  await page.goto("/deploy/7/runtime")
+  const list = page.getByRole("list", { name: "Runtime services" })
+  await expect(list.getByText("#2 · replica 2 of 3")).toBeVisible()
+  await expect(list.getByText(/replica \d of 3/)).toHaveCount(3)
+})
+
 test("runtime evidence distinguishes unavailable Docker from an empty managed inventory", async ({
   page,
 }) => {
@@ -189,6 +227,64 @@ test("runtime evidence distinguishes unavailable Docker from an empty managed in
   await page.goto("/deploy/7/runtime")
   await expect(page.getByText("No managed runtime services", { exact: true })).toBeVisible()
   await expect(page.getByText("Runtime unavailable", { exact: true })).toHaveCount(0)
+})
+
+test("the overview says how much of the time the deployment was up, and over what record", async ({
+  page,
+}, testInfo) => {
+  await mockProject(page)
+  await page.goto("/deploy/7")
+  await expect(page.getByRole("heading", { name: "Availability" })).toBeVisible()
+  // The figure comes before the delivery figures: a visitor's reading before the team's.
+  const availability = page.getByRole("heading", { name: "Availability" })
+  const delivery = page.getByRole("heading", { name: "Delivery" })
+  await expect(delivery).toBeVisible()
+  expect((await availability.boundingBox())!.y).toBeLessThan((await delivery.boundingBox())!.y)
+  // A steady day, six minutes over the week, and a month the record only
+  // reaches nine days into — said rather than left to read as a steady month.
+  await expect(page.getByText("100%", { exact: true })).toBeVisible()
+  await expect(page.getByText("99.94%", { exact: true })).toBeVisible()
+  await expect(page.getByText("99.95%", { exact: true })).toBeVisible()
+  await expect(page.getByText("no downtime recorded", { exact: true })).toBeVisible()
+  await expect(page.getByText("6 min down · 2 incidents", { exact: true })).toBeVisible()
+  await expect(
+    page.getByText("6 min down · 2 incidents · record covers 9 of 30 days", { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByText(/record since/)).toBeVisible()
+  await expect(page.getByText(/counts as down until the container comes back/)).toBeVisible()
+
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 900 })
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+    await page
+      .getByRole("heading", { name: "Availability" })
+      .locator("..")
+      .locator("..")
+      .screenshot({ path: testInfo.outputPath(`availability-${width}.png`) })
+  }
+})
+
+test("an availability the server cannot read says why, in place of a figure", async ({ page }) => {
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7/availability**", (route) =>
+    json(route, {
+      status: "unavailable",
+      reason: "Docker is unavailable on this host, so container lifecycle cannot be observed.",
+      observedAt: now,
+      down: false,
+      windows: [],
+    }),
+  )
+  await page.goto("/deploy/7")
+  await expect(page.getByRole("heading", { name: "Availability" })).toBeVisible()
+  await expect(
+    page.getByText(
+      "Docker is unavailable on this host, so container lifecycle cannot be observed.",
+    ),
+  ).toBeVisible()
+  await expect(page.getByText("Last 7 days", { exact: true })).toHaveCount(0)
 })
 
 test("the deployments tab reports delivery figures with their basis and window", async ({
@@ -805,6 +901,100 @@ test("the game workspace sends commands, moderates players and edits only declar
   await expect.poll(() => written).toEqual({ motd: "New name" })
 })
 
+test("a game server says what stands between a player and it, and opens the firewall for its port", async ({
+  page,
+}) => {
+  let reach: Record<string, unknown> = {
+    port: 19132,
+    protocol: "tcp+udp",
+    bind: "127.0.0.1",
+    public: false,
+    firewall: "drops",
+    editable: true,
+  }
+  const rules: Record<string, unknown>[] = []
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7", (route) =>
+    json(route, {
+      project,
+      running: false,
+      deployment: { ...deployment, profile: "game", buildMethod: "image", activeRun: undefined },
+    }),
+  )
+  await page.route("**/api/v1/firewall/rules", async (route) => {
+    rules.push(route.request().postDataJSON() as Record<string, unknown>)
+    if (rules.length === 2) reach = { ...reach, firewall: "admits" }
+    return json(route, { output: "Rule added", ruleId: "fw-1" })
+  })
+  await page.route("**/api/v1/deploy/7/game**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    if (path === "/deploy/7/game")
+      return json(route, {
+        status: "available",
+        blueprintId: "minecraft-bedrock",
+        edition: "bedrock",
+        containerId: "bedrock1",
+        address: "play.example.test:19132",
+        console: false,
+        consoleReason:
+          "Minecraft (Bedrock Edition) has no remote console: its server reads commands only from its own input, which this dashboard does not attach to. Its log is on the Logs page.",
+        reach,
+        players: { supported: false, status: "unsupported", online: 0, maximum: 0, names: [] },
+        files: [],
+      })
+    return route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "not_available", message: "Not mocked" } }),
+    })
+  })
+
+  // On loopback the page says only this server can connect, and where that
+  // is changed.
+  await page.goto("/deploy/7/console")
+  const loopback = page.locator("p", { hasText: "Only this server can connect" })
+  await expect(loopback).toContainText("19132/tcp+udp is published on 127.0.0.1")
+  await expect(loopback.getByRole("link", { name: "Runtime" })).toHaveAttribute(
+    "href",
+    "/deploy/7/settings/runtime",
+  )
+  // Bedrock has no console of its own, and says why rather than offering a
+  // field that would fail.
+  await expect(page.getByText(/has no remote console/)).toBeVisible()
+  await expect(page.getByRole("textbox", { name: "Command" })).toHaveCount(0)
+
+  // Published on every interface behind a firewall that drops it: the one
+  // thing left, one press away, through the firewall's own rule route.
+  reach = { ...reach, bind: "0.0.0.0", public: true }
+  await page.reload()
+  await expect(
+    page.getByText("The firewall drops 19132/tcp+udp, so players cannot connect yet."),
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Allow 19132/tcp+udp" }).click()
+  await expect
+    .poll(() => rules)
+    .toEqual([
+      // One rule per protocol, through the firewall's own route.
+      {
+        action: "allow",
+        direction: "in",
+        port: "19132",
+        protocol: "tcp",
+        comment: "just-dashboard game 19132/tcp",
+      },
+      {
+        action: "allow",
+        direction: "in",
+        port: "19132",
+        protocol: "udp",
+        comment: "just-dashboard game 19132/udp",
+      },
+    ])
+  await expect(
+    page.getByText("The firewall drops 19132/tcp+udp, so players cannot connect yet."),
+  ).toHaveCount(0)
+})
+
 test("a stopped project reads Stopped and starts from the primary button", async ({ page }) => {
   const dashboard = await mockProject(page)
   await page.route("**/api/v1/deploy/7", (route) =>
@@ -1284,6 +1474,241 @@ test("Test this pull request posts the head, the variables choice and the fork a
       acceptFork: true,
     })
   await expect(page).toHaveURL(/\/deploy\/7\/runs\/530$/)
+})
+
+test("a Compose stack's preview lists its services, and the dialog says what each one gets", async ({
+  page,
+}, testInfo) => {
+  await mockProject(page)
+  const service = (name: string, health: string) => ({
+    containerId: `c-${name}`,
+    name: `jd-e52-${name}-1`,
+    service: name,
+    stack: "jd-e52",
+    releaseId: 520,
+    liveRelease: true,
+    state: "running",
+    health,
+    imageId: "sha256:aa",
+  })
+  const composePreview = {
+    public: "web",
+    services: [
+      {
+        name: "web",
+        public: true,
+        ports: ["80:3000"],
+        volumes: ["/uploads"],
+        checkout: ["/etc/nginx/conf.d/default.conf"],
+        leftOut: ["/etc/localtime"],
+      },
+      {
+        name: "db",
+        public: false,
+        ports: ["5432:5432"],
+        volumes: ["/var/lib/postgresql/data"],
+        checkout: [],
+        leftOut: [],
+      },
+    ],
+    refusals: [] as string[],
+  }
+  const listing = () => {
+    const base = projectPullRequests(true)
+    const preview = {
+      ...previewEnvironment,
+      services: {
+        status: "available" as const,
+        observedAt: now,
+        services: [service("db", "unavailable"), service("web", "healthy")],
+      },
+    }
+    return {
+      ...base,
+      compose: true,
+      composePreview,
+      previews: [preview],
+      pulls: base.pulls.map((pull) => (pull.number === 42 ? { ...pull, preview } : pull)),
+    }
+  }
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) => json(route, listing()))
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/deploy/7")
+    const row = page
+      .getByRole("list", { name: "Pull requests" })
+      .getByRole("listitem")
+      .filter({ hasText: "Add checkout retries" })
+    const services = row.getByRole("list", { name: "Services of the preview of #42" })
+    await expect(services.getByRole("listitem")).toHaveCount(2)
+    // The public service, which the preview's address reaches, comes first.
+    await expect(services.getByRole("listitem").first()).toContainText("web")
+    await expect(services.getByRole("listitem").first()).toContainText("public")
+    await expect(services.getByRole("listitem").first()).toContainText("Healthy")
+    await expect(services.getByRole("listitem").last()).toContainText("db")
+    await expect(services.getByRole("listitem").last()).toContainText("Running")
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `horizontal viewport overflow at ${width}px`,
+    ).toBe(true)
+    await row.scrollIntoViewIfNeeded()
+    await testInfo.attach(`overview-compose-preview-${width}`, {
+      body: await page.screenshot({
+        path: testInfo.outputPath(`overview-compose-preview-${width}.png`),
+      }),
+      contentType: "image/png",
+    })
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page
+    .getByRole("list", { name: "Pull requests" })
+    .getByRole("listitem")
+    .filter({ hasText: "Translate the checkout" })
+    .getByRole("button", { name: "More actions for #45" })
+    .click()
+  await page.getByRole("menuitem", { name: /Test this pull request/ }).click()
+  const dialog = page.getByRole("dialog", { name: "Test #45" })
+  await expect(dialog.getByText("Every service is isolated")).toBeVisible()
+  const gets = dialog.getByRole("list", { name: "What each service gets" })
+  await expect(gets.getByRole("listitem").first()).toContainText(
+    "Answers the preview's route and tailnet address, on loopback only",
+  )
+  await expect(gets.getByRole("listitem").first()).toContainText(
+    "/etc/localtime from this server left out",
+  )
+  await expect(gets.getByRole("listitem").last()).toContainText(
+    "Reached only by the stack's own services. Publishes none of production's ports (5432:5432)",
+  )
+  await expect(dialog.getByText("This project cannot have a preview yet")).toHaveCount(0)
+  await testInfo.attach("compose-preview-dialog", {
+    body: await dialog.screenshot({ path: testInfo.outputPath("compose-preview-dialog.png") }),
+    contentType: "image/png",
+  })
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+
+  // A stack that needs the server itself is refused before anything is built.
+  composePreview.refusals = ["service web mounts the Docker socket"]
+  await page.reload()
+  await page
+    .getByRole("list", { name: "Pull requests" })
+    .getByRole("listitem")
+    .filter({ hasText: "Translate the checkout" })
+    .getByRole("button", { name: "More actions for #45" })
+    .click()
+  await page.getByRole("menuitem", { name: /Test this pull request/ }).click()
+  await expect(dialog.getByText("This project cannot have a preview yet")).toBeVisible()
+  await expect(dialog).toContainText(
+    "A preview isolates every service of the stack, and service web mounts the Docker socket, which no preview gets.",
+  )
+  await expect(dialog.getByRole("button", { name: "Build preview" })).toBeDisabled()
+  await testInfo.attach("compose-preview-refused", {
+    body: await dialog.screenshot({ path: testInfo.outputPath("compose-preview-refused.png") }),
+    contentType: "image/png",
+  })
+})
+
+test("a preview's database branch is listed under its row and refreshed from the newest backup", async ({
+  page,
+}, testInfo) => {
+  await mockProject(page)
+  const branch = {
+    id: 3,
+    environmentId: 52,
+    connectionId: 11,
+    name: "orders-db",
+    engine: "postgres",
+    database: "orders",
+    mode: "masked",
+    maskedColumns: ["users.email", "users.phone"],
+    state: "ready",
+    source: { kind: "dump", backupRunId: 77, takenAt: now },
+    host: "db-11-branch.jd.internal",
+    port: 5432,
+    maskedRows: 40,
+    createdAt: now,
+    readyAt: now,
+  }
+  const listing = () => {
+    const base = projectPullRequests(true)
+    const preview = { ...previewEnvironment, branches: [branch] }
+    return {
+      ...base,
+      databaseBranches: [
+        {
+          connectionId: 11,
+          name: "orders-db",
+          driver: "postgres",
+          mode: "masked",
+          maskedColumns: ["users.email", "users.phone"],
+        },
+      ],
+      previews: [preview],
+      pulls: base.pulls.map((pull) => (pull.number === 42 ? { ...pull, preview } : pull)),
+    }
+  }
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) => json(route, listing()))
+  let refreshed = ""
+  await page.route(
+    "**/api/v1/deploy/7/pull-requests/42/preview/branches/11/refresh",
+    async (route) => {
+      refreshed = route.request().method()
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({ branch: { ...branch, id: 4, state: "waiting" }, replaced: 3 }),
+      })
+    },
+  )
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/deploy/7")
+    const row = page
+      .getByRole("list", { name: "Pull requests" })
+      .getByRole("listitem")
+      .filter({ hasText: "Add checkout retries" })
+    const branches = row.getByRole("list", { name: "Database branches of the preview of #42" })
+    await expect(branches.getByRole("listitem")).toHaveCount(1)
+    await expect(branches).toContainText("orders-db")
+    await expect(branches).toContainText("Ready")
+    await expect(branches).toContainText("users.email, users.phone masked")
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `horizontal viewport overflow at ${width}px`,
+    ).toBe(true)
+    await row.scrollIntoViewIfNeeded()
+    await testInfo.attach(`overview-preview-branch-${width}`, {
+      body: await page.screenshot({
+        path: testInfo.outputPath(`overview-preview-branch-${width}.png`),
+      }),
+      contentType: "image/png",
+    })
+  }
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page
+    .getByRole("button", { name: "Refresh the branch of orders-db from the latest backup" })
+    .click()
+  const confirm = page.getByRole("dialog", { name: "Refresh the branch" })
+  await expect(confirm).toContainText("Everything the preview wrote to it is gone.")
+  await expect(confirm).toContainText("Its address and password stay the same.")
+  await testInfo.attach("preview-branch-refresh", {
+    body: await confirm.screenshot({ path: testInfo.outputPath("preview-branch-refresh.png") }),
+    contentType: "image/png",
+  })
+  await confirm.getByRole("button", { name: "Restore from the newest backup" }).click()
+  await expect.poll(() => refreshed).toBe("POST")
+
+  // A fork's preview is told it gets none.
+  await page
+    .getByRole("list", { name: "Pull requests" })
+    .getByRole("listitem")
+    .filter({ hasText: "Translate the checkout" })
+    .getByRole("button", { name: "More actions for #45" })
+    .click()
+  await page.getByRole("menuitem", { name: /Test this pull request/ }).click()
+  const dialog = page.getByRole("dialog", { name: "Test #45" })
+  await expect(dialog.getByText("No database branch")).toBeVisible()
+  await expect(dialog).toContainText("A preview of a fork never gets a database branch")
 })
 
 test("merging from the overview posts to the project's route, pins the head and re-reads the listing", async ({

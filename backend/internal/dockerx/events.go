@@ -23,9 +23,11 @@ import (
 // about samples, and it has the same answer: the dashboard is a long-running
 // process that is already connected to the thing producing the record, so it
 // should be listening while nobody is looking. The buffer is in memory and
-// bounded — an event log worth keeping across restarts belongs in the audit
-// table, which already holds everything this dashboard itself did. What the
-// daemon does on its own is worth an hour of context, not a database.
+// bounded; everything this dashboard itself did is in the audit table, which
+// survives a restart. What the daemon did on its own to a *deployment's*
+// containers is the one part of the stream worth a table of its own, and
+// EventStore (events_store.go) keeps that part: it hears every event the ring
+// records, through Keep, and writes down the ones a deployment owns.
 
 // Event is one thing that happened, in a shape the UI can render directly.
 type Event struct {
@@ -43,6 +45,15 @@ type Event struct {
 	Image    string `json:"image,omitempty"`
 	Stack    string `json:"stack,omitempty"`
 	ExitCode string `json:"exitCode,omitempty"`
+	// Signal is what a kill sent, as Docker names it ("15", "SIGKILL"): a
+	// stop's TERM and the OOM reaper's KILL are the same action with a
+	// different number in here.
+	Signal string `json:"signal,omitempty"`
+	// Requested is set on a row read back from the store: the stop or kill
+	// was asked of the daemon, or this exit followed one within seconds — as
+	// against a process that fell over on its own. The ring does not carry
+	// it; the store works it out as the stream passes.
+	Requested bool `json:"requested,omitempty"`
 	// Service is the compose service, which is what a stack's log names a
 	// container by: `db`, where the event's name is `shop-db-1`.
 	Service string `json:"service,omitempty"`
@@ -119,6 +130,11 @@ type EventLog struct {
 	filled  bool
 	subs    map[int]chan Event
 	nextSub int
+	// keepers hear every event as it is recorded, in the recording
+	// goroutine and in order, which a subscriber's channel does not promise:
+	// a slow subscriber is dropped frames, and a record kept past the
+	// process cannot afford to miss the one OOM kill in a burst of starts.
+	keepers []func(Event)
 	// running reports whether the stream is currently connected, so the UI
 	// can distinguish "nothing happened" from "not listening".
 	running bool
@@ -224,6 +240,17 @@ func (e *EventLog) setRunning(v bool) {
 	e.mu.Unlock()
 }
 
+// Keep registers a function that is handed every event the log records,
+// synchronously and in the order the daemon sent them. It is for the one
+// reader that must not miss an event — the store that keeps a deployment's
+// events past this process — and it is expected to return quickly: it runs
+// on the goroutine following the daemon's stream.
+func (e *EventLog) Keep(fn func(Event)) {
+	e.mu.Lock()
+	e.keepers = append(e.keepers, fn)
+	e.mu.Unlock()
+}
+
 func (e *EventLog) record(ev Event) {
 	e.mu.Lock()
 	e.buffer[e.next] = ev
@@ -235,8 +262,12 @@ func (e *EventLog) record(ev Event) {
 	for _, ch := range e.subs {
 		subs = append(subs, ch)
 	}
+	keepers := e.keepers
 	e.mu.Unlock()
 
+	for _, keep := range keepers {
+		keep(ev)
+	}
 	for _, ch := range subs {
 		// Never block on a slow subscriber: a browser tab that has stopped
 		// reading must not stall the recorder for every other reader.
@@ -353,6 +384,26 @@ func (e *EventLog) Status() (running bool, since time.Time, buffered int) {
 	return e.running, e.since, count
 }
 
+// Covers reports whether the buffer still holds everything the daemon said
+// from t until now: the stream has been followed since before t and the ring
+// has not overwritten anything that old. Only then is an event missing from
+// the buffer evidence that it did not happen. A reconnect after the daemon
+// restarted is not seen here; the containers it stopped are stopped again by
+// the restart itself.
+func (e *EventLog) Covers(t time.Time) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if !e.running || e.since.IsZero() || e.since.After(t) {
+		return false
+	}
+	if !e.filled {
+		return true
+	}
+	// The slot about to be written is the oldest one kept.
+	oldest := e.buffer[e.next].Time
+	return !oldest.After(t)
+}
+
 // Subscribe returns a channel of events as they arrive, and a function to stop.
 func (e *EventLog) Subscribe() (<-chan Event, func()) {
 	ch := make(chan Event, 64)
@@ -383,6 +434,7 @@ func convertEvent(msg events.Message) Event {
 		Stack:    attrs[labelProject],
 		Service:  attrs[labelService],
 		ExitCode: attrs["exitCode"],
+		Signal:   attrs["signal"],
 	}
 	if ev.Type == "network" {
 		ev.Container = attrs["container"]

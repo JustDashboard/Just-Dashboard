@@ -411,6 +411,18 @@ func (s *OrchestrationStore) RequestCancellation(ctx context.Context, runID int6
 	return run, nil
 }
 
+// surrenderLease gives a lease up as if it had expired, for a process
+// stopping in the middle of a step the reconciler resumes: the next process
+// reclaims the run at once rather than after the lease's lifetime.
+func (s *OrchestrationStore) surrenderLease(ctx context.Context, runID int64, claimToken string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	past := s.now().UTC().Add(-time.Second).Unix()
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE deploy_queue_leases SET expires_at = ? WHERE run_id = ? AND claim_token = ?`, past, runID, claimToken)
+	return err
+}
+
 func (s *OrchestrationStore) ActiveLease(ctx context.Context, runID int64) (*QueueLease, error) {
 	var lease QueueLease
 	var claimed, heartbeat, expires int64
@@ -567,7 +579,9 @@ func (s *OrchestrationStore) supersedeEligibleTx(
 			candidate.operation == OperationRollback || candidate.operation == OperationRemoveManaged {
 			continue
 		}
-		if environmentKind == "production" &&
+		// Staging is a long-lived environment with its own branch, so it
+		// keeps production's conservative rule rather than a preview's.
+		if (environmentKind == "production" || environmentKind == "staging") &&
 			(!automaticTrigger(req.Trigger) || !automaticTrigger(candidate.trigger)) {
 			continue
 		}

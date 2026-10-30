@@ -49,6 +49,14 @@ func databaseURLConnectionIDs(variables map[string]string) ([]int64, error) {
 			continue
 		}
 		host := strings.ToLower(u.Hostname())
+		if dataCopyHostRE.MatchString(host) {
+			return nil, errors.New("a data copy is a throwaway removed when it expires, and production never runs against it: point the variable at the database itself, or restore the copy's point into it from the database's Backups page")
+		}
+		// A preview's database branch is joined through its own network
+		// (previewBranchConnectionIDs), never bound like a database.
+		if deploy.PreviewBranchHostConnection(host) > 0 {
+			continue
+		}
 		// The pooler's name is the database's with -pool, and joins the same
 		// network through the same binding.
 		id, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(host, "db-"), ".jd.internal"), "-pool"), 10, 64)
@@ -63,10 +71,48 @@ func databaseURLConnectionIDs(variables map[string]string) ([]int64, error) {
 	return ids, nil
 }
 
+// previewBranchConnectionIDs are the connections whose branch a runtime's
+// variables reach by the branch's own name.
+func previewBranchConnectionIDs(variables map[string]string) []int64 {
+	ids := []int64{}
+	for _, value := range variables {
+		u, err := url.Parse(value)
+		if err != nil {
+			continue
+		}
+		if id := deploy.PreviewBranchHostConnection(u.Hostname()); id > 0 && !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
 func (o *deploymentDatabaseNetworks) NetworksForRuntime(ctx context.Context, environmentID int64, plan deploy.RuntimePlanConfig, variables map[string]string) ([]string, error) {
 	ids, err := databaseURLConnectionIDs(variables)
-	if err != nil || len(ids) == 0 {
+	if err != nil {
 		return nil, err
+	}
+	// A preview's branch is already on the preview's database network; the
+	// preview joins that network and binds nothing of production's.
+	branchNetworks := []string{}
+	for _, id := range previewBranchConnectionIDs(variables) {
+		if plan.HostNetwork {
+			return nil, errors.New("host-network workloads cannot reach a database branch")
+		}
+		name, err := o.previewBranchNetwork(ctx, environmentID, id)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.Contains(branchNetworks, name) {
+			branchNetworks = append(branchNetworks, name)
+		}
+	}
+	if len(ids) == 0 {
+		if len(branchNetworks) == 0 {
+			return nil, nil
+		}
+		return branchNetworks, nil
 	}
 	if plan.HostNetwork {
 		return nil, errors.New("host-network workloads need the host database URL")
@@ -158,14 +204,18 @@ func (o *deploymentDatabaseNetworks) bind(ctx context.Context, network deploymen
 	if err := s.Store.DB.QueryRowContext(ctx, `SELECT kind FROM deploy_environments WHERE id=?`, network.EnvironmentID).Scan(&kind); err != nil {
 		return err
 	}
-	// A preview may explicitly link its own database, but cannot join one
-	// already serving production under another saved connection identity.
+	// A preview or staging may explicitly link its own database, but cannot
+	// join one already serving production under another saved connection
+	// identity.
 	var crossKind int
 	if err := s.Store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM deploy_database_bindings b JOIN deploy_environments e ON e.id=b.environment_id
-		WHERE b.environment_id<>? AND (b.connection_id=? OR b.container_name=? OR b.container_id=?) AND (e.kind='preview' OR ?='preview')`, network.EnvironmentID, connectionID, strings.TrimPrefix(detail.Name, "/"), detail.ID, kind).Scan(&crossKind); err != nil {
+		WHERE b.environment_id<>? AND (b.connection_id=? OR b.container_name=? OR b.container_id=?) AND (e.kind IN ('preview','staging') OR ? IN ('preview','staging'))`, network.EnvironmentID, connectionID, strings.TrimPrefix(detail.Name, "/"), detail.ID, kind).Scan(&crossKind); err != nil {
 		return err
 	}
 	if crossKind > 0 {
+		if kind == string(deploy.EnvironmentStaging) {
+			return errors.New("staging and production need separate database containers")
+		}
 		return errors.New("preview and production environments need separate database containers")
 	}
 	var binding deploymentDatabaseBinding
@@ -256,17 +306,8 @@ func (o *deploymentDatabaseNetworks) attachDatabase(ctx context.Context, network
 
 func (o *deploymentDatabaseNetworks) ResolveVariable(ctx context.Context, environmentID int64, revision int, target string) (string, error) {
 	var id int64
-	format, database := "", ""
-	// 5.pooled, 5.pooled.jdbc: the same reference, through the connection's
-	// pooler. The rest of it is read as it always was.
-	pooled := false
-	if match := pooledReferenceRE.FindStringSubmatch(target); match != nil {
-		target, pooled = match[1]+match[2], true
-	}
-	if match := databaseReferenceShapeRE.FindStringSubmatch(target); match != nil {
-		target, format, database = match[1], match[2], match[3]
-	}
-	for _, candidate := range []string{target, strings.TrimSuffix(target, ".url")} {
+	candidates, format, database, pooled := databaseReferenceTarget(target)
+	for _, candidate := range candidates {
 		if parsed, err := strconv.ParseInt(candidate, 10, 64); err == nil && parsed > 0 {
 			id = parsed
 			break
@@ -281,6 +322,20 @@ func (o *deploymentDatabaseNetworks) ResolveVariable(ctx context.Context, enviro
 	conn, dsn, err := o.server.dbConnRow(ctx, id)
 	if err != nil {
 		return "", errors.New("database reference could not be opened")
+	}
+	// A preview holding a branch of the database reads the branch: its own
+	// copy, on its own network, with its own sign-in.
+	if branchURL, branched, err := o.server.previewBranchURL(ctx, environmentID, id); branched {
+		if err != nil {
+			return "", err
+		}
+		if pooled {
+			return "", fmt.Errorf("a database branch has no connection pooler: read ${{database.%d}} in the preview", id)
+		}
+		if format != "" && format != "url" || database != "" {
+			return deploy.ConnectionStringForFormat(branchURL, format, database)
+		}
+		return branchURL, nil
 	}
 	if err := o.checkEnvironmentIsolation(ctx, environmentID, conn, dsn); err != nil {
 		return "", err
@@ -314,6 +369,23 @@ func (o *deploymentDatabaseNetworks) ResolveVariable(ctx context.Context, enviro
 		return deploy.ConnectionStringForFormat(dsn, format, database)
 	}
 	return dsn, nil
+}
+
+// databaseReferenceTarget reads the target of a ${{database.…}} reference:
+// what the connection may be named by — its id, or its name with or without
+// ".url" — in the order to try them, and what is asked of it. The deployment
+// runtime resolves a reference through it, and the server map draws the line
+// from a deployment to the database its variables refer to by the same reading.
+func databaseReferenceTarget(target string) (candidates []string, format, database string, pooled bool) {
+	// 5.pooled, 5.pooled.jdbc: the same reference, through the connection's
+	// pooler. The rest of it is read as it always was.
+	if match := pooledReferenceRE.FindStringSubmatch(target); match != nil {
+		target, pooled = match[1]+match[2], true
+	}
+	if match := databaseReferenceShapeRE.FindStringSubmatch(target); match != nil {
+		target, format, database = match[1], match[2], match[3]
+	}
+	return []string{target, strings.TrimSuffix(target, ".url")}, format, database, pooled
 }
 
 // databaseReferenceShapeRE reads a database reference that asks for a
@@ -493,6 +565,14 @@ func (o *deploymentDatabaseNetworks) attachApplications(ctx context.Context, net
 		return err
 	}
 	for _, container := range containers {
+		// A rehearsal's copy and its task are on a network of their own with
+		// no way out, and joining them to this one would put production's
+		// database beside the copy under the same name; a data copy joined
+		// this network when it was made, under a name of its own. Neither is
+		// an application of the environment's.
+		if container.Labels[rehearsalLabel] != "" {
+			continue
+		}
 		detail, err := o.server.modules.docker.Inspect(ctx, container.ID)
 		if err != nil {
 			return err
@@ -554,6 +634,15 @@ func (o *deploymentDatabaseNetworks) RemoveRuntimeNetworks(ctx context.Context, 
 }
 
 func (o *deploymentDatabaseNetworks) removeRuntimeNetworks(ctx context.Context, environmentID int64, expectedNetworkID string) error {
+	// A copy of a release's data is an endpoint on this network that is no
+	// application's: it is a throwaway and goes first.
+	if err := o.server.modules.dataCopies.removeEnvironmentCopies(ctx, environmentID); err != nil {
+		return fmt.Errorf("the environment's data copies could not be removed: %w", err)
+	}
+	// So is a preview's database branch, which lives as long as the preview.
+	if err := o.server.modules.previewBranches.removeEnvironmentBranches(ctx, environmentID); err != nil {
+		return fmt.Errorf("the preview's database branches could not be removed: %w", err)
+	}
 	n, err := o.network(ctx, environmentID, false)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil

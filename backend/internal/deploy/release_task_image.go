@@ -45,6 +45,12 @@ type ReleaseTaskRuntimeRequest struct {
 	// Secret names the runtime variables whose values the task's output must
 	// never show; the task's own release_task values are always redacted.
 	Secret map[string]bool
+	// Rehearsal runs the task against a throwaway database copy: on Networks
+	// alone — the copy's — never the host's network or the environment's,
+	// and with none of the plan's volumes, so nothing it does reaches data
+	// production holds.
+	Rehearsal bool
+	Networks  []string
 }
 
 // releaseTaskImage is the image a release's tasks run in: the built or pulled
@@ -92,14 +98,19 @@ func (o *DockerRuntimeOwner) RunReleaseTask(
 	}
 	plan := request.Plan
 	networks := []string{}
-	if o.networks != nil {
+	if request.Rehearsal {
+		if len(request.Networks) == 0 {
+			return -1, true, fmt.Errorf("%w: a rehearsal task needs the copy's network", ErrInvalidPlan)
+		}
+		networks = append(networks, request.Networks...)
+	} else if o.networks != nil {
 		var err error
 		networks, err = o.networks.NetworksForRuntime(ctx, request.Release.EnvironmentID, plan, request.Variables)
 		if err != nil {
 			return -1, true, err
 		}
 	}
-	if plan.PreviewIsolation {
+	if plan.PreviewIsolation && !request.Rehearsal {
 		network, err := o.ensurePreviewResources(ctx, request.Release.EnvironmentID, plan)
 		if err != nil {
 			return -1, true, err
@@ -200,8 +211,12 @@ func (o *DockerRuntimeOwner) RemoveOrphanedReleaseTasks(ctx context.Context) err
 // release's image, variables, limits, networks and mounts — the host's own
 // network when the release runs on it, so a task reaches what the
 // application reaches — labelled as a release task so runtime observation
-// leaves it out. It publishes no port and takes none of the release's
-// devices, capabilities or privilege.
+// leaves it out. It runs as the release's user with the release's ulimits,
+// so what a migration writes into a volume belongs to whoever the
+// application runs as. It publishes no port and takes none of the release's
+// devices, GPUs, capabilities or privilege, nor its read-only root or
+// kernel parameters: a task is a command that may write where the
+// application does not.
 func releaseTaskContainerSpec(request ReleaseTaskRuntimeRequest, networks []string) (dockerx.ContainerSpec, error) {
 	entrypoint, cmd := releaseTaskArgv(request.Task.Command)
 	if len(entrypoint) == 0 {
@@ -226,9 +241,15 @@ func releaseTaskContainerSpec(request ReleaseTaskRuntimeRequest, networks []stri
 		Labels: labels, Networks: networks, Mounts: runtimeMountSpecs(plan), Logging: dockerx.CappedLogging(), Init: true,
 		NetworkMode: map[bool]string{true: "host"}[plan.HostNetwork],
 		Limits:      dockerx.ResourceLimits{MemoryMB: plan.MemoryMB, CPUs: plan.CPUs, PidsLimit: plan.PidsLimit},
+		User:        plan.User, Ulimits: plan.dockerUlimits(),
 	}
 	if plan.HostNetwork {
 		spec.Networks = nil
+	}
+	if request.Rehearsal {
+		spec.Name = rehearsalTaskContainerName(request.Release.EnvironmentID, request.Run.ID, request.Index)
+		spec.Labels = append(spec.Labels, dockerx.LabelSpec{Name: rehearsalLabel, Value: strconv.FormatInt(request.Run.ID, 10)})
+		spec.Networks, spec.NetworkMode, spec.Mounts = networks, "", nil
 	}
 	if request.Task.WorkingDirectory != "" {
 		// A relative directory is relative to the image's own working
@@ -248,6 +269,10 @@ func releaseTaskContainerName(environmentID, runID int64, index int) string {
 	return fmt.Sprintf("jd-e%d-run%d-task%d", environmentID, runID, index+1)
 }
 
+func rehearsalTaskContainerName(environmentID, runID int64, index int) string {
+	return fmt.Sprintf("jd-e%d-run%d-rehearsal-task%d", environmentID, runID, index+1)
+}
+
 // runImageReleaseTask runs one task in the candidate release's image with
 // the runtime variables the release will start with, plus the task's own
 // release_task-scoped ones.
@@ -261,10 +286,15 @@ func runImageReleaseTask(
 	task := request.Task
 	evidence := ReleaseTaskEvidence{Name: task.Name, VariableNames: append([]string(nil), task.Env...), ExitCode: -1, Runner: ReleaseTaskRunnerImage}
 	sort.Strings(evidence.VariableNames)
-	for _, mount := range request.Plan.Mounts {
-		evidence.Mounts = append(evidence.Mounts, mount.Target)
+	name := releaseTaskContainerName(request.Release.EnvironmentID, request.Run.ID, request.Index)
+	if request.Rehearsal {
+		name = rehearsalTaskContainerName(request.Release.EnvironmentID, request.Run.ID, request.Index)
+	} else {
+		for _, mount := range request.Plan.Mounts {
+			evidence.Mounts = append(evidence.Mounts, mount.Target)
+		}
 	}
-	cleanup := map[string]any{"container": releaseTaskContainerName(request.Release.EnvironmentID, request.Run.ID, request.Index), "removed": true}
+	cleanup := map[string]any{"container": name, "removed": true}
 	variables := map[string]string{}
 	for name, value := range request.Variables {
 		variables[name] = value

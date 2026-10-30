@@ -3,6 +3,7 @@ import {
   backupJob,
   deployment,
   expectSaved,
+  healthyOperations,
   json,
   mockProject,
   now,
@@ -178,6 +179,577 @@ test.describe("Domains", () => {
       "href",
       "/network/firewall",
     )
+  })
+})
+
+test.describe("Redirects, access and headers", () => {
+  test("a second name redirects to the first, and the route's addresses and headers save beside the runtime", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/hostname**", (route) =>
+      json(route, { hostname: "www.api.example.test", covered: true, method: "custom" }),
+    )
+    const puts: Record<string, unknown>[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
+        puts.push(request.postDataJSON())
+      }
+    })
+    await page.goto("/deploy/7/settings/domains")
+    await page.getByRole("button", { name: "Add domain", exact: true }).click()
+    const sheet = page.getByRole("dialog", { name: "Add domain" })
+    await sheet.getByRole("textbox", { name: "Hostname" }).fill("www.api.example.test")
+    await sheet.getByRole("button", { name: "Add domain", exact: true }).click()
+    await expect(page.getByText("Domains saved", { exact: true })).toBeVisible()
+
+    // The menu offers the redirect only towards a name that serves the app,
+    // and the row then says where it sends visitors.
+    await page.getByRole("button", { name: "Actions for www.api.example.test" }).click()
+    await page.getByRole("menuitem", { name: "Redirect to another domain" }).click()
+    const row = page.getByRole("list", { name: "Domains" }).getByRole("listitem").nth(1)
+    await expect(row.getByText("Redirects to")).toBeVisible()
+    await expect(page.getByRole("combobox", { name: "Sends visitors to" })).toHaveText(
+      "api.example.test",
+    )
+    await expect(page.getByRole("combobox", { name: "Answer" })).toHaveText("Permanent · 308")
+    await page.getByRole("combobox", { name: "Answer" }).click()
+    await page.getByRole("option", { name: "Temporary · 307" }).click()
+
+    // The route's rules are one form under the list, for every name at once.
+    const access = page.getByRole("form", { name: "Access and headers" })
+    await expect(access.getByText("Everyone · every domain above")).toBeVisible()
+    await access.getByRole("textbox", { name: "Only these addresses" }).fill("203.0.113.7")
+    await access.getByRole("button", { name: "Add to only these addresses" }).click()
+    await access.getByRole("textbox", { name: "Response headers: name" }).fill("X-Robots-Tag")
+    await access.getByRole("textbox", { name: "Response headers: value" }).fill("noindex")
+    await access.getByRole("button", { name: "Add to response headers" }).click()
+    await expect(access.getByText("Only 1 address · every domain above")).toBeVisible()
+    // HSTS is offered because a served domain is HTTPS, starts at six months
+    // with the subdomains, and says which domains it is sent on.
+    await access.getByRole("switch", { name: "HSTS" }).click()
+    await expect(access.getByText("6 months · subdomains", { exact: true })).toBeVisible()
+    await expect(access.getByText(/Sent on api\.example\.test/)).toBeVisible()
+    await access.getByRole("combobox", { name: "Remember for" }).click()
+    await page.getByRole("option", { name: "1 year" }).click()
+    await expect(access.getByText("1 year · subdomains", { exact: true })).toBeVisible()
+
+    await saveSettings(page)
+    await expectSaved(page)
+    await expect.poll(() => puts.length).toBe(3)
+    expect(puts[1].domains).toEqual([
+      { hostname: "api.example.test", https: true, ownership: "managed" },
+      {
+        hostname: "www.api.example.test",
+        https: true,
+        ownership: "managed",
+        redirectTo: "api.example.test",
+        redirectCode: 307,
+      },
+    ])
+    // The rules form writes its fields and keeps the rest of the runtime.
+    const runtime = puts[2].runtime as Record<string, unknown>
+    expect(runtime.allowFrom).toEqual(["203.0.113.7"])
+    expect(runtime.responseHeaders).toEqual([{ name: "X-Robots-Tag", value: "noindex" }])
+    expect(runtime.hsts).toEqual({ maxAge: 31536000, includeSubDomains: true })
+    expect(runtime.internalPort).toBe((puts[1].runtime as Record<string, unknown>).internalPort)
+    expect((puts[2].domains as unknown[]).length).toBe(2)
+
+    // Removing the name redirected to puts the other back to serving.
+    await page.getByRole("button", { name: "Actions for api.example.test" }).click()
+    await page.getByRole("menuitem", { name: "Remove" }).click()
+    await expect(page.getByText("Redirects to")).toHaveCount(0)
+  })
+
+  test("each domain says its own scheme, and HSTS follows the HTTPS domains", async ({ page }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/hostname**", (route) =>
+      json(route, { hostname: "old.example.test", covered: false, method: "custom" }),
+    )
+    const puts: Record<string, unknown>[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
+        puts.push(request.postDataJSON())
+      }
+    })
+    await page.goto("/deploy/7/settings/domains")
+    const list = page.getByRole("list", { name: "Domains" })
+    await expect(list.getByText("Plain HTTP is redirected to HTTPS", { exact: true })).toBeVisible()
+
+    // A second name added over plain HTTP is served that way, whatever the
+    // first does: its row says so, and no certificate is asked for.
+    await page.getByRole("button", { name: "Add domain", exact: true }).click()
+    const sheet = page.getByRole("dialog", { name: "Add domain" })
+    await sheet.getByRole("textbox", { name: "Hostname" }).fill("old.example.test")
+    await sheet.getByRole("button", { name: "Serve this hostname over HTTPS" }).click()
+    await sheet.getByRole("button", { name: "Add domain", exact: true }).click()
+    await expect(page.getByText("Domains saved", { exact: true })).toBeVisible()
+    expect(puts[0].domains).toEqual([
+      { hostname: "api.example.test", https: true, ownership: "managed" },
+      { hostname: "old.example.test", https: false, ownership: "managed" },
+    ])
+    const rows = list.getByRole("listitem")
+    await expect(
+      rows.nth(0).getByText("Plain HTTP is redirected to HTTPS", { exact: true }),
+    ).toBeVisible()
+    await expect(rows.nth(1).getByText("Plain HTTP, no redirect", { exact: true })).toBeVisible()
+
+    // HSTS names the HTTPS domain it is sent on and the plain one it is not.
+    const access = page.getByRole("form", { name: "Access and headers" })
+    const hsts = access.getByRole("switch", { name: "HSTS" })
+    await expect(hsts).toBeVisible()
+    await expect(
+      access.getByText(/Sent on api\.example\.test; old\.example\.test is served over plain HTTP/),
+    ).toBeVisible()
+
+    // With no served HTTPS domain left and no policy saved, there is
+    // nothing to send the header on, so the control is not offered.
+    await page.getByRole("button", { name: "HTTPS on api.example.test" }).click()
+    await saveSettings(page)
+    await expectSaved(page)
+    await expect.poll(() => puts.length).toBe(2)
+    expect((puts[1].domains as { https: boolean }[]).map((domain) => domain.https)).toEqual([
+      false,
+      false,
+    ])
+    await expect(rows.nth(0).getByText("Plain HTTP, no redirect", { exact: true })).toBeVisible()
+    await expect(hsts).toHaveCount(0)
+  })
+})
+
+test.describe("Sign-in", () => {
+  test("requiring sign-in saves the auth server beside the runtime, and a refusal lands on its field", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    const puts: Record<string, unknown>[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
+        puts.push(request.postDataJSON())
+      }
+    })
+    let refuse = true
+    await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+      if (route.request().method() !== "PUT" || !refuse) return route.fallback()
+      refuse = false
+      await route.fulfill({
+        status: 422,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: {
+            code: "invalid_plan",
+            message: "the check address takes no query",
+            field: "runtime.forwardAuth.verify",
+          },
+        }),
+      })
+    })
+    await page.goto("/deploy/7/settings/domains")
+    const access = page.getByRole("form", { name: "Access and headers" })
+    await expect(access.getByText("Everyone · every domain above")).toBeVisible()
+
+    // On, it starts at Authelia's usual address, and a preset address
+    // follows the provider while a typed one would stay.
+    await access.getByRole("switch", { name: "Require sign-in" }).click()
+    const check = access.getByRole("textbox", { name: "Check address" })
+    await expect(check).toHaveValue("http://127.0.0.1:9091/api/authz/auth-request")
+    await access.getByRole("radio", { name: "oauth2-proxy" }).click()
+    await expect(check).toHaveValue("http://127.0.0.1:4180/oauth2/auth")
+    await access.getByRole("radio", { name: "Authelia" }).click()
+    await check.fill("http://127.0.0.1:9091/api/authz/auth-request?x=1")
+    await access.getByRole("textbox", { name: "Sign-in page" }).fill("https://auth.example.test/")
+    await expect(access.getByText("Signed in through Authelia · every domain above")).toBeVisible()
+    await expect(
+      access.getByText(/The application is sent Remote-User and Remote-Email/),
+    ).toBeVisible()
+
+    await saveSettings(page)
+    await expect(
+      access.getByText("the check address takes no query", { exact: true }),
+    ).toBeVisible()
+    await check.fill("http://127.0.0.1:9091/api/authz/auth-request")
+    await saveSettings(page)
+    await expectSaved(page)
+    const saved = puts.at(-1)!.runtime as Record<string, unknown>
+    expect(saved.forwardAuth).toEqual({
+      provider: "authelia",
+      verify: "http://127.0.0.1:9091/api/authz/auth-request",
+      signIn: "https://auth.example.test/",
+    })
+    // The form writes its fields and keeps the rest of the runtime.
+    expect(saved.internalPort).toBe(3000)
+    expect(saved.command).toEqual(["bun", "start"])
+
+    // For previews only, this environment's route stays open.
+    await access.getByRole("radio", { name: "Previews only" }).click()
+    await expect(
+      access.getByText("Everyone here · previews sign in through Authelia"),
+    ).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
+    expect((puts.at(-1)!.runtime as Record<string, unknown>).forwardAuth).toMatchObject({
+      previewsOnly: true,
+    })
+
+    // Off, the field leaves the plan altogether.
+    await access.getByRole("switch", { name: "Require sign-in" }).click()
+    await saveSettings(page)
+    await expectSaved(page)
+    expect(puts.at(-1)!.runtime as Record<string, unknown>).not.toHaveProperty("forwardAuth")
+  })
+
+  test("a password on a domain is named before a sign-in is saved beside it", async ({ page }) => {
+    const mock = await mockProject(page)
+    mock.configuration().domains[0].protection = {
+      username: "team",
+      hash: "$2a$10$" + "a".repeat(53),
+    }
+    await page.goto("/deploy/7/settings/domains")
+    const access = page.getByRole("form", { name: "Access and headers" })
+    await access.getByRole("switch", { name: "Require sign-in" }).click()
+    await expect(
+      access.getByText(
+        "Signing in replaces the password on api.example.test. Remove it under the domain first.",
+      ),
+    ).toBeVisible()
+    await access.getByRole("radio", { name: "Previews only" }).click()
+    await expect(access.getByText(/Signing in replaces the password/)).toHaveCount(0)
+  })
+
+  test("sign-in, for the pull request @shots", async ({ page }) => {
+    test.skip(!process.env.JD_SHOTS, "JD_SHOTS names the directory the pictures go in")
+    // The whole page, so the form is seen under the domains it applies to.
+    const shot = (name: string) =>
+      page.screenshot({
+        path: `${process.env.JD_SHOTS}/${name}`,
+        fullPage: true,
+        animations: "disabled",
+      })
+    const mock = await mockProject(page)
+    Object.assign(mock.configuration().runtime, {
+      allowFrom: ["10.0.0.0/8"],
+      forwardAuth: {
+        provider: "authelia",
+        verify: "http://127.0.0.1:9091/api/authz/auth-request",
+        signIn: "https://auth.example.test/",
+      },
+    })
+    const access = page.getByRole("form", { name: "Access and headers" })
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto("/deploy/7/settings/domains")
+      await expect(access.getByText("Only 1 address, signed in through Authelia")).toBeVisible()
+      await access.evaluate((element) => element.scrollIntoView({ block: "start" }))
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+      ).toBe(false)
+      await shot(`deploy-sign-in-${width}.png`)
+    }
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await access.getByRole("radio", { name: "Previews only" }).click()
+    await expect(
+      access.getByText("Only 1 address here · previews sign in through Authelia"),
+    ).toBeVisible()
+    await shot("deploy-sign-in-previews-1280.png")
+  })
+})
+
+test.describe("Tailnet only", () => {
+  const tailnetOperations = {
+    ...healthyOperations,
+    domains: { status: "available" as const, domains: [] },
+    tailnet: {
+      url: "https://box.tail1234.ts.net:21003",
+      port: 21003,
+      published: true,
+      allow: ["alice@example.com", "tag:ci"],
+      gate: "caddy" as const,
+      gateRunning: true,
+    },
+  }
+
+  test("turning it on says what goes, reads every login, and saves the list without the public route", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    const puts: Record<string, unknown>[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
+        puts.push(request.postDataJSON())
+      }
+    })
+    await page.goto("/deploy/7/settings/domains")
+    const tailnet = page.getByRole("form", { name: "Tailnet" })
+    await expect(tailnet.getByText("Off · answers on its public domains")).toBeVisible()
+
+    await tailnet.getByRole("switch", { name: "Tailnet only" }).click()
+    await expect(
+      tailnet.getByText(
+        "Saving also takes away the domain api.example.test: a tailnet-only environment has no public route.",
+      ),
+    ).toBeVisible()
+    await expect(tailnet.getByText("Not saved yet", { exact: true })).toBeVisible()
+    await expect(tailnet.getByText("Everyone on the tailnet", { exact: true })).toBeVisible()
+
+    // Each entry is read as the server reads it before it joins the list.
+    const who = tailnet.getByRole("textbox", { name: "Who may open it" })
+    await who.fill("alice")
+    await who.press("Enter")
+    await expect(
+      tailnet.getByText(
+        "alice is neither a Tailscale login (user@example.com) nor a tag (tag:name)",
+      ),
+    ).toBeVisible()
+    await who.fill("Alice@Example.com")
+    await who.press("Enter")
+    await who.fill("tag:ci")
+    await tailnet.getByRole("button", { name: "Add to who may open it" }).click()
+    await who.fill("ALICE@example.com")
+    await who.press("Enter")
+    await expect(tailnet.getByText("alice@example.com is already on the list")).toBeVisible()
+    const list = tailnet.getByRole("list", { name: "Admitted on the tailnet" })
+    await expect(list.getByRole("listitem")).toHaveText(["alice@example.com", "tag:ci"])
+    await expect(tailnet.getByText("Only 2 logins and tags")).toBeVisible()
+    await expect(tailnet.getByText(/The application is told X-Tailnet-Login/)).toBeVisible()
+
+    await saveSettings(page)
+    await expectSaved(page)
+    const saved = puts.at(-1)!
+    expect(saved.domains).toEqual([])
+    const runtime = saved.runtime as Record<string, unknown>
+    expect(runtime.tailnet).toEqual({ allow: ["alice@example.com", "tag:ci"] })
+    // The form writes the publication and keeps the rest of the runtime.
+    expect(runtime.internalPort).toBe(3000)
+    expect(runtime.command).toEqual(["bun", "start"])
+    // Saved tailnet-only, the public route's forms are gone with the route.
+    await expect(page.getByRole("form", { name: "Domains" })).toHaveCount(0)
+    await expect(page.getByRole("form", { name: "Access and headers" })).toHaveCount(0)
+  })
+
+  test("a tailnet-only environment shows its address and who opens it, and edits the list", async ({
+    page,
+  }) => {
+    const mock = await mockProject(page, { operations: tailnetOperations })
+    mock.configuration().domains = []
+    Object.assign(mock.configuration().runtime, {
+      tailnet: { allow: ["alice@example.com", "tag:ci"] },
+    })
+    const puts: Record<string, unknown>[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
+        puts.push(request.postDataJSON())
+      }
+    })
+    await page.goto("/deploy/7/settings/domains")
+    const tailnet = page.getByRole("form", { name: "Tailnet" })
+    await expect(tailnet.getByRole("switch", { name: "Tailnet only" })).toBeChecked()
+    await expect(
+      page.getByRole("link", { name: "Open box.tail1234.ts.net:21003" }),
+    ).toHaveAttribute("href", "https://box.tail1234.ts.net:21003")
+    await expect(tailnet.getByText("Published on the tailnet", { exact: true })).toBeVisible()
+    await expect(
+      tailnet.getByText("Checked by the dashboard's own Caddy on loopback"),
+    ).toBeVisible()
+    await expect(page.getByRole("form", { name: "Domains" })).toHaveCount(0)
+
+    await tailnet.getByRole("button", { name: "Remove tag:ci" }).click()
+    await expect(tailnet.getByText("Only alice@example.com", { exact: true })).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
+    expect((puts.at(-1)!.runtime as Record<string, unknown>).tailnet).toEqual({
+      allow: ["alice@example.com"],
+    })
+
+    // Off, the publication leaves the plan, and the public domains come back.
+    await tailnet.getByRole("switch", { name: "Tailnet only" }).click()
+    await saveSettings(page)
+    await expectSaved(page)
+    expect(puts.at(-1)!.runtime as Record<string, unknown>).not.toHaveProperty("tailnet")
+    await expect(page.getByRole("form", { name: "Domains" })).toBeVisible()
+  })
+
+  test("the overview draws the tailnet address and who may open it", async ({ page }) => {
+    const mock = await mockProject(page, { operations: tailnetOperations })
+    mock.configuration().domains = []
+    await page.goto("/deploy/7")
+    const wiring = page.getByRole("list", { name: "How the project is wired" })
+    await expect(wiring.getByText("Tailnet only", { exact: true })).toBeVisible()
+    await expect(
+      wiring.getByRole("link", { name: /box\.tail1234\.ts\.net:21003/ }),
+    ).toHaveAttribute("href", "https://box.tail1234.ts.net:21003")
+    await expect(wiring.getByText("alice@example.com", { exact: true })).toBeVisible()
+    await expect(wiring.getByText("tag:ci", { exact: true })).toBeVisible()
+    await expect(wiring.getByText("· checked by the dashboard's Caddy")).toBeVisible()
+  })
+
+  test("tailnet only, for the pull request @shots", async ({ page }) => {
+    test.skip(!process.env.JD_SHOTS, "JD_SHOTS names the directory the pictures go in")
+    const shot = (name: string) =>
+      page.screenshot({
+        path: `${process.env.JD_SHOTS}/${name}`,
+        fullPage: true,
+        animations: "disabled",
+      })
+    const mock = await mockProject(page, { operations: tailnetOperations })
+    mock.configuration().domains = []
+    Object.assign(mock.configuration().runtime, {
+      tailnet: { allow: ["alice@example.com", "tag:ci"] },
+    })
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto("/deploy/7/settings/domains")
+      await expect(page.getByText("Published on the tailnet", { exact: true })).toBeVisible()
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+      ).toBe(false)
+      await shot(`tailnet-domains-${width}.png`)
+      await page.goto("/deploy/7")
+      await expect(page.getByText("Tailnet only", { exact: true })).toBeVisible()
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+      ).toBe(false)
+      await shot(`tailnet-overview-${width}.png`)
+    }
+    // The switch on a public environment, with what saving it takes away.
+    mock.configuration().domains = [
+      { hostname: "api.example.test", https: true, ownership: "managed" },
+    ]
+    delete (mock.configuration().runtime as Record<string, unknown>).tailnet
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto("/deploy/7/settings/domains")
+    const tailnet = page.getByRole("form", { name: "Tailnet" })
+    await tailnet.getByRole("switch", { name: "Tailnet only" }).click()
+    await tailnet.getByRole("textbox", { name: "Who may open it" }).fill("bob")
+    await tailnet.getByRole("textbox", { name: "Who may open it" }).press("Enter")
+    await tailnet.evaluate((element) => element.scrollIntoView({ block: "start" }))
+    await shot("tailnet-switch-1280.png")
+  })
+})
+
+test.describe("Maintenance and error pages", () => {
+  test("the switch applies at once, and who is let past and the pages save beside the runtime", async ({
+    page,
+  }) => {
+    const mock = await mockProject(page)
+    const configurationPuts: Record<string, unknown>[] = []
+    const switchPuts: Record<string, unknown>[] = []
+    page.on("request", (request) => {
+      if (request.method() !== "PUT") return
+      if (request.url().endsWith("/configuration")) configurationPuts.push(request.postDataJSON())
+      if (request.url().endsWith("/maintenance")) switchPuts.push(request.postDataJSON())
+    })
+    await page.goto("/deploy/7/settings/domains")
+
+    // The switch is its own form, which the bar saves at once.
+    const maintenance = page.getByRole("form", { name: "Maintenance", exact: true })
+    await expect(maintenance.getByText("Off · visitors reach the application")).toBeVisible()
+    await maintenance.getByRole("switch", { name: "Answer with the maintenance page" }).click()
+    await expect(saveBar(page)).toContainText("Maintenance · Applies immediately")
+    await saveSettings(page)
+    await expectSaved(page)
+    expect(switchPuts).toEqual([{ on: true }])
+    expect(configurationPuts).toHaveLength(0)
+    await expect(maintenance.getByText(/On · visitors get the maintenance page/)).toBeVisible()
+    await expect(maintenance.getByText("In maintenance", { exact: true })).toBeVisible()
+
+    // Who is let past and the pages are the route's, written into the plan.
+    const pages = page.getByRole("form", { name: "Maintenance page and error pages" })
+    await expect(pages.getByText("Nobody let past · no Retry-After")).toBeVisible()
+    await expect(pages.getByText("The proxy's own pages")).toBeVisible()
+    await pages.getByRole("textbox", { name: "Let these addresses past" }).fill("203.0.113.7")
+    await pages.getByRole("button", { name: "Add to let these addresses past" }).click()
+    const retry = pages.getByRole("textbox", { name: "Retry after" })
+    await retry.fill("an hour")
+    await expect(pages.getByText("Whole seconds, at most 86400 (a day).")).toBeVisible()
+    await retry.fill("120")
+    await pages.getByRole("switch", { name: "Own 502 Bad gateway page" }).click()
+    await pages.getByRole("switch", { name: "Replace the application's own error pages" }).click()
+    await expect(saveBar(page)).toContainText("Applies on your next deployment")
+    await saveSettings(page)
+    await expectSaved(page)
+    const runtime = configurationPuts.at(-1)!.runtime as Record<string, unknown>
+    expect(runtime.maintenance).toEqual({ retryAfter: 120, bypassFrom: ["203.0.113.7"] })
+    expect(runtime.errorPages).toEqual([502])
+    expect(runtime.interceptErrors).toBe(true)
+    // The form writes its fields and keeps the rest of the runtime.
+    expect(runtime.internalPort).toBe(3000)
+    expect(runtime.command).toEqual(["bun", "start"])
+    expect(mock.configuration().runtime.maintenance).toEqual(runtime.maintenance)
+    await expect(pages.getByText("1 address let past · Retry-After 120s")).toBeVisible()
+    await expect(pages.getByText("Own 502 page · the application's too")).toBeVisible()
+
+    // A saved page opens beside a preview of what visitors get.
+    await pages.getByRole("button", { name: "Edit 502 Bad gateway" }).click()
+    const editor = page.getByRole("dialog", { name: /502 Bad gateway/ })
+    await expect(editor.getByTitle("Preview of 502 Bad gateway")).toBeVisible()
+    await editor.getByRole("button", { name: "Cancel" }).click()
+
+    // No page chosen, the fields leave the plan, and so does replacing the
+    // application's own.
+    await pages.getByRole("switch", { name: "Own 502 Bad gateway page" }).click()
+    await expect(
+      pages.getByRole("switch", { name: "Replace the application's own error pages" }),
+    ).toHaveCount(0)
+    await saveSettings(page)
+    await expectSaved(page)
+    const cleared = configurationPuts.at(-1)!.runtime as Record<string, unknown>
+    expect(cleared).not.toHaveProperty("errorPages")
+    expect(cleared).not.toHaveProperty("interceptErrors")
+
+    // Off again, at once.
+    await maintenance.getByRole("switch", { name: "Answer with the maintenance page" }).click()
+    await saveSettings(page)
+    await expectSaved(page)
+    expect(switchPuts.at(-1)).toEqual({ on: false })
+    await expect(maintenance.getByText("Off · visitors reach the application")).toBeVisible()
+  })
+
+  test("a route written before the switch says to deploy once, and cannot be switched on", async ({
+    page,
+  }) => {
+    const mock = await mockProject(page)
+    mock.setMaintenance({ ready: false })
+    await page.goto("/deploy/7/settings/domains")
+    const maintenance = page.getByRole("form", { name: "Maintenance", exact: true })
+    await expect(maintenance.getByText("Switches at once after the next deployment")).toBeVisible()
+    await expect(
+      maintenance.getByText(/Deploy once, and from then on it switches at once/),
+    ).toBeVisible()
+    await expect(
+      maintenance.getByRole("switch", { name: "Answer with the maintenance page" }),
+    ).toBeDisabled()
+  })
+
+  test("maintenance and error pages, for the pull request @shots", async ({ page }) => {
+    test.skip(!process.env.JD_SHOTS, "JD_SHOTS names the directory the pictures go in")
+    const shot = (name: string) =>
+      page.screenshot({ path: `${process.env.JD_SHOTS}/${name}`, animations: "disabled" })
+    const mock = await mockProject(page)
+    Object.assign(mock.configuration().runtime, {
+      maintenance: { retryAfter: 300, bypassFrom: ["203.0.113.7"] },
+      errorPages: [404, 502],
+      interceptErrors: true,
+    })
+    const maintenance = page.getByRole("form", { name: "Maintenance", exact: true })
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 1100 })
+      await page.goto("/deploy/7/settings/domains")
+      await expect(maintenance.getByText("Off · visitors reach the application")).toBeVisible()
+      await maintenance.evaluate((element) => element.scrollIntoView({ block: "start" }))
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+      ).toBe(false)
+      await shot(`deploy-maintenance-off-${width}.png`)
+    }
+    await page.setViewportSize({ width: 1280, height: 1100 })
+    await maintenance.getByRole("switch", { name: "Answer with the maintenance page" }).click()
+    await maintenance.evaluate((element) => element.scrollIntoView({ block: "start" }))
+    await shot("deploy-maintenance-switching-1280.png")
+    await saveSettings(page)
+    await expectSaved(page)
+    await expect(maintenance.getByText("In maintenance", { exact: true })).toBeVisible()
+    await maintenance.evaluate((element) => element.scrollIntoView({ block: "start" }))
+    await shot("deploy-maintenance-on-1280.png")
   })
 })
 
@@ -654,6 +1226,45 @@ test.describe("Databases & backups evidence", () => {
       "href",
       "/backups?database=9",
     )
+  })
+
+  test("what a linked database gives previews is saved apart: a branch, masked by the columns named", async ({
+    page,
+  }, testInfo) => {
+    await mockLinkedDatabase(page)
+    await page.route("**/api/v1/backups/", (route) => json(route, []))
+    await page.route("**/api/v1/deploy/7/environments/12/database-links/9/previews", (route) =>
+      json(route, {
+        connectionId: 9,
+        mode: "masked",
+        maskedColumns: ["users.email", "users.phone"],
+      }),
+    )
+    const saved = page.waitForRequest(
+      (request) =>
+        request.url().endsWith("/deploy/7/environments/12/database-links/9/previews") &&
+        request.method() === "PUT",
+    )
+    await page.goto("/deploy/7/settings/databases")
+    await expect(page.getByRole("heading", { name: "Previews get" })).toBeVisible()
+    await expect(page.getByText("No database of this environment's")).toBeVisible()
+    await page.getByRole("radio", { name: "A masked branch" }).click()
+    await page
+      .getByRole("textbox", { name: "Columns of orders-db to mask" })
+      .fill("users.email\nusers.phone, users.email")
+    await expect(page.getByText("A branch of orders-db")).toBeVisible()
+    await page
+      .getByRole("textbox", { name: "Columns of orders-db to mask" })
+      .scrollIntoViewIfNeeded()
+    await testInfo.attach("settings-preview-branches", {
+      body: await page.screenshot({ path: testInfo.outputPath("settings-preview-branches.png") }),
+      contentType: "image/png",
+    })
+    await saveSettings(page)
+    expect((await saved).postDataJSON()).toEqual({
+      mode: "masked",
+      maskedColumns: ["users.email", "users.phone"],
+    })
   })
 
   test("the variable that carries a database is named, and removal takes it with the link", async ({

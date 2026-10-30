@@ -22,7 +22,7 @@ func (s *Server) handleDeploymentDraftCreate(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	principal := httpx.MustPrincipal(r)
-	draft, err := s.modules.deployPlanning.Create(r.Context(), principal.UserID(), principal.Username())
+	draft, err := s.modules.deployPlanning.CreateForKey(r.Context(), principal.UserID(), principal.Username(), draftKeyID(principal))
 	if err != nil {
 		return mapDeploymentPlanningError(err)
 	}
@@ -31,11 +31,22 @@ func (s *Server) handleDeploymentDraftCreate(w http.ResponseWriter, r *http.Requ
 	return nil
 }
 
+// draftKeyID is the deploy key a draft is made for, or 0 for anyone else:
+// a deploy key's drafts are its own, and it lists and reaches those alone.
+func draftKeyID(p *httpx.Principal) int64 {
+	if p.DeployKey() {
+		return p.KeyID()
+	}
+	return 0
+}
+
 // handleDeploymentDraftList answers the caller's own uncommitted drafts so
-// the new-project page can offer to resume one instead of starting over.
+// the new-project page can offer to resume one instead of starting over. A
+// deploy key is answered the drafts it made; a session every draft of its
+// account's, its keys' included.
 func (s *Server) handleDeploymentDraftList(w http.ResponseWriter, r *http.Request) error {
 	principal := httpx.MustPrincipal(r)
-	drafts, err := s.modules.deployPlanning.ListDrafts(r.Context(), principal.UserID())
+	drafts, err := s.modules.deployPlanning.ListDrafts(r.Context(), principal.UserID(), draftKeyID(principal))
 	if err != nil {
 		return httpx.Internal(err)
 	}
@@ -49,6 +60,13 @@ func (s *Server) handleDeploymentDraftList(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleDeploymentDraftDiscard(w http.ResponseWriter, r *http.Request) error {
 	principal := httpx.MustPrincipal(r)
 	id := chi.URLParam(r, "draft")
+	if principal.DeployKey() {
+		// The store authorizes by owner, which a key shares with its owner's
+		// sessions and other keys; the key is held to its own drafts first.
+		if _, err := s.deploymentDraftForPrincipal(r); err != nil {
+			return err
+		}
+	}
 	if err := s.modules.deployPlanning.Discard(
 		r.Context(), id, principal.UserID(), principal.Can(auth.CapSystemAdmin),
 	); err != nil {
@@ -78,6 +96,11 @@ func (s *Server) handleDeploymentDraftSave(w http.ResponseWriter, r *http.Reques
 		return refusePullRequestHead(request.Source.Ref)
 	}
 	principal := httpx.MustPrincipal(r)
+	if principal.DeployKey() {
+		if err := s.keyDraftGuard(r, request); err != nil {
+			return err
+		}
+	}
 	draft, err := s.modules.deployPlanning.Save(
 		r.Context(), chi.URLParam(r, "draft"), principal.UserID(),
 		principal.Can(auth.CapSystemAdmin), request,
@@ -111,6 +134,11 @@ func (s *Server) handleDeploymentDraftDetect(w http.ResponseWriter, r *http.Requ
 	}
 	if draft.Data.Source == nil {
 		return mapDeploymentPlanningError(deploy.ErrDraftIncomplete)
+	}
+	if httpx.MustPrincipal(r).DeployKey() {
+		if err := keyDraftSource(draft.Data.Source); err != nil {
+			return err
+		}
 	}
 	detection, err := s.modules.deploySources.Analyze(r.Context(), *draft.Data.Source)
 	if err != nil {
@@ -162,8 +190,16 @@ func (s *Server) handleDeploymentDraftPreflight(w http.ResponseWriter, r *http.R
 		return mapDeploymentPlanningError(deploy.ErrDraftRevision)
 	}
 	principal := httpx.MustPrincipal(r)
+	if principal.DeployKey() && draft.Data.Source != nil {
+		if err := keyDraftSource(draft.Data.Source); err != nil {
+			return err
+		}
+	}
+	// A deploy key may not commit a plan with host authority, so preflight
+	// says so as the blocked finding a limited account would get.
 	preflight, err := deploy.PreflightDraftWithSource(
-		r.Context(), draft, s.modules.deployPreflight, s.deploymentSourceInspector(), principal.Can(auth.CapSystemAdmin),
+		r.Context(), draft, s.modules.deployPreflight, s.deploymentSourceInspector(),
+		principal.Can(auth.CapSystemAdmin) && !principal.DeployKey(),
 	)
 	if err != nil {
 		return mapDeploymentPlanningError(err)
@@ -195,6 +231,26 @@ func (s *Server) handleDeploymentDraftCommit(w http.ResponseWriter, r *http.Requ
 		return httpx.Err(http.StatusBadRequest, "import_adopt_required", "use the import adoption endpoint for an observed workload")
 	}
 	principal := httpx.MustPrincipal(r)
+	if principal.DeployKey() {
+		var configuration deploy.PlanConfiguration
+		if draft.Data.Configuration != nil {
+			configuration = *draft.Data.Configuration
+		}
+		if reasons := hostAuthority(draft.Data.Source, configuration.Build, configuration.Runtime); len(reasons) > 0 {
+			return refuseHostAuthority("this plan", reasons)
+		}
+		for name, reference := range draft.VariableReferences() {
+			if err := keyReferenceGuard(principal, name, "${{"+reference.Kind+"."+reference.Target+"}}", ""); err != nil {
+				return err
+			}
+		}
+		// A key narrowed to chosen deployments is given the one it makes, in
+		// the transaction that makes it; a key reaching every deployment has
+		// no rows and must keep none, or the first would narrow it.
+		if !principal.Token.EveryDeployment() {
+			request.GrantToKey = principal.KeyID()
+		}
+	}
 	result, err := s.modules.deployPlanning.Commit(
 		r.Context(), chi.URLParam(r, "draft"), principal.UserID(), true, request,
 	)
@@ -202,11 +258,15 @@ func (s *Server) handleDeploymentDraftCommit(w http.ResponseWriter, r *http.Requ
 		return mapDeploymentPlanningError(err)
 	}
 	scheduled := s.applyBlueprintSchedules(r, draft, result)
-	httpx.SetAudit(r, "deploy.create", resultProjectTarget(result), map[string]any{
+	detail := map[string]any{
 		"draftId": chi.URLParam(r, "draft"), "environmentId": result.EnvironmentID,
 		"planRevision": result.PlanRevision, "created": result.Created,
 		"blueprintSchedules": scheduled,
-	})
+	}
+	if request.GrantToKey > 0 && result.Created {
+		detail["grantedToKey"] = true
+	}
+	httpx.SetAudit(r, "deploy.create", resultProjectTarget(result), detail)
 	status := http.StatusCreated
 	if !result.Created {
 		status = http.StatusOK
@@ -324,12 +384,24 @@ func (s *Server) deploymentSourceInspector() deploy.SourceInspector {
 	return s.modules.deploySources
 }
 
+// deploymentDraftForPrincipal reads the route's draft for whoever asks: a
+// session is held to its own drafts unless it is an administrator's; a deploy
+// key, which acts as its administrator owner, is held to the drafts it made
+// itself, so it never reads, changes, commits or discards a session's or
+// another key's.
 func (s *Server) deploymentDraftForPrincipal(r *http.Request) (*deploy.Draft, error) {
 	draft, err := s.modules.deployPlanning.Get(r.Context(), chi.URLParam(r, "draft"))
 	if err != nil {
 		return nil, mapDeploymentPlanningError(err)
 	}
 	principal := httpx.MustPrincipal(r)
+	if principal.DeployKey() {
+		if err := deploy.AuthorizeDraftForKey(draft, principal.KeyID()); err != nil {
+			return nil, httpx.Err(http.StatusForbidden, "draft_forbidden",
+				"this deployment draft is not this deploy key's: a key reaches the drafts it made and no other")
+		}
+		return draft, nil
+	}
 	if err := deploy.AuthorizeDraft(draft, principal.UserID(), principal.Can(auth.CapSystemAdmin)); err != nil {
 		return nil, mapDeploymentPlanningError(err)
 	}
@@ -351,7 +423,7 @@ func mapDeploymentPlanningError(err error) error {
 		return httpx.Err(status, "removal_failed", removal.Error())
 	}
 	switch {
-	case errors.Is(err, deploy.ErrPreviewApproval), errors.Is(err, deploy.ErrPreviewIsolation):
+	case errors.Is(err, deploy.ErrPreviewApproval), errors.Is(err, deploy.ErrPreviewIsolation), errors.Is(err, deploy.ErrStagingIsolation):
 		return mapAutomationError(err)
 	// Ownership and expiry are distinguished from a genuinely missing id: a
 	// 404 for someone else's draft would tell a caller that guessed ids that
@@ -448,4 +520,35 @@ func (s *Server) applyBlueprintSchedules(
 		}
 	}
 	return created
+}
+
+// keyDraftGuard holds a deploy key's save to its own draft, and the source
+// it saves into it to what it may write anywhere (deploy_keys.go): no saved
+// credential chosen or redirected, and no folder on the server or Compose
+// file. What the plan asks of the host, and the variables it would point at
+// a credential or a database, are refused when the key commits the draft:
+// that is when they would run, and a draft's variables reach their final
+// form only there.
+func (s *Server) keyDraftGuard(r *http.Request, request deploy.DraftSaveRequest) error {
+	draft, err := s.deploymentDraftForPrincipal(r)
+	if err != nil {
+		return err
+	}
+	if request.Source == nil {
+		return nil
+	}
+	if err := keySourceGuard(*request.Source, draft.Data.Source); err != nil {
+		return err
+	}
+	return keyDraftSource(request.Source)
+}
+
+// keyDraftSource refuses a deploy key a draft whose source is a folder on the
+// server or a Compose file: detecting and preflighting read that source, and
+// committing it would run what it asks for.
+func keyDraftSource(source *deploy.DraftSourceConfig) error {
+	if reasons := hostAuthority(source, deploy.BuildPlanConfig{}, deploy.RuntimePlanConfig{}); len(reasons) > 0 {
+		return refuseHostAuthority("this source", reasons)
+	}
+	return nil
 }

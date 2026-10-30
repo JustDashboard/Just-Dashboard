@@ -621,7 +621,8 @@ export function defaultConfiguration(
       rootDirectory: candidate?.root,
       buildCommand: candidate?.buildCommand,
       startCommand: candidate?.startCommand,
-      outputDirectory: candidate?.outputDirectory,
+      // Railpack decides a static site's output itself.
+      outputDirectory: method === "railpack" ? undefined : candidate?.outputDirectory,
       dockerfile: method === "dockerfile" ? (candidate?.dockerfile ?? "Dockerfile") : undefined,
       target: method === "dockerfile" ? candidate?.dockerfileTarget : undefined,
       pythonVersion: candidate?.recipe === "python" ? candidate.pythonVersion : undefined,
@@ -824,13 +825,11 @@ export function defaultChecks(
   if (profile === "game")
     return [
       {
-        // "game_handshake" is a closed check kind the backend's planning
-        // model already accepts, but `validateCheckConfiguration` (checks.go)
-        // refuses it any port/host/url/command — no protocol handshake is
-        // wired in yet, so a plan saved with that kind and a port was
-        // rejected outright. "tcp" is a real, executable check and a
-        // reasonable readiness signal for a game server: the process is
-        // listening on its own port.
+        // An image typed by hand may be any game, so its default is the one
+        // check every game answers: its own port accepting a connection.
+        // The reviewed Minecraft templates bring their own protocol checks
+        // ("game_handshake" over TCP, "udp_probe" for Bedrock), which the
+        // runner executes (checks.go).
         name: "Game port reachable",
         kind: "tcp",
         phase: "readiness",
@@ -868,6 +867,52 @@ export function defaultChecks(
       },
     ]
   }
+  if ((profile === "service" || profile === "image") && port > 0) {
+    // A service or a published container is not asked for a page, so it
+    // used to get no gate at all: it was started and cut over to, and a
+    // release that never listened went live. The port detection read is
+    // enough for the check the catalogue's own starters carry — the
+    // container's health where the image declares it, a health path where
+    // the source names one, else the socket itself.
+    const budget = {
+      attempts: readiness?.attempts ?? 20,
+      timeoutSeconds: 5,
+      intervalSeconds: readiness?.intervalSeconds ?? 3,
+    }
+    if (readiness?.kind === "docker_health")
+      return [
+        {
+          name: "Container health",
+          kind: "docker_health",
+          phase: "readiness",
+          required: true,
+          config: budget,
+        },
+      ]
+    if (readiness?.kind === "http" && readiness.path)
+      return [
+        {
+          name: "HTTP readiness",
+          kind: "http",
+          phase: "readiness",
+          required: true,
+          config: {
+            path: readiness.path,
+            ...(readiness.acceptAnyAnswer ? { acceptAnyAnswer: true } : {}),
+            ...budget,
+          },
+        },
+      ]
+    return [
+      {
+        name: "Port reachable",
+        kind: "tcp",
+        phase: "readiness",
+        required: true,
+        config: { port, ...budget },
+      },
+    ]
+  }
   return []
 }
 
@@ -880,6 +925,10 @@ export function defaultChecks(
  * of that question each: the type Select and the port field. Only the first
  * used to add the check, so a plan that got its port from the second reached
  * Deploy with `readiness_missing` standing over a control nobody had touched.
+ * A service or a published container is gated the same way once its port is
+ * known (preflight warns, `cutover_unverified`, rather than refusing); the
+ * check is proposed here, in the draft, where it is listed and can be
+ * removed — never added to a saved plan behind the operator's back.
  */
 export function checksForRuntime(
   checks: DeploymentConfiguration["checks"],
@@ -888,7 +937,8 @@ export function checksForRuntime(
   readiness?: DeploymentDetectedReadiness,
 ): DeploymentConfiguration["checks"] {
   if (profile === "worker") return checks.filter((check) => check.phase !== "readiness")
-  const gated = profile === "web" || profile === "static"
+  const gated =
+    profile === "web" || profile === "static" || profile === "service" || profile === "image"
   if (!gated || port <= 0 || checks.some((check) => check.phase === "readiness")) return checks
   return [...checks, ...defaultChecks(profile, port, readiness)]
 }
@@ -1159,6 +1209,12 @@ export function validateConfiguration(
     errors.dotnetVersion = "Use .NET 8.0, 9.0 or 10.0, or let the project decide."
   if (configuration.build.target && !DOCKERFILE_STAGE.test(configuration.build.target))
     errors.target = "A stage name starts with a letter and has only letters, digits, . _ and -."
+  if (
+    configuration.build.railpackConfig &&
+    !validRailpackConfig(configuration.build.railpackConfig)
+  )
+    errors.railpackConfig =
+      "Name a .json file inside the root directory, such as railpack.json, or leave it empty."
   for (const [name, value] of [
     ["internalPort", configuration.runtime.internalPort ?? 0],
     ["hostPort", configuration.runtime.hostPort ?? 0],
@@ -1233,6 +1289,22 @@ export function withPreviousConnectionShape(link: string, previousTarget?: strin
   const connection = link.match(/^\$\{\{database\.(\d+)\}\}$/)
   if (!connection || database || !CONNECTION_FORMATS.has(format)) return link
   return `\${{database.${connection[1]}.${format}}}`
+}
+
+/**
+ * A Railpack configuration file the backend takes (`validateRailpackSettings`): a .json
+ * file inside the root directory, never above it nor among the dashboard's own files.
+ */
+export function validRailpackConfig(path: string) {
+  const parts = path.replace(/^(\.\/)+/, "").split("/")
+  return (
+    path.length <= 256 &&
+    !path.startsWith("/") &&
+    path.endsWith(".json") &&
+    !/[\0\r\n]/.test(path) &&
+    !parts.includes("..") &&
+    parts[0] !== ".just-dashboard"
+  )
 }
 
 /** Whether a build method produces an image a release task can run in, as the backend decides. */

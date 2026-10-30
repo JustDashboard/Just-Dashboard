@@ -126,6 +126,8 @@ is connected by naming the instance found, not by typing its address again.
   route is on the read surface: for `system.admin` every container is inspected; for every other role
   nothing is, and the list is a separate reading built from what those roles already see elsewhere
   (`detail: "reduced"`). No reading carries a credential.
+  For an administrator it also carries `kernelProblems` (*MongoDB 8 and the kernel*, under the
+  provisioning catalogue).
 - **Connecting is one explicit act about one instance.** `POST /databases/inventory/connect`
   (`system.admin`) takes a key and, optionally, a name, user, password and database. The server looks
   the instance up again, reads what its container states (a `*_FILE` secret is read from the container
@@ -165,12 +167,17 @@ is connected by naming the instance found, not by typing its address again.
   twenty seconds (`dbInventoryFresh`), kept apart for administrators and for everybody else because they
   are different readings, not one filtered into the other. A file says whose it is (`file.holder`): the
   dashboard's own store, a container's volume, a deployment's or a compose stack's directory, the
-  system's (`/var/lib`, `/var/cache`, an NSS `nssdb`), a tool's, or an application's. A tool's is a
-  program's own state — anything under a hidden directory, a browser's or a browser driver's profile
-  (a directory naming Playwright, Puppeteer, Chrome, Chromium, Firefox or Mozilla), or a scratch
-  directory below the top of the tree (`tmp`, `temp`, or a name ending in either) — and the control
-  center folds a tool's and the system's under *Kept by other programs* rather than offering them to
-  open.
+  system's (`/var/lib`, `/var/cache`, an NSS `nssdb`), a backup, a tool's, or an application's. A
+  backup is a copy kept aside — a file with the store's own name anywhere but the store (a copy taken
+  before a repair, one a test run kept), anything under a directory with `backup`, `backups` or `bak`
+  as one of its words (`/var/backups`, `db-backups`), or a file named as a copy (`.bak`, `.backup`,
+  `.old`, `.orig`). A tool's is a program's own state — anything under a hidden directory, a
+  browser's or a browser driver's profile (a directory naming Playwright, Puppeteer, Chrome,
+  Chromium, Firefox or Mozilla), a scratch directory below the top of the tree (`tmp`, `temp`,
+  `scratch`, or a name ending in one), or what a build or a test run fills (`node_modules`,
+  `testdata`, `fixtures`, `test-results`, `playwright-report`, `coverage`). The control center lists
+  only servers and the files an application keeps; a tool's, the system's, a backup, a data
+  directory with no server and what was ignored are counted behind its one *Set aside* fold.
 - **Testing and saving a connection typed by hand.** `POST /databases/test` uses the same probe for every
   engine (Redis used to be reported unreachable for having no SQL dialect), and `POST /databases/` takes
   `probe: true` to dial before saving.
@@ -272,6 +279,53 @@ tag floats only within that line's patch releases; Timescale is pinned to one re
   maintained on the day of the refresh (`TestProvisionCatalogueDefaultsWereMaintainedWhenItWasRefreshed`),
   and no offered tag floats across release lines. Existing servers on any release keep working: the
   list decides only what can be started.
+- **MongoDB 8 and the kernel.** MongoDB 8 is built with Google's tcmalloc, which keeps per-CPU caches
+  through rseq; the official image sets `GLIBC_TUNABLES=glibc.pthread.rseq=0` so glibc leaves rseq to
+  it. Linux 6.19's rseq rework broke what tcmalloc relied on and the kernel's fix arrived in 7.0.14, so
+  on the kernels between, mongod exits at once with *MongoDB cannot start: Linux kernel versions 6.19
+  and newer has a known incompatibility with this version of MongoDB* (MongoDB SERVER-121912), and with
+  `unless-stopped` the container restarts for ever. MongoDB 8.0.30's own fix applies only on 7.0.14 and
+  later. Handing rseq back to glibc is what starts it: on a GitHub runner with Linux `7.0.0-1017-azure`,
+  `mongo:8.0` (8.0.34) refused as shipped and with `rseq=0` set explicitly, started with `rseq=1`
+  (mongod then warns that tcmalloc without rseq costs performance), and `mongo:7.0` and `mongo:6.0`, on
+  the older tcmalloc that does not use rseq, started unchanged. `deploy/host_kernel.go` holds the facts
+  (`MongoKernelAffected` for [6.19, 7.0.14), `MongoReleaseAffected` for 8 and later,
+  `MongoKernelMitigated` reading the last `glibc.pthread.rseq` in the colon list); the kernel is
+  `sysinfo.KernelRelease` (uname, which inside the dashboard's container is the host's, the kernel every
+  container here runs on). `database_mongo_kernel.go` applies them. **Provisioning does it without
+  asking**: on such a kernel an 8.0 request is created with the tunable and the label
+  `io.just-dashboard.mongo-kernel-mitigation=<kernel>`, and the `202` reply and the
+  `database.server.provision` audit carry `kernelMitigation`, the sentence the connection's summary then
+  says from the label (`container.kernelMitigation`): on, why, its cost, and that 7.0.14 does not need
+  it. Every later recreate keeps both, since `SpecOf` carries the environment and labels. 7.0 and 6.0
+  are started as they are. **A server that already exists** — made before this, or by hand — is offered
+  the fix where it is drawn: the fleet's `kernelProblem` (`mongoKernelProblem`) is set for a MongoDB 8
+  container here whose environment lacks the tunable (its release is the image's `MONGO_VERSION`, else
+  its tag) and whose last fifty log lines carry MongoDB's own refusal (`mongoKernelRefused`), with the
+  alert *MongoDB cannot start on this kernel; apply the mitigation*, a sentence, and `fixable`. Docker's
+  state is not the test: a crash loop reads as running for the second of each attempt, which on CI hid
+  the offer from one poll in two. A MongoDB release that learns to start on these kernels never logs
+  the refusal, so it is left alone. One that no connection is made to — on such a kernel,
+  the one provisioning made before it knew, whose adopt never got an answer — is reported the same way
+  by the inventory, for an administrator, as `kernelProblems` by instance key
+  (`inventoryKernelProblems`, which reads nothing on any other kernel), and *Found on this server*
+  offers the fix as its one press. `POST /databases/{id}/kernel-mitigation`, or `POST
+  /databases/kernel-mitigation` with `{"container"}` for one not connected (both `system.admin` +
+  `destructive`, audited `database.server.kernel_mitigation` with the kernel, release, tunables, old and
+  new container ids, or the refusal; one core, `mitigateKernel`, the connection's route adding the power
+  route's *restarting* state and a fresh pool) recreates it through `dockerx.Recreate` from its own
+  `SpecOf` with the tunable merged into any other glibc tunables and the label added — same name,
+  volumes, port and restart policy, the old container parked and put back if the new one cannot be
+  created — and refuses with `409` a container that does not need it (another kernel, another release,
+  already set) or that compose owns, whose `kernelProblem` instead says to add the variable to the
+  service and redeploy. A protected connection lets it through, as it does an access change. Docker's
+  own alert, `container_down`, adds the same reason to what it says of such a container
+  (`mongoKernelAlertLine`, from the listing's image).
+  `TestProvisionStartsMongoDB8WithWhatThisKernelNeeds`,
+  `TestMongoKernelProblemIsOnlyMongoDB8WithoutTheTunable`,
+  `TestApplyingTheMitigationKeepsTheRestOfTheEnvironment` and
+  `TestContainerDownSaysWhenItIsMongoDBOnThisKernel` hold it, and the live fixture below runs both paths
+  on whatever kernel the runner has.
 - **The full template is built here, never pulled.** No published image carries pgvector, PostGIS,
   pg_cron, pg_partman, pgaudit, hypopg and pg_repack on the official image's layout, so
   `backend/internal/api/recipes/postgres-full/Dockerfile` (embedded in the binary) builds one: the
@@ -680,7 +734,8 @@ tag floats only within that line's patch releases; Timescale is pinned to one re
   gateway, so by address alone the dashboard was drawn as *This server* reading every database it
   watched. On other engines the asking pool's own connections are left out as before. A binding's word
   (`connected`, `stale`, `broken`) outranks an observation's. Both are on the read surface; the
-  detected-but-unconnected half is filled only for `system.admin`.
+  detected-but-unconnected half is filled only for `system.admin`. The server map draws its `env` and
+  `session` lines from the same join (`mapUses`), held for two minutes.
   Fleet, topology and consumer reads reuse one Docker list and one inspection per container within
   their request, including the fleet's administrator-only discovery. Each request starts fresh; the
   snapshot is never used for access-changing actions.
@@ -1112,6 +1167,19 @@ the page.
   system prompt cached and the conversation under automatic caching, and the server-side refusal
   fallback (`fallbacks: "default"`) for Opus and Sonnet. The OpenAI-compatible request carries the
   model, the messages, the stream and the usage option, and nothing a server might not know.
+- **The same provider answers three other questions**, each sent only when somebody presses for it:
+  a drawing's *Describe a diagram* (`POST /boards/diagram`, the prompt alone, audited as
+  `board.diagram`), a failed deployment's *Ask why it failed*
+  (`POST /deploy/{id}/runs/{run}/diagnosis`, the run's record masked on the server first, audited as
+  `deploy.run.diagnose`; [the deployment contract](../deployments/implementation.md) says what is sent),
+  and a deployment's *Diagnose* (`POST /deploy/{id}/assistant`, session-only, audited as
+  `deploy.assistant.ask` and `deploy.assistant.tool`): a conversation of its own kind, with its own
+  closed set of read tools — the environment's runs, a run's transcript, the live containers' lines,
+  usage and sizing, container events, host alerts, firewall rules, security updates — each call allowed
+  or declined by the person as `describe_tables` is, masked as the diagnosis is, and a
+  `propose_action` tool that runs nothing but draws a card whose press calls the project's own route
+  ([the deployment operator](../deployments/operator.md)). All of them share the install's budget of
+  model calls and its four answers at once, and the settings sheet names all four under *Used by*.
 - **Engines** come from the capability table: `assistant` is every engine with a dialect, and
   `assistantPolicy` is PostgreSQL and its forks but CockroachDB. The editor offers the assistant to a
   role with `service.control` on those engines; a failed statement and a plan offer a question of
@@ -1512,7 +1580,9 @@ the page.
   SQL engines export their counters and gauges by the engine's own key in snake case, beside the
   shared connection, size, uptime and pool series; Redis and MongoDB export the fixed sets in
   `redisPromReads` and `mongoPromReads`. The route is for **API keys only**: no credential is 401, a session
-  cookie is `403 token_required`, and a key narrowed to `metrics.read` is admitted here and
+  cookie is `403 token_required`, and a key narrowed to `metrics.read` is admitted here, at the
+  deployments' sibling `GET /api/v1/metrics/deployments`
+  ([request observability](../deployments/request-observability.md#the-prometheus-exposition)) and
   refused everywhere else ([request lifecycle](../architecture/request-lifecycle.md)). It is not
   audited per scrape, like every read; minting a key records `dashboard.token.create` with its
   `scope`. `GET /databases/metrics-export` (any role) answers the endpoint, the retention, the
@@ -1902,7 +1972,8 @@ the page.
 ### Alerts: told when a server or its backups go wrong
 
 A database's **Alerts** page (`/databases/{id}/alerts`, in the rail under Operate) holds rules that
-tell the deployments' notification channels — webhook, Discord, Slack, Telegram and e-mail, through
+tell the deployments' notification channels — webhook, Discord, Slack, Teams, Mattermost, Telegram,
+ntfy, Gotify, Pushover and e-mail, through
 `deploy.AutomationStore.DeliverNotification`, so a channel is configured once on
 `/deploy/notifications` and nowhere else — when something is wrong with a database, and when it is
 over. There is no second delivery system and no second poll: the server kinds are judged on the
@@ -1911,8 +1982,12 @@ and the backup kinds on the same pass from `backup_jobs` and `backup_runs`.
 
 - **Six kinds, stated per engine.** `alertKinds` (`dbx/alert_capabilities.go`, a list flag) is what a
   database of an engine can be watched for, and the create route refuses a rule for one database
-  whose engine lacks the kind. A server can be `down` (it did not answer the recorder; a SQL pool
-  whose snapshot was refused is pinged to tell a refusal from a server that went away), fill its
+  whose engine lacks the kind. The host's own `backup_failed` rule
+  ([Host alerts](observability-security.md#host-alerts-told-when-the-machine-itself-goes-wrong))
+  follows every backup job, files and volumes included, and leaves to these rules any job an enabled
+  one of them already follows, so a failed dump is told once. A server can be `down` (it did not
+  answer the recorder; a SQL pool whose snapshot was refused is pinged to tell a refusal from a
+  server that went away), fill its
   `disk`, run near its `connections` limit (the snapshot's sessions against `max_connections` less
   the superuser reserve, Redis `connected_clients` against `maxclients` — now recorded with the
   counters — and MongoDB `current` against `current + available`), and fall behind in
@@ -2685,7 +2760,8 @@ say, the window, the base backup a recovery starts from, retention — is `dbx/p
 - **The destinations are a backup job's**: a directory on this server (default
   `JD_BACKUP_DIR/wal`), S3 or Backblaze B2, each archive a folder of its own (`<container>-<UTC
   stamp>`). `fromJob` takes an existing backup job's destination and sealed keys, so a bucket's keys
-  are not typed twice. Keys are sealed with `JD_MASTER_KEY` like a job's and never returned.
+  are not typed twice; a job whose destination is SFTP or rclone is refused, since WAL-G writes only
+  to a directory or an object store. Keys are sealed with `JD_MASTER_KEY` like a job's and never returned.
 - **Encrypted with WAL-G's own OpenPGP**, to a key made for the archive. The server is given only the
   public half, which is all encrypting needs: a server, or a superuser reading `walg.json` through
   `pg_read_file`, cannot read its own archive back. The private half is sealed in the store and written
@@ -2751,9 +2827,12 @@ was written by (a server since moved to a newer major cannot start the older clu
 ### The MCP server
 
 An AI client — Claude Code, Cursor, VS Code, anything that speaks the Model Context Protocol over
-Streamable HTTP — reaches the databases through one endpoint, `POST /api/v1/mcp`
-(`api/handlers_mcp.go`, `handlers_mcp_tools.go`; the protocol is `internal/mcp`). It sits outside the
-`/databases` tree, as the metrics export does, because what admits a request there is different.
+Streamable HTTP — reaches the databases, and the deployments if its key was given them, through one
+endpoint, `POST /api/v1/mcp` (`api/handlers_mcp.go`, `handlers_mcp_tools.go`, `handlers_mcp_deploy.go`,
+`handlers_mcp_operations.go`; the protocol is `internal/mcp`). It offers 113 tools in all: the seven
+database tools, the six hand-written deployment tools, and 100 tools generated from the deployment API,
+the last to a key whose owner turned them on for it. It sits outside the `/databases` tree, as the metrics export does,
+because what admits a request there is different.
 
 - **Only an MCP key opens it, and an MCP key opens nothing else.** A key with `scope = 'mcp'` is
   refused by every other group with `403 key_scope`; the endpoint's group authenticates with
@@ -2767,15 +2846,109 @@ Streamable HTTP — reaches the databases through one endpoint, `POST /api/v1/mc
 - **What a key reaches** is `api_token_connections`: one row per connection, `read` or `write`, at
   most 64, read again on every call so a grant taken away answers the next request. A key carries
   its owner's role or a narrower one, and like every key never more than its owner holds now.
-  `POST /tokens/mcp` (session only) makes one from `{name, role?, ttlDays, connections}` — Account →
-  API keys sends the replaced key's role and its databases less those protected or forgotten since;
+  `POST /tokens/mcp` (session only) makes one from `{name, role?, ttlDays, connections, deployments?,
+  deploymentIds?, operations?}` — Account → API keys sends the replaced key's role, its databases less
+  those protected or forgotten since, its deployment grant (narrowed to `read` for a read-only role),
+  the deployments that grant was narrowed to and whether it had the generated tools, so a replacement
+  never reaches more;
   `PUT /tokens/{id}/connections` (session only, the owner's own active MCP key) replaces what it
-  reaches and keeps the secret. Both refuse a protected connection (`409 connection_read_only`), an
+  reaches — its databases, its deployment grant when `deployments` is sent, the deployments it is
+  narrowed to when `deploymentIds` is sent (an empty list is every deployment) and the generated tools
+  when `operations` is sent (each left out is kept) — and keeps the secret. Both refuse a protected connection (`409 connection_read_only`), an
   engine without the `mcp` capability (every SQL engine has it; MongoDB and Redis do not), a missing
-  one, an empty list, and a `write` grant for a key whose role lacks `service.control`. The dialog
+  one, a key that would reach no database and no deployments, a `write` or `deploy` grant for a
+  key whose role lacks `service.control`, and chosen deployments for a key given none of them, or one
+  missing, archived or named twice (`keyDeploymentNames`, as for a deploy key). The dialog
   lets a database protected since be cleared from a key, the one way to save the rest. They are audited as
-  `dashboard.token.create` (with `scope` and the databases by name) and
-  `dashboard.token.connections`. Listing, revoking and deleting are the routes every key has.
+  `dashboard.token.create` (with `scope`, the databases by name and `deployments`) and
+  `dashboard.token.connections`, with `reaches` (`every`, or the chosen deployments by name) beside a
+  deployment grant and `operations`, whether the key has the generated tools. Listing, revoking and deleting are the routes every key has.
+- **The deployments are a grant of their own**, `api_tokens.deploy_access` (additive, default `''`,
+  so every key made before reaches none): `''` none, `read`, or `deploy`. It reaches every deployment,
+  or — like a deploy key — only the ones chosen for it, in `api_token_deployments` (the deploy keys'
+  table, keyed by the key's id; no rows is every deployment, so every key made before reaches them
+  all). Both are read with the key on every request (`ResolveAPIToken` loads the list for an MCP key as
+  for a deploy key), so a deployment taken off the list is refused the next call.
+  The deployment tools (`internal/mcp/deployments.go`, `api/handlers_mcp_deploy.go`) act on each
+  deployment's production environment — the fleet's rows, archived deployments and previews left out —
+  and name a deployment by its name: `list_deployments` (source, build, health, address, live release,
+  pending changes, the run in progress and the last one, and the deployment's and its production
+  environment's ids, `id` and `environmentId`, which the generated tools take), `list_runs` (10, at most
+  50, each run with its `id` beside its number),
+  `read_run_log` (the run, its steps' states and errors, and the last transcript lines — 200, at most
+  1,000, each cut at 1,000 bytes and the whole at 48 KB, newest kept — read from `deploy_log_chunks`
+  as the run page reads them, so the build's secret values are masked as they were written) and
+  `list_releases` (10, at most 30) for a `read` grant; `deploy` and `rollback` for `deploy`. `deploy`
+  queues what the deployment page's Deploy queues — `enqueueNormalizedDeploymentAtSource` (or the
+  legacy Compose path), with `ref` or `revision` as the run route takes them, so the plan checks, the
+  backup gate, `RequireSupportedProject`, the refusal to build a pull request's head into production
+  and the queue's own rules hold — and needs the owner's role to hold `service.control` now.
+  `rollback` queues `OperationRollback` to the release named, or without one the newest retained
+  release older than the live one; it needs `destructive` as the rollback route does and spends
+  `destrLim` under the route's own per-account-and-address key, and refuses a legacy Compose
+  deployment, which rolls back to a commit from its page. A preview's approval, a cancel, a retry and
+  every setting stay in the dashboard. `deploy` and `rollback` are offered in `tools/list` only when
+  they can succeed for the key and its owner's role, and a key that reaches only the deployments is
+  offered no database tool. A key narrowed to chosen deployments finds those alone: the others are
+  not listed, and naming one is answered as a deployment that is not there. Each call is audited as
+  `deploy.mcp.<tool>` with the deployment as target and the run number, release or ref in the detail.
+- **The tools generated from the deployment API** (`api/handlers_mcp_operations.go`, the tool's
+  shape in `mcp/operations.go`) are **each key's to turn on**: `api_tokens.mcp_operations`
+  (`APIToken.Operations`, additive, `0` for every key made before them, `mcp.Offer.Operations`). A key
+  without them is offered exactly the hand-written tools under its grant, its instructions say nothing
+  of the others, and a call to one by name is refused (`operations_off`: "this key's generated tools are
+  off; its owner can turn them on under Databases → MCP server"), so no key gains a tool with an
+  upgrade; the routes take `operations` (left out, a new key has them off), and the dialog makes a new
+  key with them on unless they are unticked. With them on, every route under `/api/v1/deploy` whose
+  line in `deployKeyRoutes`
+  is `keyOpen` or `keyEvery` is a tool named for its operationId in snake case
+  (`deploymentConfigurationSave` is `deployment_configuration_save`), its input schema the route's path
+  and query parameters by name and its JSON body under `body`, with the components the body refers to
+  copied into the schema's own `$defs` so it stands alone; a path parameter's description says which
+  tool lists its value (`id` from `list_deployments`, `env` its `environmentId` or
+  `deployment_environments`, `run` from `list_runs`). The list is read off the router `Routes` built and
+  the OpenAPI description generated from it, once, the first time the endpoint is asked (as the
+  description itself is built), so it cannot drift from the routes: a route given a deploy key line is
+  a tool, and a session-only route or one the table keeps from a deploy key (`keySession`, `keyDeny`)
+  never is. Left out, each with its reason in the catalogue: the six routes a hand-written tool already
+  is (`GET /deploy/` is `list_deployments`, `…/runs` `list_runs`, `…/runs/{run}/transcript`
+  `read_run_log`, `…/environments/{env}/releases` `list_releases`, `POST …/run` `deploy`,
+  `POST …/environments/{env}/rollback` `rollback` — the hand-written one is kept, with its names and
+  bounds), the three WebSocket streams, the four routes whose answer is not JSON (the favicon, the
+  preview frame, the CSV export, the YAML description) and the JSON description itself: 100 tools
+  generated, 113 tools in all. `TestEveryDeployKeyRouteIsAnMCPTool` walks the router and fails when a
+  deploy key route is neither a tool nor left out with a reason, when a route no deploy key reaches is
+  a tool, or when the count differs from `api.MCPGeneratedTools` and the 113 these pages, the README and
+  the deployment implementation notes quote.
+  - **Grants.** A `GET` is offered under `read`; any other method under `deploy` to an owner whose role
+    holds `service.control`; a route behind `s.destructive` (read off its chain by the `markDestructive`
+    marker, the description's `x-destructive`: removing a shared variable, the maintenance switch, the
+    instant rollback, the legacy rollback) under `deploy` to an owner whose role also holds
+    `destructive`. `destructiveHint` is set for those, for every `DELETE`, and for
+    `mcpDestructiveHints`: a run queued from the body (stop and restart are decided there), cancelling
+    a run, aborting a canary, rotating a variable or a trigger's secret. `readOnlyHint` marks the reads
+    and `idempotentHint` `GET`, `PUT` and `DELETE`. A call under the wrong grant is refused before
+    the route is called.
+  - **Through the router, as the key.** A call becomes a request to the route made through the
+    dashboard's own router (`dispatchMCP`): its path built from the pattern with each parameter
+    escaped, the query, the body, the client's resolved address, and the MCP key's principal in its
+    context (`httpx.WithMCPDelegate`) instead of a credential. `AuthenticateFeatures` admits it only
+    through the deploy key gate — the table's line for the route the router's `Find` resolves, the key's
+    chosen deployments and their environments, `keyEvery` for a narrowed key — and marks it `ViaMCP`,
+    which `Principal.DeployKey` reads as a deploy key from there: variables are write-only, a value a
+    route would hand back is withheld, `keyReferenceGuard`, `keySourceGuard`, `hostAuthority` and
+    `keyEnvironmentGuard` hold, a narrowed key's drafts are its own and what it commits is added to its
+    list. Every other group refuses a delegated request, and a context value cannot arrive from the
+    network. The allowlist, the rate limit, the route's capability checks and its own audit entry (under
+    the MCP key's id and name) apply as to any request; the key carries its owner's role, not the deploy
+    key's administrator, so an operator's key is refused what needs `system.admin`.
+  - **Answers.** The route's JSON is the result (a list or a scalar under `items`, since structured
+    content is an object; a `204` as `{status, done}`); past 48 KB the first 48 KB of its text are
+    returned with a note of the whole size. A refusal is the route's own code and message as a result
+    marked `isError`; a failure the dashboard could not answer is named without its text. Each call is
+    audited as `deploy.mcp.<tool>` with the route's path as target and the operationId, the route, the
+    status and the outcome in the detail, beside the route's own entry for a write. A call counts against
+    the key's four in flight.
 - **Both revisions of the protocol.** A 2025 client (`2025-03-26`, `2025-06-18`, `2025-11-25`)
   opens with `initialize` and repeats the version in `MCP-Protocol-Version`; a 2026-07-28 client
   sends no handshake and carries its version in every request's `_meta`, mirrored into
@@ -2784,8 +2957,11 @@ Streamable HTTP — reaches the databases through one endpoint, `POST /api/v1/mc
   answers `GET` and `DELETE` with `405` (no stream for the server to speak first on), and takes a
   notification or a reply with `202`. `server/discover`, `ping`, `tools/list` and `tools/call` are
   the methods; `initialize` is recorded as `database.mcp.connect` with the client's name and
-  version.
-- **The tools** (`mcp.Tools`): `list_connections`, `list_tables`, `describe_schema` (structure only:
+  version. The instructions `initialize` and `server/discover` give (`mcp.Instructions`) describe
+  what the key reaches: the databases, the deployments (with how the generated tools are named and
+  which ids they take), or both. `tools/list` gives the hand-written tools first, in their fixed
+  order, then the generated ones the grant reaches, in the order of their routes.
+- **The database tools** (`mcp.Tools`): `list_connections`, `list_tables`, `describe_schema` (structure only:
   column names and types, nullability, keys and what a foreign key references — no defaults or
   comments, which can be values somebody typed), `sample_rows` (10, at most 50), `explain` (planned,
   never run), `run_query` and `run_write`. `run_query` is offered to an owner whose role may run SQL
@@ -2794,7 +2970,7 @@ Streamable HTTP — reaches the databases through one endpoint, `POST /api/v1/mc
   most 500, 30 seconds). `run_write` is offered only when the key may change some database, runs one
   statement at a time (60 seconds), and passes it through `authoriseSQL`: a destructive statement
   needs `destructive` and spends `destrLim`, as in the SQL editor. Every value is cut at 1,000 bytes
-  and a result at 48 KB. A key has four calls in flight at most. The read-only scope is the
+  and a result at 48 KB. A key has four calls in flight at most, the deployment tools' included. The read-only scope is the
   engine's: on Oracle it is a check of the statement's first word and a rollback, so a function a
   read calls that commits in an autonomous transaction is not stopped there, and the database
   account the connection signs in as is the real limit.
@@ -2815,10 +2991,18 @@ Streamable HTTP — reaches the databases through one endpoint, `POST /api/v1/mc
   `tools/list`, `ping` and discovery are not audited.
 - **The UI** is the *MCP server* dialog of the control center
   (`components/database/fleet/mcp-server-dialog.tsx`, logic in `mcp-server.ts`): the endpoint, the
-  signed-in account's active MCP keys with what each reaches, a form choosing databases (those the
-  server would refuse listed with why) and read or change for each, the key shown once with the
-  configuration for Claude Code, Cursor and VS Code, editing a key's databases and revoking it.
-  Account → API keys lists MCP keys as *MCP only* and replaces one with the same databases.
+  signed-in account's active MCP keys with what each reaches ("reads shop, changes notes, deploys",
+  "deploys 2 deployments" for a narrowed one),
+  a form choosing databases (those the server would refuse listed with why) and read or change for
+  each, None, Read or Deploy for the deployments (Deploy disabled for a role without
+  `service.control` and for a key made read-only) and, for Read or Deploy, which deployments (every
+  one, or those ticked, with the deploy key dialog's own picker) and *Offer every deployment route as
+  a tool* (on for a new key, off for one made before the generated tools, its hint saying what it adds
+  under each grant and that a destructive route needs a role that may take destructive actions), the
+  key shown once with the configuration for
+  Claude Code, Cursor and VS Code, editing what a key reaches (*Edit access*) and revoking it.
+  Account → API keys lists MCP keys as *MCP only* and replaces one with the same databases and
+  deployment grant.
 
 ### Tests
 
@@ -2894,6 +3078,7 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/inventory/connect` | `system.admin` | — | `database.inventory.connect` | — |
 | `POST` | `/databases/inventory/ignore` | `system.admin` | — | `database.inventory.ignore`, `.unignore` | — |
 | `POST` | `/databases/inventory/scan` | `system.admin` | — | — | — |
+| `POST` | `/databases/kernel-mitigation` | `system.admin` + `destructive` | yes | `database.server.kernel_mitigation` | — |
 | `GET` | `/databases/metrics-export` | read | — | — | — |
 | `PUT` | `/databases/metrics-export` | `system.admin` | yes | `database.metrics.retention` | — |
 | `GET` | `/databases/orm/targets` | read | — | — | — |
@@ -2940,6 +3125,7 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/{id}/power` | `service.control` | by content: `stop`, `restart` | `database.power.<action>` | open |
 | `GET` | `/databases/{id}/resources` | read | — | — | — |
 | `PUT` | `/databases/{id}/resources` | `system.admin` | by content: a lifted limit | `database.resources.change` | open |
+| `POST` | `/databases/{id}/kernel-mitigation` | `system.admin` + `destructive` | yes | `database.server.kernel_mitigation` | open |
 | `GET` | `/databases/{id}/schemas` | read | — | — | — |
 | `GET` | `/databases/{id}/stats` | read | — | — | — |
 | `GET` | `/databases/{id}/url` | `system.admin` | — | `database.connection.reveal` † | — |
@@ -3285,7 +3471,9 @@ a retrieval or geospatial schema creates on its first migration, which the offic
 Quick setup leaves out the full template until its image has been built from Add a database.
 Deployment setup preselects one when detection read that extension from the schema. `mongodb` is refused
 before any pull on a CPU without AVX (x86-64) or ARMv8.2 atomics (arm64), where MongoDB 5 and later die
-with an illegal instruction. The URL read also takes `format` and `database`; see [deployment database
+with an illegal instruction, and on Linux 6.19 up to 7.0.13 its 8.0 release is started with
+`GLIBC_TUNABLES=glibc.pthread.rseq=1` (*MongoDB 8 and the kernel*, under the provisioning catalogue).
+The URL read also takes `format` and `database`; see [deployment database
 networks](../deployments/database-networks.md). `/adopt` signs in before it saves, so the caller's retry
 loop is what waits for the engine. It is idempotent by driver, address, database and login user: a
 matching connection gets that row back, and when the container's password differs the row is re-sealed in
@@ -3315,7 +3503,22 @@ provisions five of the templates (PostgreSQL, MySQL, MariaDB, Redis and MongoDB)
 authenticates from separate application containers, replaces each database at a different IP, and
 authenticates from the same client container using its unchanged URL after reconciliation. It verifies
 loopback-only publication, network ownership and cleanup, then removes its own
-containers/volumes/networks.
+containers/volumes/networks, each container with its anonymous volumes. Each image is pulled, and the
+pull timed in the log, before anything is created; the engine then has two minutes from its container
+starting to accept a sign-in, and a failure reports the adopt route's last reply with the container's
+state and last log lines. The MongoDB subtest holds provisioning to *MongoDB 8 and the kernel*: on Linux
+6.19 to 7.0.13 the container must carry the tunable and the label and the reply must say so, and on any
+other kernel none of the three is there. If MongoDB still logs its kernel refusal, the subtest fails at
+once with that line, the kernel and the container's `GLIBC_TUNABLES`, because the mitigation has stopped
+working and waiting cannot help. Then `mongodb-kernel-mitigation` makes a MongoDB 8 server as
+provisioning did before it knew of the kernel (the template's image, environment, port and named
+volume, no tunable). On a kernel MongoDB 8 refuses it restarts for ever; on any other the subtest waits
+for it to start, writes the refusal line a runner logged into its output (as the `mongodb` user, the
+one that may open mongod's descriptors), kills it, and has the dashboard read its kernel as
+`7.0.0-1017-azure`. Either way the inventory must offer the
+mitigation while nothing is connected to it; then it is saved as a connection, the fleet must offer
+it, `POST /databases/{id}/kernel-mitigation` must bring the server up within two minutes on the same
+volume with the tunable, the label and its restart policy, and the fleet must then offer nothing.
 
 ## Proxy
 
@@ -3381,7 +3584,9 @@ containers/volumes/networks.
   `ports_routes.go`): `routes` are the enabled sites whose upstream reaches the TCP socket
   (`SitesForUpstreamPort`, shared with the container routes view: `localhost`, a loopback, `0.0.0.0` or one
   of the host's own addresses at that exact port — `:30000` is not `:3000` — and only the loopback spellings
-  for a loopback socket; a container or other host name never matches), `stream` the nginx stream on an
+  for a loopback socket; a container or other host name never matches; `StreamsForUpstreamPort` reads a
+  stream's upstream and pool the same way, a range forwarded port for port included, for the server
+  map's line from a stream to what holds its port), `stream` the nginx stream on an
   nginx-held socket when nginx includes the stream directory, and `servedSites` the enabled nginx sites
   listening on an nginx-held port. `GET /ports/free?protocol=&address=&from=&count=` (system.admin: it binds
   each candidate for a moment on the address named) finds up to 20 ports with `portalloc.Select`, searching
@@ -3655,6 +3860,23 @@ containers/volumes/networks.
     `log_format` of one name fails the reload, and a `map` variable defined twice is decided by the
     last file read. `ParseSiteSpec` steps over these statements (and whatever is inside their blocks)
     rather than reading a map entry or a geo range as a server directive.
+  - **A variable name is at most 46 characters** (`maxNginxVarLen`). nginx's default
+    `variables_hash_bucket_size 64` takes no longer one on a 64-bit build, and one longer name fails
+    `nginx -t` for the whole configuration ("could not build variables_hash"), so every site stops
+    reloading. `NginxIdent` plus a suffix passed that for a site name with a dot from 21 characters (26 with
+    only WebSockets on), and for every deployment route from environment 10 on (`just-dashboard-env-10.conf` + `_connection` is 47).
+    `RenderNginx` therefore renders once under `NginxIdent` and, only when one of the dashboard's own
+    `$jd_…` variables comes out too long, renders again with every variable and limit zone named from
+    `NginxVarIdent`: the start of the ident and an FNV-32a hash of the whole name, short enough for the
+    longest suffix (`_asset_immutable`). A file that already loads keeps every name it has, so nothing
+    reads as edited by hand after an upgrade. All of a site's variables move together because the
+    readers find a partner by swapping the suffix (`_maint` → `_maint_ip`, a zone's `_req` →
+    `_limit_exempt`); the limit zones move with them because a zone's key is a variable named after it,
+    and nginx refuses a reload that finds a live zone counting by another key. Upstream, cache-zone and
+    `log_format` names are not hashed by length and keep `NginxIdent`. The forward-auth reader takes its
+    variables under either ident. `TestEveryVariableFitsNginxsDefaultHash` renders every variable the
+    form can name for the longest site name, and `TestLiveNginxTakesTheVariablesOfLongNames` passes
+    them and environment 10's route through the real `nginx -t`.
   - **WebSockets use the standard upgrade map**, per site: `map $http_upgrade $jd_<id>_connection
     { default upgrade; '' close; }`, with `Connection $jd_<id>_connection` in each upgrading location.
     It replaces passing the client's `$http_connection` through, whose comment wrongly said a map had
@@ -3861,6 +4083,18 @@ containers/volumes/networks.
   reloads — refused (409 `not_managed`) for a file the form did not write or would drop lines of. Page
   paths are refused unless the site folder resolves directly under `jd-pages` inside the nginx directory
   and the file is not a link.
+  `SiteMaintenance.Switch` is the same maintenance behind a file instead of `On`, which is how a
+  deployment's route carries it: the check is always written, behind `if (-f
+  <pages>/maintenance.on)`, and a request it holds is rewritten to an internal `= /__jd/maintenance`
+  location that returns 503 with the maintenance page as its own `error_page`, so the server's
+  `error_page 503` stays the site's 503 page whichever way the file has it. nginx tests the file on every
+  request, so turning it on or off is the file (`SetDeploymentMaintenance`) and needs no reload. The
+  parser reads the switch back with `On` false (the file decides), `VHost.maintenance` reads the file
+  (a Docker Caddy route's card reads its file inside the ingress the same way),
+  and the access explainer takes no maintenance layer while the file is absent and the site's own
+  judgement, owned by the switch, while it is there. `ReadDeploymentPage`/`WriteDeploymentPage` keep a
+  deployment's pages the same way under its route's name, or in the Docker Caddy ingress
+  ([implementation](../deployments/implementation.md), [Caddy ingress](../deployments/caddy-ingress.md#maintenance-and-error-pages)).
 
   **Limits** (`sites_limits.go`, form section "Limits", a per-path override under the extra paths).
   `SiteSpec.Limits{Request{Rate, Burst, NoDelay, Key}, ConnPerIP, ExemptFrom, DryRun}` and
@@ -3967,7 +4201,8 @@ containers/volumes/networks.
   and Permissions-Policy are kept as parts (keywords unquoted: `self`, `none`, `nonce-…`), so the stored
   scalars never carry `;` or quotes; the renderer adds them. Custom response headers may not name one a
   control writes (X-Frame-Options, CSP, Permissions-Policy, HSTS, `Access-Control-*`, and whatever the
-  security-headers switch or caches send). All response headers go through `renderHeaders`, so the
+  security-headers switch or caches send; a deployment route's refusal of `Strict-Transport-Security`
+  names its own HSTS control under Access and headers instead). All response headers go through `renderHeaders`, so the
   maintenance page's location repeats them. CORS (not on redirects): an http-level
   `map $http_origin $jd_<id>_cors` (exact origins → `$http_origin`, else empty, so no ACAO is sent) or a
   literal `*` (refused with credentials), a `map "$request_method:$http_access_control_request_method"
@@ -4014,7 +4249,21 @@ containers/volumes/networks.
   401s would redirect), and with a custom `Remote-User`/`Remote-Email` request header. The provider
   round-trips through the `# Single sign-on through <provider>.` comment. Session cookies the auth
   server sets on the check response are not relayed, so the sign-in portal must set its own.
+  The provider, check-address and sign-in-page rules are exported (`ValidForwardAuthProvider`,
+  `ValidateForwardAuthCheck`, `ValidateForwardAuthSignIn`) because a deployment route's sign-in
+  (`DeploymentRoute.ForwardAuth`) is held to the same ones; on nginx that route is this site
+  feature on every path, and on the Docker Caddy ingress it is the equivalent `forward_auth`
+  ([Caddy ingress](../deployments/caddy-ingress.md#sign-in)). The form's four presets live in
+  `frontend/src/lib/sso-providers.ts`, shared with the deployment Domains settings.
 
+  **Plain-HTTP names on a TLS site** (`sites_tls.go`). `PlainDomains` are names among `Domains` served
+  over plain HTTP alone — a server of their own on port 80 after the site's own, with no certificate,
+  redirect or HSTS, each marked `# Plain HTTP: <name> is served without TLS.` — and `HostRedirect.Plain`
+  a redirecting name answering on port 80 alone, marked `… over plain HTTP`; a redirecting HTTPS name
+  on a site whose served names are all plain is marked `… over HTTPS`, from which the parser reads the
+  site's TLS, and its certificate and HTTP/2 from that skipped server. `validPlainDomains` refuses a
+  plain name the site does not have, or any on a site without TLS. A deployment route's domains each
+  choose their scheme ([deployments](../deployments/implementation.md)); the form does not offer it.
   **HSTS and TLS versions** (`sites_tls.go`, form "Encryption"). `HSTSMaxAge` (0 = 15552000, else
   300..63072000), `HSTSOwnNameOnly` (drops `includeSubDomains`) and `HSTSPreload` (refused below a year
   or without subdomains; the form asks for the first domain typed) build the one
@@ -4032,7 +4281,11 @@ containers/volumes/networks.
   other form marked `# Canonical host (<mode>): …` that the parser skips whole; it listens on 80 (and
   443 with the site's certificate when TLS), keeps the ACME path, and 301s to the site's name; a name
   that is already a domain is refused, and a TLS site gets a warning that the certificate must cover
-  the other names. Static sites gain `Autoindex` (warned), `GzipStatic` and `IndexFiles` (also PHP;
+  the other names. `HostRedirects` (`from`, `to`, `code`, at most 16) name redirecting servers outright
+  rather than deriving them: each `from` is a name the site does not serve, sent to one it does, with
+  308 when `code` is 0, in a server marked `# Host redirect (<code>): <from> is sent to <to>.` that
+  keeps the ACME path. The marker carries the whole redirect, so the parser skips the server and still
+  reads it back. Deployment routes use it for a plan's redirecting domains. Static sites gain `Autoindex` (warned), `GzipStatic` and `IndexFiles` (also PHP;
   empty = the kind's order, a default read back as empty). Kind `php` needs `Root` and `PHPSocket`
   and renders `location ~ \.php$ { try_files $uri =404; include fastcgi_params; fastcgi_param
   SCRIPT_FILENAME …; fastcgi_pass unix:<socket>; }` plus `location ~ /\.ht { deny all; }`, with
@@ -4368,6 +4621,16 @@ containers/volumes/networks.
   cron jobs renew these certificates, their environment must set the same two variables. Saving a
   dashboard credential does not reconfigure an external timer; an IAM-role-only installation can leave
   the credential form empty.
+  Deployment runs use the same saved files for a plan that serves a wildcard
+  (`deployment_certificate_dns.go`, see the deployments [implementation guide](../deployments/implementation.md)):
+  each provider carries a pattern for the nameservers it gives a zone it hosts, the run walks up from the
+  wildcard's base to the zone's NS records and uses the provider they name, failing that the single
+  provider with saved credentials and an installed plugin, and otherwise refuses with what to save here.
+  It passes `dnsIssueArgs`'s argv — the file's path, never its contents — through the page's certbot
+  runtime, so the lineage renews like one issued here; an IAM-role-only Route 53 (no saved file) is not
+  chosen. `DeploymentDNSProvider` answers the same question without ordering, for preflight and the
+  deployment Domains sheet. Removing a provider's credentials also stops runs issuing wildcards in its
+  zones; the next one is refused, naming this page.
   Site-validation rollback restores a replaced `sites-enabled` symlink to its exact previous target.
 - **Raw configuration edits carry a content revision** (`config_checked.go`). `GET /proxy/config`
   returns `content` and its SHA-256 `revision` under the proxy writer lock, so it cannot expose
@@ -4834,6 +5097,21 @@ containers/volumes/networks.
   of Edit, Disable, Duplicate and Delete, opens it read-only (its card and a `?site=` link alike), and
   keeps Edit anyway behind a confirmation; an archived owner's route is the operator's again. The backend does not refuse
   those verbs on a route, since deployments call proxysvc directly and an administrator may override.
+  A deployment route nothing deploys any more — no owner (its project deleted) or an archived one — and
+  that Delete does not apply to (every Docker Caddy route, which has no host file) has **Remove route**,
+  on its card and its page: `DELETE /proxy/vhosts/{name}/deployment-route` (system.admin, destructive,
+  audited as `proxy.deployment_route.remove`) accepts only a name `deploy.RouteNameFor` spells, answers
+  409 `deployment_active` while an unarchived environment still owns it, and runs
+  `proxysvc.RetireDeploymentRoute`: `RemoveDeploymentRoute`'s snapshot/restore removal, then on the
+  Docker ingress `rm -rf <caddy certificates>/*/<name>` for each plain domain (checked against
+  `certDomainRe`; wildcards are left) that only that route served, since Caddy goes on renewing and the
+  Certificates page goes on listing a certificate it holds whether or not a route asks for it. A
+  certificate it could not remove is reported as `certificateError` beside a removal that succeeded.
+  Without this a route outlived its project, serving its domain, with nothing on any page to remove it.
+  The overview draws such a route's application as its owner when no socket names its upstream — a
+  deployment's container is dialled at its network address (`10.0.0.3:3000`), which no listener holds —
+  so the route list, the route map and the traffic band carry the project's name and website icon
+  (`ownedBackend`, `route-map.ts`), as the Sites cards already did.
   listing and `SetVHostEnabled`) reads sites-available where it exists and conf.d where it does not
   (every RPM distro, Alpine, Arch — most of the servers this runs on); the difference reaches the UI as an
   empty `EnabledPath`, because conf.d has no symlink and a switch that can only error is worse than none. `confdPath` stops `app.conf` becoming `app.conf.conf`, and `ReadSiteSpec` reads the listing's `app.conf` back as a spec called `app`, the name a save writes to — the spec kept `.conf` once, and the next save renamed the site's logs to `app.conf.access.log`. The listing
@@ -5055,7 +5333,9 @@ containers/volumes/networks.
     duplicates; route upstreams go through `validStreamUpstream`. `StreamModule.Preread` reads
     `--with-stream_ssl_preread_module`, and `ApplyStream` refuses routes with `ErrNoStreamPreread` (409
     `stream_preread_missing`). The parser reads the map, the route blocks and `ssl_preread` back and names
-    any other shape. A site already on the port (443) is refused by the port check like any other holder.
+    any other shape. The stream module's variables hash has the same 46-character limit, so a stream
+    whose `<ident>_sni` would pass it names the variable from `NginxVarIdent`; the parser takes either
+    spelling. A site already on the port (443) is refused by the port check like any other holder.
     The upstream Test dials the pool only, not the routes' backends. Audited as `routes` in `proxy.stream.apply`.
   - **Listen options** (`stream_listen.go`). `ListenEnd` makes `listen <first>-<last>` (at most 100 ports;
     `streamBinds`, `freePort`, the session list and `configClaims` via `listenBinds` all cover every port of a
@@ -5274,7 +5554,8 @@ containers/volumes/networks.
   signed) adds `--force-renewal`, unless the configured directory is itself a staging one; with
   `JD_ACME_DIRECTORY` both name `--server`, except Let's Encrypt's production directory, which is
   certbot's default and is left unnamed (certbot swaps a `--dry-run` to staging only when the server
-  is its default spelled exactly). The page offers that
+  is its default spelled exactly); a deployment run's own orders, over HTTP-01 and DNS-01, name it the
+  same way and check for an account under it (`deployments/implementation.md`). The page offers that
   issuance on a test lineage in place of Renew, since certbot renews from the authority the lineage's
   configuration names. Such a job is titled "Replacing the test certificate for …", audited with
   `replacesTestCertificate`, reloads nginx for the enabled sites naming the certificate (see
@@ -5601,7 +5882,11 @@ containers/volumes/networks.
   apply); behind `destructive`: `PUT /proxy/alerts/rules/{id}` (can pause; new terms or a pause clear the
   rule's state except mutes), `DELETE /proxy/alerts/rules/{id}`, `PUT /proxy/alerts/mutes {ruleId, subject,
   muted}`. The ordinary watched-check schedule still records a handshake and certificate; only an
-  enabled grade rule runs the full grader. The operator chooses the minimum expected grade.
+  enabled grade rule runs the full grader. The operator chooses the minimum expected grade. The
+  rules are read and edited on their own page, `/proxy/alerts` (`components/proxy/alerts-page.tsx`,
+  with the parts that do not know its kinds in `components/alerts/alert-parts.tsx`, which the host's
+  Alerts page shares), and the overview's identity bar links there with the firing count from the same
+  `GET /proxy/alerts`.
   `TestProxyAlertsRequireAdminAndTellEachTransitionOnce` covers the API gate, audit, firing, unreadable
   source, and recovery; `TestProxyAlertReadingsForRenewalAndServedCertificates` covers the two additional
   readings; `TestProxyAlertsCheckCurrentPinnedWatchEndpoints` and
@@ -5633,9 +5918,31 @@ running and the transcript complete.
 
 - `Manager.Start(spec, run)` returns immediately; the API answers `202`. `StartExclusive(prefix, …)`
   starts nothing while a job of that kind family runs and returns that job instead, checked and started
-  under one lock. `Emitter` gives runners `Status`, `Line`, `Run`/`RunEnv` through
+  under one lock. The `certbot.` family also takes certbot's turn (`proxysvc.HoldCertbot`, wrapped
+  around every runner by `api.startCertbotJob`): a job that finds a deployment run ordering a
+  certificate starts as before and waits in its own console, naming the run, as the run's certificate
+  step waits for a job — one certbot across the dashboard, with certbot's own lock left to arbitrate
+  only against what the dashboard does not run (see the certificate step in
+  [`deployments/implementation.md`](../deployments/implementation.md)). `Emitter` gives runners `Status`, `Line`, `Run`/`RunEnv` through
   `hostexec.CommandOnHost`, and `RunCmd` for a command the caller built on the side it chose. A slow subscriber is skipped rather than allowed to stall
   the command — the buffer is the record, the channel only the tail.
+- **`RunDetached` is for work that must finish even if the dashboard does not** — today every package
+  install, upgrade and removal (`api.runPackageCommand`). A child of the backend lives in its container's
+  cgroup and dies when the container stops, and an apt upgrade that configures docker-ce stops it:
+  dpkg was killed mid-configure and every later apt command refused with "dpkg was interrupted". So the
+  command runs as a transient host unit, `just-dashboard-job-<id>.service`, via `systemd-run` with stdout
+  and stderr written to `<data dir>/jobs/<id>.out|.err` rather than to a pipe (a dead reader would kill
+  the writer with SIGPIPE). Every argument's `$` is doubled, because systemd expands `$VAR` and `${VAR}` in
+  a unit's command line and `$$` is its literal dollar. The job tails the files every 200 ms and asks `systemctl show` once a second;
+  cancelling or the timeout runs `systemctl stop` and still waits for the unit to end. A `<id>.json`
+  record (job, shown argv, deadline, boot id) written after the unit starts lets `Manager.Adopt`, called
+  at startup, re-register the job under the same id — the watching console reconnects to it — and follow
+  the unit to its end, or replay a unit that finished while nothing watched. Failed units stay loaded
+  until their code is read and `reset-failed`; a successful one is collected by systemd and reads as
+  success. A different boot id means the server rebooted under the command, which is reported as a
+  failure. Without root, a host systemd or the data directory at the same path on the host, the
+  command runs as a child exactly as `RunEnv` would, and a failed `systemd-run` says so in the console.
+  `JD_DETACHED_JOBS_LIVE=1` (as root) runs `detached_live_test.go` against the real host systemd.
 - Bounded: 5000 lines a job, 64 KB a line, 50 jobs. `prune` runs on finish as well as on start, or a burst
   ending after the last `Start` sits over the cap until something else happens, which on an idle dashboard
   is never. A running job is never pruned.
@@ -5672,6 +5979,10 @@ collects *every* malformed setting so `Load` refuses with the whole list rather 
 `JD_BOOTSTRAP_USER`/`JD_BOOTSTRAP_PASSWORD` are read in `cmd/server/main.go`, and `JD_SITE` belongs to
 `deploy/Caddyfile`. Wherever a variable is read, its documentation lives in four places that must stay in
 step: **the reading site, `.env.example`, `docker-compose.yml`, and the README's configuration table.**
+`JD_ACCOUNT_URL` and `JD_ACCOUNT_LINK` follow it: `config.go` reads both (the URL through
+`accountlink.ParseSiteURL`, so a malformed one refuses to start) and [account link](account-link.md) says what
+they decide. `JD_USAGE_PING` follows it too, and [the usage count](usage-ping.md) says what it decides. An install
+that is never linked, and whose administrators never said yes to the count, sends the site nothing.
 
 ### Cutting a release
 
@@ -5756,7 +6067,20 @@ done by hand, and the UI refuses to fold it away.
   as root, so afterwards the updater hands back to the checkout's owner everything root-owned in `.git`
   and each file the update changed with the folders above it (`handBack`, through `hostexec.GiveBack`).
   Until 0.7.1 an update's new folders stayed root's, and the operator's own next pull stopped halfway in
-  them. And it **waits
+  them. A checkout cloned with sudo has no owner but root for `handBack` to return to, so at every start
+  the backend gives the checkout's root-owned entries to the owner of the directory holding it
+  (`Service.adoptCheckout`, through `hostexec.Adopt`), when that is not root: whoever owns `/home/ubuntu`
+  can already replace `/home/ubuntu/Just-Dashboard` with a tree of their own, so this grants nothing, and
+  a checkout in `/opt` or `/srv` stays root's. Without it that account's git refused the repository as
+  of dubious ownership, `git worktree add` with it, and agents cloned beside it instead — a clone the
+  Git page rightly lists as a second repository. A walk that changed anything then calls
+  `Options.Adopted`, which the API uses to carry root's GitHub login to the new owner
+  (`ghx.CarryLogin`; see [GitHub sign-in](processes-terminal-github.md#github-sign-in)). The walk never follows a link (directories opened
+  `O_NOFOLLOW` relative to their parent, everything else `O_PATH` and re-checked on the descriptor),
+  hands a directory over only after its contents, and leaves alone another account's files, a file with
+  more than one link, anything only its owner can read (the installer's `.env`) and other filesystems.
+  It runs under the lifecycle lock and skips a start with an upgrade, reconfiguration or uninstall in
+  flight; the restart after it settles the tree. And it **waits
   for the health URL to answer** before calling itself finished, since `compose up -d` returns as soon as
   containers start and a backend that starts then dies looks identical from there.
 - **The transcript is read two ways.** The report carries `Store.Tail()` — the last 64 KB, with a

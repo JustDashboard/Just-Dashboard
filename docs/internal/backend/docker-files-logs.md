@@ -168,6 +168,14 @@ start. Cleanup removes only objects carrying its run's label and verifies none r
   it reads the buffered past, so an event recorded between the two is sent rather than lost — one
   recorded in that instant arrives twice, and every reader drops the copy. `Event.Service` is the compose
   service (`db`, where the event's name is `shop-db-1`), which is what a stack's log calls a container.
+  `Covers(t)` says whether the ring still holds everything since `t` — followed since before it and
+  nothing that old overwritten — which is when a kill missing from it is evidence; the host alerts'
+  `container_down` reads it, with `exit.go`'s `LastExit` (one inspect of a stopped container for its
+  start, finish, exit code and OOM verdict), to tell a crash from a stop
+  ([Host alerts](observability-security.md#host-alerts-told-when-the-machine-itself-goes-wrong)).
+  `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveLastExitAndEventsTellACrashFromAStop -count=1 -v`
+  asks a real daemon: a container that exits 3 on its own has no kill in the log, one `docker stop`
+  ended has one, and the log covers the window it followed.
   `Event.Container` is the container a network's `connect` or `disconnect` moved, by id — Docker puts
   nothing else of it in the event, so the Networks page names it from the container listing.
 - **A container's and a stack's output are log sources**, `docker:<id>` and `stack:<project>` on the
@@ -320,6 +328,15 @@ it creates or changes no containers.
 
 ## Files
 
+**The Files page sees the server, not this container.** Its handlers use `modules.hostFiles`, whose
+every operation runs in the host's mount namespace through `hostexec.InHostMounts` (see
+[runtime boundaries](../architecture/runtime-boundaries.md#reaching-the-host-and-containing-paths)),
+so a path outside the directories `docker-compose.yml` mirrors — `/tmp/claude-1000`, `/var/lib/apt`,
+`/usr/sbin` — opens what the terminal shows instead of answering "not found" from the image's own
+tree. When the namespace cannot be entered the page falls back to the container's view and the backend
+logs one warning. `mounts_test.go` checks the namespace under `--privileged --pid=host`; outside that it
+skips.
+
 Owner and group names are memoised only within a listing or completion request. The next request
 performs NSS lookups again, so account renames and reused IDs are not hidden until backend restart.
 User and group IDs have separate maps, and numeric IDs remain the filesystem identity.
@@ -338,7 +355,18 @@ basename. A copy error leaves an existing regular destination intact.
 the a.txt already there. `Move` also refuses a directory into its own subtree with a sentence rather
 than rename's EINVAL, and treats a move onto itself as a no-op. `Touch` and `Mkdir` are the "New file"
 and "New folder" verbs and refuse an existing path the same way (`Mkdir` still creates missing
-parents). Uploads go through `Upload`, which writes to a temporary sibling and publishes it atomically:
+parents).
+
+**A new entry belongs to the folder's owner.** The backend is root, so a folder or file made by
+`Mkdir`, `Touch`, `Write`, `Upload`, `Copy` or `Extract` in a folder another account owns is handed to
+that account (`files/owner.go`) — what the verb typed in that account's shell would have left. Without
+it a folder made in `/home/ubuntu/app` was root's: its owner could not write into it, and the Git page,
+which runs git as the checkout's owner, could neither clean nor pull into it. A folder root owns keeps
+getting root's entries, a replaced file keeps its own owner, and a symbolic link stays root's. A single
+new file is changed through its own descriptor before it is published; the folders and files of a
+`Mkdir`, `Copy` or `Extract` are recorded as they are created (not ones they replace or merge into) and
+handed over afterwards through `hostexec.GiveBack`, deepest first, so each folder stays closed to its
+owner until what is in it has been changed. `owner_test.go` checks every verb under `sudo go test`. Uploads go through `Upload`, which writes to a temporary sibling and publishes it atomically:
 without overwrite, a no-replace rename (or a hard link where unsupported) claims the destination only
 if it is still free after the transfer; with overwrite, a rename replaces it. An interrupted transfer
 never leaves a truncated file. An existing file keeps its owner and mode across the replacement
@@ -515,6 +543,21 @@ toggles the active item. Name typing jumps through entries, repeated letters cyc
 tile arrows follow the actual rendered columns. Escape clears the selection/active item before
 canceling the internal clipboard. The footer's Files shortcuts control (also `?`) opens
 `shortcuts-dialog.tsx`. New keyboard mutation paths invoke the existing guarded operations.
+
+Ctrl/Cmd+C, X and V reach the system clipboard (`os-clipboard.ts`). The keydown handler does not
+`preventDefault` them; it marks the shortcut as pending, and the `copy`, `cut` or `paste` event it
+causes takes that mark, so only a shortcut the listing owns touches the clipboard and a field keeps its
+own text paste. Copy and cut write the paths as `text/plain` (one per line, for a terminal or editor on
+the desktop) and as `application/x-just-dashboard-files` JSON, so another dashboard tab can paste them.
+A paste is decided by the system clipboard, the newest thing copied: our format pastes those paths
+through the guarded copy/move; files (desktop files, a copied picture, a screenshot) upload into the
+current folder through the normal upload review; other text uploads as `Pasted text <time>.txt`. A
+screenshot's generic `image.png` is renamed `Pasted image <time>.png`. A copied folder cannot be read
+from a paste event and is reported rather than uploaded empty; so is a clipboard holding only
+`file://` locations without the files, which are never turned into a text file. Chromium reads a file
+manager's copied files (`text/uri-list`) as real files on Linux as well as Windows and macOS. The browser cannot place a server file on
+the desktop as a file, so copying out of the dashboard gives paths, not contents. A browser that sends no
+clipboard event falls back on a zero-delay timer to the in-memory clipboard.
 
 `file-icon.tsx` is the vocabulary (~200 extensions, the files with none — Dockerfile, authorized_keys,
 lockfiles — and ~90 folders whose name says what they hold) and draws it itself rather than from an icon

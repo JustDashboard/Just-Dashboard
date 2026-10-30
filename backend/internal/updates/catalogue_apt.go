@@ -285,7 +285,7 @@ func (aptManager) InstallCommand(names []string) (string, []string, []string) {
 	// the software the distribution considers part of it is a package that
 	// does not work, and "it works when I install it from a shell" is the
 	// worst thing a panel like this can be true of.
-	args := append([]string{"install", "-y", "-o", "Dpkg::Options::=--force-confold"}, names...)
+	args := append(append([]string{"install", "-y", "-o", "Dpkg::Options::=--force-confold"}, aptLockWait...), names...)
 	return "apt-get", args, []string{
 		"DEBIAN_FRONTEND=noninteractive", "LC_ALL=C", "NEEDRESTART_MODE=a",
 	}
@@ -299,7 +299,7 @@ func (aptManager) RemoveCommand(names []string, purge bool) (string, []string, [
 	// --auto-remove takes the dependencies that were only there for this with
 	// it, which is what an operator means by "remove" and what leaving them
 	// behind makes them come back and ask about.
-	args := append([]string{verb, "-y", "--auto-remove"}, names...)
+	args := append(append([]string{verb, "-y", "--auto-remove"}, aptLockWait...), names...)
 	return "apt-get", args, []string{
 		"DEBIAN_FRONTEND=noninteractive", "LC_ALL=C", "NEEDRESTART_MODE=a",
 	}

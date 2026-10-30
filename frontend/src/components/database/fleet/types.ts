@@ -1,4 +1,4 @@
-import type { DbDriver, DbEndOfLife, DbFlavor, Job } from "@/lib/types"
+import type { DbDriver, DbEndOfLife, DbFlavor, DbKernelProblem, Job } from "@/lib/types"
 
 /**
  * What the server says about the machine's databases beyond the saved
@@ -54,7 +54,7 @@ export type DbInstanceHost = {
 }
 
 export type DbFileHolder =
-  "self" | "container" | "deployment" | "compose" | "application" | "tool" | "system"
+  "self" | "container" | "deployment" | "compose" | "application" | "backup" | "tool" | "system"
 
 export type DbInstanceFile = {
   /** A host path; for an embedded file, the path inside its container. */
@@ -128,6 +128,11 @@ export type DbInventory = {
   /** `full` for an administrator, `reduced` for every other role. */
   detail: "full" | "reduced"
   checkedAt: string
+  /**
+   * By instance key, a MongoDB 8 container found here and not connected that
+   * cannot start on this kernel as it is. An administrator's reading only.
+   */
+  kernelProblems?: Record<string, DbKernelProblem>
 }
 
 export type DbInventoryConnectRequest = {

@@ -37,12 +37,19 @@ if args == ["--version"]:
     print("Docker version 29.8.1")
     sys.exit(0)
 entry = {"args": args, "cwd": os.getcwd()}
-if "--admin" in args and any(x in args for x in ["create-user", "reset-password"]):
+admin_link = "--admin" in args and any(x in args for x in ["link", "unlink", "link-status"])
+if "--admin" in args and any(x in args for x in ["create-user", "reset-password"]) or admin_link:
     entry["stdin"] = sys.stdin.read()
 with pathlib.Path(os.environ["TEST_CALLS"]).open("a") as calls:
     calls.write(json.dumps(entry) + "\\n")
+if admin_link:
+    if os.environ.get("TEST_LINK_OUTPUT"):
+        print(os.environ["TEST_LINK_OUTPUT"])
+    sys.exit(int(os.environ.get("TEST_ADMIN_EXIT", "0")))
 if args == ["compose", "build"]:
     sys.exit(int(os.environ.get("TEST_BUILD_FAIL", "0")))
+if args[:4] == ["run", "--rm", "--entrypoint", "cat"]:
+    sys.stdout.write(os.environ.get("TEST_JD_BINARY", ""))
 ''')
         # Sourcing this as shell code would execute the marker command.
         (self.root / ".env").write_text('JD_MASTER_KEY=fixture\nUNTRUSTED=$(touch sourced-env)\n')
@@ -144,16 +151,16 @@ if args == ["compose", "build"]:
                 process.kill()
                 process.wait()
 
-    def run_installer(self, build_fail=False, env_file=True, answers="\n"):
+    def run_installer(self, build_fail=False, env_file=True, answers="\n", args=(), env=None, env_body=None):
         script = (REPO / "install.sh").read_text()
         # Every writable absolute host path is confined to this disposable fixture.
-        for prefix in ("/var/lib/", "/var/backups/", "/tmp/just-dashboard"):
+        for prefix in ("/var/lib/", "/var/backups/", "/tmp/just-dashboard", "/usr/local/bin/jd"):
             script = script.replace(prefix, str(pathlib.Path(self.temp.name) / "host") + prefix)
         installer = self.root / "install.sh"
         installer.write_text(script)
         installer.chmod(0o755)
         (self.root / "docker-compose.yml").write_text("services: {}\n")
-        self.env_body = """JD_MASTER_KEY=fixture
+        self.env_body = env_body or """JD_MASTER_KEY=fixture
 JD_SITE=localhost
 JD_BIND=
 JD_TLS=off
@@ -168,16 +175,16 @@ JD_FRONTEND_PORT=42002
         else:
             (self.root / ".env").unlink(missing_ok=True)
         version_dir = self.root / "backend/internal/version"
-        version_dir.mkdir(parents=True)
+        version_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO / "backend/internal/version/version.go", version_dir / "version.go")
         (self.scripts / "install-dependencies.sh").write_text("jd_install_dependencies() { :; }\njd_install_host_tools() { :; }\n")
         self.tool("curl", '#!/bin/bash\n[[ "${@: -1}" == https://api.ipify.org ]] && echo TEST_SERVER\nexit 0\n')
         self.tool("dpkg", '#!/bin/bash\nexit 0\n')
         self.tool("chown", '#!/bin/bash\nexit 0\n')
         self.tool("logname", '#!/bin/bash\necho operator\n')
-        (pathlib.Path(self.temp.name) / "host/tmp").mkdir(parents=True)
-        return subprocess.run([str(installer)], input=answers, capture_output=True, text=True,
-                              cwd=self.temp.name, env={**self.env, "TEST_BUILD_FAIL": "1" if build_fail else "0"})
+        (pathlib.Path(self.temp.name) / "host/tmp").mkdir(parents=True, exist_ok=True)
+        return subprocess.run([str(installer), *args], input=answers, capture_output=True, text=True,
+                              cwd=self.temp.name, env={**self.env, "TEST_BUILD_FAIL": "1" if build_fail else "0", **(env or {})})
 
     def test_installer_completion_shows_stages_access_and_terminal_commands(self):
         result = self.run_installer()
@@ -191,6 +198,53 @@ JD_FRONTEND_PORT=42002
         self.assertNotIn("\x1b", result.stdout)
         self.assertIn("./scripts/manage.sh restart", result.stdout)
         self.assertNotIn("compose restart", result.stdout)
+
+    def test_installer_installs_jd_from_the_built_image_and_says_how_to_use_it(self):
+        fake_jd = "#!/bin/sh\necho jd 0.8.2\n"
+        result = self.run_installer(env={"TEST_JD_BINARY": fake_jd})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        installed = pathlib.Path(self.temp.name) / "host/usr/local/bin/jd"
+        self.assertEqual(installed.read_text(), fake_jd)
+        self.assertEqual(installed.stat().st_mode & 0o777, 0o755)
+        # The fixture moves every host path under its own directory, so the
+        # message names the moved one.
+        self.assertIn(f"jd is at {installed}", result.stdout)
+        self.assertIn("jd login", result.stdout)
+        self.assertIn(["run", "--rm", "--entrypoint", "cat", "just-dashboard-backend:latest"],
+                      [call["args"][:5] for call in self.read_calls()])
+
+    def test_installer_finishes_when_the_image_has_no_jd(self):
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("jd was not installed; sudo ./scripts/manage.sh install-cli tries again", result.stdout)
+        self.assertFalse((pathlib.Path(self.temp.name) / "host/usr/local/bin/jd").exists())
+        self.assertIn("Setup complete", result.stdout)
+
+    def test_install_cli_copies_jd_out_of_the_image(self):
+        target = pathlib.Path(self.temp.name) / "bin-target" / "jd"
+        target.parent.mkdir()
+        fake_jd = "#!/bin/sh\necho jd 0.8.2\n"
+        result = self.run_tool("manage.sh", "install-cli", env={"JD_CLI_PATH": str(target), "TEST_JD_BINARY": fake_jd})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(target.read_text(), fake_jd)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o755)
+        self.assertIn(f"Installed {target}: jd 0.8.2", result.stdout)
+        self.assertEqual(self.read_calls()[-1]["args"],
+                         ["run", "--rm", "--entrypoint", "cat", "just-dashboard-backend:latest", "/usr/local/bin/jd"])
+        self.assertEqual([p.name for p in target.parent.iterdir()], ["jd"])
+
+    def test_install_cli_refuses_an_image_without_jd_and_leaves_nothing(self):
+        target = pathlib.Path(self.temp.name) / "bin-target" / "jd"
+        target.parent.mkdir()
+        result = self.run_tool("manage.sh", "install-cli", env={"JD_CLI_PATH": str(target)})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("The backend image has no jd", result.stderr)
+        self.assertEqual(list(target.parent.iterdir()), [])
+        result = self.run_tool("manage.sh", "install-cli", "extra")
+        self.assertNotEqual(result.returncode, 0)
+        result = self.run_tool("manage.sh", "install-cli", env={"TEST_UID": "1000", "JD_CLI_PATH": str(target)})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("sudo", result.stderr)
 
     def test_installer_restores_the_env_a_kept_uninstall_left(self):
         kept = pathlib.Path(self.temp.name) / "host/var/lib/just-dashboard/install.env"
@@ -238,6 +292,205 @@ JD_FRONTEND_PORT=42002
         result = self.run_installer(build_fail=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("Setup complete", result.stdout)
+
+
+    # ---- linking to a just-dashboard.com account -------------------------------
+
+    def test_link_commands_forward_to_the_admin_cli_with_the_scope(self):
+        for args, expected in (
+                (("link",), ["--admin", "link", "--scope", "observe"]),
+                (("link", "operate"), ["--admin", "link", "--scope", "operate"]),
+                (("link", "maintain"), ["--admin", "link", "--scope", "maintain"]),
+                (("unlink",), ["--admin", "unlink"]),
+                (("link-status",), ["--admin", "link-status"])):
+            result = self.run_tool("manage.sh", *args)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            call = self.read_calls()[-1]
+            self.assertEqual(call["args"], ["compose", "run", "--rm", "--no-deps", "-T", "backend", *expected])
+            self.assertEqual(call["cwd"], str(self.root))
+
+    def test_link_keeps_the_commands_exit_status_so_a_decline_is_not_a_failure_to_run(self):
+        for code in (2, 1):
+            result = self.run_tool("manage.sh", "link", env={"TEST_ADMIN_EXIT": str(code)})
+            self.assertEqual(result.returncode, code, result.stderr)
+
+    def test_link_arguments_are_validated_before_docker_and_root_is_needed(self):
+        for args in (("link", "root"), ("link", "OBSERVE"), ("link", "observe", "extra"), ("link", "--scope", "observe"),
+                     ("unlink", "now"), ("link-status", "-v")):
+            result = self.run_tool("manage.sh", *args)
+            self.assertNotEqual(result.returncode, 0, args)
+        result = self.run_tool("manage.sh", "link", env={"TEST_UID": "1000"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("sudo", result.stderr)
+        self.assertEqual(self.read_calls(), [])
+
+    def test_help_lists_the_linking_commands(self):
+        result = self.run_tool("manage.sh", "--help", env={"TEST_UID": "1000"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for text in ("link [SCOPE]", "unlink", "link-status", "observe (default), operate or", "JD_ACCOUNT_LINK=false"):
+            self.assertIn(text, result.stdout)
+
+    # The installer's own prompts are read from a pipe, where bash does not
+    # print them, so these tests prove what was asked by what the answers did.
+    #
+    # Fresh install answers, in order: how to reach it (2, the tunnel, so no
+    # Tailscale is touched), the username, a generated password, the web
+    # terminal, two-factor, then the question under test.
+    FRESH = "2\n\ny\nn\nn\n"
+    LINKED = 'To link this server, open   https://just-dashboard.com/link\nand enter the code          ABCD-2345\nLinked to ion@example.com as "box" (observe).'
+
+    def link_calls(self):
+        return [c for c in self.read_calls() if "--admin" in c["args"]]
+
+    def test_installer_does_not_link_unless_told_to_and_says_how_to_later(self):
+        for answers in (self.FRESH + "n\n", self.FRESH, self.FRESH + "\n"):
+            with self.subTest(answers=answers):
+                self.calls.unlink(missing_ok=True)
+                result = self.run_installer(env_file=False, answers=answers)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.link_calls(), [])
+                self.assertIn("Setup complete", result.stdout)
+                self.assertIn("Not linked. Later: sudo ./scripts/manage.sh link, or Settings → Connect", result.stdout)
+                self.assertNotIn("Linking to just-dashboard.com", result.stdout)
+                for line in ("manage.sh link [scope]", "manage.sh unlink", "manage.sh link-status"):
+                    self.assertIn(line, result.stdout)
+
+    def test_installer_links_after_the_health_check_and_reports_the_owner(self):
+        result = self.run_installer(env_file=False, answers=self.FRESH + "y\n", env={"TEST_LINK_OUTPUT": self.LINKED})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.link_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["args"], ["compose", "run", "--rm", "--no-deps", "-T", "backend", "--admin", "link",
+                                            "--scope", "observe", "--wait", "15m"])
+        self.assertEqual(calls[0]["cwd"], str(self.root))
+        # Nothing of the installer's own input reaches the link command.
+        self.assertEqual(calls[0]["stdin"], "")
+        out = result.stdout
+        self.assertLess(out.index("backend is healthy"), out.index("Linking to just-dashboard.com"))
+        self.assertLess(out.index("Linking to just-dashboard.com"), out.index("Setup complete"))
+        self.assertIn("and enter the code          ABCD-2345", out)
+        self.assertIn('Linked to ion@example.com as "box" (observe).', out.split("Setup complete")[1])
+        self.assertNotIn("Not linked", out)
+        # The scope is not in .env; nothing about the link is.
+        self.assertNotIn("JD_ACCOUNT", (self.root / ".env").read_text())
+
+    def test_installer_flags_answer_for_an_unattended_run_and_name_the_scope(self):
+        # "y" sits where the question would be read: it must not be.
+        result = self.run_installer(env_file=False, answers=self.FRESH + "y\n", args=("--no-link",))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.link_calls(), [])
+        self.assertIn("Not linked. Later", result.stdout)
+
+        self.calls.unlink(missing_ok=True)
+        result = self.run_installer(env_file=False, answers=self.FRESH + "n\n", args=("--link", "--link-scope", "maintain"),
+                                    env={"TEST_LINK_OUTPUT": self.LINKED})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.link_calls()[0]["args"][-4:], ["--scope", "maintain", "--wait", "15m"])
+
+        self.calls.unlink(missing_ok=True)
+        result = self.run_installer(env_file=False, answers=self.FRESH, args=("--link", "--link-scope=operate"),
+                                    env={"TEST_LINK_OUTPUT": self.LINKED})
+        self.assertEqual(self.link_calls()[0]["args"][-4:], ["--scope", "operate", "--wait", "15m"])
+
+    def test_installer_finishes_whatever_becomes_of_the_link(self):
+        for name, env in (
+                ("declined", {"TEST_ADMIN_EXIT": "2", "TEST_LINK_OUTPUT": "The request was declined on the site. Nothing was linked."}),
+                ("failed", {"TEST_ADMIN_EXIT": "1", "TEST_LINK_OUTPUT": "account command failed: the site is unreachable"}),
+                ("no network", {"TEST_ADMIN_EXIT": "1"}),
+                ("exit zero without a link", {"TEST_LINK_OUTPUT": "something else entirely"})):
+            with self.subTest(name):
+                self.calls.unlink(missing_ok=True)
+                result = self.run_installer(env_file=False, answers=self.FRESH + "y\n", env=env)
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                out = result.stdout
+                self.assertIn("Setup complete", out)
+                self.assertIn("This server was not linked (the install itself is finished)", out)
+                self.assertIn("sudo ./scripts/manage.sh link", out)
+                self.assertTrue(out.rstrip().split("Setup complete")[1].count("Not linked. Later: sudo ./scripts/manage.sh link") == 1)
+                self.assertNotIn("Linked to", out)
+                # The stack was started before the link was tried.
+                self.assertTrue(any(c["args"][:2] == ["compose", "build"] or "-start-stack" in c["args"] for c in self.read_calls()))
+
+    def test_installer_skips_the_question_and_says_nothing_of_linking_when_it_is_switched_off(self):
+        result = self.run_installer(env_file=False, answers=self.FRESH + "y\n", env={"JD_ACCOUNT_LINK": "false"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.link_calls(), [])
+        self.assertNotIn("Not linked", result.stdout)
+        self.assertNotIn("manage.sh link", result.stdout)
+        env_text = (self.root / ".env").read_text()
+        self.assertIn("\nJD_ACCOUNT_LINK=false\n", env_text)
+
+        # --link does not get round it.
+        result = self.run_installer(env_file=False, answers=self.FRESH, args=("--link",), env={"JD_ACCOUNT_LINK": "false"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.link_calls(), [])
+        self.assertIn("--link ignored: JD_ACCOUNT_LINK=false", result.stdout)
+
+        # A kept .env that says false is read the same way, quoted or not and
+        # with a comment after it, as Compose reads it.
+        for spelling in ('"false"', "false", "false # switched off", "'false'   # off", "0", "F"):
+            with self.subTest(spelling=spelling):
+                self.calls.unlink(missing_ok=True)
+                result = self.run_installer(args=("--link",), env_body="JD_MASTER_KEY=fixture\nJD_SITE=localhost\nJD_TLS=off\nJD_REQUIRE_2FA=false\n"
+                                            f"JD_TERMINAL_ENABLED=false\nJD_ACCOUNT_LINK={spelling}\nJD_PORT=8443\nJD_BACKEND_PORT=42001\nJD_FRONTEND_PORT=42002\n")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.link_calls(), [])
+                self.assertIn("--link ignored", result.stdout)
+                self.assertNotIn("manage.sh link", result.stdout)
+
+        # And a value that is not false does not switch it off: a hash with no
+        # space before it is part of the value, not a comment.
+        self.calls.unlink(missing_ok=True)
+        result = self.run_installer(args=("--link",), env={"TEST_LINK_OUTPUT": self.LINKED},
+                                    env_body="JD_MASTER_KEY=fixture\nJD_SITE=localhost\nJD_TLS=off\nJD_REQUIRE_2FA=false\n"
+                                    "JD_TERMINAL_ENABLED=false\nJD_ACCOUNT_LINK=true # on\nJD_PORT=8443\nJD_BACKEND_PORT=42001\nJD_FRONTEND_PORT=42002\n")
+        self.assertEqual(len(self.link_calls()), 1)
+
+    def test_installer_rerun_with_a_kept_env_only_links_when_asked_to(self):
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.link_calls(), [])
+        self.assertIn("Linking this server to a just-dashboard.com account is optional", result.stdout)
+        self.assertIn("sudo ./scripts/manage.sh link, or Settings → Connect", result.stdout)
+        # It does not claim the install is unlinked: it may well be linked.
+        self.assertNotIn("Not linked", result.stdout)
+
+        self.calls.unlink(missing_ok=True)
+        result = self.run_installer(args=("--link",), env={"TEST_LINK_OUTPUT": self.LINKED})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.link_calls()), 1)
+        self.assertIn('Linked to ion@example.com as "box" (observe).', result.stdout.split("Setup complete")[1])
+        # .env is kept exactly as it was.
+        self.assertEqual((self.root / ".env").read_text(), self.env_body)
+
+        self.calls.unlink(missing_ok=True)
+        result = self.run_installer(args=("--no-link",))
+        self.assertEqual(self.link_calls(), [])
+        self.assertNotIn("is optional", result.stdout)
+
+    def test_installer_says_so_when_a_rerun_with_link_finds_the_server_already_linked(self):
+        said = "account command failed: this server is already linked to ion@example.com; run unlink first to link it to another account"
+        result = self.run_installer(args=("--link",), env={"TEST_ADMIN_EXIT": "1", "TEST_LINK_OUTPUT": said})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = result.stdout
+        self.assertIn("Setup complete", out)
+        self.assertIn("This server is already linked to ion@example.com.", out)
+        self.assertIn("sudo ./scripts/manage.sh unlink", out)
+        self.assertNotIn("Not linked", out)
+        self.assertNotIn("was not linked", out)
+
+    def test_installer_refuses_contradictory_or_unknown_link_flags_before_doing_anything(self):
+        for args in (("--link", "--no-link"), ("--no-link", "--link"), ("--link-scope", "root"), ("--link-scope",),
+                     ("--link-scope=OBSERVE",), ("--linked",), ("link",)):
+            with self.subTest(args=args):
+                result = self.run_installer(args=args)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("[1/4]", result.stdout)
+                self.assertEqual(self.read_calls(), [])
+        result = self.run_installer(args=("--help",))
+        self.assertEqual(result.returncode, 0)
+        for text in ("--link", "--no-link", "--link-scope", "optional"):
+            self.assertIn(text, result.stdout)
 
 
 if __name__ == "__main__":

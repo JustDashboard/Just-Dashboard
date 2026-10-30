@@ -313,3 +313,57 @@ func TestLastDatabaseDumpsIsTheNewestRunHoldingEachDump(t *testing.T) {
 		t.Fatalf("last dumps = %v, want %v", got, want)
 	}
 }
+
+// A migration rehearsal restores the newest dump a successful run holds of
+// one connection, and reads it out of the archive exactly as recorded: not a
+// failed run's, not one whose manifest does not vouch for it, and nothing
+// when no run holds it.
+func TestLatestDatabaseDumpIsTheNewestSuccessfulRunHoldingIt(t *testing.T) {
+	dumper := &fakeDumper{
+		content:   map[int64]string{7: "PGDMP shop rows", 9: "PGDMP crm rows"},
+		described: map[int64]DatabaseDescription{7: {ID: 7, Name: "shop", Driver: "postgres"}, 9: {ID: 9, Name: "crm", Driver: "mysql"}},
+	}
+	s, runner, job := dumpFixture(t, dumper, []int64{7, 9})
+	ctx := t.Context()
+	if _, _, _, err := s.LatestDatabaseDump(ctx, 7); !errors.Is(err, ErrNoDatabaseDump) {
+		t.Fatalf("before any run: %v", err)
+	}
+	monday := time.Date(2026, 10, 12, 3, 0, 0, 0, time.UTC)
+	ran := func(want RunStatus, at time.Time) *Run {
+		t.Helper()
+		run, err := runner.Execute(ctx, job.ID, "schedule")
+		if err != nil || run.Status != want {
+			t.Fatalf("run = %+v, %v; want %s", run, err, want)
+		}
+		if _, err := s.st.DB.Exec(`UPDATE backup_runs SET started_at = ? WHERE id = ?`, at.Unix(), run.ID); err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
+	first := ran(StatusSuccess, monday)
+	dumper.content[7] = "PGDMP shop rows, Tuesday"
+	dumper.failOn = 9
+	ran(StatusFailed, monday.Add(24*time.Hour))
+	incomplete := `{"version":1,"complete":false,"artifactDigest":"sha256:` + strings.Repeat("ab", 32) +
+		`","databaseDumps":[{"connectionId":7,"digest":"sha256:` + strings.Repeat("cd", 32) + `","archivePath":"database-0001/app-7.dump"}]}`
+	if _, err := s.st.DB.Exec(`INSERT INTO backup_runs(job_id, started_at, ended_at, status, artifact, manifest_json) VALUES(?,?,?,?,?,?)`,
+		job.ID, monday.Add(48*time.Hour).Unix(), monday.Add(48*time.Hour).Unix(), string(StatusSuccess), "/archives/hand-made.tar.gz", incomplete); err != nil {
+		t.Fatal(err)
+	}
+
+	runID, takenAt, dump, err := s.LatestDatabaseDump(ctx, 7)
+	if err != nil || runID != first.ID || !takenAt.Equal(monday) || dump.ConnectionID != 7 || dump.Method != "pg_dump" || dump.Bytes != int64(len("PGDMP shop rows")) {
+		t.Fatalf("latest = run %d at %s %+v, %v; want run %d at %s", runID, takenAt, dump, err, first.ID, monday)
+	}
+	if _, _, _, err := s.LatestDatabaseDump(ctx, 8); !errors.Is(err, ErrNoDatabaseDump) {
+		t.Fatalf("an undumped connection: %v", err)
+	}
+	directory := t.TempDir()
+	path, extracted, err := runner.ExtractDatabaseDump(ctx, runID, 7, directory)
+	if err != nil || extracted.ConnectionID != 7 || !strings.HasPrefix(path, directory) {
+		t.Fatalf("extract = %q %+v, %v", path, extracted, err)
+	}
+	if content, err := os.ReadFile(path); err != nil || string(content) != "PGDMP shop rows" {
+		t.Fatalf("extracted %q, %v", content, err)
+	}
+}

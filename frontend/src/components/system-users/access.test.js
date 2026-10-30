@@ -1,120 +1,161 @@
 import { describe, expect, test } from "bun:test"
 import {
-  hasSignInRoute,
-  isBare,
-  keyShares,
-  placeOnAxis,
-  rootReach,
-  rootRoutes,
-  signIns,
-  verdict,
+  accountFindings,
+  isPrivateGroup,
+  readRestrictions,
+  restrictionWords,
+  rootSummary,
+  signInSummary,
+  splitKeyOptions,
+  writeRestrictions,
 } from "./access"
-import { isAdmin } from "./marks"
 
-const user = (username, over = {}) => ({
-  username,
+const closed = (why) => ({ allowed: false, why })
+const open = { allowed: true }
+const user = (fields) => ({
+  username: "ion",
   uid: 1000,
-  gid: 1000,
-  comment: "",
-  home: `/home/${username}`,
-  shell: "/bin/bash",
-  groups: [username],
   system: false,
-  locked: false,
-  noPassword: false,
-  sshKeyCount: 0,
+  comment: "",
+  groups: [],
   canLogin: true,
-  ...over,
+  disabled: false,
+  noPassword: false,
+  signIn: { password: closed("no_password"), key: closed("no_keys") },
+  rootRoutes: [],
+  sshKeyCount: 0,
+  ...fields,
 })
 
-const NOW = Date.parse("2026-10-10T12:00:00Z")
-const ago = (ms) => new Date(NOW - ms).toISOString()
-
-test("password locks do not erase an authorised-key route or uid-0 administration", () => {
-  expect(hasSignInRoute(user("key-only", { locked: true, sshKeyCount: 1 }))).toBe(true)
-  expect(hasSignInRoute(user("locked", { locked: true }))).toBe(false)
-  expect(hasSignInRoute(user("daemon", { canLogin: false, sshKeyCount: 1 }))).toBe(false)
-  expect(isAdmin(user("root", { uid: 0, groups: ["root"] }))).toBe(true)
-  expect(isAdmin(user("docker-user", { groups: ["docker"] }))).toBe(true)
-  expect(verdict([user("root", { uid: 0, groups: ["root"], noPassword: true })]).admins).toBe(1)
-})
-
-describe("verdict", () => {
-  test("counts the accounts that need no password and which of them are administrators", () => {
-    const users = [
-      user("a", { noPassword: true }),
-      user("b", { noPassword: true, groups: ["sudo"] }),
-    ]
-    expect(verdict(users)).toEqual({ tone: "warning", count: 2, admins: 1, scope: "bare" })
+describe("signInSummary", () => {
+  test("no password and no keys is no way in, and says why", () => {
+    const summary = signInSummary(user({}))
+    expect(summary.label).toBe("No way in")
+    expect(summary.tone).toBe("warning")
+    expect(summary.detail).toContain("no password")
+    expect(summary.detail).toContain("no SSH keys")
   })
 
-  test("an account that cannot sign in is not a warning, and a locked one is not bare", () => {
-    const users = [
-      user("daemon", { noPassword: true, canLogin: false }),
-      user("held", { noPassword: true, locked: true }),
-    ]
-    expect(isBare(users[1])).toBe(false)
-    expect(verdict(users)).toEqual({ tone: "running", count: 0, admins: 0 })
+  test("a daemon's closed shell is not a warning", () => {
+    const summary = signInSummary(user({ system: true, canLogin: false }))
+    expect(summary.label).toBe("No login")
+    expect(summary.tone).toBe("unknown")
+  })
+
+  test("disabled wins over routes that would otherwise be open", () => {
+    expect(signInSummary(user({ disabled: true })).label).toBe("Disabled")
+  })
+
+  test("an empty password that SSH would take is the alarm", () => {
+    const summary = signInSummary(
+      user({ noPassword: true, signIn: { password: open, key: closed("no_keys") } }),
+    )
+    expect(summary.tone).toBe("danger")
   })
 })
 
-describe("root reach", () => {
-  test("docker is root by another name", () => {
-    expect(rootRoutes({ uid: 1000, groups: ["docker", "adm"] })).toEqual([
-      { label: "docker", kind: "docker" },
+describe("rootSummary", () => {
+  const sudo = (fields) => ({ kind: "sudo", usable: true, ...fields })
+
+  test("the strongest sudo rule is the one named", () => {
+    const summary = rootSummary({
+      rootRoutes: [sudo({ usable: false }), sudo({ noPassword: true })],
+    })
+    expect(summary.label).toBe("No password asked")
+    expect(summary.tone).toBe("danger")
+  })
+
+  test("a rule asking for a password it lacks reads as going nowhere", () => {
+    const summary = rootSummary({ rootRoutes: [sudo({ usable: false })] })
+    expect(summary.tone).toBe("muted")
+    expect(summary.label).toBe("Needs a password it lacks")
+  })
+
+  test("docker and lxd come through as groups beside a sudo rule", () => {
+    const summary = rootSummary({
+      rootRoutes: [sudo({}), { kind: "group", via: "docker", usable: true }],
+    })
+    expect(summary.label).toBe("Asks for password")
+    expect(summary.groups).toEqual(["docker"])
+  })
+
+  test("uid 0 is root whatever else is said", () => {
+    expect(rootSummary({ rootRoutes: [{ kind: "uid0", usable: true }] }).label).toBe("Is root")
+  })
+})
+
+describe("accountFindings", () => {
+  const root = (signIn) =>
+    user({ username: "root", uid: 0, system: true, signIn, rootRoutes: [{ kind: "uid0" }] })
+
+  test("a clean host says nothing at all", () => {
+    expect(
+      accountFindings([
+        root({ password: closed("root_keys_only"), key: open }),
+        user({ signIn: { password: closed("no_password"), key: open } }),
+      ]),
+    ).toEqual([])
+  })
+
+  test("the host this page was rebuilt against", () => {
+    const findings = accountFindings([
+      root({ password: open, key: closed("no_keys") }),
+      user({
+        username: "ubuntu",
+        rootRoutes: [
+          {
+            kind: "sudo",
+            noPassword: true,
+            usable: true,
+            file: "/etc/sudoers.d/90-cloud-init-users",
+          },
+        ],
+      }),
+      user({ username: "zoro", rootRoutes: [{ kind: "sudo", via: "sudo", usable: false }] }),
     ])
-    expect(rootRoutes({ uid: 0, groups: ["root", "wheel"] }).map((r) => r.label)).toEqual([
-      "uid 0",
-      "wheel",
+    expect(findings.map((f) => f.id)).toEqual(["root-password", "sudo-nopassword", "no-way-in"])
+    expect(findings[1].title).toBe("ubuntu can become root with no password")
+    expect(findings[1].detail).toBe("From /etc/sudoers.d/90-cloud-init-users")
+    expect(findings[2].title).toBe("ubuntu and zoro have no way in")
+  })
+
+  test("a disabled account is not stranded: that was the point", () => {
+    expect(accountFindings([user({ disabled: true })])).toEqual([])
+  })
+})
+
+describe("key restrictions", () => {
+  const line = 'restrict,from="10.0.0.0/8,192.168.0.1",command="/bin/backup",expiry-time="20270101"'
+
+  test("a comma inside quotes does not split an option", () => {
+    expect(splitKeyOptions(line)).toEqual([
+      "restrict",
+      'from="10.0.0.0/8,192.168.0.1"',
+      'command="/bin/backup"',
+      'expiry-time="20270101"',
     ])
   })
 
-  test("accounts that need no password lead and locked ones come last", () => {
-    const users = [
-      user("c", { groups: ["sudo"], locked: true }),
-      user("b", { groups: ["sudo"] }),
-      user("a", { groups: ["docker"], noPassword: true }),
-      user("plain"),
-    ]
-    expect(rootReach(users).map((r) => r.user.username)).toEqual(["a", "b", "c"])
+  test("reading and writing round-trip, and an option it has no field for survives", () => {
+    const read = readRestrictions(`${line},no-pty`)
+    expect(read.expires).toBe("2027-01-01")
+    expect(read.other).toEqual(["no-pty"])
+    expect(writeRestrictions(read).sort()).toEqual(splitKeyOptions(`${line},no-pty`).sort())
+  })
+
+  test("the row's words", () => {
+    expect(restrictionWords(line)).toEqual([
+      "No forwarding",
+      "Only from 10.0.0.0/8,192.168.0.1",
+      "One command",
+      "Expires 2027-01-01",
+    ])
+    expect(restrictionWords(undefined)).toEqual([])
   })
 })
 
-describe("sign-ins", () => {
-  const users = [
-    user("recent", { lastLogin: ago(60_000) }),
-    user("week", { lastLogin: ago(3 * 24 * 3600_000) }),
-    user("old", { lastLogin: ago(90 * 24 * 3600_000) }),
-    user("never"),
-    user("daemon", { canLogin: false, system: true }),
-  ]
-
-  test("splits the window from what is earlier and counts only those who could have", () => {
-    const day = signIns(users, NOW, 24 * 3600_000)
-    expect(day.within.map((s) => s.user.username)).toEqual(["recent"])
-    expect(day.older).toBe(2)
-    expect(day.never).toBe(1)
-    expect(day.latest.user.username).toBe("recent")
-  })
-
-  test("an unreadable timestamp is left out rather than placed at the epoch", () => {
-    expect(signIns([user("x", { lastLogin: "yesterday" })], NOW, Infinity).latest).toBeUndefined()
-  })
-
-  test("the axis ends at now and clamps what falls outside it", () => {
-    const day = 24 * 3600_000
-    expect(placeOnAxis(NOW, NOW, day)).toBe(100)
-    expect(placeOnAxis(NOW - day / 2, NOW, day)).toBe(50)
-    expect(placeOnAxis(NOW - 2 * day, NOW, day)).toBe(0)
-  })
-})
-
-test("keys are shared out most first, with the total they are shares of", () => {
-  const { holders, total } = keyShares([
-    user("a", { sshKeyCount: 1 }),
-    user("b", { sshKeyCount: 3 }),
-    user("c"),
-  ])
-  expect(holders.map((u) => u.username)).toEqual(["b", "a"])
-  expect(total).toBe(4)
+test("a group useradd made for one account is private; one with members is not", () => {
+  expect(isPrivateGroup({ name: "ion", primary: ["ion"], members: [] })).toBe(true)
+  expect(isPrivateGroup({ name: "ion", primary: ["ion"], members: ["mira"] })).toBe(false)
+  expect(isPrivateGroup({ name: "staff", primary: ["ion"], members: [] })).toBe(false)
 })

@@ -21,8 +21,10 @@ import {
   Key,
   Layers,
   Lifebuoy,
+  Link,
   Rocket,
   LineChart,
+  Linked,
   ListOrdered,
   LockClosed,
   Logs,
@@ -43,6 +45,7 @@ import {
   SignIn,
   Terminal,
   TerminalWindow,
+  ServerMap,
   Topology,
   UserSettings,
   Users,
@@ -128,11 +131,18 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
     label: "Server",
     items: [
       { title: "Overview", href: "/", icon: Home },
+      // Everything on the server as one canvas, the server in the middle.
+      // Beside the Overview rather than in a section: it is about every
+      // section at once, and like the Overview it cannot be hidden.
+      { title: "Map", href: "/map", icon: ServerMap },
       {
         title: "Monitoring",
         icon: Monitoring,
         children: [
           { title: "Metrics", href: "/metrics", icon: LineChart },
+          // Beside the readings it watches. An administrator's, as the
+          // proxy's Alerts are: its rules decide who is told about what.
+          { title: "Alerts", href: "/metrics/alerts", icon: Bell, capability: "system.admin" },
           {
             title: "Processes",
             href: "/processes",
@@ -158,6 +168,9 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         icon: Rocket,
         children: [
           { title: "Projects", href: "/deploy", icon: GridMasonry },
+          // The catalogue's own templates: read by anyone who may read the
+          // catalogue, added and removed by an administrator.
+          { title: "Templates", href: "/deploy/templates", icon: Layers },
           // Reading the credential list needs system.admin — the backend seals
           // every credential route alike — so the row is drawn only where the
           // destination would not simply refuse it.
@@ -167,7 +180,15 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
             icon: Key,
             capability: "system.admin",
           },
+          // Read masked by anyone who may read a project's variables; written
+          // by an administrator, which the page itself says.
+          { title: "Shared variables", href: "/deploy/variables", icon: Linked },
+          // Read by anyone who may read a project's variables — names,
+          // addresses and who reads each, never a credential; written by an
+          // administrator.
+          { title: "Secret stores", href: "/deploy/secret-stores", icon: LockClosed },
           { title: "Notifications", href: "/deploy/notifications", icon: Bell },
+          { title: "Log drains", href: "/deploy/drains", icon: Logs },
         ],
       },
       {
@@ -298,7 +319,9 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
           { title: "TLS report", href: "/proxy/tls", icon: Inspect },
           { title: "Streams", href: "/proxy/streams", icon: ArrowLeftRight },
           { title: "Ports", href: "/proxy/ports", icon: Router },
+          { title: "Tunnel", href: "/proxy/tunnel", icon: CloudUpload },
           { title: "Traffic", href: "/proxy/traffic", icon: ChartActivity },
+          { title: "Alerts", href: "/proxy/alerts", icon: Bell, capability: "system.admin" },
           { title: "Configuration", href: "/proxy/config", icon: FileText },
         ],
       },
@@ -355,6 +378,14 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
             title: "Configuration",
             href: "/dashboard/configuration",
             icon: SettingsSliders,
+            capability: "system.admin",
+          },
+          // "Connect", not the site's domain: the domain said where the link goes but not
+          // what the page does, and it wore Version's cloud beside it.
+          {
+            title: "Connect",
+            href: "/dashboard/link",
+            icon: Link,
             capability: "system.admin",
           },
         ],

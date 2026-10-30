@@ -1063,6 +1063,13 @@ test("a detected site opens with its variables, its database and its single-page
   await page.locator("summary").filter({ hasText: "Build & output settings" }).click()
   await expect(page.getByRole("textbox", { name: "Output directory" })).toHaveValue("dist")
   await expect(page.getByRole("switch", { name: "Single-page application" })).toBeChecked()
+  // Railpack is offered where the recipes and a Dockerfile are, with the line
+  // that says what decides its build; looking changes nothing.
+  await page.getByRole("combobox", { name: "Build method" }).click()
+  const railpack = page.getByRole("option", { name: /^Railpack/ })
+  await expect(railpack).toContainText("the builder Railway and Coolify use")
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("combobox", { name: "Build method" })).toHaveText(/Automatic recipe/)
   await gotoStep(page, "runtime")
   await expect(page.getByRole("spinbutton", { name: /Port/ })).toHaveValue("80")
 
@@ -1355,4 +1362,164 @@ test("workspace: deployment Back and Forward restore each step and its in-progre
   await gotoStep(page, "project")
   await expect(page.getByRole("textbox", { name: "Project name" })).toHaveValue("history-site")
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
+})
+
+/** A multi-service template as the catalogue and detail endpoints answer it. */
+const wordpressStack = {
+  id: "wordpress",
+  version: "1.0.0",
+  name: "WordPress",
+  category: "http",
+  profile: "compose",
+  description: "The blogging and website platform, with its own MariaDB server beside it.",
+  iconId: "globe",
+  docsUrl: "https://hub.docker.com/_/wordpress",
+  license: "GPL-2.0-or-later",
+  maintainer: "Just Dashboard",
+  reviewedAt: "2026-10-27",
+  access: {
+    kind: "setup",
+    path: "/wp-admin/install.php",
+    note: "WordPress has no administrator until someone makes one.",
+  },
+  image: "wordpress:7.1.3-php8.4-apache",
+  memoryMb: 1024,
+  sourceKind: "compose",
+  services: [
+    {
+      name: "wordpress",
+      role: "app",
+      purpose: "The site and its admin, behind the domain",
+      image: "wordpress:7.1.3-php8.4-apache",
+      memoryMb: 512,
+      public: true,
+    },
+    {
+      name: "db",
+      role: "database",
+      purpose: "MariaDB, holding every post, page, user and setting",
+      image: "mariadb:11.8.9",
+      memoryMb: 512,
+    },
+  ],
+}
+
+const wordpressDefinition = {
+  ...wordpressStack,
+  image: { reference: "", tagPolicy: "" },
+  provenance: {
+    maintainer: "Just Dashboard",
+    license: "GPL-2.0-or-later",
+    upstreamUrl: "https://github.com/docker-library/wordpress",
+    reviewedAt: "2026-10-27",
+    minimumDashboard: "0.8.2",
+  },
+  resources: { memoryMb: 0, minMemoryMb: 0 },
+  update: { detector: "registry", backupFirst: true, notes: "" },
+  secrets: [
+    {
+      name: "db-password",
+      variable: "WORDPRESS_DB_PASSWORD",
+      label: "Database password",
+      length: 40,
+    },
+  ],
+  services: [
+    {
+      name: "wordpress",
+      role: "app",
+      purpose: "The site and its admin, behind the domain",
+      image: { reference: "wordpress:7.1.3-php8.4-apache", tagPolicy: "pinned" },
+      ports: [
+        { name: "http", internal: 80, protocol: "tcp", purpose: "The site", exposure: "proxy" },
+      ],
+      resources: { memoryMb: 512, minMemoryMb: 256 },
+      dependsOn: [{ service: "db", condition: "healthy" }],
+    },
+    {
+      name: "db",
+      role: "database",
+      purpose: "MariaDB, holding every post, page, user and setting",
+      image: { reference: "mariadb:11.8.9", tagPolicy: "pinned" },
+      ports: [
+        { name: "mysql", internal: 3306, protocol: "tcp", purpose: "SQL", exposure: "internal" },
+      ],
+      resources: { memoryMb: 512, minMemoryMb: 256 },
+    },
+  ],
+}
+
+test("a multi-service template shows the stack it runs and deploys as a Compose source", async ({
+  page,
+}) => {
+  await mockNewProject(page)
+  await page.route("**/api/v1/deploy/blueprints/", (route) =>
+    json(route, [...blueprintCatalogue, wordpressStack]),
+  )
+  await page.route("**/api/v1/deploy/blueprints/wordpress", (route) =>
+    json(route, wordpressDefinition),
+  )
+  const sources: Array<Record<string, unknown>> = []
+  await page.route("**/api/v1/deploy/drafts/journey-draft", (route) => {
+    const body = route.request().postDataJSON() as { source?: Record<string, unknown> } | null
+    if (route.request().method() === "PUT" && body?.source) sources.push(body.source)
+    return route.fallback()
+  })
+  await page.goto("/deploy/new?source=template")
+
+  // The card says it is a stack before anything is chosen.
+  const shelf = page.getByRole("group", { name: "Web & files" })
+  await expect(shelf.getByText("2 services", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Use WordPress", exact: true }).click()
+
+  const settings = page.getByRole("region", { name: "Selected template settings" })
+  await expect(settings.getByText("Compose stack", { exact: true })).toBeVisible()
+  await expect(
+    settings.getByText(/Memory limits add up to 1024 MB across 2 services/),
+  ).toBeVisible()
+  const services = settings.getByRole("list", { name: "Services this template runs" })
+  await expect(services.getByRole("listitem")).toHaveCount(2)
+  await expect(services.getByRole("listitem").first()).toContainText("wordpress")
+  await expect(services.getByRole("listitem").first()).toContainText("Public")
+  await expect(services.getByRole("listitem").nth(1)).toContainText("Database")
+  await expect(services.getByRole("listitem").nth(1)).toContainText("mariadb:11.8.9")
+  // What deploying it does by itself is said before the press, honestly.
+  await expect(
+    settings.getByText(/db publishes no port and stays on a private network/),
+  ).toBeVisible()
+  await expect(
+    settings.getByText(/stops the running stack before starting the new one/),
+  ).toBeVisible()
+  await expect(settings.getByText(/not a consistent dump/)).toBeVisible()
+
+  await page.getByRole("button", { name: "Use this template", exact: true }).click()
+  await expect.poll(() => sources.length).toBeGreaterThan(0)
+  expect(sources[0]).toMatchObject({
+    kind: "compose",
+    mode: "blueprint",
+    blueprintId: "wordpress",
+    blueprintVersion: "1.0.0",
+  })
+  // The browser never sends a document: the server renders the reviewed one.
+  expect(sources[0].composeFiles).toBeUndefined()
+})
+
+test("a chosen stack's settings fit a phone's width", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockNewProject(page)
+  await page.route("**/api/v1/deploy/blueprints/", (route) =>
+    json(route, [...blueprintCatalogue, wordpressStack]),
+  )
+  await page.route("**/api/v1/deploy/blueprints/wordpress", (route) =>
+    json(route, wordpressDefinition),
+  )
+  await page.goto("/deploy/new?source=template")
+  await page.getByRole("button", { name: "Use WordPress", exact: true }).click()
+  const settings = page.getByRole("region", { name: "Selected template settings" })
+  await expect(settings.getByRole("list", { name: "Services this template runs" })).toBeVisible()
+  const across = await page.locator("[data-slot='page']").evaluate((element) => {
+    const shell = element.closest<HTMLElement>("[data-workspace-shell-scroll]")!
+    return shell.scrollWidth - shell.clientWidth
+  })
+  expect(across).toBe(0)
 })

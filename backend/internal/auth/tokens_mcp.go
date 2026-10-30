@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
@@ -11,7 +12,8 @@ import (
 
 // An MCP key is an API key for an AI client. It opens the MCP endpoint and no
 // other route, and it reaches only the databases granted to it, each either to
-// read or to change.
+// read or to change, and the deployments if it was given them, either to read
+// or to deploy as well.
 //
 // It carries its owner's role, or a narrower one chosen when it is made — a
 // replacement keeps the key's it replaces — and like any key it never holds
@@ -32,6 +34,27 @@ const (
 	AccessWrite TokenAccess = "write"
 )
 
+// DeployAccess is what an MCP key may do with the deployments. It is one grant
+// for every deployment, as the deployment pages are one section: a key that
+// reads one reads them all.
+type DeployAccess string
+
+const (
+	// DeployNone reaches no deployment: what every key made before the grant
+	// existed holds.
+	DeployNone DeployAccess = ""
+	// DeployRead lists deployments, their runs, releases and run transcripts.
+	DeployRead DeployAccess = "read"
+	// DeployRun also queues a deploy or a rollback, held to what the key's
+	// owner may do on the deployment pages.
+	DeployRun DeployAccess = "deploy"
+)
+
+// Valid reports whether a is one of the three grants.
+func (a DeployAccess) Valid() bool {
+	return a == DeployNone || a == DeployRead || a == DeployRun
+}
+
 // TokenConnection is one database an MCP key reaches.
 type TokenConnection struct {
 	ConnectionID int64       `json:"connectionId"`
@@ -47,9 +70,12 @@ var (
 	ErrTokenInactive = errors.New("this key was revoked or has expired")
 )
 
-// CreateMCPToken mints an MCP key reaching the databases granted. An empty
-// role is the owner's.
-func (s *Service) CreateMCPToken(ctx context.Context, owner *User, name string, role Role, ttl time.Duration, grants []TokenConnection) (*APIToken, string, error) {
+// CreateMCPToken mints an MCP key reaching the databases granted and, as
+// deployments says, the deployments: every one, or only those deploymentIDs
+// names, as a deploy key is narrowed. operations offers it the tools
+// generated from the deployment API under that grant. An empty role is the
+// owner's.
+func (s *Service) CreateMCPToken(ctx context.Context, owner *User, name string, role Role, ttl time.Duration, grants []TokenConnection, deployments DeployAccess, deploymentIDs []int64, operations bool) (*APIToken, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, "", errors.New("token name required")
@@ -63,7 +89,11 @@ func (s *Service) CreateMCPToken(ctx context.Context, owner *User, name string, 
 	if !roleAtMost(role, owner.Role) {
 		return nil, "", fmt.Errorf("cannot mint a %s token from a %s account", role, owner.Role)
 	}
-	if err := checkTokenConnections(role, grants); err != nil {
+	if err := checkTokenGrants(role, grants, deployments); err != nil {
+		return nil, "", err
+	}
+	ids, err := cleanMCPDeployments(deployments, deploymentIDs)
+	if err != nil {
 		return nil, "", err
 	}
 	tx, err := s.st.DB.BeginTx(ctx, nil)
@@ -78,6 +108,12 @@ func (s *Service) CreateMCPToken(ctx context.Context, owner *User, name string, 
 	if err := writeTokenConnections(ctx, tx, id, grants); err != nil {
 		return nil, "", err
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE api_tokens SET deploy_access = ?, mcp_operations = ? WHERE id = ?`, string(deployments), operations, id); err != nil {
+		return nil, "", err
+	}
+	if err := writeTokenDeployments(ctx, tx, id, ids); err != nil {
+		return nil, "", err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, "", err
 	}
@@ -86,26 +122,59 @@ func (s *Service) CreateMCPToken(ctx context.Context, owner *User, name string, 
 		return nil, "", err
 	}
 	tok.Connections = sortedConnections(grants)
+	tok.DeploymentIDs = ids
 	return tok, full, nil
 }
 
-// SetTokenConnections replaces what an owner's MCP key reaches. The key keeps
-// working, so a client already set up with it sees one database more or one
-// fewer without a new key being pasted anywhere. Another account's key is not
+// cleanMCPDeployments is the deployments an MCP key's grant is narrowed to,
+// held to the rules a deploy key's list is, and refused for a key given no
+// deployments at all, which a list would only make look as if it reached some.
+func cleanMCPDeployments(access DeployAccess, ids []int64) ([]int64, error) {
+	out, err := cleanDeployments(ids)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) > 0 && access == DeployNone {
+		return nil, errors.New("a key given no deployments is not narrowed to some: choose read or deploy for them first")
+	}
+	return out, nil
+}
+
+// writeTokenDeployments replaces the deployments a key is narrowed to.
+func writeTokenDeployments(ctx context.Context, db execer, tokenID int64, ids []int64) error {
+	if _, err := db.ExecContext(ctx, `DELETE FROM api_token_deployments WHERE token_id = ?`, tokenID); err != nil {
+		return err
+	}
+	for _, project := range ids {
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO api_token_deployments(token_id, project_id) VALUES(?,?)`, tokenID, project); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetTokenConnections replaces what an owner's MCP key reaches: its databases,
+// its deployment grant unless deployments is nil, which keeps it, the
+// deployments that grant is narrowed to unless deploymentIDs is nil, which
+// keeps them (a key given no deployments keeps none), and whether it is
+// offered the generated tools unless operations is nil. The key keeps working,
+// so a client already set up with it sees one database more or one fewer
+// without a new key being pasted anywhere. Another account's key is not
 // found: an administrator may revoke it, never re-point it.
-func (s *Service) SetTokenConnections(ctx context.Context, owner *User, tokenID int64, grants []TokenConnection) (*APIToken, error) {
+func (s *Service) SetTokenConnections(ctx context.Context, owner *User, tokenID int64, grants []TokenConnection, deployments *DeployAccess, deploymentIDs *[]int64, operations *bool) (*APIToken, error) {
 	tx, err := s.st.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 	var (
-		userID, expires int64
-		revoked         int
-		scope, role     string
+		userID, expires     int64
+		revoked             int
+		scope, role, deploy string
 	)
-	err = tx.QueryRowContext(ctx, `SELECT user_id, revoked, expires_at, scope, role FROM api_tokens WHERE id = ?`, tokenID).
-		Scan(&userID, &revoked, &expires, &scope, &role)
+	err = tx.QueryRowContext(ctx, `SELECT user_id, revoked, expires_at, scope, role, deploy_access FROM api_tokens WHERE id = ?`, tokenID).
+		Scan(&userID, &revoked, &expires, &scope, &role, &deploy)
 	switch {
 	case err != nil || userID != owner.ID:
 		return nil, ErrNotFound
@@ -120,13 +189,44 @@ func (s *Service) SetTokenConnections(ctx context.Context, owner *User, tokenID 
 	if !roleAtMost(effective, owner.Role) {
 		effective = owner.Role
 	}
-	if err := checkTokenConnections(effective, grants); err != nil {
+	access := DeployAccess(deploy)
+	if deployments != nil {
+		access = *deployments
+	}
+	if err := checkTokenGrants(effective, grants, access); err != nil {
 		return nil, err
+	}
+	var ids []int64
+	switch {
+	case access == DeployNone:
+		// No deployments: nothing to be narrowed to, whatever was kept.
+		if deploymentIDs != nil && len(*deploymentIDs) > 0 {
+			return nil, errors.New("a key given no deployments is not narrowed to some: choose read or deploy for them first")
+		}
+	case deploymentIDs != nil:
+		if ids, err = cleanMCPDeployments(access, *deploymentIDs); err != nil {
+			return nil, err
+		}
+	default:
+		if ids, err = tokenDeploymentsTx(ctx, tx, tokenID); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM api_token_connections WHERE token_id = ?`, tokenID); err != nil {
 		return nil, err
 	}
 	if err := writeTokenConnections(ctx, tx, tokenID, grants); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE api_tokens SET deploy_access = ? WHERE id = ?`, string(access), tokenID); err != nil {
+		return nil, err
+	}
+	if operations != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE api_tokens SET mcp_operations = ? WHERE id = ?`, *operations, tokenID); err != nil {
+			return nil, err
+		}
+	}
+	if err := writeTokenDeployments(ctx, tx, tokenID, ids); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -137,7 +237,26 @@ func (s *Service) SetTokenConnections(ctx context.Context, owner *User, tokenID 
 		return nil, err
 	}
 	tok.Connections = sortedConnections(grants)
+	tok.DeploymentIDs = append([]int64{}, ids...)
 	return tok, nil
+}
+
+// tokenDeploymentsTx is TokenDeployments inside a transaction.
+func tokenDeploymentsTx(ctx context.Context, tx *sql.Tx, tokenID int64) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT project_id FROM api_token_deployments WHERE token_id = ? ORDER BY project_id`, tokenID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // TokenConnections is what an MCP key reaches now, read for every call it
@@ -194,12 +313,18 @@ func (s *Service) fillTokenConnections(ctx context.Context, tokens []*APIToken) 
 	return rows.Err()
 }
 
-// checkTokenConnections refuses a grant list that is empty, too long, names a
-// connection twice, or asks to change a database through an owner whose role
-// may not change one anywhere.
-func checkTokenConnections(role Role, grants []TokenConnection) error {
-	if len(grants) == 0 {
-		return errors.New("choose at least one database the key reaches")
+// checkTokenGrants refuses a key that reaches nothing, a grant list that is
+// too long or names a connection twice, and a grant to change a database or to
+// deploy through an owner whose role may do neither anywhere: both are what
+// service.control allows on the dashboard's own pages.
+func checkTokenGrants(role Role, grants []TokenConnection, deployments DeployAccess) error {
+	switch {
+	case !deployments.Valid():
+		return fmt.Errorf("deployments must be %q, %q or %q", DeployNone, DeployRead, DeployRun)
+	case deployments == DeployRun && !role.Can(CapServiceControl):
+		return fmt.Errorf("a %s account cannot deploy, so its keys can only read the deployments", role)
+	case len(grants) == 0 && deployments == DeployNone:
+		return errors.New("choose at least one database or the deployments for the key to reach")
 	}
 	if len(grants) > maxTokenConnections {
 		return fmt.Errorf("a key reaches at most %d databases", maxTokenConnections)

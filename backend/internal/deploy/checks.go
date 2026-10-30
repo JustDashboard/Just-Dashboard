@@ -12,9 +12,12 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/gameserver"
 )
 
 type HealthOutcome string
@@ -47,7 +50,22 @@ type CheckConfiguration struct {
 	// services whose root is not a page, where 2xx-only failed healthy
 	// releases (checks_http.go).
 	AcceptAnyAnswer bool `json:"acceptAnyAnswer,omitempty"`
+
+	// Payload is the datagram a udp_probe sends and Expect the prefix its
+	// answer must begin with, both lowercase hexadecimal. An empty Expect
+	// accepts any answer: for a UDP server, answering is the whole signal.
+	Payload string `json:"payload,omitempty"`
+	Expect  string `json:"expect,omitempty"`
 }
+
+// Probe bounds, as the catalogue holds a definition to them.
+const (
+	maxUDPProbePayload = 512
+	maxUDPProbeExpect  = 64
+	maxUDPAnswerBytes  = 2048
+)
+
+var probeHexRE = regexp.MustCompile(`^(?:[0-9a-f]{2})*$`)
 
 func decodeCheckConfiguration(raw json.RawMessage) (CheckConfiguration, error) {
 	config := CheckConfiguration{}
@@ -92,6 +110,13 @@ func validateCheckConfiguration(kind string, raw json.RawMessage) error {
 	if config.AcceptAnyAnswer && len(config.ExpectedStatus) != 0 {
 		return errors.New("an HTTP check expects either listed statuses or any answer, not both")
 	}
+	if !probeHexRE.MatchString(config.Payload) || len(config.Payload)/2 > maxUDPProbePayload ||
+		!probeHexRE.MatchString(config.Expect) || len(config.Expect)/2 > maxUDPProbeExpect {
+		return errors.New("a UDP probe's payload and expected answer are bounded lowercase hexadecimal")
+	}
+	if (config.Payload != "" || config.Expect != "") && CheckKind(kind) != CheckUDPProbe {
+		return errors.New("only a UDP probe sends a datagram")
+	}
 	if config.URL != "" {
 		parsed, err := url.Parse(config.URL)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" ||
@@ -121,12 +146,44 @@ func validateCheckConfiguration(kind string, raw json.RawMessage) error {
 		if len(config.Command) == 0 || config.URL != "" || config.AcceptAnyAnswer {
 			return errors.New("command checks require a non-empty argv")
 		}
+	case CheckGameHandshake, CheckUDPProbe:
+		if config.URL != "" || len(config.Command) != 0 || config.AcceptAnyAnswer || config.Path != "" ||
+			len(config.ExpectedStatus) != 0 || config.Method != "" {
+			return errors.New("a game handshake or UDP probe names a host and port, and nothing an HTTP or command check takes")
+		}
 	default:
-		// DNS/TLS/game/backup checks are owned by later feature joins. Their
-		// closed kind is already valid, but accepting arbitrary C5 fields here
-		// would make an unavailable check look executable.
+		// DNS/TLS/backup checks have no runner (see unrunnableCheck). A
+		// plan saved with one still validates so it keeps deploying, but
+		// accepting C5 fields here would make it look executable.
 		if config.URL != "" || config.Host != "" || config.Port != 0 || len(config.Command) != 0 || config.AcceptAnyAnswer {
 			return errors.New("this check kind has no C5 execution configuration")
+		}
+	}
+	return nil
+}
+
+// unrunnableCheck says why the runner would never execute a check of this
+// kind, or "" for a kind it runs. Such a check only ever reports
+// check_owner_unavailable, which blocks the phase when the check is required
+// and is a warning when it is not.
+func unrunnableCheck(kind string) string {
+	switch CheckKind(kind) {
+	case CheckDNS, CheckTLS:
+		return "the deployment runner has no " + kind + " check; a public_route check on the https address resolves the name and verifies the certificate"
+	case CheckBackupFreshness:
+		return "backup freshness is set on a storage dependency (requiredBeforeDeploy, maxAgeSeconds, requireRestoreTest), not as a check"
+	}
+	return ""
+}
+
+// refuseUnrunnableChecks keeps a configuration being written from asking for
+// a check nothing runs. It applies where a configuration is saved, not in
+// Validate: a stored plan that already holds one is re-validated before it
+// runs, and refusing it there would stop a deployment that runs today.
+func refuseUnrunnableChecks(checks []PlannedCheck) error {
+	for index, check := range checks {
+		if reason := unrunnableCheck(check.Kind); reason != "" {
+			return invalidField(fmt.Sprintf("checks[%d]", index), "check %q of kind %s cannot run: %s", check.Name, check.Kind, reason)
 		}
 	}
 	return nil
@@ -165,6 +222,10 @@ type CheckEvidence struct {
 	Attempts    []CheckAttemptEvidence `json:"attempts"`
 	StartedAt   time.Time              `json:"startedAt"`
 	CompletedAt time.Time              `json:"completedAt"`
+	// Replica is which of a replicated release's containers the check
+	// asked, from 1; zero for a release of one container and for a check of
+	// the public route, which asks whichever replica the proxy picks.
+	Replica int `json:"replica,omitempty"`
 }
 
 type ContainerCheckBackend interface {
@@ -311,11 +372,87 @@ func (r *CheckRunner) runAttempt(
 		} else {
 			result.Code = "exit_nonzero"
 		}
+	case CheckGameHandshake:
+		r.handshakeAttempt(attemptCtx, config, target, &result)
+	case CheckUDPProbe:
+		r.udpAttempt(attemptCtx, config, target, &result)
 	default:
 		result.Outcome, result.Code = HealthUnavailable, "check_owner_unavailable"
 	}
 	result.DurationMillis = time.Since(started).Milliseconds()
 	return result
+}
+
+// handshakeAttempt asks a Minecraft Java server for its status the way the
+// client's server list does. A listening socket is not the answer: the
+// server binds its port before the world is ready, and answers the status
+// only once it can take a player.
+func (r *CheckRunner) handshakeAttempt(ctx context.Context, config CheckConfiguration, target CheckTarget, result *CheckAttemptEvidence) {
+	host, port := targetAddress(config, target)
+	if host == "" || port == 0 {
+		result.Outcome, result.Code = HealthUnavailable, "target_unavailable"
+		return
+	}
+	result.Address = net.JoinHostPort(host, strconv.Itoa(port))
+	connection, err := r.dial(ctx, "tcp", result.Address)
+	if err != nil {
+		result.Code = checkNetworkError(ctx, err)
+		return
+	}
+	defer connection.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = connection.SetDeadline(deadline)
+	}
+	if _, err := gameserver.JavaStatusHandshake(connection, host, port); err != nil {
+		result.Code = "handshake_failed"
+		if ctx.Err() != nil {
+			result.Code = "timeout"
+		}
+		return
+	}
+	result.Outcome = HealthPassed
+}
+
+// udpAttempt sends the probe's datagram and waits for one back. UDP has no
+// connection to refuse, so silence until the deadline is the only failure a
+// server that is not up yet gives — unless the kernel answers for it, which a
+// connected socket reads as a refusal.
+func (r *CheckRunner) udpAttempt(ctx context.Context, config CheckConfiguration, target CheckTarget, result *CheckAttemptEvidence) {
+	host, port := targetAddress(config, target)
+	if host == "" || port == 0 {
+		result.Outcome, result.Code = HealthUnavailable, "target_unavailable"
+		return
+	}
+	payload, _ := hex.DecodeString(config.Payload)
+	expect, _ := hex.DecodeString(config.Expect)
+	result.Address = net.JoinHostPort(host, strconv.Itoa(port))
+	connection, err := r.dial(ctx, "udp", result.Address)
+	if err != nil {
+		result.Code = checkNetworkError(ctx, err)
+		return
+	}
+	defer connection.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = connection.SetDeadline(deadline)
+	}
+	if _, err := connection.Write(payload); err != nil {
+		result.Code = checkNetworkError(ctx, err)
+		return
+	}
+	answer := make([]byte, maxUDPAnswerBytes)
+	read, err := connection.Read(answer)
+	if err != nil {
+		result.Code = checkNetworkError(ctx, err)
+		if result.Code == "timeout" {
+			result.Code = "no_answer"
+		}
+		return
+	}
+	if !bytes.HasPrefix(answer[:read], expect) {
+		result.Code = "unexpected_answer"
+		return
+	}
+	result.Outcome = HealthPassed
 }
 
 func targetAddress(config CheckConfiguration, target CheckTarget) (string, int) {
@@ -411,6 +548,12 @@ func checkFailureMessage(phase string, outcome HealthOutcome, checks ...CheckEvi
 			reason = "the application's runtime address is unavailable"
 		case "exit_nonzero":
 			reason = fmt.Sprintf("the check command exited with code %d", last.ExitCode)
+		case "handshake_failed":
+			reason = "the game server accepted the connection but did not answer a status handshake"
+		case "no_answer":
+			reason = "the game server did not answer the probe datagram"
+		case "unexpected_answer":
+			reason = "the server answered the probe datagram with something other than the expected reply"
 		}
 		address := last.Address
 		if parsed, err := url.Parse(address); err == nil && parsed.Host != "" {

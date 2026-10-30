@@ -19,9 +19,13 @@ func (s *Server) mountSystemRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/metrics", s.handle(s.handleSystemMetrics))
 		r.Method(http.MethodGet, "/metrics/history", s.handle(s.handleMetricsHistory))
 		r.Method(http.MethodGet, "/metrics/storage", s.handle(s.handleStorageHistory))
+		// When each filesystem fills, and whose volumes grow fastest.
+		r.Method(http.MethodGet, "/metrics/capacity", s.handle(s.handleCapacityForecast))
 		r.Method(http.MethodGet, "/metrics/events", s.handle(s.handleMetricsEvents))
 		r.Method(http.MethodGet, "/disk-usage", s.handle(s.handleDiskBreakdown))
 		r.Method(http.MethodGet, "/stream", s.handle(s.handleSystemStream))
+		// The host's alert rules; see mountHostAlertRoutes.
+		r.Route("/alerts", s.mountHostAlertRoutes)
 	})
 }
 
@@ -184,7 +188,9 @@ func (s *Server) handleDiskBreakdown(w http.ResponseWriter, r *http.Request) err
 	if limit > 100 {
 		limit = 100
 	}
-	resolved, err := s.modules.files.Resolve(path)
+	// The server's mount, not this container's: it is the same question the
+	// Files page asks, so it is answered from the same tree.
+	resolved, err := s.modules.hostFiles.Resolve(path)
 	if err != nil {
 		return mapFileError(err)
 	}
@@ -197,7 +203,8 @@ func (s *Server) handleDiskBreakdown(w http.ResponseWriter, r *http.Request) err
 	}
 	ctx, cancel := timeoutCtx(r, 45*time.Second)
 	defer cancel()
-	entries, err := sysinfo.DirBreakdown(ctx, resolved, limit)
+	var entries []sysinfo.DirEntry
+	s.modules.onHost(func() { entries, err = sysinfo.DirBreakdown(ctx, resolved, limit) })
 	if err != nil {
 		if errors.Is(err, sysinfo.ErrDirScanLimit) {
 			return httpx.Err(http.StatusUnprocessableEntity, "disk_scan_limit",

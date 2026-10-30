@@ -20,6 +20,7 @@ package accesslog
 import (
 	"encoding/json"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +56,28 @@ type Entry struct {
 	UserAgent string `json:"userAgent,omitempty"`
 	Referer   string `json:"referer,omitempty"`
 	TLS       bool   `json:"tls,omitempty"`
+	// Release is which of a deployment's releases answered, where the route
+	// shares its requests between two — a canary beside the live release —
+	// and records it: Caddy's `log_append release`, nginx's `rel=`. Empty
+	// for a route serving one release, which needs no saying.
+	Release string `json:"release,omitempty"`
+	// TraceID and SpanID are the W3C trace context the ingress sent the
+	// application in its traceparent header, and ParentSpanID the span of
+	// the client's that it continued, when the client sent one. A route
+	// rendered before the ingress injected one has none.
+	TraceID      string `json:"traceId,omitempty"`
+	SpanID       string `json:"spanId,omitempty"`
+	ParentSpanID string `json:"parentSpanId,omitempty"`
+	// User is who the route's tailnet gate admitted: the Tailscale login,
+	// or a tagged machine's tags, the dashboard answered the proxy with
+	// (tailnet-apps.md). Empty on every other route, and on a request the
+	// gate refused.
+	User string `json:"user,omitempty"`
+	// EdgeRule is the route's edge rule that decided the request — refused
+	// it, answered it, redirected it or let it through past the rules after
+	// it — or "crowdsec" for an address CrowdSec's list refused. Empty when
+	// no rule did (proxysvc/deployment_edge.go).
+	EdgeRule string `json:"edgeRule,omitempty"`
 
 	// at is unix nanoseconds, kept unexported so every consumer sorts and
 	// buckets on the same value rather than re-parsing a string.
@@ -162,6 +185,16 @@ type caddyLine struct {
 	Duration *float64 `json:"duration"`
 	Size     int64    `json:"size"`
 	Status   int      `json:"status"`
+	// Release is the field a canary route appends to each entry.
+	Release string `json:"release"`
+	// What the route's log_append adds: the trace context it sent upstream.
+	TraceID      string `json:"trace_id"`
+	SpanID       string `json:"span_id"`
+	ParentSpanID string `json:"parent_span_id"`
+	// TailnetLogin is the field the tailnet gate's log_append adds.
+	TailnetLogin string `json:"tailnet_login"`
+	// EdgeRule is the field a route with edge rules appends.
+	EdgeRule string `json:"edge_rule"`
 }
 
 func parseCaddy(line string) (Entry, bool) {
@@ -182,7 +215,7 @@ func parseCaddy(line string) (Entry, bool) {
 	entry := Entry{
 		at: at.UnixNano(), Method: raw.Request.Method, Host: raw.Request.Host,
 		Proto: raw.Request.Proto, Status: raw.Status, Size: raw.Size,
-		RemoteIP: raw.Request.ClientIP, TLS: raw.Request.TLS != nil,
+		RemoteIP: raw.Request.ClientIP, TLS: raw.Request.TLS != nil, Release: raw.Release,
 	}
 	if entry.RemoteIP == "" {
 		entry.RemoteIP = raw.Request.RemoteIP
@@ -190,10 +223,33 @@ func parseCaddy(line string) (Entry, bool) {
 	entry.Path, entry.Query = splitURI(raw.Request.URI)
 	entry.UserAgent = header(raw.Request.Headers, "User-Agent")
 	entry.Referer = header(raw.Request.Headers, "Referer")
+	entry.User = strings.TrimSpace(raw.TailnetLogin)
+	entry.EdgeRule = edgeRuleName(raw.EdgeRule)
 	if raw.Duration != nil {
 		entry.duration, entry.timed = *raw.Duration*1000, true
 	}
+	entry.setTrace(raw.TraceID, raw.SpanID, raw.ParentSpanID)
 	return entry, true
+}
+
+var (
+	traceIDRe = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	spanIDRe  = regexp.MustCompile(`^[0-9a-f]{16}$`)
+)
+
+// setTrace keeps a trace context only when it is one: 32 and 16 lowercase
+// hex characters, not all zeros, which W3C trace context forbids. Anything
+// else — a field an operator's own log format reused, a placeholder Caddy
+// left unreplaced — is no context rather than a wrong one.
+func (e *Entry) setTrace(trace, span, parent string) {
+	if !traceIDRe.MatchString(trace) || !spanIDRe.MatchString(span) ||
+		strings.Trim(trace, "0") == "" || strings.Trim(span, "0") == "" {
+		return
+	}
+	e.TraceID, e.SpanID = trace, span
+	if spanIDRe.MatchString(parent) && strings.Trim(parent, "0") != "" {
+		e.ParentSpanID = parent
+	}
 }
 
 // caddyTime reads either spelling of Caddy's timestamp. The default format is
@@ -315,10 +371,13 @@ func parseCombined(line string) (Entry, bool) {
 
 // readTrailing reads what an operator appended to `combined` in a log_format
 // of their own: `rt=$request_time` gives the latency the stock format lacks,
-// and `host=$host` names the site on a log several share. A trailing field
+// `host=$host` names the site on a log several share, and `tl=` is the login
+// a tailnet gate admitted. A trailing field
 // this does not know, or one written `-`, is left alone rather than failing
 // the line, because the line up to it is still a served request.
 func readTrailing(entry *Entry, rest string) {
+	var trace, span, parent string
+	defer func() { entry.setTrace(trace, span, parent) }()
 	for _, field := range strings.Fields(rest) {
 		key, value, ok := strings.Cut(field, "=")
 		if !ok || value == "" || value == "-" {
@@ -326,6 +385,8 @@ func readTrailing(entry *Entry, rest string) {
 		}
 		value = strings.Trim(value, `"`)
 		switch key {
+		case "rel":
+			entry.Release = value
 		case "rt":
 			if seconds, err := strconv.ParseFloat(value, 64); err == nil && seconds >= 0 {
 				entry.duration, entry.timed = seconds*1000, true
@@ -334,6 +395,20 @@ func readTrailing(entry *Entry, rest string) {
 			if entry.Host == "" {
 				entry.Host = value
 			}
+		// The trace context a deployment route's log_format records: what
+		// the ingress sent the application as its traceparent.
+		case "trace":
+			trace = value
+		case "span":
+			span = value
+		case "parent":
+			parent = value
+		case "tl":
+			// The tailnet gate's login, which nginx writes escaped as
+			// \xHH where it is not printable ASCII.
+			entry.User = value
+		case "er":
+			entry.EdgeRule = edgeRuleName(value)
 		}
 	}
 }
@@ -381,4 +456,20 @@ func splitURI(uri string) (path, query string) {
 		path = "/"
 	}
 	return path, query
+}
+
+// edgeRuleName keeps a rule name as the proxies write it: a route's rule
+// names are lower-case letters, digits and dashes, so anything else in the
+// field is not one, and a line is not failed for it.
+func edgeRuleName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 40 {
+		return ""
+	}
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+			return ""
+		}
+	}
+	return value
 }

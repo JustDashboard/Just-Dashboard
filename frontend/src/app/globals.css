@@ -63,7 +63,7 @@
    * value.
    *
    * Both are the same hue, because the product has a mark and the mark is
-   * one colour: #CAE9FF, the pale blue the J in `public/LOGO.svg` is drawn in.
+   * one colour: #CAE9FF, the brand blue of the files in `public/brand-logo/`.
    * A focus ring in some other hue would be a second identity nobody chose.
    *
    * What separates the two roles is chroma, not hue. `--brand` is the logo's
@@ -526,14 +526,6 @@
   --text-body: 0.8125rem; /* 13px — body and row text; the product's default */
   --text-title: 0.9375rem; /* 15px — the title of a surface that opens */
 
-  /* The wordmark's own ramp. A logo is not body type — it is a drawing of the
-     product's name — so it gets its own three sizes rather than borrowing steps
-     from the reading scale it has no relationship to. Named here only so the
-     one file that uses them is not the one place still typing a raw pixel. */
-  --text-mark-sm: 0.9375rem;
-  --text-mark-md: 1.0625rem;
-  --text-mark-lg: 1.375rem;
-
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -907,14 +899,17 @@
  * the header hairline above it by the table's own `-mx-4` bleed. Declaring
  * the ground on the panel rather than reading it at the table means the
  * nearest panel wins, so a framed block nested in a plain section is still
- * opaque with its own card. */
+ * opaque with its own card. A surface that frames a table without being a
+ * panel — the Files browser's card — declares the ground itself; an
+ * undeclared ground leaves the header transparent, which is what let rows
+ * show through the Files header while scrolling. */
 [data-slot="panel"] {
   --panel-ground: var(--card);
 }
 [data-slot="panel"][data-plain] {
   --panel-ground: var(--background);
 }
-[data-slot="panel"] [data-slot="table-container"] thead {
+[data-slot="table-container"] thead {
   background-color: var(--panel-ground);
 }
 
@@ -1100,4 +1095,66 @@
 .terminal-history:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 1px;
+}
+
+/* The server map's wiring (components/map). Its shapes are Tailwind; these are
+ * the parts React Flow draws itself.
+ *
+ * The ports are a workflow editor's: a line leaves a box from a round port
+ * on its right and arrives at a bar on its left, and what hangs under a box
+ * hangs from a diamond on its foot with the port's name beneath. A port with
+ * no line at it is not drawn. */
+[data-slot="server-map"] .react-flow__handle.map-port {
+  width: 10px;
+  height: 10px;
+  min-width: 0;
+  min-height: 0;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 9999px;
+  background: var(--card);
+  pointer-events: none;
+}
+[data-slot="server-map"] .react-flow__handle.map-port-in {
+  width: 6px;
+  height: 16px;
+  border-radius: 2px;
+}
+[data-slot="server-map"] .react-flow__handle.map-port-sub {
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+/* The diamond is the port's own ground, cut to shape: cutting the port
+ * itself would cut its name off with it. */
+[data-slot="server-map"] .react-flow__handle.map-port-sub::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--muted-foreground);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+[data-slot="server-map"] .react-flow__handle.map-port-off {
+  opacity: 0;
+}
+[data-slot="server-map"] .react-flow__node:focus-visible {
+  outline: none;
+}
+[data-slot="server-map"] .map-frame {
+  background: color-mix(in oklab, var(--card) 42%, transparent);
+}
+/* A system's head is the handle its whole diagram is carried by. */
+[data-slot="server-map"] .map-frame-grip {
+  cursor: grab;
+}
+[data-slot="server-map"][data-carrying] .map-frame-grip,
+[data-slot="server-map"][data-carrying] .react-flow__pane {
+  cursor: grabbing;
+}
+
+/* A box's name: one size at every distance, like everything else on the
+ * canvas — zooming scales the picture, it does not re-letter it. */
+[data-slot="server-map"] .map-name {
+  line-height: 1.3;
 }

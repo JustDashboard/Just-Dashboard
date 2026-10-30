@@ -89,7 +89,7 @@ func mapFileError(err error) error {
 }
 
 func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) error {
-	listing, err := s.modules.files.List(r.URL.Query().Get("path"),
+	listing, err := s.modules.hostFiles.List(r.URL.Query().Get("path"),
 		r.URL.Query().Get("hidden") == "true")
 	if err != nil {
 		return mapFileError(err)
@@ -99,7 +99,7 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) handleFileStat(w http.ResponseWriter, r *http.Request) error {
-	entry, err := s.modules.files.Stat(r.URL.Query().Get("path"))
+	entry, err := s.modules.hostFiles.Stat(r.URL.Query().Get("path"))
 	if err != nil {
 		return mapFileError(err)
 	}
@@ -108,7 +108,7 @@ func (s *Server) handleFileStat(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) handleFileRead(w http.ResponseWriter, r *http.Request) error {
-	content, err := s.modules.files.Read(r.URL.Query().Get("path"))
+	content, err := s.modules.hostFiles.Read(r.URL.Query().Get("path"))
 	if err != nil {
 		return mapFileError(err)
 	}
@@ -121,7 +121,7 @@ func (s *Server) handleFileRead(w http.ResponseWriter, r *http.Request) error {
 // is a download that fails.
 func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) error {
 	path := r.URL.Query().Get("path")
-	f, st, err := s.modules.files.Open(path)
+	f, st, err := s.modules.hostFiles.Open(path)
 	if err != nil {
 		return mapFileError(err)
 	}
@@ -150,7 +150,7 @@ func (s *Server) handleFileArchive(w http.ResponseWriter, r *http.Request) error
 	}
 	// Resolved before any header goes out: a refusal has to arrive as a JSON
 	// error, not as a 200 whose attachment is an empty archive.
-	baseDir, members, err := s.modules.files.ResolveArchive(base, paths)
+	baseDir, members, err := s.modules.hostFiles.ResolveArchive(base, paths)
 	if err != nil {
 		return mapFileError(err)
 	}
@@ -163,7 +163,7 @@ func (s *Server) handleFileArchive(w http.ResponseWriter, r *http.Request) error
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition",
 		mime.FormatMediaType("attachment", map[string]string{"filename": name + ext}))
-	if err := s.modules.files.Compress(w, baseDir, members, format); err != nil {
+	if err := s.modules.hostFiles.Compress(w, baseDir, members, format); err != nil {
 		// The archive body has already begun; log rather than attempt a
 		// status code that can no longer be sent.
 		s.Log.Error("archive stream failed", "err", err, "paths", paths)
@@ -182,11 +182,11 @@ func (s *Server) handleFileWrite(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	if err := s.modules.files.WriteChecked(req.Path, req.Content, req.ExpectedRevision); err != nil {
+	if err := s.modules.hostFiles.WriteChecked(req.Path, req.Content, req.ExpectedRevision); err != nil {
 		return mapFileError(err)
 	}
 	httpx.SetAudit(r, "file.write", req.Path, map[string]any{"bytes": len(req.Content)})
-	entry, err := s.modules.files.Stat(req.Path)
+	entry, err := s.modules.hostFiles.Stat(req.Path)
 	if err != nil {
 		return mapFileError(err)
 	}
@@ -243,7 +243,7 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) error 
 			continue
 		}
 		hash := sha256.New()
-		_, err = s.modules.files.UploadChecked(filepath.Join(dir, name), io.TeeReader(part, hash), overwrite, expected)
+		_, err = s.modules.hostFiles.UploadChecked(filepath.Join(dir, name), io.TeeReader(part, hash), overwrite, expected)
 		part.Close()
 		if err != nil {
 			return uploadError(err)
@@ -291,7 +291,7 @@ func (s *Server) handleFileMkdir(w http.ResponseWriter, r *http.Request) error {
 	if req.Path == "" {
 		return httpx.BadRequest("path is required")
 	}
-	if err := s.modules.files.Mkdir(req.Path, 0); err != nil {
+	if err := s.modules.hostFiles.Mkdir(req.Path, 0); err != nil {
 		return mapFileError(err)
 	}
 	httpx.SetAudit(r, "file.mkdir", req.Path, nil)
@@ -307,7 +307,7 @@ func (s *Server) handleFileTouch(w http.ResponseWriter, r *http.Request) error {
 	if req.Path == "" {
 		return httpx.BadRequest("path is required")
 	}
-	if err := s.modules.files.Touch(req.Path); err != nil {
+	if err := s.modules.hostFiles.Touch(req.Path); err != nil {
 		return mapFileError(err)
 	}
 	httpx.SetAudit(r, "file.create", req.Path, nil)
@@ -342,11 +342,11 @@ func (s *Server) handleFileMove(w http.ResponseWriter, r *http.Request) error {
 	if err := req.validate(); err != nil {
 		return err
 	}
-	src, dst, err := s.modules.files.MoveEnds(req.From, req.To)
+	src, dst, err := s.modules.hostFiles.MoveEnds(req.From, req.To)
 	if err != nil {
 		return mapFileError(err)
 	}
-	if err := s.modules.files.Move(req.From, req.To, req.Overwrite); err != nil {
+	if err := s.modules.hostFiles.Move(req.From, req.To, req.Overwrite); err != nil {
 		return mapFileError(err)
 	}
 	s.moveFileColours(r.Context(), src, dst)
@@ -363,7 +363,7 @@ func (s *Server) handleFileCopy(w http.ResponseWriter, r *http.Request) error {
 	if err := req.validate(); err != nil {
 		return err
 	}
-	if err := s.modules.files.Copy(req.From, req.To, req.Overwrite); err != nil {
+	if err := s.modules.hostFiles.Copy(req.From, req.To, req.Overwrite); err != nil {
 		return mapFileError(err)
 	}
 	httpx.SetAudit(r, "file.copy", req.From, map[string]any{"to": req.To, "overwrite": req.Overwrite})
@@ -384,7 +384,7 @@ func (s *Server) handleFileSymlink(w http.ResponseWriter, r *http.Request) error
 	if req.Target == "" || req.Link == "" {
 		return httpx.BadRequest("target and link are both required")
 	}
-	if err := s.modules.files.Symlink(req.Target, req.Link); err != nil {
+	if err := s.modules.hostFiles.Symlink(req.Target, req.Link); err != nil {
 		return mapFileError(err)
 	}
 	httpx.SetAudit(r, "file.symlink", req.Link, map[string]any{"target": req.Target})
@@ -398,11 +398,11 @@ func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) error 
 		return httpx.BadRequest("path query parameter is required")
 	}
 	recursive := r.URL.Query().Get("recursive") == "true"
-	entry, err := s.modules.files.ResolveEntry(path)
+	entry, err := s.modules.hostFiles.ResolveEntry(path)
 	if err != nil {
 		return mapFileError(err)
 	}
-	if err := s.modules.files.Delete(path, recursive); err != nil {
+	if err := s.modules.hostFiles.Delete(path, recursive); err != nil {
 		return mapFileError(err)
 	}
 	s.dropFileColours(r.Context(), entry)
@@ -416,7 +416,7 @@ func (s *Server) handleFileChmod(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	if err := s.modules.files.Chmod(req.Path, req.Mode, req.Recursive); err != nil {
+	if err := s.modules.hostFiles.Chmod(req.Path, req.Mode, req.Recursive); err != nil {
 		return mapFileError(err)
 	}
 	httpx.SetAudit(r, "file.chmod", req.Path, map[string]any{"mode": req.Mode, "recursive": req.Recursive})
@@ -436,7 +436,7 @@ func (s *Server) handleFileChown(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	if err := s.modules.files.Chown(req.Path, req.Owner, req.Group, req.Recursive); err != nil {
+	if err := s.modules.hostFiles.Chown(req.Path, req.Owner, req.Group, req.Recursive); err != nil {
 		return mapFileError(err)
 	}
 	httpx.SetAudit(r, "file.chown", req.Path,
@@ -457,7 +457,7 @@ func (s *Server) handleFileExtract(w http.ResponseWriter, r *http.Request) error
 	}
 	ctx, cancel := timeoutCtx(r, 10*time.Minute)
 	defer cancel()
-	written, err := s.modules.files.Extract(ctx, req.Archive, req.Destination)
+	written, err := s.modules.hostFiles.Extract(ctx, req.Archive, req.Destination)
 	if err != nil {
 		return mapFileError(err)
 	}
@@ -478,7 +478,7 @@ func (s *Server) handleFileSearch(w http.ResponseWriter, r *http.Request) error 
 	}
 	ctx, cancel := timeoutCtx(r, deadline)
 	defer cancel()
-	result, err := s.modules.files.SearchDetailed(ctx, files.SearchOptions{
+	result, err := s.modules.hostFiles.SearchDetailed(ctx, files.SearchOptions{
 		Root:       defaultStr(q.Get("path"), "/"),
 		Query:      q.Get("q"),
 		Content:    q.Get("content") == "true",

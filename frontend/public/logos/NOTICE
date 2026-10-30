@@ -53,6 +53,11 @@ telegram.svg, webhook.svg, bitbucket.svg, codeberg.svg, forgejo.svg, quay.svg
 and harbor.svg keep their names; aws.svg is its aws-light variant, drawn for a
 dark ground, and google-cloud.svg its google-cloud-platform.svg; azure.svg had
 its #0072c6 lifted to #52a9ff, the same hue at the L 0.72 rung.
+The push and chat services a channel can post to besides those come from the
+same collection: pushover.svg and microsoft-teams.svg keep their names, and
+mattermost.svg had its navy #22315b lifted to #8fa4d6, the same hue at the
+L 0.72 rung, so its ring reads on a dark ground. ntfy.svg and gotify.svg were
+already here for the webhooks that point at them.
 
 So do the sites a request arrives from and the services a variable's name says
 hold it: google.svg, bing.svg, duckduckgo.svg, reddit.svg, linkedin.svg,
@@ -219,3 +224,54 @@ was. The rest of the page's marks are files already here, drawn for the
 project's own extensions: Supabase's, Timescale's, Python's and Perl's. An
 extension with no mark of its own is drawn as its category's glyph, never as
 a mark that is not its own.
+
+The multi-service templates added in 0.8.2 are drawn as the application each
+one runs. wordpress.svg, plausible.svg, matomo.svg, listmonk.svg, wikijs.svg,
+authentik.svg, keycloak.svg, firefly-iii.svg and planka.svg are the
+collection's files, unchanged; miniflux.svg is its miniflux-light variant,
+drawn for a dark ground; paperless-ngx.svg is its file with the leaf's #17541f
+lifted to #79b67c, the same hue at the L 0.72 rung. ghost.webp is the
+collection's ghost-light.png and docmost.webp its docmost.png, resized to 96px
+WebP the way docker-compose.webp was. The templates that pair an application
+already drawn here with its database (nextcloud-mariadb, n8n-postgres,
+gitea-postgres, metabase-postgres, directus-postgres) are keyed to that
+application's file.
+
+The second batch of templates in 0.8.2 is drawn the same way, from the same
+collection: activepieces.svg, flowise.svg, librechat.svg, lobe-chat.svg,
+chroma.svg, budibase.svg, grist.svg, documenso.svg, rallly.svg, wakapi.svg and
+duplicati.svg are its files, unchanged; anythingllm.svg is its
+anything-llm-light variant, drawn for a dark ground; glitchtip.svg is its file
+with the "G"'s #841880 lifted to #e175da, the same hue at the L 0.72 rung.
+Langflow, LiteLLM, Appsmith, GoatCounter, SFTPGo and Apprise have no vector
+mark in the collection (SFTPGo's and Apprise's are rasters this change could
+not resize), so their cards keep their category glyph rather than a mark that
+is not the project's.
+The Secret stores page draws each connection as the product it reaches. From
+homarr-labs/dashboard-icons, under the Apache License 2.0: vault.svg is the
+collection's hashicorp-vault.svg, renamed after the store kind the page uses;
+infisical.svg and doppler.svg are unchanged. OpenBao has no file here: the
+collection's openbao.svg is a wordmark set in a web font that does not read at
+24px, so the page draws a lock rather than a mark that is not the project's.
+
+The one-click templates added in 0.8.2's second pass are drawn as the
+application each one runs, from the same collection under the Apache License
+2.0: homarr.svg, karakeep.svg, kimai.svg, mailpit.svg, metube.svg,
+privatebin.svg, yamtrack.svg and bentopdf.svg are the collection's files,
+unchanged; librespeed.svg is its librespeed-light variant, drawn for a dark
+ground; changedetection.svg had its #3056d3 lifted to #918cff and homebox.svg
+its black outlines (and one unfilled path) to #a4a4a4, each the same hue at
+the L 0.72 rung; libretranslate.svg is the collection's black glyph drawn in
+#ffffff, as the other black marks are, with its editor metadata removed.
+dashy.webp, gotenberg.webp, linkwarden.webp, pairdrop.webp and convertx.webp
+are the collection's PNG files, resized to 96px WebP the way docker-compose.webp
+was. excalidraw.svg, already here for the drawing editor, draws the Excalidraw
+template too. Onetime Secret has no file in any of the three collections, and
+Zipline's is a wordmark that does not read at 24px, so both keep the plain
+glyph rather than a mark that is not the project's.
+
+lxd.svg, zsh.svg, fish.svg and bash-light.svg are from Simple Icons 13.21.0
+(https://simpleicons.org), CC0 1.0: Linux Containers, Zsh, fish shell and GNU Bash,
+filled with Ubuntu's #E95420, Zsh's #F15A24, fish's #34C534 and Bash's #4EAA25,
+because Simple Icons ships the path alone and the Linux Containers mark's own
+#333333 and devicon's dark bash.svg disappear on a dark ground.

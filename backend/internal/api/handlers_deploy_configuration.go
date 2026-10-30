@@ -3,11 +3,14 @@ package api
 import (
 	"errors"
 	"net/http"
+	"slices"
+	"sort"
 	"strconv"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/tailnetgate"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -194,6 +197,21 @@ func (s *Server) handleDeploymentVariablePut(w http.ResponseWriter, r *http.Requ
 	}
 	name := chi.URLParam(r, "name")
 	principal := httpx.MustPrincipal(r)
+	if principal.DeployKey() && request.Reference != "" {
+		previous := ""
+		variables, err := s.modules.deployPlanning.ListVariables(r.Context(), projectID, environmentID)
+		if err != nil {
+			return mapDeploymentPlanningError(err)
+		}
+		for _, variable := range variables {
+			if variable.Name == name {
+				previous = variableReference(variable)
+			}
+		}
+		if err := keyReferenceGuard(principal, name, request.Reference, previous); err != nil {
+			return err
+		}
+	}
 	result, err := s.modules.deployPlanning.PutVariable(
 		r.Context(), projectID, environmentID, name, principal.Username(), request,
 	)
@@ -214,10 +232,7 @@ func (s *Server) handleDeploymentVariableGenerate(w http.ResponseWriter, r *http
 	if err != nil {
 		return err
 	}
-	var request struct {
-		Revision int      `json:"revision"`
-		Scopes   []string `json:"scopes"`
-	}
+	var request variableGenerateRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
@@ -233,6 +248,7 @@ func (s *Server) handleDeploymentVariableGenerate(w http.ResponseWriter, r *http
 		"deploymentId": projectID, "environmentId": environmentID,
 		"revision": result.DesiredRevision, "scopes": request.Scopes,
 	})
+	withholdGeneratedValue(principal, result)
 	httpx.JSON(w, http.StatusCreated, result)
 	return nil
 }
@@ -242,9 +258,7 @@ func (s *Server) handleDeploymentVariableRotate(w http.ResponseWriter, r *http.R
 	if err != nil {
 		return err
 	}
-	var request struct {
-		Revision int `json:"revision"`
-	}
+	var request variableRevisionRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
@@ -260,6 +274,7 @@ func (s *Server) handleDeploymentVariableRotate(w http.ResponseWriter, r *http.R
 		"deploymentId": projectID, "environmentId": environmentID,
 		"revision": result.DesiredRevision,
 	})
+	withholdGeneratedValue(principal, result)
 	httpx.JSON(w, http.StatusOK, result)
 	return nil
 }
@@ -314,9 +329,7 @@ func (s *Server) handleDeploymentVariableDelete(w http.ResponseWriter, r *http.R
 	if err != nil {
 		return err
 	}
-	var request struct {
-		Revision int `json:"revision"`
-	}
+	var request variableRevisionRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
@@ -369,17 +382,82 @@ func (s *Server) handleDeploymentConfigurationSave(w http.ResponseWriter, r *htt
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
+	if httpx.MustPrincipal(r).DeployKey() {
+		current, err := s.keyEnvironmentGuard(r.Context(), projectID, environmentID)
+		if err != nil {
+			return err
+		}
+		if reasons := hostAuthority(current.Source, request.Build, request.Runtime); len(reasons) > 0 {
+			return refuseHostAuthority("this configuration", reasons)
+		}
+		// Who may open a tailnet-only deployment is a person's decision: a
+		// key that could change it could let anyone on the tailnet in, or
+		// take the deployment off its public route.
+		if !sameTailnetPublication(current.Runtime.Tailnet, request.Runtime.Tailnet) {
+			return refuseForDeployKey("a deploy key cannot change whether a deployment is tailnet-only or who on the tailnet may open it")
+		}
+	}
+	if err := s.refuseSleepWithContainerSchedules(r.Context(), projectID, environmentID, request.Runtime); err != nil {
+		return err
+	}
 	configuration, err := s.modules.deployPlanning.SaveEnvironmentConfiguration(
 		r.Context(), projectID, environmentID, request,
 	)
 	if err != nil {
 		return mapDeploymentPlanningError(err)
 	}
-	httpx.SetAudit(r, "deploy.configuration.update", strconv.FormatInt(environmentID, 10), map[string]any{
+	detail := map[string]any{
 		"deploymentId": projectID, "environmentId": environmentID, "revision": configuration.Revision,
 		"domains": len(configuration.Domains), "dependencies": len(configuration.Dependencies),
 		"checks": len(configuration.Checks), "publicBind": request.Runtime.BindAddress == "0.0.0.0" || request.Runtime.BindAddress == "::",
-	})
+	}
+	if tailnet := configuration.Runtime.Tailnet; tailnet != nil {
+		// The list itself, so the trail says who was let in and when.
+		detail["tailnet"] = map[string]any{"allow": append([]string{}, tailnet.Allow...)}
+	}
+	httpx.SetAudit(r, "deploy.configuration.update", strconv.FormatInt(environmentID, 10), detail)
 	httpx.JSON(w, http.StatusOK, configuration)
 	return nil
+}
+
+// withholdGeneratedValue keeps a generated secret from a deploy key: variables
+// are write-only to it, a value it did not send as much as one it did. The
+// variable is generated and set all the same; a person reads it in the
+// dashboard, and the deployment reads it at run time.
+func withholdGeneratedValue(p *httpx.Principal, result *deploy.VariableMutationResult) {
+	if p.DeployKey() {
+		result.GeneratedValue = ""
+	}
+}
+
+// variableRevisionRequest names the environment revision a variable write
+// was read at, so a write over a change somebody else made is refused.
+type variableRevisionRequest struct {
+	Revision int `json:"revision"`
+}
+
+// variableGenerateRequest asks for a generated secret in the given scopes.
+type variableGenerateRequest struct {
+	Revision int      `json:"revision"`
+	Scopes   []string `json:"scopes"`
+}
+
+// sameTailnetPublication says two plans publish on the tailnet alike: both
+// not at all, or both tailnet-only admitting the same logins and tags.
+func sameTailnetPublication(a, b *deploy.RouteTailnet) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	canonical := func(list []string) []string {
+		out := make([]string, 0, len(list))
+		for _, entry := range list {
+			if value, _, err := tailnetgate.Canonical(entry); err == nil {
+				entry = value
+			}
+			out = append(out, entry)
+		}
+		sort.Strings(out)
+		return out
+	}
+	return slices.Equal(canonical(a.Allow), canonical(b.Allow))
 }

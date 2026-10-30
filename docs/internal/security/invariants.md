@@ -58,6 +58,13 @@ A change that weakens any of these has to say so explicitly.
      for anybody else (an allowlisted network, the tailnet's previews, the SSH tunnel) needs an
      explicit `acknowledgeBoundary` (`netsec.BoundaryImpacts`,
      [observability-security](../backend/observability-security.md#the-access-boundary));
+   - `api.spendDestructive` for a body under `/system-users` that is destructive though its route is not:
+     disabling with `endSessions`, a sudo level of `none`, and bulk `end-sessions`;
+   - `api.guardSystemAccount` for every write under `/system-users/{name}`: an account a package made
+     (below uid 1000, and `nobody`, but not root) is refused with `403 system_account` unless the request
+     says `allowSystem=true`, and `handleTerminalCreate`, where `asUser` asks for `system.admin` on a route
+     that otherwise asks only for `terminal` and refuses an API key, because root is one of the accounts it
+     can name;
    - `api.logTargetFor` for a log source that is login and sudo records (auth data needs
      `system.admin` on every `/logs` route that reads a source — except the whole journal
      (`journal:`), which stays `read` as it was before the gate; those lines are in it unfiltered, a
@@ -78,9 +85,110 @@ A change that weakens any of these has to say so explicitly.
    exactly as the SQL editor judges it for that role — a destructive one
    still needs `destructive` and spends the same budget — and the key's grants narrow it further:
    only the connections `api_token_connections` names, each `read` or `write`, re-read on every call,
-   and never a protected connection, which is refused for every tool, reads included. A walk of
+   and never a protected connection, which is refused for every tool, reads included. The
+   deployments are a separate grant, `api_tokens.deploy_access` (`''`, `read` or `deploy`, none for
+   every key made before it): a deploy or a rollback goes through the same enqueue functions the
+   deployment routes call and asks the key's role, narrowed to its owner's now, for the capability
+   the route asks — `service.control` to deploy, `destructive` and the destructive budget to roll
+   back. The grant reaches every deployment or, like a deploy key, only those chosen for it
+   (`api_token_deployments`, read with the key on every request). **With the generated tools on, it
+   deliberately reaches more than those two verbs:** every deployment route a deploy key may call (`keyOpen`, `keyEvery` in
+   `deployKeyRoutes`) is also a tool generated from the API's description, so `read` reads what a
+   deploy key reads and `deploy` changes what a deploy key changes — configuration, source, Git
+   policy, triggers, variables, drafts — held to the key's owner's role (not the administrator role a
+   deploy key carries), with the routes behind `s.destructive` only for a role holding `destructive`.
+   **The generated tools are each key's to turn on** (`api_tokens.mcp_operations`, additive, `0` for
+   every key made before them): a key without them is offered exactly the hand-written tools under its
+   grant and is refused a generated one by name, so no key gains a tool with an upgrade; a new key made
+   from the dialog has them on unless its maker unticks them, and the flag is audited with the grant.
+   A generated tool's call
+   never leaves the process: the MCP handler makes it through the dashboard's router as a request whose
+   context carries the MCP key's principal (`httpx.WithMCPDelegate`); `AuthenticateFeatures` admits it
+   only through the deploy key gate — the table's line, the key's chosen deployments, the
+   environment's — and marks it `Principal.ViaMCP`, which `DeployKey` reads as a deploy key, so every
+   handler's deploy key rule (write-only variables, `keyReferenceGuard`, `keySourceGuard`,
+   `hostAuthority`) holds; every other group refuses a delegated request, and no request from the
+   network can carry a context value. A walk of
    every route with an MCP key (`TestAnMCPKeyOpensNoOtherRoute`) holds the first half; the grants
-   are re-checked by the handler rather than trusted from the key.
+   are re-checked by the handler rather than trusted from the key, and
+   `TestEveryDeployKeyRouteIsAnMCPTool` holds that no session-only or deploy-key-refused route is a tool.
+
+   A deploy key (`scope = 'deploy'`, made by `CreateDeployToken` on `POST /tokens/deploy`, which an
+   administrator reaches only in a session) **deliberately changes the session-only rule** for part of
+   the deployment surface. Until it, every deployment write that handles a secret — drafts,
+   configuration, source, Git policy, triggers, variables and shared variables — answered any API key
+   with `403 session_required`. A deploy key reaches those writes; nothing else changed for any other
+   key. The operating verbs beside a deploy that an ordinary key already had — promoting staging
+   (`POST …/promote`, which also takes a pull request preview's approved image into staging for an
+   administrator, the role the key carries; approving the commit stays a session's), the warm
+   release's instant rollback and keep (`POST …/rollback-watch/rollback`,
+   `…/keep`), a canary's promote and abort (`POST …/canary/promote`, `…/canary/abort`) and the
+   maintenance switch (`PUT …/maintenance`) — are the deploy key's as well, with their reads
+   (`GET /deploy/{id}/environments`, `…/promotion`, `…/rollback-watch`, `…/canary`, `…/maintenance`,
+   `…/pages/{page}`, which is what every visitor is shown, `…/rehearsal`, the terms alone, and
+   `…/data-copies`, what each copy is of and until when, never its sign-in). It
+   holds the administrator role (narrowed to its owner's now, like every key), and where it
+   goes is decided once, before any other middleware of the route runs: `Authenticate`,
+   `AuthenticateScoped` and `AuthenticateMCP` refuse it, and the feature group's
+   `httpx.AuthenticateFeatures` admits it only when `api.deployKeyRoutes` (`deploy_keys.go`) has a
+   line for the exact route the router's own `Find` resolves (a mount's root, which the router serves
+   with and without its trailing slash, being one route; no two routes differ by the slash alone). A route without a line answers
+   `key_scope`, so a route added later is refused until someone writes its line; a line marked
+   session-only answers `session_required` with the reason. Admission is what lets the key past
+   `httpx.RequireSession` (`Principal.DeployRoute`), on that route and no other. The API's own
+   description, `GET /deploy/openapi.json` and `.yaml`, is a static document any signed-in account
+   and any key read, a deploy key included; it derives each operation's security from this table and
+   from `RequireSession` in the route's chain, and a test walks both keys to check it
+   ([`../backend/deploy-api.md`](../backend/deploy-api.md)). What stays a
+   session's whatever the key: every reveal (`…/variables/{name}/reveal`, shared variables, the legacy
+   `…/env/reveal`), the saved registry and Git credentials (list, create, update, test and delete), the secret-store
+   connections that hold credentials of their own (create, update, test and delete),
+   the pull-request merge and comment that speak as the dashboard's GitHub account, preview approval,
+   the removals that take a typed phrase (`DELETE /deploy/{id}/permanent`, `remove-managed` and its
+   plan), the terms of the warm-release window (`PUT …/rollback-policy`) and of migration rehearsal
+   (`PUT …/rehearsal`, which chooses a database whose backup is restored), a copy of a release's data
+   (asking for one, revealing its address, keeping it longer, removing it and comparing it: a second
+   copy of production's data whose address carries a password), what a linked database gives
+   previews and a preview's database branch restored again (`PUT …/database-links/{connection}/previews`,
+   `POST …/pull-requests/{number}/preview/branches/{connection}/refresh`: a second copy of production's
+   data next to a pull request's code), a route's maintenance
+   and error pages (`PUT …/pages/{page}`, files on the server beside the proxy's route), and a domain's
+   DNS record (`GET` and `POST …/domains/{domain}/dns-record`: read and written in a zone outside this
+   server with the DNS credentials saved under Certificates, which the key never sees). The
+   secret-store list (`GET /deploy/secret-stores`), which an ordinary key reads, answers a deploy key
+   `key_scope`: it carries each connection's address and sign-in fields and every deployment's
+   variables that read it, and the key cannot point a variable at a store. Variables are write-only to
+   the key: lists carry names and digests, and
+   `withholdGeneratedValue` drops the value a generate or rotate would return. A key narrowed to some
+   deployments (`api_token_deployments`; none is every deployment) reaches only routes about those —
+   the gate checks the route's `{id}` and that its `{env}` belongs to it — lists only those, and none
+   that reach what every deployment shares (server shared variables, fleet-wide reads). Drafts are
+   every deploy key's own: a draft records the key that made it (`deploy_drafts.key_id`, 0 for a
+   session), and a key lists, reads, saves, detects, preflights, commits and discards those alone
+   (`deploy.AuthorizeDraftForKey`, through `deploymentDraftForPrincipal` on every draft route), never a
+   session's or another key's, while an administrator's session still sees every draft of its
+   account. A narrowed key's commit adds the deployment it creates to `api_token_deployments` in the
+   commit's own transaction (`DraftCommitRequest.GrantToKey`, set by the handler and never read from a
+   body), so the key reaches what it made from the next request and nothing that failed to be made; a
+   key reaching every deployment is given no row, since the first would narrow it. Duplicating takes a
+   deployment the key reaches and leaves a draft that is the key's. Because a host-level setting or a
+   saved credential sent somewhere new would hand the key what the session-only routes keep from it,
+   the handlers hold what the key writes (`hostAuthority`, `keySourceGuard`, `keyReferenceGuard`): no
+   privileged container, host network, capability, device, GPU, host path, host-shell release task,
+   folder on the server or Compose file, in a plan it commits or an environment it changes — and an
+   environment that already has one, or whose variables a person pointed at a saved credential, is
+   changed (configuration and source) by a person only, though the key may still deploy it and set its
+   variables; no saved credential chosen, or a Git credential sent to a different repository; no
+   variable pointed at a saved credential, a database or a secret store — checked on a draft at commit, where its
+   variables reach the form they are stored in — nor, for a narrowed key, at a server shared variable.
+   A key that can change a deployment's source and deploy it can still run code that reads that
+   deployment's own variables at run time, a database reference a person gave it included:
+   write-only is a property of the API, not a sandbox. The walk `TestADeployKeyGetsTheDecidedAnswerOnEveryRoute` holds the table on every
+   route of the API and an ordinary key's answers as they were,
+   `TestEverySessionOnlyDeploymentRouteHasADeployKeyDecision` fails when a session-only deployment
+   route has no line, `TestADeployKeysDraftsAreItsOwnAndANarrowedKeyReachesWhatItMade` holds the
+   drafts and the grant, and `TestADeployKeyOperatesTheDeploymentsItReaches` the operating verbs,
+   their reads and a narrowed key's refusals, each write audited under the key.
 
    A database connection marked read-only adds one rule in front of all of these, and it fails closed
    the other way round: `protectReadOnlyConnections` refuses every request under `/databases/{id}` that
@@ -89,7 +197,10 @@ A change that weakens any of these has to say so explicitly.
    carry are judged by the same classifiers as above. It guards the dashboard's own controls; it is
    not a sandbox around the server. Each check and the rule are stated in
    [request lifecycle](../architecture/request-lifecycle.md#checks-that-depend-on-what-a-request-carries).
-5. Every state-changing request lands in the audit log.
+5. Every state-changing request lands in the audit log. A request made with an API key carries the
+   key's id and name (`audit_log.key_id`, `key_name`) as well as its account, and a deploy key refused
+   by the gate is written as `auth.deploy_key.refused`, reads included, since it is answered before the
+   group's audit middleware runs.
 6. Client-supplied paths go through `files.Resolve` — including the ones that do not look like file
    operations (bind-mount source, build context, a new stack's directory). Host commands go through
    `hostexec` with an argv, never a shell string. Request-defined shell source is confined to `deploy.Deployer.shell`, deliberately:
@@ -97,7 +208,9 @@ A change that weakens any of these has to say so explicitly.
    a second request-defined shell, and do not "fix" that one into an argv. A git clone's parent and an
    `init` target go through `gitx.ResolveDir` against `JD_GIT_ROOTS` — the Git page's own boundary — and a
    clone can only create a directory that does not exist. Terminal startup also uses
-   a bundled constant bootstrap to load the native prompt; paths remain separate positional arguments. `dockerx` invokes the `docker` binary in three places
+   a bundled constant bootstrap to load the native prompt; paths remain separate positional arguments. An
+   apt command that must first finish an interrupted dpkg run is wrapped in the constant
+   `updates.finishDpkgScript`, with the command and its validated arguments as positional arguments. `dockerx` invokes the `docker` binary in three places
    (compose, the streaming runner, `Build`) because the Engine API has no equivalent; all three build argv
    explicitly. A database dump that is a SQL script is replayed by `dbx` over the dashboard's own
    connection (`dump_script.go`) and never piped to `psql` or `mysql`: each of those runs a shell for a
@@ -117,18 +230,44 @@ A change that weakens any of these has to say so explicitly.
    port no preview owns, or an owned port serving an upstream other than the recorded one. A directory,
    a funnel or any other target of the operator's is never touched, at start, on a failed activation or
    on removal, since restore and withdrawal act only on a mapping whose upstream the row recorded. See
-   [preview isolation](../deployments/preview-isolation.md#tailnet-only-addresses).
+   [preview isolation](../deployments/preview-isolation.md#tailnet-only-addresses). An environment whose
+   plan is tailnet-only is published the same way, from the same range and table. Every such mapping,
+   a preview's included, goes to the address's front instead of the container — its tailnet gate, when
+   the plan names who may open it — a route bound to `127.0.0.1` alone, on host nginx, or on the
+   dashboard's own Caddy on the host's network, which publishes nothing and binds every site to
+   loopback, so this exception gains no listener on a routable address
+   ([tailnet-only deployments](../deployments/tailnet-apps.md)). The front is also what keeps the
+   dashboard's session cookie from the application: the address is a port of the name the dashboard is
+   reached by, and a browser sends a cookie to every port of its name, so the front, and a deployment
+   route serving the dashboard's own name, take the dashboard's cookies out of the request
+   ([the dashboard's session cookie](../deployments/tailnet-apps.md#the-dashboards-session-cookie)).
    The second exception is Remote Desktop's stream bridge: on a server on a tailnet it publishes a
    block of 20 UDP ports from 40000 on the **tailnet address only**, for WebRTC
    ([Stream mode](../backend/remote-desktop.md#stream-mode)). Nothing is sent on them without a
    stream negotiated over the bridge's WebSocket, which is behind the dashboard's session, and no
    block is published on a server off a tailnet.
+   A game server's port is published on loopback like every other deployment publication; publishing
+   it on every interface, so players can join, is the operator's explicit choice of bind address under
+   the deployment's Runtime settings, warned about in preflight (`game_loopback_only`, `public_bind`)
+   and held to the firewall review, and admitting it through the firewall is the Firewall page's own
+   audited rule route ([game servers](../deployments/game-servers.md#ports-and-binds)).
    A database's port published from its Network page — on one of the host's own addresses, on every
    interface kept to a list, or to anywhere — is not the dashboard's socket either: it is the operator's
    explicit choice, in the destructive group and audited as `database.access.change`. A list is kept by
    the network module's gateway table, whose prerouting drop runs before Docker's translation, never by
    a host firewall rule that a published port's traffic does not meet
    ([databases](../backend/databases-proxy-platform.md)).
+   Scale to zero's wake ([sleep when idle](../deployments/scale-to-zero.md#the-wake-socket)) binds no
+   address at all: the proxy asks over a Unix socket beside host nginx's sites or inside the Docker Caddy
+   ingress's own `/config` volume, and the dashboard answers only a peer whose process is nginx or Caddy
+   (`SO_PEERCRED`). What it does — start an application asleep by design — is what any visitor's request
+   to the domain does.
+   A Cloudflare Tunnel's connector binds nothing at all: cloudflared runs as the managed container
+   `just-dashboard-cloudflared` (never a process on the host) with no published port, dials out to
+   Cloudflare's edge, and reaches the proxy over a Docker network only it and the ingress share; its
+   metrics answer on that network alone. Its token is sealed with `auth.Sealer` as it arrives, never
+   returned or logged, and handed to the container through the `docker` client's environment, never its
+   argv ([Cloudflare Tunnel](../deployments/cloudflare-tunnel.md)).
    `GET /security/boundary` reports both halves as observed — a dashboard socket other than Caddy's
    on a routable address, no Caddy on the configured port, or a preview port that is funnelled or
    serves anything but a loopback upstream is a broken boundary on the Security overview — but the
@@ -145,7 +284,26 @@ A change that weakens any of these has to say so explicitly.
    no "run this string" kind, and adding one would be adding a second request-defined shell by another
    name. No blueprint may ship a default credential, publish a database port, declare a stateful workload
    without persistence, download without https plus a size limit and a checksum or declared version
-   source, name an uncontained path, or take privilege without a written reason.
+   source, name an uncontained path, or take privilege without a written reason. An install-time file
+   is written only inside a volume the definition declares, with generated secrets as references the
+   helper fills, and a download is deployable only when a checksum pins it: both are written by a
+   short-lived helper container that mounts that one volume (the release's own image for a file, a
+   digest-pinned fetch image for a download), never by a host shell or into a host path, and fetched
+   bytes are hashed by the dashboard and refused on a mismatch before anything starts. A multi-service
+   (Compose) template publishes exactly one port — its public service's, on loopback — keeps every other
+   service on private networks the ingress never joins (`internal: true`, with no route out unless the
+   service declares egress), takes no privilege, device, host
+   network or Docker socket, and carries values only as typed references (`{{secret.…}}`,
+   `{{variable.…}}`) that render as interpolations of the deployment's sealed variables, so its document
+   holds no value; commands and healthchecks are argv that are never templated, so neither an
+   operator's input nor a secret reaches a process list or a shell. The stored document is the server's
+   own render of a shipped version or of a template added on this dashboard, never one a client sent
+   under a template's name. A template added on this dashboard is held to every one of these rules when
+   it is saved, and to more: its id is in the `user-` namespace no built-in may use, so it can never
+   stand in for a reviewed definition; it may take no privilege, host network, capability, device or
+   Docker socket, since only a reviewed built-in may reach the host; and a source that names it is
+   saved with the server's stored copy frozen in, never a definition the client sent. A template made
+   from a deployment never opens a secret's value: each becomes an input the next deployment answers.
 10. The game console is not a shell. `gameserver.ValidateCommand` refuses anything carrying a shell
     metacharacter, newline or NUL, the command reaches Docker exec as separate argv elements, and player
     actions come from a closed set with the account name validated before interpolation. The same
@@ -154,6 +312,48 @@ A change that weakens any of these has to say so explicitly.
 11. Requested diagnostics claim only what an owner returned. Unavailable measurements carry a
     reason — never as a healthy result, and never as a problem. A finding that cannot name an action or a
     deep link says which external action is required instead.
+12. Linking to a just-dashboard.com account adds no inbound path and no second authority. A command from the
+    site runs only if its signature verifies against the site key pinned at link time, it has not expired or
+    been seen before, and its kind is within the scope chosen on this server, and each is written to the audit
+    log whatever its outcome; the kinds are a closed set that call the services the pages call. Linking,
+    changing the scope and unlinking are session-only in the browser (an API key is refused) and root-only at
+    the terminal, the heartbeat is a fixed field set that names nothing on the machine below `operate`, and
+    the installer never handles a link credential. See [account link](../backend/account-link.md).
+13. The deployment operator reads only with the person's leave and runs nothing itself. Its reads are a
+    closed set of tools held to their own fields and bounds (`assistant.OperatorCalls`; a call to
+    anything else refuses the whole answer), each run only after the person allows that call, with the
+    person's own role and masked by the run diagnosis's masker. Its actions are proposals: the server
+    checks one and the page draws a card, and only the person's press runs it — as the request the
+    project's own button makes to that action's existing route, under that route's capability,
+    confirmation and audit. There is no shell, no command the model writes and no other path from an
+    answer to the host, and the route is a session's. See [the deployment operator](../deployments/operator.md).
+
+14. A vulnerability scanner reads an image; it never reaches the host. `imagescan.ScanSpec` runs Trivy
+    with **no network** (`NetworkMode: none`), no capabilities, a read-only root, no new privileges and
+    as nobody (65534), and mounts only the image's `docker save` archive and the database volume
+    read-only plus its own report and scratch folders — never the Docker socket, a host path of the
+    operator's or a credential. What needs a network is done by the dashboard itself, not the scanner:
+    the database is fetched over https from its registry, checked against the digest its manifest
+    names, repacked so that only `db/trivy.db` and `db/metadata.json` reach the volume, and copied in
+    through a container that is created and never started; a base image is pulled by the daemon, by
+    digest, as a build pulls it. The scanner image is pinned by tag and index digest. Scanning changes
+    nothing a release runs: a rebuild is offered as the runs route's own `force_build`, gated and
+    audited as any build is. See [image vulnerabilities](../deployments/image-vulnerabilities.md).
+
+15. Railpack's planner reads a checkout; it never reaches the host. `deploy.railpackPrepareSpec` runs
+    the pinned Railpack image (tag and index digest) with the build root mounted **read-only**, a fresh
+    output folder of its own, no capabilities, no new privileges, a read-only root, bounded memory, CPU
+    and processes, and never the Docker socket, a host path of the operator's or a credential. It has
+    Docker's bridge network, as a build has, because Railpack downloads its pinned mise release and
+    resolves language releases; it runs as root inside the container only because the checkout is a
+    root-only 0700 tree, and with every capability dropped. Build variables reach it by name only,
+    except plain `RAILPACK_*` ones, which configure the plan; their values reach the build as BuildKit
+    secret mounts, as a recipe's do. A Railpack plan runs only in BuildKit, like a Dockerfile's steps.
+    See [Railpack](../deployments/recipes.md#railpack).
+16. The usage count reports nothing without an administrator's yes, given in a session and audited, and an API
+    key cannot give it. The report is the three fields of `usageping.Report` with no identifier, at most once per
+    UTC day, and a redirect is never followed. `JD_USAGE_PING=false` or `JD_ACCOUNT_LINK=false` stops it, and an
+    agent has none. See [the usage count](../backend/usage-ping.md).
 
 ## Invariant 2: what two-factor still guarantees
 
@@ -176,6 +376,12 @@ What did **not** change, and must not:
 - Setup, enrollment confirmation and code verification share one account-scoped attempt budget.
   Enrollment cannot be used again after TOTP is enabled. An accepted TOTP counter or recovery code is
   consumed atomically with session elevation; another session cannot reuse it.
+- A passkey replaces the password and nothing else. A passkey sign-in starts its session through the
+  same `auth.startSession` a password sign-in does, so an enrolled account still owes its code (the
+  session reaches only the 2FA routes until it is given) and `JD_REQUIRE_2FA` still decides only
+  whether an unenrolled account may sign in. A passkey is never counted as the second factor; making
+  it one would be a change to this invariant, and is not made. See
+  [passkeys](../architecture/runtime-boundaries.md#passkeys).
 - A temporary password does not grant feature access. After required factors, only authentication
   status/logout and the session-only password change are available until `must_change_pw` is
   cleared. API tokens cannot bypass this restriction.
@@ -187,7 +393,7 @@ setting off would strand everyone who was mid-flow with a session that can never
 
 ## Invariant 3: which routes take a typed phrase
 
-Typed confirmation is reserved for six deletion operations:
+Typed confirmation is reserved for seven deletion operations:
 
 - Permanently deleting an archived deployment project (`DELETE /deploy/{id}/permanent`) requires the
   project's name. Archiving a project is reversible and uses ordinary confirmation.
@@ -207,6 +413,10 @@ Typed confirmation is reserved for six deletion operations:
   the server's host name, because it removes every deployment with its managed volumes and paths and
   deletes the dashboard's database and the key it is sealed with. Uninstalling and keeping everything
   takes ordinary confirmation: running `install.sh` again restores the dashboard as it was.
+- Deleting a host account along with its home directory and no archive (`DELETE /system-users/{name}`
+  with `home=delete`) requires the account's name, because what a person keeps in a home exists nowhere
+  else. Its preview (`GET /system-users/{name}/removal`) counts it first. Keeping the home, or archiving
+  it to a root-only tarball first, takes ordinary confirmation, and bulk deletion only ever keeps homes.
 
 These are the only places the UI asks the operator to type a phrase. Other destructive operations,
 including table and collection deletion, data restores, Docker volume removal and pruning, account and
@@ -224,7 +434,7 @@ beside `total`, which is what its confirmation has to show. The Redis console's 
 like `DROP DATABASE` through the SQL query route, take the destructive capability and no phrase: a console
 is where an operator types the statement itself.
 
-The server enforces the six phrases inside their handlers. The browser sends an
+The server enforces the seven phrases inside their handlers. The browser sends an
 `encodeURIComponent`-encoded value in `X-Confirm` with `X-Confirm-Encoding: uri`; the backend decodes
 it once, requires valid UTF-8, and compares the exact phrase. Legacy unencoded headers remain
 supported. Only the Compose WebSocket action accepts a phrase in a query parameter because browsers

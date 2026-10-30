@@ -30,10 +30,7 @@ func (s *Server) handleDeploymentPreviewApprove(w http.ResponseWriter, r *http.R
 	if err != nil {
 		return err
 	}
-	var request struct {
-		Revision string `json:"revision"`
-		Deploy   bool   `json:"deploy"`
-	}
+	var request previewApproveRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
@@ -95,9 +92,7 @@ func (s *Server) handleDeploymentPreviewReject(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		return err
 	}
-	var request struct {
-		Revision string `json:"revision"`
-	}
+	var request previewRejectRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
@@ -111,4 +106,16 @@ func (s *Server) handleDeploymentPreviewReject(w http.ResponseWriter, r *http.Re
 	})
 	httpx.JSON(w, http.StatusOK, approval)
 	return nil
+}
+
+// previewApproveRequest approves one exact revision of a preview, and deploys
+// it when asked.
+type previewApproveRequest struct {
+	Revision string `json:"revision"`
+	Deploy   bool   `json:"deploy"`
+}
+
+// previewRejectRequest rejects one exact revision of a preview.
+type previewRejectRequest struct {
+	Revision string `json:"revision"`
 }

@@ -20,7 +20,7 @@ information (`ErrorState` in `components/state.tsx`), not an error.
 `Server.Start(ctx)` is separate from `New` so failing to schedule background work is reported by `main`
 rather than swallowed in construction. It starts the metrics recorder (here, not lazily — its whole
 purpose is to have been running while nobody was looking), the database activity recorder, the repair
-of connections sealed under another master key (`database_stranded.go`), the Docker event log, the network module's interface sampler and its daily blocklist refresh, the self-update
+of connections sealed under another master key (`database_stranded.go`), the Docker event log, the host alerts' pass once a minute (`hostAlerts.Start`, after both of those it reads), the network module's interface sampler and its daily blocklist refresh, the self-update
 check, the backup scheduler, `selfupdate.Installer.Reconcile`,
 `selfcfg.Applier.Reconcile`, Remote Desktop's `Reconcile` (closing the history of sessions a restart cut
 off) and the Tailscale certificate keeper. `Shutdown` releases what outlives a request:
@@ -77,6 +77,12 @@ transfer, a `compose up --build`) descends from `context.Background()` and is no
 — a deploy killed halfway is worse than one finishing into a dashboard that is gone. Its timeout is the
 only bound.
 
+That outlives the process, not the container: a host command started through `nsenter` stays in the
+backend container's cgroup and is killed when the container stops. Package commands can stop it
+themselves (docker-ce's maintainer script restarts Docker), so they run as transient units of the host's
+systemd through `jobs.RunDetached`, and a restarted backend adopts them; see
+[streaming and jobs](../backend/databases-proxy-platform.md#streaming-jobs-secrets-agent-mode).
+
 ## Reaching the host, and containing paths
 
 `internal/hostexec`:
@@ -89,6 +95,10 @@ only bound.
 - `CommandOnHostAsUser` enters the host namespace before using `setpriv` to select the trusted account's
   UID/GID and groups, clear capabilities and set no-new-privileges. PM2 uses this path with a minimal
   environment; a user-owned executable is never run as the dashboard's root identity.
+- `InHostMounts(fn)` runs Go code, not a command, in the host's mount namespace: on a goroutine locked
+  to a thread that unshares its filesystem attributes and `setns`es into `/proc/1/ns/mnt`, a thread Go
+  then discards rather than reuses. Only `fn` moves; a goroutine it starts is back in the container.
+  Where there is no other namespace (a plain install) or it cannot be entered, `fn` runs in place.
 - Argv is passed through unchanged and **never** through a shell. Keep it that way ([invariant 6](../security/invariants.md#invariants-that-must-not-regress)).
 
 Local interactive rebase uses Git's editor protocol: `gitx` sets the editor to the current server
@@ -103,6 +113,16 @@ filesystem entry point goes through it, including the ones that do not look like
 backup restore destinations, database dump paths, bind-mount sources, build contexts. `ResolveEntry`
 applies the same containment but returns the entry rather than its target: use it for delete, move, stat
 and chmod, which act *on* a symlink.
+
+The Files page's handlers (and `GET /system/disk-usage`) use `modules.hostFiles`, the same `Service`
+made with `OnHost(InHostMounts)`: every exported operation, `Resolve` included, runs whole in the host's
+mount namespace, so the page sees `/tmp`, `/usr` and `/var/lib` as the terminal does and a path is never
+resolved in one tree and opened in another. Every other caller keeps `modules.files`, in the container's
+view, because it resolves a path and then opens it itself. The roots and the checks are identical in
+both; only the tree they are evaluated against differs. Resolving through `/host` was the alternative
+and was rejected: every path the kernel hands back — symlink targets, walk results, error text — would
+need translating, and absolute symlinks would have to be re-rooted by hand, at every one of the
+package's syscalls.
 
 Logs are read under their own roots: `logsx.Service.Allow` holds a path, after resolving symlinks, to
 `JD_LOG_ROOTS`. Every log file the dashboard opens passes it, including the paths no request typed — a
@@ -123,9 +143,20 @@ metadata is never trusted as the quota. `internal/sysinfo` reads the host throug
 
 ## Auth, secrets, state
 
-`internal/auth` owns users, sessions, TOTP, recovery codes, API tokens. Cookie `vpsd_session` (HttpOnly,
-SameSite=Strict, Secure unless `JD_DEV` or loopback-only `JD_TLS=off`). The WebSocket upgrader uses that
-same browser-facing scheme for its same-origin check, so HTTP tunnel installs can open live streams. A
+`internal/auth` owns users, sessions, TOTP, recovery codes, passkeys, API tokens. The session cookie is
+`__Host-jd_session` (HttpOnly, SameSite=Strict, Secure, `Path=/`, no `Domain`), or `jd_session` without
+Secure where the dashboard is served over plain loopback HTTP (`JD_DEV`, `JD_TLS=off`), since a browser
+refuses a `__Host-` cookie that cannot be Secure; `internal/sessioncookie` names both, and
+`httpx.Authenticator` sets and reads them. The prefix is the browser's guarantee that the cookie is
+sent to this one name and cannot be planted by a sibling. A browser still holding the name releases
+before 0.8.2 set, `vpsd_session`, is answered on its first request, given the current name for what is
+left of the session's lifetime and the old cookie cleared (`settle`); sign-out and a password change
+clear both names. A browser still sends the cookie to every *port* of the dashboard's name, so every
+proxy the dashboard writes in front of an application on that name — a tailnet address's front, a
+deployment route on `JD_SITE` — takes it out of the request
+([the dashboard's session cookie](../deployments/tailnet-apps.md#the-dashboards-session-cookie)). The
+CSRF header and `SameSite=Strict` are unchanged. The WebSocket upgrader uses the same browser-facing
+scheme for its same-origin check, so HTTP tunnel installs can open live streams. A
 session that still owes a second factor is accepted only by
 the 2FA routes (`AuthenticatePartial`); everything else answers `totp_required` /
 `totp_enrollment_required`. Who owes one is decided per account: an enrolled account is always challenged,
@@ -150,11 +181,26 @@ optional, separately confirmed revoke after the tool has switched credentials. T
 valid until revoked or expired; creating a replacement does not impersonate another owner.
 An MCP key's replacement is made on `POST /tokens/mcp` at the old key's role with the databases the
 old key reaches that are neither protected nor forgotten since, each narrowed to `read` where that
-role may not change a database. `PUT /tokens/{id}/connections`
+role may not change a database, and the old key's deployment grant, narrowed to `read` where that
+role may not deploy, with the deployments that grant was narrowed to and the generated tools only if
+the old key had them. `PUT /tokens/{id}/connections`
 (session only, the owner's own active MCP key, `404` for another account's, `409 not_mcp_key` for any
-other key) replaces what a key reaches without a new secret; it is audited as
-`dashboard.token.connections` with the databases by name. Forgetting a connection removes its grants
+other key) replaces what a key reaches without a new secret — its databases, its deployment grant and
+its chosen deployments and whether it has the generated tools, each kept when left out; it is audited as
+`dashboard.token.connections` with the databases by name, the deployment grant, what it reaches and
+`operations`. Forgetting a connection removes its grants
 with it (`ON DELETE CASCADE`).
+A deploy key (`auth.ScopeDeploy`) is made on `POST /tokens/deploy` (session only, `system.admin`) from
+`{name, ttlDays, deploymentIds}` and always holds the administrator role, which `CreateDeployToken`
+refuses to an owner without it; `ResolveAPIToken` narrows it to the owner's role on every call like any
+key. Its deployments live in `api_token_deployments` and are read with the key on every request; none
+is every deployment. The project is deliberately not a foreign key there: purging a deployment leaves
+the row, so a key that reached only it keeps reaching nothing rather than everything. There is no route
+to re-point one; a replacement is minted with the same list, and a narrowed key's own draft commit adds
+the deployment it created, in the commit's transaction (`deploy.DraftCommitRequest.GrantToKey`). A draft
+records the deploy key that made it (`deploy_drafts.key_id`, 0 for a session), which is what holds a key
+to its own drafts. Where it may go is the API's decision
+(`api/deploy_keys.go`, [request lifecycle](request-lifecycle.md)).
 `DELETE /tokens/{id}` revokes and retains the record. The session-only
 `DELETE /tokens/{id}/record` additionally requires `system.admin` and `s.destructive`; it deletes
 only revoked or expired metadata through `auth.DeleteInactiveAPIToken`'s conditional SQL write.
@@ -176,7 +222,7 @@ heap had doubled, which left the process at about 155 MB for up to half a minute
 Local host-root account recovery uses the same binary's isolated `--admin` mode through
 `scripts/manage.sh`. It opens only an existing store and starts no server or modules. Password resets
 atomically set the new password, clear any owed change and login lockout, and revoke sessions/API
-tokens while keeping TOTP enrollment, recovery codes and disabled state; account mutations are audited
+tokens and passkeys while keeping TOTP enrollment, recovery codes and disabled state; account mutations are audited
 as actor `cli`. See [terminal tools](../operations/terminal-tools.md) for commands and the local
 privilege boundary.
 
@@ -223,16 +269,18 @@ and another SQLite closing its connection afterwards would believe it was the la
 `-wal` and `-shm` the store is still writing through, corrupting the database. Inspect a live store
 read-only: `sqlite3 'file:/var/lib/just-dashboard/vpsd.db?mode=ro'`.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
-`api_tokens`, `api_token_connections` — the databases an MCP key reaches —, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`, the statement history's `db_statement_intervals`, `db_statement_shapes` and `db_statement_samples`, point-in-time recovery's `db_wal_archives` — with the destination's keys and the archive's private key sealed — `db_wal_restore_points` and `db_wal_restores`, `db_upgrades`, and `db_tls_ca` and `db_server_tls` for the certificate authority, whose key is sealed, and the certificates issued from it); boards (`boards`, the images placed on them in `board_files`, the install's shape library in `board_library`, and `sticky_boards`, which nothing reads since Stickyboard was removed in 0.8 but which stays so the boards made with it in 0.7.2–0.7.5 survive an update); Remote Desktop (`remote_desktop_computers`, with sealed passwords and the stream bridge's id once paired, and
+`api_tokens`, `api_token_connections` — the databases an MCP key reaches —, `api_token_deployments` — the deployments a deploy key, or an MCP key's deployment grant, was narrowed to —, `audit_log`, whose `key_id` and `key_name` name the API key behind a request); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`, the statement history's `db_statement_intervals`, `db_statement_shapes` and `db_statement_samples`, point-in-time recovery's `db_wal_archives` — with the destination's keys and the archive's private key sealed — `db_wal_restore_points` and `db_wal_restores`, `db_upgrades`, and `db_tls_ca` and `db_server_tls` for the certificate authority, whose key is sealed, and the certificates issued from it); boards (`boards`, the images placed on them in `board_files`, the install's shape library in `board_library`, and `sticky_boards`, which nothing reads since Stickyboard was removed in 0.8 but which stays so the boards made with it in 0.7.2–0.7.5 survive an update); Remote Desktop (`remote_desktop_computers`, with sealed passwords and the stream bridge's id once paired, and
 `remote_desktop_sessions`); backups
 (`backup_jobs`, `backup_runs`, `backup_restore_tests`); legacy deployment compatibility (`deploy_projects`, `deploy_env`,
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,
 runtimes, steps, logs, dependencies, checks, triggers, delivery records, variable and plan snapshots,
 blueprint installs, port and queue leases, removals, drafts, schedules, Git watch cursors, notifications,
-and previews; proxy
+and previews, and the last answer the assistant gave about a failed run with the masked text it was sent
+(`deploy_run_diagnoses`, which goes with its run); proxy
 watching (`watched_endpoints`, filled from the older one-port-per-name `watched_domains`, holding TLS watches and TCP network probes by `kind`, with each check in `watched_checks`); compose deployment history (`docker_stack_deployments` — the file, the
 running digests and the git commit captured before every state-changing action, with environment values
-hashed rather than stored); the general `settings` key/value table; mount, container, interface
+hashed rather than stored); the server map's arrangement, one JSON document per account
+(`map_layouts`, which goes with its account); the general `settings` key/value table; mount, container, interface
 (`metric_interface_samples`) and host metric samples; and the network module's sealed WireGuard client
 configurations (`network_vpn_clients`), saved diagnostic runs (`network_diagnostic_runs`) and private
 packet capture metadata/artifacts (`network_packet_captures`), optional source/check identities
@@ -255,6 +303,54 @@ cancellation (bounded at five seconds), so a client that disconnects once its mu
 leaves the row. An `Entry` records who (user, role, `Actor` = session or token), from
 where, what (action, target, method, path), and how it went. Local root account commands use
 `Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target.
+
+## Passkeys
+
+`auth/passkeys.go` (library: `github.com/go-webauthn/webauthn`, BSD-3-Clause) adds WebAuthn passkeys
+that stand in for an account's password at sign-in. Tables: `webauthn_credentials` (the credential
+id, the library's record of it as JSON — public key, flags, signature counter — the relying party ID
+it was registered under and the name its owner gave it; `ON DELETE CASCADE` with the account) and
+`webauthn_spent_challenges` (`store/schema_passkeys.go`, additive).
+
+- **What a passkey is worth.** It replaces the password, never the code. A passkey sign-in starts
+  its session through `startSession`, the function a password sign-in calls, so an enrolled account
+  owes its code exactly as after a password and `JD_REQUIRE_2FA` keeps its meaning
+  ([invariant 2](../security/invariants.md#invariant-2-what-two-factor-still-guarantees)). Sessions
+  record `passkey`, then `passkey+totp` or `passkey+recovery` once the code is given.
+- **Relying party and origin.** The RP ID is the host name the browser reached the dashboard at, read
+  from the request's `Origin` (`auth.PasskeyParty`): it must be the request's own host or one of
+  `JD_ALLOWED_ORIGINS`, over https or plain http on `localhost`, and never an IP address, which
+  WebAuthn refuses. A credential is bound by the browser to the name it was made at, so one made at
+  `dash.example.com` does not sign in at the tailnet name; each is stored with its RP ID and the
+  security page says where a passkey made elsewhere works. At an IP address the sign-in and security
+  pages say why no passkey is offered instead of offering one that fails.
+- **Ceremonies.** Registration asks for a discoverable credential with user verification required,
+  excludes the account's existing ones, and takes no attestation. Sign-in is discoverable (no
+  username): the authenticator's user handle — an HMAC of the account id under the install's key, so
+  it names nobody — says whose it is, and must match the credential's account. A challenge is not
+  stored while in flight: its session data, kind, account, session, origin and a five-minute expiry
+  are sealed with the install's key and handed to the browser as the challenge id, so beginning a
+  sign-in writes nothing. The finish opens it, checks every field and spends it by inserting its id
+  into `webauthn_spent_challenges`, so a response is tried against a challenge once.
+- **Refusals.** User verification is required at both ends; a signature counter that does not move
+  forward (`CloneWarning`) refuses the sign-in as a possibly copied key; a removed credential, one
+  registered at another name, a disabled account, an expired, altered, replayed or misplaced
+  challenge and a response signed for another origin or relying party are each refused, and every
+  refusal is audited with its reason. A password lockout does not block a passkey: it brakes
+  password guessing, and a passkey is not guessed.
+- **Lifecycle.** Registering takes a complete session (`/account`, `RequireSession`) and a fresh
+  password plus, where enrolled, a TOTP code that is consumed as at sign-in. Renaming and removing
+  are the account holder's, from a session, with an ordinary confirmation; an account holds at most
+  25. Disabling an account keeps its passkeys and refuses them until it is enabled. A root shell's
+  `reset-password` deletes them with the sessions and API tokens, because that reset is how an
+  account somebody else may hold is taken back; an administrator's password set and the holder's
+  own password change keep them, as they keep API tokens. Role changes do not touch them.
+- **Routes and audit.** `POST /auth/passkey/begin`, `POST /auth/passkey/finish` (sign-in);
+  `GET /account/passkeys`, `POST /account/passkeys/register/begin` (password and code),
+  `POST …/register/finish`, `PATCH /account/passkeys/{id}`, `DELETE /account/passkeys/{id}`.
+  Audited as `auth.passkey.login` (success or the refusal), `auth.passkey.reauth`,
+  `auth.passkey.register`, `auth.passkey.rename` and `auth.passkey.remove`, with the passkey's name
+  and RP ID and never a credential.
 
 ## Session authentication provenance
 

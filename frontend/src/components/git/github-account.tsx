@@ -67,8 +67,10 @@ export function GitHubAccountControl({
    */
   status?: ReturnType<typeof useGitHubAccount>
   /** For a crowded strip: the avatar, the login, and nothing else — or, for
-   *  a strip too narrow for a login, the avatar alone. */
-  compact?: boolean | "avatar"
+   *  a strip too narrow for a login, the avatar alone. "fit" decides between
+   *  the two by the nearest `@container`: the avatar alone below 36rem, where
+   *  a phone's folded git workspace strip has no room left for the title. */
+  compact?: boolean | "avatar" | "fit"
 }) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
@@ -136,7 +138,7 @@ export function GitHubAccountControl({
               {compact === "avatar" ? (
                 <span className="sr-only">Sign in to GitHub</span>
               ) : (
-                "Sign in"
+                <span className={cn(compact === "fit" && "@max-xl:sr-only")}>Sign in</span>
               )}
             </Button>
           </TooltipTrigger>
@@ -174,7 +176,11 @@ export function GitHubAccountControl({
               size="sm"
               variant="outline"
               aria-label={compact === "avatar" ? `GitHub account ${account.login}` : undefined}
-              className={cn("gap-1.5 pr-2 pl-1.5", compact === "avatar" && "px-1.5")}
+              className={cn(
+                "gap-1.5 pr-2 pl-1.5",
+                compact === "avatar" && "px-1.5",
+                compact === "fit" && "@max-xl:px-1.5",
+              )}
             >
               <span className="relative flex">
                 <ForgeFace login={account.login} provider="github" size="md" account />
@@ -187,10 +193,22 @@ export function GitHubAccountControl({
               </span>
               {compact !== "avatar" && (
                 <>
-                  <span className={cn("truncate", compact ? "max-w-[8rem]" : "max-w-[10rem]")}>
+                  <span
+                    className={cn(
+                      "truncate",
+                      compact ? "max-w-[8rem]" : "max-w-[10rem]",
+                      compact === "fit" && "@max-xl:sr-only",
+                    )}
+                  >
                     {account.login}
                   </span>
-                  <ChevronDown aria-hidden className="size-3 text-muted-foreground" />
+                  <ChevronDown
+                    aria-hidden
+                    className={cn(
+                      "size-3 text-muted-foreground",
+                      compact === "fit" && "@max-xl:hidden",
+                    )}
+                  />
                 </>
               )}
             </Button>

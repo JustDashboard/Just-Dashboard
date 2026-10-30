@@ -18,7 +18,8 @@ projects with unfinished engine or legacy runs return 409. Unknown engine states
 
 The transaction checks archive and run state before deleting notification delivery records, committed
 drafts, runs, and the project. Foreign keys remove its environments, variable revisions, releases,
-configuration, triggers, schedules, database network bindings, and ownership joins. Runs are deleted before variables because
+configuration, triggers, schedules, database network bindings, the last commit-status and
+preview-comment outcomes, and ownership joins. Runs are deleted before variables because
 run-to-variable revision references intentionally do not cascade from the variable side. The audit
 log is outside this cascade and survives deletion.
 

@@ -13,8 +13,8 @@ const tokenPrefix = "vpsd_"
 
 // ScopeMCP is the scope of a key made for an AI client. Unlike a capability
 // scope it narrows where the key goes, not what its role may do there: it
-// opens the MCP endpoint and nothing else, and reaches only the databases
-// granted to it.
+// opens the MCP endpoint and nothing else, and reaches only the databases and
+// the deployments granted to it.
 const ScopeMCP = "mcp"
 
 var ErrTokenInvalid = errors.New("api token invalid, revoked or expired")
@@ -35,6 +35,17 @@ type APIToken struct {
 	// Connections are the databases an MCP key reaches, as ListAPITokens
 	// reads them. Every other key has none.
 	Connections []TokenConnection `json:"connections,omitempty"`
+	// Deployments is what an MCP key may do with the deployments: nothing,
+	// read them, or also deploy and roll them back. Every other key has none.
+	Deployments DeployAccess `json:"deployments,omitempty"`
+	// Operations is whether an MCP key is offered the tools generated from
+	// the deployment API under its deployment grant, beside the hand-written
+	// ones. A key made before them is not, until its owner turns them on.
+	Operations bool `json:"operations,omitempty"`
+	// DeploymentIDs are the deployments a deploy key, or an MCP key's
+	// deployment grant, was narrowed to; empty is every deployment. Every
+	// other key has none.
+	DeploymentIDs []int64 `json:"deploymentIds,omitempty"`
 }
 
 // CreateAPIToken mints a scripting credential. The role may narrow the owner's
@@ -107,7 +118,7 @@ func roleAtMost(want, have Role) bool {
 	return rank[want] <= rank[have]
 }
 
-const apiTokenColumns = `id, user_id, name, prefix, role, scope, created_at, expires_at, last_used_at, revoked`
+const apiTokenColumns = `id, user_id, name, prefix, role, scope, created_at, expires_at, last_used_at, revoked, deploy_access, mcp_operations`
 
 func (s *Service) apiTokenByID(ctx context.Context, id int64) (*APIToken, error) {
 	row := s.st.DB.QueryRowContext(ctx, `SELECT `+apiTokenColumns+` FROM api_tokens WHERE id = ?`, id)
@@ -117,14 +128,16 @@ func (s *Service) apiTokenByID(ctx context.Context, id int64) (*APIToken, error)
 func scanAPIToken(row interface{ Scan(...any) error }) (*APIToken, error) {
 	var (
 		t                      APIToken
-		role                   string
+		role, deployments      string
 		created, expires, used int64
-		revoked                int
+		revoked, operations    int
 	)
-	if err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &role, &t.Scope, &created, &expires, &used, &revoked); err != nil {
+	if err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &role, &t.Scope, &created, &expires, &used, &revoked, &deployments, &operations); err != nil {
 		return nil, err
 	}
+	t.Operations = operations == 1
 	t.Role = Role(role)
+	t.Deployments = DeployAccess(deployments)
 	t.CreatedAt = time.Unix(created, 0).UTC()
 	t.Revoked = revoked == 1
 	if expires > 0 {
@@ -162,7 +175,10 @@ func (s *Service) ListAPITokens(ctx context.Context, userID int64, all bool) ([]
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return out, s.fillTokenConnections(ctx, out)
+	if err := s.fillTokenConnections(ctx, out); err != nil {
+		return nil, err
+	}
+	return out, s.fillTokenDeployments(ctx, out)
 }
 
 func (s *Service) RevokeAPIToken(ctx context.Context, id int64) error {
@@ -201,6 +217,14 @@ func (s *Service) ResolveAPIToken(ctx context.Context, presented string) (*APITo
 	effective := t.Role
 	if !roleAtMost(effective, u.Role) {
 		effective = u.Role
+	}
+	// A deploy key's deployments are part of what it is, and an MCP key's,
+	// read with it on every request: one taken off its list is refused the
+	// next call.
+	if narrowable(t.Scope) {
+		if t.DeploymentIDs, err = s.TokenDeployments(ctx, t.ID); err != nil {
+			return nil, nil, "", err
+		}
 	}
 	s.st.DB.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, time.Now().Unix(), t.ID)
 	return t, u, effective, nil

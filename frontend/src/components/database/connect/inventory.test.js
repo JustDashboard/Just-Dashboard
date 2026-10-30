@@ -5,6 +5,7 @@ import {
   foundAction,
   foundActionWords,
   foundShelves,
+  instanceName,
   hostInstance,
   instanceAddress,
   instanceHref,
@@ -177,6 +178,36 @@ describe("the one press a found instance offers", () => {
     })
   })
 
+  test("a MongoDB this kernel keeps from starting is recreated with the mitigation, not started", () => {
+    const mongo = {
+      ...stopped,
+      engine: "mongodb",
+      driver: "mongodb",
+      flavor: "mongodb",
+      state: "restarting",
+      container: { id: "m1", name: "app-db", image: "mongo:8.0", dataVolumes: [] },
+    }
+    const problem = {
+      message: "MongoDB cannot start on this kernel; apply the mitigation",
+      detail: "MongoDB 8.0.34 refuses to start on Linux 7.0.0-1017-azure (MongoDB SERVER-121912).",
+      kernel: "7.0.0-1017-azure",
+      release: "8.0.34",
+      fixable: true,
+    }
+    expect(foundAction(mongo, false, problem)).toEqual({
+      kind: "kernel-mitigation",
+      container: "m1",
+      problem,
+    })
+    expect(foundActionWords(foundAction(mongo, false, problem), "app-db")).toEqual({
+      verb: "Apply the kernel mitigation to app-db",
+      word: "Apply mitigation",
+    })
+    // Compose's file has to say it, so the row offers what it would anyway.
+    expect(foundAction(mongo, false, { ...problem, fixable: false }).kind).toBe("look")
+    expect(foundAction({ ...mongo, state: "exited" }).kind).toBe("start-container")
+  })
+
   test("an engine with no driver links to the container or unit that runs it", () => {
     expect(foundAction(memcached)).toEqual({
       kind: "look",
@@ -239,6 +270,25 @@ describe("the shelves of what was found", () => {
         file: { ...file.file, holder: "tool" },
       }),
       instance({ key: "docker:skip", name: "skip", ignored: true }),
+      instance({
+        ...file,
+        key: "file:/var/backups/jd/vpsd.db",
+        name: "vpsd.db",
+        file: { ...file.file, path: "/var/backups/jd/vpsd.db", holder: "backup" },
+      }),
+      instance({
+        key: "data:/var/lib/docker/volumes/old/_data",
+        kind: "data",
+        name: "old",
+        driver: "",
+        connectable: false,
+        file: {
+          path: "/var/lib/docker/volumes/old/_data",
+          size: 0,
+          modified: "",
+          holder: "container",
+        },
+      }),
     ],
     scans: [],
     ignored: ["docker:skip", "docker:long-gone"],
@@ -246,11 +296,15 @@ describe("the shelves of what was found", () => {
     checkedAt: "",
   }
 
-  test("connected ones are left out; the rest are servers, files, kept and ignored", () => {
+  test("connected ones are left out; the rest are servers, files, and what is set aside", () => {
     const shelves = foundShelves(inventory)
     expect(shelves.servers.map((one) => one.name)).toEqual(["shop-db", "old-db", "mc"])
     expect(shelves.files.map((one) => one.name)).toEqual(["data.db"])
     expect(shelves.kept).toHaveLength(2)
+    // A copy kept aside and a data directory with no server are not offered
+    // as things to take.
+    expect(shelves.backups.map((one) => one.key)).toEqual(["file:/var/backups/jd/vpsd.db"])
+    expect(shelves.leftover.map((one) => one.name)).toEqual(["old"])
     expect(shelves.ignored.map((one) => one.name)).toEqual(["skip"])
     expect(shelves.gone).toEqual(["docker:long-gone"])
     expect(foundShelves(undefined).servers).toEqual([])
@@ -267,6 +321,12 @@ describe("the shelves of what was found", () => {
       "old-db",
       "mc",
     ])
+  })
+
+  test("an anonymous volume is titled by its ID cut to twelve, as Docker lists it", () => {
+    const hash = "c85d8585e2dad6a12ee3408eda77d915155437414dd871baf02c286d27b07714"
+    expect(instanceName(instance({ name: hash }))).toBe("c85d8585e2da")
+    expect(instanceName(instance({ name: "pg-data" }))).toBe("pg-data")
   })
 
   test("private state is a tool's, the system's or the dashboard's own", () => {

@@ -71,7 +71,7 @@ export function AutomaticDeployment({
         </Field>
       </OptionRow>
       <OptionRow
-        title="Report each release as a GitHub commit status"
+        title="Report each release as a commit status"
         checked={policy.commitStatuses}
         onCheckedChange={(commitStatuses) => onChange({ ...policy, commitStatuses })}
       />

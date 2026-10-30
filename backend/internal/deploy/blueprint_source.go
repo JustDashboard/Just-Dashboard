@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -20,19 +21,33 @@ type BlueprintPlan struct {
 	Inputs        []blueprint.Input      `json:"inputs"`
 	Automation    []blueprint.Automation `json:"automation"`
 	Files         []blueprint.ConfigFile `json:"files"`
+	// ComposeFiles is a Compose template's rendered document, the one its
+	// source stores and every release of it runs.
+	ComposeFiles []ComposeDocument `json:"composeFiles,omitempty"`
 }
 
 // RenderBlueprintPlan resolves a blueprint version, renders it against the
 // operator's inputs and maps the result onto the normalized plan. It is pure
 // apart from the catalogue read, so preflight can call it without side effects.
 func RenderBlueprintPlan(source DraftSourceConfig, name string) (*BlueprintPlan, error) {
-	definition, err := blueprint.GetVersion(source.BlueprintID, source.BlueprintVersion)
+	definition, err := source.definition()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidSource, err)
+	}
+	// Rendering does not depend on the kind, so a caller that names none —
+	// a preview — gets the definition's own; one that names the wrong one is
+	// told which it is.
+	if source.Kind != "" {
+		if err := blueprintSourceKindMatches(source, definition); err != nil {
+			return nil, err
+		}
 	}
 	rendered, err := blueprint.Render(definition, source.BlueprintInputs)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidPlan, err)
+	}
+	if definition.IsCompose() {
+		return blueprintComposePlan(definition, rendered)
 	}
 	profile := blueprintWorkloadProfile(rendered.Profile)
 	candidate := DetectedCandidate{
@@ -40,7 +55,7 @@ func RenderBlueprintPlan(source DraftSourceConfig, name string) (*BlueprintPlan,
 		BuildMethod: BuildImage, Confidence: ConfidenceHigh,
 		Evidence: []DetectionEvidence{{
 			Path:   definition.ID + "@" + definition.Version,
-			Reason: "reviewed blueprint shipped with this dashboard",
+			Reason: blueprintOrigin(definition, "reviewed blueprint shipped with this dashboard"),
 		}},
 		NeedsDecision: []string{},
 	}
@@ -81,6 +96,152 @@ func RenderBlueprintPlan(source DraftSourceConfig, name string) (*BlueprintPlan,
 		Summary: blueprint.Summarize(definition), Inputs: definition.Inputs,
 		Automation: rendered.Automation, Files: rendered.Files,
 	}, nil
+}
+
+// definition is the template a source names: a built-in from the catalogue
+// the binary ships, or a template added on this dashboard from the definition
+// frozen into the source when it was saved (DraftSourceConfig's
+// BlueprintDefinition). The namespaces cannot overlap (blueprint.UserPrefix),
+// so a source can name a built-in or an added template and never be read as
+// the other; the frozen definition is parsed and held to every rule again.
+func (c DraftSourceConfig) definition() (*blueprint.Blueprint, error) {
+	if !blueprint.IsUserID(c.BlueprintID) {
+		if len(c.BlueprintDefinition) > 0 {
+			return nil, fmt.Errorf("%w: %s is a built-in and is read from the catalogue, not from the source", ErrInvalidSource, c.BlueprintID)
+		}
+		return blueprint.GetVersion(c.BlueprintID, c.BlueprintVersion)
+	}
+	if len(c.BlueprintDefinition) == 0 {
+		return nil, fmt.Errorf("%w: %s: the template is not saved with this source", blueprint.ErrNotFound, c.BlueprintID)
+	}
+	definition, err := blueprint.ParseUserTemplate(c.BlueprintDefinition)
+	if err != nil {
+		return nil, err
+	}
+	if definition.ID != c.BlueprintID || (c.BlueprintVersion != "" && definition.Version != c.BlueprintVersion) {
+		return nil, fmt.Errorf("%w: the source names %s@%s and holds %s@%s", ErrInvalidSource,
+			c.BlueprintID, c.BlueprintVersion, definition.ID, definition.Version)
+	}
+	return definition, nil
+}
+
+// blueprintOrigin is how detection evidence names where a definition came
+// from: the reviewed catalogue, or this dashboard's own templates.
+func blueprintOrigin(definition *blueprint.Blueprint, builtIn string) string {
+	if blueprint.IsUserID(definition.ID) {
+		return "template added on this dashboard"
+	}
+	return builtIn
+}
+
+// blueprintSourceKindMatches keeps the source kind honest about what a
+// definition is. A multi-service template runs through the Compose release
+// path and is a Compose source; a single reviewed image is a blueprint source.
+// Accepting either for both would let a stack be planned as one container.
+func blueprintSourceKindMatches(source DraftSourceConfig, definition *blueprint.Blueprint) error {
+	if expected := BlueprintSourceKind(definition); source.Kind != expected {
+		if expected == SourceCompose {
+			return fmt.Errorf("%w: %s is a multi-service template and deploys as a Compose source", ErrInvalidSource, definition.ID)
+		}
+		return fmt.Errorf("%w: %s is a single-image template and deploys as a blueprint source", ErrInvalidSource, definition.ID)
+	}
+	return nil
+}
+
+// BlueprintSourceKind is the source kind a definition deploys as.
+func BlueprintSourceKind(definition *blueprint.Blueprint) SourceKind {
+	if definition.IsCompose() {
+		return SourceCompose
+	}
+	return SourceBlueprint
+}
+
+// blueprintComposePlan is RenderBlueprintPlan for a multi-service template.
+// The stack is planned exactly as a pasted Compose file is — the same
+// structural analysis, the same release path, the same Compose evidence — with
+// the reviewed definition supplying what an operator would otherwise have to:
+// the public service, its port and checks, the generated secrets every service
+// shares, and the domain.
+func blueprintComposePlan(definition *blueprint.Blueprint, rendered *blueprint.Plan) (*BlueprintPlan, error) {
+	documents := []ComposeDocument{{Path: blueprint.ComposeFile, Content: rendered.Compose}}
+	analysis, err := analyzeComposeDocuments(documents)
+	if err != nil {
+		// The definition passed every catalogue rule and still renders a file
+		// the planner refuses: that is the catalogue's fault, never the
+		// operator's, and it must not reach a deployment.
+		return nil, fmt.Errorf("%w: %s renders a Compose file the planner refuses: %v", ErrInvalidPlan, definition.ID, err)
+	}
+	public := definition.PublicService()
+	if public == nil {
+		return nil, fmt.Errorf("%w: %s has no public service", ErrInvalidPlan, definition.ID)
+	}
+	analysis.PrimaryService = public.Name
+	port := 0
+	for _, candidate := range rendered.Ports {
+		if candidate.Exposure == "proxy" {
+			port = candidate.Internal
+		}
+	}
+	services := make([]string, 0, len(analysis.Services))
+	for _, service := range analysis.Services {
+		services = append(services, service.Name)
+	}
+	candidate := newDetectedCandidate("", BuildCompose, DetectedCandidate{
+		Name: definition.Name, Profile: ProfileCompose, Confidence: ConfidenceHigh, Port: port,
+		Evidence: []DetectionEvidence{{
+			Path:   definition.ID + "@" + definition.Version,
+			Reason: fmt.Sprintf("%s: %s", blueprintOrigin(definition, "reviewed multi-service template shipped with this dashboard"), strings.Join(services, ", ")),
+		}},
+	})
+	// The identity names the reviewed definition (Template), the digest of
+	// this exact render (Revision) and the document the release runs (Digest),
+	// which is what makes a template's release as immutable as a pasted one.
+	detection := DetectionResult{
+		Source: SourceIdentity{
+			Kind: SourceCompose, Digest: analysis.Digest, ComposeFiles: analysis.Files, Services: services,
+			Revision: rendered.Digest, Template: definition.ID + "@" + definition.Version,
+		},
+		Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID, Compose: &analysis,
+	}
+	configuration := &PlanConfiguration{
+		Build: BuildPlanConfig{
+			Method: BuildCompose, PrimaryService: public.Name,
+			Secrets: []BuildSecretConfig{}, ReleaseTasks: []ReleaseTaskConfig{},
+		},
+		// Compose keeps the limits the document declares per service, and a
+		// stack of stateful services is replaced, never run twice at once.
+		Runtime: RuntimePlanConfig{
+			InternalPort: port, Protocol: "tcp", BindAddress: "127.0.0.1", Strategy: StrategyStopFirst,
+			Mounts: []RuntimeMount{}, Capabilities: []string{}, Devices: []string{},
+		},
+		Variables: blueprintVariables(definition, rendered), Dependencies: []PlannedDependency{},
+		Checks: blueprintChecks(rendered), Domains: blueprintDomains(rendered),
+	}
+	return &BlueprintPlan{
+		Detection: detection, Configuration: *configuration, Rendered: rendered,
+		Summary: blueprint.Summarize(definition), Inputs: definition.Inputs,
+		Automation: rendered.Automation, Files: rendered.Files, ComposeFiles: documents,
+	}, nil
+}
+
+// WithTemplateDocuments renders a Compose template source's document from
+// the reviewed definition it names and stores it in the source, replacing
+// whatever the caller sent. It is how a template source is saved: the stored
+// document is the server's render of a version this dashboard ships, never a
+// file a client chose to label with a template's name, and from then on it is
+// the release — a later dashboard that ships a newer version of the template
+// does not change what this deployment runs, and a redeploy does not need
+// the old version to still be shipped. Any other source is returned as it is.
+func (c DraftSourceConfig) WithTemplateDocuments() (DraftSourceConfig, error) {
+	if c.Mode != SourceModeBlueprint || c.Kind != SourceCompose {
+		return c, nil
+	}
+	plan, err := RenderBlueprintPlan(c, "")
+	if err != nil {
+		return c, err
+	}
+	c.ComposeFiles = append([]ComposeDocument(nil), plan.ComposeFiles...)
+	return c, nil
 }
 
 func blueprintWorkloadProfile(profile blueprint.Profile) WorkloadProfile {
@@ -153,23 +314,49 @@ func blueprintConfiguration(
 		case "direct":
 			direct = true
 			if port.Primary || (configuration.Runtime.HostPort == 0 && configuration.Runtime.InternalPort == 0) {
+				// The port players or clients connect to, TCP or UDP, on its
+				// own number. It starts on loopback like every other
+				// publication: reaching it from another machine is the
+				// operator's choice of every interface under Runtime, and
+				// preflight says what that choice still needs from the
+				// firewall.
 				configuration.Runtime.InternalPort = port.Internal
 				configuration.Runtime.Protocol = port.Protocol
-				configuration.Runtime.HostPort = port.Internal
-				configuration.Runtime.BindAddress = "0.0.0.0"
+				configuration.Runtime.HostPort = blueprintHostPort(port)
+				configuration.Runtime.BindAddress = "127.0.0.1"
 				continue
 			}
 			// Gitea's SSH next to its web port, Syncthing's sync protocol next
 			// to its GUI: the proxy carries the primary port and this one is
 			// published on its own number, as the definition promised.
 			configuration.Runtime.Ports = append(configuration.Runtime.Ports, PublishedPort{
-				HostPort: port.Internal, ContainerPort: port.Internal, Protocol: port.Protocol,
+				HostPort: blueprintHostPort(port), ContainerPort: port.Internal, Protocol: port.Protocol,
 			})
 		case "internal":
 			if configuration.Runtime.InternalPort == 0 {
 				configuration.Runtime.InternalPort = port.Internal
 				configuration.Runtime.Protocol = port.Protocol
 			}
+		}
+	}
+	// A direct port on the primary's own number in the other protocol is the
+	// same publication: Bedrock signals over TCP and plays over UDP on 19132.
+	// It follows the primary's bind address rather than becoming a second
+	// publication on every interface, so the one Bind address control under
+	// Runtime decides where players reach both.
+	if runtime := &configuration.Runtime; runtime.HostPort > 0 {
+		kept := runtime.Ports[:0]
+		for _, published := range runtime.Ports {
+			if published.ContainerPort == runtime.InternalPort && published.HostPort == runtime.HostPort &&
+				published.effectiveProtocol() != runtime.effectiveProtocol() {
+				runtime.Protocol = "tcp+udp"
+				continue
+			}
+			kept = append(kept, published)
+		}
+		runtime.Ports = kept
+		if len(runtime.Ports) == 0 {
+			runtime.Ports = nil
 		}
 	}
 	if exclusive || direct {
@@ -195,6 +382,35 @@ func blueprintConfiguration(
 		})
 	}
 
+	configuration.Runtime.Seeds = blueprintSeeds(definition, rendered)
+	if len(configuration.Runtime.Seeds) == 0 {
+		configuration.Runtime.Seeds = nil
+	}
+	configuration.Variables = blueprintVariables(definition, rendered)
+	configuration.Domains = blueprintDomains(rendered)
+	configuration.Checks = blueprintChecks(rendered)
+	sort.Slice(configuration.Dependencies, func(i, j int) bool {
+		return configuration.Dependencies[i].ResourceID < configuration.Dependencies[j].ResourceID
+	})
+	return configuration, nil
+}
+
+// blueprintHostPort is where a direct port is published: on its own number,
+// unless the definition takes the number from an input (blueprint.Port's
+// HostInput), which is how a template saved from a deployment keeps that
+// deployment's publication as an answer rather than as this server's port.
+func blueprintHostPort(port blueprint.RenderedPort) int {
+	if port.HostPort > 0 {
+		return port.HostPort
+	}
+	return port.Internal
+}
+
+// blueprintVariables maps a render's variables onto planned ones. A generated
+// secret is declared by shape only; its value is produced by the planning
+// store when the deployment is committed and is sealed from then on.
+func blueprintVariables(definition *blueprint.Blueprint, rendered *blueprint.Plan) []PlannedVariable {
+	variables := []PlannedVariable{}
 	for _, variable := range rendered.Variables {
 		domainTemplate, domainRequired := blueprintDomainTemplate(definition, variable.Name)
 		planned := PlannedVariable{
@@ -204,20 +420,27 @@ func blueprintConfiguration(
 		}
 		switch {
 		case variable.Generated:
-			// The blueprint declares the shape; the value is produced by the
-			// planning store when the deployment is committed.
 			planned.Sensitivity = "secret"
 			planned.Generate = max(MinGeneratedSecretLength, min(MaxGeneratedSecretLength, variable.Length))
+			planned.GenerateFormat = variable.Format
 		case variable.Sensitivity != "secret":
 			planned.Value = variable.Value
 		}
-		configuration.Variables = append(configuration.Variables, planned)
+		variables = append(variables, planned)
 	}
+	return variables
+}
+
+func blueprintDomains(rendered *blueprint.Plan) []PlannedDomain {
+	domains := []PlannedDomain{}
 	for _, domain := range rendered.Domains {
-		configuration.Domains = append(configuration.Domains, PlannedDomain{
-			Hostname: domain, HTTPS: true, Ownership: OwnershipManaged,
-		})
+		domains = append(domains, PlannedDomain{Hostname: domain, HTTPS: true, Ownership: OwnershipManaged})
 	}
+	return domains
+}
+
+func blueprintChecks(rendered *blueprint.Plan) []PlannedCheck {
+	checks := []PlannedCheck{}
 	for _, check := range rendered.Checks {
 		planned := PlannedCheck{
 			Name: check.Name, Kind: string(check.Kind), Phase: check.Phase, Required: check.Required,
@@ -226,8 +449,14 @@ func blueprintConfiguration(
 		if check.Path != "" {
 			config["path"] = check.Path
 		}
-		if check.Port > 0 && string(check.Kind) != "game_handshake" {
+		if check.Port > 0 {
 			config["port"] = check.Port
+		}
+		if check.Payload != "" {
+			config["payload"] = check.Payload
+		}
+		if check.Expect != "" {
+			config["expect"] = check.Expect
 		}
 		if len(check.Command) > 0 {
 			config["command"] = check.Command
@@ -249,12 +478,9 @@ func blueprintConfiguration(
 			config["intervalSeconds"] = interval
 		}
 		planned.Config = mustJSON(config)
-		configuration.Checks = append(configuration.Checks, planned)
+		checks = append(checks, planned)
 	}
-	sort.Slice(configuration.Dependencies, func(i, j int) bool {
-		return configuration.Dependencies[i].ResourceID < configuration.Dependencies[j].ResourceID
-	})
-	return configuration, nil
+	return checks
 }
 
 // The primary public address can change after detection. Keep the reviewed
@@ -406,27 +632,44 @@ func blueprintScheduleStep(action string) (ScheduleStep, bool) {
 // A blueprint the catalogue cannot deploy end to end is refused here with the
 // catalogue's own reason, so a stale draft or a direct API call gets the same
 // answer the picker shows.
+//
+// A Compose template's release is the document its source stored, so it
+// stays deployable after the dashboard stops shipping the version it was
+// rendered from; it only has to have been rendered.
 func (c DraftSourceConfig) ValidateForDeployment() error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
-	if c.Kind == SourceBlueprint {
-		definition, err := blueprint.GetVersion(c.BlueprintID, c.BlueprintVersion)
+	if c.Mode != SourceModeBlueprint {
+		return nil
+	}
+	definition, err := c.definition()
+	if c.Kind == SourceCompose {
+		if len(c.ComposeFiles) == 0 {
+			return fmt.Errorf("%w: the template's Compose file has not been rendered; inspect the template again", ErrUnsupportedSource)
+		}
 		if err != nil {
-			return fmt.Errorf("%w: %v", ErrUnsupportedSource, err)
+			return nil
 		}
-		if supported, reason := blueprint.DeploymentSupport(definition); !supported {
-			return fmt.Errorf("%w: %s", ErrUnsupportedSource, reason)
-		}
+		return blueprintSourceKindMatches(c, definition)
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrUnsupportedSource, err)
+	}
+	if err := blueprintSourceKindMatches(c, definition); err != nil {
+		return err
+	}
+	if supported, reason := blueprint.DeploymentSupport(definition); !supported {
+		return fmt.Errorf("%w: %s", ErrUnsupportedSource, reason)
 	}
 	return nil
 }
 
 func (c DraftSourceConfig) validateBlueprintSecretInputs() error {
-	if c.Kind != SourceBlueprint {
+	if c.Mode != SourceModeBlueprint {
 		return nil
 	}
-	definition, err := blueprint.GetVersion(c.BlueprintID, c.BlueprintVersion)
+	definition, err := c.definition()
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidSource, err)
 	}
@@ -442,10 +685,15 @@ func (c DraftSourceConfig) validateBlueprintSecretInputs() error {
 // committed run already has its sealed variable revisions; materialization
 // must neither re-read this old value nor copy it into another source marker.
 func (c DraftSourceConfig) withoutBlueprintSecretInputs() (DraftSourceConfig, error) {
-	if c.Kind != SourceBlueprint {
+	if c.Mode != SourceModeBlueprint {
 		return c, nil
 	}
-	definition, err := blueprint.GetVersion(c.BlueprintID, c.BlueprintVersion)
+	definition, err := c.definition()
+	if err != nil && c.Kind == SourceCompose {
+		// A template version no longer shipped still runs from its stored
+		// document; its inputs never held a secret, because saving refuses one.
+		return c, nil
+	}
 	if err != nil {
 		return c, fmt.Errorf("%w: %v", ErrInvalidSource, err)
 	}
@@ -468,16 +716,26 @@ func (c DraftSourceConfig) validateForNewDeployment() error {
 	if err := c.ValidateForDeployment(); err != nil {
 		return err
 	}
-	if err := c.validateBlueprintSecretInputs(); err != nil {
-		return err
-	}
-	if c.Kind == SourceBlueprint {
-		definition, err := blueprint.GetVersion(c.BlueprintID, c.BlueprintVersion)
+	if c.Mode == SourceModeBlueprint {
+		definition, err := c.definition()
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrUnsupportedSource, err)
 		}
 		if definition.Retired != "" {
 			return fmt.Errorf("%w: %s", ErrUnsupportedSource, definition.Retired)
+		}
+		if err := c.validateBlueprintSecretInputs(); err != nil {
+			return err
+		}
+		if c.Kind == SourceCompose {
+			// A new template deployment runs exactly this dashboard's render.
+			rendered, err := c.WithTemplateDocuments()
+			if err != nil {
+				return err
+			}
+			if !slices.Equal(rendered.ComposeFiles, c.ComposeFiles) {
+				return fmt.Errorf("%w: the Compose file differs from the reviewed template's render", ErrInvalidSource)
+			}
 		}
 	}
 	return nil

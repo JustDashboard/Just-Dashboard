@@ -56,8 +56,19 @@ func (k Kind) Known() bool {
 
 type Service struct {
 	dockerIngress bool
-	nginxDir      string
-	caddyFile     string
+	// ingressContainer pins deployments to one Caddy container by name;
+	// empty discovers the host's public one.
+	ingressContainer string
+	nginxDir         string
+	caddyFile        string
+	// tailnetGateName and tailnetGateSource name the gate Caddy and its
+	// Caddyfile when they are not the dashboard's (tailnet_gate.go), which
+	// is how a test keeps its own gate apart from a real one.
+	tailnetGateName   string
+	tailnetGateSource string
+	// dashboardHost is the name the dashboard itself is reached by, set once
+	// before the service is used (WithDashboardHost).
+	dashboardHost string
 
 	// nginx has no way to test a config fragment in isolation, so validation
 	// has to put the candidate where nginx expects it and take it away again.
@@ -69,6 +80,11 @@ type Service struct {
 	effective effectiveCache
 	pending   pendingTracker
 	tested    testMemory
+
+	// trustedProxies are the dashboard's JD_TRUSTED_PROXIES, which a
+	// deployment route's limits and edge rules believe (deployment_crowdsec.go).
+	trustedMu      sync.RWMutex
+	trustedProxies []string
 }
 
 func New(nginxDir, caddyFile string) *Service {
@@ -83,9 +99,23 @@ func NewWithDockerIngress(nginxDir, caddyFile string) *Service {
 	return s
 }
 
+// NewWithIngressContainer routes deployments through the named Caddy
+// container and nothing else: never host nginx, and never one it starts.
+// Discovery insists on a Caddy publishing 80 and 443 on every address; one
+// bound to a single address, or an acceptance fixture published on loopback,
+// is only ever used by name.
+func NewWithIngressContainer(nginxDir, caddyFile, container string) *Service {
+	s := NewWithDockerIngress(nginxDir, caddyFile)
+	s.ingressContainer = container
+	return s
+}
+
 func (s *Service) dockerCaddy(ctx context.Context) (*dockerCaddy, error) {
 	if !s.dockerIngress {
 		return nil, nil
+	}
+	if s.ingressContainer != "" {
+		return namedDockerCaddy(ctx, s.ingressContainer)
 	}
 	return discoverDockerCaddy(ctx)
 }

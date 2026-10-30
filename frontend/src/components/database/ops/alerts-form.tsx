@@ -40,6 +40,11 @@ const CHANNEL_KIND: Record<NotificationChannel["kind"], string> = {
   telegram: "Telegram",
   email: "E-mail",
   webhook: "Webhook",
+  ntfy: "ntfy",
+  gotify: "Gotify",
+  pushover: "Pushover",
+  mattermost: "Mattermost",
+  teams: "Microsoft Teams",
 }
 
 /**

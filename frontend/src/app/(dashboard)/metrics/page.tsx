@@ -44,6 +44,7 @@ import { MomentInspector } from "@/components/metrics/moment-inspector"
 import { getCrosshair, unpinCrosshair } from "@/lib/metrics-crosshair"
 import { NotableMoments } from "@/components/metrics/notable-moments"
 import { TopProcesses } from "@/components/metrics/top-processes"
+import { CapacityForecastSection } from "@/components/metrics/capacity-forecast"
 import { TileTrend } from "@/components/metrics/sparkline"
 import {
   InterfacesPanel,
@@ -64,6 +65,7 @@ import {
 import { ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
+import { HostAlertsLink } from "@/components/metrics/alerts-link"
 import { cpuProduct, platformProduct, virtualizationProduct } from "@/components/product-logo"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
@@ -380,6 +382,7 @@ export default function MetricsPage() {
           }
           aside={
             <div className="flex max-w-full flex-wrap items-center gap-2">
+              <HostAlertsLink />
               {live && (
                 <IconAction
                   label={paused ? "Resume live feed" : "Pause live feed"}
@@ -628,6 +631,10 @@ export default function MetricsPage() {
             />
           </div>
         </Section>
+
+        {/* Where the record's lines meet the ceiling: each disk's date, and
+            the deployments whose volumes are growing fastest. */}
+        <CapacityForecastSection />
 
         {/*
           Saturation is a separate question from utilisation, and the reason most

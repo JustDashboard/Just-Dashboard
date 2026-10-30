@@ -190,6 +190,12 @@ func holderOf(file string, places Places) (holder string, mount *MountPlace, pro
 	if places.StorePath != "" && (file == places.StorePath || view == places.StorePath) {
 		return HolderSelf, nil, ""
 	}
+	if places.StorePath != "" && path.Base(view) == path.Base(places.StorePath) {
+		// The dashboard's store under its own name somewhere else: a backup
+		// taken before a repair, a copy a test run kept as evidence. Two such
+		// copies were the files the control center offered to open first.
+		return HolderBackup, nil, ""
+	}
 	var best *MountPlace
 	for i := range places.Mounts {
 		m := &places.Mounts[i]
@@ -235,9 +241,15 @@ func holderOf(file string, places Places) (holder string, mount *MountPlace, pro
 		// center offered. The system's own /tmp at the top of the tree is not
 		// one: the scan never walks it as an application's, so a file under it
 		// was found because the scan was pointed there.
-		if browserProfile(segment) || (i > 1 && scratchDir(segment)) {
+		if browserProfile(segment) || (i > 1 && scratchDir(segment)) || buildDir(segment) {
 			return HolderTool, nil, ""
 		}
+		if backupName(segment) {
+			return HolderBackup, nil, ""
+		}
+	}
+	if backupFile(path.Base(view)) {
+		return HolderBackup, nil, ""
 	}
 	for _, system := range []string{"/var/lib", "/var/cache", "/usr", "/etc", "/var/spool", "/snap"} {
 		if within(system, view) {
@@ -260,12 +272,51 @@ func browserProfile(name string) bool {
 	return false
 }
 
-// scratchDir reports a directory named for temporary files: tmp, temp, and a
-// name ending in either (network-audit-tmp, build_temp).
+// scratchDir reports a directory named for temporary files: tmp, temp,
+// scratch, and a name ending in any of them (network-audit-tmp, build_temp,
+// jdt-scratch).
 func scratchDir(name string) bool {
 	name = strings.ToLower(name)
-	for _, word := range []string{"tmp", "temp"} {
+	for _, word := range []string{"tmp", "temp", "scratch"} {
 		if name == word || strings.HasSuffix(name, "-"+word) || strings.HasSuffix(name, "_"+word) || strings.HasSuffix(name, "."+word) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildDir reports a directory a build or a test run fills: installed
+// packages, fixtures, a test runner's results. Its databases are the
+// project's tooling, not one the project runs on.
+func buildDir(name string) bool {
+	switch strings.ToLower(name) {
+	case "node_modules", "testdata", "fixtures", "__fixtures__", "test-results", "playwright-report", "coverage":
+		return true
+	}
+	return false
+}
+
+// backupName reports a directory named for backups: backup, backups, bak, as
+// the whole name or one of its words (/var/backups, db-backup,
+// backups_2026).
+func backupName(name string) bool {
+	words := strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+	})
+	for _, word := range words {
+		if word == "backup" || word == "backups" || word == "bak" {
+			return true
+		}
+	}
+	return false
+}
+
+// backupFile reports a file named as a copy of another: app.db.bak,
+// data.sqlite.backup, store.db.old, app.bak.db.
+func backupFile(name string) bool {
+	name = strings.ToLower(name)
+	for _, suffix := range []string{".bak", ".backup", ".old", ".orig"} {
+		if strings.HasSuffix(name, suffix) || strings.Contains(name, suffix+".") {
 			return true
 		}
 	}

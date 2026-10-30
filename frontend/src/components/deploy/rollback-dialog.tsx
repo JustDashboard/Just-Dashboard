@@ -1,11 +1,12 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useId, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowDown, Globe, Pin } from "@/components/icons"
 import { post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { plural, relativeTime } from "@/lib/format"
+import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { Modal } from "@/components/modal"
 import { Notice } from "@/components/state"
@@ -16,11 +17,13 @@ import { GroupRule } from "@/components/flow"
 import { AuthorMark } from "@/components/git/marks"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import type { DeploymentEngineRun, DeploymentRelease } from "@/lib/types"
 import { RunActorMark } from "@/components/deploy/run-marks"
 import { WireMark } from "@/components/deploy/wire"
 import { ReleaseRevision } from "@/components/deploy/release-comparison-sheet"
 import { runCommit, runTitle, runTriggerLine } from "@/components/deploy/vocabulary"
+import { DATA_COPY_HOURS, NOT_POINTED } from "@/components/deploy/data-rollback-model"
 
 /**
  * Roll back the live release to a retained one.
@@ -40,6 +43,12 @@ import { runCommit, runTitle, runTriggerLine } from "@/components/deploy/vocabul
  * point, as a picture from `sm` with the line to the release they are about
  * to reach dotted until it carries, then as the two releases one above the
  * other — which name both, so the picture carries no words of its own.
+ *
+ * The database is never rolled back with the release. What the review can
+ * add, off unless ticked, is a side copy of each linked database as it was
+ * when the chosen release went live (`data-copies.tsx`), restored once the
+ * rollback has finished and linked from its run page — a copy to compare with
+ * or restore from, which production is never pointed at.
  */
 export function RollbackDialog({
   open,
@@ -68,13 +77,16 @@ export function RollbackDialog({
   initialReleaseId?: number
 }) {
   const router = useRouter()
+  const { can } = useAuth()
   const wide = useMediaQuery("(min-width: 640px)")
+  const copyId = useId()
   const eligible = releases.filter(
     (release) => release.state === "retained" && release.id !== liveRelease?.id,
   )
   const [step, setStep] = useState<"choose" | "review">(initialReleaseId ? "review" : "choose")
   const [selected, setSelected] = useState<number | undefined>(initialReleaseId ?? eligible[0]?.id)
   const [busy, setBusy] = useState(false)
+  const [withCopy, setWithCopy] = useState(false)
 
   // Radix keeps this component mounted across a close/open cycle, so its
   // state needs resetting on the way in rather than relying on a remount —
@@ -87,10 +99,16 @@ export function RollbackDialog({
     if (open) {
       setStep(initialReleaseId ? "review" : "choose")
       setSelected(initialReleaseId ?? eligible[0]?.id)
+      setWithCopy(false)
     }
   }
 
   const release = eligible.find((candidate) => candidate.id === selected)
+  // Offered where the server says the release has a point to restore, and to
+  // whoever may read a copy's credentials; ticked, it holds only for the
+  // release it was ticked for.
+  const canCopy = Boolean(release?.dataCopy?.eligible) && can("system.admin")
+  const copying = canCopy && withCopy
   const runOf = (candidate?: DeploymentRelease) =>
     candidate && runs.find((entry) => entry.id === candidate.runId)
 
@@ -102,6 +120,19 @@ export function RollbackDialog({
         `/deploy/${projectId}/environments/${environmentId}/rollback`,
         { releaseId: release.id },
       )
+      if (copying) {
+        // A second request, after the first is accepted: the copy waits for
+        // this run and is restored once it ends. A refusal here leaves the
+        // rollback running, and says so rather than undoing it.
+        try {
+          await post(
+            `/deploy/${projectId}/environments/${environmentId}/releases/${release.id}/data-copies`,
+            { afterRunId: started.id },
+          )
+        } catch (error) {
+          notify.error("The rollback started, but the side copy could not be requested", error)
+        }
+      }
       router.push(`/deploy/${projectId}/runs/${started.id}`)
     } catch (error) {
       notify.error("Could not roll back", error)
@@ -248,8 +279,38 @@ export function RollbackDialog({
 
             <Notice tone="warning" title="Databases and files are not rolled back">
               The application image, its variables and its configuration move back. Anything a
-              database or a persistent volume holds stays exactly as it is now.
+              database or a persistent volume holds stays exactly as it is now, and so does a value
+              read from a shared variable or a secret store, unless the reference pins a version.
+              {copying &&
+                ` Once the rollback finishes, each linked database is also restored as it was when release #${release.number} went live, into a side copy beside production for ${DATA_COPY_HOURS} hours.`}
             </Notice>
+
+            {canCopy ? (
+              <label htmlFor={copyId} className="flex min-h-11 items-start gap-3 text-hint">
+                <Checkbox
+                  id={copyId}
+                  className="mt-0.5"
+                  checked={withCopy}
+                  disabled={busy}
+                  onCheckedChange={(checked) => setWithCopy(checked === true)}
+                />
+                <span className="min-w-0">
+                  <span className="block text-body font-medium">
+                    Also restore the database as of this release into a side copy
+                  </span>
+                  <span className="mt-0.5 block leading-relaxed text-muted-foreground">
+                    Production&apos;s data is not touched. {NOT_POINTED}
+                  </span>
+                </span>
+              </label>
+            ) : (
+              release.dataCopy?.reason &&
+              can("system.admin") && (
+                <p className="text-hint text-muted-foreground">
+                  No side copy of the database: {release.dataCopy.reason}
+                </p>
+              )
+            )}
           </div>
         )
       )}

@@ -49,6 +49,17 @@ since a tab was opened, and charts that start empty every visit cannot show last
   Each point also carries `pidsPeak` (the bucket's maximum) beside the mean `pids`.
 - The recorder keeps its **own** `sysinfo.Collector` and `dockerx.StatsSampler`: rates are deltas, and
   sharing with request handlers would let a one-shot `GET /system/metrics` shorten the next interval.
+- Samples also keep Docker's cumulative CFS counters, `cpu_periods` and `cpu_throttled` (additive,
+  nullable): written only for a container with a CPU quota, so a NULL is "no limit or not yet kept",
+  never "never throttled". [Right-sizing](../deployments/right-sizing.md) differences them per
+  container into the share of periods a limit throttled.
+- **Volume sizes** of the volumes deployments own go to `metric_volume_samples` every quarter hour
+  (`metrics.VolumeInterval`, `Recorder.WithVolumes`), on a loop of their own so Docker's disk walk never
+  delays a host sample, and are pruned with the rest. The sampler (`api.sampleDeploymentVolumes`) reads
+  the cached walk the Docker pages share and skips a size the walk did not reach.
+- `GET /system/metrics/capacity` fits a least-squares line through hourly means of each filesystem's
+  used bytes and each deployment volume's size and says when each disk fills at that rate, with the
+  fit's R² and a confidence; see [right-sizing and the capacity forecast](../deployments/right-sizing.md).
 
 **Saturation series** answer "is work waiting", which utilisation cannot: CPU **by mode** including
 `steal` (on a VPS the one whose fix is outside the machine); PSI pressure (`Supported: false` renders as
@@ -85,6 +96,135 @@ They are recorded and charted; with Health removed, nothing judges them into fin
 carries its project's id, so the Overview's activity row draws the project's own icon. Reboots need no
 storage: a sample whose `uptime_seconds` dropped means the machine went down, which also catches
 restarts nobody initiated here. Works with `JD_METRICS_RETENTION=0`; only reboot markers go quiet.
+
+The deployments have a Prometheus exposition of their own, `GET /api/v1/metrics/deployments`
+(`api/deployment_metrics_export.go`), behind the same `metrics.read` key as the databases': per
+environment, the live release's age, its containers' CPU seconds and memory from the newest
+`metric_container_samples` row, restarts, OOM kills and exits from the persisted container events
+(`deploy_container_events`, kept at least thirty days whatever `JD_METRICS_RETENTION` says), run
+outcomes, the last hour's requests by status class and latency quantiles, the warm-release window's
+state, the maintenance switch and the availability figure over 24 h, 7 d and 30 d. The series and
+what each reads are tabled in
+[request observability](../deployments/request-observability.md#the-prometheus-exposition).
+
+## Host alerts: told when the machine itself goes wrong
+
+The host's **Alerts** page (`/metrics/alerts`, under Monitoring beside Metrics, for administrators;
+Metrics' identity line links there with the firing count) holds rules that tell the deployments'
+notification channels — through `deploy.AutomationStore.DeliverNotification`, so a channel is set up
+once on `/deploy/notifications` — when the machine is in trouble, and when that is over. It is the
+proxy alerts' shape ([Proxy alerts](databases-proxy-platform.md#proxy)): rules, subjects, mutes and a
+bounded history, a picture of what is watched wired to the channels, and a test per channel and per
+rule. Source: `api/host_alerts.go` (rules, the pass, `stepHostAlert`, history), `api/host_alert_readings.go`
+(each kind's source and judge), `api/handlers_host_alerts.go` (routes); tables `host_alert_rules`,
+`host_alert_state`, `host_alert_events` in `store/schema_host_alerts.go`; the page is
+`components/metrics/alerts-page.tsx` over `lib/host-alerts.ts`, with the parts it shares with the
+proxy's page in `components/alerts/alert-parts.tsx`.
+
+- **Seven kinds, a closed vocabulary** (`hostAlertSpecs`). `cpu_high` and `memory_high` take a line
+  (default 90%, 10–100) and a window (CPU 10 min, memory 5 — the OOM killer does not wait ten; 1–1440):
+  the **mean of the recorded samples** in `metric_samples` over the window, with its peak, so a spike
+  inside a quiet window is a high peak and not an alert (Netdata's stock CPU alarm averages ten minutes
+  the same way). A window the record does not cover yet — fewer than two samples, a newest sample older
+  than three intervals (at least two minutes), or a first sample later than the window's start plus
+  two intervals — is not judged. A firing message ends with the container that used the most over the
+  window from `metric_container_samples` ("1.8 cores on average", Docker counting a core as 100%, or
+  bytes for memory). `disk_filling` (default 90%, 10–99) reads the recorder's newest
+  `metric_mount_samples` batch and fires a mount on its space **or** its inodes, since a filesystem out
+  of inodes reports free space and refuses to create a file; a mount missing from the newest batch has
+  been unmounted and leaves. `container_down` (minutes 2, 1–1440), `backup_failed`, `image_vulnerable`,
+  `tunnel_down` (minutes 2, 1–1440) and `account_changed` are below.
+- **One pass a minute** (`hostAlerts.Start` from `Server.Start`, clock, observer and deliverer fields
+  for tests); each source is read once a pass and only when an enabled rule needs it. CPU, memory and
+  disk are queries of what the recorder already keeps; with `JD_METRICS_RETENTION=0` those rules are
+  unjudged and say so.
+- **A container is down** when it is running with a health check reporting unhealthy, Docker restarted
+  it by its restart policy three times in ten minutes (a loop, counted from `RestartCount` across passes;
+  a deploy's or an operator's restart is not counted by Docker at all), it is `restarting`, or it
+  **stopped without being asked to**. The listing is `ListContainers(all)`, which inspects running
+  containers for health and restart count as the Docker page's listing does; a stopped container is
+  inspected once per stop (`dockerx.LastExit`, cached by id and the exit code its status prints) for its
+  start, finish, exit code and OOM verdict. A stop counts only when it finished after the rule began
+  watching on its current terms (`watch_from`), so containers stopped long ago, or while the rule was
+  paused, never page. Then `judgeExit`: `dead` and an OOM kill are down; a `kill` or `stop` Docker
+  recorded for the container between its start and its finish (`judgeStop`, from the event log — docker
+  stop's SIGTERM, compose, a deploy's cutover and this dashboard all send one; a crash or the kernel gets
+  only a `die`) is on purpose; exit 0 finished rather than failed; 130 and 143 were signals asking it to
+  stop; 137 is down only when the event log was listening and still holds the ten minutes before the
+  stop (`EventLog.Covers`) and saw no kill — otherwise it is read as a stop that outlasted its grace
+  period, because a false page is worse than a late one; any other code is a crash. A deploy's release
+  task and a `compose run` container are one-shot by design and never subjects, a `paused` container
+  (a backup freezing its volumes) is fine, and a removed container leaves. A down container whose image
+  is MongoDB 8 (by its tag), on a kernel MongoDB 8 refuses (Linux 6.19 to 7.0.13) and without the
+  dashboard's mitigation label, has why added to its detail: MongoDB SERVER-121912 and that the
+  Databases page applies the fix (`mongoKernelAlertLine`; *MongoDB 8 and the kernel* in
+  [Databases](databases-proxy-platform.md)). It is the same kind, not a new one.
+- **Every backup job** — files, volumes and database dumps alike — is a `backup_failed` subject
+  (`job:<id>`), judged by its newest finished run in the database alerts' own words (`judgeBackupJob`
+  over `readAlertBackupJobs`, the reader both share): it stays failed until a run succeeds. A job an
+  enabled database `backup_failed` rule already follows (one for every database, or one for a database
+  the job dumps) is **left to that rule** (`databaseBackupRules`), so one failed run is told once and
+  keeps the database page's link; a job leaving the host rule that way is told it is over if it was
+  firing.
+- **A deployment's image is vulnerable** (`image_vulnerable`, nothing to set, one pass) when its
+  environment scans and its live release's latest scan found a vulnerability with a published fix at
+  or above the environment's severity floor **and** a base the release was pinned on (or, for an
+  upstream image, its own tag) now names a newer image in the registry — together, what says a
+  rebuild is likely to fix something (`imageAlertReading` over `deploy.LiveImageScans`). The subject is
+  `env:<project>:<environment>`, labelled "shop · production", and the message links to the
+  project's overview, whose panel offers the rebuild. A scan not run yet, in flight or failed keeps
+  its subject where it was; an environment that stops scanning, or whose release is replaced by one
+  scanned clean, is told it is over. The scans are the deployments'
+  ([image vulnerabilities](../deployments/image-vulnerabilities.md)); the rule only reads them.
+- **The Cloudflare Tunnel is down** (`tunnel_down`, `tunnelAlertReading`) when its connector container
+  is not running, or is running and its metrics say it holds no connection to Cloudflare's edge; the
+  detail carries cloudflared's own words where it said why (the manager's last reading,
+  [Cloudflare Tunnel](../deployments/cloudflare-tunnel.md)). One subject, `tunnel:<id>`, linking to
+  Proxy › Tunnel; with no tunnel connected the rule is unjudged rather than quiet. It holds two passes
+  and the rule's minutes, as a container does, because a connector reconnects by itself after a blip of
+  the edge.
+- **The host's accounts changed** (`account_changed`, `accountChangeReading`, `host_alert_accounts.go`)
+  when a pass finds a new account, SSH key or sudo rule that reaches root, or root has signed in since the
+  last pass. It reads the host through `linuxusers.TakeSnapshot` and compares with the reading it kept in
+  the settings store (`system_account_baseline`), so a change made outside the dashboard is caught, which
+  is the one that matters. A first pass, or a reading older than a day (the rule was off, not the dashboard
+  restarting), sets the line and tells nothing; a pass that cannot read or store is unjudged. It is the one
+  kind that is `oneShot`: a key that was added has nothing to recover from, so the next pass ends its
+  subject without a word. What disappeared is not told, and neither is a key relabelled.
+- **Hold and state** (`stepHostAlert`, one pure function). A subject is told once when it has been over
+  the line for its kind's passes and minutes — one pass for CPU, memory (their window is the hold) and
+  backups, two for disks, two and the rule's minutes for containers — and once when it comes back,
+  never in between; one that comes back before it was told ends without a word. A reading that could
+  not be taken, or a percentage between the line and five points under it, keeps the subject where it
+  was. A subject the reading no longer finds is cleared, told it is over if it had fired. State rows
+  exist only while a subject fires, holds or is muted; a rule's `revision` moves on every edit and a
+  pass writes a subject only while the revision it read still holds. New terms, a pause or a resume
+  start the rule over (mutes are kept, `watch_from` moves on); new channels alone do not. The newest 500
+  events are kept, a test marked as one.
+- **Messages.** `host.alert.firing` / `host.alert.recovered` with `NotificationEnvelope.Host`, rendered
+  by `renderHostAlert` ([notifications](../deployments/notifications.md)); a rule with no channels tells
+  every enabled one, a paused channel gets nothing, a muted subject is followed but not told.
+- **Routes**, all `system.admin` and audited: `GET /system/alerts` (rules with why the last pass could
+  not judge each, `unjudged`; firing, holding and muted subjects; the last 100 events; `metrics`, whether
+  history is recorded), `POST /system/alerts/rules` (`host.alerts.rule.create`),
+  `POST /system/alerts/rules/{id}/test` (the rule's message, `[test]`, to its channels;
+  `host.alerts.rule.test`; 409 when no enabled channel is told), `POST /system/alerts/test {channelId}`
+  (`host.alerts.test`), `POST /system/alerts/evaluate` (a pass now; holds still apply;
+  `host.alerts.evaluate`); behind `destructive`, because each stops somebody being told:
+  `PUT /system/alerts/rules/{id}` (`.rule.update`, can pause), `DELETE /system/alerts/rules/{id}`
+  (`.rule.delete`), `PUT /system/alerts/mutes {ruleId, subject, muted}` (`host.alerts.mute`/`unmute`).
+- **Tests.** `host_alerts_test.go`: validation and defaults, the state machine's holds and transitions,
+  each kind's reading with made-up readings (the window's mean, coverage and band; space and inodes per
+  mount; a crash told from a stop, a loop, a one-shot and a stop before the rule; every job but those a
+  database rule follows), the restart window, and the store queries.
+  `handlers_host_alerts_test.go`: the admin gate on every route, audit, firing once after the hold,
+  unknown and unjudged passes, a muted recovery, both tests, a pause clearing state, an edit during a
+  pass, and the server's own observer on staged backup jobs and a CPU rule with no samples.
+  `events_test.go` covers `Covers`, `notifications_test.go` the message, `schema_host_alerts_test.go` the
+  tables on fresh and upgraded installs, `lib/host-alerts.test.js` the page's words and form ranges, and
+  `tests/browser/host-alerts.spec.ts` the page. Not verified here: a real container crashing under a
+  live daemon end to end and a real channel's delivery (the readings and the delivery path are the ones
+  the tests drive).
 
 ## netsec: exposure and login history
 
@@ -544,6 +684,19 @@ details were each confirmed by running the tool in a container of its distributi
   version is refused. `apt-get -t <security-suite> upgrade` is not used: a preferred suite does not
   restrict the upgrade set to security fixes. With no eligible candidates the request is refused, never
   broadened to a full upgrade.
+
+**Package commands survive the dashboard and repair what an earlier run left.** Install, upgrade and
+removal (and certbot's install) go through `api.runPackageCommand`, which runs them with
+`jobs.RunDetached` as host systemd units: a docker-ce upgrade restarts Docker, which used to kill the
+backend container and, with it, the dpkg it had started — the host was then stuck on "dpkg was
+interrupted, you must manually run 'dpkg --configure -a'" for every later apt command. When
+`updates.DpkgInterrupted` sees apt's own sign of that state (a numbered entry in
+`/var/lib/dpkg/updates`, read through `hostexec.HostPath`) while neither `lock-frontend` nor `lock` is
+held, the command is wrapped by `FinishingDpkgFirst` in a constant script that runs
+`dpkg --force-confold --configure -a` and then execs the command, in one unit so the Docker restart the
+repair usually causes cannot separate the two. Every mutating apt-get also carries
+`-o DPkg::Lock::Timeout=600`, so one started while unattended-upgrades holds the lock waits instead of
+refusing.
 
 Reboot detection: Debian's flag file, then `needs-restarting -r`, then "cannot tell". **Exactly exit 1**
 means yes — every other non-zero is the tool failing, and reading those as yes puts a permanent reboot

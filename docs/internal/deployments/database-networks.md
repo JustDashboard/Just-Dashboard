@@ -16,7 +16,10 @@ a connection name containing dots is never misread. Relinking a variable from Se
 keeps the shape its previous reference asked for. Quick setup also offers PostgreSQL 16 with pgvector
 (`pgvector/pgvector:pg16`) or PostGIS (`postgis/postgis:16-3.5-alpine`, offered and accepted only on
 x86-64, the one architecture that image is published for), which Databases already recognises, and
-refuses MongoDB 7 on a CPU without AVX or ARMv8.2 atomics before pulling it.
+refuses MongoDB 7 on a CPU without AVX or ARMv8.2 atomics before pulling it. On Linux 6.19 up to 7.0.13
+it starts MongoDB 8 with `GLIBC_TUNABLES=glibc.pthread.rseq=1`, without which it does not start there
+(MongoDB SERVER-121912; *MongoDB 8 and the kernel* in
+[Databases](../backend/databases-proxy-platform.md)).
 
 A PostgreSQL connection that has a [connection pooler](../backend/databases-proxy-platform.md) also has
 `${{database.5.pooled}}` (and `5.pooled.jdbc`, `5.pooled.url.app_cache`, …): the same string with the host
@@ -53,8 +56,15 @@ Network labels, name, environment and driver must match before adoption or mutat
 not change host bindings: a database quick setup provisions is published to loopback only, and a
 database the operator opened or created as reachable from anywhere keeps that binding. This is environment
 network separation, not a sandbox against an administrator or arbitrary outbound network access.
-Previews cannot share a linked database endpoint/container with another environment, including another
-preview or a different saved connection ID. Reference resolution checks known links and bindings before
+A preview's [database branch](preview-isolation.md#database-branches) — its own copy of a linked database,
+restored from the newest backup — is the one database a preview environment's network holds that is not
+bound like the rest: it joins the preview's network when it is made, under
+`db-<connection>-branch.jd.internal`, a variable naming that host joins the preview to the network without a
+binding (`previewBranchConnectionIDs`), and `${{database.N…}}` in the preview resolves to it. Previews and
+staging environments cannot share a linked database endpoint/container with another
+environment, including another preview or a different saved connection ID: a staging release task would
+otherwise migrate production's schema from code that was never promoted (`staging_isolation_required`;
+[staging and promotion](staging-promotion.md)). Reference resolution checks known links and bindings before
 returning build/runtime credentials; runtime joins also check observed container identity. This does not
 discover arbitrary untracked services, DNS aliases or literal credentials. Preview approval still clears
 inherited credentials and dependencies.
@@ -75,6 +85,13 @@ Connected means the network binding was observed; it does not prove database sch
 health. Observations older than 30 seconds are marked stale. The database name is read from the sealed
 DSN the way every other database route reads it; a connection whose DSN no longer resolves keeps its row
 without that name.
+
+Reconciliation joins the environment's application containers — those labelled with its id — and
+leaves every container carrying the rehearsal label where it is: a migration rehearsal's copy and task
+belong on their own internal network, and a [copy of a release's data](data-aware-rollback.md) joined
+this network when it was made, under `db-<connection>-copy-<copy>.jd.internal`, never the production
+database's name. A variable whose host is such a copy's is refused before a release starts: the copy is
+removed when it expires, and production never runs against it.
 
 A binding that reconciliation could not repair carries `detail`, the reason of the pass that failed —
 a replaced container that no longer matches the saved identity, an alias another container holds, a
@@ -100,7 +117,8 @@ dashboard restarts. Bindings remain for retained releases and rollback until exp
 Removing a variable alone does not detach a database from existing releases.
 
 Configuration's removal preview includes the current managed network ID. Applications/Compose stacks
-are removed before their network. Cleanup refuses unknown endpoints, disconnects only bound database
+are removed before their network, and so are the environment's data copies and a preview's database
+branches (`removeEnvironmentBranches`), which are endpoints on it that are no application's. Cleanup refuses unknown endpoints, disconnects only bound database
 endpoints and leaves the database container and its data intact. Preview close uses the same cleanup.
 Removing a stale network ID cannot delete a newer replacement. Successful cleanup removes bindings and
 clears the Docker ID while preserving the logical network name for subsequent deployment.
@@ -132,7 +150,13 @@ No hosted-provider account or live provider credentials are required by the loca
   replaces each database with the original persistent volume and a different IP, reconciles, then
   restarts the same client with its unchanged URL and authenticates again. It checks loopback publication,
   cleanup ordering and refusal to adopt a foreign network. This establishes DNS reconnection, not a
-  continuous application traffic test.
+  continuous application traffic test. Each engine's image is pulled, and the pull timed in the log,
+  before anything is created; the engine then has two minutes from its container starting to accept a
+  sign-in, and a failure reports the adopt route's last reply with the container's state and last log
+  lines. The MongoDB subtest checks that provisioning gave MongoDB 8 what it needs on Linux 6.19 to
+  7.0.13 (MongoDB SERVER-121912) and nothing on any other kernel, and fails at once, naming the kernel,
+  the line and the container's `GLIBC_TUNABLES`, if MongoDB still refuses; `mongodb-kernel-mitigation`
+  applies the mitigation from the Databases page to a server made without it.
 - `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`
   checks the merged network configuration with the real Compose parser.
 - Browser coverage checks that new and existing database selection saves a logical reference without

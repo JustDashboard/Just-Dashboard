@@ -1,8 +1,10 @@
 "use client"
 
 import {
+  ArrowCircleUp,
   ArrowLeftRight,
   ArrowRight,
+  Database,
   External,
   Notes,
   Pin,
@@ -34,6 +36,13 @@ export type ReleaseVerbHandlers = {
   compare: (release: DeploymentRelease) => void
   rollback: (release: DeploymentRelease) => void
   pin: (release: DeploymentRelease) => void
+  /** Offered for a staging release: into production, as the same image. */
+  promote?: (release: DeploymentRelease) => void
+  /**
+   * Each linked database as it was when the release went live, into a side
+   * copy. Offered where the server says the release has a point to restore.
+   */
+  restoreData?: (release: DeploymentRelease) => void
 }
 
 /**
@@ -168,6 +177,21 @@ export function releaseVerbs({
       run: () => on.compare(release),
     })
   }
+  // Promoting changes production, so it takes what deploying production takes.
+  if (
+    on.promote &&
+    (release.state === "live" || release.state === "retained") &&
+    can("service.control")
+  ) {
+    const promote = on.promote
+    verbs.push({
+      key: "promote",
+      label: "Promote to production…",
+      icon: ArrowCircleUp,
+      group,
+      run: () => promote(release),
+    })
+  }
   if (release.state === "retained" && !isLive && can("destructive")) {
     verbs.push({
       key: "rollback",
@@ -175,6 +199,18 @@ export function releaseVerbs({
       icon: RotateCounterClockwise,
       group,
       run: () => on.rollback(release),
+    })
+  }
+  // A copy beside production changes nothing there, but it holds
+  // production's data and its credentials are an administrator's to read.
+  if (on.restoreData && release.dataCopy?.eligible && can("system.admin")) {
+    const restoreData = on.restoreData
+    verbs.push({
+      key: "restore-data",
+      label: "Restore data as of this release…",
+      icon: Database,
+      group,
+      run: () => restoreData(release),
     })
   }
   if (can("system.admin")) {
@@ -201,4 +237,6 @@ export type RunVerbKey =
   | "changes"
   | "compare"
   | "rollback"
+  | "promote"
+  | "restore-data"
   | "pin"

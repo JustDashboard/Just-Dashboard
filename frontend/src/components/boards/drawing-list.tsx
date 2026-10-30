@@ -403,7 +403,7 @@ function LinkedLine({ resources, linked }: { resources: BoardResource[]; linked:
 
 function ResourceGlyph({ resource, linked }: { resource: BoardResource; linked: Linked }) {
   if (resource.kind === "server") {
-    return <LogoGlyph className="h-3.5 w-auto shrink-0 text-brand" />
+    return <LogoGlyph small className="h-3.5 w-auto shrink-0 text-brand" />
   }
   if (resource.kind === "project") {
     const project = resource.id === undefined ? undefined : linked.projects.get(resource.id)

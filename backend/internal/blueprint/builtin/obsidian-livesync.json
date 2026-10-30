@@ -1,0 +1,126 @@
+{
+  "id": "obsidian-livesync",
+  "version": "1.0.0",
+  "name": "Obsidian LiveSync",
+  "category": "database",
+  "profile": "web",
+  "description": "CouchDB configured for the Self-hosted LiveSync plugin, which syncs Obsidian vaults between desktop and mobile in real time through your own server, end-to-end encrypted if you choose a passphrase in the plugin. The template writes the CORS and size settings the plugin checks for before CouchDB first starts.",
+  "iconId": "database",
+  "docsUrl": "https://github.com/vrtmrz/obsidian-livesync/blob/main/docs/setup_own_server.md",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "COUCHDB_USER",
+    "secretVariable": "COUCHDB_PASSWORD",
+    "note": "There is no page to sign in to: in Obsidian, the Self-hosted LiveSync plugin connects to https://<domain> with the user name chosen here and the generated COUCHDB_PASSWORD from the Variables tab. CouchDB creates that administrator on the first start only, so change the password later inside CouchDB (/_utils) rather than by rotating the variable."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0 (CouchDB), MIT (LiveSync)",
+    "upstreamUrl": "https://github.com/vrtmrz/obsidian-livesync",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "image": {
+    "reference": "couchdb:3.5.3",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "The server address the plugin is configured with; it must be HTTPS for the mobile app."
+    },
+    {
+      "name": "user",
+      "kind": "text",
+      "label": "CouchDB user",
+      "required": true,
+      "default": "obsidian",
+      "description": "The administrator the plugin signs in as.",
+      "variable": "COUCHDB_USER",
+      "pattern": "^[a-z][a-z0-9_-]{2,31}$"
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 5984,
+      "protocol": "tcp",
+      "purpose": "The CouchDB API the plugin replicates through, and the Fauxton admin at /_utils",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/opt/couchdb/data",
+      "purpose": "Every synchronised vault's documents",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "config",
+      "target": "/opt/couchdb/etc/local.d",
+      "purpose": "CouchDB's settings, the administrator and the LiveSync options",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "CouchDB reports itself up",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/_up",
+      "timeoutSeconds": 120
+    }
+  ],
+  "operations": {
+    "install": [
+      {
+        "kind": "write_file",
+        "path": "/opt/couchdb/etc/local.d/10-livesync.ini",
+        "content": "; Written by Just Dashboard before the first start: the settings the Self-hosted\n; LiveSync plugin checks for. CouchDB writes later changes to the last file here.\n[couchdb]\nsingle_node = true\nmax_document_size = 50000000\n\n[chttpd]\nmax_http_request_size = 4294967296\nenable_cors = true\n\n[chttpd_auth]\nrequire_valid_user = true\nrequire_valid_user_except_for_up = true\n\n[httpd]\nWWW-Authenticate = Basic realm=\"couchdb\"\nenable_cors = true\n\n[cors]\norigins = app://obsidian.md,capacitor://localhost,http://localhost\ncredentials = true\nheaders = accept, authorization, content-type, origin, referer\nmethods = GET, PUT, POST, HEAD, DELETE\nmax_age = 3600\n"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "CouchDB 3.x upgrades in place. The settings file is written once; changes made from Fauxton are kept in the config volume.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "sync.example.test"
+      },
+      "digest": "sha256:9ffeab0d2313865f67bcd8b55229c7e639b1ccd47e4660d782690c72eaf23973"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "password",
+      "variable": "COUCHDB_PASSWORD",
+      "label": "CouchDB password",
+      "length": 32,
+      "description": "The administrator's password, which the plugin is configured with."
+    }
+  ]
+}

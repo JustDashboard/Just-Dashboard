@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Notification events. A channel with an empty list receives every event; the
@@ -42,6 +43,13 @@ const (
 	// And the database events, to the channels a database alert rule names.
 	NotificationEventDatabaseFiring    = "database.alert.firing"
 	NotificationEventDatabaseRecovered = "database.alert.recovered"
+	// And the host events, to the channels a host alert rule names.
+	NotificationEventHostFiring    = "host.alert.firing"
+	NotificationEventHostRecovered = "host.alert.recovered"
+	// An automatic rollback is not selected on its own: it reaches every
+	// channel that hears about failures, because a release that had to be
+	// taken back is one, however cleanly the taking back went.
+	NotificationEventRolledBack = "release.rolled_back"
 )
 
 // NotificationEvents is the closed vocabulary a channel may select from.
@@ -52,15 +60,21 @@ var NotificationEvents = []string{
 // Notification channel kinds. The webhook kind is the signed generic contract
 // the product always had; the rest deliver a rendered message to a provider.
 const (
-	NotificationKindWebhook  = "webhook"
-	NotificationKindDiscord  = "discord"
-	NotificationKindSlack    = "slack"
-	NotificationKindTelegram = "telegram"
-	NotificationKindEmail    = "email"
+	NotificationKindWebhook    = "webhook"
+	NotificationKindDiscord    = "discord"
+	NotificationKindSlack      = "slack"
+	NotificationKindTelegram   = "telegram"
+	NotificationKindEmail      = "email"
+	NotificationKindNtfy       = "ntfy"
+	NotificationKindGotify     = "gotify"
+	NotificationKindPushover   = "pushover"
+	NotificationKindMattermost = "mattermost"
+	NotificationKindTeams      = "teams"
 )
 
 var NotificationKinds = []string{
 	NotificationKindWebhook, NotificationKindDiscord, NotificationKindSlack, NotificationKindTelegram, NotificationKindEmail,
+	NotificationKindNtfy, NotificationKindGotify, NotificationKindPushover, NotificationKindMattermost, NotificationKindTeams,
 }
 
 // NotificationConfig is a channel's per-kind configuration. It is sealed at
@@ -78,6 +92,14 @@ type NotificationConfig struct {
 	SMTPSecurity string   `json:"smtpSecurity,omitempty"`
 	From         string   `json:"from,omitempty"`
 	To           []string `json:"to,omitempty"`
+	// ServerURL is an ntfy or Gotify server; Topic the ntfy topic, which on a
+	// public server is the only thing standing between a stranger and the
+	// messages. Token is an ntfy access token, a Gotify application token or a
+	// Pushover application token, and UserKey the Pushover user or group key.
+	ServerURL string `json:"serverUrl,omitempty"`
+	Topic     string `json:"topic,omitempty"`
+	Token     string `json:"token,omitempty"`
+	UserKey   string `json:"userKey,omitempty"`
 }
 
 // SMTP transport security modes.
@@ -92,7 +114,19 @@ var (
 	telegramChatRE            = regexp.MustCompile(`^(-?[0-9]{1,20}|@[A-Za-z0-9_]{5,32})$`)
 	smtpHostnameRE            = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?)*$`)
 	maxNotificationRecipients = 20
+	// The shapes each provider documents: ntfy's topic names and its tk_
+	// access tokens, Gotify's application tokens, Pushover's 30-character
+	// keys, and a Mattermost incoming webhook's /hooks/<id> path, which may sit
+	// under the subpath a server is published at.
+	ntfyTopicRE      = regexp.MustCompile(`^[-_A-Za-z0-9]{1,64}$`)
+	ntfyTokenRE      = regexp.MustCompile(`^tk_[A-Za-z0-9]{29}$`)
+	gotifyTokenRE    = regexp.MustCompile(`^[A-Za-z0-9._-]{10,64}$`)
+	pushoverKeyRE    = regexp.MustCompile(`^[A-Za-z0-9]{30}$`)
+	mattermostHookRE = regexp.MustCompile(`(^|/)hooks/[A-Za-z0-9]{20,64}$`)
 )
+
+// DefaultNtfyServer is where an ntfy channel posts when no server is named.
+const DefaultNtfyServer = "https://ntfy.sh"
 
 // ErrInvalidNotification reports a channel definition that cannot deliver.
 var ErrInvalidNotification = fmt.Errorf("invalid notification channel")
@@ -176,6 +210,10 @@ func validateNotificationChannel(kind, rawURL string, cfg NotificationConfig, ex
 	cfg.SMTPUsername = strings.TrimSpace(cfg.SMTPUsername)
 	cfg.SMTPSecurity = strings.ToLower(strings.TrimSpace(cfg.SMTPSecurity))
 	cfg.From = strings.TrimSpace(cfg.From)
+	cfg.ServerURL = strings.TrimSpace(cfg.ServerURL)
+	cfg.Topic = strings.TrimSpace(cfg.Topic)
+	cfg.Token = strings.TrimSpace(cfg.Token)
+	cfg.UserKey = strings.TrimSpace(cfg.UserKey)
 	switch kind {
 	case NotificationKindWebhook:
 		if !strings.HasPrefix(rawURL, "https://") && !strings.HasPrefix(rawURL, "http://") {
@@ -185,7 +223,7 @@ func validateNotificationChannel(kind, rawURL string, cfg NotificationConfig, ex
 			return resolvedNotificationChannel{}, invalidNotification("notification URL is malformed")
 		}
 		return resolvedNotificationChannel{Config: NotificationConfig{}, URL: rawURL, Target: rawURL}, nil
-	case NotificationKindDiscord, NotificationKindSlack:
+	case NotificationKindDiscord, NotificationKindSlack, NotificationKindMattermost, NotificationKindTeams:
 		if cfg.WebhookURL == "" && existing != nil {
 			cfg.WebhookURL = existing.WebhookURL
 		}
@@ -193,10 +231,15 @@ func validateNotificationChannel(kind, rawURL string, cfg NotificationConfig, ex
 			cfg.WebhookURL = rawURL
 		}
 		parsed, err := url.Parse(cfg.WebhookURL)
-		if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-			return resolvedNotificationChannel{}, invalidNotification("%s webhook URL must be an https address", kind)
+		// A self-hosted Mattermost on this machine may be reached over plain
+		// HTTP on loopback, where the URL never crosses a network; every other
+		// webhook URL is a credential and travels over TLS.
+		secure := err == nil && parsed.Host != "" && (parsed.Scheme == "https" || (kind == NotificationKindMattermost && parsed.Scheme == "http" && loopbackAddress(parsed.Hostname())))
+		if !secure {
+			return resolvedNotificationChannel{}, invalidNotification("%s webhook URL must be an https address", kindName(kind))
 		}
 		host := strings.ToLower(parsed.Hostname())
+		masked := maskWebhookURL(parsed)
 		switch kind {
 		case NotificationKindDiscord:
 			validHost := host == "discord.com" || host == "discordapp.com" || strings.HasSuffix(host, ".discord.com") || strings.HasSuffix(host, ".discordapp.com")
@@ -207,9 +250,81 @@ func validateNotificationChannel(kind, rawURL string, cfg NotificationConfig, ex
 			if host != "hooks.slack.com" || !strings.HasPrefix(parsed.Path, "/services/") {
 				return resolvedNotificationChannel{}, invalidNotification("Slack incoming webhook URLs look like https://hooks.slack.com/services/…")
 			}
+		case NotificationKindMattermost:
+			if parsed.User != nil || !mattermostHookRE.MatchString(strings.TrimRight(parsed.Path, "/")) {
+				return resolvedNotificationChannel{}, invalidNotification("Mattermost incoming webhook URLs look like https://chat.example.com/hooks/<id>")
+			}
+		case NotificationKindTeams:
+			if strings.HasSuffix(host, ".webhook.office.com") || host == "outlook.office.com" {
+				return resolvedNotificationChannel{}, invalidNotification("Office 365 connector webhooks were retired in May 2026; create a Workflows webhook in Teams instead")
+			}
+			// A Workflows trigger is a Logic Apps or Power Platform address,
+			// and its sig parameter is what authorizes the post.
+			validHost := strings.HasSuffix(host, ".logic.azure.com") || strings.HasSuffix(host, ".powerplatform.com")
+			if !validHost || !strings.Contains(parsed.Path, "/workflows/") || parsed.Query().Get("sig") == "" {
+				return resolvedNotificationChannel{}, invalidNotification("Teams Workflows webhook URLs look like https://….logic.azure.com/workflows/<id>/triggers/manual/paths/invoke?…&sig=…")
+			}
+			// The path is long and says nothing the name does not; the
+			// credential is in the query, which is never shown.
+			masked = parsed.Scheme + "://" + host + "/workflows/••••"
 		}
-		masked := maskWebhookURL(parsed)
 		return resolvedNotificationChannel{Config: NotificationConfig{WebhookURL: cfg.WebhookURL}, URL: masked, Target: masked}, nil
+	case NotificationKindNtfy:
+		if existing != nil {
+			cfg.ServerURL = keep(cfg.ServerURL, existing.ServerURL)
+			cfg.Topic = keep(cfg.Topic, existing.Topic)
+			cfg.Token = keep(cfg.Token, existing.Token)
+		}
+		if cfg.ServerURL == "" {
+			cfg.ServerURL = DefaultNtfyServer
+		}
+		if cfg.Token != "" && !ntfyTokenRE.MatchString(cfg.Token) {
+			return resolvedNotificationChannel{}, invalidNotification("ntfy access tokens look like tk_ and 29 letters or digits")
+		}
+		server, err := notificationServer("ntfy", cfg.ServerURL, cfg.Token != "")
+		if err != nil {
+			return resolvedNotificationChannel{}, err
+		}
+		if !ntfyTopicRE.MatchString(cfg.Topic) {
+			return resolvedNotificationChannel{}, invalidNotification("ntfy topic must be 1 to 64 letters, digits, dashes or underscores")
+		}
+		// The topic is masked like a webhook's token: on a public server,
+		// whoever knows it reads every message.
+		return resolvedNotificationChannel{
+			Config: NotificationConfig{ServerURL: server, Topic: cfg.Topic, Token: cfg.Token},
+			Target: server + "/••••",
+		}, nil
+	case NotificationKindGotify:
+		if existing != nil {
+			cfg.ServerURL = keep(cfg.ServerURL, existing.ServerURL)
+			cfg.Token = keep(cfg.Token, existing.Token)
+		}
+		if cfg.ServerURL == "" {
+			return resolvedNotificationChannel{}, invalidNotification("Gotify server URL is required")
+		}
+		server, err := notificationServer("Gotify", cfg.ServerURL, true)
+		if err != nil {
+			return resolvedNotificationChannel{}, err
+		}
+		if !gotifyTokenRE.MatchString(cfg.Token) {
+			return resolvedNotificationChannel{}, invalidNotification("Gotify needs an application token from Apps → Create application")
+		}
+		return resolvedNotificationChannel{Config: NotificationConfig{ServerURL: server, Token: cfg.Token}, Target: server}, nil
+	case NotificationKindPushover:
+		if existing != nil {
+			cfg.Token = keep(cfg.Token, existing.Token)
+			cfg.UserKey = keep(cfg.UserKey, existing.UserKey)
+		}
+		if !pushoverKeyRE.MatchString(cfg.Token) {
+			return resolvedNotificationChannel{}, invalidNotification("Pushover application tokens are 30 letters and digits")
+		}
+		if !pushoverKeyRE.MatchString(cfg.UserKey) {
+			return resolvedNotificationChannel{}, invalidNotification("Pushover user and group keys are 30 letters and digits")
+		}
+		return resolvedNotificationChannel{
+			Config: NotificationConfig{Token: cfg.Token, UserKey: cfg.UserKey},
+			Target: "Pushover user " + cfg.UserKey[:3] + "••••",
+		}, nil
 	case NotificationKindTelegram:
 		if cfg.BotToken == "" && existing != nil {
 			cfg.BotToken = existing.BotToken
@@ -272,6 +387,57 @@ func validateNotificationChannel(kind, rawURL string, cfg NotificationConfig, ex
 	return resolvedNotificationChannel{}, invalidNotification("unknown channel kind %q", kind)
 }
 
+// keep is a field left blank on edit: the stored value stays, because the form
+// never showed it.
+func keep(value, stored string) string {
+	if value == "" {
+		return stored
+	}
+	return value
+}
+
+// kindName is a kind as a sentence names it.
+func kindName(kind string) string {
+	switch kind {
+	case NotificationKindTeams:
+		return "Teams"
+	case NotificationKindNtfy:
+		return "ntfy"
+	}
+	return strings.ToUpper(kind[:1]) + kind[1:]
+}
+
+// loopbackAddress is an address that never leaves this machine. The backend
+// shares the host's network, so a server published on 127.0.0.1 is reachable.
+// It parses the address rather than matching a prefix as detection's
+// loopbackHost does: 127.example.com is somebody else's machine.
+func loopbackAddress(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// notificationServer checks a self-hosted server's base URL and returns it
+// without a trailing slash. A server that is handed a token must be reached
+// over TLS unless it is on loopback — the rule SMTP sign-in is held to — and
+// a URL may not carry a sign-in of its own, which would be shown as the
+// channel's target.
+func notificationServer(product, raw string, credential bool) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return "", invalidNotification("%s server URL must be an http or https address", product)
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", invalidNotification("%s server URL must be the server's address alone, without a sign-in, query or fragment", product)
+	}
+	if credential && parsed.Scheme == "http" && !loopbackAddress(parsed.Hostname()) {
+		return "", invalidNotification("%s server URL must use https: a token must not travel in clear text (plain http is accepted on loopback only)", product)
+	}
+	return parsed.Scheme + "://" + parsed.Host + strings.TrimRight(parsed.EscapedPath(), "/"), nil
+}
+
 // maskWebhookURL keeps the host and every path segment but the last so the
 // operator can tell channels apart, and hides the tail: on Discord and Slack
 // the final segment is the credential.
@@ -317,6 +483,47 @@ type NotificationEnvelope struct {
 	// Database carries a database alert's subject and reading; it is set on
 	// the two database events and on nothing else.
 	Database *DatabaseAlertEnvelope `json:"database,omitempty"`
+	// Host carries a host alert's subject and reading; it is set on the two
+	// host events and on nothing else.
+	Host *HostAlertEnvelope `json:"host,omitempty"`
+	// Rollback carries what an instant rollback switched from and to, and
+	// why; it is set on an instant rollback run's events and nothing else.
+	Rollback *RollbackEnvelope `json:"rollback,omitempty"`
+}
+
+// RollbackEnvelope is an instant rollback's account of itself: the release
+// traffic was taken from, the warm release it went back to, and the reading
+// that decided it or the operator who pressed it.
+type RollbackEnvelope struct {
+	Automatic             bool   `json:"automatic"`
+	ReleaseNumber         int64  `json:"releaseNumber"`
+	RestoredReleaseNumber int64  `json:"restoredReleaseNumber"`
+	Reason                string `json:"reason,omitempty"`
+	// Rule is the verdict code that decided an automatic one: error_rate or
+	// latency.
+	Rule string `json:"rule,omitempty"`
+}
+
+// HostAlertEnvelope is what a host alert says when the machine itself is in
+// trouble — its CPU or memory held high, a filesystem filling, a container
+// gone down, a backup job failed — and when that is over. Server is the
+// machine's name, because one channel often hears from several of them;
+// Label names the subject in words and Detail is the reading against the
+// rule's line.
+type HostAlertEnvelope struct {
+	RuleID int64  `json:"ruleId"`
+	Kind   string `json:"kind"`
+	// Subject is what the rule follows: "cpu", "memory", a mountpoint, a
+	// container's name, or "job:<id>".
+	Subject   string  `json:"subject"`
+	Label     string  `json:"label"`
+	Server    string  `json:"server,omitempty"`
+	Detail    string  `json:"detail"`
+	Threshold float64 `json:"threshold,omitempty"`
+	// Since is when the subject entered the state being announced.
+	Since time.Time `json:"since"`
+	// Test marks a message sent from "Send test", so nobody acts on it.
+	Test bool `json:"test,omitempty"`
 }
 
 // DatabaseAlertEnvelope is what a database alert says when a server stops
@@ -383,9 +590,22 @@ type notificationMessage struct {
 	// LinkLabel is the words an e-mail puts before URL; a run's own message
 	// says "Open the run".
 	LinkLabel string
-	// Color is the Discord embed colour; Slack and e-mail ignore it.
+	// Color is the Discord embed colour and Mattermost's attachment bar; a
+	// Teams card reads it as attention or good, and ntfy, Gotify and Pushover
+	// read the red as a reason to raise the message's priority. Slack and
+	// e-mail ignore it.
 	Color int
 }
+
+// The two colours a message's outcome is drawn in. Red is a failure or an
+// alert firing: the one a phone should make noise for.
+const (
+	notificationRed   = 0xef4444
+	notificationGreen = 0x22c55e
+)
+
+// urgent is a message that says something went wrong.
+func (m notificationMessage) urgent() bool { return m.Color == notificationRed }
 
 func renderNotification(envelope NotificationEnvelope) notificationMessage {
 	project := envelope.ProjectName
@@ -403,6 +623,12 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 		run = fmt.Sprintf("Run %d", envelope.RunID)
 	}
 	message := notificationMessage{URL: envelope.URL}
+	operation := humanizeOperation(envelope.Operation)
+	// Staging takes promotions only from pull request previews; production
+	// only from staging.
+	if Operation(envelope.Operation) == OperationPromote && strings.EqualFold(envelope.EnvironmentName, string(EnvironmentStaging)) {
+		operation = "Promotion from a pull request preview"
+	}
 	switch envelope.Event {
 	case NotificationEventTrafficFiring, NotificationEventTrafficRecovered:
 		return renderTrafficAlert(envelope, project, environment)
@@ -410,6 +636,10 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 		return renderProxyAlert(envelope)
 	case NotificationEventDatabaseFiring, NotificationEventDatabaseRecovered:
 		return renderDatabaseAlert(envelope)
+	case NotificationEventHostFiring, NotificationEventHostRecovered:
+		return renderHostAlert(envelope)
+	case NotificationEventRolledBack:
+		return renderAutomaticRollback(envelope, project, environment, run)
 	case NotificationEventTest:
 		message.Emoji, message.Color = "🔔", 0x5865f2
 		message.Title = "Test notification from Just Dashboard"
@@ -418,25 +648,25 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 	case NotificationEventStarted:
 		message.Emoji, message.Color = "🚀", 0x3b82f6
 		message.Title = fmt.Sprintf("%s · %s — %s started", project, environment, run)
-		message.Summary = fmt.Sprintf("%s requested by %s.", humanizeOperation(envelope.Operation), describeTrigger(envelope))
+		message.Summary = fmt.Sprintf("%s requested by %s.", operation, describeTrigger(envelope))
 	case NotificationEventSucceeded:
-		message.Emoji, message.Color = "✅", 0x22c55e
+		message.Emoji, message.Color = "✅", notificationGreen
 		message.Title = fmt.Sprintf("%s · %s — %s succeeded", project, environment, run)
-		message.Summary = fmt.Sprintf("%s completed successfully.", humanizeOperation(envelope.Operation))
+		message.Summary = fmt.Sprintf("%s completed successfully.", operation)
 	case NotificationEventCancelled:
 		message.Emoji, message.Color = "⏹", 0x6b7280
 		message.Title = fmt.Sprintf("%s · %s — %s cancelled", project, environment, run)
-		message.Summary = fmt.Sprintf("%s was cancelled before it finished.", humanizeOperation(envelope.Operation))
+		message.Summary = fmt.Sprintf("%s was cancelled before it finished.", operation)
 	default:
-		message.Emoji, message.Color = "❌", 0xef4444
+		message.Emoji, message.Color = "❌", notificationRed
 		outcome := "failed"
 		if envelope.State == string(RunRolledBack) {
 			outcome = "failed and was rolled back"
 		}
 		message.Title = fmt.Sprintf("%s · %s — %s %s", project, environment, run, outcome)
-		message.Summary = fmt.Sprintf("%s did not complete. The previous release keeps serving.", humanizeOperation(envelope.Operation))
+		message.Summary = fmt.Sprintf("%s did not complete. The previous release keeps serving.", operation)
 	}
-	fields := [][2]string{{"Operation", humanizeOperation(envelope.Operation)}, {"Trigger", describeTrigger(envelope)}}
+	fields := [][2]string{{"Operation", operation}, {"Trigger", describeTrigger(envelope)}}
 	if envelope.SourceRef != "" || envelope.SourceRevision != "" {
 		fields = append(fields, [2]string{"Source", describeSource(envelope)})
 	}
@@ -458,6 +688,36 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 	if envelope.Endpoint != "" && envelope.Event == NotificationEventSucceeded {
 		fields = append(fields, [2]string{"Address", envelope.Endpoint})
 	}
+	if rollback := envelope.Rollback; rollback != nil {
+		fields = append(fields, [2]string{"Rolled back", fmt.Sprintf("release #%d to the warm release #%d", rollback.ReleaseNumber, rollback.RestoredReleaseNumber)})
+		if rollback.Reason != "" && envelope.Event == NotificationEventFailed {
+			fields = append(fields, [2]string{"Why", rollback.Reason})
+		}
+	}
+	message.Fields = fields
+	return message
+}
+
+// renderAutomaticRollback is the message an automatic rollback sends: which
+// release was taken back, what the reading was, and that the previous
+// release is serving again — the last part being what lets the reader finish
+// breakfast.
+func renderAutomaticRollback(envelope NotificationEnvelope, project, environment, run string) notificationMessage {
+	rollback := envelope.Rollback
+	if rollback == nil {
+		rollback = &RollbackEnvelope{}
+	}
+	message := notificationMessage{URL: envelope.URL, Emoji: "↩️", Color: notificationRed}
+	message.Title = fmt.Sprintf("%s · %s — release #%d rolled back automatically", project, environment, rollback.ReleaseNumber)
+	message.Summary = strings.TrimSpace(fmt.Sprintf("%s Release #%d serves again from its warm container.", rollback.Reason, rollback.RestoredReleaseNumber))
+	fields := [][2]string{
+		{"Rolled back", fmt.Sprintf("release #%d", rollback.ReleaseNumber)},
+		{"Serving", fmt.Sprintf("release #%d (kept warm)", rollback.RestoredReleaseNumber)},
+	}
+	if rollback.Reason != "" {
+		fields = append(fields, [2]string{"Why", rollback.Reason})
+	}
+	fields = append(fields, [2]string{"Run", run})
 	message.Fields = fields
 	return message
 }
@@ -489,11 +749,11 @@ func renderTrafficAlert(envelope NotificationEnvelope, project, environment stri
 		limit = fmt.Sprintf("%.1f%%", alert.Threshold)
 	}
 	if envelope.Event == NotificationEventTrafficFiring {
-		message.Emoji, message.Color = "🚨", 0xef4444
+		message.Emoji, message.Color = "🚨", notificationRed
 		message.Title = fmt.Sprintf("%s · %s is %s — %s", project, environment, what, reading)
 		message.Summary = fmt.Sprintf("The limit is %s. Open the project's Logs page to see which requests.", limit)
 	} else {
-		message.Emoji, message.Color = "✅", 0x22c55e
+		message.Emoji, message.Color = "✅", notificationGreen
 		message.Title = fmt.Sprintf("%s · %s recovered — %s", project, environment, reading)
 		message.Summary = fmt.Sprintf("Back within the limit of %s.", limit)
 	}
@@ -541,11 +801,11 @@ func renderProxyAlert(envelope NotificationEnvelope) notificationMessage {
 		prefix = "[test] "
 	}
 	if envelope.Event == NotificationEventProxyFiring {
-		message.Emoji, message.Color = "🚨", 0xef4444
+		message.Emoji, message.Color = "🚨", notificationRed
 		message.Title = fmt.Sprintf("%s%s — %s", prefix, what, label)
 		message.Summary = alert.Detail
 	} else {
-		message.Emoji, message.Color = "✅", 0x22c55e
+		message.Emoji, message.Color = "✅", notificationGreen
 		message.Title = fmt.Sprintf("%sResolved: %s — %s", prefix, what, label)
 		message.Summary = alert.Detail
 	}
@@ -592,10 +852,10 @@ func renderDatabaseAlert(envelope NotificationEnvelope) notificationMessage {
 		prefix = "[test] "
 	}
 	if envelope.Event == NotificationEventDatabaseFiring {
-		message.Emoji, message.Color = "🚨", 0xef4444
+		message.Emoji, message.Color = "🚨", notificationRed
 		message.Title = fmt.Sprintf("%s%s — %s", prefix, what, label)
 	} else {
-		message.Emoji, message.Color = "✅", 0x22c55e
+		message.Emoji, message.Color = "✅", notificationGreen
 		message.Title = fmt.Sprintf("%sResolved: %s — %s", prefix, what, label)
 	}
 	message.Summary = alert.Detail
@@ -604,6 +864,59 @@ func renderDatabaseAlert(envelope NotificationEnvelope) notificationMessage {
 		subject = "Backup job"
 	}
 	message.Fields = [][2]string{{subject, label}}
+	if !alert.Since.IsZero() {
+		message.Fields = append(message.Fields, [2]string{"Since", alert.Since.UTC().Format("2006-01-02 15:04 UTC")})
+	}
+	return message
+}
+
+// hostAlertWhat is each host alert kind as the noun phrase a title leads
+// with, and the word its subject goes by in the fields. The kinds are the api
+// package's; an unknown one still renders.
+var hostAlertWhat = map[string][2]string{
+	"cpu_high":       {"CPU high", "Server"},
+	"memory_high":    {"Memory high", "Server"},
+	"disk_filling":   {"Disk filling up", "Filesystem"},
+	"container_down": {"Container down", "Container"},
+	"backup_failed":  {"Backup failed", "Backup job"},
+	// The subject is a deployment's environment: "shop · production".
+	"image_vulnerable": {"Vulnerable base image", "Deployment"},
+	"tunnel_down":      {"Tunnel down", "Tunnel"},
+}
+
+// renderHostAlert is the sentence a host alert sends: what, which subject on
+// which server, and the reading against the line.
+func renderHostAlert(envelope NotificationEnvelope) notificationMessage {
+	message := notificationMessage{URL: envelope.URL, LinkLabel: "Open it in Just Dashboard"}
+	alert := envelope.Host
+	if alert == nil {
+		alert = &HostAlertEnvelope{}
+	}
+	words, ok := hostAlertWhat[alert.Kind]
+	if !ok {
+		words = [2]string{"Host alert", "Subject"}
+	}
+	label := alert.Label
+	if label == "" {
+		label = alert.Subject
+	}
+	prefix := ""
+	if alert.Test {
+		prefix = "[test] "
+	}
+	if envelope.Event == NotificationEventHostFiring {
+		message.Emoji, message.Color = "🚨", notificationRed
+		message.Title = fmt.Sprintf("%s%s — %s", prefix, words[0], label)
+	} else {
+		message.Emoji, message.Color = "✅", notificationGreen
+		message.Title = fmt.Sprintf("%sResolved: %s — %s", prefix, words[0], label)
+	}
+	message.Summary = alert.Detail
+	message.Fields = [][2]string{{words[1], label}}
+	// The machine is named once: a CPU rule's subject already is the server.
+	if alert.Server != "" && alert.Server != label {
+		message.Fields = append(message.Fields, [2]string{"Server", alert.Server})
+	}
 	if !alert.Since.IsZero() {
 		message.Fields = append(message.Fields, [2]string{"Since", alert.Since.UTC().Format("2006-01-02 15:04 UTC")})
 	}
@@ -627,6 +940,8 @@ func humanizeOperation(operation string) string {
 		return "Rebuild without cache"
 	case OperationRollback:
 		return "Rollback"
+	case OperationPromote:
+		return "Promotion from staging"
 	case OperationRestart:
 		return "Restart"
 	case OperationStop:
@@ -767,6 +1082,169 @@ func telegramPayload(chatID string, message notificationMessage) []byte {
 	return mustJSON(payload)
 }
 
+// linkLabel is the words a message puts before its link.
+func linkLabel(message notificationMessage) string {
+	if message.LinkLabel != "" {
+		return message.LinkLabel
+	}
+	return "Open the run"
+}
+
+// truncateBytes cuts text to a byte limit on a character boundary, for the
+// services whose limits are in bytes.
+func truncateBytes(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	cut := limit - len("…")
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut] + "…"
+}
+
+// plainNotificationText is a message as lines of text, for the push services
+// that draw no markup: the summary, each field as "Name: value", and, where
+// the service has nowhere else to put it, the link line an e-mail ends with.
+func plainNotificationText(message notificationMessage, link bool) string {
+	fields := make([]string, 0, len(message.Fields))
+	for _, field := range message.Fields {
+		fields = append(fields, field[0]+": "+field[1])
+	}
+	paragraphs := []string{}
+	for _, paragraph := range []string{message.Summary, strings.Join(fields, "\n")} {
+		if paragraph != "" {
+			paragraphs = append(paragraphs, paragraph)
+		}
+	}
+	if link && message.URL != "" {
+		paragraphs = append(paragraphs, linkLabel(message)+": "+message.URL)
+	}
+	return strings.Join(paragraphs, "\n\n")
+}
+
+// ntfy's JSON publishing: the topic rides in the body and the server's root
+// takes it. A message over 4096 bytes is turned into an attachment, so the
+// text stays under that.
+const ntfyMessageLimit = 4000
+
+func ntfyPayload(topic string, message notificationMessage) []byte {
+	priority := 3
+	if message.urgent() {
+		priority = 4
+	}
+	payload := map[string]any{
+		"topic": topic, "title": message.Emoji + " " + message.Title,
+		"message": truncateBytes(plainNotificationText(message, false), ntfyMessageLimit), "priority": priority,
+	}
+	if message.URL != "" {
+		payload["click"] = message.URL
+		payload["actions"] = []any{map[string]any{"action": "view", "label": linkLabel(message), "url": message.URL}}
+	}
+	return mustJSON(payload)
+}
+
+// Gotify's clients show a notification from priority 4 up and make noise from
+// 8, so a failure or a firing alert is sent at 8 and everything else at 5.
+// Its web client does not follow the click extra, so the link is in the text.
+func gotifyPayload(message notificationMessage) []byte {
+	priority := 5
+	if message.urgent() {
+		priority = 8
+	}
+	payload := map[string]any{"title": message.Emoji + " " + message.Title, "message": plainNotificationText(message, true), "priority": priority}
+	if message.URL != "" {
+		payload["extras"] = map[string]any{"client::notification": map[string]any{"click": map[string]any{"url": message.URL}}}
+	}
+	return mustJSON(payload)
+}
+
+// Pushover's documented limits, in characters.
+const (
+	pushoverMessageLimit  = 1024
+	pushoverTitleLimit    = 250
+	pushoverURLLimit      = 512
+	pushoverURLTitleLimit = 100
+)
+
+// pushoverPayload sends a failure or a firing alert at priority 1, which
+// sounds through the recipient's quiet hours, and everything else at 0.
+func pushoverPayload(cfg NotificationConfig, message notificationMessage, sentAt time.Time) []byte {
+	priority := 0
+	if message.urgent() {
+		priority = 1
+	}
+	payload := map[string]any{
+		"token": cfg.Token, "user": cfg.UserKey,
+		"title":    truncateRunes(message.Emoji+" "+message.Title, pushoverTitleLimit),
+		"message":  truncateRunes(plainNotificationText(message, false), pushoverMessageLimit),
+		"priority": priority, "timestamp": sentAt.Unix(),
+	}
+	if message.URL != "" && len(message.URL) <= pushoverURLLimit {
+		payload["url"] = message.URL
+		payload["url_title"] = truncateRunes(linkLabel(message), pushoverURLTitleLimit)
+	}
+	return mustJSON(payload)
+}
+
+// mattermostEscaper backslash-escapes the Markdown a Mattermost attachment
+// would otherwise render, so a reason quoting build output cannot turn into
+// emphasis, a link or a quote.
+var mattermostEscaper = strings.NewReplacer(`\`, `\\`, "*", `\*`, "_", `\_`, "~", `\~`, "`", "\\`", "[", `\[`, "]", `\]`, "#", `\#`, "|", `\|`, ">", `\>`)
+
+// mattermostPayload is Slack's attachment shape, which Mattermost documents
+// for incoming webhooks: the outcome's colour as the bar, the title linked to
+// the run, the summary and the fields side by side.
+func mattermostPayload(message notificationMessage) []byte {
+	fields := make([]map[string]any, 0, len(message.Fields))
+	for _, field := range message.Fields {
+		fields = append(fields, map[string]any{"short": len(field[1]) < 40, "title": field[0], "value": mattermostEscaper.Replace(field[1])})
+	}
+	attachment := map[string]any{
+		"fallback": message.Emoji + " " + message.Title, "color": fmt.Sprintf("#%06x", message.Color),
+		"title": message.Emoji + " " + message.Title, "text": mattermostEscaper.Replace(message.Summary), "fields": fields,
+	}
+	if message.URL != "" {
+		attachment["title_link"] = message.URL
+	}
+	return mustJSON(map[string]any{"attachments": []any{attachment}})
+}
+
+// teamsPayload is the Adaptive Card a Workflows "post to a channel when a
+// webhook request is received" trigger takes, wrapped as a message with one
+// attachment: the title in the outcome's colour, the summary, the fields as
+// facts, and the link as the card's one action.
+func teamsPayload(message notificationMessage) []byte {
+	color := "default"
+	switch message.Color {
+	case notificationRed:
+		color = "attention"
+	case notificationGreen:
+		color = "good"
+	}
+	body := []any{map[string]any{"type": "TextBlock", "text": message.Emoji + " " + message.Title, "weight": "bolder", "size": "medium", "wrap": true, "color": color}}
+	if message.Summary != "" {
+		body = append(body, map[string]any{"type": "TextBlock", "text": message.Summary, "wrap": true})
+	}
+	if len(message.Fields) > 0 {
+		facts := make([]map[string]any, 0, len(message.Fields))
+		for _, field := range message.Fields {
+			facts = append(facts, map[string]any{"title": field[0], "value": field[1]})
+		}
+		body = append(body, map[string]any{"type": "FactSet", "facts": facts})
+	}
+	card := map[string]any{
+		"$schema": "http://adaptivecards.io/schemas/adaptive-card.json", "type": "AdaptiveCard", "version": "1.4",
+		"body": body, "msteams": map[string]any{"width": "Full"},
+	}
+	if message.URL != "" {
+		card["actions"] = []any{map[string]any{"type": "Action.OpenUrl", "title": linkLabel(message), "url": message.URL}}
+	}
+	return mustJSON(map[string]any{"type": "message", "attachments": []any{map[string]any{
+		"contentType": "application/vnd.microsoft.card.adaptive", "contentUrl": nil, "content": card,
+	}}})
+}
+
 func emailMessage(cfg NotificationConfig, message notificationMessage, sentAt time.Time) (subject string, body []byte) {
 	subject = message.Emoji + " " + message.Title
 	var text strings.Builder
@@ -778,11 +1256,7 @@ func emailMessage(cfg NotificationConfig, message notificationMessage, sentAt ti
 		fmt.Fprintf(&text, "\r\n%s: %s", field[0], field[1])
 	}
 	if message.URL != "" {
-		link := message.LinkLabel
-		if link == "" {
-			link = "Open the run"
-		}
-		fmt.Fprintf(&text, "\r\n\r\n%s: %s", link, message.URL)
+		fmt.Fprintf(&text, "\r\n\r\n%s: %s", linkLabel(message), message.URL)
 	}
 	text.WriteString("\r\n\r\n— Just Dashboard\r\n")
 	var out bytes.Buffer
@@ -896,11 +1370,21 @@ func (d *NotificationDispatcher) RunStarted(ctx context.Context, run EngineRun) 
 }
 
 func (d *NotificationDispatcher) RunFinished(ctx context.Context, run EngineRun) {
-	event := notificationEventForState(run.State)
+	event := notificationEventForRun(run)
 	if event == "" {
 		return
 	}
 	d.dispatch(ctx, run, event)
+}
+
+// notificationEventForRun is the event a terminal run raises. A successful
+// automatic rollback raises its own: the run went well, the release it took
+// traffic from did not.
+func notificationEventForRun(run EngineRun) string {
+	if request, ok := instantRollbackOf(run); ok && request.Automatic && run.State == RunSucceeded {
+		return NotificationEventRolledBack
+	}
+	return notificationEventForState(run.State)
 }
 
 func (d *NotificationDispatcher) dispatch(ctx context.Context, run EngineRun, event string) {
@@ -975,6 +1459,15 @@ func (d *NotificationDispatcher) envelope(ctx context.Context, run EngineRun, ev
 	if d.baseURL != nil {
 		if base := strings.TrimRight(strings.TrimSpace(d.baseURL()), "/"); base != "" {
 			envelope.URL = fmt.Sprintf("%s/deploy/%d/runs/%d", base, run.ProjectID, run.ID)
+		}
+	}
+	if request, ok := instantRollbackOf(run); ok && d.runs != nil {
+		envelope.Rollback = &RollbackEnvelope{Automatic: request.Automatic, Reason: request.Reason}
+		if watch, err := d.runs.RollbackWatch(ctx, request.WatchID); err == nil {
+			envelope.Rollback.ReleaseNumber, envelope.Rollback.RestoredReleaseNumber = watch.ReleaseNumber, watch.WarmReleaseNum
+			if request.Automatic && watch.Verdict != nil && watch.Verdict.Tripped {
+				envelope.Rollback.Rule = watch.Verdict.Code
+			}
 		}
 	}
 	return envelope

@@ -38,6 +38,13 @@ type DraftSaveRequest struct {
 type DraftCommitRequest struct {
 	Revision             int      `json:"revision"`
 	AcknowledgedWarnings []string `json:"acknowledgedWarnings"`
+	// GrantToKey is the deploy key, narrowed to chosen deployments, that is
+	// committing: the deployment the commit creates is added to its grant
+	// (api_token_deployments) in the same transaction, so the key keeps
+	// reaching what it made. Set by the handler from the key, never read
+	// from a request body; 0 for a session or a key reaching every deployment,
+	// which must stay without rows.
+	GrantToKey int64 `json:"-"`
 	// GitPolicy is the automatic-deployment decision, taken while the project
 	// is being created rather than after. A Git deployment polls its branch
 	// from the moment it exists and the default is to deploy every push, so
@@ -63,6 +70,10 @@ type PlanningStore struct {
 	// installationTokens mints GitHub App credentials; nil until an App is
 	// connected.
 	installationTokens InstallationTokenMinter
+	// secretStores reads the values store references name; storeReads is
+	// what each run read, for the run's own later steps.
+	secretStores SecretStoreResolver
+	storeReads   storeReadCache
 }
 
 func (s *PlanningStore) WithDatabaseURLResolver(resolve func(context.Context, int64, int, string) (string, error)) *PlanningStore {
@@ -159,7 +170,14 @@ func (s *PlanningStore) OpenScopedVariables(
 		}
 		return nil, err
 	}
+	reads, err := s.readStores(ctx, 0, environmentID, all, false)
+	if err != nil {
+		return nil, err
+	}
 	return resolveScopedVariableValues(all, scope, func(reference VariableReference) (string, bool, error) {
+		if reference.Kind == StoreReferenceKind {
+			return storeValue(reads, reference)
+		}
 		return s.resolveExternalVariableReference(ctx, environmentID, revision, 0, reference)
 	})
 }
@@ -176,6 +194,25 @@ func (s *PlanningStore) OpenRunScopedVariables(
 	if scope != "build" && scope != "runtime" && scope != "release_task" {
 		return nil, fmt.Errorf("invalid deployment variable scope %q", scope)
 	}
+	all, planRevision, err := s.runVariableValues(ctx, runID, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	reads, err := s.readStores(ctx, runID, environmentID, all, false)
+	if err != nil {
+		return nil, err
+	}
+	return resolveScopedVariableValues(all, scope, func(reference VariableReference) (string, bool, error) {
+		if reference.Kind == StoreReferenceKind {
+			return storeValue(reads, reference)
+		}
+		return s.resolveExternalVariableReference(ctx, environmentID, planRevision, runID, reference)
+	})
+}
+
+// runVariableValues opens every variable revision a run's snapshot holds,
+// unresolved, with the plan revision the run deploys.
+func (s *PlanningStore) runVariableValues(ctx context.Context, runID, environmentID int64) ([]ScopedVariableValue, int, error) {
 	var snapshotEnvironmentID int64
 	var planRevision int
 	var expectedDigest string
@@ -185,12 +222,12 @@ func (s *PlanningStore) OpenRunScopedVariables(
 		  JOIN deploy_runs run ON run.id = snapshot.run_id
 		 WHERE snapshot.run_id = ?`, runID).Scan(&snapshotEnvironmentID, &expectedDigest, &planRevision); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("%w: run has no variable snapshot", ErrInvalidPlan)
+			return nil, 0, fmt.Errorf("%w: run has no variable snapshot", ErrInvalidPlan)
 		}
-		return nil, err
+		return nil, 0, err
 	}
 	if snapshotEnvironmentID != environmentID {
-		return nil, fmt.Errorf("%w: run variable snapshot belongs to another environment", ErrInvalidPlan)
+		return nil, 0, fmt.Errorf("%w: run variable snapshot belongs to another environment", ErrInvalidPlan)
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT v.key, v.sensitivity, v.scopes, v.value_enc, v.value_digest, v.value_mode
@@ -199,7 +236,7 @@ func (s *PlanningStore) OpenRunScopedVariables(
 		 WHERE rv.run_id = ? AND v.environment_id = ?
 		 ORDER BY rv.ordinal`, runID, environmentID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	all := []ScopedVariableValue{}
@@ -210,10 +247,10 @@ func (s *PlanningStore) OpenRunScopedVariables(
 		var value ScopedVariableValue
 		var scopes, sealed string
 		if err := rows.Scan(&value.Name, &value.Sensitivity, &scopes, &sealed, &value.ValueDigest, &value.ValueMode); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if seen[value.Name] || !contentDigestRE.MatchString(value.ValueDigest) {
-			return nil, fmt.Errorf("%w: run variable snapshot has invalid revision metadata", ErrInvalidPlan)
+			return nil, 0, fmt.Errorf("%w: run variable snapshot has invalid revision metadata", ErrInvalidPlan)
 		}
 		seen[value.Name] = true
 		value.Scopes = strings.Split(scopes, ",")
@@ -225,20 +262,18 @@ func (s *PlanningStore) OpenRunScopedVariables(
 		all = append(all, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if digestReleaseVariables(snapshot) != expectedDigest {
-		return nil, fmt.Errorf("%w: run variable snapshot digest is inconsistent", ErrInvalidPlan)
+		return nil, 0, fmt.Errorf("%w: run variable snapshot digest is inconsistent", ErrInvalidPlan)
 	}
 	for index := range all {
 		all[index].Value, err = s.sealer.Open(sealedValues[all[index].Name])
 		if err != nil {
-			return nil, fmt.Errorf("deployment variable %s cannot be decrypted", all[index].Name)
+			return nil, 0, fmt.Errorf("deployment variable %s cannot be decrypted", all[index].Name)
 		}
 	}
-	return resolveScopedVariableValues(all, scope, func(reference VariableReference) (string, bool, error) {
-		return s.resolveExternalVariableReference(ctx, environmentID, planRevision, runID, reference)
-	})
+	return all, planRevision, nil
 }
 
 func resolveScopedVariableValues(
@@ -341,6 +376,18 @@ func (s *PlanningStore) resolveExternalVariableReference(
 		return "", false, fmt.Errorf("%w: domain reference target was not found", ErrInvalidVariable)
 	case "service":
 		return s.resolveServiceVariableReference(ctx, environmentID, planRevision, reference.Target)
+	case SharedScopeServer:
+		return s.sharedVariableValue(ctx, 0, reference.Target)
+	case SharedScopeProject:
+		projectID, err := s.environmentProject(ctx, environmentID)
+		if err != nil {
+			return "", false, err
+		}
+		return s.sharedVariableValue(ctx, projectID, reference.Target)
+	case StoreReferenceKind:
+		// Read where the variables are opened, all of a run's at once; one
+		// reaching here was never read, and fails closed.
+		return "", false, fmt.Errorf("%w: %s was not read from its store", ErrInvalidVariable, reference.Target)
 	default:
 		return "", false, fmt.Errorf("%w: unsupported external reference kind", ErrInvalidVariable)
 	}
@@ -481,6 +528,13 @@ func composeServiceByName(services []ComposeServicePlan, name string) *ComposeSe
 }
 
 func (s *PlanningStore) Create(ctx context.Context, ownerUserID int64, ownerUsername string) (*Draft, error) {
+	return s.CreateForKey(ctx, ownerUserID, ownerUsername, 0)
+}
+
+// CreateForKey opens a draft for a deploy key (keyID 0 is a session's). The
+// owner is the key's owner, as every key acts as its owner; the key id is what
+// holds the key to the drafts it made.
+func (s *PlanningStore) CreateForKey(ctx context.Context, ownerUserID int64, ownerUsername string, keyID int64) (*Draft, error) {
 	if ownerUserID <= 0 || strings.TrimSpace(ownerUsername) == "" {
 		return nil, fmt.Errorf("deployment draft owner is required")
 	}
@@ -488,17 +542,17 @@ func (s *PlanningStore) Create(ctx context.Context, ownerUserID int64, ownerUser
 	defer s.mu.Unlock()
 	now := s.now().UTC()
 	draft := &Draft{
-		ID: auth.RandomToken(18), OwnerUserID: ownerUserID, OwnerUsername: ownerUsername,
+		ID: auth.RandomToken(18), OwnerUserID: ownerUserID, OwnerUsername: ownerUsername, KeyID: keyID,
 		CurrentStep: DraftIntent, Revision: 1, Data: DraftData{},
 		Findings: []PreflightFinding{}, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(draftTTL),
 	}
 	data, _ := json.Marshal(draft.Data)
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO deploy_drafts(
-		  id, owner_user_id, owner_username, current_step, revision, data_json,
+		  id, owner_user_id, owner_username, key_id, current_step, revision, data_json,
 		  findings_json, plan_preview, created_at, updated_at, expires_at)
-		VALUES(?, ?, ?, ?, ?, ?, '[]', '', ?, ?, ?)`,
-		draft.ID, draft.OwnerUserID, draft.OwnerUsername, draft.CurrentStep, draft.Revision,
+		VALUES(?, ?, ?, ?, ?, ?, ?, '[]', '', ?, ?, ?)`,
+		draft.ID, draft.OwnerUserID, draft.OwnerUsername, draft.KeyID, draft.CurrentStep, draft.Revision,
 		string(data), now.Unix(), now.Unix(), draft.ExpiresAt.Unix()); err != nil {
 		return nil, err
 	}
@@ -507,7 +561,7 @@ func (s *PlanningStore) Create(ctx context.Context, ownerUserID int64, ownerUser
 
 func (s *PlanningStore) Get(ctx context.Context, id string) (*Draft, error) {
 	draft, err := s.scanDraft(s.db.QueryRowContext(ctx, `
-		SELECT id, owner_user_id, owner_username, current_step, revision, data_json,
+		SELECT id, owner_user_id, owner_username, key_id, current_step, revision, data_json,
 		       findings_json, plan_preview, committed_project_id, created_at, updated_at, expires_at, environment_enc
 		  FROM deploy_drafts WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -550,12 +604,15 @@ func (s *PlanningStore) Discard(ctx context.Context, id string, userID int64, ad
 // ListDrafts returns the caller's own uncommitted, unexpired drafts, newest
 // first, so the new-project page can offer to resume one instead of starting
 // the wizard over. A committed or expired draft has nothing left to resume.
-func (s *PlanningStore) ListDrafts(ctx context.Context, ownerUserID int64) ([]DraftSummary, error) {
+// With a keyID the list is that deploy key's own drafts; with 0 it is every
+// draft of the owner's, those its keys made included, since a person sees
+// what their keys are doing.
+func (s *PlanningStore) ListDrafts(ctx context.Context, ownerUserID, keyID int64) ([]DraftSummary, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, data_json, current_step, updated_at, expires_at
 		  FROM deploy_drafts
-		 WHERE owner_user_id = ? AND committed_project_id = 0 AND expires_at > ?
-		 ORDER BY updated_at DESC, rowid DESC`, ownerUserID, s.now().UTC().Unix())
+		 WHERE owner_user_id = ? AND (? = 0 OR key_id = ?) AND committed_project_id = 0 AND expires_at > ?
+		 ORDER BY updated_at DESC, rowid DESC`, ownerUserID, keyID, keyID, s.now().UTC().Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -588,7 +645,7 @@ func (s *PlanningStore) scanDraft(row interface{ Scan(...any) error }) (*Draft, 
 	var draft Draft
 	var data, findings string
 	var created, updated, expires int64
-	if err := row.Scan(&draft.ID, &draft.OwnerUserID, &draft.OwnerUsername, &draft.CurrentStep,
+	if err := row.Scan(&draft.ID, &draft.OwnerUserID, &draft.OwnerUsername, &draft.KeyID, &draft.CurrentStep,
 		&draft.Revision, &data, &findings, &draft.PlanPreview, &draft.CommittedProjectID,
 		&created, &updated, &expires, &draft.environmentEnc); err != nil {
 		return nil, err
@@ -620,6 +677,18 @@ func (s *PlanningStore) scanDraft(row interface{ Scan(...any) error }) (*Draft, 
 
 func AuthorizeDraft(draft *Draft, userID int64, admin bool) error {
 	if draft.OwnerUserID != userID && !admin {
+		return ErrDraftForbidden
+	}
+	return nil
+}
+
+// AuthorizeDraftForKey holds a deploy key to the drafts it made itself. The
+// key acts as its owner, who as an administrator could read any draft, so
+// ownership is not the test: a session's drafts, and another key's, are a
+// different piece of work the key has no business in, and a key narrowed to
+// some deployments would otherwise commit a plan a person left half-made.
+func AuthorizeDraftForKey(draft *Draft, keyID int64) error {
+	if keyID <= 0 || draft.KeyID != keyID {
 		return ErrDraftForbidden
 	}
 	return nil
@@ -667,7 +736,16 @@ func (s *PlanningStore) Save(
 		if request.Source == nil || request.Intent != nil || request.Configuration != nil || request.Dotenv != nil {
 			return nil, fmt.Errorf("%w: source step requires only source data", ErrInvalidPlan)
 		}
-		copy := canonicalSourceConfig(*request.Source)
+		// A template added here is frozen into the source first, so every
+		// read below renders the definition this draft will deploy.
+		copy, err := s.WithUserTemplate(ctx, canonicalSourceConfig(*request.Source))
+		if err != nil {
+			return nil, err
+		}
+		copy, err = copy.WithTemplateDocuments()
+		if err != nil {
+			return nil, err
+		}
 		if err := copy.validateForNewDeployment(); err != nil {
 			return nil, err
 		}
@@ -734,6 +812,9 @@ func (s *PlanningStore) Save(
 			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 		}
 		if err := copy.Validate(); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+		}
+		if err := refuseUnrunnableChecks(copy.Checks); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 		}
 		if _, _, err := ResolveVariableGraphWithModes(draft.variableValues(copy), draft.variableModes(copy), nil); err != nil {
@@ -897,7 +978,7 @@ func (s *PlanningStore) persistDraft(ctx context.Context, draft *Draft) (*Draft,
 
 func (s *PlanningStore) getUnlocked(ctx context.Context, id string) (*Draft, error) {
 	draft, err := s.scanDraft(s.db.QueryRowContext(ctx, `
-		SELECT id, owner_user_id, owner_username, current_step, revision, data_json,
+		SELECT id, owner_user_id, owner_username, key_id, current_step, revision, data_json,
 		       findings_json, plan_preview, committed_project_id, created_at, updated_at, expires_at, environment_enc
 		  FROM deploy_drafts WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -968,6 +1049,10 @@ func (s *PlanningStore) Commit(
 				return nil, fmt.Errorf("%w: warning %s is not acknowledged", ErrPreflightBlocked, finding.Code)
 			}
 		}
+	}
+
+	if err := s.checkDraftSharedReferences(ctx, draft); err != nil {
+		return nil, err
 	}
 
 	secret := auth.RandomToken(24)
@@ -1145,7 +1230,14 @@ func (s *PlanningStore) Commit(
 		}
 	}
 	for _, domain := range configuration.Domains {
-		config := mustJSON(map[string]any{"hostname": domain.Hostname, "https": domain.HTTPS})
+		domainConfig := map[string]any{"hostname": domain.Hostname, "https": domain.HTTPS}
+		if domain.RedirectTo != "" {
+			domainConfig["redirectTo"] = domain.RedirectTo
+			if domain.RedirectCode != 0 {
+				domainConfig["redirectCode"] = domain.RedirectCode
+			}
+		}
+		config := mustJSON(domainConfig)
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO deploy_dependencies(
 			  environment_id, release_id, kind, ownership, resource_kind,
@@ -1178,6 +1270,18 @@ func (s *PlanningStore) Commit(
 	}
 	if affected, _ := update.RowsAffected(); affected != 1 {
 		return nil, ErrDraftRevision
+	}
+	// A narrowed deploy key's grant grows by the deployment it made, in the
+	// transaction that makes it: the key reaches its own deployment from the
+	// first request after this one, and never a deployment that failed to be
+	// made. The table is the key's (auth); the row is written here because
+	// nowhere else is atomic with the deployment's creation.
+	if request.GrantToKey > 0 {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO api_token_deployments(token_id, project_id) VALUES(?, ?)`,
+			request.GrantToKey, projectID); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -1214,6 +1318,9 @@ func validateDraftComplete(draft *Draft) error {
 		return err
 	}
 	if err := draft.Data.Configuration.Validate(); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+	}
+	if err := refuseRailpackWithoutCheckout(draft.Data.Source.Kind, draft.Data.Configuration.Build); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
 	values, _, err := ResolveVariableGraphWithModes(draft.variableValues(*draft.Data.Configuration), draft.variableModes(*draft.Data.Configuration), nil)

@@ -1,11 +1,21 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { ArrowRight, Check, Copy, Eye, EyeOff, Key, ShieldCheck } from "@/components/icons"
+import {
+  ArrowRight,
+  Check,
+  Copy,
+  Eye,
+  EyeOff,
+  Fingerprint,
+  Key,
+  ShieldCheck,
+} from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, post } from "@/lib/api"
 import { passwordChecks } from "@/lib/password"
+import { conditionalSignInAvailable, usePasskeyPlace } from "@/lib/passkeys"
 import { cn } from "@/lib/utils"
 import type { AuthStatus } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
@@ -50,7 +60,8 @@ const HEADINGS: Record<Step, string> = {
 export default function LoginPage() {
   const router = useRouter()
   const endedInUrl = useSearchParams().get("reason") === "session"
-  const { status, loading, sessionEnded, login, verifyTotp, refresh, logout } = useAuth()
+  const { status, loading, sessionEnded, login, loginWithPasskey, verifyTotp, refresh, logout } =
+    useAuth()
   // "auto" defers to whatever the session says; the explicit values are set
   // only once the user has moved the flow forward themselves.
   const [chosenStep, setChosenStep] = useState<Step | "auto">("auto")
@@ -87,11 +98,52 @@ export default function LoginPage() {
     if (!loading && status?.authenticated) router.replace("/")
   }, [loading, status, router])
 
+  // Where the page is open decides whether a passkey can be offered at all.
+  const place = usePasskeyPlace()
+  // The quiet offer: the browser lists this dashboard's passkeys in the
+  // username field's autofill while the form is shown, and picking one signs
+  // in. It is withdrawn for the button's prompt, which asks out loud.
+  const conditional = useRef<AbortController | null>(null)
+  const advanceRef = useRef<(next: AuthStatus) => void>(() => undefined)
+  useEffect(() => {
+    if (step !== "credentials" || !place?.usable || loading) return
+    const controller = new AbortController()
+    conditional.current = controller
+    void (async () => {
+      if (!(await conditionalSignInAvailable()) || controller.signal.aborted) return
+      try {
+        advanceRef.current(await loginWithPasskey({ conditional: true, signal: controller.signal }))
+      } catch (err) {
+        if (controller.signal.aborted) return
+        notify.error("Passkey sign-in failed", err instanceof ApiError ? err.message : String(err))
+      }
+    })()
+    return () => controller.abort()
+  }, [step, place, loading, loginWithPasskey])
+
   const advance = (next: AuthStatus) => {
     if (next.authenticated) router.replace("/")
     else if (next.needsTotp) setStep("totp")
     else if (next.needsEnrollment) setStep("enroll")
     else if (next.needsPasswordChange) setStep("password")
+  }
+
+  useEffect(() => {
+    advanceRef.current = advance
+  })
+
+  const signInWithPasskey = async () => {
+    conditional.current?.abort()
+    setBusy(true)
+    try {
+      advance(await loginWithPasskey({}))
+    } catch (err) {
+      // Closing the browser's prompt is a choice, not a failure.
+      if (err instanceof DOMException && err.name === "NotAllowedError") return
+      notify.error("Passkey sign-in failed", err instanceof ApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
   }
 
   const submitCredentials = async (e: React.FormEvent) => {
@@ -263,7 +315,8 @@ export default function LoginPage() {
                         <Input
                           id="username"
                           autoFocus
-                          autoComplete="username"
+                          // "webauthn" lets the browser list passkeys here.
+                          autoComplete="username webauthn"
                           autoCapitalize="none"
                           spellCheck={false}
                           value={username}
@@ -312,6 +365,27 @@ export default function LoginPage() {
                         Continue
                         {!busy && <ArrowRight className="size-4" />}
                       </Button>
+                      {place?.usable ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="lg"
+                          className="w-full"
+                          disabled={busy}
+                          onClick={() => void signInWithPasskey()}
+                        >
+                          <Fingerprint className="size-4" />
+                          Sign in with a passkey
+                        </Button>
+                      ) : (
+                        place &&
+                        place.reason && (
+                          <p className="flex items-start gap-2 text-hint text-muted-foreground">
+                            <Fingerprint aria-hidden className="mt-px size-3.5 shrink-0" />
+                            {place.reason}
+                          </p>
+                        )
+                      )}
                     </form>
                   )}
 

@@ -22,6 +22,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentEngineRun,
+  DeploymentEnvironment,
   DeploymentOperations,
   DeploymentPreview,
   DeploymentRelease,
@@ -46,9 +47,11 @@ import {
   latestAttempts,
   projectProduct,
   runFailed,
+  runPromotion,
   runLabel,
   runStopped,
   stepName,
+  stepOperation,
   useNow,
 } from "@/components/deploy/vocabulary"
 import { BuildConsole, consoleRows, transcriptSummary } from "@/components/deploy/build-console"
@@ -56,6 +59,8 @@ import { ReleasePipeline } from "@/components/deploy/run-pipeline"
 import { RunDetails, initialStep } from "@/components/deploy/run-steps"
 import { RunHeader } from "@/components/deploy/run-header"
 import { RunFailure, RunReady } from "@/components/deploy/run-outcome"
+import { RunCanary } from "@/components/deploy/run-canary"
+import { RunDiagnosis } from "@/components/deploy/run-diagnosis"
 import { useRunStream } from "@/components/deploy/run-stream"
 import { useProjectNavScope } from "@/components/deploy/project-shell"
 import { releaseVerbs } from "@/components/deploy/run-verbs"
@@ -67,6 +72,7 @@ import {
   runPlanIsStale,
 } from "@/components/deploy/failure-cause"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
+import { RestoreDataDialog, RunDataCopies } from "@/components/deploy/data-copies"
 import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-sheet"
 
 /**
@@ -123,6 +129,7 @@ export function RunPage() {
   // "Show the line" twice scrolls to it twice.
   const [focusLine, setFocusLine] = useState<{ seq: number; nonce: number }>()
   const [rollbackOpen, setRollbackOpen] = useState(false)
+  const [restoreDataOpen, setRestoreDataOpen] = useState(false)
   const [compare, setCompare] = useState<{
     open: boolean
     releaseId?: number
@@ -133,13 +140,31 @@ export function RunPage() {
   const events = stream.events
   const snapshot = stream.snapshot ?? initial.data
 
+  // A staging run is read against staging's own summary — its live release,
+  // its address, its name — not production's, and not as a preview.
+  const environmentList = usePoll(
+    (signal) =>
+      get<DeploymentEnvironment[]>(`/deploy/${projectId}/environments`, undefined, signal),
+    0,
+    [projectId],
+    { enabled: validIds },
+  )
+  const stagingId = environmentList.data?.find(
+    (environment) =>
+      environment.kind === "staging" && environment.id === snapshot?.run.environmentId,
+  )?.id
   // The project is read separately, on its own poll, purely to answer "is
   // this run's release still the one live today" — the run itself never
   // changes once it exists, but the project's live release does.
   const project = usePoll(
-    (signal) => get<ProjectDetail>(`/deploy/${projectId}`, undefined, signal),
+    (signal) =>
+      get<ProjectDetail>(
+        `/deploy/${projectId}`,
+        stagingId ? { environment: stagingId } : undefined,
+        signal,
+      ),
     5000,
-    [projectId],
+    [projectId, stagingId],
     { enabled: validIds },
   )
   // Worth asking once the run has a release to place — the one it made, the
@@ -198,9 +223,14 @@ export function RunPage() {
     { enabled: validIds && rollbackOpen },
   )
   const operations = usePoll(
-    (signal) => get<DeploymentOperations>(`/deploy/${projectId}/operations`, undefined, signal),
+    (signal) =>
+      get<DeploymentOperations>(
+        `/deploy/${projectId}/operations`,
+        stagingId ? { environment: stagingId } : undefined,
+        signal,
+      ),
     0,
-    [projectId],
+    [projectId, stagingId],
     { enabled: validIds && rollbackOpen },
   )
   // Whether the settings have moved on since a run that can be retried: then
@@ -427,6 +457,15 @@ export function RunPage() {
       setFocusLine((focus) => ({ seq: cause.lineSeq!, nonce: (focus?.nonce ?? 0) + 1 }))
   }
 
+  // A line the diagnosis quoted, in the build logs: on its own step's
+  // output, scrolled to the line.
+  const showLine = (seq: number) => {
+    const step =
+      rows.find((candidate) => candidate.id.startsWith(`${seq}:`))?.stepId ?? failedStep?.id
+    if (step !== undefined) showOutput(step)
+    setFocusLine((focus) => ({ seq, nonce: (focus?.nonce ?? 0) + 1 }))
+  }
+
   const showFailedStep = () => {
     if (!failedStep) return
     setInspectedStepId(failedStep.id)
@@ -477,6 +516,7 @@ export function RunPage() {
           }),
         rollback: () => setRollbackOpen(true),
         pin: (target) => void togglePin(target),
+        restoreData: forPreview ? undefined : () => setRestoreDataOpen(true),
       },
     }),
   ]
@@ -548,7 +588,9 @@ export function RunPage() {
 
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         Deployment state: {runLabel(run.state, run.operation)}
-        {current ? `. Current step: ${stepName(current.key, run.operation)}, ${current.state}` : ""}
+        {current
+          ? `. Current step: ${stepName(current.key, stepOperation(run))}, ${current.state}`
+          : ""}
       </p>
 
       <RunHeader
@@ -567,6 +609,7 @@ export function RunPage() {
             ? releaseNumbers.get(targetReleaseId)
             : undefined
         }
+        promotion={runPromotion(run)}
         projectId={projectId}
         verbs={verbs}
       />
@@ -575,7 +618,7 @@ export function RunPage() {
         <p className="text-body text-muted-foreground">Compatibility pipeline</p>
       ) : (
         <div className="flex flex-col gap-3">
-          <ReleasePipeline steps={attempts} operation={run.operation} now={clock} />
+          <ReleasePipeline steps={attempts} operation={stepOperation(run)} now={clock} />
           {/* The path lights the stage at work; before there is one, this
               says why nothing has started. */}
           {active && attempts.length === 0 && (
@@ -585,6 +628,20 @@ export function RunPage() {
           )}
         </div>
       )}
+
+      {/* A canary is drawn while its step runs and stays as its outcome;
+          a plan without one skips the step and draws nothing. */}
+      {!legacy &&
+        attempts.some(
+          (step) => step.key === "canary" && step.state !== "skipped" && step.state !== "pending",
+        ) && (
+          <RunCanary
+            projectId={projectId}
+            environmentId={run.environmentId}
+            runId={run.id}
+            active={attempts.some((step) => step.key === "canary" && step.state === "running")}
+          />
+        )}
 
       {run.cancelRequested && active ? (
         <Notice tone="warning" icon={Warning} title="Cancellation requested">
@@ -616,6 +673,19 @@ export function RunPage() {
         </p>
       ) : null}
 
+      {/* Asked for, never shown unasked: the failure above is the decision,
+          and its own fix stays the command. */}
+      {(run.state === "failed" || run.state === "rolled_back") && (
+        <RunDiagnosis
+          projectId={projectId}
+          runId={runId}
+          canAsk={canRun}
+          canSetUp={can("system.admin")}
+          rows={rows}
+          onShowLine={showLine}
+        />
+      )}
+
       {/* project.data is a separate poll from the run snapshot; reading
           isLiveRelease before it lands would flash "Superseded" for every
           successful run while the project fetch is still in flight — and a
@@ -630,6 +700,21 @@ export function RunPage() {
           release={release}
           liveRelease={liveRelease}
           projectId={projectId}
+          ungated={attempts.some(
+            (step) => step.key === "activate" && step.evidence?.readinessGated === false,
+          )}
+        />
+      )}
+
+      {/* A rollback that asked for a side copy of the database links it here,
+          from waiting on this run to ready; the copy is worked with on the
+          Deployments page. */}
+      {run.operation === "rollback" && (
+        <RunDataCopies
+          projectId={projectId}
+          environmentId={run.environmentId}
+          runId={run.id}
+          enabled={!forPreview}
         />
       )}
 
@@ -654,7 +739,7 @@ export function RunPage() {
             steps={attempts}
             active={active}
             outcome={run.state}
-            operation={run.operation}
+            operation={stepOperation(run)}
             connected={stream.socket === "open"}
             startedAt={run.claimedAt ?? run.requestedAt}
             runNumber={run.runNumber}
@@ -671,7 +756,7 @@ export function RunPage() {
           projectId={projectId}
           deployment={deployment}
           steps={attempts}
-          operation={run.operation}
+          operation={stepOperation(run)}
           now={clock}
           rows={rows}
           lineCounts={transcript.perStep}
@@ -692,6 +777,14 @@ export function RunPage() {
         domains={rollbackDomains(operations.data, deployment)}
         remote={deployment?.sourceRemote}
         initialReleaseId={release?.id}
+      />
+      <RestoreDataDialog
+        open={restoreDataOpen}
+        onOpenChange={setRestoreDataOpen}
+        projectId={projectId}
+        environmentId={run.environmentId}
+        release={release}
+        onStarted={() => router.push(`/deploy/${projectId}/deployments#data-copies`)}
       />
       <ReleaseComparisonSheet
         open={compare.open}

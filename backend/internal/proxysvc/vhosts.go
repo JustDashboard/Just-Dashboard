@@ -116,6 +116,10 @@ var (
 	cacheOnRe    = regexp.MustCompile(`(?m)^\s*proxy_cache\s+jd_\w+_cache\s*;`)
 )
 
+// maintSwitchLineRe finds a switched maintenance's file, whose presence
+// rather than the check says whether it is on.
+var maintSwitchLineRe = regexp.MustCompile(`(?m)^\s*if\s*\(-f\s+(/\S+/maintenance\.on)\)`)
+
 func (s *Service) ListVHosts(ctx context.Context) ([]VHost, error) {
 	out := []VHost{}
 	out = append(out, s.nginxVHosts()...)
@@ -425,7 +429,14 @@ func (s *Service) fileVHost(name, path, layout string, logs logDefaults) VHost {
 		}
 	}
 	for _, m := range proxyPassRe.FindAllStringSubmatch(text, -1) {
-		v.Upstreams = appendNew(v.Upstreams, unquote(strings.TrimSpace(m[1])))
+		upstream := unquote(strings.TrimSpace(m[1]))
+		// A sleeping deployment route forwards through a variable and wakes
+		// through the dashboard's socket; the application's own address is
+		// the one its wake location names.
+		if sleepVarRe.MatchString(strings.TrimPrefix(upstream, "http://")) || strings.Contains(upstream, ":/wake/") {
+			continue
+		}
+		v.Upstreams = appendNew(v.Upstreams, upstream)
 	}
 	certs := certificatePaths(text)
 	for _, m := range includeRe.FindAllStringSubmatch(text, -1) {
@@ -439,6 +450,9 @@ func (s *Service) fileVHost(name, path, layout string, logs logDefaults) VHost {
 		v.CertPath = v.CertPaths[0]
 	}
 	v.Maintenance = maintOnRe.MatchString(text)
+	if m := maintSwitchLineRe.FindStringSubmatch(text); m != nil && filepath.Dir(filepath.Dir(m[1])) == s.pagesRoot() {
+		v.Maintenance = switchFileExists(m[1])
+	}
 	v.RateLimited = limitRe.MatchString(text)
 	v.Cached = cacheOnRe.MatchString(text)
 	s.siteDetails(&v, path, text, logs)

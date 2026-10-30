@@ -5,8 +5,10 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   Archive,
+  ArrowCircleUp,
   ArrowRight,
   Box,
+  BranchPlus,
   Copy,
   External,
   GitTag,
@@ -93,7 +95,7 @@ function DockerGlyph({ className }: { className?: string }) {
   return <ProductGlyph id="docker" className={className} />
 }
 
-const COMMANDS = new Set(["view", "start", "deploy", "redeploy"])
+const COMMANDS = new Set(["view", "start", "deploy", "promote", "redeploy"])
 
 /**
  * The project's one command: the verb a header draws as its button, and every
@@ -124,6 +126,13 @@ export function projectCommand(verbs: Verb[]) {
  * `onDuplicate` open the dialogs the page owns. Archiving leaves by
  * `onArchived`, which is the list's refresh unless the caller has somewhere
  * to go.
+ *
+ * Staging is the same project read through its other environment, so the
+ * summary decides which verbs make sense: the project-wide ones (duplicate,
+ * test a pull request, archive) stay with production, staging adds Promote
+ * and its own removal, and a production that takes only promotions offers
+ * Promote where it would offer a build. `onPromote`, `onAddStaging` and
+ * `onRemoveStaging` open the dialogs the shell owns for them.
  */
 export function useProjectVerbs(
   summary: DeploymentSummary,
@@ -139,6 +148,11 @@ export function useProjectVerbs(
     onTestPull,
     onDuplicate,
     onArchived,
+    hasStaging = false,
+    promotionOnly = false,
+    onPromote,
+    onAddStaging,
+    onRemoveStaging,
   }: {
     confirm: Confirm
     refresh: () => void
@@ -151,11 +165,18 @@ export function useProjectVerbs(
     onTestPull?: () => void
     onDuplicate?: () => void
     onArchived?: () => void
+    /** The deployment has a staging environment. */
+    hasStaging?: boolean
+    /** Production refuses builds and takes only promotions from staging. */
+    promotionOnly?: boolean
+    onPromote?: () => void
+    onAddStaging?: () => void
+    onRemoveStaging?: () => void
   },
 ): Verb[] {
   const router = useRouter()
   const { can } = useAuth()
-  const [working, setWorking] = useState<"cancel" | "retry">()
+  const [working, setWorking] = useState<"cancel" | "retry" | "wake">()
   const base = `/deploy/${summary.id}`
   const url = deploymentURL(summary.endpoint)
   const state = projectState(summary, runtime, archived)
@@ -165,6 +186,10 @@ export function useProjectVerbs(
   const normalized = summary.buildMethod !== "legacy_compose"
   const control = can("service.control") && !archived
   const canRun = control && normalized
+  const staging = summary.environmentKind === "staging"
+  // A build is refused in a production that takes only promotions, so the
+  // verbs that would ask for one are not offered there at all.
+  const builds = !promotionOnly || staging
   const active = summary.activeRun
   const last = summary.lastRun
   const busy = Boolean(active) || Boolean(starting) || Boolean(working)
@@ -179,6 +204,21 @@ export function useProjectVerbs(
       refresh()
     } catch (error) {
       notify.error("Could not cancel deployment", error)
+    } finally {
+      setWorking(undefined)
+    }
+  }
+
+  // Waking is what the next visitor's request would do; it waits for the
+  // application to pass its readiness checks, so the press reads the outcome.
+  const wake = async () => {
+    setWorking("wake")
+    try {
+      await post(`${base}/environments/${summary.environmentId}/sleep/wake`, {})
+      notify.success(`${summary.name} is awake`)
+      refresh()
+    } catch (error) {
+      notify.error("Could not wake the deployment", error)
     } finally {
       setWorking(undefined)
     }
@@ -262,6 +302,27 @@ export function useProjectVerbs(
   } else if (control) {
     if (state === "stopped") {
       verbs.push(runVerb("start", "Start", Play, "Starting…"))
+    } else if (state === "asleep") {
+      verbs.push({
+        key: "wake",
+        label: "Wake now",
+        icon: Play,
+        group: "Running",
+        progressive: "Waking…",
+        disabled: busy,
+        run: () => void wake(),
+      })
+    } else if (!builds) {
+      if (onPromote) {
+        verbs.push({
+          key: "promote",
+          label: "Promote from staging…",
+          icon: ArrowCircleUp,
+          group: "Building",
+          run: onPromote,
+        })
+      }
+      if (live) verbs.push(runVerb("redeploy", "Redeploy", RefreshClockwise, "Redeploying…"))
     } else if (!live || summary.pendingChanges || !normalized) {
       verbs.push(
         runVerb(
@@ -309,8 +370,19 @@ export function useProjectVerbs(
         ),
       )
     }
-    if (summary.pendingChanges) {
+    if (summary.pendingChanges && builds) {
       verbs.push(runVerb("redeploy", "Redeploy live release", RefreshClockwise, "Redeploying…"))
+    }
+    // Promoting changes production, so it takes what deploying production
+    // takes; staging's own live release is what it offers first.
+    if (staging && onPromote) {
+      verbs.push({
+        key: "promote",
+        label: "Promote to production…",
+        icon: ArrowCircleUp,
+        group: "Building",
+        run: onPromote,
+      })
     }
   }
   if (control && !active && last && runFailed(last.state) && isRetryable(last.state)) {
@@ -327,10 +399,10 @@ export function useProjectVerbs(
       run: () => void retry(last),
     })
   }
-  if (canRun) {
+  if (canRun && builds) {
     verbs.push(runVerb("force_build", "Rebuild without cache", Box, "Rebuilding…"))
   }
-  if (canRun && summary.sourceKind === "git" && onVersion) {
+  if (canRun && builds && summary.sourceKind === "git" && onVersion) {
     verbs.push({
       key: "version",
       label: "Deploy a specific version…",
@@ -347,6 +419,7 @@ export function useProjectVerbs(
   if (
     can("system.admin") &&
     !archived &&
+    !staging &&
     summary.sourceKind === "git" &&
     sourceProduct(summary) === "github" &&
     onTestPull
@@ -401,7 +474,25 @@ export function useProjectVerbs(
       },
     )
   }
-  if (can("system.admin") && !archived && onDuplicate) {
+  if (
+    can("system.admin") &&
+    !archived &&
+    !staging &&
+    !hasStaging &&
+    normalized &&
+    summary.sourceKind !== "compose" &&
+    summary.buildMethod !== "compose" &&
+    onAddStaging
+  ) {
+    verbs.push({
+      key: "add-staging",
+      label: "Add staging environment…",
+      icon: BranchPlus,
+      group: "Project",
+      run: onAddStaging,
+    })
+  }
+  if (can("system.admin") && !archived && !staging && onDuplicate) {
     verbs.push({
       key: "duplicate",
       label: "Duplicate project…",
@@ -423,7 +514,17 @@ export function useProjectVerbs(
     })
   }
 
-  if (can("destructive") && !archived) {
+  if (can("destructive") && !archived && staging && onRemoveStaging) {
+    verbs.push({
+      key: "remove-staging",
+      label: "Remove staging…",
+      icon: Trash,
+      danger: true,
+      disabled: busy,
+      run: onRemoveStaging,
+    })
+  }
+  if (can("destructive") && !archived && !staging) {
     verbs.push({
       key: "archive",
       label: "Archive deployment",

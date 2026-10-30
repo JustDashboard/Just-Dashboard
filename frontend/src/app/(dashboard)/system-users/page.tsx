@@ -1,196 +1,204 @@
 "use client"
 
+import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
-import { Key, LockClosed, LockOpen, Plus, Trash, UserPlus, Users } from "@/components/icons"
-import { notify } from "@/lib/toast"
-import { del, get, patch, post } from "@/lib/api"
-import { keyProduct } from "@/lib/clients"
+import {
+  ArrowRight,
+  Key,
+  LockClosed,
+  LockOpen,
+  SettingsSliders,
+  ShieldCheck,
+  Trash,
+  UserPlus,
+  Users,
+} from "@/components/icons"
+import { Page, PageContext, SearchInput } from "@/components/page"
+import { Panel, PanelBody, PanelToolbar } from "@/components/panel"
+import { Address } from "@/components/security/marks"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { platformProduct, ProductGlyph } from "@/components/product-logo"
+import { useConfirm } from "@/components/confirm-dialog"
+import { GroupRule } from "@/components/flow"
+import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import {
+  accountFindings,
+  accountHref,
+  latestSignIn,
+  reachesRoot,
+  rootSummary,
+  signInSummary,
+  type RootSummary,
+} from "@/components/system-users/access"
+import { AccountMark, groupProduct } from "@/components/system-users/marks"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { useMetrics } from "@/hooks/use-metrics"
+import { useMediaQuery } from "@/hooks/use-mobile"
+import { usePoll } from "@/hooks/use-poll"
+import { get, post } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
-import type { SSHKey, SystemUser } from "@/lib/types"
+import { notify } from "@/lib/toast"
+import type { BulkResults, SystemUser } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
-import { usePoll } from "@/hooks/use-poll"
-import { useMediaQuery } from "@/hooks/use-mobile"
-import { useArrivals } from "@/hooks/use-arrivals"
-import { useMetrics } from "@/hooks/use-metrics"
-import { useConfirm } from "@/components/confirm-dialog"
-import { useNow } from "@/components/deploy/vocabulary"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
-import { Page, PageContext, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
-import { Field, FieldRow, FormFact, FormFacts, FormNote } from "@/components/form"
-import { ProductLogo } from "@/components/product-logo"
-import { Row, RowList } from "@/components/row-list"
-import { Address } from "@/components/security/marks"
-import { SidePanel } from "@/components/side-panel"
-import { EmptyNote, EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
-import { Status, type DotTone } from "@/components/status-dot"
-import { AccessBand } from "@/components/system-users/access-band"
-import { hasSignInRoute, isBare, signIns, verdict } from "@/components/system-users/access"
-import { AccountMark, FaceRun, GroupList, isAdmin } from "@/components/system-users/marks"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { Tag } from "@/components/tag"
-import { Modal } from "@/components/modal"
-import { IconAction } from "@/components/icon-action"
-import { VerbActions, type Verb } from "@/components/verbs"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 
-type Pending = Record<string, string | undefined>
+type Scope = "all" | "signin" | "root" | "disabled"
 
-type Scope = "all" | "signin" | "admins" | "bare" | "locked"
-
-/**
- * The password state is separate from key authentication and host policy.
- */
-function accountState(user: SystemUser): { tone: DotTone; label: string } {
-  if (user.locked) return { tone: "unknown", label: "Password locked" }
-  if (user.noPassword) return { tone: "warning", label: "No password" }
-  if (!user.canLogin) return { tone: "unknown", label: "No login" }
-  return { tone: "running", label: "Active" }
+const ROOT_INK: Record<RootSummary["tone"], string> = {
+  danger: "text-destructive",
+  warning: "text-warning",
+  default: "text-foreground",
+  muted: "text-muted-foreground",
 }
 
+/** A search box is for a list too long to read; two accounts are not one. */
+const SEARCH_FROM = 8
+
 /**
- * The host's own accounts, as the people and daemons they are.
+ * The host's accounts, as a table you read down and open.
  *
- * The page opens on the host's identity line (the Overview's): the people on
- * it drawn as their faces, how many of them can sign in, how many keys open
- * the host and who signed in last and from where, with the verdict at its
- * right end — an administrator who needs no password, else an account that
- * needs none, else that none does — a press of which narrows the cards to
- * them. Four tiles used to stand there, each a count with no name in it;
- * where each went is the line's facts, the chips' counts and the band under
- * it (`system-users/access-band.tsx`), which answers what the tiles never
- * did: who last signed in and when, on an axis that ends at this second, who
- * can become root and by which route, and whose keys open the host.
+ * It opened on three report blocks — last sign-ins on an axis, who can become
+ * root, whose keys open the host — and the operator asked for what is not needed
+ * to go. On a small server all three said "nobody", "never" and "none", and every
+ * figure in them is a column here: who can sign in and how, how far they can
+ * reach, when they last did. What the blocks were for is the list of findings
+ * under the line, which is drawn only when there is something to change.
  *
- * The accounts are cards under it (§12, §16): each opens its authorised keys,
- * so the list is a run of places to go rather than a table of readings, worst
- * first — an account that needs no password leads its shelf. With system
- * accounts shown they are a second shelf under the people, each drawn as the
- * daemon it runs where its name says (`system-users/marks.tsx`). An account
- * that appears rises into the list; one that signs in changes in place.
+ * Root is in the list however the system-accounts switch is set. It is a system
+ * account by number and the most important account by every other measure, and
+ * leaving it out is how this page once said "0 have sign-in routes" over a host
+ * where root signs in with a password.
  */
 export default function SystemUsersPage() {
+  const router = useRouter()
   const { confirm, dialog } = useConfirm()
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const { host } = useMetrics()
+  const wide = useMediaQuery("(min-width: 768px)")
   const [showSystem, setShowSystem] = useViewState("system-users.show-system", false)
   const [query, setQuery] = useSessionState("system-users.query", "")
   const [scope, setScope] = useSessionState<Scope>("system-users.scope", "all")
-  const [keysFor, setKeysFor] = useState<string | null>(null)
-  const [pending, setPending] = useState<Pending>({})
-  const { host } = useMetrics()
-  const now = useNow(15_000)
+  const [selected, setSelected] = useState<string[]>([])
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<SystemUser[]>("/system-users/", { system: showSystem }, signal),
     30000,
     [showSystem],
   )
 
-  const setLocked = async (user: SystemUser, locked: boolean) => {
-    setPending((p) => ({
-      ...p,
-      [user.username]: locked ? "Locking password" : "Unlocking password",
-    }))
-    try {
-      await patch(`/system-users/${encodeURIComponent(user.username)}`, { locked })
-      notify.success(`${user.username}'s password ${locked ? "locked" : "unlocked"}`)
-      refresh()
-    } catch (err) {
-      notify.error("Could not change lock state", err)
-    } finally {
-      setPending((p) => ({ ...p, [user.username]: undefined }))
-    }
-  }
-
-  const remove = (user: SystemUser) =>
-    confirm({
-      title: "Delete system user",
-      confirmLabel: "Delete",
-      subject: {
-        mark: <AccountMark user={user} size="sm" />,
-        name: <span className="font-mono">{user.username}</span>,
-        facts: (
-          <>
-            <FormFact label="uid">{user.uid}</FormFact>
-            <FormFact label="Home" mono>
-              {user.home}
-            </FormFact>
-          </>
-        ),
-      },
-      description: (
-        <p className="text-destructive">
-          Removes the account <b>{user.username}</b> from this host. Its home directory is left in
-          place.
-        </p>
-      ),
-      action: async (c) => {
-        await del(`/system-users/${encodeURIComponent(user.username)}`, { confirm: c })
-        refresh()
-      },
-    })
-
-  // The figures are read over everything the host returned, so the search box
-  // and the chips narrow the cards without narrowing the readings above them.
   const figures = useMemo(() => {
     const users = data ?? []
     return {
-      people: users.filter((u) => !u.system),
-      system: users.filter((u) => u.system).length,
-      signIn: users.filter(hasSignInRoute),
-      bare: users.filter((u) => isBare(u)).length,
-      admins: users.filter(isAdmin),
-      locked: users.filter((u) => u.locked).length,
-      keys: users.reduce((sum, u) => sum + u.sshKeyCount, 0),
-      latest: signIns(users, now, Infinity).latest,
-      verdict: verdict(users),
+      people: users.filter((u) => !u.system).length,
+      signIn: users.filter((u) => u.signIn.password.allowed || u.signIn.key.allowed).length,
+      root: users.filter(reachesRoot).length,
+      disabled: users.filter((u) => u.disabled).length,
+      latest: latestSignIn(users),
+      findings: accountFindings(users),
     }
-  }, [data, now])
-
-  // The No password chip is drawn only while an account needs none; a scope
-  // saved for the session must not outlive the chip that sets it.
-  const activeScope = scope === "bare" && figures.bare === 0 ? "all" : scope
+  }, [data])
 
   const rows = useMemo(() => {
-    if (!data) return []
     const q = query.trim().toLowerCase()
-    return data.filter((u) => {
-      if (activeScope === "signin" && !hasSignInRoute(u)) return false
-      if (activeScope === "admins" && !isAdmin(u)) return false
-      if (activeScope === "bare" && !isBare(u)) return false
-      if (activeScope === "locked" && !u.locked) return false
+    return (data ?? []).filter((u) => {
+      if (scope === "signin" && !(u.signIn.password.allowed || u.signIn.key.allowed)) return false
+      if (scope === "root" && !reachesRoot(u)) return false
+      if (scope === "disabled" && !u.disabled) return false
       if (!q) return true
       return (
         u.username.toLowerCase().includes(q) ||
         u.comment.toLowerCase().includes(q) ||
-        u.shell.toLowerCase().includes(q) ||
         u.groups.some((g) => g.toLowerCase().includes(q))
       )
     })
-  }, [data, query, activeScope])
+  }, [data, query, scope])
 
-  // People first, then the accounts packages made — the order the host lists
-  // them in, as two shelves once both are on the page.
-  const shelves = useMemo(
-    () =>
-      [
-        { key: "people", label: "People", users: rows.filter((u) => !u.system) },
-        { key: "system", label: "System accounts", users: rows.filter((u) => u.system) },
-      ]
-        .map((shelf) => ({
-          ...shelf,
-          // Worst first, stably: the list is already in the host's order.
-          users: [...shelf.users].sort((a, b) => Number(isBare(b)) - Number(isBare(a))),
-        }))
-        .filter((shelf) => shelf.users.length > 0),
-    [rows],
+  // Root and people lead, and the daemons are a shelf of their own under them:
+  // forty package accounts are not read the way three people are.
+  const accounts = rows
+    .filter((u) => !u.system || u.uid === 0)
+    .sort((a, b) => Number(b.uid === 0) - Number(a.uid === 0))
+  const daemons = rows.filter((u) => u.system && u.uid !== 0)
+  const selectable = accounts.filter((u) => !u.system).map((u) => u.username)
+  const chosen = selected.filter((name) => selectable.includes(name))
+
+  const bulk = async (action: string, extra?: object) => {
+    const { results } = await post<BulkResults>("/system-accounts/bulk", {
+      action,
+      usernames: chosen,
+      ...extra,
+    })
+    reportBulk(results)
+    setSelected([])
+    refresh()
+  }
+
+  const bulkDisable = () =>
+    confirm({
+      title: `Disable ${plural(chosen.length, "account")}`,
+      confirmLabel: "Disable",
+      description: (
+        <p>
+          Closes every way in for {chosen.join(", ")}, SSH keys included, and ends what they are
+          running. Nothing is deleted, and enabling them brings everything back.
+        </p>
+      ),
+      action: () => bulk("disable", { endSessions: true }),
+    })
+
+  const bulkEnd = () =>
+    confirm({
+      title: `End everything ${chosen.join(", ")} ${chosen.length === 1 ? "is" : "are"} running`,
+      confirmLabel: "End sessions",
+      description: <p>Signs them out everywhere and stops every process they own.</p>,
+      action: () => bulk("end-sessions"),
+    })
+
+  const bulkDelete = () =>
+    confirm({
+      title: `Delete ${plural(chosen.length, "account")}`,
+      confirmLabel: "Delete",
+      description: (
+        <p className="text-destructive">
+          Removes {chosen.join(", ")} and ends what they are running. Their home directories stay on
+          the server. To remove a home as well, delete the account from its own page.
+        </p>
+      ),
+      action: async (typed) => {
+        const { results } = await post<BulkResults>(
+          "/system-accounts/bulk/delete",
+          { usernames: chosen, endSessions: true },
+          { confirm: typed },
+        )
+        reportBulk(results)
+        setSelected([])
+        refresh()
+      },
+    })
+
+  const toggle = (name: string) =>
+    setSelected((now) => (now.includes(name) ? now.filter((n) => n !== name) : [...now, name]))
+
+  const row = (user: SystemUser) => (
+    <AccountRow
+      key={user.username}
+      user={user}
+      wide={wide}
+      selected={chosen.includes(user.username)}
+      onToggle={user.system ? undefined : () => toggle(user.username)}
+      onOpen={() => router.push(accountHref(user.username))}
+    />
   )
-  const arrived = useArrivals((data ?? []).map((u) => u.username))
-
-  const cardProps = { pending, setLocked, remove, onKeys: setKeysFor, wide, arrived }
 
   return (
     <Page className="animate-rise">
@@ -199,33 +207,26 @@ export default function SystemUsersPage() {
       {data && (
         <HostIdentity
           className="animate-rise"
-          logo={
-            <span className="flex h-12 shrink-0 items-center rounded-xl border bg-card px-3">
-              <FaceRun names={figures.people.map((u) => u.username)} max={3} />
-            </span>
-          }
+          mark={platformProduct(host?.platform)}
+          fallback={Users}
           title={host?.hostname ?? "Accounts"}
           facts={
             <>
-              <span className="numeric">
-                {showSystem
-                  ? `${plural(figures.people.length, "person", "people")} · ${figures.system} system`
-                  : plural(figures.people.length, "person", "people")}
+              <span className="numeric">{plural(figures.people, "person", "people")}</span>
+              <FactDot />
+              <span className={cn("numeric", figures.signIn > 0 && "text-success")}>
+                {figures.signIn} can sign in
               </span>
-              <FactDot />
-              <span className="numeric">{figures.signIn.length} have sign-in routes</span>
-              <FactDot />
-              <span className="numeric">{plural(figures.keys, "SSH key")} authorised</span>
               {figures.latest && (
                 <>
                   <FactDot />
                   <span className="inline-flex min-w-0 items-center gap-1.5">
-                    <span className="shrink-0 text-foreground">{figures.latest.user.username}</span>
+                    <span className="shrink-0 text-foreground">{figures.latest.username}</span>
                     <span className="numeric shrink-0">
-                      {relativeTime(figures.latest.user.lastLogin)}
+                      {relativeTime(figures.latest.lastLogin)}
                     </span>
-                    {figures.latest.user.lastLoginFrom && (
-                      <Address ip={figures.latest.user.lastLoginFrom} className="min-w-0" />
+                    {figures.latest.lastLoginFrom && (
+                      <Address ip={figures.latest.lastLoginFrom} className="min-w-0" />
                     )}
                   </span>
                 </>
@@ -233,527 +234,307 @@ export default function SystemUsersPage() {
             </>
           }
           aside={
-            <Verdict
-              {...figures.verdict}
-              pressed={scope === figures.verdict.scope}
-              onPress={() =>
-                figures.verdict.scope &&
-                setScope(scope === figures.verdict.scope ? "all" : figures.verdict.scope)
-              }
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="outline" asChild>
+                <Link href="/system-users/groups">
+                  <Users className="size-4" />
+                  Groups
+                </Link>
+              </Button>
+              <Button size="sm" variant="outline" asChild>
+                <Link href="/system-users/defaults">
+                  <SettingsSliders className="size-4" />
+                  Defaults
+                </Link>
+              </Button>
+              <Button size="sm" asChild>
+                <Link href="/system-users/new">
+                  <UserPlus className="size-4" />
+                  New account
+                </Link>
+              </Button>
+            </div>
           }
         />
       )}
 
-      {data && <AccessBand users={data} onOpen={setKeysFor} />}
-
-      {/* The accounts are cards you open, so the list around them is plain: a
-          frame around framed cards is two nested frames (§12). */}
-      <Panel plain>
-        <PanelHeader title="Accounts" actions={<CreateUserDialog onDone={refresh} />} />
-        <PanelToolbar>
-          <SearchInput
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Name, group or shell"
-            containerClassName="sm:w-64"
-          />
-          {data && (
-            <ChipStrip>
-              <FilterChip selected={scope === "all"} onClick={() => setScope("all")}>
-                All <ChipCount>{data.length}</ChipCount>
-              </FilterChip>
-              <FilterChip selected={scope === "signin"} onClick={() => setScope("signin")}>
-                Sign-in routes <ChipCount>{figures.signIn.length}</ChipCount>
-              </FilterChip>
-              <FilterChip selected={scope === "admins"} onClick={() => setScope("admins")}>
-                Administrators <ChipCount>{figures.admins.length}</ChipCount>
-              </FilterChip>
-              {figures.bare > 0 && (
-                <FilterChip selected={scope === "bare"} onClick={() => setScope("bare")}>
-                  <span className="text-warning">No password</span>
-                  <ChipCount>{figures.bare}</ChipCount>
-                </FilterChip>
+      {figures.findings.length > 0 && (
+        <ul data-slot="account-findings" className="-mt-3 divide-y divide-hairline md:-mt-5">
+          {figures.findings.map((finding) => (
+            <li
+              key={finding.id}
+              className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2.5"
+            >
+              <Status tone={finding.tone} label={finding.title} className="font-medium" />
+              {finding.detail && (
+                <span className="min-w-0 text-hint text-muted-foreground">{finding.detail}</span>
               )}
-              <FilterChip selected={scope === "locked"} onClick={() => setScope("locked")}>
-                Password locked <ChipCount>{figures.locked}</ChipCount>
+              <Link
+                href={finding.href}
+                className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-sm text-hint font-medium text-foreground focus-ring hover:underline"
+              >
+                {finding.action}
+                <ArrowRight className="size-3" />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* A plain block: the table has its own hairlines, and a frame around them
+          is one more box saying nothing (§7). */}
+      <Panel plain>
+        <PanelToolbar>
+          {chosen.length > 0 ? (
+            <div data-slot="bulk-bar" className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="numeric text-body font-medium">{chosen.length} selected</span>
+              <Button size="xs" variant="outline" onClick={() => void bulk("lock")}>
+                <LockClosed className="size-3" />
+                Lock passwords
+              </Button>
+              <Button size="xs" variant="outline" onClick={bulkDisable}>
+                <LockClosed className="size-3" />
+                Disable
+              </Button>
+              <Button size="xs" variant="outline" onClick={() => void bulk("enable")}>
+                <LockOpen className="size-3" />
+                Enable
+              </Button>
+              <Button size="xs" variant="outline" onClick={bulkEnd}>
+                End sessions
+              </Button>
+              <Button size="xs" variant="outline" className="text-destructive" onClick={bulkDelete}>
+                <Trash className="size-3" />
+                Delete
+              </Button>
+              <Button size="xs" variant="ghost" onClick={() => setSelected([])}>
+                Clear
+              </Button>
+            </div>
+          ) : (
+            <>
+              {(data?.length ?? 0) >= SEARCH_FROM && (
+                <SearchInput
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Name or group"
+                  containerClassName="sm:w-56"
+                />
+              )}
+              {data && (
+                <ChipStrip>
+                  <FilterChip selected={scope === "all"} onClick={() => setScope("all")}>
+                    All <ChipCount>{data.length}</ChipCount>
+                  </FilterChip>
+                  <FilterChip selected={scope === "signin"} onClick={() => setScope("signin")}>
+                    Can sign in <ChipCount>{figures.signIn}</ChipCount>
+                  </FilterChip>
+                  <FilterChip selected={scope === "root"} onClick={() => setScope("root")}>
+                    Reach root <ChipCount>{figures.root}</ChipCount>
+                  </FilterChip>
+                  {figures.disabled > 0 && (
+                    <FilterChip
+                      selected={scope === "disabled"}
+                      onClick={() => setScope("disabled")}
+                    >
+                      Disabled <ChipCount>{figures.disabled}</ChipCount>
+                    </FilterChip>
+                  )}
+                </ChipStrip>
+              )}
+              <FilterChip
+                className="sm:ml-auto"
+                selected={showSystem}
+                onClick={() => setShowSystem(!showSystem)}
+              >
+                System accounts
               </FilterChip>
-            </ChipStrip>
+            </>
           )}
-          <FilterChip
-            className="sm:ml-auto"
-            selected={showSystem}
-            onClick={() => setShowSystem(!showSystem)}
-          >
-            System accounts
-          </FilterChip>
         </PanelToolbar>
         <PanelBody flush>
           {loading && !data && <LoadingPanel />}
           {error && !data && <ErrorState error={error} />}
-          {data && (
-            <div key="rows" className="animate-rise space-y-5 pt-3">
-              {shelves.map((shelf) => (
-                <section key={shelf.key} className="space-y-2.5">
-                  {shelves.length > 1 && (
-                    <GroupRule label={shelf.label} count={shelf.users.length} />
-                  )}
-                  <ChoiceList>
-                    {shelf.users.map((user, index) => (
-                      <AccountCard key={user.username} user={user} index={index} {...cardProps} />
-                    ))}
-                  </ChoiceList>
-                </section>
-              ))}
-              {rows.length === 0 && (
-                <EmptyState
-                  icon={Users}
-                  title={data.length === 0 ? "No accounts to show" : "No accounts match"}
-                  description={
-                    data.length === 0
-                      ? "Every account on this host is a system account."
-                      : "Clear the search, pick All, or include system accounts."
-                  }
-                />
+          {data && rows.length === 0 && (
+            <EmptyState
+              icon={Users}
+              title="No accounts match"
+              description="Clear the search or pick All."
+            />
+          )}
+          {data && rows.length > 0 && (
+            <Table>
+              {wide && (
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-8" />
+                    <TableHead>Account</TableHead>
+                    <TableHead>Sign-in</TableHead>
+                    <TableHead>Root access</TableHead>
+                    <TableHead>Last sign-in</TableHead>
+                    <TableHead className="w-8" />
+                  </TableRow>
+                </TableHeader>
               )}
-            </div>
+              <TableBody>
+                {accounts.map(row)}
+                {daemons.length > 0 && (
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={wide ? 6 : 2} className="pt-5 pb-2">
+                      <GroupRule label="System accounts" count={daemons.length} />
+                    </TableCell>
+                  </TableRow>
+                )}
+                {daemons.map(row)}
+              </TableBody>
+            </Table>
           )}
         </PanelBody>
-        {data && (
-          <PanelFooter className="text-hint text-muted-foreground">
-            <span className="numeric">
-              {rows.length === data.length
-                ? plural(data.length, "account")
-                : `${rows.length} of ${plural(data.length, "account")}`}
-            </span>
-            <span className="text-muted-foreground/40">·</span>
-            <span>{showSystem ? "system accounts included" : "system accounts hidden"}</span>
-          </PanelFooter>
-        )}
       </Panel>
-
-      <SSHKeysSheet
-        user={data?.find((u) => u.username === keysFor)}
-        username={keysFor}
-        onOpenChange={(o) => !o && setKeysFor(null)}
-        onChanged={refresh}
-      />
       {dialog}
     </Page>
   )
 }
 
-/**
- * The line's verdict: how many accounts need no password, and how many of
- * those are administrators. An account that needs none is the one thing on
- * this page that is a warning, so a press narrows the cards to exactly the
- * accounts counted; when none does the line says so, and there is nothing to
- * press.
- */
-function Verdict({
-  tone,
-  count,
-  admins,
-  scope,
-  pressed,
-  onPress,
-}: ReturnType<typeof verdict> & { pressed: boolean; onPress: () => void }) {
-  if (!scope) return <Status tone={tone} label="No account signs in without a password" />
-  return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      onClick={onPress}
-      className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
-    >
-      <span className="flex flex-col items-end gap-0.5 max-sm:items-start">
-        <Status tone={tone} label={`${count} without a password`} />
-        {admins > 0 && (
-          <span className="text-hint text-muted-foreground">
-            {admins === 1 ? "1 can" : `${admins} can`} run anything as root
-          </span>
-        )}
-      </span>
-    </button>
+function reportBulk(results: BulkResults["results"]) {
+  const failed = results.filter((r) => r.error)
+  if (failed.length === 0) {
+    notify.success(`Done for ${plural(results.length, "account")}`)
+    return
+  }
+  notify.error(
+    `${failed.length} of ${plural(results.length, "account")} refused`,
+    new Error(failed.map((r) => `${r.username}: ${r.error}`).join("; ")),
   )
 }
 
-type CardProps = {
+/**
+ * One account: named readings in columns from `md`, and under the name below it,
+ * chosen once rather than drawn twice. A phone has no width for four columns, and
+ * a table that scrolls sideways there hid the one that says who can become root.
+ */
+function AccountRow({
+  user,
+  wide,
+  selected,
+  onToggle,
+  onOpen,
+}: {
   user: SystemUser
-  index: number
-  arrived: Set<string>
   wide: boolean
-  pending: Pending
-  setLocked: (user: SystemUser, locked: boolean) => void
-  remove: (user: SystemUser) => void
-  onKeys: (username: string) => void
-}
-
-/**
- * What can be done to an account, declared once. The card itself opens the
- * keys, so the lock is the one verb drawn beside it; deleting an account is
- * rare and unrecoverable, so it lives in the menu.
- */
-function userVerbs({ user, pending, setLocked, remove }: CardProps): Verb[] {
-  return [
-    {
-      key: "lock",
-      label: user.locked ? "Unlock password" : "Lock password",
-      icon: user.locked ? LockOpen : LockClosed,
-      inline: true,
-      disabled: Boolean(pending[user.username]),
-      run: () => setLocked(user, !user.locked),
-    },
-    {
-      key: "delete",
-      label: "Delete",
-      icon: Trash,
-      danger: true,
-      run: () => remove(user),
-    },
-  ]
-}
-
-/**
- * One account, as the person or the daemon it is: its mark, its name, and the
- * four readings compared down the list — what it belongs to, when it last
- * signed in and from where, how many keys open it, and its state. From `lg`
- * the readings sit beside the name in fixed measures; below it they go
- * beneath it at the card's full width, chosen once rather than drawn twice.
- * While the lock is changing a light runs round its edge (§11 *live*).
- */
-function AccountCard(props: CardProps) {
-  const { user, index, wide, pending, onKeys, arrived } = props
-  const busy = pending[user.username]
-  const state = accountState(user)
-  const readings = (
-    <span className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 text-xs">
-      <GroupList groups={user.groups} className="w-52" />
-      <span className="inline-flex w-44 min-w-0 items-center gap-1.5 text-muted-foreground">
-        {user.lastLogin ? (
-          <>
-            <span className="shrink-0">{relativeTime(user.lastLogin)}</span>
-            {user.lastLoginFrom && <Address ip={user.lastLoginFrom} className="min-w-0" />}
-          </>
-        ) : (
-          <span className="text-muted-foreground/60">never signed in</span>
-        )}
-      </span>
-      <span
-        className="inline-flex w-14 items-center gap-1 text-muted-foreground"
-        title={plural(user.sshKeyCount, "authorised key")}
-      >
-        <Key aria-hidden className="size-3.5" />
-        <span className={user.sshKeyCount > 0 ? "numeric text-foreground" : "numeric"}>
-          {user.sshKeyCount}
-        </span>
-      </span>
-      <span className="flex w-28">
-        <Status tone={busy ? "warning" : state.tone} label={busy ? `${busy}…` : state.label} />
-      </span>
+  selected: boolean
+  onToggle?: () => void
+  onOpen: () => void
+}) {
+  const signIn = signInSummary(user)
+  const root = rootSummary(user)
+  const signInCell = (
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-1" title={signIn.detail}>
+      {signIn.password || signIn.key ? (
+        <>
+          {signIn.password && (
+            <span
+              className={cn(
+                "inline-flex items-center gap-1",
+                user.noPassword ? "text-destructive" : "text-success",
+              )}
+            >
+              <LockOpen aria-hidden className="size-3.5" />
+              {user.noPassword ? "No password" : "Password"}
+            </span>
+          )}
+          {signIn.key && (
+            <span className="inline-flex items-center gap-1 text-success">
+              <Key aria-hidden className="size-3.5" />
+              <span className="numeric">
+                {user.sshKeyCount > 0 ? plural(user.sshKeyCount, "key") : "Unread keys"}
+              </span>
+            </span>
+          )}
+        </>
+      ) : (
+        <Status tone={signIn.tone} label={signIn.label} />
+      )}
     </span>
   )
-
+  const rootCell = (
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      {root.label !== "None" && root.label !== "Through a group" && (
+        <span className={cn("inline-flex items-center gap-1", ROOT_INK[root.tone])}>
+          <ShieldCheck aria-hidden className="size-3.5" />
+          {root.label}
+        </span>
+      )}
+      {root.groups.map((group) => (
+        <span key={group} className="inline-flex items-center gap-1 text-warning">
+          {groupProduct(group) ? (
+            <ProductGlyph id={groupProduct(group) as string} />
+          ) : (
+            <ShieldCheck aria-hidden className="size-3.5" />
+          )}
+          {group}
+        </span>
+      ))}
+      {root.label === "None" && wide && <span className="text-muted-foreground/60">None</span>}
+    </span>
+  )
+  const lastCell = user.lastLogin ? (
+    <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+      <span className="numeric shrink-0">{relativeTime(user.lastLogin)}</span>
+      {user.lastLoginFrom && <Address ip={user.lastLoginFrom} className="min-w-0" />}
+    </span>
+  ) : (
+    <span className="text-muted-foreground/60">Never</span>
+  )
   return (
-    <ChoiceRow
-      index={index}
-      verb={`SSH keys for ${user.username}`}
-      onSelect={() => onKeys(user.username)}
-      busy={Boolean(busy)}
-      className={cn(user.locked && "opacity-70", arrived.has(user.username) && "animate-rise")}
-      leading={<AccountMark user={user} />}
-      title={<span className="font-mono">{user.username}</span>}
-      description={
-        <>
-          {user.comment && <>{user.comment} · </>}
-          <span className="numeric">uid {user.uid}</span> ·{" "}
-          <span className="font-mono">{user.shell}</span>
-        </>
-      }
-      trailing={wide ? readings : undefined}
-      actions={<VerbActions dim verbs={userVerbs(props)} menuLabel={`More for ${user.username}`} />}
+    <TableRow
+      data-slot="account-row"
+      onActivate={onOpen}
+      className={cn(user.disabled && "opacity-60", selected && "bg-accent/40")}
     >
-      {!wide && <div className="pl-12">{readings}</div>}
-    </ChoiceRow>
-  )
-}
-
-function CreateUserDialog({ onDone }: { onDone: () => void }) {
-  const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [username, setUsername] = useState("")
-  const [comment, setComment] = useState("")
-  const [shell, setShell] = useState("/bin/bash")
-  const [groups, setGroups] = useState("")
-  const [sshKey, setSshKey] = useState("")
-
-  const create = async () => {
-    setBusy(true)
-    try {
-      await post("/system-users/", {
-        username,
-        comment,
-        shell,
-        groups: groups
-          .split(",")
-          .map((g) => g.trim())
-          .filter(Boolean),
-        sshKey: sshKey.trim(),
-      })
-      notify.success(`Created ${username}`)
-      setOpen(false)
-      setUsername("")
-      setComment("")
-      setGroups("")
-      setSshKey("")
-      onDone()
-    } catch (err) {
-      notify.error("Could not create account", err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <>
-      <Button size="sm" onClick={() => setOpen(true)}>
-        <UserPlus className="size-4" />
-        New account
-      </Button>
-      <Modal
-        open={open}
-        onOpenChange={setOpen}
-        title="New system account"
-        description="Create a local account on this host"
-        footer={
-          <Button onClick={create} disabled={!username} pending={busy}>
-            Create
-          </Button>
-        }
-      >
-        <div className="grid gap-4">
-          <Field label="Username" htmlFor="new-username">
-            <Input
-              id="new-username"
-              autoComplete="off"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-          </Field>
-          <Field
-            label="Full name"
-            htmlFor="new-comment"
-            hint="Optional. Stored as the account's comment."
-          >
-            <Input id="new-comment" value={comment} onChange={(e) => setComment(e.target.value)} />
-          </Field>
-          <FieldRow>
-            <Field label="Shell" htmlFor="new-shell">
-              <Input
-                id="new-shell"
-                className="font-mono"
-                value={shell}
-                onChange={(e) => setShell(e.target.value)}
-              />
-            </Field>
-            <Field
-              label="Groups"
-              htmlFor="new-groups"
-              hint="Comma-separated; each must already exist."
-            >
-              <Input
-                id="new-groups"
-                value={groups}
-                onChange={(e) => setGroups(e.target.value)}
-                placeholder="sudo, docker"
-              />
-            </Field>
-          </FieldRow>
-          <Field label="SSH public key" htmlFor="new-key">
-            <Textarea
-              id="new-key"
-              value={sshKey}
-              onChange={(e) => setSshKey(e.target.value)}
-              className="font-mono text-xs"
-              rows={3}
-              placeholder="ssh-ed25519 AAAA…"
-            />
-          </Field>
-          <FormNote>
-            The account is created with no password, so a key is the only way in. It is validated
-            before the account exists.
-          </FormNote>
-        </div>
-      </Modal>
-    </>
-  )
-}
-
-/**
- * An account's authorised keys. The sheet opens on the account itself — its
- * mark and its name — and each key is drawn as the service its comment says
- * holds it (`keyProduct`: `github-actions` is GitHub's), a key glyph where the
- * comment says nothing.
- */
-function SSHKeysSheet({
-  user,
-  username,
-  onOpenChange,
-  onChanged,
-}: {
-  user?: SystemUser
-  username: string | null
-  onOpenChange: (open: boolean) => void
-  onChanged: () => void
-}) {
-  const { confirm, dialog } = useConfirm()
-  const [newKey, setNewKey] = useState("")
-  const [adding, setAdding] = useState(false)
-  const { data, error, loading, refresh } = usePoll(
-    (signal) =>
-      get<{ path: string; keys: SSHKey[] }>(
-        `/system-users/${encodeURIComponent(username ?? "")}/keys`,
-        undefined,
-        signal,
-      ),
-    0,
-    [username],
-    { enabled: username !== null },
-  )
-
-  const add = async () => {
-    if (!username) return
-    setAdding(true)
-    try {
-      await post(`/system-users/${encodeURIComponent(username)}/keys`, { key: newKey.trim() })
-      notify.success("Key authorised")
-      setNewKey("")
-      refresh()
-      onChanged()
-    } catch (err) {
-      notify.error("Key rejected", err)
-    } finally {
-      setAdding(false)
-    }
-  }
-
-  const revoke = (key: SSHKey) =>
-    confirm({
-      title: "Revoke SSH key",
-      confirmLabel: "Revoke",
-      description: (
-        <p>
-          Whoever holds this key loses SSH access as <b>{username}</b>.
-        </p>
-      ),
-      action: async (c) => {
-        await del(`/system-users/${encodeURIComponent(username ?? "")}/keys`, {
-          confirm: c,
-          query: { fingerprint: key.fingerprint },
-        })
-        refresh()
-        onChanged()
-      },
-    })
-
-  return (
-    <>
-      <SidePanel
-        open={username !== null}
-        onOpenChange={onOpenChange}
-        width="md"
-        title={
-          <>
-            {user && <AccountMark user={user} size="sm" />}
-            <span className="min-w-0 truncate font-mono">{username ?? ""}</span>
-          </>
-        }
-        description="Authorised SSH keys for this account"
-      >
-        <div className="space-y-6">
-          <Panel plain>
-            <PanelHeader
-              title="Authorised keys"
-              actions={
-                data && (
-                  <span className="numeric text-hint text-muted-foreground">
-                    {plural(data.keys.length, "key")}
-                  </span>
-                )
-              }
-            />
-            <PanelBody flush className="py-1">
-              {loading && !data && <LoadingRows rows={3} className="py-3" />}
-              {error && <ErrorState error={error} />}
-              {data && data.keys.length === 0 && <EmptyNote>No authorised keys yet.</EmptyNote>}
-              {data && data.keys.length > 0 && (
-                <RowList className="animate-rise">
-                  {data.keys.map((key) => (
-                    <Row
-                      key={key.fingerprint}
-                      leading={
-                        <ProductLogo id={keyProduct(key.comment)} size="sm" fallback={Key} />
-                      }
-                      title={
-                        key.comment || <span className="text-muted-foreground">No comment</span>
-                      }
-                      subtitle={key.fingerprint}
-                      mono
-                      className="py-2.5"
-                      trailing={
-                        <>
-                          <Tag mono>{key.bits ? `${key.type} ${key.bits}` : key.type}</Tag>
-                          <IconAction
-                            label="Revoke key"
-                            className="text-muted-foreground hover:text-destructive"
-                            onClick={() => revoke(key)}
-                          >
-                            <Trash />
-                          </IconAction>
-                        </>
-                      }
-                    />
-                  ))}
-                </RowList>
-              )}
-            </PanelBody>
-            {data?.path && (
-              <PanelFooter>
-                <FormFacts>
-                  <FormFact label="File" mono>
-                    {data.path}
-                  </FormFact>
-                </FormFacts>
-              </PanelFooter>
+      <TableCell className="w-8 pr-0 align-top md:align-middle">
+        {onToggle && (
+          <Checkbox
+            aria-label={`Select ${user.username}`}
+            checked={selected}
+            onCheckedChange={onToggle}
+          />
+        )}
+      </TableCell>
+      <TableCell className={cn(!wide && "whitespace-normal")}>
+        <span className="flex min-w-0 items-center gap-3">
+          <AccountMark user={user} />
+          <span className="min-w-0">
+            <span className="block truncate font-mono text-body font-medium">{user.username}</span>
+            {user.comment && user.comment !== user.username && (
+              <span className="block truncate text-hint text-muted-foreground">{user.comment}</span>
             )}
-          </Panel>
-
-          <Panel plain>
-            <PanelHeader title="Authorise another key" />
-            <PanelBody className="space-y-3">
-              <Field
-                label="Public key"
-                htmlFor="add-key"
-                hint="One public key. It is checked before anything is written."
-              >
-                <Textarea
-                  id="add-key"
-                  value={newKey}
-                  onChange={(e) => setNewKey(e.target.value)}
-                  className="font-mono text-xs"
-                  rows={3}
-                  placeholder="ssh-ed25519 AAAA…"
-                />
-              </Field>
-              <Button size="sm" onClick={add} disabled={!newKey.trim()} pending={adding}>
-                <Plus className="size-4" />
-                Add key
-              </Button>
-            </PanelBody>
-          </Panel>
-        </div>
-      </SidePanel>
-      {dialog}
-    </>
+          </span>
+        </span>
+        {!wide && (
+          <span className="mt-2 flex flex-col gap-1.5">
+            {signInCell}
+            {rootCell}
+            {user.lastLogin && lastCell}
+          </span>
+        )}
+      </TableCell>
+      {wide && (
+        <>
+          <TableCell>{signInCell}</TableCell>
+          <TableCell>{rootCell}</TableCell>
+          <TableCell>{lastCell}</TableCell>
+          <TableCell className="pl-0 text-right">
+            <Link
+              href={accountHref(user.username)}
+              aria-label={`Open ${user.username}`}
+              className="inline-flex rounded-sm text-muted-foreground focus-ring hover:text-foreground"
+            >
+              <ArrowRight className="size-3.5" />
+            </Link>
+          </TableCell>
+        </>
+      )}
+    </TableRow>
   )
 }

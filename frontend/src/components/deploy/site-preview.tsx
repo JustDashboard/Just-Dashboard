@@ -58,6 +58,7 @@ export function SitePreview({
   product,
   domain,
   stopped,
+  asleep,
 }: {
   deployment: DeploymentSummary
   /** What the project is, drawn when there is no site to show. */
@@ -65,10 +66,12 @@ export function SitePreview({
   /** The route the address answers on, for the lock's colour. */
   domain?: DeploymentDomainRoute
   stopped?: boolean
+  /** Asleep by design: the frame is not loaded, since loading it would wake it. */
+  asleep?: boolean
 }) {
   const url = deploymentURL(deployment.endpoint)
   const [failed, setFailed] = useState(false)
-  const live = Boolean(url && deployment.liveReleaseId && !stopped && !failed)
+  const live = Boolean(url && deployment.liveReleaseId && !stopped && !asleep && !failed)
   const screen = useRef<HTMLDivElement>(null)
   const size = useSize(screen)
   const [device, setDevice] = useState<Device>("desktop")
@@ -165,7 +168,11 @@ export function SitePreview({
             // which on the frame itself would undo the scale that shrinks it.
             <div className={cn("absolute inset-0", loaded ? "animate-rise" : "opacity-0")}>
               <iframe
-                src={`${API_BASE}/deploy/${deployment.id}/preview-frame`}
+                src={`${API_BASE}/deploy/${deployment.id}/preview-frame${
+                  deployment.environmentKind === "staging"
+                    ? `?environment=${deployment.environmentId}`
+                    : ""
+                }`}
                 title={`Website preview for ${deployment.name}`}
                 aria-hidden="true"
                 tabIndex={-1}
@@ -195,7 +202,13 @@ export function SitePreview({
             </div>
           )
         ) : (
-          <Glass deployment={deployment} product={product} stopped={stopped} unavailable={failed} />
+          <Glass
+            deployment={deployment}
+            product={product}
+            stopped={stopped}
+            asleep={asleep}
+            unavailable={failed}
+          />
         )}
       </div>
     </section>
@@ -207,11 +220,13 @@ function Glass({
   deployment,
   product,
   stopped,
+  asleep,
   unavailable,
 }: {
   deployment: DeploymentSummary
   product?: string
   stopped?: boolean
+  asleep?: boolean
   /** The site has an address, but its preview could not be served. */
   unavailable?: boolean
 }) {
@@ -227,6 +242,13 @@ function Glass({
         <div className="space-y-1">
           <p className="text-body font-medium">Not deployed yet</p>
           <p className="text-hint text-muted-foreground">The first deployment puts the site here</p>
+        </div>
+      ) : asleep ? (
+        <div className="space-y-1">
+          <p className="text-body font-medium">Asleep</p>
+          <p className="text-hint text-muted-foreground">
+            The next visit wakes it; this preview does not, so it stays asleep
+          </p>
         </div>
       ) : stopped ? (
         <div className="space-y-1">

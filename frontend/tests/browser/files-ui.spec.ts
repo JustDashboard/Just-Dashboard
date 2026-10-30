@@ -636,6 +636,27 @@ test("large listings retain find, selection and keyboard menu focus", async ({ p
   await expect(name).toBeFocused()
 })
 
+test("the list header stays opaque while rows scroll under it", async ({ page }) => {
+  await mockFiles(page)
+  const many = Array.from({ length: 60 }, (_, i) => entry(`row-${String(i).padStart(2, "0")}.txt`))
+  await page.route("**/api/v1/files/list**", (route) =>
+    json(route, { path: home, parent: "/home", entries: many, roots: ["/"] }),
+  )
+  await openFiles(page)
+  const head = page.locator("[data-file-listing] thead")
+  await page.locator("[data-file-listing] [data-slot='table-container']").evaluate((el) => {
+    el.scrollTop = 400
+  })
+  // A transparent header let the scrolled rows read through the column names.
+  const ground = await head.evaluate((el) => getComputedStyle(el).backgroundColor)
+  expect(ground).not.toBe("rgba(0, 0, 0, 0)")
+  expect(ground).not.toBe("transparent")
+  if (process.env.SHOT) {
+    await page.emulateMedia({ colorScheme: "dark" })
+    await page.locator("[data-file-listing]").screenshot({ path: process.env.SHOT })
+  }
+})
+
 test("the sidebar is a fixed list of places that stays put while browsing", async ({ page }) => {
   await mockFiles(page)
   await openFiles(page)
@@ -1782,6 +1803,93 @@ test("desktop file drops still upload into the accepting folder", async ({ page 
   await photos.dispatchEvent("drop", { dataTransfer: transfer })
   await expect.poll(() => uploadedTo).toBe(`${home}/photos`)
   await expect(photos).not.toHaveClass(/bg-wash-brand/)
+})
+
+/** A Ctrl+V the listing owns, carrying what the desktop put on the clipboard. */
+async function pasteFromDesktop(
+  page: Page,
+  clipboard: { files?: { name: string; type: string; bytes: number[] }[]; text?: string },
+) {
+  await page.getByRole("region", { name: "Folder contents" }).focus()
+  await page.evaluate(({ files, text }) => {
+    const data = new DataTransfer()
+    for (const file of files ?? [])
+      data.items.add(new File([new Uint8Array(file.bytes)], file.name, { type: file.type }))
+    if (text) data.setData("text/plain", text)
+    const target = document.activeElement ?? document.body
+    target.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "v", ctrlKey: true, bubbles: true, cancelable: true }),
+    )
+    target.dispatchEvent(
+      new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }),
+    )
+  }, clipboard)
+}
+
+test("files and screenshots copied on the desktop paste in as uploads", async ({ page }) => {
+  await mockFiles(page)
+  const sent: { path: string; body: string }[] = []
+  await page.route("**/api/v1/files/upload**", (route) => {
+    sent.push({
+      path: new URL(route.request().url()).searchParams.get("path") ?? "",
+      body: route.request().postDataBuffer()?.toString("latin1") ?? "",
+    })
+    return json(route, { uploaded: ["x"] }, 201)
+  })
+  await openFiles(page)
+  await pasteFromDesktop(page, {
+    files: [
+      { name: "report.txt", type: "text/plain", bytes: [...Buffer.from("from desktop")] },
+      { name: "image.png", type: "image/png", bytes: [137, 80, 78, 71] },
+    ],
+  })
+  await expect.poll(() => sent.length).toBe(2)
+  expect(sent.every((upload) => upload.path === home)).toBe(true)
+  const bodies = sent.map((upload) => upload.body).join("\n")
+  expect(bodies).toContain('filename="report.txt"')
+  expect(bodies).toMatch(/filename="Pasted image \d{4}-\d\d-\d\d \d\d\.\d\d\.\d\d\.png"/)
+})
+
+test("text copied on the desktop pastes in as a text file", async ({ page }) => {
+  await mockFiles(page)
+  let body = ""
+  await page.route("**/api/v1/files/upload**", (route) => {
+    body = route.request().postDataBuffer()?.toString("latin1") ?? ""
+    return json(route, { uploaded: ["x"] }, 201)
+  })
+  await openFiles(page)
+  await pasteFromDesktop(page, { text: "hello from the desktop" })
+  await expect.poll(() => body).toContain("hello from the desktop")
+  expect(body).toMatch(/filename="Pasted text [^"]+\.txt"/)
+})
+
+test("Ctrl+C puts the paths on the system clipboard and Ctrl+V pastes them back", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"])
+  await mockFiles(page)
+  let copied: { from: string; to: string } | undefined
+  await page.route("**/api/v1/files/copy", (route) => {
+    copied = route.request().postDataJSON()
+    return json(route, { ok: true })
+  })
+  await openFiles(page)
+  await page.locator(`[data-file-listing] [data-entry-path="${home}/notes.md"]`).click()
+  await page.keyboard.press("Control+c")
+  await expect(page.getByLabel("Forget the clipboard")).toBeVisible()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`${home}/notes.md`)
+  await page.locator(`[data-file-listing] [data-entry-path="${home}/photos"]`).dblclick()
+  await expect.poll(() => new URL(page.url()).searchParams.get("path")).toBe(`${home}/photos`)
+  await page.getByRole("region", { name: "Folder contents" }).focus()
+  await page.keyboard.press("Control+v")
+  await expect
+    .poll(() => copied)
+    .toEqual({
+      from: `${home}/notes.md`,
+      to: `${home}/photos/notes.md`,
+      overwrite: false,
+    })
 })
 
 test("a failed native move keeps its source preview available", async ({ page }) => {

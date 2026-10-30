@@ -177,7 +177,8 @@ func certbotInstallers(output string) map[string]bool {
 }
 
 // CertbotCommand is certbot with args on the side the page reads it from, for
-// a job to stream. env is added to the process environment.
+// a job to stream. env is added to the process environment, and so is the
+// trust a private authority needs (acmeDirectory).
 func CertbotCommand(ctx context.Context, env []string, args ...string) (*exec.Cmd, error) {
 	rt, err := loadCertbotRuntime(ctx)
 	if rt == nil {
@@ -187,6 +188,15 @@ func CertbotCommand(ctx context.Context, env []string, args ...string) (*exec.Cm
 		return nil, err
 	}
 	cmd := rt.command(ctx, args...)
+	if directory := acmeDirectory(); directory.private() {
+		// certbot reads the directory over TLS through python-requests, which
+		// trusts the system's roots and the bundle REQUESTS_CA_BUNDLE names.
+		// The managed Caddy is handed the same bundle; without this, certbot
+		// alone would refuse a private authority's listener. The path is read
+		// on certbot's side: the stack mounts /etc, /srv, /opt and the data
+		// directory at the same paths on both, so one spelling serves both.
+		env = append(env, "REQUESTS_CA_BUNDLE="+directory.CARoot)
+	}
 	if len(env) > 0 {
 		cmd.Env = append(cmd.Environ(), env...)
 	}

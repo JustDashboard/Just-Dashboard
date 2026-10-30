@@ -305,7 +305,7 @@ test("a group opens its panel without leaving the page", async ({ page }) => {
   await expect(rail(page).getByRole("link", { name: "Metrics" })).toHaveCount(0)
   await rail(page).getByRole("button", { name: "Monitoring", exact: true }).click()
   await expect(page).toHaveURL(/\/$/)
-  for (const name of ["Metrics", "Processes", "Logs"])
+  for (const name of ["Metrics", "Alerts", "Processes", "Logs"])
     await expect(rail(page).getByRole("link", { name, exact: true })).toBeVisible()
 
   // A section inside a group is a third level, and back from it is the group.

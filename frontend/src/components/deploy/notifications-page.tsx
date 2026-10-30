@@ -108,6 +108,9 @@ import { ChannelGlyph, channelMark, mailProduct } from "@/components/deploy/voca
  * with the run it announced — and the last message is that list's first row.
  */
 
+// The order the picker and the picture's empty rings offer them in: the chat
+// rooms most teams already have, mail, then the push services a phone
+// subscribes to, and last the contract for a receiver of one's own.
 const KINDS: { kind: NotificationChannelKind; title: string; hint: string }[] = [
   {
     kind: "discord",
@@ -116,13 +119,43 @@ const KINDS: { kind: NotificationChannelKind; title: string; hint: string }[] = 
   },
   { kind: "slack", title: "Slack", hint: "An incoming webhook from a Slack app." },
   {
+    kind: "teams",
+    title: "Microsoft Teams",
+    hint: "A Workflows webhook that posts to a channel.",
+  },
+  {
     kind: "telegram",
     title: "Telegram",
     hint: "A bot token from @BotFather and the chat to post in.",
   },
   { kind: "email", title: "E-mail", hint: "An SMTP server, sender and recipients." },
+  {
+    kind: "ntfy",
+    title: "ntfy",
+    hint: "A topic on ntfy.sh or your own ntfy server, and a token if it asks for one.",
+  },
+  {
+    kind: "gotify",
+    title: "Gotify",
+    hint: "Your Gotify server and an application token from its Apps page.",
+  },
+  {
+    kind: "pushover",
+    title: "Pushover",
+    hint: "An application token and your user or group key from pushover.net.",
+  },
+  {
+    kind: "mattermost",
+    title: "Mattermost",
+    hint: "An incoming webhook from Integrations → Incoming Webhooks.",
+  },
   { kind: "webhook", title: "Signed webhook", hint: "Your own endpoint receives signed JSON." },
 ]
+
+// The empty rings the picture draws for kinds not set up yet: enough to say
+// what a channel can be, not one per kind — ten rings stood taller than the
+// projects and the server together.
+const PICTURE_TARGETS = 5
 
 /**
  * The events a channel may choose. What a channel hears about is its
@@ -156,6 +189,8 @@ const EVENT_WORD: Record<string, string> = {
   "proxy.alert.recovered": "Proxy alert resolved",
   "database.alert.firing": "Database alert fired",
   "database.alert.recovered": "Database alert resolved",
+  "host.alert.firing": "Host alert fired",
+  "host.alert.recovered": "Host alert resolved",
 }
 
 /** How the far end answered, as the dispatcher records it. */
@@ -195,20 +230,54 @@ const SECURITY: { value: Security; label: string; port: number; hint: string }[]
   },
 ]
 
-// The server keeps three credentials when they are left blank on edit:
-// Discord/Slack's webhook URL, Telegram's bot token and the SMTP password
+// The server keeps a stored value when its field is left blank on edit for
+// every webhook URL (Discord, Slack, Mattermost, Teams), every field of ntfy,
+// Gotify and Pushover, Telegram's bot token and the SMTP password
 // (notifications.go). It keeps nothing else: an e-mail channel's host, sender
 // and recipients, and a Telegram chat id, are sent on every write, and a
-// signed webhook's URL is never masked, so Edit resends it as read. Only the
-// Discord/Slack URL is hidden until replaced, because it is the one the list
-// shows, masked.
+// signed webhook's URL is never masked, so Edit resends it as read. The kinds
+// whose every delivery setting is kept are hidden until replaced, showing
+// what the list shows of them, masked.
 const ALWAYS_OPEN: NotificationChannelKind[] = ["webhook", "email", "telegram"]
 const REENTRY_KINDS: NotificationChannelKind[] = ["email", "telegram"]
+
+/** What a kept channel's stored settings are called, and what the list shows of them. */
+const STORED: Partial<Record<NotificationChannelKind, { label: string; hint: string }>> = {
+  discord: { label: "Discord webhook URL", hint: "Stored encrypted; the list shows it masked." },
+  slack: {
+    label: "Slack incoming webhook URL",
+    hint: "Stored encrypted; the list shows it masked.",
+  },
+  mattermost: {
+    label: "Mattermost incoming webhook URL",
+    hint: "Stored encrypted; the list shows it masked.",
+  },
+  teams: {
+    label: "Teams Workflows webhook URL",
+    hint: "Stored encrypted; the list shows its host.",
+  },
+  ntfy: {
+    label: "ntfy server and topic",
+    hint: "Stored encrypted; the list hides the topic, which on a public server is the password.",
+  },
+  gotify: {
+    label: "Gotify server",
+    hint: "The application token is stored encrypted; the list shows the server only.",
+  },
+  pushover: {
+    label: "Pushover keys",
+    hint: "Stored encrypted; the list shows the user key's start.",
+  },
+}
 
 // The server's own shapes (notifications.go), so a form is refused here, with
 // its reason lit beside the field, rather than by a 400 after the press.
 const TELEGRAM_TOKEN = /^[0-9]{5,}:[A-Za-z0-9_-]{30,}$/
 const TELEGRAM_CHAT = /^(-?[0-9]{1,20}|@[A-Za-z0-9_]{5,32})$/
+const NTFY_TOPIC = /^[-_A-Za-z0-9]{1,64}$/
+const NTFY_TOKEN = /^tk_[A-Za-z0-9]{29}$/
+const GOTIFY_TOKEN = /^[A-Za-z0-9._-]{10,64}$/
+const PUSHOVER_KEY = /^[A-Za-z0-9]{30}$/
 const SMTP_HOST =
   /^([A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?)*|[0-9a-fA-F:.]+)$/
 
@@ -229,7 +298,13 @@ function emptyDraft(kind: NotificationChannelKind): Draft {
     url: "",
     events: DEFAULT_EVENTS,
     enabled: true,
-    config: { smtpSecurity: "starttls", toText: "" },
+    config: {
+      smtpSecurity: "starttls",
+      toText: "",
+      // The server ntfy posts to when none is named, written out so it is
+      // seen to be the public one.
+      serverUrl: kind === "ntfy" ? "https://ntfy.sh" : undefined,
+    },
   }
 }
 
@@ -246,22 +321,75 @@ function kindTitle(kind: NotificationChannelKind) {
   return KINDS.find((item) => item.kind === kind)?.title ?? kind
 }
 
-/** The Discord or Slack address a pasted URL is, by the server's own rule. */
-function webhookShape(url: string): "discord" | "slack" | undefined {
-  let parsed: URL
+type WebhookKind = "discord" | "slack" | "mattermost" | "teams"
+
+function parseURL(url: string) {
   try {
-    parsed = new URL(url.trim())
+    return new URL(url.trim())
   } catch {
     return undefined
   }
-  if (parsed.protocol !== "https:") return undefined
+}
+
+/**
+ * An address that never leaves the machine: the backend shares the host's
+ * network, so the server takes plain http to it (notifications.go).
+ */
+function loopback(hostname: string) {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "")
+  return host === "localhost" || host === "::1" || /^127(\.\d{1,3}){3}$/.test(host)
+}
+
+/** The service a pasted webhook URL is for, by the server's own rule. */
+function webhookShape(url: string): WebhookKind | undefined {
+  const parsed = parseURL(url)
+  if (!parsed) return undefined
   const host = parsed.hostname.toLowerCase()
+  if (
+    parsed.protocol === "http:" &&
+    loopback(host) &&
+    /(^|\/)hooks\/[A-Za-z0-9]{20,64}$/.test(parsed.pathname.replace(/\/+$/, ""))
+  )
+    return "mattermost"
+  if (parsed.protocol !== "https:") return undefined
   const discord = ["discord.com", "discordapp.com"].some(
     (name) => host === name || host.endsWith(`.${name}`),
   )
   if (discord && parsed.pathname.startsWith("/api/webhooks/")) return "discord"
   if (host === "hooks.slack.com" && parsed.pathname.startsWith("/services/")) return "slack"
+  const workflows = host.endsWith(".logic.azure.com") || host.endsWith(".powerplatform.com")
+  if (workflows && parsed.pathname.includes("/workflows/") && parsed.searchParams.get("sig"))
+    return "teams"
+  if (/(^|\/)hooks\/[A-Za-z0-9]{20,64}$/.test(parsed.pathname.replace(/\/+$/, "")))
+    return "mattermost"
   return undefined
+}
+
+/** An Office 365 connector address, which Microsoft stopped delivering to in May 2026. */
+function retiredConnector(url: string) {
+  const host = parseURL(url)?.hostname.toLowerCase() ?? ""
+  return host.endsWith(".webhook.office.com") || host === "outlook.office.com"
+}
+
+/**
+ * Whether a self-hosted server's address is one the server would take: http
+ * or https, with nothing but the address — and https when a token goes with
+ * it, unless it is on loopback.
+ */
+function serverShape(url: string, token: boolean): "ok" | "malformed" | "cleartext" {
+  const parsed = parseURL(url)
+  if (!parsed || !["http:", "https:"].includes(parsed.protocol) || !parsed.hostname)
+    return "malformed"
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) return "malformed"
+  if (token && parsed.protocol === "http:" && !loopback(parsed.hostname)) return "cleartext"
+  return "ok"
+}
+
+/** Whether the form holds any delivery setting typed since it opened. */
+function typedDelivery(config: Draft["config"]) {
+  return [config.webhookUrl, config.serverUrl, config.topic, config.token, config.userKey].some(
+    (value) => value?.trim(),
+  )
 }
 
 /** What a Telegram chat id is, by its shape. */
@@ -305,7 +433,27 @@ function ready(draft: Draft) {
       return /^https?:\/\/\S+$/.test(draft.url.trim())
     case "discord":
     case "slack":
+    case "mattermost":
+    case "teams":
       return kept(config.webhookUrl, (url) => webhookShape(url) === draft.kind)
+    case "ntfy": {
+      const token = config.token?.trim() ?? ""
+      return (
+        kept(config.topic, (topic) => NTFY_TOPIC.test(topic)) &&
+        (!token || NTFY_TOKEN.test(token)) &&
+        (!config.serverUrl?.trim() || serverShape(config.serverUrl, Boolean(token)) === "ok")
+      )
+    }
+    case "gotify":
+      return (
+        kept(config.serverUrl, (url) => serverShape(url, true) === "ok") &&
+        kept(config.token, (token) => GOTIFY_TOKEN.test(token))
+      )
+    case "pushover":
+      return (
+        kept(config.token, (token) => PUSHOVER_KEY.test(token)) &&
+        kept(config.userKey, (key) => PUSHOVER_KEY.test(key))
+      )
     case "telegram":
       return (
         kept(config.botToken, (token) => TELEGRAM_TOKEN.test(token)) &&
@@ -473,6 +621,10 @@ export function NotificationsPage() {
         smtpSecurity: draft.kind === "email" ? draft.config.smtpSecurity : undefined,
         from: draft.config.from?.trim() || undefined,
         to: draft.kind === "email" ? to : undefined,
+        serverUrl: draft.config.serverUrl?.trim() || undefined,
+        topic: draft.config.topic?.trim() || undefined,
+        token: draft.config.token?.trim() || undefined,
+        userKey: draft.config.userKey?.trim() || undefined,
       },
     }
     try {
@@ -710,7 +862,7 @@ export function NotificationsPage() {
               />
               <PanelBody>
                 {list.length === 0 ? (
-                  // The picture above already offers the five kinds; the list
+                  // The picture above already offers kinds to add; the list
                   // only has to say it is empty.
                   <EmptyNote>No notification channels</EmptyNote>
                 ) : (
@@ -812,7 +964,7 @@ export function NotificationsPage() {
                   !draft.id ||
                   ALWAYS_OPEN.includes(draft.kind) ||
                   revealDelivery ||
-                  Boolean(draft.config.webhookUrl)
+                  typedDelivery(draft.config)
                 }
                 onReplace={() => setRevealDelivery(true)}
               />
@@ -1037,7 +1189,9 @@ function outcomeWords(channel: NotificationChannel) {
  * never sent anything; the kinds not yet set up are their services faded in
  * dashed rings — pressed to add one, for an administrator — so the empty page
  * is the same picture with nothing wired yet. The lines from the projects are
- * still: every one of them reports, and a project is not a delivery.
+ * still: every one of them reports, and a project is not a delivery. Only
+ * the first few kinds not set up get a ring (PICTURE_TARGETS); the rest are
+ * in Add channel's picker.
  *
  * Wide, the three balance around the lines across the page. On a phone the
  * list below already names every channel, so the picture shrinks to what it
@@ -1056,7 +1210,9 @@ function Fanout({
   const wide = useMediaQuery("(min-width: 1024px)")
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
-  const missing = KINDS.filter((item) => !channels.some((channel) => channel.kind === item.kind))
+  const missing = KINDS.filter(
+    (item) => !channels.some((channel) => channel.kind === item.kind),
+  ).slice(0, Math.max(0, PICTURE_TARGETS - channels.length))
   const targets: { key: string; kind: NotificationChannelKind; channel?: NotificationChannel }[] = [
     ...channels.map((channel) => ({ key: `channel-${channel.id}`, channel, kind: channel.kind })),
     ...missing.map((item) => ({ key: `add-${item.kind}`, kind: item.kind })),
@@ -1681,7 +1837,7 @@ function AttemptRow({
 }
 
 /**
- * The five kinds as the services they are, picked by their marks (§16: a
+ * The ten kinds as the services they are, picked by their marks (§16: a
  * choice between kinds is a grid, and a card you pick has the lit edge). Two
  * across a phone and three across the sheet, whose width does not follow the
  * viewport's.
@@ -1734,7 +1890,7 @@ function KindPicker({
 function ChannelFields({
   draft,
   onChange,
-  stored,
+  stored: storedTarget,
   open,
   onReplace,
 }: {
@@ -1776,20 +1932,24 @@ function ChannelFields({
       )
     }
     case "discord":
-    case "slack": {
-      const label = draft.kind === "discord" ? "Discord webhook URL" : "Slack incoming webhook URL"
-      const title = kindTitle(draft.kind)
+    case "slack":
+    case "mattermost":
+    case "teams":
+    case "ntfy":
+    case "gotify":
+    case "pushover": {
+      const stored = STORED[draft.kind]!
       if (!open)
         return (
           // The stored address is a reading, not a field: nothing here takes
           // input until the reader chooses to replace it.
-          <Field label={label} hint="Stored encrypted; the list shows it masked.">
+          <Field label={stored.label} hint={stored.hint}>
             <InputGroup>
               <InputGroupAddon>
-                <ProductGlyph id={draft.kind} />
+                <ProductGlyph id={channelProduct(draft.kind)!} />
               </InputGroupAddon>
               <InputGroupText className="min-w-0 flex-1 px-3 font-mono text-hint text-muted-foreground">
-                <span className="truncate">{stored}</span>
+                <span className="truncate">{storedTarget}</span>
               </InputGroupText>
               <InputGroupAddon align="inline-end" className="gap-0 p-0">
                 <InputGroupButton aria-label="Replace delivery settings" onClick={onReplace}>
@@ -1799,51 +1959,10 @@ function ChannelFields({
             </InputGroup>
           </Field>
         )
-      const url = draft.config.webhookUrl ?? ""
-      const shape = webhookShape(url)
-      const other = shape && shape !== draft.kind ? kindTitle(shape) : undefined
+      if (draft.kind === "ntfy" || draft.kind === "gotify" || draft.kind === "pushover")
+        return <PushFields draft={draft} onChange={onChange} keepHint={keepHint} />
       return (
-        <div className="space-y-2">
-          <Field
-            label={label}
-            htmlFor="notification-webhook"
-            hint={`The URL is stored encrypted and shown masked afterwards.${keepHint ? ` ${keepHint}` : ""}`}
-          >
-            <InputGroup>
-              <InputGroupAddon>
-                <ProductGlyph id={draft.kind} />
-              </InputGroupAddon>
-              <InputGroupInput
-                id="notification-webhook"
-                type="url"
-                placeholder={
-                  draft.kind === "discord"
-                    ? "https://discord.com/api/webhooks/…"
-                    : "https://hooks.slack.com/services/…"
-                }
-                value={url}
-                onChange={(event) => config({ webhookUrl: event.target.value })}
-                autoComplete="off"
-                spellCheck={false}
-              />
-              {shape === draft.kind && (
-                <InputGroupAddon align="inline-end">
-                  <InputGroupText className="text-success">
-                    <Check className="size-3.5" />
-                    <span className="max-sm:sr-only">{title} webhook</span>
-                  </InputGroupText>
-                </InputGroupAddon>
-              )}
-            </InputGroup>
-          </Field>
-          {other && (
-            <FormNote tone="warning">
-              {draft.id
-                ? `That is a ${other} address; this channel posts to ${title}.`
-                : `That is a ${other} address — choose ${other} above.`}
-            </FormNote>
-          )}
-        </div>
+        <WebhookField draft={draft} kind={draft.kind} onChange={onChange} keepHint={keepHint} />
       )
     }
     case "telegram": {
@@ -1919,6 +2038,366 @@ function ChannelFields({
     case "email":
       return <MailFields draft={draft} onChange={onChange} keepHint={keepHint} />
   }
+}
+
+const WEBHOOK_FIELD: Record<WebhookKind, { label: string; placeholder: string; hint: string }> = {
+  discord: {
+    label: "Discord webhook URL",
+    placeholder: "https://discord.com/api/webhooks/…",
+    hint: "The URL is stored encrypted and shown masked afterwards.",
+  },
+  slack: {
+    label: "Slack incoming webhook URL",
+    placeholder: "https://hooks.slack.com/services/…",
+    hint: "The URL is stored encrypted and shown masked afterwards.",
+  },
+  mattermost: {
+    label: "Mattermost incoming webhook URL",
+    placeholder: "https://chat.example.com/hooks/…",
+    hint: "The URL is stored encrypted and shown masked afterwards. Plain http is taken on this server's own loopback only.",
+  },
+  teams: {
+    label: "Teams Workflows webhook URL",
+    placeholder: "https://….logic.azure.com/workflows/…",
+    hint: "From the channel's Workflows: the “Post to a channel when a webhook request is received” template, once saved. Only its host is shown afterwards.",
+  },
+}
+
+/**
+ * One webhook URL that is itself the credential — Discord's, Slack's,
+ * Mattermost's or a Teams workflow's — read against the server's rule as it
+ * is pasted, and named for the service it is when it is another's.
+ */
+function WebhookField({
+  draft,
+  kind,
+  onChange,
+  keepHint,
+}: {
+  draft: Draft
+  kind: WebhookKind
+  onChange: (draft: Draft) => void
+  keepHint?: string
+}) {
+  const field = WEBHOOK_FIELD[kind]
+  const title = kindTitle(kind)
+  const url = draft.config.webhookUrl ?? ""
+  const shape = webhookShape(url)
+  const other = shape && shape !== kind ? kindTitle(shape) : undefined
+  return (
+    <div className="space-y-2">
+      <Field
+        label={field.label}
+        htmlFor="notification-webhook"
+        hint={`${field.hint}${keepHint ? ` ${keepHint}` : ""}`}
+      >
+        <InputGroup>
+          <InputGroupAddon>
+            <ProductGlyph id={channelProduct(kind)!} />
+          </InputGroupAddon>
+          <InputGroupInput
+            id="notification-webhook"
+            type="url"
+            placeholder={field.placeholder}
+            value={url}
+            onChange={(event) =>
+              onChange({ ...draft, config: { ...draft.config, webhookUrl: event.target.value } })
+            }
+            autoComplete="off"
+            spellCheck={false}
+          />
+          {shape === kind && (
+            <InputGroupAddon align="inline-end">
+              <InputGroupText className="text-success">
+                <Check className="size-3.5" />
+                <span className="max-sm:sr-only">{title} webhook</span>
+              </InputGroupText>
+            </InputGroupAddon>
+          )}
+        </InputGroup>
+      </Field>
+      {other && (
+        <FormNote tone="warning">
+          {draft.id
+            ? `That is a ${other} address; this channel posts to ${title}.`
+            : `That is a ${other} address — choose ${other} above.`}
+        </FormNote>
+      )}
+      {kind === "teams" && retiredConnector(url) && (
+        <FormNote tone="warning">
+          That is an Office 365 connector, which Teams stopped delivering to in May 2026. Create a
+          Workflows webhook in the channel instead.
+        </FormNote>
+      )}
+    </div>
+  )
+}
+
+/** A token typed as a password, with the eye that shows it. */
+function SecretInput({
+  id,
+  label,
+  value,
+  placeholder,
+  product,
+  onChange,
+}: {
+  id: string
+  label: string
+  value: string
+  placeholder?: string
+  product?: string
+  onChange: (value: string) => void
+}) {
+  const [shown, setShown] = useState(false)
+  return (
+    <InputGroup>
+      {product && (
+        <InputGroupAddon>
+          <ProductGlyph id={product} />
+        </InputGroupAddon>
+      )}
+      <InputGroupInput
+        id={id}
+        type={shown ? "text" : "password"}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        autoComplete="off"
+        spellCheck={false}
+        className={cn(shown && "font-mono")}
+      />
+      <InputGroupAddon align="inline-end" className="gap-0 p-0">
+        <InputGroupToggle
+          icon={shown ? EyeOff : Eye}
+          label="Show"
+          aria-label={`Show ${label}`}
+          pressed={shown}
+          onPressedChange={setShown}
+        />
+      </InputGroupAddon>
+    </InputGroup>
+  )
+}
+
+/** A topic nobody would guess: on ntfy.sh it is all that keeps the messages private. */
+function randomTopic() {
+  const alphabet = "abcdefghijkmnopqrstuvwxyz23456789"
+  const bytes = crypto.getRandomValues(new Uint8Array(20))
+  return `jd-${Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("")}`
+}
+
+/**
+ * The push services a phone subscribes to. ntfy is a server and a topic, with
+ * a token for a server that asks for one; Gotify a server and an application
+ * token; Pushover two keys. Each is read against the server's rule as it is
+ * typed, and a token bound for a server over plain http is named before the
+ * press, not refused after it.
+ */
+function PushFields({
+  draft,
+  onChange,
+  keepHint,
+}: {
+  draft: Draft
+  onChange: (draft: Draft) => void
+  keepHint?: string
+}) {
+  const config = (patch: Partial<Draft["config"]>) =>
+    onChange({ ...draft, config: { ...draft.config, ...patch } })
+  const server = draft.config.serverUrl?.trim() ?? ""
+  const token = draft.config.token?.trim() ?? ""
+  const keep = keepHint ? ` ${keepHint}` : ""
+  const serverField = (label: string, placeholder: string, hint: string) => {
+    const shape = server ? serverShape(server, draft.kind === "gotify" || Boolean(token)) : "ok"
+    return (
+      <div className="space-y-2">
+        <Field label={label} htmlFor="notification-server" hint={`${hint}${keep}`}>
+          <InputGroup>
+            <InputGroupAddon>
+              <ProductGlyph id={draft.kind} />
+            </InputGroupAddon>
+            <InputGroupInput
+              id="notification-server"
+              type="url"
+              placeholder={placeholder}
+              value={draft.config.serverUrl ?? ""}
+              onChange={(event) => config({ serverUrl: event.target.value })}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </InputGroup>
+        </Field>
+        {shape === "malformed" && (
+          <FormNote tone="warning">
+            {server} is not a server&apos;s address: http or https, without a sign-in or query.
+          </FormNote>
+        )}
+        {shape === "cleartext" && (
+          <FormNote tone="warning">
+            A token is not sent over plain http. Use https, or this server&apos;s own 127.0.0.1.
+          </FormNote>
+        )}
+      </div>
+    )
+  }
+  switch (draft.kind) {
+    case "ntfy": {
+      const topic = draft.config.topic?.trim() ?? ""
+      const publicServer = (parseURL(server || "https://ntfy.sh")?.hostname ?? "") === "ntfy.sh"
+      return (
+        <>
+          {serverField("Server", "https://ntfy.sh", "ntfy.sh, or the address of your own server.")}
+          <div className="space-y-2">
+            <Field
+              label="Topic"
+              htmlFor="notification-topic"
+              hint={`${
+                publicServer
+                  ? "On ntfy.sh anyone who knows the topic reads every message, so make it one nobody would guess."
+                  : "Subscribe to the same topic in the ntfy app."
+              }${keep}`}
+            >
+              <InputGroup>
+                <InputGroupInput
+                  id="notification-topic"
+                  placeholder="jd-deploys-…"
+                  value={draft.config.topic ?? ""}
+                  onChange={(event) => config({ topic: event.target.value })}
+                  className="font-mono"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <InputGroupAddon align="inline-end" className="gap-0 p-0">
+                  <InputGroupButton
+                    aria-label="Generate a topic"
+                    onClick={() => config({ topic: randomTopic() })}
+                  >
+                    Generate
+                  </InputGroupButton>
+                </InputGroupAddon>
+              </InputGroup>
+            </Field>
+            {topic && (
+              <p aria-live="polite">
+                <FieldCheck met={NTFY_TOPIC.test(topic)}>
+                  {NTFY_TOPIC.test(topic)
+                    ? `${topic.length} characters`
+                    : "letters, digits, - and _ only, up to 64"}
+                </FieldCheck>
+              </p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Field
+              label="Access token"
+              htmlFor="notification-token"
+              hint={`Only for a server that asks for sign-in: create one under Account → Access tokens, or with ntfy token add.${keep}`}
+            >
+              <SecretInput
+                id="notification-token"
+                label="access token"
+                placeholder="tk_…"
+                value={draft.config.token ?? ""}
+                onChange={(value) => config({ token: value })}
+              />
+            </Field>
+            {token && (
+              <p aria-live="polite">
+                <FieldCheck met={NTFY_TOKEN.test(token)}>
+                  {NTFY_TOKEN.test(token) ? "access token" : "tk_ and 29 letters or digits"}
+                </FieldCheck>
+              </p>
+            )}
+          </div>
+        </>
+      )
+    }
+    case "gotify":
+      return (
+        <>
+          {serverField(
+            "Server",
+            "https://gotify.example.com",
+            "The address your Gotify app connects to.",
+          )}
+          <div className="space-y-2">
+            <Field
+              label="Application token"
+              htmlFor="notification-token"
+              hint={`From Apps → Create application on the Gotify server.${keep}`}
+            >
+              <SecretInput
+                id="notification-token"
+                label="application token"
+                value={draft.config.token ?? ""}
+                onChange={(value) => config({ token: value })}
+              />
+            </Field>
+            {token && (
+              <p aria-live="polite">
+                <FieldCheck met={GOTIFY_TOKEN.test(token)}>
+                  {GOTIFY_TOKEN.test(token)
+                    ? "application token"
+                    : "an application token, not a client's"}
+                </FieldCheck>
+              </p>
+            )}
+          </div>
+        </>
+      )
+    case "pushover": {
+      const user = draft.config.userKey?.trim() ?? ""
+      return (
+        <>
+          <div className="space-y-2">
+            <Field
+              label="Application token"
+              htmlFor="notification-token"
+              hint={`From Create an Application/API Token on pushover.net.${keep}`}
+            >
+              <SecretInput
+                id="notification-token"
+                label="application token"
+                product="pushover"
+                value={draft.config.token ?? ""}
+                onChange={(value) => config({ token: value })}
+              />
+            </Field>
+            {token && (
+              <p aria-live="polite">
+                <FieldCheck met={PUSHOVER_KEY.test(token)}>
+                  {PUSHOVER_KEY.test(token) ? "application token" : "30 letters and digits"}
+                </FieldCheck>
+              </p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Field
+              label="User or group key"
+              htmlFor="notification-user-key"
+              hint={`Your user key from pushover.net, or a delivery group's. Failures and alerts are sent at high priority, which sounds through quiet hours.${keep}`}
+            >
+              <SecretInput
+                id="notification-user-key"
+                label="user key"
+                value={draft.config.userKey ?? ""}
+                onChange={(value) => config({ userKey: value })}
+              />
+            </Field>
+            {user && (
+              <p aria-live="polite">
+                <FieldCheck met={PUSHOVER_KEY.test(user)}>
+                  {PUSHOVER_KEY.test(user) ? "user key" : "30 letters and digits"}
+                </FieldCheck>
+              </p>
+            )}
+          </div>
+        </>
+      )
+    }
+  }
+  return null
 }
 
 /**

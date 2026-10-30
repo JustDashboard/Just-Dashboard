@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useRouter } from "next/navigation"
 import { ApiError, get, post } from "@/lib/api"
 import { forgetWorkingState } from "@/lib/view-state"
+import { signInWithPasskey } from "@/lib/passkeys"
 import type { AuthStatus, Capability } from "@/lib/types"
 
 type AuthContextValue = {
@@ -12,6 +13,11 @@ type AuthContextValue = {
   sessionEnded: boolean
   refresh: () => Promise<AuthStatus | null>
   login: (username: string, password: string) => Promise<AuthStatus>
+  /** A passkey in place of the password; an enrolled account still owes its code. */
+  loginWithPasskey: (options: {
+    conditional?: boolean
+    signal?: AbortSignal
+  }) => Promise<AuthStatus>
   verifyTotp: (code: string) => Promise<AuthStatus>
   logout: () => Promise<void>
   can: (capability: Capability) => boolean
@@ -151,6 +157,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [applyStatus],
   )
 
+  const loginWithPasskey = useCallback(
+    async (options: { conditional?: boolean; signal?: AbortSignal }) => {
+      await logoutPending.current?.catch(() => undefined)
+      const requested = ++generation.current
+      const next = await signInWithPasskey(options)
+      if (requested !== generation.current) return next
+      setSessionEnded(false)
+      applyStatus(next, true)
+      return next
+    },
+    [applyStatus],
+  )
+
   const verifyTotp = useCallback(
     async (code: string) => {
       await logoutPending.current?.catch(() => undefined)
@@ -191,8 +210,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   )
 
   const value = useMemo(
-    () => ({ status, loading, sessionEnded, refresh, login, verifyTotp, logout, can }),
-    [status, loading, sessionEnded, refresh, login, verifyTotp, logout, can],
+    () => ({
+      status,
+      loading,
+      sessionEnded,
+      refresh,
+      login,
+      loginWithPasskey,
+      verifyTotp,
+      logout,
+      can,
+    }),
+    [status, loading, sessionEnded, refresh, login, loginWithPasskey, verifyTotp, logout, can],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

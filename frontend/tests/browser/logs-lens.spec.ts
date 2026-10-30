@@ -45,14 +45,17 @@ test("custom log export validates native extended years and date order without c
   await page.getByRole("option", { name: "Custom range", exact: true }).click()
   await expect(dialog.getByRole("button", { name: "Download", exact: true })).toBeDisabled()
   const from = dialog.getByLabel("From", { exact: true })
+  // The second day of the year, so the instant it names is past 9999 in the
+  // browser's own zone as much as in UTC: the window's year is judged in UTC,
+  // and local midnight on the first is still 9999 anywhere east of it.
   const input = await from.evaluate((element) => {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!
-    setter.call(element, "10000-01-01T00:00")
+    setter.call(element, "10000-01-02T00:00")
     element.dispatchEvent(new Event("input", { bubbles: true }))
     element.dispatchEvent(new Event("change", { bubbles: true }))
     return (element as HTMLInputElement).value
   })
-  expect(input).toBe("10000-01-01T00:00")
+  expect(input).toBe("10000-01-02T00:00")
   await expect(dialog.getByText("Log windows support years up to 9999.")).toBeVisible()
   await expect(from).toHaveAttribute("aria-invalid", "true")
   await expect(dialog.getByRole("button", { name: "Download", exact: true })).toBeDisabled()
@@ -68,7 +71,11 @@ test("custom log export validates native extended years and date order without c
   const href = await dialog
     .getByRole("link", { name: "Download", exact: true })
     .getAttribute("href")
-  expect(new URL(href!, page.url()).searchParams.get("since")).toBe("2026-10-14T12:00:00.000Z")
+  // The fields are local time in the browser's zone, so the instant they
+  // name is read there too, rather than written as the UTC string it is only
+  // in UTC.
+  const since = await page.evaluate(() => new Date(2026, 9, 14, 12, 0).toISOString())
+  expect(new URL(href!, page.url()).searchParams.get("since")).toBe(since)
   expect(errors).toEqual([])
 })
 
@@ -76,9 +83,10 @@ test("the shared log time window disables Apply for unsupported native years", a
   await mockLensLogs(page)
   await page.goto(pgLog)
   await page.getByRole("button", { name: /^Time window:/ }).click()
+  // The second day, for the same reason as above: past 9999 in any zone.
   await page.locator("#window-from").evaluate((element) => {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!
-    setter.call(element, "10000-01-01T00:00")
+    setter.call(element, "10000-01-02T00:00")
     element.dispatchEvent(new Event("input", { bubbles: true }))
     element.dispatchEvent(new Event("change", { bubbles: true }))
   })
@@ -379,9 +387,10 @@ test("the window is one control, and a preset picked on the stream opens History
   await page.getByLabel("From", { exact: true }).fill("2026-09-27T10:00")
   await page.getByLabel("To", { exact: true }).fill("2026-09-27T10:30")
   await page.getByRole("button", { name: "Apply", exact: true }).click()
-  await expect
-    .poll(() => lineSearches(mocks).at(-1)?.get("until"))
-    .toBe(new Date("2026-09-27T10:30").toISOString())
+  // The bound is local time in the browser's zone, which the config pins and
+  // this process's clock need not share, so the instant is read there.
+  const until = await page.evaluate(() => new Date("2026-09-27T10:30").toISOString())
+  await expect.poll(() => lineSearches(mocks).at(-1)?.get("until")).toBe(until)
   await expect(window).not.toHaveText(/Last/)
 
   // And back to the stream from the same place.

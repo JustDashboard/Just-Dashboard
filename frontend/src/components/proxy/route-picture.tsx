@@ -137,7 +137,11 @@ export function RoutePicture({
   const appPort = 26
 
   return (
-    <div data-slot="route-picture" className="relative animate-rise py-4">
+    // Wide, the lanes' headings and the engine's words hang outside their
+    // boxes so every mark sits on one line; each column is padded the same
+    // above and below to hold them, and the bottom padding holds what the
+    // engine's words run past the row.
+    <div data-slot="route-picture" className="relative animate-rise pt-4 pb-10 lg:pb-6">
       <div ref={container} className="relative">
         {edges.map((edge, index) => {
           const into = edge.to === "hub"
@@ -205,7 +209,7 @@ export function RoutePicture({
 
           <div aria-hidden className="max-lg:hidden" />
 
-          <div className="flex min-w-0 lg:justify-center">
+          <div className="flex min-w-0 lg:justify-center lg:py-12">
             <WireNode
               nodeRef={hub}
               align="center"
@@ -403,18 +407,23 @@ function Lane({
   children: React.ReactNode
 }) {
   return (
-    <div className="min-w-0 self-stretch lg:flex lg:flex-col lg:justify-center">
-      <p className={cn("eyebrow mb-4", className)}>
-        {title}
-        {count > 0 && (
-          <span className="numeric ml-1.5 font-medium tracking-normal text-muted-foreground/70">
-            {count}
-          </span>
-        )}
-      </p>
-      <ol className="flex flex-col gap-4" aria-label={title}>
-        {children}
-      </ol>
+    // Wide, the heading hangs above the list rather than sharing its box: in
+    // the box it pushed the marks half its height below the engine's, and
+    // every wire bent to meet them.
+    <div className="min-w-0 self-stretch lg:flex lg:flex-col lg:justify-center lg:py-8">
+      <div className="lg:relative">
+        <p className={cn("eyebrow mb-4 lg:absolute lg:inset-x-0 lg:bottom-full", className)}>
+          {title}
+          {count > 0 && (
+            <span className="numeric ml-1.5 font-medium tracking-normal text-muted-foreground/70">
+              {count}
+            </span>
+          )}
+        </p>
+        <ol className="flex flex-col gap-4" aria-label={title}>
+          {children}
+        </ol>
+      </div>
     </div>
   )
 }

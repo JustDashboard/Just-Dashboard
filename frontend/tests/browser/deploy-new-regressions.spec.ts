@@ -334,3 +334,40 @@ test("a required yes-or-no left unanswered says so under its switch", async ({ p
     page.getByRole("heading", { level: 1, name: "What are you deploying?" }),
   ).toBeVisible()
 })
+
+test("a plan nothing gates is warned about on review, acknowledged, and deployed", async ({
+  page,
+}) => {
+  // The server's own words (`cutover_unverified`, deploy/preflight_readiness.go):
+  // a warning, never a refusal, with the remedy beside it.
+  const journey = await mockNewProject(page, {
+    preflightFindings: [
+      {
+        code: "cutover_unverified",
+        severity: "warning",
+        title: "No readiness check gates this release",
+        measured: "stop-first · port 8080",
+        means:
+          "The candidate is cut over to without being asked whether it answers, so a release that starts but never listens goes live and the previous one is not restored.",
+        action:
+          "Add a required readiness check: TCP on port 8080, HTTP on a health path, or the container's own health.",
+        owner: "deploy",
+        fieldId: "checks",
+      },
+    ],
+  })
+  await page.goto("/deploy/new")
+  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await gotoStep(page, "review")
+  const warnings = page.locator("#deployment-warning-acknowledgements")
+  await expect(warnings.getByText("No readiness check gates this release")).toBeVisible()
+  await expect(warnings.getByText("stop-first · port 8080")).toBeVisible()
+  await expect(warnings.getByText(/TCP on port 8080/)).toBeVisible()
+  // A warning is accepted or fixed, never silently passed: the action asks
+  // for the acknowledgement first, then carries it to the server.
+  await expect(page.getByRole("button", { name: "Acknowledge, then deploy" })).toBeVisible()
+  await warnings.getByRole("checkbox").check()
+  await page.getByRole("button", { name: "Deploy", exact: true }).click()
+  await expect(page).toHaveURL(/\/deploy\/77\/runs\/84$/)
+  expect(journey.commitBody()).toMatchObject({ acknowledgedWarnings: ["cutover_unverified"] })
+})

@@ -10,6 +10,7 @@ import { useSessionState } from "@/lib/view-state"
 import type {
   BlueprintDetail,
   BlueprintInput,
+  BlueprintService,
   BlueprintSummary,
   DeploymentDraftSource,
   DeploymentHostnameSuggestion,
@@ -38,8 +39,14 @@ import {
 } from "@/components/ui/select"
 import { AccessPromise, AccessTag } from "@/components/deploy/first-sign-in"
 import { deploymentName } from "@/components/deploy/vocabulary"
-import { ProductLogo, ProductLogos, hasProductLogo } from "@/components/product-logo"
+import { ProductLogo, ProductLogos, hasProductLogo, imageProduct } from "@/components/product-logo"
 import { inspectAndPrepare, type ConfigureFlow } from "@/components/deploy/new-project/draft"
+import {
+  YOUR_TEMPLATES_EMPTY,
+  isUserTemplate,
+  splitCatalogue,
+  templateProvenance,
+} from "@/components/deploy/templates"
 import { useSourceInspection } from "./use-source-inspection"
 import { templateInputErrors } from "./template-inputs"
 
@@ -73,17 +80,25 @@ const BLUEPRINT_ID = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/
 
 const TOPIC_OF: Record<string, TopicKey> = {
   actual: "productivity",
+  docmost: "productivity",
   docuseal: "productivity",
   drawio: "productivity",
+  "firefly-iii": "productivity",
   freshrss: "productivity",
   linkding: "productivity",
+  mattermost: "productivity",
   memos: "productivity",
+  miniflux: "productivity",
   nextcloud: "productivity",
+  "nextcloud-mariadb": "productivity",
   nocodb: "productivity",
+  "paperless-ngx": "productivity",
+  planka: "productivity",
   "stirling-pdf": "productivity",
   trilium: "productivity",
   vaultwarden: "productivity",
   wallabag: "productivity",
+  wikijs: "productivity",
   audiobookshelf: "media",
   jellyfin: "media",
   kavita: "media",
@@ -93,21 +108,31 @@ const TOPIC_OF: Record<string, TopicKey> = {
   dozzle: "monitoring",
   grafana: "monitoring",
   healthchecks: "monitoring",
+  matomo: "monitoring",
   metabase: "monitoring",
+  "metabase-postgres": "monitoring",
+  plausible: "monitoring",
   prometheus: "monitoring",
   "uptime-kuma": "monitoring",
   gotify: "automation",
+  listmonk: "automation",
   n8n: "automation",
+  "n8n-postgres": "automation",
   ntfy: "automation",
   ollama: "ai",
   "open-webui": "ai",
   adminer: "developer",
+  authentik: "developer",
   "code-server": "developer",
   cyberchef: "developer",
   directus: "developer",
+  "directus-postgres": "developer",
+  forgejo: "developer",
   gitea: "developer",
+  "gitea-postgres": "developer",
   "it-tools": "developer",
   jupyter: "developer",
+  keycloak: "developer",
   "mongo-express": "developer",
   opengist: "developer",
   pgadmin: "developer",
@@ -116,12 +141,14 @@ const TOPIC_OF: Record<string, TopicKey> = {
   whoami: "developer",
   caddy: "web",
   filebrowser: "web",
+  ghost: "web",
   homepage: "web",
   minio: "web",
   "nginx-static": "web",
   searxng: "web",
   shlink: "web",
   syncthing: "web",
+  wordpress: "web",
 }
 
 const CATEGORY_TOPIC: Record<BlueprintSummary["category"], TopicKey> = {
@@ -134,6 +161,23 @@ const CATEGORY_TOPIC: Record<BlueprintSummary["category"], TopicKey> = {
 
 function topicOf(entry: BlueprintSummary): TopicKey {
   return TOPIC_OF[entry.id] ?? CATEGORY_TOPIC[entry.category] ?? "web"
+}
+
+/**
+ * The mark a template is drawn with: a built-in's own, or for one added on
+ * this dashboard the product its public image is, since its id names nothing
+ * the logo table knows.
+ */
+function templateLogo(entry: Pick<BlueprintSummary, "id" | "image">) {
+  return isUserTemplate(entry.id) ? imageProduct(entry.image) : entry.id
+}
+
+function matchesSearch(entry: BlueprintSummary, needle: string) {
+  return (
+    !needle ||
+    entry.name.toLowerCase().includes(needle) ||
+    entry.description.toLowerCase().includes(needle)
+  )
 }
 
 function asError(error: unknown) {
@@ -159,7 +203,10 @@ export function SourceTemplate({
     0,
   )
   const [filter, setFilter] = useSessionState("deploy.new.template.filter", "")
-  const [topic, setTopic] = useSessionState<TopicKey | "all">("deploy.new.template.topic", "all")
+  const [topic, setTopic] = useSessionState<TopicKey | "all" | "yours">(
+    "deploy.new.template.topic",
+    "all",
+  )
   // The id comes from the address and becomes a request path, so only a
   // blueprint identifier's shape is taken from it.
   const [selectedId, setSelectedId] = useSessionState(
@@ -187,29 +234,35 @@ export function SourceTemplate({
   )
   const definition = detail.data?.id === selectedId ? detail.data : undefined
 
-  // Every shelf that has a match, in shelf order — the chips count what the
+  // The templates added on this dashboard are a section of their own above
+  // the shelves: they are what this server's operators chose to keep, and a
+  // shelf of the reviewed catalogue is no place to look for them. Every shelf
+  // that has a match is listed in shelf order — the chips count what the
   // search left on each, so a search that empties a shelf says so before the
   // shelf is opened.
-  const shelves = useMemo(() => {
-    const needle = filter.trim().toLowerCase()
+  const needle = filter.trim().toLowerCase()
+  const { shelves, yoursMatched } = useMemo(() => {
+    const search = filter.trim().toLowerCase()
+    const { builtIn, yours } = splitCatalogue(catalogue.data ?? [])
     const map = new Map<TopicKey, BlueprintSummary[]>()
-    for (const entry of catalogue.data ?? []) {
-      if (
-        needle &&
-        !entry.name.toLowerCase().includes(needle) &&
-        !entry.description.toLowerCase().includes(needle)
-      )
-        continue
+    for (const entry of builtIn) {
+      if (!matchesSearch(entry, search)) continue
       const key = topicOf(entry)
       map.set(key, [...(map.get(key) ?? []), entry])
     }
-    return TOPICS.filter((shelf) => map.has(shelf.key)).map((shelf) => ({
-      ...shelf,
-      entries: map.get(shelf.key)!,
-    }))
+    return {
+      shelves: TOPICS.filter((shelf) => map.has(shelf.key)).map((shelf) => ({
+        ...shelf,
+        entries: map.get(shelf.key)!,
+      })),
+      yoursMatched: yours.filter((entry) => matchesSearch(entry, search)),
+    }
   }, [catalogue.data, filter])
-  const shown = topic === "all" ? shelves : shelves.filter((shelf) => shelf.key === topic)
-  const matched = shelves.reduce((total, shelf) => total + shelf.entries.length, 0)
+  const shown =
+    topic === "all" ? shelves : topic === "yours" ? [] : shelves.filter((s) => s.key === topic)
+  const showYours = topic === "all" || topic === "yours"
+  const matched =
+    shelves.reduce((total, shelf) => total + shelf.entries.length, 0) + yoursMatched.length
 
   const revealOnSmallScreen = (id: string) => {
     if (window.matchMedia("(min-width: 1280px)").matches) return
@@ -236,6 +289,11 @@ export function SourceTemplate({
   }
 
   const declared = definition?.inputs ?? []
+  const stackServices = definition?.services ?? []
+  const stackFootprint = stackServices.reduce(
+    (total, service) => total + service.resources.memoryMb,
+    0,
+  )
   // A field that must be filled is never behind a fold. Everything else about
   // `advanced` holds; what does not hold is hiding the one answer without
   // which the template cannot be used at all.
@@ -316,9 +374,13 @@ export function SourceTemplate({
     setFailure(undefined)
     let current = true
     try {
-      const profile: WorkloadProfile = definition.profile === "game" ? "game" : "service"
+      // A multi-service template runs through the Compose release path, so
+      // it is a Compose source the server renders from the definition.
+      const stack = (definition.services?.length ?? 0) > 0
+      const profile: WorkloadProfile =
+        definition.profile === "game" ? "game" : stack ? "compose" : "service"
       const source: DeploymentDraftSource = {
-        kind: "blueprint",
+        kind: stack ? "compose" : "blueprint",
         mode: "blueprint",
         blueprintId: definition.id,
         blueprintVersion: definition.version,
@@ -382,6 +444,12 @@ export function SourceTemplate({
               <FilterChip selected={topic === "all"} onClick={() => setTopic("all")}>
                 All <ChipCount>{matched}</ChipCount>
               </FilterChip>
+              <FilterChip
+                selected={topic === "yours"}
+                onClick={() => setTopic(topic === "yours" ? "all" : "yours")}
+              >
+                Yours <ChipCount>{yoursMatched.length}</ChipCount>
+              </FilterChip>
               {TOPICS.map((shelf) => {
                 const count = shelves.find((one) => one.key === shelf.key)?.entries.length ?? 0
                 return (
@@ -397,17 +465,57 @@ export function SourceTemplate({
             </ChipStrip>
           )}
           {catalogue.loading && !catalogue.data && <LoadingRows rows={4} />}
-          {catalogue.data && shown.length === 0 && (
+          {catalogue.data && shown.length === 0 && topic !== "all" && topic !== "yours" && (
             <EmptyNote>
               {matched === 0
                 ? "No template matches that search."
                 : "Nothing on this shelf matches."}
             </EmptyNote>
           )}
+          {catalogue.data && topic === "all" && matched === 0 && needle && (
+            <EmptyNote>No template matches that search.</EmptyNote>
+          )}
+          {catalogue.data && topic === "yours" && yoursMatched.length === 0 && needle && (
+            <EmptyNote>None of your templates matches that search.</EmptyNote>
+          )}
           {/* Padded by the cards' own lit edge, which would otherwise run
               under the scrollbar, and pulled back out so the cards still start
               where the search field does. */}
           <div className="-mx-3 space-y-5 px-3 pt-1 pb-3 xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
+            {catalogue.data && showYours && (yoursMatched.length > 0 || !needle) && (
+              <section className="space-y-2" aria-labelledby="your-templates">
+                <p id="your-templates" className="eyebrow">
+                  Your templates
+                </p>
+                {yoursMatched.length > 0 ? (
+                  <ChoiceGrid columns="fill" role="group" aria-label="Your templates">
+                    {yoursMatched.map((entry, index) => (
+                      <TemplateCard
+                        key={entry.id}
+                        entry={entry}
+                        index={index}
+                        selected={selectedId === entry.id}
+                        onSelect={() => select(entry)}
+                      />
+                    ))}
+                  </ChoiceGrid>
+                ) : (
+                  // The two ways to make one, where the reader is looking for
+                  // one: a running deployment's Save as template, and a
+                  // Compose file or an exported definition on the Templates
+                  // page.
+                  <EmptyNote>
+                    {YOUR_TEMPLATES_EMPTY}{" "}
+                    <Link
+                      href="/deploy/templates"
+                      className="rounded-sm text-foreground underline underline-offset-4 focus-ring"
+                    >
+                      Open Templates
+                    </Link>
+                  </EmptyNote>
+                )}
+              </section>
+            )}
             {shown.map((shelf) => (
               // The cards arrive staggered by their own index, so the group
               // does not also rise: that is one block animating twice.
@@ -418,47 +526,15 @@ export function SourceTemplate({
                     nothing, so the eyebrow would reach a reader and no one
                     else. */}
                 <ChoiceGrid columns="fill" role="group" aria-label={shelf.label}>
-                  {shelf.entries.map((entry, index) => {
-                    const usable = entry.deploymentSupported !== false
-                    return (
-                      <ChoiceCard
-                        key={entry.id}
-                        index={index}
-                        logo={<ProductLogo id={entry.id} />}
-                        title={entry.name}
-                        // The control's name is the verb and the template, not
-                        // the card's whole contents — see ChoiceCard (§12).
-                        verb={`Use ${entry.name}`}
-                        description={
-                          usable
-                            ? entry.description
-                            : entry.unavailableReason ||
-                              "This blueprint cannot be deployed by this dashboard version."
-                        }
-                        // How it is signed into stays on the card, where the
-                        // template is chosen (first-sign-in.tsx). The image
-                        // moved to the settings beside it: a registry path in
-                        // every card was the widest thing in the grid and what
-                        // made one card a line taller than its neighbour.
-                        trailing={
-                          <span className="mt-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pt-0.5">
-                            <AccessTag access={entry.access} />
-                            {entry.requiresAcceptance && <Tag tone="warning">licence</Tag>}
-                            {entry.privileged && <Tag tone="danger">privileged</Tag>}
-                            {!usable && <Tag tone="warning">Preview only</Tag>}
-                          </span>
-                        }
-                        selected={selectedId === entry.id}
-                        // A template this dashboard cannot deploy is still
-                        // drawn and still says why, and is dimmed and
-                        // unpressable rather than silently inert: when the
-                        // card is the control, a card with the control taken
-                        // out of it looks exactly like one that works.
-                        disabled={!usable}
-                        onClick={() => select(entry)}
-                      />
-                    )
-                  })}
+                  {shelf.entries.map((entry, index) => (
+                    <TemplateCard
+                      key={entry.id}
+                      entry={entry}
+                      index={index}
+                      selected={selectedId === entry.id}
+                      onSelect={() => select(entry)}
+                    />
+                  ))}
                 </ChoiceGrid>
               </div>
             ))}
@@ -483,7 +559,10 @@ export function SourceTemplate({
           <FlowPanelHeader
             title={
               <span className="flex min-w-0 items-center gap-2.5">
-                <ProductLogo id={selectedId} size="sm" />
+                <ProductLogo
+                  id={templateLogo({ id: selectedId, image: chosen?.image ?? "" })}
+                  size="sm"
+                />
                 <span className="truncate">{definition?.name ?? chosen?.name ?? "Template"}</span>
               </span>
             }
@@ -506,14 +585,19 @@ export function SourceTemplate({
                 <div className="min-w-0 space-y-1.5 text-xs text-muted-foreground">
                   <p className="flex min-w-0 flex-wrap items-center gap-2">
                     <Tag>{definition.provenance.license}</Tag>
-                    <Tag mono className="max-w-full truncate">
-                      {definition.image.reference}
-                    </Tag>
+                    {stackServices.length > 0 ? (
+                      <Tag>Compose stack</Tag>
+                    ) : (
+                      <Tag mono className="max-w-full truncate">
+                        {definition.image.reference}
+                      </Tag>
+                    )}
                   </p>
                   <p>
-                    Reviewed {definition.provenance.reviewedAt} by{" "}
-                    {definition.provenance.maintainer}. Recommended memory{" "}
-                    {definition.resources.memoryMb} MB.
+                    {templateProvenance(definition)}{" "}
+                    {stackServices.length > 0
+                      ? `Memory limits add up to ${stackFootprint} MB across ${plural(stackServices.length, "service")}.`
+                      : `Recommended memory ${definition.resources.memoryMb} MB.`}
                   </p>
                   {definition.update.notes && <p>{definition.update.notes}</p>}
                   <p className="flex flex-wrap gap-3">
@@ -543,6 +627,8 @@ export function SourceTemplate({
                 )}
 
                 <AccessPromise access={definition.access} />
+
+                {stackServices.length > 0 && <StackServices services={stackServices} />}
 
                 {definition.profile === "game" && (
                   <ExistingServerImport
@@ -675,6 +761,156 @@ export function SourceTemplate({
       )}
     </div>
   )
+}
+
+/**
+ * One template on a shelf or in Your templates: its mark, name and what it is
+ * for, with how it is signed into and what it runs said where it is chosen.
+ */
+function TemplateCard({
+  entry,
+  index,
+  selected,
+  onSelect,
+}: {
+  entry: BlueprintSummary
+  index: number
+  selected: boolean
+  onSelect: () => void
+}) {
+  const usable = entry.deploymentSupported !== false
+  return (
+    <ChoiceCard
+      index={index}
+      logo={<ProductLogo id={templateLogo(entry)} />}
+      title={entry.name}
+      // The control's name is the verb and the template, not the card's
+      // whole contents — see ChoiceCard (§12).
+      verb={`Use ${entry.name}`}
+      description={
+        usable
+          ? entry.description
+          : entry.unavailableReason ||
+            "This blueprint cannot be deployed by this dashboard version."
+      }
+      // How it is signed into stays on the card, where the template is
+      // chosen (first-sign-in.tsx). The image moved to the settings beside
+      // it: a registry path in every card was the widest thing in the grid
+      // and what made one card a line taller than its neighbour.
+      trailing={
+        <span className="mt-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pt-0.5">
+          <AccessTag access={entry.access} />
+          {/* A stack says so where it is chosen: what it runs is part of
+              what is being picked. */}
+          {(entry.services?.length ?? 0) > 0 && (
+            <Tag>{plural(entry.services?.length ?? 0, "service")}</Tag>
+          )}
+          {entry.requiresAcceptance && <Tag tone="warning">licence</Tag>}
+          {entry.privileged && <Tag tone="danger">privileged</Tag>}
+          {!usable && <Tag tone="warning">Preview only</Tag>}
+        </span>
+      }
+      selected={selected}
+      // A template this dashboard cannot deploy is still drawn and still
+      // says why, and is dimmed and unpressable rather than silently inert:
+      // when the card is the control, a card with the control taken out of
+      // it looks exactly like one that works.
+      disabled={!usable}
+      onClick={onSelect}
+    />
+  )
+}
+
+/**
+ * What a multi-service template runs, and what deploying it does by itself.
+ *
+ * The stack is part of what is being chosen — an application with its own
+ * database is a different thing to adopt from one that needs a server found
+ * for it — so its services are listed where the template is decided, each
+ * with its role, image and limit, and the one that owns the domain marked.
+ * What happens without anybody deciding it is hint text (§14): the private
+ * network, the stop-first release, and what a backup of a running database
+ * is and is not.
+ */
+function StackServices({ services }: { services: BlueprintService[] }) {
+  const publicService = services.find((service) =>
+    service.ports?.some((port) => port.exposure === "proxy"),
+  )
+  const privateServices = services.filter((service) => service !== publicService)
+  const outbound = privateServices.filter((service) => service.egress)
+  return (
+    <div className="min-w-0 space-y-2">
+      <p className="eyebrow">Services</p>
+      <ul className="min-w-0 divide-y divide-border/60" aria-label="Services this template runs">
+        {services.map((service) => {
+          const owner = service === publicService
+          return (
+            <li key={service.name} className="flex min-w-0 items-start gap-2.5 py-2 first:pt-0">
+              <ProductLogo id={imageProduct(service.image.reference)} size="sm" />
+              <span className="min-w-0 flex-1 space-y-0.5">
+                <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="font-mono text-body text-foreground">{service.name}</span>
+                  <Tag tone={owner ? "success" : "default"}>
+                    {owner ? "Public" : ROLE_LABELS[service.role]}
+                  </Tag>
+                  <span className="numeric ml-auto text-hint text-muted-foreground">
+                    {service.resources.memoryMb} MB
+                  </span>
+                </span>
+                <span className="block text-hint leading-relaxed text-muted-foreground">
+                  {service.purpose}
+                </span>
+                <span className="block truncate font-mono text-hint text-muted-foreground">
+                  {service.image.reference}
+                </span>
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+      <ul className="min-w-0 list-disc space-y-1 pl-4 text-hint leading-relaxed text-muted-foreground">
+        {publicService && (
+          <li>
+            Only <span className="font-mono text-foreground">{publicService.name}</span> is
+            reachable, through the project&apos;s address.{" "}
+            {privateServices.length > 0 &&
+              (privateServices.length === 1
+                ? `${listNames(privateServices)} publishes no port and stays on a private network with no route out`
+                : `${listNames(privateServices)} publish no ports and stay on a private network with no route out`) +
+                (outbound.length > 0
+                  ? `, except ${listNames(outbound)} for outbound requests.`
+                  : ".")}
+          </li>
+        )}
+        <li>
+          Deploys as one Compose stack: each deploy stops the running stack before starting the new
+          one, so expect a short interruption.
+        </li>
+        <li>
+          Shared passwords are generated on this server and handed to each service that needs them;
+          you never type or see them unless you reveal them.
+        </li>
+        <li>
+          Backups archive every volume of the stack. A copy of a running database&apos;s files is
+          not a consistent dump, so restore one into a stopped stack.
+        </li>
+      </ul>
+    </div>
+  )
+}
+
+const ROLE_LABELS: Record<BlueprintService["role"], string> = {
+  app: "Application",
+  worker: "Worker",
+  database: "Database",
+  cache: "Cache",
+}
+
+function listNames(services: BlueprintService[]) {
+  const names = services.map((service) => service.name)
+  return names.length <= 1
+    ? (names[0] ?? "")
+    : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
 }
 
 function BlueprintField({

@@ -8,12 +8,15 @@ import {
   Check,
   Copy,
   Crosshair,
+  Database,
+  Gauge,
   GitCommit,
   GitTag,
   Globe,
   Heart,
   Layers,
   LockClosed,
+  RefreshClockwise,
   Route,
   ShieldCheck,
   StopCircle,
@@ -47,6 +50,8 @@ import {
   sourceProduct,
   type ReleaseNodeState,
 } from "@/components/deploy/vocabulary"
+import { rehearsalOf, rehearsalSummary } from "@/components/deploy/rehearsal-model"
+import { replayOf, replaySummary } from "@/components/deploy/replay-model"
 
 /**
  * What a run's steps recorded, drawn as what each thing is.
@@ -126,11 +131,14 @@ const STEP_GLYPH: Record<string, Icon> = {
   build_artifact: Box,
   render_runtime: Layers,
   backup_gate: Archive,
+  rehearse_migration: Database,
   release_task: Terminal,
   provision_certificate: LockClosed,
   start_candidate: Box,
   verify_readiness: Heart,
   verify_smoke: Crosshair,
+  replay_traffic: RefreshClockwise,
+  canary: Gauge,
   activate: Route,
   retire_previous: StopCircle,
   record_release: GitTag,
@@ -185,6 +193,11 @@ function stepProduct(
         (runtime && RUNTIME_PRODUCT[runtime]) ??
         (deployment?.buildMethod === "compose" ? "docker-compose" : "docker")
       )
+    }
+    case "rehearse_migration": {
+      // The engine the copy ran, where the report names one.
+      const database = isRecord(evidence.database) ? evidence.database : undefined
+      return text(database?.engine)
     }
     case "provision_certificate":
       return "lets-encrypt"
@@ -280,6 +293,14 @@ export function stepSummary(step: DeploymentStep): string | undefined {
       const size = typeof artifact.sizeBytes === "number" ? bytes(artifact.sizeBytes) : undefined
       return [text(artifact.kind), size, platform].filter(Boolean).join(" · ")
     }
+    case "rehearse_migration": {
+      const report = rehearsalOf(evidence)
+      return report ? rehearsalSummary(report) : undefined
+    }
+    case "replay_traffic": {
+      const report = replayOf(evidence)
+      return report ? replaySummary(report) : undefined
+    }
     case "render_runtime":
     case "record_release":
       return typeof evidence.releaseNumber === "number"
@@ -307,7 +328,11 @@ export function stepSummary(step: DeploymentStep): string | undefined {
     }
     case "activate": {
       const route = isRecord(evidence.route) ? evidence.route : undefined
-      return text(route?.name)
+      // Said here, not only in the transcript: a cutover nothing verified
+      // is the one fact about this step worth a glance at the rail.
+      const ungated =
+        evidence.readinessGated === false ? "no readiness check gated the cutover" : ""
+      return [text(route?.name), ungated].filter(Boolean).join(" · ") || undefined
     }
     case "notify":
       return typeof evidence.channels === "number"
@@ -640,6 +665,8 @@ function CheckRow({ check }: { check: Json }) {
       <span className="min-w-0 font-medium">{String(check.name)}</span>
       {text(check.kind) && <Tag>{String(check.kind)}</Tag>}
       {check.required === true && <Tag>required</Tag>}
+      {/* Which of a replicated release's containers was asked. */}
+      {typeof check.replica === "number" && check.replica > 0 && <Tag>replica {check.replica}</Tag>}
       <span className="numeric ml-auto text-hint text-muted-foreground">
         {plural(attempts.length, "attempt")}
         {typeof last?.statusCode === "number" && ` · ${last.statusCode}`}

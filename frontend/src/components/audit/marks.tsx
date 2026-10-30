@@ -260,6 +260,21 @@ export function isMachine(entry: Pick<AuditEntry, "actor">) {
   return entry.actor in MACHINES
 }
 
+/**
+ * Which key wrote an entry, in the words its row has room for: the key's own
+ * name where the server recorded it, since an account holding a CI key and a
+ * laptop key needs to know which of the two changed something.
+ */
+export function keyWords(entry: Pick<AuditEntry, "actor" | "keyId" | "keyName">) {
+  if (entry.actor !== "token") return undefined
+  return entry.keyName ? `key ${entry.keyName}` : "API key"
+}
+
+/** The key's record number, for the tooltip over its name. */
+export function keyTitle(entry: Pick<AuditEntry, "keyId">) {
+  return entry.keyId ? `key #${entry.keyId}` : undefined
+}
+
 /** Who an entry names, in words: the account, else what acted without one. */
 export function actorName(entry: Pick<AuditEntry, "actor" | "username">) {
   return entry.username || MACHINES[entry.actor] || "anonymous"

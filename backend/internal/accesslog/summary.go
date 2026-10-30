@@ -27,6 +27,9 @@ type Filter struct {
 	// press on one of their rows narrows to.
 	Agent   string
 	Referer string
+	// Release keeps the requests one release answered, on a route that
+	// records which did (Entry.Release).
+	Release string
 	MinMs   float64
 	MaxMs   float64
 	// PagesOnly keeps the requests a person would call a page view and drops
@@ -137,6 +140,9 @@ func (f Filter) Match(e Entry) bool {
 		return false
 	}
 	if f.Host != "" && !strings.EqualFold(f.Host, e.Host) {
+		return false
+	}
+	if f.Release != "" && f.Release != e.Release {
 		return false
 	}
 	if f.Client != "" && !strings.HasPrefix(e.RemoteIP, f.Client) {
@@ -257,6 +263,9 @@ type Summary struct {
 	// clients that asked for several of them.
 	Probes   []Facet `json:"probes"`
 	Scanners []Facet `json:"scanners"`
+	// EdgeRules is how many requests each of the route's edge rules
+	// decided in the window, every rule that decided one listed.
+	EdgeRules []Facet `json:"edgeRules"`
 
 	// Audience is who the traffic was: the people among it, apart from the
 	// crawlers and scanners the tables above count alongside them.
@@ -314,6 +323,7 @@ type Collector struct {
 	agents   map[string]*Facet
 	referers map[string]*Facet
 	probes   map[string]*Facet
+	edge     map[string]*Facet
 	// pathLatencies is a bounded sample per path, so the top-paths table can
 	// say which route is slow rather than only that one is. Bounded twice:
 	// per path, and in how many paths are sampled at all, because a path
@@ -355,7 +365,7 @@ func NewCollector(f Filter) *Collector {
 		methods: map[string]*Facet{}, statuses: map[int]*Facet{},
 		paths: map[string]*Facet{}, hosts: map[string]*Facet{},
 		clients: map[string]*Facet{}, agents: map[string]*Facet{},
-		referers: map[string]*Facet{}, probes: map[string]*Facet{},
+		referers: map[string]*Facet{}, probes: map[string]*Facet{}, edge: map[string]*Facet{},
 		pathLatencies: map[string][]float64{},
 		byMinute:      map[int64]*minuteBucket{},
 		audience:      newAudienceTally(),
@@ -402,6 +412,9 @@ func (c *Collector) Feed(e Entry) {
 	c.bump(c.referers, source, e, failed, refused, probe)
 	if probe {
 		c.bump(c.probes, e.Path, e, failed, refused, probe)
+	}
+	if e.EdgeRule != "" {
+		c.bump(c.edge, e.EdgeRule, e, failed, refused, probe)
 	}
 	if e.timed {
 		if samples, ok := c.pathLatencies[e.Path]; ok || len(c.pathLatencies) < pathSampleKeys {
@@ -630,6 +643,9 @@ func (c *Collector) Result() *Result {
 	out.Summary.Agents = rank(c.agents, 8)
 	out.Summary.Referers = rank(c.referers, 10)
 	out.Summary.Probes = rank(c.probes, 10)
+	// Every rule that decided anything, not a top few: a route has at most
+	// 32 and the page reads each one's line.
+	out.Summary.EdgeRules = rank(c.edge, 40)
 	out.Summary.Scanners = rankScanners(c.clients)
 	out.Summary.Audience = c.audience.reading()
 	out.Summary.Statuses = rankStatuses(c.statuses)
@@ -760,6 +776,16 @@ func (c *Collector) histogram() ([]Bucket, int) {
 	return out, int(width / time.Second)
 }
 
+// Percentile is percentile's nearest-rank reading over values in any order,
+// for a caller holding a sample of its own: the deployment engine's traffic
+// replay compares a candidate's p95 with the record's over the same
+// requests, and the two must be the one percentile the page shows.
+func Percentile(values []float64, q float64) float64 {
+	sorted := append([]float64(nil), values...)
+	sort.Float64s(sorted)
+	return percentile(sorted, q)
+}
+
 // percentile reads the nearest-rank value of an already-sorted sample. Nearest
 // rank rather than interpolation because a latency percentile that reports a
 // duration no request actually took is a number an operator cannot go and find
@@ -829,4 +855,23 @@ func rankStatuses(from map[int]*Facet) []Facet {
 		out = out[:16]
 	}
 	return out
+}
+
+// ClientClass is what kind of client a request came from, in one word the
+// request pages and a trace both use: "scanner" for a probe of a path no
+// application serves, "bot" for a program that says it is one, "browser" for
+// a person's browser and "client" for anything else that sent an agent — an
+// SDK, a mobile app's HTTP stack. An absent agent is "unknown".
+func ClientClass(e Entry) string {
+	switch {
+	case IsProbe(e):
+		return "scanner"
+	case IsBot(e.UserAgent):
+		return "bot"
+	case deviceOf(e.UserAgent) != "":
+		return "browser"
+	case e.UserAgent != "":
+		return "client"
+	}
+	return "unknown"
 }

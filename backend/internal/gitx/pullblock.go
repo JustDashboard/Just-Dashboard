@@ -90,19 +90,23 @@ func unquotePath(p string) string {
 // only half finish.
 //
 // Asking costs a fetch, so it is asked only when there is something to ask
-// about: when no directory holding a tracked file belongs to anyone else —
-// nearly always — the pull goes ahead untouched. When some do, what decides it
-// is whether the pull writes into one of them, which needs the incoming
-// commit; a directory a container owns for its own data blocks only the pulls
-// that change it. Anything this cannot work out is left to the pull itself,
-// which reports its own failure.
+// about: when no directory holding a file belongs to anyone else — nearly
+// always — the pull goes ahead untouched. Untracked files count: a folder
+// holding nothing but files git has not been told about yet is exactly where
+// a pull lands the tracked versions of them, and missing it sent the operator
+// to Discard, which git, unable to delete in that folder either, refused.
+// --directory names a wholly untracked folder once, an empty one included.
+// When some do, what decides it is whether the pull writes into one of them,
+// which needs the incoming commit; a directory a container owns for its own
+// data blocks only the pulls that change it. Anything this cannot work out is
+// left to the pull itself, which reports its own failure.
 func (s *Service) pullWritable(ctx context.Context, path string, fetch []string, target string) error {
 	owner, ok := hostexec.OwnerOf(path)
 	if !ok || fetch == nil {
 		return nil
 	}
-	tracked, err := s.run(ctx, path, "ls-files", "-z")
-	if err != nil || len(hostexec.Unwritable(path, owner, splitNul(tracked))) == 0 {
+	present, err := s.run(ctx, path, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--directory")
+	if err != nil || len(hostexec.Unwritable(path, owner, splitNul(present))) == 0 {
 		return nil
 	}
 	if _, err := s.runTimeout(ctx, path, 2*time.Minute, fetch...); err != nil {

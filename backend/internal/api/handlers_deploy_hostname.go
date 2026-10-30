@@ -47,10 +47,13 @@ type hostnameSuggestion struct {
 	// empty when it has no way to. "webroot" keeps nginx serving while
 	// certbot writes challenge files; "standalone" needs port 80 free.
 	CertificateMethod string `json:"certificateMethod,omitempty"`
-	CertificateIssue  string `json:"certificateIssue,omitempty"`
-	Method            string `json:"method"`
-	Detail            string `json:"detail"`
-	Address           string `json:"address,omitempty"`
+	// CertificateDNSProvider names, for a wildcard, whose credentials saved
+	// under Certificates the run would prove it with ("dns-01").
+	CertificateDNSProvider string `json:"certificateDnsProvider,omitempty"`
+	CertificateIssue       string `json:"certificateIssue,omitempty"`
+	Method                 string `json:"method"`
+	Detail                 string `json:"detail"`
+	Address                string `json:"address,omitempty"`
 	// Resolves answers, for a hostname an administrator typed, whether its
 	// DNS already points at this server — the record they have to create is
 	// an A record to Address. A pointer for the same reason as NameTaken: a
@@ -79,9 +82,28 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 	// A hostname that is given is being asked about, not replaced: the operator
 	// has typed their own domain and wants to know whether HTTPS will work.
 	if chosen := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("hostname"))); chosen != "" {
+		// A name served through Cloudflare Tunnel is not reached at this
+		// server's address and needs no certificate here: the public-IP DNS
+		// check and the certificate question say nothing about it.
+		if r.URL.Query().Get("tunnel") == "1" {
+			httpx.JSON(w, http.StatusOK, s.tunnelHostnameSuggestion(ctx, chosen))
+			return nil
+		}
 		suggestion := hostnameSuggestion{Hostname: chosen, Method: "custom"}
 		suggestion.Covered, suggestion.CertificateName = s.certificateCovering(ctx, chosen)
-		suggestion.CertificateMethod, suggestion.CertificateIssue = s.certificateMethod(ctx)
+		if strings.HasPrefix(chosen, "*.") {
+			// Which provider answers is read from the zone's nameservers: a
+			// lookup of a name the caller chose, kept with administrators
+			// like the resolution below.
+			if httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+				suggestion.CertificateMethod, suggestion.CertificateDNSProvider, suggestion.CertificateIssue =
+					s.wildcardCertificateMethod(ctx, chosen)
+			} else {
+				suggestion.CertificateIssue = "A wildcard is proved only over a DNS challenge, with credentials saved under Certificates; an administrator sees which provider answers for it."
+			}
+		} else {
+			suggestion.CertificateMethod, suggestion.CertificateIssue = s.certificateMethod(ctx)
+		}
 		suggestion.Detail = certificateDetail(suggestion)
 		if address := firstIPv4(proxysvc.PublicAddresses()); address != "" {
 			suggestion.Address = address
@@ -136,10 +158,34 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 	return nil
 }
 
+// tunnelHostnameSuggestion answers for a name to be served through the
+// tunnel: which tunnel, and that Cloudflare terminates its HTTPS and its
+// record is made as the release goes live.
+func (s *Server) tunnelHostnameSuggestion(ctx context.Context, hostname string) hostnameSuggestion {
+	suggestion := hostnameSuggestion{Hostname: hostname, Method: "tunnel", Covered: true}
+	if strings.HasPrefix(hostname, "*.") {
+		suggestion.Covered = false
+		suggestion.Detail = "A wildcard is not routed through Cloudflare Tunnel here: route each name."
+		return suggestion
+	}
+	name, connected := s.tunnelObserver()(ctx)
+	if !connected {
+		suggestion.Covered = false
+		suggestion.Detail = "No Cloudflare Tunnel is connected: connect one under Proxy › Tunnel, or serve the name at this server's address."
+		return suggestion
+	}
+	suggestion.CertificateName = "Cloudflare"
+	suggestion.Detail = "Served through the Cloudflare Tunnel " + name + ": Cloudflare terminates HTTPS, nothing is issued here, and the name's CNAME to the tunnel is created as the release goes live."
+	return suggestion
+}
+
 func certificateDetail(suggestion hostnameSuggestion) string {
 	switch {
 	case suggestion.Covered:
 		return "The " + suggestion.CertificateName + " certificate already covers it."
+	case suggestion.CertificateDNSProvider != "":
+		return "No certificate covers it yet; the release proves it over a DNS challenge with the " +
+			suggestion.CertificateDNSProvider + " credentials saved under Certificates."
 	case suggestion.CertificateMethod != "":
 		return "No certificate covers it yet; one can be issued for it from here."
 	case suggestion.CertificateIssue != "":
@@ -211,6 +257,21 @@ func (s *Server) certificateMethod(ctx context.Context) (string, string) {
 		return "", err.Error()
 	}
 	return method, ""
+}
+
+// wildcardCertificateMethod is certificateMethod for a wildcard, which no
+// HTTP challenge proves: "dns-01" and the provider whose saved credentials
+// the run would use, or the refusal the run would stop with — the one
+// decision proxysvc makes for both.
+func (s *Server) wildcardCertificateMethod(ctx context.Context, wildcard string) (string, string, string) {
+	if s.modules.proxy == nil {
+		return "", "", "The certificate service is unavailable. Check the dashboard service status."
+	}
+	provider, err := s.modules.proxy.DeploymentDNSProvider(ctx, wildcard)
+	if err != nil {
+		return "", "", err.Error()
+	}
+	return "dns-01", provider.Name, ""
 }
 
 // hostnameSlug turns a deployment name into one DNS label. It carries no

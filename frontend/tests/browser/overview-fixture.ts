@@ -95,6 +95,21 @@ export const databaseFleet = {
   needsCredentials: [],
 }
 
+/** GET /proxy/vhosts, which only the Add a site shortcut counts. */
+export const sites = ["shop.example.test", "status.example.test"].map((domain) => ({
+  name: domain,
+  kind: "nginx",
+  path: `/etc/nginx/sites-available/${domain}`,
+  enabled: true,
+  formEditable: true,
+  serverNames: [domain],
+  listen: ["443 ssl"],
+  upstreams: ["http://127.0.0.1:3000"],
+  tls: true,
+  modified: iso(now),
+  size: 1200,
+}))
+
 export const certificates = [
   ["shop.example.test", 61],
   ["status.example.test", 12],
@@ -442,6 +457,7 @@ export async function mockOverview(
   await page.route("**/api/v1/systemd/", (route) => json(route, units))
   await page.route("**/api/v1/remote-desktop/", (route) => json(route, remoteDesktop))
   await page.route("**/api/v1/certificates/", (route) => json(route, certificates))
+  await page.route("**/api/v1/proxy/vhosts", (route) => json(route, sites))
   await page.route("**/api/v1/backups/", (route) => json(route, backups))
   await page.route("**/api/v1/git/", (route) => json(route, { available: true, repos }))
   await page.route("**/api/v1/packages/updates", (route) => json(route, packageUpdates))

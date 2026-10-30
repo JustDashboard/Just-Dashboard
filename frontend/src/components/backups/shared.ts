@@ -9,9 +9,54 @@ export function targetLabel(job: BackupJob): string {
       return `S3 · ${job.target.bucket ?? ""}`
     case "b2":
       return `Backblaze B2 · ${job.target.bucket ?? ""}`
+    case "sftp":
+      return `SFTP · ${sftpPlace(job)}`
+    case "rclone":
+      return `${rcloneService(job.target.remoteType)} · ${job.target.path || "/"}`
     default:
       return job.target.path ?? "Local directory"
   }
+}
+
+/** An SFTP destination the way scp and sftp write one: user@host:path, the port only when not 22. */
+export function sftpPlace(job: Pick<BackupJob, "target">): string {
+  const { host = "", port, username = "", path = "" } = job.target
+  const server = host.includes(":") ? `[${host}]` : host
+  return `${username}@${server}${port && port !== 22 ? `:${port}` : ""}:${path}`
+}
+
+/** The storage services rclone remotes name, in their own words. */
+const RCLONE_SERVICES: Record<string, string> = {
+  azureblob: "Azure Blob Storage",
+  azurefiles: "Azure Files",
+  b2: "Backblaze B2",
+  box: "Box",
+  drive: "Google Drive",
+  dropbox: "Dropbox",
+  ftp: "FTP",
+  gcs: "Google Cloud Storage",
+  "google cloud storage": "Google Cloud Storage",
+  hidrive: "HiDrive",
+  jottacloud: "Jottacloud",
+  koofr: "Koofr",
+  mega: "MEGA",
+  onedrive: "OneDrive",
+  pcloud: "pCloud",
+  protondrive: "Proton Drive",
+  s3: "S3",
+  seafile: "Seafile",
+  sftp: "SFTP",
+  smb: "SMB share",
+  storj: "Storj",
+  swift: "OpenStack Swift",
+  webdav: "WebDAV",
+  yandex: "Yandex Disk",
+  zoho: "Zoho WorkDrive",
+}
+
+export function rcloneService(remoteType: string | undefined): string {
+  if (!remoteType) return "rclone remote"
+  return RCLONE_SERVICES[remoteType] ?? `rclone ${remoteType}`
 }
 
 /** The schedule as a sentence, or the word for a job that only runs by hand. */

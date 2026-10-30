@@ -16,6 +16,9 @@
 #     the longest `_`-separated prefix of it that some test file shares
 #     (`handlers_db_fleet.go` runs `handlers_db*_test.go`), and the whole
 #     package only when no test file shares even its first word;
+#   - for a change under sdk/, the deployment API clients' own checks: `tsc`
+#     and `bun test` in sdk/typescript, `go vet` and `go test` in sdk/go
+#     (its own module, which the backend's packages do not reach);
 #   - the browser specs that open a page the change renders. A changed file is
 #     followed through `@/` imports up to the pages and layouts that use it,
 #     and a spec is picked when it names one of those addresses. A module whose
@@ -257,6 +260,27 @@ if [ "${#lintable[@]}" -gt 0 ]; then
 		bunx tsc --noEmit
 		bun test src
 	)
+fi
+
+sdk_go=
+sdk_ts=
+for f in "${changed[@]}"; do
+	case $f in
+	sdk/go/*) sdk_go=1 ;;
+	sdk/typescript/*) sdk_ts=1 ;;
+	esac
+done
+if [ -n "$sdk_ts" ]; then
+	# The client has no dependencies of its own; the frontend's TypeScript
+	# compiler checks it.
+	if [ ! -x frontend/node_modules/.bin/tsc ]; then
+		echo "sdk/typescript: run bun install --frozen-lockfile in frontend/ first, for tsc" >&2
+		exit 1
+	fi
+	(cd sdk/typescript && ../../frontend/node_modules/.bin/tsc -p . && bun test)
+fi
+if [ -n "$sdk_go" ]; then
+	(cd sdk/go && GOWORK=off go vet ./... && GOWORK=off go test ./...)
 fi
 
 gotest=

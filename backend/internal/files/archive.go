@@ -48,6 +48,9 @@ var (
 // beginning "../". An archive this server writes must never carry the path
 // traversal its own extractor exists to refuse.
 func (s *Service) ResolveArchive(base string, paths []string) (string, []string, error) {
+	if s.run != nil {
+		return hosted3(s, func(s *Service) (string, []string, error) { return s.ResolveArchive(base, paths) })
+	}
 	baseDir, err := s.Resolve(base)
 	if err != nil {
 		return "", nil, err
@@ -72,6 +75,9 @@ func (s *Service) ResolveArchive(base string, paths []string) (string, []string,
 // download costs no temporary space. Callers resolve through ResolveArchive
 // first; nothing here checks a path.
 func (s *Service) Compress(w io.Writer, baseDir string, members []string, format ArchiveFormat) error {
+	if s.run != nil {
+		return hosted1(s, func(s *Service) error { return s.Compress(w, baseDir, members, format) })
+	}
 	switch format {
 	case FormatZip:
 		return writeZip(w, baseDir, members)
@@ -166,6 +172,9 @@ func writeZip(w io.Writer, baseDir string, paths []string) error {
 // "../../etc/cron.d/evil" is the classic path-traversal write primitive, and
 // refusing it is not optional.
 func (s *Service) Extract(ctx context.Context, archivePath, dest string) ([]string, error) {
+	if s.run != nil {
+		return hosted2(s, func(s *Service) ([]string, error) { return s.Extract(ctx, archivePath, dest) })
+	}
 	// Serialising extraction keeps two requests from each reserving the same
 	// free space and then consuming it together.
 	s.extractMu.Lock()
@@ -179,25 +188,29 @@ func (s *Service) Extract(ctx context.Context, archivePath, dest string) ([]stri
 	if err != nil {
 		return nil, err
 	}
+	made := unmade(target)
+	base := madeBase(target, made)
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return nil, err
 	}
 	byteLimit, err := extractByteLimit(target)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, handDown(base, made))
 	}
 	lower := strings.ToLower(src)
 	budget := &extractBudget{ctx: ctx, maxBytes: byteLimit, maxEntries: maxExtractEntries}
+	var written []string
 	switch {
 	case strings.HasSuffix(lower, ".zip"):
-		return extractZip(src, target, budget)
+		written, err = extractZip(src, target, budget, &made)
 	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"):
-		return extractTar(src, target, true, budget)
+		written, err = extractTar(src, target, true, budget, &made)
 	case strings.HasSuffix(lower, ".tar"):
-		return extractTar(src, target, false, budget)
+		written, err = extractTar(src, target, false, budget, &made)
 	default:
-		return nil, fmt.Errorf("unsupported archive format: %s", filepath.Base(src))
+		err = fmt.Errorf("unsupported archive format: %s", filepath.Base(src))
 	}
+	return written, errors.Join(err, handDown(base, made))
 }
 
 func extractByteLimit(dest string) (int64, error) {
@@ -268,7 +281,9 @@ func (w *extractWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func extractTar(src, dest string, compressed bool, budget *extractBudget) ([]string, error) {
+// extractTar and extractZip record in made each folder and file they create,
+// rather than replace, for handDown.
+func extractTar(src, dest string, compressed bool, budget *extractBudget, made *[]string) ([]string, error) {
 	f, err := os.Open(src)
 	if err != nil {
 		return nil, err
@@ -306,6 +321,7 @@ func extractTar(src, dest string, compressed bool, budget *extractBudget) ([]str
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
+			*made = append(*made, unmade(path)...)
 			if err := safepath.Mkdir(path, os.FileMode(hdr.Mode).Perm()); err != nil {
 				return written, err
 			}
@@ -319,6 +335,7 @@ func extractTar(src, dest string, compressed bool, budget *extractBudget) ([]str
 				return written, err
 			}
 		case tar.TypeReg:
+			*made = append(*made, unmade(path)...)
 			if err := safepath.MkdirParents(path); err != nil {
 				return written, err
 			}
@@ -342,7 +359,7 @@ func extractTar(src, dest string, compressed bool, budget *extractBudget) ([]str
 	}
 }
 
-func extractZip(src, dest string, budget *extractBudget) ([]string, error) {
+func extractZip(src, dest string, budget *extractBudget, made *[]string) ([]string, error) {
 	zr, err := zip.OpenReader(src)
 	if err != nil {
 		return nil, err
@@ -358,6 +375,7 @@ func extractZip(src, dest string, budget *extractBudget) ([]string, error) {
 		if err != nil {
 			return written, err
 		}
+		*made = append(*made, unmade(path)...)
 		if entry.FileInfo().IsDir() {
 			if err := safepath.Mkdir(path, entry.Mode().Perm()); err != nil {
 				return written, err

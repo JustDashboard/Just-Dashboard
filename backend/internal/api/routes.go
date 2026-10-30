@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"reflect"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
@@ -20,6 +21,9 @@ import (
 // cannot use, but the server re-decides every request on its own.
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
+	// The deploy key gate asks this router which route a request will reach,
+	// so it is the whole tree, read at request time once it is built.
+	root := r
 	r.Use(middleware.RequestID)
 	r.Use(httpx.RealIP(s.Cfg.TrustedProxies))
 	r.Use(httpx.Recoverer(s.Log))
@@ -58,6 +62,14 @@ func (s *Server) Routes() http.Handler {
 			r.Use(httpx.AuditMutations(s.Audit))
 			r.Method(http.MethodPost, "/deploy/{id}/hooks/{triggerID}", s.handle(s.handleDeploymentGenericWebhook))
 		})
+		// A tailnet-only deployment's gate asks here about every request it
+		// is sent (handlers_tailnet_whois.go). No session, as a webhook has
+		// none: the handler answers only the proxy — a loopback caller no
+		// other proxy forwarded — and refuses anybody else before it looks
+		// anything up. Outside the API rate limit, because every request to
+		// the deployment is one call here, and its few-second cache, not a
+		// budget per address, is what bounds what reaches tailscaled.
+		s.mountTailnetGate(r)
 
 		if s.Cfg.AgentMode {
 			// An agent has no human login surface at all: no password route,
@@ -71,7 +83,11 @@ func (s *Server) Routes() http.Handler {
 				r.Use(httpx.AuditMutations(s.Audit))
 				r.Use(httpx.RequireCSRF)
 				r.Method(http.MethodPost, "/auth/login", s.handle(s.handleLogin))
+				// A passkey's sign-in is a sign-in: the same budget per
+				// address, the same audit, the same session at the end.
+				s.mountPasskeySignInFinish(r)
 			})
+			s.mountPasskeySignIn(r)
 
 			// Half-authenticated: password proved, second factor outstanding.
 			r.Group(func(r chi.Router) {
@@ -102,7 +118,9 @@ func (s *Server) Routes() http.Handler {
 			if s.Cfg.AgentMode {
 				r.Use(httpx.HubOnly(s.Agent))
 			} else {
-				r.Use(s.Authn.Authenticate)
+				// The one group a deploy key can enter, and only for the
+				// routes deployKeyRoutes lists (deploy_keys.go).
+				r.Use(s.Authn.AuthenticateFeatures(s.deployKeyGate(root), s.Audit))
 			}
 			r.Use(s.apiLim.ByPrincipal)
 			r.Use(httpx.AuditMutations(s.Audit))
@@ -128,6 +146,8 @@ func (s *Server) Routes() http.Handler {
 			s.mountDeployRoutes(r)
 			s.mountJobRoutes(r)
 			s.mountRemoteDesktopRoutes(r)
+			s.mountMapRoutes(r)
+			s.mountCLIRoutes(r)
 		})
 
 		if !s.Cfg.AgentMode {
@@ -157,6 +177,12 @@ func (s *Server) Routes() http.Handler {
 			})
 		}
 	})
+	// The OpenAPI description of the deployment routes is read off this
+	// finished router (deploy_openapi.go), so it describes what was mounted.
+	// It is built when first asked for rather than here: it costs ten times
+	// what the rest of Routes does, and the tests build routes by the
+	// thousand.
+	s.deployOpenAPI.Store(&deployOpenAPISource{root: root})
 	return r
 }
 
@@ -171,6 +197,9 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/sessions", s.handle(s.handleListOwnSessions))
 		r.Method(http.MethodDelete, "/sessions/{id}", s.handle(s.handleRevokeOwnSession))
 		r.Method(http.MethodPost, "/sessions/revoke-others", s.handle(s.handleRevokeOtherSessions))
+		// Passkeys are the account holder's own, from a complete session;
+		// registering one asks for the password (and code) again.
+		s.mountAccountPasskeys(r)
 		r.Method(http.MethodPatch, "/profile", s.handle(s.handleUpdateProfile))
 		r.Method(http.MethodPut, "/workspace", s.handle(s.handleSetWorkspace))
 		r.Method(http.MethodGet, "/avatar", s.handle(s.handleOwnAvatar))
@@ -186,6 +215,10 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 			// A key for an AI client, and the databases it reaches
 			// (handlers_mcp_keys.go).
 			r.Method(http.MethodPost, "/mcp", s.handle(s.handleCreateMCPToken))
+			// A key for the jd command line and CI (deploy_keys.go): it holds
+			// the administrator role, so only an administrator makes one.
+			r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
+				Method(http.MethodPost, "/deploy", s.handle(s.handleCreateDeployToken))
 			r.Method(http.MethodPut, "/{id}/connections", s.handle(s.handleSetMCPTokenConnections))
 			r.Method(http.MethodDelete, "/{id}", s.handle(s.handleRevokeToken))
 			r.Group(func(r chi.Router) {
@@ -231,8 +264,29 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 // hand, after classifying the statement.
 func (s *Server) destructive(r chi.Router, fn func(chi.Router)) {
 	r.Group(func(r chi.Router) {
+		r.Use(markDestructive)
 		r.Use(httpx.RequireCapability(auth.CapDestructive))
 		r.Use(s.destrLim.ByPrincipal)
 		fn(r)
 	})
+}
+
+// markDestructive is s.destructive's mark on every route it wraps. It does
+// nothing to a request; its presence in a route's middleware chain, found by
+// function identity as requiresSession finds httpx.RequireSession, is how the
+// deployment API's description (x-destructive) and the MCP tools generated
+// from it read a route as destructive. RequireCapability is a closure and
+// cannot be told apart from the other capabilities' by identity.
+func markDestructive(next http.Handler) http.Handler { return next }
+
+// isDestructive reports whether s.destructive wraps a route, read off the
+// middleware chain chi.Walk gives for it.
+func isDestructive(middlewares []func(http.Handler) http.Handler) bool {
+	want := reflect.ValueOf(markDestructive).Pointer()
+	for _, mw := range middlewares {
+		if reflect.ValueOf(mw).Pointer() == want {
+			return true
+		}
+	}
+	return false
 }

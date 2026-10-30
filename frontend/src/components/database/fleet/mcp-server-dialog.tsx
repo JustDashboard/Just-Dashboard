@@ -1,10 +1,11 @@
 "use client"
 
-import { EXPIRY, useApiKeys, useApiOrigin } from "@/components/account/api-keys"
+import { DeploymentChoice, EXPIRY, useApiKeys, useApiOrigin } from "@/components/account/api-keys"
 import { usableKeys } from "@/components/account/access"
 import {
   MCP_CLIENTS,
   MCP_PATH,
+  chosenDeployments,
   clientConfig,
   grantList,
   grantsOf,
@@ -37,17 +38,17 @@ import { keyProduct } from "@/lib/clients"
 import { calendarDate, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
-import type { ApiToken, DbConnection } from "@/lib/types"
+import type { ApiToken, ApiTokenDeployments, DbConnection } from "@/lib/types"
 import { useRef, useState } from "react"
 
 /**
- * Where an AI client reaches the databases: the MCP endpoint, the keys made
- * for it, and the databases each key was given. A key here opens the MCP
- * endpoint and nothing else, and reaches only what it was given, each either
- * to read or to change; the server holds every call to that and to its
- * owner's role, refuses protected databases outright, and audits each call.
- * It opens from the control center beside Metrics export, because a key
- * spans databases.
+ * Where an AI client reaches the databases and the deployments: the MCP
+ * endpoint, the keys made for it, and what each key was given. A key here
+ * opens the MCP endpoint and nothing else, and reaches only what it was given:
+ * each database to read or to change, and the deployments to read or to
+ * deploy. The server holds every call to that and to its owner's role,
+ * refuses protected databases outright, and audits each call. It opens from
+ * the control center beside Metrics export, because a key spans databases.
  */
 export function McpServer() {
   const [open, setOpen] = useState(false)
@@ -77,8 +78,41 @@ type View =
   | { kind: "edit"; token: ApiToken; draft: Draft }
   | { kind: "made"; token: ApiToken; secret: string }
 
-/** A key being made or re-pointed. The name and expiry are a new key's alone. */
-type Draft = { name: string; ttl: string; grants: Grants }
+/**
+ * A key being made or re-pointed. The name and expiry are a new key's alone;
+ * every and chosen are which deployments its deployment grant reaches, and
+ * operations whether it is offered the tools generated from the deployment API.
+ */
+type Draft = {
+  name: string
+  ttl: string
+  grants: Grants
+  deployments: ApiTokenDeployments
+  every: boolean
+  chosen: ReadonlySet<number>
+  operations: boolean
+}
+
+/**
+ * Whether a draft reaches anything at all, which the server asks of every key,
+ * and names at least one deployment when it is narrowed to some.
+ */
+const reachesSomething = (draft: Draft) =>
+  (grantList(draft.grants).length > 0 || draft.deployments !== "") &&
+  (draft.deployments === "" || draft.every || draft.chosen.size > 0)
+
+const deploymentIdsOf = (draft: Draft) =>
+  chosenDeployments(draft.deployments, draft.every, draft.chosen)
+
+/** The generated tools mean nothing to a key given no deployments, so it has them off. */
+const operationsOf = (draft: Draft) => draft.deployments !== "" && draft.operations
+
+/** Whether a re-pointed key's deployments differ from what it reaches now. */
+const sameDeployments = (draft: Draft, token: ApiToken) =>
+  draft.deployments === (token.deployments ?? "") &&
+  operationsOf(draft) === (token.operations ?? false) &&
+  deploymentIdsOf(draft).join(",") ===
+    [...(token.deployments ? (token.deploymentIds ?? []) : [])].sort((a, b) => a - b).join(",")
 
 function McpServerDialog({
   onClose,
@@ -135,23 +169,27 @@ function McpServerDialog({
       if (view.kind === "edit") {
         const saved = await put<ApiToken>(`/tokens/${view.token.id}/connections`, {
           connections,
+          deployments: draft.deployments,
+          deploymentIds: deploymentIdsOf(draft),
+          operations: operationsOf(draft),
         })
-        notify.success(
-          `${saved.name} reaches ${connections.length === 1 ? "1 database" : `${connections.length} databases`}`,
-        )
+        notify.success(`${saved.name} ${grantSummary(saved, nameOf)}`)
         setView({ kind: "keys" })
       } else {
         const made = await post<{ token: ApiToken; secret: string }>("/tokens/mcp", {
           name: draft.name.trim(),
           ttlDays: Number(draft.ttl),
           connections,
+          deployments: draft.deployments,
+          deploymentIds: deploymentIdsOf(draft),
+          operations: operationsOf(draft),
         })
         setView({ kind: "made", token: made.token, secret: made.secret })
       }
       keys.refresh()
     } catch (err) {
       notify.error(
-        view.kind === "edit" ? "Could not change the key's databases" : "Could not create the key",
+        view.kind === "edit" ? "Could not change what the key reaches" : "Could not create the key",
         err,
       )
     } finally {
@@ -159,12 +197,11 @@ function McpServerDialog({
     }
   }
   const ready =
-    (view.kind === "new" &&
-      view.draft.name.trim() !== "" &&
-      grantList(view.draft.grants).length > 0) ||
+    (view.kind === "new" && view.draft.name.trim() !== "" && reachesSomething(view.draft)) ||
     (view.kind === "edit" &&
-      grantList(view.draft.grants).length > 0 &&
-      !sameGrants(view.draft.grants, grantsOf(view.token)))
+      reachesSomething(view.draft) &&
+      (!sameGrants(view.draft.grants, grantsOf(view.token)) ||
+        !sameDeployments(view.draft, view.token)))
 
   return (
     <>
@@ -176,12 +213,12 @@ function McpServerDialog({
           view.kind === "new"
             ? "New MCP key"
             : view.kind === "edit"
-              ? `Databases for ${view.token.name}`
+              ? `What ${view.token.name} reaches`
               : view.kind === "made"
                 ? "Your new MCP key"
                 : "MCP server"
         }
-        description="Let an AI client such as Claude Code, Cursor or VS Code read and query the databases you choose."
+        description="Let an AI client such as Claude Code, Cursor or VS Code query the databases you choose, and read or deploy the deployments you choose."
         footer={
           view.kind === "new" || view.kind === "edit" ? (
             <>
@@ -189,7 +226,7 @@ function McpServerDialog({
                 Cancel
               </Button>
               <Button onClick={() => void save()} disabled={!ready || busy} pending={busy}>
-                {view.kind === "edit" ? "Save databases" : "Create key"}
+                {view.kind === "edit" ? "Save" : "Create key"}
               </Button>
             </>
           ) : (
@@ -231,7 +268,21 @@ function McpServerDialog({
                   size="sm"
                   variant="outline"
                   onClick={() =>
-                    setView({ kind: "new", draft: { name: "claude-code", ttl: "90", grants: {} } })
+                    setView({
+                      kind: "new",
+                      draft: {
+                        name: "claude-code",
+                        ttl: "90",
+                        grants: {},
+                        deployments: "",
+                        every: true,
+                        chosen: new Set(),
+                        // A new key is offered the deployment API's tools
+                        // unless they are turned off; a key made before them
+                        // is not, until its owner turns them on.
+                        operations: true,
+                      },
+                    })
                   }
                 >
                   <Plus className="size-4" />
@@ -245,7 +296,7 @@ function McpServerDialog({
                 <LoadingRows rows={2} />
               ) : mine.length === 0 ? (
                 <EmptyNote>
-                  No MCP keys yet. A key reaches only the databases you give it.
+                  No MCP keys yet. A key reaches only the databases and deployments you give it.
                 </EmptyNote>
               ) : (
                 <RowList aria-label="MCP keys">
@@ -282,14 +333,22 @@ function McpServerDialog({
                         verbs={[
                           {
                             key: "edit",
-                            label: "Edit databases",
+                            label: "Edit access",
                             icon: Pencil,
                             inline: true,
                             run: () =>
                               setView({
                                 kind: "edit",
                                 token,
-                                draft: { name: token.name, ttl: "0", grants: grantsOf(token) },
+                                draft: {
+                                  name: token.name,
+                                  ttl: "0",
+                                  grants: grantsOf(token),
+                                  deployments: token.deployments ?? "",
+                                  every: (token.deploymentIds ?? []).length === 0,
+                                  chosen: new Set(token.deploymentIds ?? []),
+                                  operations: token.operations ?? false,
+                                },
                               }),
                           },
                           {
@@ -312,8 +371,13 @@ function McpServerDialog({
               and explain or run read-only queries. Where the key may change a database it can run
               one statement at a time, held to your role: a delete, an overwrite or a drop needs an
               administrator. Protected databases are never reachable, and every call is in the audit
-              log as the shape of its statement, without its values.
-              {!canRun && " Your role runs no SQL, so your keys can read structure and rows only."}
+              log as the shape of its statement, without its values. A key given the deployments —
+              every one or the ones you choose — lists them and reads their runs and transcripts;
+              one that may deploy also queues a deploy or a rollback of a production environment, as
+              the deployment pages would. With the deployment API on, every deployment route its
+              grant may call is a tool as well, held to what a deploy key may do and to your role.
+              {!canRun &&
+                " Your role runs no SQL and deploys nothing, so your keys can read structure, rows and the deployments only."}
             </FormNote>
           </div>
         )}
@@ -348,7 +412,7 @@ function KeyFields({
 }) {
   const { engineFor } = useDatabases()
   const now = useNow(30_000)
-  const { name, ttl, grants } = draft
+  const { name, ttl, grants, deployments, every, chosen, operations } = draft
   const setGrants = (next: Grants) => onChange({ ...draft, grants: next })
 
   const toggle = (id: number, on: boolean) => {
@@ -450,6 +514,63 @@ function KeyFields({
         )}
       </Field>
 
+      <Field
+        label="Deployments"
+        hint={
+          !canRun
+            ? "Your role deploys nothing, so a key you make reads the deployments at most."
+            : !canChange
+              ? "This key was made to read only, so it deploys nothing."
+              : DEPLOYMENT_HINTS[deployments]
+        }
+      >
+        {/* A toggle group reads an empty value as nothing pressed, so None
+            has a word of its own here and is sent as the empty grant. */}
+        <Segments
+          label="What the key may do with the deployments"
+          value={deployments || "none"}
+          onChange={(next) => onChange({ ...draft, deployments: next === "none" ? "" : next })}
+          options={[
+            { value: "none", label: "None" },
+            { value: "read", label: "Read" },
+            { value: "deploy", label: "Deploy", disabled: !canChange },
+          ]}
+        />
+      </Field>
+
+      {deployments !== "" && (
+        <DeploymentChoice
+          label="Which deployments"
+          idPrefix="mcp-deployment"
+          every={every}
+          onEvery={(next) => onChange({ ...draft, every: next })}
+          chosen={chosen}
+          onChosen={(next) => onChange({ ...draft, chosen: next })}
+        />
+      )}
+
+      {deployments !== "" && (
+        <Field
+          label="Deployment API"
+          hint={
+            operations
+              ? "Every deployment route this key's grant may call becomes a tool: reads under Read; configuration, source, triggers, variables and drafts under Deploy, held to your role. A destructive one — the instant rollback, the maintenance switch, removing a shared variable — also needs a role that may take destructive actions."
+              : "The key is offered the six deployment tools alone: list deployments, runs and releases, read a run's log, deploy and roll back."
+          }
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <Checkbox
+              id="mcp-operations"
+              checked={operations}
+              onCheckedChange={(checked) => onChange({ ...draft, operations: checked === true })}
+            />
+            <label htmlFor="mcp-operations" className="min-w-0 text-body">
+              Offer every deployment route as a tool
+            </label>
+          </div>
+        </Field>
+      )}
+
       {!editing && (
         <Field
           label="Expires"
@@ -479,12 +600,20 @@ function KeyFields({
 
       {editing && (
         <Notice title="The key keeps working">
-          A client already set up with it sees the new list at its next call; nothing needs pasting
+          A client already set up with it sees the change at its next call; nothing needs pasting
           again.
         </Notice>
       )}
     </fieldset>
   )
+}
+
+/** What each deployment grant lets a client do, as the field's hint says it. */
+const DEPLOYMENT_HINTS: Record<ApiTokenDeployments, string> = {
+  "": "The key reaches no deployment.",
+  read: "Lists the deployments and reads their runs, releases and transcripts.",
+  deploy:
+    "Also queues a deploy or a rollback of a production environment, held to your role. A rollback needs an administrator.",
 }
 
 /** The key, once, and what to paste where to use it. */

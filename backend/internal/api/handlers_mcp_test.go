@@ -98,7 +98,14 @@ func (b *mcpBench) protect(id int64, on bool) {
 
 func (b *mcpBench) key(owner *auth.User, grants ...auth.TokenConnection) string {
 	b.t.Helper()
-	_, secret, err := b.s.Auth.CreateMCPToken(b.t.Context(), owner, "claude-desktop", "", 0, grants)
+	return b.deployKey(owner, auth.DeployNone, grants...)
+}
+
+// deployKey is a key given the deployments as access says, and the databases
+// named.
+func (b *mcpBench) deployKey(owner *auth.User, access auth.DeployAccess, grants ...auth.TokenConnection) string {
+	b.t.Helper()
+	_, secret, err := b.s.Auth.CreateMCPToken(b.t.Context(), owner, "claude-desktop", "", 0, grants, access, nil, false)
 	if err != nil {
 		b.t.Fatal(err)
 	}
@@ -278,7 +285,9 @@ func TestTheMCPEndpointTakesAnMCPKeyAndNothingElse(t *testing.T) {
 // the same walk.
 func TestAnMCPKeyOpensNoOtherRoute(t *testing.T) {
 	b := newMCPBench(t)
-	key := b.key(b.admin, write(b.shop))
+	// The widest key there is: a database to change and the deployments to
+	// deploy. Neither reaches a route of the API.
+	key := b.deployKey(b.admin, auth.DeployRun, write(b.shop))
 	for _, rt := range apiRoutes(t, b.h) {
 		if rt.pattern == "/api/v1/mcp" {
 			continue

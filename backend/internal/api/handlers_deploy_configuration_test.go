@@ -270,6 +270,130 @@ func TestDeploymentConfigurationSaveReportsAFieldForAnInvalidPort(t *testing.T) 
 	}
 }
 
+// The process flags are saved through the configuration PUT like any other
+// runtime field: spelled one way, read back by the configuration route,
+// audited, and a bad value is refused with the field the Runtime page shows
+// it under.
+func TestDeploymentConfigurationSavesTheRuntimeFlags(t *testing.T) {
+	s := testServer(t)
+	projectID, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "config-flags-admin", auth.RoleAdmin)}
+	base := fmt.Sprintf("/api/v1/deploy/%d/environments/%d", projectID, environmentID)
+	configuration, err := s.modules.deployPlanning.EnvironmentConfiguration(t.Context(), projectID, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(edit func(*deploy.RuntimePlanConfig)) string {
+		t.Helper()
+		write := deploy.ConfigurationWriteRequest{
+			Revision: configuration.Revision, Build: configuration.Build, Runtime: configuration.Runtime,
+			Dependencies: configuration.Dependencies, Checks: configuration.Checks, Domains: configuration.Domains,
+		}
+		edit(&write.Runtime)
+		body, err := json.Marshal(write)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(body)
+	}
+	refused := func(body, field, says string) {
+		t.Helper()
+		response := admin.do(http.MethodPut, base+"/configuration", body, nil)
+		var decoded struct {
+			Error httpx.APIError `json:"error"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if response.Code != http.StatusUnprocessableEntity || decoded.Error.Code != "invalid_plan" ||
+			decoded.Error.Field != field || !strings.Contains(decoded.Error.Message, says) {
+			t.Fatalf("want %s refused (%q), got %d %s", field, says, response.Code, response.Body.String())
+		}
+	}
+	refused(request(func(r *deploy.RuntimePlanConfig) {
+		r.Sysctls = []deploy.RuntimeSysctl{{Name: "net.core.somaxconn", Value: "1024"}, {Name: "vm.swappiness", Value: "1"}}
+	}), "runtime.sysctls[1]", "the server's")
+	refused(request(func(r *deploy.RuntimePlanConfig) {
+		r.Ulimits = []deploy.RuntimeUlimit{{Name: deploy.UlimitNofile, Soft: 8192, Hard: 1024}}
+	}), "runtime.ulimits[0]", "above the hard one")
+	refused(request(func(r *deploy.RuntimePlanConfig) { r.User = "root:wheel:x" }), "runtime.user", "colon")
+	refused(request(func(r *deploy.RuntimePlanConfig) { r.Tmpfs = []deploy.RuntimeTmpfs{{Path: "/data"}} }), "runtime.tmpfs[0]", "volume is mounted")
+	refused(request(func(r *deploy.RuntimePlanConfig) { r.GPUs = &deploy.RuntimeGPUs{Mode: deploy.GPUCount} }), "runtime.gpus.count", "1 to 64")
+
+	response := admin.do(http.MethodPut, base+"/configuration", request(func(r *deploy.RuntimePlanConfig) {
+		r.User = " 1000:1000 "
+		r.ReadOnlyRootfs = true
+		r.Tmpfs = []deploy.RuntimeTmpfs{{Path: "/tmp/", SizeMB: 128}, {Path: "/app/cache"}}
+		r.Ulimits = []deploy.RuntimeUlimit{{Name: "NOFILE", Soft: 65536, Hard: 65536}, {Name: deploy.UlimitMemlock, Soft: -1, Hard: -1}}
+		r.Sysctls = []deploy.RuntimeSysctl{{Name: "net.core.somaxconn", Value: "2048"}}
+		r.GPUs = &deploy.RuntimeGPUs{Mode: deploy.GPUDevices, DeviceIDs: []string{"0", "1"}}
+	}), nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("save = %d %s", response.Code, response.Body.String())
+	}
+	saved, err := s.modules.deployPlanning.EnvironmentConfiguration(t.Context(), projectID, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := saved.Runtime
+	if runtime.User != "1000:1000" || !runtime.ReadOnlyRootfs ||
+		fmt.Sprint(runtime.Tmpfs) != "[{/app/cache 0} {/tmp 128}]" ||
+		fmt.Sprint(runtime.Ulimits) != "[{memlock -1 -1} {nofile 65536 65536}]" ||
+		fmt.Sprint(runtime.Sysctls) != "[{net.core.somaxconn 2048}]" ||
+		runtime.GPUs == nil || runtime.GPUs.Mode != deploy.GPUDevices || fmt.Sprint(runtime.GPUs.DeviceIDs) != "[0 1]" {
+		t.Fatalf("saved runtime = %+v", runtime)
+	}
+	read := admin.do(http.MethodGet, base+"/configuration", "", nil)
+	for _, part := range []string{`"user":"1000:1000"`, `"readOnlyRootfs":true`, `"ulimits":[{"name":"memlock","soft":-1,"hard":-1}`, `"gpus":{"mode":"devices","deviceIds":["0","1"]}`} {
+		if read.Code != http.StatusOK || !strings.Contains(read.Body.String(), part) {
+			t.Fatalf("GET configuration lacks %s: %d %s", part, read.Code, read.Body.String())
+		}
+	}
+	var audits int
+	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action = 'deploy.configuration.update' AND target = ?`, fmt.Sprint(environmentID)).Scan(&audits); err != nil || audits != 1 {
+		t.Fatalf("configuration audits = %d, %v", audits, err)
+	}
+}
+
+// A check kind nothing runs is refused on save with the field and the reason,
+// rather than saved to report check_owner_unavailable at every deploy.
+func TestDeploymentConfigurationSaveRefusesACheckNothingRuns(t *testing.T) {
+	s := testServer(t)
+	projectID, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "config-check-admin", auth.RoleAdmin)}
+	base := fmt.Sprintf("/api/v1/deploy/%d/environments/%d", projectID, environmentID)
+	configuration, err := s.modules.deployPlanning.EnvironmentConfiguration(t.Context(), projectID, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := deploy.ConfigurationWriteRequest{
+		Revision: configuration.Revision, Build: configuration.Build,
+		Runtime:      configuration.Runtime,
+		Dependencies: configuration.Dependencies, Checks: configuration.Checks, Domains: configuration.Domains,
+	}
+	request.Checks = append(request.Checks, deploy.PlannedCheck{Name: "certificate", Kind: "tls", Phase: "smoke"})
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := admin.do(http.MethodPut, base+"/configuration", string(body), nil)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("tls check save = %d %s", response.Code, response.Body.String())
+	}
+	t.Logf("PUT %s/configuration with a tls check: %d %s", base, response.Code, strings.TrimSpace(response.Body.String()))
+	var decoded struct {
+		Error httpx.APIError `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	field := fmt.Sprintf("checks[%d]", len(request.Checks)-1)
+	if decoded.Error.Code != "invalid_plan" || decoded.Error.Field != field ||
+		!strings.Contains(decoded.Error.Message, "public_route") {
+		t.Fatalf("error body = %#v", decoded.Error)
+	}
+}
+
 // Revealing a variable that does not exist is a missing resource, not a bad
 // request: the route answers 404 variable_not_found rather than the 400 an
 // operator would otherwise read as "you typed the name wrong".

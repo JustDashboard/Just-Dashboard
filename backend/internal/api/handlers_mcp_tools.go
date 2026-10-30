@@ -53,7 +53,11 @@ func (s *Server) callMCPTool(r *http.Request, p *httpx.Principal, req *mcp.Reque
 	if c.failed {
 		httpx.AuditFailed(r)
 	}
-	httpx.SetAudit(r, "database.mcp."+req.Name, c.target, c.detail)
+	area := "database"
+	if _, generated := s.mcpOperation(req.Name); mcp.IsDeployTool(req.Name) || generated {
+		area = "deploy"
+	}
+	httpx.SetAudit(r, area+".mcp."+req.Name, c.target, c.detail)
 	return result
 }
 
@@ -62,6 +66,9 @@ func (c *mcpCall) run(tool string, raw []byte) map[string]any {
 		return c.refuse("busy", fmt.Sprintf("This key already has %d calls running; wait for one to finish.", mcpCallsPerKey))
 	}
 	defer c.s.mcp.leave(c.p.TokenID)
+	if op, generated := c.s.mcpOperation(tool); generated {
+		return c.operation(op, raw)
+	}
 	grants, err := c.s.Auth.TokenConnections(c.r.Context(), c.p.TokenID)
 	if err != nil {
 		return c.fail("the key's databases could not be read", nil)
@@ -89,6 +96,18 @@ func (c *mcpCall) run(tool string, raw []byte) map[string]any {
 		return c.runQuery(args)
 	case mcp.ToolRunWrite:
 		return c.runWrite(args)
+	case mcp.ToolListDeployments:
+		return c.listDeployments()
+	case mcp.ToolListRuns:
+		return c.listRuns(args)
+	case mcp.ToolReadRunLog:
+		return c.readRunLog(args)
+	case mcp.ToolListReleases:
+		return c.listReleases(args)
+	case mcp.ToolDeploy:
+		return c.deploy(args)
+	case mcp.ToolRollback:
+		return c.rollback(args)
 	}
 	return c.refuse("unknown", "Unknown tool: "+tool)
 }

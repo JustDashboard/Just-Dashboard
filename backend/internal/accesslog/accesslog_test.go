@@ -581,3 +581,115 @@ func TestPagesOnlyFilterKeepsTheReadingsHonest(t *testing.T) {
 		t.Fatalf("pages-only: total %d scanned %d rows %d", result.Summary.Total, result.Summary.Scanned, len(result.Entries))
 	}
 }
+
+// A canary route records which release answered each request, on either
+// proxy, and a window can be read for one release alone.
+func TestCanaryEntriesSayWhichReleaseAnswered(t *testing.T) {
+	caddy, ok := Parse(`{"level":"info","ts":1758260877.5,"logger":"http.log.access.log0","msg":"handled request","request":{"remote_ip":"203.0.113.9","proto":"HTTP/1.1","method":"GET","host":"app.example.test","uri":"/","headers":{}},"duration":0.004,"size":5,"status":500,"release":"42"}`)
+	if !ok || caddy.Release != "42" {
+		t.Fatalf("caddy entry = %+v, %v", caddy, ok)
+	}
+	nginx, ok := Parse(`203.0.113.9 - - [19/Sep/2026:05:47:57 +0000] "GET / HTTP/1.1" 200 5 "-" "curl/8" rt=0.003 urt="0.003" host=app.example.test cs=- rel=41`)
+	if !ok || nginx.Release != "41" || nginx.Status != 200 {
+		t.Fatalf("nginx entry = %+v, %v", nginx, ok)
+	}
+	plain, _ := Parse(`203.0.113.9 - - [19/Sep/2026:05:47:57 +0000] "GET / HTTP/1.1" 200 5 "-" "curl/8" rt=0.003`)
+	if plain.Release != "" {
+		t.Fatalf("a route of one release recorded %q", plain.Release)
+	}
+	if !(Filter{Release: "42"}).Match(caddy) || (Filter{Release: "42"}).Match(nginx) || !(Filter{}).Match(nginx) {
+		t.Fatal("the release filter does not keep one release's requests")
+	}
+}
+
+// The trace context a deployment route records is read from both proxies'
+// lines: Caddy's log_append fields and the trailing fields of nginx's timed
+// format. Anything that is not one — a placeholder Caddy left, an all-zero
+// id, nginx's "-" — is no context.
+func TestTheTraceContextARouteRecordsIsRead(t *testing.T) {
+	trace, span, parent := "4bf92f3577b34da6a3ce929d0e0e4736", "a3ce929d0e0e4736", "00f067aa0ba902b7"
+	caddy := `{"level":"info","ts":1793263529.9,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"203.0.113.9","proto":"HTTP/1.1","method":"GET","host":"shop.example.test","uri":"/cart","headers":{}},"duration":0.0123,"size":12,"status":200,` +
+		`"trace_id":"` + trace + `","span_id":"` + span + `","parent_span_id":"` + parent + `"}`
+	entry, ok := Parse(caddy)
+	if !ok || entry.TraceID != trace || entry.SpanID != span || entry.ParentSpanID != parent {
+		t.Fatalf("caddy = %+v", entry)
+	}
+	nginx := `203.0.113.9 - - [29/Oct/2026:09:00:00 +0000] "GET /cart HTTP/1.1" 200 12 "-" "curl/8" rt=0.012 urt="0.011" host=shop.example.test cs=- trace=` + trace + ` span=` + span + ` parent=-`
+	entry, ok = Parse(nginx)
+	if !ok || entry.TraceID != trace || entry.SpanID != span || entry.ParentSpanID != "" || entry.Host != "shop.example.test" {
+		t.Fatalf("nginx = %+v", entry)
+	}
+	for name, line := range map[string]string{
+		"a placeholder": strings.Replace(caddy, trace, "{jd_trace}", 1),
+		"all zeros":     strings.Replace(caddy, trace, strings.Repeat("0", 32), 1),
+		"uppercase":     strings.Replace(caddy, trace, strings.ToUpper(trace), 1),
+		"a short span":  strings.Replace(nginx, "span="+span, "span=abc", 1),
+	} {
+		if entry, _ := Parse(line); entry.TraceID != "" || entry.SpanID != "" {
+			t.Errorf("%s was read as a trace: %+v", name, entry)
+		}
+	}
+	if raw, _ := json.Marshal(entry); !strings.Contains(string(raw), `"traceId":"`+trace+`"`) {
+		t.Fatalf("the request's JSON does not carry its trace: %s", raw)
+	}
+}
+
+func TestEachRequestHasAClientClass(t *testing.T) {
+	for want, entry := range map[string]Entry{
+		"browser": {Path: "/", UserAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 Safari/605.1.15"},
+		"bot":     {Path: "/", UserAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"},
+		"scanner": {Path: "/.env", Status: 404, UserAgent: "Mozilla/5.0"},
+		"client":  {Path: "/api/orders", UserAgent: "MyApp/3.2 (iPhone; iOS 18.0)"},
+		"unknown": {Path: "/"},
+	} {
+		if got := ClientClass(entry); got != want {
+			t.Errorf("%+v = %s, want %s", entry, got, want)
+		}
+	}
+}
+
+// A tailnet gate's record names who it let in: nginx's tl= field after the
+// timed format, Caddy's tailnet_login field from the gate's log_append.
+func TestParseReadsTheTailnetLoginTheGateAdmitted(t *testing.T) {
+	nginx := `100.101.102.103 - - [19/Sep/2026:05:47:57 +0000] "GET /a HTTP/1.1" 200 12 "-" "curl/8" rt=0.004 urt="0.003" host=box.tail1234.ts.net tl=alice@example.com`
+	entry, ok := Parse(nginx)
+	if !ok || entry.User != "alice@example.com" || entry.RemoteIP != "100.101.102.103" {
+		t.Fatalf("nginx = %+v %v", entry, ok)
+	}
+	refused := `100.70.0.1 - - [19/Sep/2026:05:47:57 +0000] "GET /a HTTP/1.1" 403 12 "-" "curl/8" rt=0.004 urt="0.003" host=box.tail1234.ts.net tl=-`
+	if entry, ok := Parse(refused); !ok || entry.User != "" {
+		t.Fatalf("a refused request = %+v %v", entry, ok)
+	}
+	caddy := `{"level":"info","ts":1793245892.69,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"127.0.0.1","client_ip":"100.64.0.9","proto":"HTTP/1.1","method":"GET","host":"box.tail1234.ts.net:21003","uri":"/","headers":{}},"duration":0.002,"size":5,"status":200,"tailnet_login":"tag:ci"}`
+	if entry, ok := Parse(caddy); !ok || entry.User != "tag:ci" || entry.RemoteIP != "100.64.0.9" {
+		t.Fatalf("caddy = %+v %v", entry, ok)
+	}
+}
+
+// A route with edge rules names the rule that decided each request: nginx's
+// er= field after the timed format, Caddy's edge_rule field from the route's
+// log_append. The summary counts each rule's requests, every rule listed.
+func TestParseReadsTheEdgeRuleThatDecidedAndCountsEach(t *testing.T) {
+	lines := []string{
+		`203.0.113.9 - - [29/Oct/2026:10:00:01 +0000] "GET /admin HTTP/1.1" 403 153 "-" "Mozilla/5.0" rt=0.000 urt="-" host=app.example.test cs=- er=admin`,
+		`203.0.113.9 - - [29/Oct/2026:10:00:02 +0000] "GET / HTTP/1.1" 200 12 "-" "Mozilla/5.0" rt=0.004 urt="0.003" host=app.example.test cs=- er=`,
+		`{"level":"info","ts":1793268003.1,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.4","proto":"HTTP/1.1","method":"POST","host":"app.example.test","uri":"/login","headers":{"User-Agent":["curl/8"]}},"duration":0.0001,"size":0,"status":429,"edge_rule":"bots"}`,
+		`{"level":"info","ts":1793268004.1,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.4","proto":"HTTP/1.1","method":"GET","host":"app.example.test","uri":"/admin/x","headers":{}},"duration":0.0001,"size":9,"status":403,"edge_rule":"admin"}`,
+		// Something in the field that is not a rule's name is not one.
+		`198.51.100.5 - - [29/Oct/2026:10:00:05 +0000] "GET / HTTP/1.1" 200 12 "-" "x" rt=0.004 urt="0.003" host=app.example.test cs=- er=$jd_x`,
+	}
+	collector := NewCollector(Filter{})
+	want := []string{"admin", "", "bots", "admin", ""}
+	for index, line := range lines {
+		entry, ok := Parse(line)
+		if !ok || entry.EdgeRule != want[index] {
+			t.Fatalf("line %d = %+v %v, want edge rule %q", index, entry, ok, want[index])
+		}
+		collector.Feed(entry)
+	}
+	summary := collector.Result().Summary
+	if len(summary.EdgeRules) != 2 || summary.EdgeRules[0].Value != "admin" || summary.EdgeRules[0].Count != 2 ||
+		summary.EdgeRules[1].Value != "bots" || summary.EdgeRules[1].Count != 1 {
+		t.Fatalf("edge rules = %+v", summary.EdgeRules)
+	}
+}

@@ -160,8 +160,17 @@ func createIsolatedPreviewPlansTx(ctx context.Context, tx *sql.Tx, sourceID int6
 		return ErrInvalidPlan
 	}
 	build.Method = BuildMethod(method)
-	if build.Method == BuildCompose || runtime.HostNetwork || runtime.Privileged || len(runtime.Capabilities) > 0 || len(runtime.Devices) > 0 {
-		return fmt.Errorf("%w: previews currently require a container build without host access", ErrPreviewIsolation)
+	if build.Method == BuildLegacyCompose || runtime.HostNetwork || runtime.Privileged || len(runtime.Capabilities) > 0 || len(runtime.Devices) > 0 {
+		return fmt.Errorf("%w: previews require a release build without host access", ErrPreviewIsolation)
+	}
+	if build.Method == BuildCompose {
+		// Every service of the stack is isolated the way one container is;
+		// one that needs the server itself cannot be, so the stack is refused
+		// here, before an environment exists, and again at start from what
+		// Compose resolves (dockerx.ComposePreviewOverride).
+		if err := composePreviewRefusal(build, evidence); err != nil {
+			return err
+		}
 	}
 	var quarantined int
 	if sourceID == environmentID {
@@ -181,16 +190,36 @@ func createIsolatedPreviewPlansTx(ctx context.Context, tx *sql.Tx, sourceID int6
 	}
 	build.ReleaseTasks, build.Secrets = nil, nil
 	runtime.PreviewIsolation, runtime.HostPort, runtime.Ports, runtime.BindAddress = true, 0, nil, "127.0.0.1"
+	// A preview is one container whatever production runs: it is for
+	// looking at a branch, not for carrying production's traffic.
+	runtime.Replicas = 0
+	// Nor is a preview ever kept warm, so there is no release to keep its
+	// visitors on.
+	runtime.SkewProtection = false
+	// Nor does it get the server's GPUs unless the environment says its
+	// previews do: a preview runs a branch nobody has deployed, and a GPU is
+	// a device of the host's. The other process flags — the user, the
+	// read-only root, ulimits and kernel parameters — are the application's
+	// and come with the copy.
+	if runtime.GPUs != nil && !runtime.GPUs.Previews {
+		runtime.GPUs = nil
+	}
 	for index := range runtime.Mounts {
 		mount := &runtime.Mounts[index]
 		mount.Source, mount.Ownership = previewVolumeName(environmentID, mount.Target), OwnershipManaged
 	}
-	if len(runtime.Mounts) > 0 {
+	// One Compose project per environment cannot run two releases at once.
+	if len(runtime.Mounts) > 0 || build.Method == BuildCompose {
 		runtime.Strategy = StrategyStopFirst
 	}
-	if runtime.Strategy == "" {
+	// A preview has no live release of its own traffic to try a canary
+	// against; it is replaced blue/green.
+	if runtime.Strategy == "" || runtime.Strategy == StrategyCanary {
 		runtime.Strategy = StrategyBlueGreen
 	}
+	// Mounts made it stop-first above, or the branch above made it blue/
+	// green: either way it is no canary, and its terms go with it.
+	runtime.Canary = nil
 	buildJSON, runtimeJSON := mustJSON(build), mustJSON(runtime)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO deploy_build_plans(environment_id,revision,method,config_json,evidence_json,preview,digest,created_at) VALUES(?,?,?,?,?,?,?,?)`, environmentID, revision, method, string(buildJSON), evidence, renderBuildPreview(build), buildPlanDigest(build), now); err != nil {
 		return err
@@ -248,7 +277,7 @@ func copyPreviewChecksTx(ctx context.Context, tx *sql.Tx, sourceID, environmentI
 }
 
 func validatePreviewPlan(environmentID int64, build BuildPlanConfig, runtime RuntimePlanConfig) error {
-	if !runtime.PreviewIsolation || build.Method == BuildCompose || len(build.ReleaseTasks) > 0 ||
+	if !runtime.PreviewIsolation || build.Method == BuildLegacyCompose || len(build.ReleaseTasks) > 0 ||
 		runtime.Privileged || runtime.HostNetwork || len(runtime.Devices) > 0 || len(runtime.Capabilities) > 0 || runtime.HostPort != 0 || len(runtime.Ports) != 0 || runtime.BindAddress != "127.0.0.1" {
 		return ErrPreviewIsolation
 	}
@@ -256,6 +285,9 @@ func validatePreviewPlan(environmentID int64, build BuildPlanConfig, runtime Run
 		if mount.Source != previewVolumeName(environmentID, mount.Target) || mount.Ownership != OwnershipManaged {
 			return ErrPreviewIsolation
 		}
+	}
+	if runtime.GPUs != nil && !runtime.GPUs.Previews {
+		return ErrPreviewIsolation
 	}
 	return nil
 }

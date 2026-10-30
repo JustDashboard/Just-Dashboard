@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/assistant"
@@ -33,17 +34,24 @@ const assistantSettingKey = "databases.assistant"
 // assistantState is what the assistant's routes keep between requests.
 type assistantState struct {
 	conversations *assistant.Store
+	// operators holds the deployment operator's conversations, one per
+	// person and environment (handlers_deploy_operator.go).
+	operators *assistant.Store
 	// limit is the install's budget of model calls, one bucket however many
 	// people ask, because every call is billed to the same key.
 	limit *httpx.Limiter
 	// slots bounds how many answers stream at once.
 	slots   chan struct{}
 	options assistant.Options
+	// diagnosing holds the runs whose failure is being asked about, so a
+	// second press waits for the first answer instead of paying for another.
+	diagnosing sync.Map
 }
 
 func newAssistantState() *assistantState {
 	return &assistantState{
 		conversations: assistant.NewStore(),
+		operators:     assistant.NewStore(),
 		limit:         httpx.NewLimiter(20, 6),
 		slots:         make(chan struct{}, 4),
 		options:       assistant.Options{HTTP: assistant.NewHTTPClient()},

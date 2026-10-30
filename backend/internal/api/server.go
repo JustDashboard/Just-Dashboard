@@ -4,7 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/agent"
@@ -22,6 +24,10 @@ import (
 // (no Docker socket, no systemd) degrades to a clear error on its own routes
 // instead of preventing the dashboard from starting.
 type Server struct {
+	// deployOpenAPI is the description of the deployment API, read off the
+	// router Routes returns the first time it is asked for (deploy_openapi.go).
+	deployOpenAPI atomic.Pointer[deployOpenAPISource]
+
 	Cfg         *config.Config
 	Log         *slog.Logger
 	Store       *store.Store
@@ -36,8 +42,11 @@ type Server struct {
 	// and the record of which hub this server answers to.
 	Agent    *agent.Identity
 	loginLim *httpx.Limiter
-	apiLim   *httpx.Limiter
-	destrLim *httpx.Limiter
+	// passkeyLim is beginning a passkey sign-in, which only hands out a
+	// sealed challenge; the finish spends loginLim like a password does.
+	passkeyLim *httpx.Limiter
+	apiLim     *httpx.Limiter
+	destrLim   *httpx.Limiter
 	// streamLim is Remote Desktop's stream bridge, whose page loads a
 	// hundred of its own files at once; on apiLim that one page would spend
 	// the whole dashboard's burst.
@@ -64,8 +73,20 @@ type Server struct {
 	// The icons deployed websites declare, read once an hour per project.
 	favicons faviconCache
 
+	// What the deployments' scrape read that costs a Docker call per
+	// environment, kept for a minute between scrapes (deployment_metrics_export.go).
+	deployScrape scrapeCache
+
+	// mapSources holds the server map's last answer from every source it
+	// reads (map_sources.go), so an open map costs the server little.
+	mapSources mapSources
+
 	// The GitHub accounts' own pictures, read once an hour per account.
 	avatars avatarCache
+
+	// What the DNS record routes reach, which a test replaces
+	// (handlers_deploy_dns_record.go).
+	dnsRecords dnsRecordHooks
 
 	// What the database inventory last found on this machine, kept for the
 	// few seconds between two polls (handlers_db_inventory.go).
@@ -142,8 +163,9 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, svc *auth.Servic
 		WS:    wsx.NewUpgrader(cfg.AllowedOrigins, !cfg.Dev && cfg.TLSMode != selfcfg.TLSOff),
 		// Login is deliberately tight: five attempts a minute per address on
 		// top of the per-account lockout.
-		loginLim: httpx.NewLimiter(10, 5),
-		apiLim:   httpx.NewLimiter(600, 120),
+		loginLim:   httpx.NewLimiter(10, 5),
+		passkeyLim: httpx.NewLimiter(60, 20),
+		apiLim:     httpx.NewLimiter(600, 120),
 		// Destructive routes get their own budget so a scripted delete loop
 		// cannot run away even with a valid admin token.
 		destrLim:  httpx.NewLimiter(30, 10),
@@ -217,6 +239,17 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.modules.deployRuntime.RemoveOrphanedReleaseTasks(cleanupCtx); err != nil {
 		s.Log.Warn("release task containers left by a previous start could not be removed", "err", err)
 	}
+	// And the database copies a rehearsal it was running made: a resumed run
+	// makes its own again. A copy of a release's data it was restoring is
+	// ended first, so the sweep removes it; one already restored and still
+	// within its lifetime is kept.
+	s.modules.dataCopies.SettleInterrupted(cleanupCtx)
+	// A preview's branch a restart interrupted is ended the same way; one
+	// ready, or still waiting for its restore, is kept.
+	s.modules.previewBranches.SettleInterrupted(cleanupCtx)
+	if err := s.modules.rehearser.RemoveOrphanedRehearsals(cleanupCtx); err != nil {
+		s.Log.Warn("migration rehearsal copies left by a previous start could not be removed", "err", err)
+	}
 	cleanupCancel()
 	// A database upgrade this process's predecessor was carrying out has
 	// nobody left to finish it or undo it: the old server is put back in the
@@ -237,6 +270,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// going red, and the daemon keeps none of it. A host with no Docker
 	// simply never connects, which is a steady state rather than an error.
 	s.modules.dockerEvents.Start(ctx)
+	// And the deployments' share of it is written down as it arrives, so the
+	// feed a project page draws reaches past the last restart of this process.
+	s.modules.deployEvents.Follow(ctx, s.modules.dockerEvents)
 	// Interface counters are sampled from boot for the same reason: the
 	// traffic chart for three this morning exists only if something was
 	// reading the counters at three.
@@ -252,6 +288,9 @@ func (s *Server) Start(ctx context.Context) error {
 	s.modules.network.StartRouteHistory(ctx)
 	s.startDatabaseMetrics(ctx)
 	s.startDatabaseTLS(ctx)
+	// CrowdSec's bans are refused at every deployment route that asks, from
+	// a list kept current whether or not anybody has a page open.
+	s.startCrowdSecRefresh(ctx)
 	s.startStrandedRepair(ctx)
 	// Two things, both of which have to happen at boot rather than on request.
 	// An upgrade that was in flight when this process started is settled here,
@@ -293,21 +332,50 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	s.modules.deploySchedule.Start(ctx)
 	s.modules.trafficAlerts.Start(ctx)
+	// Drains copy what deployments say while it happens, whether or not
+	// anybody has a page open.
+	s.startLogDrains(ctx)
+	// The host's own alerts read the recorder's history and Docker, both
+	// started above, and tell the same channels.
+	s.modules.hostAlerts.Start(ctx)
 	if err := s.startDeployEngine(ctx); err != nil {
 		return err
 	}
+	// After the engine, so a window a restart interrupted is settled by a
+	// watcher that can already ask the engine for its rollback.
+	s.modules.rollbackWatcher.Start(ctx)
+	// The tunnel's connector and routes follow the deployments routed
+	// through it, so after the engine too.
+	s.modules.tunnel.Start(ctx)
+	// After the engine too: a run it resumes may wake an environment, and
+	// the pass leaves alone an environment with a run under way.
+	s.modules.sleeper.Start(ctx)
+	// Copies waiting for a rollback read its run, and expired ones are
+	// removed whether or not anybody has the page open.
+	s.modules.dataCopies.Start(ctx)
+	s.modules.previewBranches.Start(ctx)
+	// Scans run one at a time behind the engine, never inside a run.
+	s.startImageScans(ctx)
 	s.modules.deployGit.Start(ctx)
 	s.modules.previewReconciler.Start(ctx)
 	s.modules.deployDatabases.Start(ctx)
 	s.modules.poolers.Start(ctx)
+	// Last, because a link's first heartbeat reads nearly everything above. A
+	// no-op until the dashboard is linked, and always when linking is off.
+	s.modules.accountLink.Start(ctx)
+	// Runs and sends nothing until an administrator has said yes.
+	s.modules.usagePing.Start(ctx)
 	return nil
 }
 
 // startDeployEngine puts tailscale's serve config and the preview address
-// table in agreement, then starts the engine — in that order. A restart may
-// have left a served port whose preview is gone, or a preview recorded as
-// reachable that nothing serves, and both are put right before any preview
-// page reads the record. The engine comes second because a run it resumes at
+// table in agreement, moves every address still mapped straight to its
+// container behind its front, then starts the engine — in that order. A
+// restart may have left a served port whose preview is gone, or a preview
+// recorded as reachable that nothing serves, and both are put right before
+// any preview page reads the record; an address published before every
+// address had a front stops being sent the dashboard's session cookie now,
+// not at its next release. The engine comes last because a run it resumes at
 // boot may publish a preview the moment it starts, and a sweep still reading
 // the config would take that fresh mapping for a dead one.
 func (s *Server) startDeployEngine(ctx context.Context) error {
@@ -320,17 +388,35 @@ func (s *Server) startDeployEngine(ctx context.Context) error {
 	if err != nil {
 		s.Log.Warn("tailnet preview addresses need attention", "error", err)
 	}
+	frontCtx, frontCancel := context.WithTimeout(ctx, 2*time.Minute)
+	fronting, err := s.modules.deployExecutor.FrontTailnetAddresses(frontCtx)
+	frontCancel()
+	for _, environmentID := range fronting.Fronted {
+		s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.tailnet.fronted", Target: strconv.FormatInt(environmentID, 10), Success: true,
+			Detail: "the tailnet address now reaches the application through the dashboard's front, which keeps the dashboard's session cookie from it"})
+	}
+	for environmentID, reason := range fronting.Failed {
+		s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.tailnet.fronted", Target: strconv.FormatInt(environmentID, 10), Success: false, Detail: reason})
+		s.Log.Warn("a tailnet address is still mapped straight to its container", "environment", environmentID, "reason", reason)
+	}
+	if err != nil {
+		s.Log.Warn("tailnet addresses could not be moved behind their front", "error", err)
+	}
 	return s.modules.deployEngine.Start(ctx)
 }
 
 // Shutdown releases the resources that outlive a request: database pools,
 // live PTY sessions, the metrics sampler and the backup scheduler.
 func (s *Server) Shutdown() {
+	s.modules.usagePing.Stop()
+	s.modules.accountLink.Stop()
 	s.modules.deployPreviews.Stop()
 	s.modules.deployGit.Stop()
 	s.modules.previewReconciler.Stop()
 	s.modules.deployDatabases.Stop()
 	s.modules.poolers.Stop()
+	s.modules.dataCopies.Stop()
+	s.modules.previewBranches.Stop()
 	// Stop fresh claims first. Active work is given a bounded grace to reach a
 	// persisted boundary; Engine.Shutdown never injects a cancellation into an
 	// activation or restoration.

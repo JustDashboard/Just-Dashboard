@@ -604,6 +604,10 @@ type dbContainerRef struct {
 	MemoryLimit   int64   `json:"memoryLimit,omitempty"`
 	CPULimit      float64 `json:"cpuLimit,omitempty"`
 	RestartPolicy string  `json:"restartPolicy,omitempty"`
+	// KernelMitigation says that the container was started with what MongoDB 8
+	// needs to start on this kernel, and why (mongoKernelRecord); absent
+	// otherwise.
+	KernelMitigation string `json:"kernelMitigation,omitempty"`
 	// inspected reports that the three above were read. The listing a
 	// placement is found in inspects running containers only, so for any other
 	// they are still to be asked for.
@@ -1017,7 +1021,8 @@ func (p *dbPlacement) inContainer(c *dockerx.Container) {
 		ComposeProject: c.Labels["com.docker.compose.project"],
 		ComposeService: c.Labels["com.docker.compose.service"],
 		MemoryLimit:    c.MemoryLimit, CPULimit: c.CPULimit, RestartPolicy: c.RestartPolicy,
-		inspected: c.Inspected,
+		KernelMitigation: mongoKernelRecord(c.Labels),
+		inspected:        c.Inspected,
 	}
 	started := ""
 	if c.StartedAt != nil {

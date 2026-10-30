@@ -114,6 +114,9 @@ const (
 )
 
 func (s *Service) Preview(path string) (*Preview, error) {
+	if s.run != nil {
+		return hosted2(s, func(s *Service) (*Preview, error) { return s.Preview(path) })
+	}
 	full, err := s.ResolveEntry(path)
 	if err != nil {
 		return nil, err
@@ -489,6 +492,9 @@ type UsageEntry struct {
 const usageMaxEntries = 400_000
 
 func (s *Service) Usage(ctx context.Context, path string, budget time.Duration) (*Usage, error) {
+	if s.run != nil {
+		return hosted2(s, func(s *Service) (*Usage, error) { return s.Usage(ctx, path, budget) })
+	}
 	full, err := s.Resolve(path)
 	if err != nil {
 		return nil, err
@@ -591,6 +597,9 @@ type Checksum struct {
 }
 
 func (s *Service) Checksum(ctx context.Context, path, algo string) (*Checksum, error) {
+	if s.run != nil {
+		return hosted2(s, func(s *Service) (*Checksum, error) { return s.Checksum(ctx, path, algo) })
+	}
 	full, err := s.Resolve(path)
 	if err != nil {
 		return nil, err

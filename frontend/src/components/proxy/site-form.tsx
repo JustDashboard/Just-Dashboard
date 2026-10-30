@@ -14,6 +14,7 @@ import {
   type Icon,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
+import { SSO_PROVIDERS, chooseSsoProvider, ssoPreset } from "@/lib/sso-providers"
 import { ApiError, get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type {
@@ -1835,13 +1836,16 @@ function DomainChecks({ checks }: { checks: SitePreflightCheck[] }) {
   )
 }
 
-function ListField({
+/** Single values, added one at a time. The deployment Domains page uses it too. */
+export function ListField({
   id,
   label,
   placeholder,
   values,
   onChange,
   hint,
+  error,
+  disabled,
 }: {
   id: string
   label: string
@@ -1849,6 +1853,9 @@ function ListField({
   values: string[]
   onChange: (values: string[]) => void
   hint?: string
+  error?: string
+  /** Read-only: the values without the controls that change them. */
+  disabled?: boolean
 }) {
   const [draft, setDraft] = useState("")
   const add = () => {
@@ -1857,49 +1864,55 @@ function ListField({
     setDraft("")
   }
   return (
-    <Field label={label} htmlFor={id} hint={hint}>
+    <Field label={label} htmlFor={id} hint={hint} error={error}>
       <div className="space-y-2">
         {values.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
             {values.map((value, i) => (
               <Tag key={`${value}-${i}`} mono className="gap-1.5 pr-0.5">
                 {value}
-                <IconAction
-                  label={`Remove ${value}`}
-                  size="icon-xs"
-                  className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
-                  onClick={() => onChange(values.filter((_, j) => j !== i))}
-                >
-                  <Trash />
-                </IconAction>
+                {!disabled && (
+                  <IconAction
+                    type="button"
+                    label={`Remove ${value}`}
+                    size="icon-xs"
+                    className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
+                    onClick={() => onChange(values.filter((_, j) => j !== i))}
+                  >
+                    <Trash />
+                  </IconAction>
+                )}
               </Tag>
             ))}
           </div>
         )}
-        <div className="flex items-center gap-2">
-          <Input
-            id={id}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault()
-                add()
-              }
-            }}
-            placeholder={placeholder}
-            className="font-mono text-xs"
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={add}
-            disabled={!draft.trim()}
-            aria-label={`Add to ${label.toLowerCase()}`}
-          >
-            <Plus className="size-3.5" />
-          </Button>
-        </div>
+        {!disabled && (
+          <div className="flex items-center gap-2">
+            <Input
+              id={id}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  add()
+                }
+              }}
+              placeholder={placeholder}
+              className="font-mono text-xs"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={add}
+              disabled={!draft.trim()}
+              aria-label={`Add to ${label.toLowerCase()}`}
+            >
+              <Plus className="size-3.5" />
+            </Button>
+          </div>
+        )}
       </div>
     </Field>
   )
@@ -2246,8 +2259,12 @@ function LocationCard({
 }
 
 /** The site's setting, or on or off, for this path. */
-/** How long browsers keep the HSTS policy. Six months is what the form always wrote. */
-const HSTS_MAX_AGES: { value: number; label: string }[] = [
+/**
+ * How long browsers keep the HSTS policy. Six months is what the form always
+ * wrote. Shared with a deployment's Domains settings, whose HSTS control
+ * offers the same choices for the same header.
+ */
+export const HSTS_MAX_AGES: { value: number; label: string }[] = [
   { value: 300, label: "5 minutes (while testing)" },
   { value: 86400, label: "1 day" },
   { value: 2592000, label: "30 days" },
@@ -2255,8 +2272,8 @@ const HSTS_MAX_AGES: { value: number; label: string }[] = [
   { value: 31536000, label: "1 year" },
   { value: 63072000, label: "2 years" },
 ]
-const HSTS_DEFAULT_MAX_AGE = 15552000
-const HSTS_PRELOAD_MAX_AGE = 31536000
+export const HSTS_DEFAULT_MAX_AGE = 15552000
+export const HSTS_PRELOAD_MAX_AGE = 31536000
 
 /**
  * The HSTS policy's lifetime, whether it covers subdomains, and preload.
@@ -3528,19 +3545,24 @@ function HeadersSection({
   )
 }
 
-/** Name and value pairs, added one at a time. */
-function HeaderListField({
+/** Name and value pairs, added one at a time. The deployment Domains page uses it too. */
+export function HeaderListField({
   id,
   label,
   values,
   onChange,
   hint,
+  error,
+  disabled,
 }: {
   id: string
   label: string
   values: HeaderValue[]
   onChange: (values: HeaderValue[]) => void
   hint?: string
+  error?: string
+  /** Read-only: the values without the controls that change them. */
+  disabled?: boolean
 }) {
   const [name, setName] = useState("")
   const [value, setValue] = useState("")
@@ -3551,57 +3573,63 @@ function HeaderListField({
     setValue("")
   }
   return (
-    <Field label={label} htmlFor={id} hint={hint}>
+    <Field label={label} htmlFor={id} hint={hint} error={error}>
       <div className="space-y-2">
         {values.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
             {values.map((header, i) => (
               <Tag key={`${header.name}-${i}`} mono className="gap-1.5 pr-0.5">
                 {header.name}: {header.value || "(empty)"}
-                <IconAction
-                  label={`Remove ${header.name}`}
-                  size="icon-xs"
-                  className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
-                  onClick={() => onChange(values.filter((_, j) => j !== i))}
-                >
-                  <Trash />
-                </IconAction>
+                {!disabled && (
+                  <IconAction
+                    type="button"
+                    label={`Remove ${header.name}`}
+                    size="icon-xs"
+                    className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
+                    onClick={() => onChange(values.filter((_, j) => j !== i))}
+                  >
+                    <Trash />
+                  </IconAction>
+                )}
               </Tag>
             ))}
           </div>
         )}
-        <div className="flex gap-2">
-          <Input
-            id={id}
-            aria-label={`${label}: name`}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="X-Robots-Tag"
-            className="font-mono text-xs"
-          />
-          <Input
-            aria-label={`${label}: value`}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault()
-                add()
-              }
-            }}
-            placeholder="noindex"
-            className="font-mono text-xs"
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={add}
-            disabled={!name.trim()}
-            aria-label={`Add to ${label.toLowerCase()}`}
-          >
-            <Plus className="size-3.5" />
-          </Button>
-        </div>
+        {!disabled && (
+          <div className="flex gap-2">
+            <Input
+              id={id}
+              aria-label={`${label}: name`}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="X-Robots-Tag"
+              className="font-mono text-xs"
+            />
+            <Input
+              aria-label={`${label}: value`}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  add()
+                }
+              }}
+              placeholder="noindex"
+              className="font-mono text-xs"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={add}
+              disabled={!name.trim()}
+              aria-label={`Add to ${label.toLowerCase()}`}
+            >
+              <Plus className="size-3.5" />
+            </Button>
+          </div>
+        )}
       </div>
     </Field>
   )
@@ -3740,43 +3768,6 @@ function AccessSection({
   )
 }
 
-const SSO_PROVIDERS: {
-  value: ForwardAuthProvider
-  label: string
-  verify: string
-  signIn: string
-  sends: string
-}[] = [
-  {
-    value: "authelia",
-    label: "Authelia",
-    verify: "http://127.0.0.1:9091/api/authz/auth-request",
-    signIn: "https://auth.example.com/",
-    sends: "Remote-User and Remote-Email",
-  },
-  {
-    value: "authentik",
-    label: "Authentik",
-    verify: "http://127.0.0.1:9000/outpost.goauthentik.io/auth/nginx",
-    signIn: "https://authentik.example.com/outpost.goauthentik.io/start",
-    sends: "X-authentik-username and X-authentik-email",
-  },
-  {
-    value: "oauth2-proxy",
-    label: "oauth2-proxy",
-    verify: "http://127.0.0.1:4180/oauth2/auth",
-    signIn: "https://auth.example.com/oauth2/start",
-    sends: "X-Auth-Request-User and X-Auth-Request-Email (run it with --set-xauthrequest)",
-  },
-  {
-    value: "custom",
-    label: "Other",
-    verify: "",
-    signIn: "https://auth.example.com/login",
-    sends: "Remote-User and Remote-Email",
-  },
-]
-
 /** Single sign-on through an auth server nginx asks about each request. */
 function SingleSignOn({
   spec,
@@ -3786,16 +3777,10 @@ function SingleSignOn({
   set: <K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => void
 }) {
   const sso = spec.forwardAuth
-  const preset = SSO_PROVIDERS.find((p) => p.value === sso?.provider) ?? SSO_PROVIDERS[0]
+  const preset = ssoPreset(sso?.provider)
   const update = (patch: Partial<SiteForwardAuth>) =>
     set("forwardAuth", { provider: "authelia", verify: "", signIn: "", ...sso, ...patch })
-  // A check address still at another preset's default follows the choice;
-  // one the operator typed stays.
-  const choose = (provider: ForwardAuthProvider) => {
-    const next = SSO_PROVIDERS.find((p) => p.value === provider)
-    const typed = sso?.verify && !SSO_PROVIDERS.some((p) => p.verify === sso.verify)
-    update({ provider, ...(next && !typed ? { verify: next.verify } : {}) })
-  }
+  const choose = (provider: ForwardAuthProvider) => update(chooseSsoProvider(sso, provider))
   const conflicts = [
     (spec.basicAuthFile || spec.accessList !== undefined) && "the password and access list",
     spec.interceptErrors && "replacing the application's own error pages",

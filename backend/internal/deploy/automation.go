@@ -1128,6 +1128,15 @@ type PreviewRef struct {
 	LiveReleaseID           int64           `json:"liveReleaseId,omitempty"`
 	Address                 *PreviewAddress `json:"address,omitempty"`
 	LastRun                 *RecentRun      `json:"lastRun,omitempty"`
+	// Services are a Compose preview's services as Docker reports them, read
+	// by the pull-request listing; the store never fills them.
+	Services *RuntimeServices `json:"services,omitempty"`
+	// Branches are the preview's database branches (preview_branches.go),
+	// read by the pull-request listing; the store never fills them.
+	Branches []PreviewBranch `json:"branches,omitempty"`
+	// Promotion is the newest promotion of the preview's image into staging,
+	// however it ended.
+	Promotion *PreviewPromotion `json:"promotion,omitempty"`
 }
 
 func (s *AutomationStore) ListPreviews(ctx context.Context, projectID int64) ([]PreviewRef, error) {
@@ -1218,6 +1227,9 @@ func (s *AutomationStore) EnsurePreview(ctx context.Context, t *Trigger, event P
 					if _, err := tx.ExecContext(ctx, `UPDATE deploy_preview_quarantines SET status='cleared',updated_at=? WHERE environment_id=? AND status='quarantined'`, s.now().UTC().Unix(), existing.EnvironmentID); err != nil {
 						return nil, false, err
 					}
+					if err := requestPreviewBranchesTx(ctx, tx, t.ProjectID, t.EnvironmentID, existing.EnvironmentID, event, s.now().UTC().Unix()); err != nil {
+						return nil, false, err
+					}
 					if err := tx.Commit(); err != nil {
 						return nil, false, err
 					}
@@ -1233,6 +1245,12 @@ func (s *AutomationStore) EnsurePreview(ctx context.Context, t *Trigger, event P
 				}
 				if err == nil {
 					_, err = tx.ExecContext(ctx, `UPDATE deploy_preview_quarantines SET status='cleared',updated_at=? WHERE environment_id=? AND status='quarantined'`, s.now().UTC().Unix(), existing.EnvironmentID)
+				}
+				if err == nil {
+					// A branch of each database the environment gives its
+					// previews, unless the preview has one or the head is a
+					// fork's (preview_branches.go).
+					err = requestPreviewBranchesTx(ctx, tx, t.ProjectID, t.EnvironmentID, existing.EnvironmentID, event, s.now().UTC().Unix())
 				}
 			}
 		}
@@ -1300,6 +1318,9 @@ func (s *AutomationStore) EnsurePreview(ctx context.Context, t *Trigger, event P
 		return nil, false, err
 	}
 	previewID, _ := res.LastInsertId()
+	if err = requestPreviewBranchesTx(ctx, tx, t.ProjectID, t.EnvironmentID, envID, event, now); err != nil {
+		return nil, false, err
+	}
 	if err = tx.Commit(); err != nil {
 		return nil, false, err
 	}
@@ -2024,6 +2045,8 @@ func (s *AutomationStore) deliverProvider(ctx context.Context, client *http.Clie
 	message := renderNotification(envelope)
 	var target string
 	var body []byte
+	// A credential the provider takes as a header rather than in the URL.
+	headers := map[string]string{}
 	switch kind {
 	case NotificationKindDiscord:
 		target, body = cfg.WebhookURL, discordPayload(message, envelope.SentAt)
@@ -2032,6 +2055,27 @@ func (s *AutomationStore) deliverProvider(ctx context.Context, client *http.Clie
 	case NotificationKindTelegram:
 		target = "https://api.telegram.org/bot" + cfg.BotToken + "/sendMessage"
 		body = telegramPayload(cfg.ChatID, message)
+	case NotificationKindMattermost:
+		target, body = cfg.WebhookURL, mattermostPayload(message)
+	case NotificationKindTeams:
+		target, body = cfg.WebhookURL, teamsPayload(message)
+	case NotificationKindNtfy:
+		if cfg.ServerURL != "" {
+			target = cfg.ServerURL + "/"
+		}
+		body = ntfyPayload(cfg.Topic, message)
+		if cfg.Token != "" {
+			headers["Authorization"] = "Bearer " + cfg.Token
+		}
+	case NotificationKindGotify:
+		if cfg.ServerURL != "" {
+			target = cfg.ServerURL + "/message"
+		}
+		body = gotifyPayload(message)
+		headers["X-Gotify-Key"] = cfg.Token
+	case NotificationKindPushover:
+		target = "https://api.pushover.net/1/messages.json"
+		body = pushoverPayload(cfg, message, envelope.SentAt)
 	default:
 		return "unsupported", invalidNotification("unknown channel kind %q", kind)
 	}
@@ -2044,6 +2088,9 @@ func (s *AutomationStore) deliverProvider(ctx context.Context, client *http.Clie
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "just-dashboard-notifications")
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
 	return postNotification(client, req)
 }
 

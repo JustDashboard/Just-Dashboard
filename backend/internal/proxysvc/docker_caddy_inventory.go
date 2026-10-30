@@ -76,9 +76,18 @@ func (c *dockerCaddy) vhosts(ctx context.Context) ([]VHost, error) {
 			enabled = enabled && hosts[name]
 			delete(hosts, name)
 		}
-		site := VHost{Name: strings.TrimSuffix(filepath.Base(path), ".caddy"), Kind: KindCaddy, Enabled: enabled, ServerNames: names, TLS: !strings.Contains(content, "http://"+firstName(names)), Listen: []string{"80", "443"}, Upstreams: []string{}}
-		if target, ok := parseDockerCaddyTarget(content); ok {
-			site.Upstreams = []string{target.upstream()}
+		site := VHost{Name: strings.TrimSuffix(filepath.Base(path), ".caddy"), Kind: KindCaddy, Enabled: enabled, ServerNames: names, TLS: caddyRouteServesTLS(content), Listen: []string{"80", "443"}, Upstreams: []string{}}
+		if targets, ok := parseDockerCaddyTargets(content); ok {
+			for _, target := range targets {
+				site.Upstreams = append(site.Upstreams, target.upstream())
+			}
+		}
+		// A deployment's route is in maintenance while its switch file is
+		// there, as on nginx; the matcher every route carries says nothing.
+		if pages, err := dockerCaddyPagesDir(site.Name); err == nil && strings.Contains(content, " try_files /"+maintenanceSwitchFile+"\n") {
+			if _, on, err := c.read(ctx, pages+"/"+maintenanceSwitchFile); err == nil {
+				site.Maintenance = on
+			}
 		}
 		sites = append(sites, site)
 	}
@@ -88,11 +97,21 @@ func (c *dockerCaddy) vhosts(ctx context.Context) ([]VHost, error) {
 	return sites, nil
 }
 
-func firstName(names []string) string {
-	if len(names) == 0 {
-		return ""
+// caddyRouteServesTLS says whether any site address of a managed route is
+// served over HTTPS: an address without the http:// a plain name carries.
+// A route's names may be split across a TLS block and a plain one.
+func caddyRouteServesTLS(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if !strings.HasSuffix(line, " {") || strings.HasPrefix(line, " ") || strings.HasPrefix(line, "#") {
+			continue
+		}
+		for _, address := range strings.Split(strings.TrimSuffix(line, " {"), ",") {
+			if address = strings.TrimSpace(address); address != "" && !strings.HasPrefix(address, "http://") {
+				return true
+			}
+		}
 	}
-	return names[0]
+	return false
 }
 
 // IngressRouteNames lists the routes the Docker Caddy ingress holds for

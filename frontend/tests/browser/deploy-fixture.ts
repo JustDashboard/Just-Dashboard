@@ -33,10 +33,15 @@ import type {
   GitHubAppStatus,
   GitHubRepoSummary,
   GitPullRequest,
+  ImageScanPolicy,
+  ImageScanReading,
   NotificationChannel,
   NotificationDelivery,
   ProjectPullRequests,
+  RehearsalPolicy,
   ReleaseComparisonResponse,
+  RollbackPolicy,
+  RollbackWatch,
   SourceIdentity,
   TrafficPulse,
   VolumeDetail,
@@ -2168,6 +2173,143 @@ export async function expectSaved(page: Page) {
   await expect(saveBar(page).getByText("Saved", { exact: true })).toBeVisible()
 }
 
+/**
+ * The live release (20, #2) read for known vulnerabilities: zlib's
+ * CVE-2022-37434 and openssl's with a fix, carried by the base, and the base's
+ * tag naming a newer image than the one the release was pinned on — the
+ * alert's condition — plus a high nobody has fixed yet.
+ */
+export function vulnerableScanReading(
+  policy: ImageScanPolicy = { enabled: true, severityFloor: "HIGH" },
+): ImageScanReading {
+  const finding = (
+    id: string,
+    pkg: string,
+    installed: string,
+    fixed: string | undefined,
+    severity: "CRITICAL" | "HIGH" | "MEDIUM",
+  ) => ({
+    id,
+    package: pkg,
+    installed,
+    fixed,
+    severity,
+    title: `${pkg}: a flaw in ${pkg}`,
+    url: `https://avd.aquasec.com/nvd/${id.toLowerCase()}`,
+    target: "alpine 3.19.1",
+    class: "os-pkgs",
+    fromBase: true,
+  })
+  return {
+    policy,
+    available: true,
+    scanner: "Trivy 0.76.1",
+    database: {
+      installed: true,
+      updatedAt: now,
+      ageHours: 6,
+      source: "mirror.gcr.io/aquasec/trivy-db:2",
+    },
+    releaseId: 20,
+    scan: {
+      releaseId: 20,
+      releaseNumber: 2,
+      environmentId: 12,
+      state: "scanned",
+      trigger: "schedule",
+      scanner: "0.76.1",
+      databaseUpdatedAt: now,
+      databaseAgeHours: 6,
+      floor: policy.severityFloor,
+      summary: {
+        counts: { critical: 1, high: 2, medium: 4, low: 9, unknown: 0 },
+        fixableCounts: { critical: 1, high: 1, medium: 3, low: 2, unknown: 0 },
+        fixable: [
+          finding("CVE-2022-37434", "zlib", "1.2.13-r0", "1.2.13-r1", "CRITICAL"),
+          finding("CVE-2024-5535", "openssl", "3.1.4-r5", "3.1.6-r0", "HIGH"),
+        ],
+        unfixed: [finding("CVE-2023-1234", "busybox", "1.36.1-r15", undefined, "HIGH")],
+      },
+      targets: [
+        {
+          kind: "release",
+          reference: "jd-release-e12-r84",
+          state: "scanned",
+          os: "alpine 3.19.1",
+          counts: { critical: 1, high: 2, medium: 4, low: 9, unknown: 0 },
+          scannedAt: now,
+        },
+        {
+          kind: "base",
+          reference: "node:22-alpine",
+          digest: `sha256:${"d".repeat(64)}`,
+          state: "scanned",
+          os: "alpine 3.19.1",
+          counts: { critical: 1, high: 2, medium: 2, low: 4, unknown: 0 },
+          scannedAt: now,
+        },
+      ],
+      baseUpdates: [
+        {
+          reference: "node:22-alpine",
+          pinned: `sha256:${"d".repeat(64)}`,
+          current: `sha256:${"e".repeat(64)}`,
+          state: "outdated",
+          checkedAt: now,
+        },
+      ],
+      newerBase: true,
+      rebuildable: true,
+      requestedAt: now,
+      startedAt: now,
+      finishedAt: now,
+    },
+    rebuild: { operation: "force_build", sourceRevision: "a12bc34d56ef7890" },
+    releases: [
+      {
+        releaseId: 20,
+        state: "scanned",
+        floor: policy.severityFloor,
+        counts: { critical: 1, high: 2, medium: 4, low: 9, unknown: 0 },
+        atFloor: 3,
+        fixable: 2,
+        newerBase: true,
+        scannedAt: now,
+      },
+    ],
+  }
+}
+
+/** The live release scanned clean at its floor. */
+export function cleanScanReading(
+  policy: ImageScanPolicy = { enabled: true, severityFloor: "HIGH" },
+): ImageScanReading {
+  const reading = vulnerableScanReading(policy)
+  return {
+    ...reading,
+    rebuild: { operation: "force_build", sourceRevision: "a12bc34d56ef7890" },
+    scan: {
+      ...reading.scan!,
+      summary: {
+        counts: { critical: 0, high: 0, medium: 1, low: 3, unknown: 0 },
+        fixableCounts: { critical: 0, high: 0, medium: 1, low: 0, unknown: 0 },
+        fixable: [],
+        unfixed: [],
+      },
+      baseUpdates: [
+        {
+          reference: "node:22-alpine",
+          state: "current",
+          pinned: `sha256:${"d".repeat(64)}`,
+          current: `sha256:${"d".repeat(64)}`,
+        },
+      ],
+      newerBase: false,
+    },
+    releases: [],
+  }
+}
+
 export async function mockProject(
   page: Page,
   options: {
@@ -2182,9 +2324,29 @@ export async function mockProject(
      * draws. `runtime` and `operations` still win when given.
      */
     showcase?: boolean
+    /**
+     * The production environment's warm-release window; null, the default,
+     * is an environment that has never had one.
+     */
+    rollbackWatch?: RollbackWatch | null
+    /** The environment's migration rehearsal terms; off unless given. */
+    rehearsal?: RehearsalPolicy
+    /** The live release's vulnerability scan; clean unless given (vulnerable in the showcase). */
+    vulnerabilities?: ImageScanReading
+    /** Fields laid over the saved runtime plan, such as no mounts for a stateless one. */
+    runtimePlan?: Partial<DeploymentConfiguration["runtime"]>
   } = {},
 ) {
   const showcase = Boolean(options.showcase)
+  let scanReading: ImageScanReading =
+    options.vulnerabilities ?? (showcase ? vulnerableScanReading() : cleanScanReading())
+  let rehearsalPolicy: RehearsalPolicy = options.rehearsal ?? {
+    enabled: false,
+    connectionId: 0,
+    whenUnavailable: "block",
+    restoreTimeoutSeconds: 600,
+    maxBackupMb: 2048,
+  }
   // The showcase runs on its own clock, two and a half minutes after the
   // moment its records were written, so every age on its pages reads as the
   // fixture meant it rather than as however long ago that date is today. The
@@ -2202,6 +2364,15 @@ export async function mockProject(
   let configurationRevision = 3
   let configurationPending = true
   let automationTriggers: Record<string, unknown>[] = showcase ? [...showcaseTriggers] : []
+  let rollbackPolicy: RollbackPolicy = {
+    keepWarm: true,
+    windowSeconds: 600,
+    automatic: true,
+    errorRateMargin: 5,
+    latencyFactor: 2,
+    minRequests: 20,
+  }
+  let rollbackWatch: RollbackWatch | null = options.rollbackWatch ?? null
   let gitPolicy = {
     automatic: true,
     commitStatuses: true,
@@ -2231,6 +2402,15 @@ export async function mockProject(
     },
   ]
   let notificationTests = 0
+  // The maintenance switch beside the live route, and the pages the route
+  // answers with that the operator wrote; the rest are the shipped ones.
+  let maintenanceSwitch: Record<string, unknown> = {
+    driver: "nginx",
+    route: true,
+    ready: true,
+    on: false,
+  }
+  const routePages: Record<string, string> = {}
   let scopedVariables: DeploymentVariable[] = showcase
     ? [...showcaseVariables]
     : [
@@ -2277,6 +2457,8 @@ export async function mockProject(
         checks: [],
         domains: [{ hostname: "api.example.test", https: true, ownership: "managed" }],
       }
+  if (options.runtimePlan)
+    normalizedConfiguration.runtime = { ...normalizedConfiguration.runtime, ...options.runtimePlan }
   const configurationBody = () => ({
     ...normalizedConfiguration,
     revision: configurationRevision,
@@ -2522,11 +2704,53 @@ export async function mockProject(
           until: "2026-09-03T12:00:00Z",
         },
       }
+    } else if (path === "/deploy/7/availability") {
+      // Nine days of record: a steady day, six minutes down over the week,
+      // and a month the record only reaches nine days into.
+      const recordSince = minutesAgo(9 * 24 * 60)
+      body = {
+        status: "available",
+        observedAt: now,
+        recordSince,
+        liveRelease: 20,
+        down: false,
+        windows: [
+          {
+            window: "24h",
+            seconds: 86400,
+            observedSeconds: 86400,
+            downSeconds: 0,
+            incidents: 0,
+            ratio: 1,
+            coverageSeconds: 86400,
+          },
+          {
+            window: "7d",
+            seconds: 7 * 86400,
+            observedSeconds: 7 * 86400,
+            downSeconds: 372,
+            incidents: 2,
+            ratio: 1 - 372 / (7 * 86400),
+            coverageSeconds: 7 * 86400,
+          },
+          {
+            window: "30d",
+            seconds: 30 * 86400,
+            observedSeconds: 9 * 86400,
+            downSeconds: 372,
+            incidents: 2,
+            ratio: 1 - 372 / (9 * 86400),
+            coverageSeconds: 9 * 86400,
+          },
+        ],
+      }
     } else if (path === "/deploy/7/lifecycle") {
       body = {
         status: "available",
         watching: true,
         since: minutesAgo(6 * 60),
+        recordSince: minutesAgo(9 * 24 * 60),
+        retentionDays: 30,
         events: [
           {
             time: minutesAgo(12),
@@ -2586,6 +2810,49 @@ export async function mockProject(
       body = { run: liveRun(), steps: showcase ? showcaseSteps : steps }
     } else if (path === "/deploy/7/environments/12/configuration" && method === "GET") {
       body = configurationBody()
+    } else if (path === "/deploy/7/environments/12/maintenance" && method === "GET") {
+      body = maintenanceSwitch
+    } else if (path === "/deploy/7/environments/12/maintenance" && method === "PUT") {
+      const { on } = request.postDataJSON() as { on: boolean }
+      // The page's clock is the real one, so the switch is turned on now.
+      maintenanceSwitch = {
+        ...maintenanceSwitch,
+        on,
+        since: on ? new Date().toISOString() : undefined,
+      }
+      body = maintenanceSwitch
+    } else if (path.startsWith("/deploy/7/environments/12/pages/")) {
+      const name = path.slice("/deploy/7/environments/12/pages/".length)
+      if (method === "PUT")
+        routePages[name] = (request.postDataJSON() as { content: string }).content
+      body = {
+        site: "just-dashboard-env-12.conf",
+        page: name,
+        content:
+          routePages[name] ?? `<!doctype html><title>${name}</title><h1>Shipped ${name} page</h1>`,
+        custom: name in routePages,
+      }
+    } else if (path === "/deploy/7/environments/12/rollback-watch" && method === "GET") {
+      body = { policy: rollbackPolicy, watch: rollbackWatch, preview: false }
+    } else if (path === "/deploy/7/environments/12/rollback-policy" && method === "PUT") {
+      rollbackPolicy = { ...(request.postDataJSON() as RollbackPolicy), updatedBy: "operator" }
+      actions.push("rollback-policy")
+      body = rollbackPolicy
+    } else if (path === "/deploy/7/environments/12/rollback-watch/rollback" && method === "POST") {
+      actions.push("instant-rollback")
+      if (rollbackWatch) rollbackWatch = { ...rollbackWatch, rollbackRunId: 85 }
+      body = { ...liveRun(), id: 85, runNumber: 85, operation: "rollback", state: "queued" }
+    } else if (path === "/deploy/7/environments/12/rollback-watch/keep" && method === "POST") {
+      actions.push("keep-release")
+      if (rollbackWatch)
+        rollbackWatch = {
+          ...rollbackWatch,
+          state: "closed",
+          endReason: "kept",
+          endMessage: `operator kept release #${rollbackWatch.releaseNumber}.`,
+          endedAt: new Date().toISOString(),
+        }
+      body = rollbackWatch
     } else if (path === "/deploy/7/environments/12/git-watch" && method === "GET") {
       body = {
         automatic: gitPolicy.automatic,
@@ -2594,6 +2861,34 @@ export async function mockProject(
         intervalSeconds: 5,
         policy: gitPolicy,
       }
+    } else if (path === "/deploy/7/environments/12/vulnerabilities" && method === "GET") {
+      body = scanReading
+    } else if (path === "/deploy/7/environments/12/vulnerabilities" && method === "PUT") {
+      const policy = request.postDataJSON() as ImageScanPolicy
+      actions.push(`vulnerabilities:${policy.enabled ? policy.severityFloor : "off"}`)
+      scanReading = { ...scanReading, policy: { ...policy, updatedBy: "admin", updatedAt: now } }
+      body = scanReading.policy
+    } else if (path === "/deploy/7/environments/12/vulnerabilities/scan" && method === "POST") {
+      actions.push("scan")
+      scanReading = scanReading.scan
+        ? { ...scanReading, scan: { ...scanReading.scan, state: "queued" } }
+        : scanReading
+      body = scanReading.scan
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      })
+      return
+    } else if (path === "/deploy/7/environments/12/rehearsal" && method === "GET") {
+      body = rehearsalPolicy
+    } else if (path === "/deploy/7/environments/12/rehearsal" && method === "PUT") {
+      rehearsalPolicy = {
+        ...(request.postDataJSON() as RehearsalPolicy),
+        updatedBy: "admin",
+        updatedAt: new Date().toISOString(),
+      }
+      body = rehearsalPolicy
     } else if (path === "/deploy/7/environments/12/git-policy" && method === "PUT") {
       const input = request.postDataJSON() as typeof gitPolicy
       gitPolicy = { ...input, revision: input.revision + 1 }
@@ -2753,7 +3048,10 @@ export async function mockProject(
       const requestBody = request.postDataJSON() as {
         sensitivity: "plain" | "secret"
         scopes: DeploymentVariable["scopes"]
+        reference?: string
       }
+      // A typed reference reads back parsed, as the server answers it.
+      const typed = /^\$\{\{([A-Za-z][\w-]*)\.(.+)\}\}$/.exec(requestBody.reference ?? "")
       configurationRevision += 1
       configurationPending = true
       scopedVariables = [
@@ -2765,6 +3063,7 @@ export async function mockProject(
           scopes: requestBody.scopes,
           masked: requestBody.sensitivity === "secret" ? "••••••••" : "configured",
           valueDigest: `sha256:${"3".repeat(64)}`,
+          ...(typed ? { reference: { kind: typed[1], target: typed[2] } } : {}),
           pending: true,
           createdBy: "operator",
           createdAt: now,
@@ -2834,6 +3133,12 @@ export async function mockProject(
     } else if (path === "/deploy/drafts" && method === "POST") {
       body = draft
     } else if (path === "/deploy/drafts/browser-draft") body = draft
+    // Shared variables are empty here; deploy-shared-variables.spec.ts
+    // routes its own over these.
+    else if (/^\/deploy\/(\d+\/)?shared-variables$/.test(path) && method === "GET") body = []
+    // No secret store is connected here; deploy-secret-stores.spec.ts routes
+    // its own over this.
+    else if (path === "/deploy/secret-stores" && method === "GET") body = []
     else {
       body = showcase && method === "GET" ? showcaseRead(path, url) : undefined
       if (body === undefined) {
@@ -2885,10 +3190,25 @@ export async function mockProject(
     configuration() {
       return normalizedConfiguration
     },
+    maintenance() {
+      return maintenanceSwitch
+    },
+    setMaintenance(patch: Record<string, unknown>) {
+      maintenanceSwitch = { ...maintenanceSwitch, ...patch }
+    },
+    routePages() {
+      return routePages
+    },
   }
 }
 
-export async function mockDraftJourney(page: Page) {
+export async function mockDraftJourney(
+  page: Page,
+  options: {
+    /** Findings `/preflight` answers besides its passes: a warning to acknowledge, say. */
+    preflightFindings?: Record<string, unknown>[]
+  } = {},
+) {
   let revision = 1
   let currentStep = "intent"
   let data: Record<string, unknown> = {}
@@ -3248,6 +3568,7 @@ export async function mockDraftJourney(page: Page) {
         { code: "build.ok", severity: "pass", title: "Build plan is valid", owner: "build" },
         { code: "runtime.ok", severity: "pass", title: "Runtime plan is valid", owner: "runtime" },
         { code: "checks.ok", severity: "pass", title: "Readiness is configured", owner: "checks" },
+        ...(options.preflightFindings ?? []),
       ]
       revision += 1
       currentStep = "preflight"
@@ -3297,8 +3618,11 @@ export async function mockDraftJourney(page: Page) {
   }
 }
 
-export async function mockNewProject(page: Page) {
-  const journey = await mockDraftJourney(page)
+export async function mockNewProject(
+  page: Page,
+  options: Parameters<typeof mockDraftJourney>[1] = {},
+) {
+  const journey = await mockDraftJourney(page, options)
   let runs = 0
   await page.route("**/api/v1/git/github**", (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")

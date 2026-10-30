@@ -120,6 +120,47 @@ test("lists credentials as one-line cards drawn as their hosts, with no tiles ov
   await page.screenshot({ path: test.info().outputPath("credentials-390.png"), fullPage: true })
 })
 
+test("a provider token that writes commit statuses is in use, and can still be removed", async ({
+  page,
+}) => {
+  await mockProject(page)
+  const gitlabApi = {
+    ...providerToken,
+    name: "gitlab-api",
+    target: "gitlab.example.test",
+    lastUsedAt: now,
+    reportsForProjectIds: [7],
+  }
+  await page.route("**/api/v1/deploy/credentials", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    await json(route, [githubToken, gitlabApi])
+  })
+  await page.route("**/api/v1/deploy/github-app/", (route) =>
+    json(route, { configured: false, installations: [] }),
+  )
+  await page.goto("/deploy/credentials")
+
+  // Nothing deploys through it, but a project's statuses go out with it, so
+  // it is not filed with the tokens nobody uses.
+  const card = credentialRow(page, "gitlab-api")
+  await expect(card.getByText("writes statuses for 1 project")).toBeVisible()
+  await expect(card.getByText("api-production", { exact: true })).toBeVisible()
+  const inUse = page.getByText("In use", { exact: true }).last()
+  const idle = page.getByText("Not in use", { exact: true })
+  expect((await inUse.boundingBox())!.y).toBeLessThan((await card.boundingBox())!.y)
+  expect((await card.boundingBox())!.y).toBeLessThan((await idle.boundingBox())!.y)
+
+  // Removing it says what stops, and that nothing about deploying does.
+  await card.getByRole("button", { name: "Actions for gitlab-api" }).click()
+  await page.getByRole("menuitem", { name: "Remove credential" }).click()
+  await expect(
+    page.getByText(
+      "It writes commit statuses for 1 project. They stop until another token for gitlab.example.test is saved; how they deploy does not change.",
+    ),
+  ).toBeVisible()
+  await expect(page.getByText(/refuses to remove it/)).toHaveCount(0)
+})
+
 test("an empty list offers the four kinds, each opening its own form", async ({ page }) => {
   await mockProject(page)
   await page.route("**/api/v1/deploy/credentials", async (route) => {

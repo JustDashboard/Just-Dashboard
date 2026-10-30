@@ -240,3 +240,38 @@ func TestOwnerNamesAreReusedOnlyWithinOneListing(t *testing.T) {
 		t.Fatalf("group reused a user's name: %q", got)
 	}
 }
+
+// An operation on an OnHost Service is moved once, Resolve and all: the
+// Resolve inside a List must not be evaluated somewhere the List is not.
+func TestOnHostMovesEachOperationOnce(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	moves := 0
+	s := New([]string{root}).OnHost(func(fn func()) {
+		moves++
+		done := make(chan struct{})
+		go func() { defer close(done); fn() }()
+		<-done
+	})
+	listing, err := s.List(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listing.Entries) != 1 || listing.Entries[0].Name != "a.txt" {
+		t.Fatalf("listing = %+v", listing.Entries)
+	}
+	if moves != 1 {
+		t.Fatalf("List moved %d times, want 1", moves)
+	}
+	if _, err := s.Resolve(filepath.Join(root, "..")); !errors.Is(err, ErrOutsideRoot) {
+		t.Fatalf("Resolve outside the roots = %v, want ErrOutsideRoot", err)
+	}
+	if err := s.Write(filepath.Join(root, "b.txt"), "b"); err != nil {
+		t.Fatal(err)
+	}
+	if moves != 3 {
+		t.Fatalf("moves after Resolve and Write = %d, want 3", moves)
+	}
+}

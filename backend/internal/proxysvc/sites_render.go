@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -35,11 +36,36 @@ func (l *lines) String() string {
 
 // RenderNginx turns a spec into the file that would produce it.
 func RenderNginx(spec *SiteSpec) (string, error) {
+	content, err := renderNginx(spec)
+	if err != nil || spec.shortVars || !hasOverlongVar(content) {
+		return content, err
+	}
+	// Written again with every variable named from the short ident, rather
+	// than only the long ones, so a file that already loads keeps the names
+	// it has and one that would not loads.
+	short := *spec
+	short.shortVars = true
+	return renderNginx(&short)
+}
+
+var ownVarRe = regexp.MustCompile(`\$jd_[a-z0-9_]+`)
+
+// hasOverlongVar says whether the file names one of the dashboard's
+// variables too long for nginx's default variables hash.
+func hasOverlongVar(content string) bool {
+	for _, v := range ownVarRe.FindAllString(content, -1) {
+		if len(v)-1 > maxNginxVarLen {
+			return true
+		}
+	}
+	return false
+}
+
+func renderNginx(spec *SiteSpec) (string, error) {
 	if err := ValidateSpec(spec); err != nil {
 		return "", err
 	}
 	l := &lines{}
-	names := strings.Join(spec.Domains, " ")
 
 	l.add(managedMarker)
 	l.add("# Site: %s", spec.Name)
@@ -49,12 +75,41 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 
 	renderHTTPBlock(l, spec)
 
-	if spec.TLS && spec.ForceHTTPS {
-		renderRedirectServer(l, names, spec)
+	// The site's own server answers the names its TLS covers; the names it
+	// serves over plain HTTP get a server of their own, on port 80 alone,
+	// after it. When every served name is plain the site's own server is
+	// that plain one, and only its redirecting names answer on 443.
+	main, mainNames, plainServed := spec, spec.Domains, []string(nil)
+	if spec.TLS {
+		tlsServed, plain := spec.servedByScheme()
+		if len(tlsServed) == 0 {
+			main = spec.plainCopy(spec.Domains)
+		} else {
+			mainNames, plainServed = tlsServed, plain
+		}
+	}
+	names := strings.Join(mainNames, " ")
+	if main.TLS && main.ForceHTTPS {
+		renderRedirectServer(l, names, main)
 		l.blank()
 	}
 	renderCanonicalServers(l, spec)
+	renderHostRedirectServers(l, spec)
+	renderServer(l, main, names)
+	if len(plainServed) > 0 {
+		l.blank()
+		for _, name := range plainServed {
+			l.add("# Plain HTTP: %s is served without TLS.", name)
+		}
+		renderServer(l, spec.plainCopy(plainServed), strings.Join(plainServed, " "))
+	}
+	return l.String(), nil
+}
 
+// renderServer is one server answering names as spec says: the site's own,
+// or the plain-HTTP one a TLS site keeps for the names its certificate does
+// not cover, which differs only in what TLS gives.
+func renderServer(l *lines, spec *SiteSpec, names string) {
 	l.add("server {")
 	renderListen(l, spec)
 	l.add("    server_name %s;", names)
@@ -72,9 +127,14 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 	renderServerOptions(l, spec)
 	renderUpstreamTLS(l, spec)
 	renderErrorRouting(l, spec)
+	// The edge rules' refusals before the sleep switch, so a request they
+	// refuse never wakes a sleeping application.
+	renderEdgeChecks(l, spec)
+	renderSleepSwitch(l, spec)
 	renderAccess(l, spec)
 	renderForwardAuth(l, spec)
 	renderServerLimits(l, spec)
+	renderRateLimitAnswer(l, spec)
 	renderServerCache(l, spec)
 	renderServerHeaders(l, spec)
 	renderACMEChallenge(l, spec)
@@ -91,13 +151,26 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 			renderLocation(l, loc, spec)
 			l.blank()
 		}
-		renderLocation(l, SiteLocation{Path: "/", Upstream: spec.mainUpstream(), WebSockets: spec.WebSockets}, spec)
+		main := SiteLocation{Path: "/", Upstream: spec.mainUpstream(), WebSockets: spec.WebSockets}
+		if spec.sleep != nil {
+			main.wake = wakeMain
+		}
+		renderLocation(l, main, spec)
+		if spec.sleep != nil {
+			l.blank()
+			retry := main
+			retry.wake = wakeRetry
+			renderLocation(l, retry, spec)
+			l.blank()
+			renderWakeLocations(l, spec)
+		}
 	}
 
 	if spec.usesPages() {
 		l.blank()
 		renderPageLocations(l, spec)
 	}
+	renderRateLimitLocation(l, spec)
 	if spec.ForwardAuth != nil {
 		l.blank()
 		renderForwardAuthLocation(l, spec)
@@ -114,7 +187,6 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 		}
 	}
 	l.add("}")
-	return l.String(), nil
 }
 
 // timedLogFormat is combined followed by named fields, so a reader of the
@@ -145,11 +217,32 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		l.add("}")
 		wrote = true
 	}
+	if spec.dropsCookies() {
+		if wrote {
+			l.blank()
+		}
+		l.add("# The dashboard is reached by this name too, on another port, and a")
+		l.add("# browser sends a cookie to every port of its name: these take the")
+		l.add("# dashboard's session out of what the application is sent.")
+		nginxDropCookieMaps(l, spec.varIdent(), spec.dropCookies)
+		wrote = true
+	}
 	if spec.Kind == "proxy" && spec.Pool != nil {
 		if wrote {
 			l.blank()
 		}
 		renderPool(l, spec)
+		wrote = true
+	}
+	if spec.Kind == "proxy" && spec.Pool != nil && spec.Split != nil {
+		l.blank()
+		renderSplit(l, spec)
+	}
+	if spec.Trace {
+		if wrote {
+			l.blank()
+		}
+		renderNginxTraceMaps(l, spec)
 		wrote = true
 	}
 	if spec.AccessLog && spec.timedLog() {
@@ -158,7 +251,17 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		}
 		l.add("# nginx's combined format with the time taken added, which is what")
 		l.add("# the dashboard's traffic pages read latency from.")
-		l.add("log_format %s %s;", spec.logFormatName(), timedLogFormat)
+		// The trace context the application was sent, and the edge rule that
+		// decided the request, after the rest.
+		format := strings.TrimSuffix(timedLogFormat, "'")
+		if spec.Pool != nil && spec.Split != nil {
+			l.add("# rel= is the release that answered, while the route is split.")
+			format = strings.TrimSuffix(splitLogFormat(spec), "'")
+		}
+		if spec.Trace {
+			format += nginxTraceLogFields(spec)
+		}
+		l.add("log_format %s %s;", spec.logFormatName(), format+spec.edgeLogField()+"'")
 		wrote = true
 	}
 	if spec.Maintenance != nil {
@@ -173,6 +276,13 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 			l.blank()
 		}
 		renderLimitZones(l, spec)
+		wrote = true
+	}
+	if spec.hasEdge() {
+		if wrote {
+			l.blank()
+		}
+		renderEdgeObjects(l, spec)
 		wrote = true
 	}
 	if spec.cachesStatic() || spec.cachesProxy() {
@@ -239,9 +349,13 @@ const maintenanceExempt = `"^/(\.well-known/acme-challenge/|__jd/maintenance\.ht
 // on every pass rather than a map, whose value nginx keeps for the rest of
 // the request.
 func renderErrorRouting(l *lines, spec *SiteSpec) {
-	on := spec.Maintenance != nil && spec.Maintenance.On
-	if !on && len(spec.ErrorPages) == 0 {
+	switched := spec.Maintenance != nil && spec.Maintenance.Switch
+	on := spec.Maintenance != nil && spec.Maintenance.On && !switched
+	if !on && !switched && len(spec.ErrorPages) == 0 {
 		return
+	}
+	if switched {
+		renderMaintenanceSwitch(l, spec)
 	}
 	if on {
 		l.add("    # Maintenance is on. It is checked before anything else the")
@@ -256,7 +370,9 @@ func renderErrorRouting(l *lines, spec *SiteSpec) {
 		l.add("    error_page 503 %s;", pageURI("maintenance"))
 	}
 	// The site's own 503 page waits while maintenance holds the code; its
-	// location stays written, which is what brings it back afterwards.
+	// location stays written, which is what brings it back afterwards. A
+	// switched site's maintenance answers from a location of its own, so
+	// the server's 503 stays the site's page whichever way it is switched.
 	for _, code := range errorPageCodes {
 		if spec.hasErrorPage(code) && !(on && code == 503) {
 			l.add("    error_page %d %s;", code, pageURI(strconv.Itoa(code)))
@@ -265,13 +381,46 @@ func renderErrorRouting(l *lines, spec *SiteSpec) {
 	l.blank()
 }
 
+// maintenanceAnswerURI is where a switched site sends a request maintenance
+// holds: a location that answers 503 with the maintenance page.
+const maintenanceAnswerURI = "/__jd/maintenance"
+
+// renderMaintenanceSwitch writes the check for a site whose maintenance
+// follows a file. It is the check renderErrorRouting writes for a site in
+// maintenance, behind a test for the file, and it hands the request to a
+// location rather than holding the server's error_page 503: that one stays
+// free for the site's own 503 page, so an application's 503 is never
+// answered with the maintenance page while maintenance is off.
+func renderMaintenanceSwitch(l *lines, spec *SiteSpec) {
+	l.add("    # Maintenance is on while this file exists. nginx looks for it on")
+	l.add("    # every request, so turning it on or off needs no reload. It is")
+	l.add("    # checked before anything else the server does, a redirect included.")
+	l.add("    set $%s 0;", spec.maintVar())
+	l.add("    if (-f %s) {", spec.maintenanceSwitchPath())
+	l.add("        set $%s $%s;", spec.maintVar(), spec.maintIPVar())
+	l.add("    }")
+	l.add("    if ($uri ~ %s) {", maintenanceExempt)
+	l.add("        set $%s 0;", spec.maintVar())
+	l.add("    }")
+	l.add("    if ($%s) {", spec.maintVar())
+	l.add("        rewrite ^ %s last;", maintenanceAnswerURI)
+	l.add("    }")
+}
+
 // renderPageLocations writes the locations the pages are served from. Each
 // is internal, so a visitor cannot ask for one, and exact, so no other path
 // reaches the folder. The response keeps the status that sent it there.
 func renderPageLocations(l *lines, spec *SiteSpec) {
-	dir := spec.PagesDir
-	if dir == "" {
-		dir = "/etc/nginx/jd-pages/" + spec.Name
+	dir := spec.pagesDir()
+	if m := spec.Maintenance; m != nil && m.Switch {
+		// Its return is answered in the location's rewrite phase, ahead of
+		// the address list and the password, so the page decides who sees
+		// it the way the site's own maintenance page does.
+		l.add("    location = %s {", maintenanceAnswerURI)
+		l.add("        internal;")
+		l.add("        error_page 503 %s;", pageURI("maintenance"))
+		l.add("        return 503;")
+		l.add("    }")
 	}
 	page := func(name string, extra func()) {
 		l.add("    location = %s {", pageURI(name))
@@ -315,6 +464,9 @@ func renderPageLocations(l *lines, spec *SiteSpec) {
 		if spec.hasErrorPage(code) {
 			page(strconv.Itoa(code), nil)
 		}
+	}
+	if spec.sleep != nil {
+		page("waking", func() { renderWakingPageExtra(l, spec) })
 	}
 	renderWellKnown(l, spec, dir)
 }
@@ -406,7 +558,7 @@ func renderTLS(l *lines, spec *SiteSpec) {
 // writesHeaders says whether the server sets any response header, each of
 // which a location with an add_header of its own has to repeat.
 func (spec *SiteSpec) writesHeaders() bool {
-	return spec.SecurityHeaders || spec.HSTS ||
+	return spec.SecurityHeaders || spec.HSTS || (spec.Pool != nil && spec.Split != nil && spec.Split.CookieMaxAge > 0) ||
 		(spec.cachesStatic() && spec.StaticCache.Immutable) || spec.cachesProxy() ||
 		spec.headersWritten()
 }
@@ -424,6 +576,7 @@ func renderHeaders(l *lines, spec *SiteSpec) {
 	}
 	cacheHeaders(l, spec)
 	renderSiteHeaders(l, spec)
+	renderReleaseCookie(l, spec)
 }
 
 func renderServerOptions(l *lines, spec *SiteSpec) {
@@ -550,9 +703,12 @@ func renderUpstreamTLS(l *lines, spec *SiteSpec) {
 const stripMarker = "# Strips the path before forwarding"
 
 func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
-	if loc.Match != "" {
+	switch {
+	case loc.wake == wakeRetry:
+		renderWakeOpening(l, spec)
+	case loc.Match != "":
 		l.add("    location %s %s {", loc.Match, loc.renderedPath())
-	} else {
+	default:
 		l.add("    location %s {", loc.renderedPath())
 	}
 	renderLocationLimit(l, loc, spec)
@@ -581,8 +737,12 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	// As typed: a path on the upstream is how nginx is told to replace the
 	// location's own prefix, and trimming its slash turned /app/ into /app,
 	// which sent /page to the application as /apppage.
-	l.add("        proxy_pass %s;", proxyPassTarget(loc.renderedPath(), loc.renderedUpstream()))
-	if spec.Pool != nil && loc.Upstream == spec.poolUpstream() {
+	if loc.wake == wakeMain {
+		l.add("        proxy_pass http://$%s;", spec.sleepUpstreamVar())
+	} else {
+		l.add("        proxy_pass %s;", proxyPassTarget(loc.renderedPath(), loc.renderedUpstream()))
+	}
+	if spec.Pool != nil && loc.Upstream == spec.mainUpstream() {
 		renderPoolLocation(l, loc, spec)
 	}
 	l.add("        proxy_http_version 1.1;")
@@ -597,6 +757,12 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	if loc.WebSockets {
 		l.add("        proxy_set_header Upgrade    $http_upgrade;")
 		l.add("        proxy_set_header Connection $%s;", spec.connectionVar())
+	}
+	if spec.dropsCookies() {
+		l.add("        proxy_set_header Cookie     $%s;", spec.cookieVar())
+	}
+	if spec.Trace {
+		renderNginxTraceHeader(l, spec)
 	}
 	renderRequestHeaders(l, spec)
 	renderClientCertHeaders(l, spec)
@@ -638,6 +804,7 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 			l.add("        proxy_request_buffering %s;", requestBuffering)
 		}
 	}
+	renderWakeErrors(l, loc, spec)
 	l.add("    }")
 }
 

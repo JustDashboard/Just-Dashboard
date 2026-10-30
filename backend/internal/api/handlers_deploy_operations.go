@@ -40,15 +40,9 @@ func (s *Server) operationsOwners() deploy.OperationsOwners {
 }
 
 func (s *Server) handleDeploymentOperations(w http.ResponseWriter, r *http.Request) error {
-	id, err := parseID(r)
+	summary, err := s.deploymentTarget(r)
 	if err != nil {
 		return err
-	}
-	summary, err := s.modules.deployRuns.DeploymentSummary(r.Context(), id, deploy.QueueBudget{
-		Heavy: s.Cfg.DeployHeavySlots, Light: s.Cfg.DeployLightSlots,
-	})
-	if err != nil {
-		return mapDeployError(err)
 	}
 	operations, err := s.modules.deployRuns.Operations(r.Context(), s.operationsOwners(), *summary)
 	if err != nil {
@@ -74,9 +68,7 @@ func (s *Server) handleDeploymentReleasePin(w http.ResponseWriter, r *http.Reque
 	if err != nil || releaseID <= 0 {
 		return httpx.BadRequest("release id must be a positive integer")
 	}
-	var request struct {
-		Pinned bool `json:"pinned"`
-	}
+	var request releasePinRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
@@ -153,4 +145,9 @@ func (s *Server) handleDeploymentReleaseComparison(w http.ResponseWriter, r *htt
 		"comparison": comparison, "update": update, "artifacts": comparison.Artifacts,
 	})
 	return nil
+}
+
+// releasePinRequest pins a release so retention keeps it, or unpins it.
+type releasePinRequest struct {
+	Pinned bool `json:"pinned"`
 }

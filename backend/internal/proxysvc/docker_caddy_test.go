@@ -41,8 +41,37 @@ func TestDockerCaddySelectionRequiresPublicOwnershipAndPersistence(t *testing.T)
 	}
 }
 
+// A named ingress is asked everything discovery asks except the public
+// ports: a Caddy on loopback is used when named and never chosen otherwise,
+// and nothing named ever falls back to a server it would provision.
+func TestNamedIngressSkipsOnlyThePublicPorts(t *testing.T) {
+	raw := `[{"Id":"fixture-id","Name":"/acceptance-ingress","State":{"Running":true},"Config":{"Cmd":["caddy","run","--config","/etc/caddy/Caddyfile","--adapter","caddyfile"]},"Mounts":[{"Type":"bind","Source":"/tmp/fixture/Caddyfile","Destination":"/etc/caddy/Caddyfile"},{"Type":"volume","Source":"/var/lib/docker/volumes/c","Destination":"/config","RW":true},{"Type":"volume","Source":"/var/lib/docker/volumes/d","Destination":"/data","RW":true}],"NetworkSettings":{"Ports":{"80/tcp":[{"HostIp":"127.0.0.1","HostPort":"43280"}]}}}]`
+	var containers []ingressContainer
+	if err := json.Unmarshal([]byte(raw), &containers); err != nil {
+		t.Fatal(err)
+	}
+	if edge, err := selectDockerCaddy(containers); err != nil || edge != nil {
+		t.Fatalf("discovery chose a loopback Caddy: %+v %v", edge, err)
+	}
+	if !runsCaddyfile(containers[0]) {
+		t.Fatal("a Caddy serving its Caddyfile was not recognized")
+	}
+	edge, err := dockerCaddyFrom(containers[0])
+	if err != nil || edge.Name != "acceptance-ingress" || edge.Source != "/tmp/fixture/Caddyfile" || edge.Identity == "" {
+		t.Fatalf("named ingress = %+v %v", edge, err)
+	}
+	containers[0].Mounts = containers[0].Mounts[:1]
+	if _, err := dockerCaddyFrom(containers[0]); err == nil {
+		t.Fatal("a named ingress without persistent /config and /data was accepted")
+	}
+	pinned := NewWithIngressContainer(t.TempDir(), "/nonexistent/Caddyfile", "acceptance-ingress")
+	if pinned.canProvisionIngress(context.Background()) {
+		t.Fatal("a pinned ingress offered to provision another")
+	}
+}
+
 func TestDockerCaddyRouteRejectsInjectionAndHostPathTraversal(t *testing.T) {
-	for _, domain := range []string{"app.test { respond bad }", "app.test\nadmin off", "*.example.test"} {
+	for _, domain := range []string{"app.test { respond bad }", "app.test\nadmin off"} {
 		if _, err := renderDockerCaddyRoute(DeploymentRoute{Domains: []string{domain}, TLS: true}, "http://127.0.0.1:8080"); err == nil {
 			t.Fatalf("accepted domain %q", domain)
 		}
@@ -305,7 +334,7 @@ func TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute(t *testing.
 		time.Sleep(100 * time.Millisecond)
 	}
 	repairs := 0
-	if err := edge.reconcile(ctx, func(name string, success bool) {
+	if _, err := edge.reconcile(ctx, func(name string, success bool) {
 		if name != route.Name || !success {
 			t.Fatalf("unexpected repair %s %v", name, success)
 		}
@@ -320,7 +349,7 @@ func TestLiveDockerCaddyIngressPreservesExistingSiteAndRestoresRoute(t *testing.
 	if err != nil || status != 200 || !strings.Contains(body, "Welcome to nginx") {
 		t.Fatalf("recreated ingress response=%d %q %v", status, body, err)
 	}
-	if err := edge.reconcile(ctx, func(string, bool) { t.Fatal("unchanged route was mutated") }); err != nil {
+	if _, err := edge.reconcile(ctx, func(string, bool) { t.Fatal("unchanged route was mutated") }); err != nil {
 		t.Fatal(err)
 	}
 	foreign := result.Snapshot

@@ -1,6 +1,6 @@
 <div align="center">
 
-<a href="https://just-dashboard.com"><img src="docs/readme/logo.svg" width="88" height="88" alt="Just Dashboard"></a>
+<a href="https://just-dashboard.com"><img src="frontend/public/brand-logo/just-tile-ink.svg" width="88" height="88" alt="Just Dashboard"></a>
 
 # Just Dashboard
 
@@ -9,7 +9,7 @@
 Deploy apps, run Docker, manage databases, shape the network, open a real shell and keep it all
 backed up — behind one login that lives on your private network.
 
-**Version 0.8.1** · Go backend · Next.js frontend · one `docker compose` stack
+**Version 0.8.2** · Go backend · Next.js frontend · one `docker compose` stack
 
 [![Website](https://img.shields.io/badge/website-just--dashboard.com-CAE9FF?style=flat-square&labelColor=16181d)](https://just-dashboard.com)
 [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FJustDashboard%2FJust-Dashboard%2Fmain%2Fbackend%2Finternal%2Fselfupdate%2Fchangelog.json&query=%24.latest&label=version&style=flat-square&color=CAE9FF&labelColor=16181d)](CHANGELOG.md)
@@ -24,9 +24,9 @@ backed up — behind one login that lives on your private network.
 
 <br>
 
-![The server overview: the machine drawn as itself, live resources with their last hour, storage and the deployed projects](docs/readme/overview.png)
+![The server overview: the machine drawn as itself, shortcuts to every section, live resources with their last hour, storage and the deployed projects](docs/readme/overview.png)
 
-<p align="center"><sub>Screenshots show version 0.7.5 with example data.</sub></p>
+<p align="center"><sub>Screenshots show example data: the Overview and Excalidraw at 0.8.1, the rest at 0.7.5.</sub></p>
 
 ---
 
@@ -54,7 +54,7 @@ login, two-factor is per account, and every change is audited.
 
 **One server, done properly**
 
-No fleet, no cloud account, no AI model or API key. One `docker compose` stack that knows the
+No fleet, no cloud account, no AI model or API key required. One `docker compose` stack that knows the
 machine it runs on, end to end.
 
 </td>
@@ -78,7 +78,15 @@ free.
 ### 🖥️ Overview & monitoring
 
 - A live overview of the machine: CPU, memory, load, network, storage and disk I/O
+- Shortcuts to every section, with the open shells, the drawings edited last, the databases and
+  every backup job one press away
+- A map of the whole server: the server in the middle and everything it runs branching off it —
+  projects, containers, databases, domains, backups, shells, accounts — wired together where the
+  server knows they are, arranged however you like and remembered
 - Metrics with seven days of history the backend records itself, and CSV export
+- Alerts when the CPU or memory stays high, a disk fills, a container goes down, a backup fails or a
+  deployment's image has a fixable vulnerability a newer base would bring
+- A capacity forecast: when each disk fills at the rate it has been growing, and whose volumes grow fastest
 - Notable moments, top processes and the day's activity at a glance
 - Processes, PM2 apps, systemd services and scheduled jobs, each with its verbs
 - One log viewer for files, containers, stacks, PM2 and the journal, with insights
@@ -89,13 +97,62 @@ free.
 
 ### 🚀 Deployments
 
-- Deploy from a repository, an image, a Compose stack or **57 reviewed templates**
-- Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
-- Push to deploy, plus pull-request previews only your tailnet can reach
+- Deploy from a repository, an image, a Compose stack or **157 reviewed templates**, 56 of them
+  multi-service stacks — an application with its own database, cache or worker
+- Templates of your own beside them: a pasted Compose file or a running deployment saved as one,
+  validated as a built-in is, its passwords made secrets each deployment generates or is asked for,
+  exported and imported as JSON
+- Minecraft Java and Bedrock servers with their console, players and settings file, kept on
+  loopback until you open the port and its firewall rule
+- Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more, and builds what no
+  recipe does with Railpack, the builder Railway and Coolify use, pinned to a reviewed release
+- Push to deploy, plus pull-request previews only your tailnet can reach — Compose stacks too, every
+  service isolated on the preview's own network and storage
+- Database branches for previews: a preview's own copy of a linked PostgreSQL, MySQL or MariaDB,
+  restored from its newest backup with chosen columns masked, removed with the preview, never for a fork
 - Immutable releases, one-click rollback and health-gated cutover
+- Up to eight replicas of a stateless release behind one route, cut over and rolled back together
+- Canary releases: a new release takes a share of the requests beside the live one, read side by side,
+  and is removed if it does worse or promoted when it does not
+- Skew protection: a visitor stays on the release that first answered them for the warm window after a
+  cutover, so a page loaded before it never asks the new release for scripts it does not have
+- Right-sizing from what each app actually used: the memory and CPU limits it should have, applied in one click
+- The container flags `docker run` has, per deployment: the user it runs as, a read-only root with
+  writable paths in memory, ulimits, the container's own sysctls and NVIDIA GPUs
+- HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
+- A domain's DNS record created from its settings with those same credentials: the A and AAAA to this
+  server, or a tunnel's CNAME, written into its zone at Cloudflare, Route 53, DigitalOcean, Google Cloud
+  DNS, Linode, OVH, Gandi or your own RFC 2136 server, shown as a dry run first and never deleting a record
+- Domains served through Cloudflare Tunnel from a server with no public address or open port: the
+  connector runs as a container, and its routes and DNS records are set as each release goes live
+- Edge rules per deployment: block, answer or redirect by path, method, user agent or address, a
+  rate limit per visitor, and CrowdSec's bans refused at the route
+- A staging environment on its own branch, promoted to production as the exact image it ran, with no rebuild
+- Migrations rehearsed on a throwaway copy of the database, restored from its backup, before production
+- Real recent requests replayed against a new release before traffic moves, so a page it broke stops it
+- Sleep when idle: an app nobody visits is stopped, and the next visitor's request starts it and gets the page after a pause
+- Each release remembers where its database stood when it went live: bring that data back into a side copy to compare or restore from
+- Variables per environment, plus shared ones defined once for the server or a project
+- Variables read from HashiCorp Vault, OpenBao, Infisical, Doppler, AWS Secrets Manager or Azure Key Vault, fresh for each run
+- Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
+- Apps that exist only on your tailnet, opened only by the Tailscale logins and tags you list, with
+  no public domain, no sign-in server and no certificate to order
+- A maintenance page switched on at once, without a deploy, and the app's own error pages
 - Build logs, runtime, console, request logs and traffic alerts per project
+- A failed run named from its own output, and on request explained by your own model, secrets masked
+- Diagnose: ask your own model what is wrong with a deployment; it reads runs, logs, usage, events,
+  alerts, firewall rules and pending updates only as you allow each read, and proposes a restart,
+  rollback or maintenance that runs only when you press it
+- Each release's image and the base images it was built on scanned for known vulnerabilities
+  after the build and daily, offline; told when a fixable one meets a newer base, rebuilt in one click
 - Request insights that count real visitors apart from bots, with their devices and pages
-- Notifications to Discord, Slack, Telegram, e-mail, webhooks and GitHub
+- Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover,
+  e-mail and webhooks
+- Commit statuses and preview comments on GitHub, GitLab, Gitea and Forgejo
+- Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint,
+  and every request as an OpenTelemetry span under the `traceparent` the ingress sends your app
+- The `jd` command line and deploy keys for CI: create, configure, deploy, follow, roll back, promote,
+  keep or switch back, maintenance, status, set variables
 
 </td>
 </tr>
@@ -130,7 +187,9 @@ free.
 - Point-in-time recovery for PostgreSQL: the write-ahead log archived with WAL-G, recovered to any second
 - Alerts when a database goes down, fills its disk, runs low on connections, lags or misses a backup
 - An MCP server for AI clients such as Claude Code, Cursor and VS Code: keys that reach only the
-  databases you choose, read-only unless you allow changes, never a protected one, every call audited
+  databases you choose, read-only unless you allow changes, never a protected one, and the
+  deployments only if you allow it — every one or the ones you pick — through 113 tools in all,
+  100 tools generated from the deployment API; every call audited
 
 </td>
 </tr>
@@ -179,9 +238,11 @@ free.
 
 - A verdict on the host: exposure, SSH, logins and who is attacking
 - fail2ban, CrowdSec and Suricata where they run
-- Scheduled backups to disk, S3 or Backblaze B2, encrypted on the way out, and native database dumps
+- Scheduled backups to disk, S3, Backblaze B2, an SFTP server or Google Drive, OneDrive, Dropbox, WebDAV
+  and the other services rclone speaks, encrypted on the way out, and native database dumps
 - A coverage map of everything that is *not* backed up yet
-- Single-file and in-place restore
+- Single-file and in-place restore, on this server or a fresh one: import what a destination holds and
+  restore it there, its Docker volumes made again
 
 </td>
 </tr>
@@ -193,10 +254,11 @@ free.
 - Host package updates on apt, dnf, yum, zypper, pacman or apk
 - System users, an audit log of every change and the panel's own settings
 - Address, certificate, allowlist and ports applied with automatic rollback
-- Roles, two-factor, sessions and API keys for every account
+- Roles, two-factor, passkeys, sessions and API keys for every account
 - Search and replace API keys, with explicit revocation and inactive-record cleanup
 - A first-run question that keeps the sections you don't use out of your sidebar
 - One-click self-update, with the release notes compiled in
+- Optionally linked to your just-dashboard.com account, at a scope you choose, to see this server from the site
 
 </td>
 <td width="50%" valign="top">
@@ -278,7 +340,26 @@ free.
 </tr>
 </table>
 
-### New in 0.7.5
+### New in 0.8
+
+<img src="docs/readme/excalidraw.png" alt="An Excalidraw drawing of a release path from the internet through Caddy to a Next.js app, its PostgreSQL database and a nightly backup">
+<p align="center"><b>Excalidraw</b> — drawings kept on the server and edited together live</p>
+
+- **Drawings edited together:** Excalidraw is the Workspace's one board. Everyone with a drawing open
+  edits it live; its images and the shape library are kept on the server; and a drawing can hold live
+  cards of your hosts, projects and databases, YouTube, Vimeo and Figma embeds, and diagrams written
+  from a description.
+- **An Overview that opens onto everything:** shortcuts to every section, the open shells beside the
+  drawings edited last, and the databases beside every backup job.
+- **Projects drawn by their own icon** wherever the dashboard names them, a web terminal that finds
+  what ssh finds, and saved database connections that repair themselves after a reinstall lost the
+  master key.
+- **Gone:** Stickyboard (its boards stay in the database) and the schema comparison page.
+
+0.8.1 made a streamed Mac connect once, unstretched, with the pointer where it is drawn. Every change
+is in [CHANGELOG.md](CHANGELOG.md).
+
+### Added in 0.7.5
 
 <table>
 <tr>
@@ -339,6 +420,12 @@ rest in four labelled stages:
 Use `./install.sh --help` to preview the steps, or `sudo NO_COLOR=1 ./install.sh` for plain output.
 Everything it asked is editable afterwards under **Settings → Configuration**.
 
+One of its questions is optional and defaults to **No**: whether to [link this server to your
+just-dashboard.com account](#linking-to-just-dashboardcom). For unattended runs, `--link` and
+`--no-link` answer it and `--link-scope observe|operate|maintain` names what the site may do
+(default `observe`). The install finishes whether or not the link is approved, and
+`JD_ACCOUNT_LINK=false` removes the question altogether.
+
 **First sign-in:** every new account is asked once what it will use the server for — shipping apps,
 running databases, containers, the network, security, or working on the box — and its sidebar,
 Overview and search's empty list keep only those sections. Hiding a section is about the sidebar,
@@ -369,9 +456,13 @@ while the backend is stopped.
 | `sudo ./scripts/create-user.sh alice limited` | Create an account (`readonly`, `limited` or `admin`) |
 | `sudo ./scripts/manage.sh users` | List accounts, roles and two-factor status |
 | `sudo ./scripts/manage.sh revoke-sessions alice` | Sign out every browser session for an account |
+| `sudo ./scripts/manage.sh link [observe\|operate\|maintain]` | Link this server to your just-dashboard.com account (prints a code to approve there) |
+| `sudo ./scripts/manage.sh unlink` | Unlink it |
+| `sudo ./scripts/manage.sh link-status` | Say whether it is linked |
 | `sudo ./scripts/manage.sh status` | Show the containers and their health |
 | `sudo ./scripts/manage.sh logs [backend\|frontend\|proxy]` | Follow logs (Ctrl+C exits) |
 | `sudo ./scripts/manage.sh restart` | Recreate the stack to apply `.env` edits |
+| `sudo ./scripts/manage.sh install-cli` | Install (or reinstall) the `jd` command line at `/usr/local/bin/jd` |
 | `./scripts/manage.sh --help` | Usage, no sudo needed |
 
 <details>
@@ -383,7 +474,7 @@ Passwords are entered twice with hidden input and must meet the dashboard's stre
 password a script sets is the one the account signs in with — the dashboard does not ask for another
 at sign-in. An account an admin creates from Account → Users, and a bootstrap password the backend
 generated, are the ones replaced on first sign-in, after any required two-factor step. A reset
-clears failed-login lockout and revokes that account's sessions and API tokens, while keeping
+clears failed-login lockout and revokes that account's sessions, API tokens and passkeys, while keeping
 two-factor enrolment, recovery codes, role and disabled state. Account changes are audited as local
 root; `revoke-sessions` leaves API tokens unchanged.
 
@@ -395,6 +486,137 @@ disconnects the web terminal; it recreates containers with current settings, whi
 
 </details>
 
+## The jd command line
+
+`jd` drives your deployments from a terminal or a CI job, over the dashboard's own API. The installer
+puts it at `/usr/local/bin/jd` on the server, and the dashboard keeps that copy current after every
+update (`sudo ./scripts/manage.sh install-cli` installs it again by hand). For another Linux machine
+of the same architecture, **Account → API keys** links the same file (`GET /api/v1/cli/jd`, for any
+signed-in account); anywhere else, build it from a checkout with Go 1.26: `cd backend && go build ./cmd/jd`
+— it uses only Go's standard library.
+
+It signs in with a **deploy key**: under **Account → API keys → New key**, an administrator chooses
+*Deploy key*, a name, an expiry and the deployments it reaches (every one, or only those you pick).
+The key is shown once.
+
+```bash
+jd login https://dash.example.com --key - < key   # the key read from stdin; stored 0600 in ~/.config/jd
+jd deployments                                    # every deployment with its health and last run
+jd deploy shop --wait                             # exit status is the run's result
+jd logs shop --follow                             # or --run 12 for an earlier run
+jd runs shop / jd releases shop
+jd rollback shop                                  # to the release before the live one, or --to <id>
+jd rollback shop --instant                        # straight back to the release kept warm after the last deploy
+jd keep shop                                      # keep the new release now; the warm one is retired
+jd canary status shop                             # a canary's window and both releases' requests, 5xx and p95
+jd canary promote shop / jd canary abort shop     # decide a canary now; abort leaves the live release untouched
+jd promote shop --wait                            # staging's live release into production, as the same image
+jd promote shop --from-preview 42 --wait          # PR #42's approved preview into staging, as the same image
+jd maintenance shop on --bypass 10.0.0.0/8        # the switch acts at once; the bypass list with the next deploy
+jd status shop                                    # environments, live release, rollback watch, maintenance, rehearsal
+jd vars ls shop                                   # names, scopes and digests: never values
+jd vars set shop STRIPE_KEY=- < stripe.key        # KEY=- reads the value from stdin, out of shell history
+jd vars import shop .env --dry-run                # then without --dry-run
+jd vars rm shop OLD_FLAG
+jd config get shop --json > shop.json             # edit, then: jd config set shop shop.json
+jd create --name blog --image nginx:1.27-alpine --port 80   # a new deployment, through a draft
+```
+
+Every read takes `--json`. In CI, set `JD_URL` and `JD_KEY` instead of logging in; nothing is written.
+For a client in another language, the dashboard describes the whole deployment API as OpenAPI 3.1 at
+`GET /api/v1/deploy/openapi.json` (or `.yaml`; `jd openapi` prints it), generated from its own router
+and types; **Account → API keys** links it beside the `jd` download when a deploy key is made, and the
+repository carries a copy at `docs/api/deploy-openapi.json`. Typed clients generated from it are in
+the repository too: a Go package with no dependencies (`sdk/go`, module
+`github.com/Wayy01/Just-Dashboard/sdk/go`) and a TypeScript module over `fetch` (`sdk/typescript`),
+a call per route and a type per schema, regenerated with the description (see [`sdk/README.md`](sdk/README.md)).
+`--env` picks an environment other than production, `--ca-file` trusts the internal Caddy certificate
+authority, and plain `http://` is refused except to loopback (an SSH tunnel). Exit codes: 0 done (the
+run succeeded), 1 refused or the run failed, 2 usage, 3 not logged in or the key is no longer valid.
+
+**What a deploy key can do.** Everything an ordinary key could on the deployments — list, read, deploy,
+cancel, retry, roll back, promote staging (and a pull request's approved preview into staging), switch
+back to the warm release or keep the new one, promote or abort a canary, switch maintenance, runs and logs — plus what used to need
+a browser session: create deployments from drafts
+and duplicates (a key's drafts are its own, and a key narrowed to some deployments reaches the
+deployments it commits), change configuration, source, Git policy and triggers, and set, import,
+generate, rotate and delete variables and shared variables. Variables are write-only to it: it sees
+names and digests, never a value. **What it cannot do, whatever it reaches:** reveal a value; list,
+add, change or test saved registry and Git credentials; see or change secret-store connections; set the
+rollback-watch or rehearsal terms or edit a route's maintenance and error pages; ask for, read or remove
+a copy of a release's data; merge or comment on
+pull requests as the dashboard's GitHub account; approve previews; archive or delete deployments; or
+reach anything outside Deployments. It also cannot give a deployment access to the server itself — a
+privileged container, the host's network, its devices or GPUs, a host folder, a release task in the
+host's shell, a Compose file — nor point a saved credential somewhere new; a deployment that already has such settings, or
+reads a saved credential through a variable, can be deployed and its variables set, but its
+configuration and source are changed in the dashboard. Every
+write is in the audit log under the key's name. See [the security notes](docs/internal/security/invariants.md)
+for the full boundary; a key that can deploy code can still read that deployment's own variables from
+inside it, as in any CI system.
+
+**AI clients.** An MCP key given the deployments (**Databases → MCP server**, every deployment or the
+ones you pick) reaches the same API as tools: six written by hand — list deployments, runs and
+releases, read a run's log, deploy, roll back — and, when *Offer every deployment route as a tool* is
+on for the key (it is for a new key, and off for every key made before it until you turn it on), 100
+tools generated from the deployment API, one per route a deploy key may call, named for its operation
+(`deployment_configuration_save`, `deployment_variable_put`, …): 113 tools in all with the seven
+database tools. *Read* is offered the reads; *Deploy* also the changes, held to your role and to everything above that a deploy key cannot
+do; a destructive route also needs a role that may take destructive actions. Each call goes through
+the dashboard's own routes as the key and is in the audit log twice: as the MCP call and as the
+route's own entry.
+
+## Linking to just-dashboard.com
+
+Optional, and off until you do it. A linked server shows up on your [just-dashboard.com](https://just-dashboard.com)
+account with its health, version and the way to reach it, so you can find your dashboards in one
+place. Link it from **Settings → Connect**, from the question in `install.sh`, or over SSH
+with `sudo ./scripts/manage.sh link`; all three run the same code. The server asks the site for a short
+code, you enter it on the site while signed in, and the server learns it was approved. Nothing secret is
+typed or printed: the code only points at the request, and completing the link needs the key this
+server keeps sealed in its own store.
+
+You choose the **scope** when you link, and can change it any time in Settings:
+
+| Scope | The site sees | The site can also |
+| --- | --- | --- |
+| `observe` (default) | Version and update state, OS, kernel, architecture, uptime, the address you reach the dashboard at (tailnet name or SSH tunnel port), CPU, memory, disk, load and network readings, container and backup counts, alerts firing | Ask for a fresh reading |
+| `operate` | All of that, plus the names of containers, stacks, backup jobs and the last-deployed project | Start, stop or restart a container, restart a compose stack, run a backup job |
+| `maintain` | Same as `operate` | Also install a dashboard update, set an automatic-update policy (evaluated here, in your server's time zone), restart the dashboard |
+
+Never sent, at any scope: `.env`, the allowlist, accounts, API keys, file paths beyond mount points,
+logs, connection strings, deployment variables or backup credentials. The Settings page shows the exact
+body of the last report.
+
+Everything is outbound over HTTPS: the dashboard is not made reachable and the site never connects to it.
+A command from the site runs only if its signature verifies against the site key pinned when you linked,
+it has not expired or been seen before, and it fits the scope you chose here; every one, run or refused,
+is written to the audit log as the site account. Unlink from Settings, with
+`sudo ./scripts/manage.sh unlink`, or by removing the server on the site. `JD_ACCOUNT_LINK=false` switches
+the feature off entirely: no page controls, no installer question, no command, and a link that exists
+goes quiet. `JD_ACCOUNT_URL` names the site, an origin only (`http://` just for `localhost`).
+
+## The usage count
+
+An administrator is asked once, on the Overview, whether this server may be counted in the public install
+numbers at [just-dashboard.com/stats](https://just-dashboard.com/stats). **Nothing is sent until somebody says
+yes.** You can change the answer at any time under **Settings → Configuration**, which also prints the report
+exactly as it is sent.
+
+A server that says yes sends one request a day, and this is all of it:
+
+```json
+{"version":"0.8.2","usedToday":true,"usedThisWeek":true}
+```
+
+The two flags say whether anybody signed in during the last 24 hours and the last 7 days. There is no ID and no
+hostname, so a server cannot be followed from one day to the next, and the number counts servers rather than
+people. The site sees the address a request comes from, as any server does; it adds the report to that day's
+totals and keeps no address.
+
+`JD_USAGE_PING=false` means nobody is asked and nothing is ever sent, and silences an earlier yes.
+`JD_ACCOUNT_LINK=false` does the same.
+
 ## Security first
 
 **This dashboard is root-equivalent.** Anyone who reaches it with a valid session has root on the
@@ -403,11 +625,20 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - The backend refuses to start on a non-loopback address without a `JD_ALLOWED_CIDRS` allowlist,
   and the allowlist is checked **before** authentication.
 - Two-factor is enforced for every account that has enrolled; `JD_REQUIRE_2FA` decides whether an
-  account *must* enrol.
+  account *must* enrol. A passkey replaces the password at sign-in, never the code.
 - Capabilities are checked on every backend route, never in the UI alone.
-- Destructive actions are confirmed and audited; deleting a project, database, stack or Git checkout,
-  and uninstalling with a wipe, asks for a typed phrase checked on the server.
+- Destructive actions are confirmed and audited; deleting a project, database, stack, Git checkout or a
+  host account's home, and uninstalling with a wipe, asks for a typed phrase checked on the server.
 - Every state-changing request lands in the audit log.
+- The session cookie stays the dashboard's. It is `__Host-jd_session` — HttpOnly, SameSite=Strict,
+  Secure and sent to no other name — and the previews and tailnet-only apps the dashboard publishes on
+  its own tailnet name, or a deployment on the dashboard's own domain, are never sent it: browsers send
+  a cookie to every port of its name, so the dashboard's proxy takes it out before the app sees the
+  request. Upgrading signs nobody out.
+- Linking to a just-dashboard.com account is optional and outbound only. A command from the site runs
+  only if its signature verifies against the key pinned at link time and its kind is within the scope
+  you chose; linking is a browser-session action for an administrator, or root at the terminal.
+- [The usage count](#the-usage-count) is off until an administrator says yes, and is three fields with no ID.
 
 ### Roles
 
@@ -422,10 +653,11 @@ disk.
 
 ## Version, and updating
 
-This is **0.8.1**. It is not 1.0 because the API is still moving. Every release is in
+This is **0.8.2**. It is not 1.0 because the API is still moving. Every release is in
 [CHANGELOG.md](CHANGELOG.md) and in the dashboard itself, where **Update now** pulls, rebuilds and
 restarts from a container that outlives the restart. The update check is one unauthenticated GET of
-one file from GitHub; `JD_UPDATE_CHECK=false` turns it off.
+one file from GitHub, every two hours and at most every five minutes while pages are being opened;
+`JD_UPDATE_CHECK=false` turns it off.
 
 ## Configuration
 
@@ -473,15 +705,18 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_DEPLOY_LIGHT_SLOTS` | `2` | Concurrent validation/metadata deployment workers. Valid range: 1–8. |
 | `JD_DEPLOY_LEASE_TTL` | `30s` | Time before a silent deployment worker claim is reconciled after a crash. Valid range: 5s–5m. |
 | `JD_METRICS_INTERVAL` | `15s` | How often the backend samples the host, and every running container, into its own history. Clamped to 5s and 5m. |
-| `JD_METRICS_RETENTION` | `7d` | How long that history is kept. Accepts days. `0` records nothing and leaves only the live feed. |
-| `JD_UPDATE_CHECK` | `true` | Whether the dashboard may ask GitHub whether a newer version of *itself* exists — one unauthenticated GET of one file, four times a day, carrying nothing but a version number. `false` turns it off; the release notes for the version you run stay readable, since they are compiled in. |
-| `JD_ACME_DIRECTORY` | Let's Encrypt | Another ACME directory to order deployment certificates from: Let's Encrypt's staging endpoint for a rehearsal that spends no rate limit, or a private authority on a network that never sees the internet. Both the managed Caddy and certbot follow it. |
-| `JD_ACME_CA_ROOT` | system roots | A PEM bundle to trust when that authority signs with its own roots — its issuing roots, and the root behind its directory's TLS listener if that is private too. With it set, the public-DNS check before an order is skipped, because a private authority validates however it was set up to. |
+| `JD_METRICS_RETENTION` | `7d` | How long that history is kept — and with it the sizes of the volumes deployments own, sampled every 15 minutes for the capacity forecast. Right-sizing needs a day of it before it suggests a limit. Accepts days. `0` records nothing and leaves only the live feed. A deployment's container events (exits, OOM kills, restarts, health changes) are kept for 30 days or this, whichever is longer, whatever this is set to. |
+| `JD_UPDATE_CHECK` | `true` | Whether the dashboard may ask GitHub whether a newer version of *itself* exists — one unauthenticated GET of one file, every two hours and at most every five minutes while pages are being opened, carrying nothing but a version number. `false` turns it off; the release notes for the version you run stay readable, since they are compiled in. |
+| `JD_ACME_DIRECTORY` | Let's Encrypt | Another ACME directory to order deployment certificates from: Let's Encrypt's staging endpoint for a rehearsal that spends no rate limit, or a private authority on a network that never sees the internet. Both the managed Caddy and certbot follow it — the Certificates page's orders and a deployment run's, over HTTP-01 and DNS-01 alike — and certbot registers an account with that directory rather than reusing one it has with another. |
+| `JD_ACME_CA_ROOT` | system roots | A PEM bundle to trust when that authority signs with its own roots — its issuing roots, and the root behind its directory's TLS listener if that is private too. Caddy is given it as its trusted roots and certbot as `REQUESTS_CA_BUNDLE`, so keep it where both read it (under `/etc`, `/srv`, `/opt` or the data directory, which the stack mounts at the same paths). With it set, the public-DNS check before an order is skipped, because a private authority validates however it was set up to. |
 | `JD_UPDATE_REPO` | `JustDashboard/Just-Dashboard` | The repository releases are read from. Change it to follow a fork. |
 | `JD_UPDATE_BRANCH` | `main` | The branch whose changelog decides what "newest" means, and which an in-app update fast-forwards to. |
+| `JD_ACCOUNT_LINK` | `true` | Whether this server may be linked to a just-dashboard.com account. Linking is always something an administrator does; `false` removes the Settings page's controls, the installer's question and the terminal command, and silences a link that already exists, so nothing is ever sent. |
+| `JD_ACCOUNT_URL` | `https://just-dashboard.com` | The site this install may link to: an origin only, with no path, query or credentials. `https://` everywhere; `http://` only for `localhost`, `127.0.0.1` or `[::1]`, to develop the site beside the dashboard. Anything else refuses to start. |
+| `JD_USAGE_PING` | `true` | Whether an administrator may be asked to [count this server](#the-usage-count) in the public install numbers. Nothing is sent until one says yes. `false` means nobody is asked and nothing is ever sent; `JD_ACCOUNT_LINK=false` does the same. |
 | `JD_UPDATE_DIR` | discovered | The directory you cloned into. Normally empty: the dashboard asks Docker where its own stack was deployed from. Set it only if the Updates page says that failed. |
 | `JD_AGENT_MODE` | `false` | Run as an agent managed by a hub: no login, mutual TLS only. Not useful on its own yet. |
-| `JD_DEV` | `false` | Development only. Drops `Secure` from the session cookie so the UI works over plain HTTP. Never set it on a real host. |
+| `JD_DEV` | `false` | Development only. Drops `Secure` from the session cookie, which is then `jd_session` rather than `__Host-jd_session`, so the UI works over plain HTTP. Never set it on a real host. |
 | `JD_LOG_LEVEL` | `info` | `debug` for verbose logs. |
 
 **Where it looks**
@@ -495,6 +730,7 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_DEPLOY_ROOTS` | `/opt,/srv,/home,/root` | Where a deploy project's repository may live. A project outside these is refused. |
 | `JD_NGINX_DIR` | `/etc/nginx` | nginx configuration root. |
 | `JD_CADDYFILE` | `/etc/caddy/Caddyfile` | Caddy configuration file. |
+| `JD_INGRESS_CONTAINER` | — | Name of the Caddy container deployment domains are served through, when it is not one publishing 80 and 443 on every address (discovered otherwise). |
 | `JD_BACKUP_DIR` | `/var/backups/just-dashboard` | Local backup destination and staging. |
 | `JD_DB_UPLOAD_MAX_MB` | `2048` | Largest file one database import or uploaded dump may be, in MiB. |
 | `JD_DATA_DIR` | `/var/lib/just-dashboard` | The dashboard's own database. **Back this up.** |
@@ -600,7 +836,7 @@ owners' trademarks and keep their own licences, listed in that directory's `NOTI
 
 <div align="center">
 <br>
-<a href="https://just-dashboard.com"><img src="docs/readme/logo.svg" width="40" height="40" alt="Just Dashboard"></a>
+<a href="https://just-dashboard.com"><img src="frontend/public/brand-logo/just-tile-ink.svg" width="40" height="40" alt="Just Dashboard"></a>
 <br>
 <sub><a href="https://just-dashboard.com">just-dashboard.com</a></sub>
 </div>

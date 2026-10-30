@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useState } from "react"
 import { ApiError, errorMessage, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import type { DbConnection, DbCredentialServer } from "@/lib/types"
+import type { DbConnection, DbCredentialServer, DbKernelProblem } from "@/lib/types"
+import { useConfirm } from "@/components/confirm-dialog"
+import { FormFact } from "@/components/form"
+import { EngineMark } from "@/components/database/kit"
 import { engineOf, type Engine } from "@/components/database/engine"
 import { FoundConnectDialog } from "@/components/database/connect/found-connect"
 import { returnFocus } from "@/components/database/connect/focus"
@@ -58,17 +61,24 @@ export function useFound({
   const ask = (instance: DbInstance, message?: string) =>
     setAsking((held) => ({ instance, message, open: true, turn: (held?.turn ?? 0) + 1 }))
   const [syncing, setSyncing] = useState(false)
+  const [forgetting, setForgetting] = useState(false)
   const refreshInventory = inventory.refresh
 
   const engineOfInstance = useCallback(
     (instance: DbInstance): Engine => engineOf(instance.flavor ?? instance.engine, drivers),
     [drivers],
   )
+  const kernelProblems = inventory.data?.kernelProblems
   const actionOf = useCallback(
     (instance: DbInstance): FoundAction =>
-      foundAction(instance, engineOfInstance(instance).can("hostAccount")),
-    [engineOfInstance],
+      foundAction(
+        instance,
+        engineOfInstance(instance).can("hostAccount"),
+        kernelProblems?.[instance.key],
+      ),
+    [engineOfInstance, kernelProblems],
   )
+  const { confirm, dialog: confirmDialog } = useConfirm()
 
   const mark = (key: string, word?: string) =>
     setPending((held) => {
@@ -122,24 +132,30 @@ export function useFound({
     }
   }
 
+  /**
+   * The inventory is read from a cache for some seconds, so a row that was
+   * started goes on saying so until a reading shows it running.
+   */
+  const settle = (key: string) => {
+    setSettling((held) => ({ ...held, [key]: "Starting" }))
+    window.setTimeout(
+      () =>
+        setSettling((held) => {
+          const next = { ...held }
+          delete next[key]
+          return next
+        }),
+      SETTLE_MS,
+    )
+  }
+
   /** Start the container or the unit behind a server that is down. */
   const start = async (instance: DbInstance, path: string) => {
     mark(instance.key, "Starting")
     fail(instance.key)
     try {
       await post(path)
-      // The inventory is read from a cache for some seconds, so the row keeps
-      // saying it is starting until a reading shows it running.
-      setSettling((held) => ({ ...held, [instance.key]: "Starting" }))
-      window.setTimeout(
-        () =>
-          setSettling((held) => {
-            const next = { ...held }
-            delete next[instance.key]
-            return next
-          }),
-        SETTLE_MS,
-      )
+      settle(instance.key)
       refreshInventory()
     } catch (err) {
       fail(instance.key, errorMessage(err))
@@ -147,6 +163,47 @@ export function useFound({
       mark(instance.key)
     }
   }
+
+  /**
+   * Recreate a MongoDB container this kernel keeps from starting with the
+   * mitigation, asked first; once it starts, Connect is what the row offers.
+   */
+  const mitigate = (instance: DbInstance, container: string, problem: DbKernelProblem) =>
+    confirm({
+      title: `Apply the kernel mitigation to ${instance.name}`,
+      subject: {
+        mark: <EngineMark engine={engineOfInstance(instance)} size="sm" />,
+        name: instance.name,
+        facts: (
+          <>
+            <FormFact label="Engine">MongoDB {problem.release}</FormFact>
+            <FormFact label="Image" mono>
+              {instance.container?.image}
+            </FormFact>
+          </>
+        ),
+      },
+      description: (
+        <>
+          <p>{problem.detail}</p>
+          <p>MongoDB warns that it runs slower this way; Linux 7.0.14 and later do not need it.</p>
+        </>
+      ),
+      confirmLabel: "Apply",
+      action: async () => {
+        mark(instance.key, "Applying")
+        fail(instance.key)
+        try {
+          await post("/databases/kernel-mitigation", { container })
+          notify.success(`${instance.name} was recreated with the kernel mitigation`)
+          settle(instance.key)
+          refreshInventory()
+        } finally {
+          mark(instance.key)
+        }
+        return "reported"
+      },
+    })
 
   const waiting = Object.keys(settling).length > 0
   useEffect(() => {
@@ -172,6 +229,9 @@ export function useFound({
       case "start-unit":
         void start(instance, `/systemd/${encodeURIComponent(action.unit)}/start`)
         break
+      case "kernel-mitigation":
+        mitigate(instance, action.container, action.problem)
+        break
     }
   }
 
@@ -184,6 +244,25 @@ export function useFound({
       notify.error(ignored ? "Could not ignore it" : "Could not bring it back", err)
     } finally {
       mark(key)
+    }
+  }
+
+  /**
+   * Take back the ignore marks of things no longer on this machine. A mark
+   * outlives what it names on purpose — a container recreated under its old
+   * name is still left alone — so they go only when the operator says.
+   */
+  const forget = async (keys: string[]) => {
+    setForgetting(true)
+    try {
+      await Promise.all(
+        keys.map((key) => post("/databases/inventory/ignore", { key, ignored: false })),
+      )
+    } catch (err) {
+      notify.error("Could not forget them", err)
+    } finally {
+      refreshInventory()
+      setForgetting(false)
     }
   }
 
@@ -236,7 +315,7 @@ export function useFound({
     // the dialog may have nothing to give the keyboard back to.
     returnFocus(foundActionWords(actionOf(asking.instance), asking.instance.name).verb)
   }
-  const dialog = asking && (
+  const connectDialog = asking && (
     <FoundConnectDialog
       // A new form for each time it is asked: what was typed for one server,
       // or before a cancel — a password, half of one — is not what the next
@@ -255,6 +334,12 @@ export function useFound({
       }}
     />
   )
+  const dialog = (
+    <>
+      {connectDialog}
+      {confirmDialog}
+    </>
+  )
 
   return {
     act,
@@ -268,6 +353,8 @@ export function useFound({
      */
     askHost: (server: DbCredentialServer) => ask(hostInstance(server)),
     ignore,
+    forget,
+    forgetting,
     connectAll,
     syncing,
     busyWord,

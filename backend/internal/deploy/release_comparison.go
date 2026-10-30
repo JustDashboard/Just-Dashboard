@@ -113,7 +113,17 @@ func compareReleaseSnapshots(from, to *ReleaseWithArtifacts) ReleaseDetailCompar
 		detail.Reason = "One of these releases has no readable runtime snapshot, so only its recorded digests can be compared."
 		return detail
 	}
-	detail.Status = statusAvailable
+	return compareRuntimeSnapshots(fromSnapshot, toSnapshot, from.Release.ExpectedDowntime, to.Release.ExpectedDowntime)
+}
+
+// compareRuntimeSnapshots is the comparison of two frozen runtime snapshots,
+// whichever releases — or, for a promotion's confirmation, which plan not yet
+// released — they came from.
+func compareRuntimeSnapshots(fromSnapshot, toSnapshot runtimeReleaseSnapshot, fromDowntime, toDowntime bool) ReleaseDetailComparison {
+	detail := ReleaseDetailComparison{
+		Status: statusAvailable, Fields: []ReleaseFieldChange{}, Variables: []ReleaseListChange{},
+		Dependencies: []ReleaseListChange{}, Checks: []ReleaseListChange{}, Domains: []ReleaseListChange{},
+	}
 	field := func(name, before, after string) {
 		detail.Fields = append(detail.Fields, ReleaseFieldChange{
 			Field: name, From: before, To: after, Changed: before != after,
@@ -127,18 +137,38 @@ func compareReleaseSnapshots(from, to *ReleaseWithArtifacts) ReleaseDetailCompar
 	field("host port", portLabel(fromSnapshot.Plan.HostPort), portLabel(toSnapshot.Plan.HostPort))
 	field("published ports", publishedPortsLabel(fromSnapshot.Plan.Ports), publishedPortsLabel(toSnapshot.Plan.Ports))
 	field("strategy", string(fromSnapshot.Plan.Strategy), string(toSnapshot.Plan.Strategy))
+	field("replicas", strconv.Itoa(fromSnapshot.Plan.EffectiveReplicas()), strconv.Itoa(toSnapshot.Plan.EffectiveReplicas()))
 	field("stop signal", fromSnapshot.Plan.StopSignal, toSnapshot.Plan.StopSignal)
 	field("grace period", secondsLabel(fromSnapshot.Plan.GracePeriodSeconds), secondsLabel(toSnapshot.Plan.GracePeriodSeconds))
 	field("memory limit", memoryLimitLabel(fromSnapshot.Plan.MemoryMB), memoryLimitLabel(toSnapshot.Plan.MemoryMB))
 	field("cpu limit", cpuLimitLabel(fromSnapshot.Plan.CPUs), cpuLimitLabel(toSnapshot.Plan.CPUs))
 	field("pid limit", countLimitLabel(fromSnapshot.Plan.PidsLimit), countLimitLabel(toSnapshot.Plan.PidsLimit))
 	field("request body limit", fromSnapshot.Plan.requestBodyLimitLabel(), toSnapshot.Plan.requestBodyLimitLabel())
+	field("traffic replay", replayLabel(fromSnapshot.Plan.Replay), replayLabel(toSnapshot.Plan.Replay))
+	field("sleep when idle", sleepLabel(fromSnapshot.Plan.Sleep), sleepLabel(toSnapshot.Plan.Sleep))
+	field("allowed addresses", allowFromLabel(fromSnapshot.Plan.AllowFrom), allowFromLabel(toSnapshot.Plan.AllowFrom))
+	field("response headers", responseHeadersLabel(fromSnapshot.Plan.ResponseHeaders), responseHeadersLabel(toSnapshot.Plan.ResponseHeaders))
+	field("edge rules", edgeRulesLabel(fromSnapshot.Plan.EdgeRules), edgeRulesLabel(toSnapshot.Plan.EdgeRules))
+	field("rate limit", rateLimitLabel(fromSnapshot.Plan.RateLimit), rateLimitLabel(toSnapshot.Plan.RateLimit))
+	field("crowdsec", onOffLabel(fromSnapshot.Plan.CrowdSec), onOffLabel(toSnapshot.Plan.CrowdSec))
+	field("sign-in", signInLabel(fromSnapshot.Plan.ForwardAuth), signInLabel(toSnapshot.Plan.ForwardAuth))
+	field("tailnet", tailnetLabel(fromSnapshot.Plan.Tailnet), tailnetLabel(toSnapshot.Plan.Tailnet))
+	field("hsts", hstsLabel(fromSnapshot.Plan.HSTS), hstsLabel(toSnapshot.Plan.HSTS))
+	field("let past maintenance", maintenanceBypassLabel(fromSnapshot.Plan.Maintenance), maintenanceBypassLabel(toSnapshot.Plan.Maintenance))
+	field("maintenance retry after", maintenanceRetryLabel(fromSnapshot.Plan.Maintenance), maintenanceRetryLabel(toSnapshot.Plan.Maintenance))
+	field("error pages", errorPagesLabel(fromSnapshot.Plan), errorPagesLabel(toSnapshot.Plan))
 	field("restart policy", fromSnapshot.Plan.EffectiveRestartPolicy(), toSnapshot.Plan.EffectiveRestartPolicy())
 	field("host network", boolLabel(fromSnapshot.Plan.HostNetwork), boolLabel(toSnapshot.Plan.HostNetwork))
 	field("privileged", boolLabel(fromSnapshot.Plan.Privileged), boolLabel(toSnapshot.Plan.Privileged))
 	field("capabilities", strings.Join(fromSnapshot.Plan.Capabilities, ", "), strings.Join(toSnapshot.Plan.Capabilities, ", "))
 	field("devices", strings.Join(fromSnapshot.Plan.Devices, ", "), strings.Join(toSnapshot.Plan.Devices, ", "))
-	field("expected downtime", boolLabel(from.Release.ExpectedDowntime), boolLabel(to.Release.ExpectedDowntime))
+	field("user", fromSnapshot.Plan.User, toSnapshot.Plan.User)
+	field("read-only root", readOnlyRootLabel(fromSnapshot.Plan), readOnlyRootLabel(toSnapshot.Plan))
+	field("writable paths", writablePathsLabel(fromSnapshot.Plan), writablePathsLabel(toSnapshot.Plan))
+	field("ulimits", ulimitsLabel(fromSnapshot.Plan.Ulimits), ulimitsLabel(toSnapshot.Plan.Ulimits))
+	field("sysctls", sysctlsLabel(fromSnapshot.Plan.Sysctls), sysctlsLabel(toSnapshot.Plan.Sysctls))
+	field("gpus", gpusLabel(fromSnapshot.Plan.GPUs), gpusLabel(toSnapshot.Plan.GPUs))
+	field("expected downtime", boolLabel(fromDowntime), boolLabel(toDowntime))
 
 	detail.Variables = diffNamedValues(
 		variableDigestPairs(fromSnapshot.Variables), variableDigestPairs(toSnapshot.Variables))
@@ -228,8 +258,132 @@ func domainPairs(domains []PlannedDomain) map[string]string {
 			scheme = "https"
 		}
 		pairs[domain.Hostname] = scheme + " · " + string(domain.Ownership)
+		if domain.Redirects() {
+			code := domain.RedirectCode
+			if code == 0 {
+				code = 308
+			}
+			pairs[domain.Hostname] += fmt.Sprintf(" · redirects to %s (%d)", domain.RedirectTo, code)
+		}
 	}
 	return pairs
+}
+
+// edgeRulesLabel names the rules in the order they decide, with what each
+// does, so a reordering reads as the change it is.
+func edgeRulesLabel(rules []RouteEdgeRule) string {
+	if len(rules) == 0 {
+		return "none"
+	}
+	labels := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		labels = append(labels, rule.Name+" ("+rule.Action.Kind+")")
+	}
+	return strings.Join(labels, ", ")
+}
+
+func rateLimitLabel(limit *RouteRateLimit) string {
+	if limit == nil {
+		return "off"
+	}
+	label := fmt.Sprintf("%d per %s", limit.Requests, limit.Per)
+	if limit.Burst > 0 {
+		label += fmt.Sprintf(", burst %d", limit.Burst)
+	}
+	return label
+}
+
+func onOffLabel(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
+}
+
+func allowFromLabel(entries []string) string {
+	if len(entries) == 0 {
+		return "everyone"
+	}
+	return strings.Join(entries, ", ")
+}
+
+// signInLabel names the auth server and both of its addresses, none of them
+// a secret: every visitor is sent to the sign-in page.
+// hstsLabel is the policy as the header says it, or "off".
+func hstsLabel(h *RouteHSTS) string {
+	if h == nil {
+		return "off"
+	}
+	return h.proxy().Value()
+}
+
+// tailnetLabel names a release's tailnet publication and who it admits.
+func tailnetLabel(tailnet *RouteTailnet) string {
+	switch {
+	case tailnet == nil:
+		return "not tailnet-only"
+	case len(tailnet.Allow) == 0:
+		return "tailnet only · everyone on the tailnet"
+	}
+	return "tailnet only · " + strings.Join(tailnet.Allow, ", ")
+}
+
+func signInLabel(gate *RouteForwardAuth) string {
+	if gate == nil {
+		return "none"
+	}
+	label := gate.Provider + " · " + gate.Verify + " · " + gate.SignIn
+	if gate.PreviewsOnly {
+		label += " · previews only"
+	}
+	return label
+}
+
+// maintenanceBypassLabel names who reaches the application while the route
+// is in maintenance. Whether it is in maintenance is not a release's, so it
+// is never a difference between two.
+func maintenanceBypassLabel(m *RouteMaintenance) string {
+	if m == nil || len(m.BypassFrom) == 0 {
+		return "nobody"
+	}
+	return strings.Join(m.BypassFrom, ", ")
+}
+
+func maintenanceRetryLabel(m *RouteMaintenance) string {
+	if m == nil || m.RetryAfter == 0 {
+		return "not sent"
+	}
+	return fmt.Sprintf("%ds", m.RetryAfter)
+}
+
+// errorPagesLabel names the codes the route answers with its own page, and
+// whether the application's own answers get it too.
+func errorPagesLabel(plan RuntimePlanConfig) string {
+	if len(plan.ErrorPages) == 0 {
+		return "the proxy's own"
+	}
+	codes := make([]string, 0, len(plan.ErrorPages))
+	for _, code := range plan.ErrorPages {
+		codes = append(codes, strconv.Itoa(code))
+	}
+	label := strings.Join(codes, ", ")
+	if plan.InterceptErrors {
+		label += " · the application's too"
+	}
+	return label
+}
+
+// responseHeadersLabel compares headers by name and value; neither is a
+// secret, since every visitor is sent them.
+func responseHeadersLabel(headers []RouteHeader) string {
+	if len(headers) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(headers))
+	for _, header := range headers {
+		parts = append(parts, header.Name+": "+header.Value)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func snapshotImageLabel(snapshot runtimeReleaseSnapshot) string {

@@ -533,12 +533,12 @@ func TestLocalGitImageAndImportSourceAdapters(t *testing.T) {
 		Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: "minecraft-java",
 		BlueprintVersion: "1.0.0", BlueprintInputs: map[string]string{"eula": "true"},
 	})
-	// A game blueprint renders as a preview: its identity names the image the
-	// release would pull and the reviewed definition, but no digest is
-	// resolved because the game integration cannot deploy it yet.
+	// A game blueprint resolves like any reviewed image: its identity names
+	// the normalized image the release pulls, the reviewed definition and
+	// the registry digest.
 	if err != nil || blueprintSource.Source.Kind != SourceBlueprint ||
-		blueprintSource.Source.Repository != "itzg/minecraft-server:2026.9.1-java21" || blueprintSource.Source.Ref != "minecraft-java@1.0.0" ||
-		!strings.HasPrefix(blueprintSource.Source.Revision, "sha256:") || blueprintSource.Source.Digest != "" ||
+		blueprintSource.Source.Repository != "docker.io/itzg/minecraft-server:2026.9.1-java25" || blueprintSource.Source.Ref != "minecraft-java@1.0.0" ||
+		!strings.HasPrefix(blueprintSource.Source.Revision, "sha256:") || !contentDigestRE.MatchString(blueprintSource.Source.Digest) ||
 		len(blueprintSource.Candidates) != 1 || blueprintSource.Candidates[0].Profile != ProfileGame ||
 		blueprintSource.Candidates[0].Port != 25565 {
 		t.Fatalf("blueprint source result = %#v, %v", blueprintSource, err)
@@ -878,7 +878,7 @@ func TestPreflightIsPureStableAndSecretFree(t *testing.T) {
 	if first.Preview != second.Preview || first.Digest != second.Digest {
 		t.Fatalf("preflight changed with identical evidence:\n%s\n%s", first.Preview, second.Preview)
 	}
-	if len(first.Plan.Actions) != len(DefaultStepKeys) || len(first.Plan.Actions) != 16 {
+	if len(first.Plan.Actions) != len(DefaultStepKeys) || len(first.Plan.Actions) != 19 {
 		t.Fatalf("exact actions = %d", len(first.Plan.Actions))
 	}
 	if strings.Contains(first.Preview, "never-preview-this") || strings.Contains(first.Preview, "Observed") {
@@ -1123,7 +1123,7 @@ func TestListDraftsReturnsOnlyTheOwnersUncommittedUnexpiredDrafts(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	drafts, err := fixture.plans.ListDrafts(ctx, 41)
+	drafts, err := fixture.plans.ListDrafts(ctx, 41, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1151,7 +1151,7 @@ func TestListDraftsReturnsOnlyTheOwnersUncommittedUnexpiredDrafts(t *testing.T) 
 	if _, err := fixture.store.DB.Exec(`UPDATE deploy_drafts SET expires_at = 1 WHERE id = ?`, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	drafts, err = fixture.plans.ListDrafts(ctx, 41)
+	drafts, err = fixture.plans.ListDrafts(ctx, 41, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

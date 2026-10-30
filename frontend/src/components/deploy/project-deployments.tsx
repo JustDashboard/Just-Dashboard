@@ -3,10 +3,18 @@
 import { useMemo, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { useRouter } from "next/navigation"
-import { GitPullRequest, Globe, Pin, RotateCounterClockwise } from "@/components/icons"
+import {
+  ArrowCircleUp,
+  Database,
+  GitPullRequest,
+  Globe,
+  Pin,
+  RotateCounterClockwise,
+  ShieldOff,
+} from "@/components/icons"
 import { get, post, put } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
-import { previewURL } from "@/lib/pull-requests"
+import { previewURL, promotionOrigin } from "@/lib/pull-requests"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -14,10 +22,12 @@ import type {
   DeployCommit,
   DeploymentEngineRun,
   DeploymentPreview,
+  DeploymentPromotion,
   DeploymentRelease,
   DeploymentRunSettingsDrift,
   DeploymentRunState,
   DeploymentRunsPage,
+  ImageScanReading,
 } from "@/lib/types"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
@@ -58,11 +68,17 @@ import {
 import { Insights } from "@/components/deploy/insights"
 import { deployWithCurrentSettings, runPlanIsStale } from "@/components/deploy/failure-cause"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
+import { useReleaseWatch } from "@/components/deploy/release-watch"
+import { watchOpen } from "@/components/deploy/rollback-watch-model"
+import { PromoteDialog } from "@/components/deploy/promote-dialog"
 import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-sheet"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { RunRow } from "@/components/deploy/run-row"
 import { RunStrip } from "@/components/deploy/run-marks"
 import { releaseVerbs, runVerbs, type RunVerbKey } from "@/components/deploy/run-verbs"
+import { DataCopiesPanel, RestoreDataDialog, useDataCopies } from "@/components/deploy/data-copies"
+import { dataPointTag } from "@/components/deploy/data-rollback-model"
+import { badgeOf } from "@/components/deploy/vulnerabilities-model"
 
 type StatusFilter = "all" | "ready" | "failed" | "cancelled"
 
@@ -191,6 +207,26 @@ export function ProjectDeployments() {
     undefined,
   )
   const [rollback, setRollback] = useState<{ open: boolean; releaseId?: number }>({ open: false })
+  // The release kept warm for an open window is marked on the row of the run
+  // that made it, so the list says which release Roll back instantly reaches.
+  const releaseWatch = useReleaseWatch(
+    project.projectId,
+    project.environmentId,
+    project.normalized && !project.archived,
+  )
+  const warmReleaseId = watchOpen(releaseWatch.watch)
+    ? releaseWatch.watch?.warmReleaseId
+    : undefined
+  const [promote, setPromote] = useState<{ open: boolean; releaseId?: number }>({ open: false })
+  const [restoreData, setRestoreData] = useState<{ open: boolean; releaseId?: number }>({
+    open: false,
+  })
+  // The side copies a release's data was restored into, while they last.
+  const dataCopies = useDataCopies({
+    projectId: project.projectId,
+    environmentId: project.environmentId,
+    enabled: project.normalized && !project.archived,
+  })
   const [compare, setCompare] = useState<{
     open: boolean
     releaseId?: number
@@ -224,7 +260,7 @@ export function ProjectDeployments() {
 
   const environments = useMemo(() => {
     const labels = new Map<number, string>()
-    labels.set(project.environmentId, "Production")
+    labels.set(project.environmentId, project.environment === "staging" ? "Staging" : "Production")
     for (const preview of previews.data ?? []) {
       if (!labels.has(preview.environmentId)) {
         labels.set(preview.environmentId, `PR ${preview.providerRef}`)
@@ -235,7 +271,7 @@ export function ProjectDeployments() {
         labels.set(run.environmentId, `Environment ${run.environmentId}`)
     }
     return [...labels.entries()].map(([id, label]) => ({ id, label }))
-  }, [project.environmentId, previews.data, project.runs])
+  }, [project.environmentId, project.environment, previews.data, project.runs])
   // A pull request's preview came through the forge that holds the repository.
   const forge = gitProviderProduct(hostProduct(deployment.sourceRemote))
 
@@ -266,6 +302,21 @@ export function ProjectDeployments() {
   }, [project.runs, older])
 
   const environmentRuns = allRuns.filter((run) => run.environmentId === selectedEnv)
+  // Each release's latest scan, marked on its row when it found something at
+  // or above the environment's floor. Previews are not scanned.
+  const scans = usePoll(
+    (signal) =>
+      get<ImageScanReading>(
+        `/deploy/${project.projectId}/environments/${project.environmentId}/vulnerabilities`,
+        undefined,
+        signal,
+      ),
+    60000,
+    [project.projectId, project.environmentId],
+    { enabled: project.normalized && !project.archived && project.environmentId > 0 },
+  )
+  const scanOf = (release?: DeploymentRelease) =>
+    release ? scans.data?.releases.find((badge) => badge.releaseId === release.id) : undefined
   // The newest run, when it can be retried, is the one a fix was saved for.
   // Its drift counts what no plan revision does — a variable given another
   // scope — and says whether the source itself moved; older rows go by the
@@ -464,6 +515,11 @@ export function ProjectDeployments() {
             }),
           rollback: (release) => setRollback({ open: true, releaseId: release.id }),
           pin: (release) => void togglePin(run, release),
+          restoreData: (release) => setRestoreData({ open: true, releaseId: release.id }),
+          promote:
+            project.environment === "staging" && project.production && !project.archived
+              ? (release) => setPromote({ open: true, releaseId: release.id })
+              : undefined,
         },
       }),
     ]
@@ -488,6 +544,7 @@ export function ProjectDeployments() {
       {project.normalized && (
         <Insights
           projectId={project.projectId}
+          environmentId={project.environmentQuery?.environment}
           presentation="history"
           onFailureClick={() => {
             changeFilter("failed")
@@ -495,6 +552,13 @@ export function ProjectDeployments() {
           }}
         />
       )}
+
+      <DataCopiesPanel
+        projectId={project.projectId}
+        environmentId={project.environmentId}
+        copies={dataCopies.copies}
+        refresh={dataCopies.refresh}
+      />
 
       <div ref={list} className="scroll-mt-6">
         <Panel plain>
@@ -589,9 +653,15 @@ export function ProjectDeployments() {
                       <ChoiceList aria-label={group.label}>
                         {group.runs.map((run) => {
                           const release = releaseOf(run)
+                          // One row reads Live: the run whose outcome is live
+                          // now, as the overview's list says it. An instant
+                          // rollback and the deploy that first made its release
+                          // both name that release, and only the newer is live.
                           const isLive =
-                            Boolean(run.releaseId) &&
-                            run.releaseId === standingOf(run).liveReleaseId
+                            run.environmentId === project.environmentId
+                              ? run.id === project.liveRun?.id
+                              : Boolean(run.releaseId) &&
+                                run.releaseId === standingOf(run).liveReleaseId
                           const pending = pendingOf(run, release)
                           const preview =
                             run.environmentId !== project.environmentId &&
@@ -611,6 +681,20 @@ export function ProjectDeployments() {
                                     <TextShimmer className="text-hint">{pending.word}</TextShimmer>
                                   )}
                                   {release?.pinned && <Tag icon={Pin}>Pinned</Tag>}
+                                  <DataPointTag release={release} />
+                                  {release?.rolledBackAt && (
+                                    <Tag tone="danger" title={release.rollbackReason}>
+                                      Rolled back
+                                    </Tag>
+                                  )}
+                                  {release && release.id === warmReleaseId && <Tag>Warm</Tag>}
+                                  <ScanMark badge={badgeOf(scanOf(release))} />
+                                  {/* Provenance, fixed with the release: the
+                                      image was staging's — or for staging, a
+                                      pull request preview's — not built here. */}
+                                  {release?.promotion && (
+                                    <PromotionTag promotion={release.promotion} />
+                                  )}
                                   {preview && <Tag>{preview}</Tag>}
                                 </>
                               }
@@ -669,6 +753,25 @@ export function ProjectDeployments() {
         remote={deployment.sourceRemote}
         initialReleaseId={rollback.releaseId}
       />
+      {project.staging && project.production && (
+        <PromoteDialog
+          open={promote.open}
+          onOpenChange={(open) => setPromote((current) => ({ ...current, open }))}
+          projectId={project.projectId}
+          productionId={project.production.id}
+          stagingId={project.staging.id}
+          remote={deployment.sourceRemote}
+          initialReleaseId={promote.releaseId}
+        />
+      )}
+      <RestoreDataDialog
+        open={restoreData.open}
+        onOpenChange={(open) => setRestoreData((current) => ({ ...current, open }))}
+        projectId={project.projectId}
+        environmentId={project.environmentId}
+        release={project.releases.find((release) => release.id === restoreData.releaseId)}
+        onStarted={dataCopies.refresh}
+      />
       <ReleaseComparisonSheet
         open={compare.open}
         onOpenChange={(open) => setCompare((current) => ({ ...current, open }))}
@@ -679,6 +782,22 @@ export function ProjectDeployments() {
         releases={project.releases}
       />
     </div>
+  )
+}
+
+/**
+ * A release's data point, as a property of its row: that each linked
+ * database's state at the moment it went live was recorded, and — in the
+ * title, for the reader who asks — what it was. Kept to one word on purpose;
+ * the restore dialog and the comparison say the rest.
+ */
+function DataPointTag({ release }: { release?: DeploymentRelease }) {
+  const tag = release && dataPointTag(release)
+  if (!tag) return null
+  return (
+    <Tag icon={Database} title={tag.title} className={tag.restorable ? undefined : "opacity-60"}>
+      Data point
+    </Tag>
   )
 }
 
@@ -786,5 +905,36 @@ function LegacyRecovery({
       </PanelBody>
       {dialog}
     </Panel>
+  )
+}
+
+/** "From staging #2", or "Promoted from PR #12 (abc1234)" on a staging release. */
+function PromotionTag({ promotion }: { promotion: DeploymentPromotion }) {
+  const origin = promotionOrigin(promotion)
+  if (origin?.kind === "preview") {
+    return (
+      <Tag
+        icon={ArrowCircleUp}
+        title={origin.approvedBy ? `Approved by ${origin.approvedBy}` : undefined}
+      >
+        Promoted from {origin.from}
+        {origin.sha && <span className="font-mono normal-case"> ({origin.sha})</span>}
+      </Tag>
+    )
+  }
+  return <Tag icon={ArrowCircleUp}>From staging #{promotion.releaseNumber}</Tag>
+}
+
+/**
+ * A release's scan on its row: a shield and what can be done about what it
+ * found — "2 fixable" — with the counts in its title. A state that will
+ * change with the next day's scan, so a `Status`, never a tag.
+ */
+function ScanMark({ badge }: { badge?: ReturnType<typeof badgeOf> }) {
+  if (!badge) return null
+  return (
+    <span title={badge.title} aria-label={`Vulnerabilities: ${badge.title}`}>
+      <Status tone={badge.tone} icon={ShieldOff} label={badge.label} />
+    </span>
   )
 }

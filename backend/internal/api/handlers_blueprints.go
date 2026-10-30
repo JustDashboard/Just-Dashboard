@@ -49,26 +49,41 @@ func mapBlueprintError(err error) error {
 	}
 }
 
+// handleBlueprintList is the picker's catalogue: every offered built-in, then
+// every template added on this dashboard, each marked by its origin.
 func (s *Server) handleBlueprintList(w http.ResponseWriter, r *http.Request) error {
 	summaries, err := blueprint.Summaries()
 	if err != nil {
 		return mapBlueprintError(err)
 	}
-	httpx.JSON(w, http.StatusOK, summaries)
+	added, err := s.modules.deployPlanning.UserTemplateSummaries(r.Context())
+	if err != nil {
+		return mapTemplateError(err)
+	}
+	httpx.JSON(w, http.StatusOK, append(summaries, added...))
 	return nil
 }
 
-func (s *Server) handleBlueprintGet(w http.ResponseWriter, r *http.Request) error {
-	found, err := blueprint.Get(chi.URLParam(r, "id"))
+// resolveTemplate is the catalogue's resolver for the blueprint routes: the
+// built-ins first, then the templates added here (deploy.ResolveTemplate).
+func (s *Server) resolveTemplate(r *http.Request, id string) (*blueprint.Blueprint, error) {
+	found, err := s.modules.deployPlanning.ResolveTemplate(r.Context(), id, "")
 	if err != nil {
-		return mapBlueprintError(err)
+		if blueprint.IsUserID(id) {
+			return nil, mapTemplateError(err)
+		}
+		return nil, mapBlueprintError(err)
+	}
+	return found, nil
+}
+
+func (s *Server) handleBlueprintGet(w http.ResponseWriter, r *http.Request) error {
+	found, err := s.resolveTemplate(r, chi.URLParam(r, "id"))
+	if err != nil {
+		return err
 	}
 	supported, reason := blueprint.DeploymentSupport(found)
-	httpx.JSON(w, http.StatusOK, struct {
-		*blueprint.Blueprint
-		DeploymentSupported bool   `json:"deploymentSupported"`
-		UnavailableReason   string `json:"unavailableReason,omitempty"`
-	}{Blueprint: found, DeploymentSupported: supported, UnavailableReason: reason})
+	httpx.JSON(w, http.StatusOK, blueprintDetail{Blueprint: found, DeploymentSupported: supported, UnavailableReason: reason})
 	return nil
 }
 
@@ -77,9 +92,9 @@ func (s *Server) handleBlueprintGet(w http.ResponseWriter, r *http.Request) erro
 // image tag policy is the answer.
 func (s *Server) handleBlueprintVersions(w http.ResponseWriter, r *http.Request) error {
 	id := chi.URLParam(r, "id")
-	found, err := blueprint.Get(id)
+	found, err := s.resolveTemplate(r, id)
 	if err != nil {
-		return mapBlueprintError(err)
+		return err
 	}
 	if found.Profile != blueprint.ProfileGame {
 		httpx.JSON(w, http.StatusOK, gameserver.VersionList{
@@ -106,17 +121,30 @@ func (s *Server) handleBlueprintRender(w http.ResponseWriter, r *http.Request) e
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
-	found, err := blueprint.Get(chi.URLParam(r, "id"))
+	found, err := s.resolveTemplate(r, chi.URLParam(r, "id"))
 	if err != nil {
-		return mapBlueprintError(err)
+		return err
 	}
-	plan, err := deploy.RenderBlueprintPlan(deploy.DraftSourceConfig{
-		Kind: deploy.SourceBlueprint, Mode: deploy.SourceModeBlueprint,
+	// The source a draft would save: a template added here is frozen into
+	// it as every save freezes it, and rendered from that copy.
+	source, err := s.modules.deployPlanning.WithUserTemplate(r.Context(), deploy.DraftSourceConfig{
+		Kind: deploy.BlueprintSourceKind(found), Mode: deploy.SourceModeBlueprint,
 		BlueprintID: found.ID, BlueprintVersion: found.Version, BlueprintInputs: request.Inputs,
-	}, request.Name)
+	})
+	if err != nil {
+		return mapTemplateError(err)
+	}
+	plan, err := deploy.RenderBlueprintPlan(source, request.Name)
 	if err != nil {
 		return mapBlueprintError(err)
 	}
 	httpx.JSON(w, http.StatusOK, plan)
 	return nil
+}
+
+// blueprintDetail is a blueprint with whether this install can deploy it.
+type blueprintDetail struct {
+	*blueprint.Blueprint
+	DeploymentSupported bool   `json:"deploymentSupported"`
+	UnavailableReason   string `json:"unavailableReason,omitempty"`
 }

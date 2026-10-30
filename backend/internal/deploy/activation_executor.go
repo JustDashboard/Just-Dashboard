@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"strings"
 	"time"
 
@@ -26,6 +25,9 @@ type checkStepEvidence struct {
 	Phase   string          `json:"phase"`
 	Outcome HealthOutcome   `json:"outcome"`
 	Checks  []CheckEvidence `json:"checks"`
+	// Reason says, for a phase with no checks, what that means for the
+	// release: the run page shows it as the step's one line.
+	Reason string `json:"reason,omitempty"`
 }
 
 type recoveryEvidence struct {
@@ -40,8 +42,13 @@ type activationStepEvidence struct {
 	ReleaseID    int64                      `json:"releaseId"`
 	Route        *routeActivationEvidence   `json:"route,omitempty"`
 	Tailnet      *tailnetActivationEvidence `json:"tailnet,omitempty"`
+	TailnetGate  *tailnetGateEvidence       `json:"tailnetGate,omitempty"`
 	PublicChecks []CheckEvidence            `json:"publicChecks"`
 	Recovery     *recoveryEvidence          `json:"recovery,omitempty"`
+	// ReadinessGated says whether a required readiness check stood between
+	// the candidate's start and this cutover. False is a release that went
+	// live on nothing but having started, which the run page says in words.
+	ReadinessGated bool `json:"readinessGated"`
 }
 
 type routeActivationEvidence struct {
@@ -66,6 +73,9 @@ func (e *NormalizedStepExecutor) CleanupCancelledRun(
 	if e == nil || e.store == nil || e.runtime == nil || operationTargetsLiveRelease(run.Operation) {
 		return mustJSON(map[string]any{"completed": true, "reason": "no candidate runtime cleanup required"}), nil
 	}
+	if request, ok := instantRollbackOf(run); ok {
+		return e.cleanupInstantRollback(ctx, run, request)
+	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 11*time.Minute)
 	defer cancel()
 	release, snapshot, err := e.releaseSnapshotForRun(cleanupCtx, run.ID)
@@ -77,7 +87,7 @@ func (e *NormalizedStepExecutor) CleanupCancelledRun(
 	}
 	execution := StepExecution{Run: run, ClaimToken: claimToken, Output: cancellationCleanupOutput{}}
 	if release.Release.State == "live" {
-		result := e.retirePrevious(cleanupCtx, execution, nil)
+		result := e.retirePredecessor(cleanupCtx, execution, false)
 		completed := result.State == StepPassed || result.State == StepSkipped
 		evidence := mustJSON(map[string]any{
 			"completed": completed, "action": "finish_retirement", "result": result,
@@ -89,6 +99,11 @@ func (e *NormalizedStepExecutor) CleanupCancelledRun(
 	}
 	if release.Release.State != "candidate" {
 		return mustJSON(map[string]any{"completed": true, "reason": "release is not active or candidate"}), nil
+	}
+	// A candidate in a canary is on the route beside the live release; it
+	// comes off it before it is removed.
+	if err := e.endCanaryForCancellation(cleanupCtx, run); err != nil {
+		return mustJSON(map[string]any{"completed": false, "action": "end_canary"}), err
 	}
 	runtime, runtimeErr := e.store.RuntimeForRelease(cleanupCtx, release.Release.ID)
 	if runtimeErr == nil {
@@ -115,7 +130,8 @@ func (e *NormalizedStepExecutor) CleanupCancelledRun(
 	if snapshot.Compose == nil {
 		orphan := ReleaseRuntime{
 			ReleaseID: release.Release.ID, EnvironmentID: release.Release.EnvironmentID,
-			Kind: "container", RuntimeID: fmt.Sprintf("jd-e%d-r%d", release.Release.EnvironmentID, release.Release.Number),
+			Kind: "container", RuntimeID: replicaContainerName(release.Release.EnvironmentID, release.Release.Number, 1),
+			Metadata: orphanReplicas(release.Release.EnvironmentID, release.Release.Number, snapshot.Plan.EffectiveReplicas()),
 		}
 		variables, _ := e.variablesForScope(cleanupCtx, run.ID, run.EnvironmentID, "runtime")
 		_, stopErr := e.runtime.Stop(cleanupCtx, orphan, snapshot.Plan, variables, true, nil)
@@ -376,6 +392,14 @@ func (e *NormalizedStepExecutor) startCandidate(
 	if leaseToken != "" {
 		defer e.store.ReleasePortLease(context.WithoutCancel(ctx), execution.Run.ID, leaseToken)
 	}
+	replicaPorts, replicaTokens, err := e.replicaAddresses(ctx, execution, snapshot.Plan, host, port)
+	for _, token := range replicaTokens {
+		defer e.store.ReleasePortLease(context.WithoutCancel(ctx), execution.Run.ID, token)
+	}
+	if err != nil {
+		recovery := e.restorePrevious(ctx, execution, release.Release, snapshot.Plan)
+		return runtimeStepFailure(err, "port_unavailable", "a port for each replica could not be reserved", recovery)
+	}
 	variables, err := e.variablesForScope(ctx, execution.Run.ID, execution.Run.EnvironmentID, "runtime")
 	if err != nil {
 		recovery := e.restorePrevious(ctx, execution, release.Release, snapshot.Plan)
@@ -392,7 +416,7 @@ func (e *NormalizedStepExecutor) startCandidate(
 	}
 	started, err := e.runtime.StartCandidate(ctx, CandidateRuntimeRequest{
 		Run: execution.Run, Release: release.Release, Snapshot: snapshot, SourceRoot: sourceRoot,
-		RuntimeVariables: variables, Host: host, Port: port, PortLeaseToken: leaseToken,
+		RuntimeVariables: variables, Host: host, Port: port, PortLeaseToken: leaseToken, ReplicaPorts: replicaPorts,
 	}, func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) })
 	if err != nil {
 		recovery := e.restorePrevious(ctx, execution, release.Release, snapshot.Plan)
@@ -408,7 +432,11 @@ func (e *NormalizedStepExecutor) startCandidate(
 		recovery := e.restorePrevious(ctx, execution, release.Release, snapshot.Plan)
 		return runtimeStepFailure(err, "runtime_record_failed", "the candidate started but its identity could not be recorded", recovery)
 	}
-	_ = stepLog(execution, "status", fmt.Sprintf("Started immutable candidate release #%d", release.Release.Number))
+	if replicas := snapshot.Plan.EffectiveReplicas(); replicas > 1 {
+		_ = stepLog(execution, "status", fmt.Sprintf("Started immutable candidate release #%d as %d replicas", release.Release.Number, replicas))
+	} else {
+		_ = stepLog(execution, "status", fmt.Sprintf("Started immutable candidate release #%d", release.Release.Number))
+	}
 	for _, variable := range webConcurrencyEnvironment(snapshot, variables) {
 		_ = stepLog(execution, "status", "WEB_CONCURRENCY="+variable.Value+": "+webConcurrencyReason(snapshot.Plan))
 	}
@@ -420,7 +448,7 @@ func (e *NormalizedStepExecutor) startCandidate(
 
 func validateRuntimeActivationStrategy(snapshot runtimeReleaseSnapshot) error {
 	plan := snapshot.Plan
-	if plan.Strategy != StrategyBlueGreen {
+	if !plan.Strategy.startsBeside() {
 		return nil
 	}
 	if snapshot.Compose != nil || plan.HostPort != 0 || len(plan.Ports) != 0 || plan.HostNetwork {
@@ -464,6 +492,74 @@ func (e *NormalizedStepExecutor) candidateAddress(
 	return lease.Address, lease.Port, lease.Token, nil
 }
 
+// replicaAddresses leases a loopback port for each replica after the first,
+// whose port candidateAddress already holds. A plan with nothing to publish
+// needs none. The tokens are handed back even on failure, so the leases
+// already taken are released with the rest.
+func (e *NormalizedStepExecutor) replicaAddresses(
+	ctx context.Context,
+	execution StepExecution,
+	plan RuntimePlanConfig,
+	host string,
+	port int,
+) ([]int, []string, error) {
+	count := plan.EffectiveReplicas()
+	if count <= 1 || port == 0 || plan.InternalPort == 0 {
+		return nil, nil, nil
+	}
+	ports, tokens := make([]int, 0, count-1), make([]string, 0, count-1)
+	for index := 2; index <= count; index++ {
+		lease, err := e.store.AcquirePortLease(ctx, execution.Run.ID, execution.Run.EnvironmentID,
+			execution.ClaimToken, host, 0, 30*time.Minute)
+		if err != nil {
+			return nil, tokens, err
+		}
+		ports, tokens = append(ports, lease.Port), append(tokens, lease.Token)
+	}
+	return ports, tokens, nil
+}
+
+// runReplicaChecks runs the phase's checks against every replica in turn,
+// stopping at the first replica a required one fails on: the route shares
+// traffic between all of them once it moves, so one replica that does not
+// answer is a release that does not. The evidence says which replica each
+// result is for when there are several.
+func (e *NormalizedStepExecutor) runReplicaChecks(
+	ctx context.Context,
+	execution StepExecution,
+	runtime ReleaseRuntime,
+	snapshot runtimeReleaseSnapshot,
+	selected []PlannedCheck,
+	describe func(PlannedCheck, int, int) string,
+) []CheckEvidence {
+	targets := replicaTargets(runtime, snapshot)
+	checks := make([]CheckEvidence, 0, len(selected)*len(targets))
+	for index, target := range targets {
+		replica := 0
+		if len(targets) > 1 {
+			replica = index + 1
+		}
+		for _, check := range selected {
+			_ = stepLog(execution, "status", describe(check, replica, len(targets)))
+			evidence := e.checks.Run(ctx, check, target)
+			evidence.Replica = replica
+			checks = append(checks, evidence)
+		}
+		if ctx.Err() != nil || requiredCheckFailed(checks) {
+			break
+		}
+	}
+	return checks
+}
+
+// replicaSuffix is how a transcript line names the replica it is about.
+func replicaSuffix(replica, replicas int) string {
+	if replica == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" against replica %d of %d", replica, replicas)
+}
+
 func (e *NormalizedStepExecutor) verifyChecks(
 	ctx context.Context,
 	execution StepExecution,
@@ -489,22 +585,22 @@ func (e *NormalizedStepExecutor) verifyChecks(
 		}
 	}
 	if len(selected) == 0 {
+		evidence := checkStepEvidence{Phase: phase, Outcome: HealthDisabled, Checks: []CheckEvidence{}}
 		if phase == "readiness" && !operationTargetsLiveRelease(execution.Run.Operation) {
 			_ = e.store.SetRuntimeState(ctx, execution.Run.ID, execution.ClaimToken, release.Release.ID, "ready")
+			// Skipped is not passed: nothing asked the candidate whether it
+			// answers, and the transcript must not read as if something did.
+			evidence.Reason = "no readiness check in the plan, so the candidate is cut over to unverified"
+			_ = stepLog(execution, "status", "No readiness check in the plan: the candidate counts as ready because it started, not because it answered")
 		}
-		return StepResult{State: StepSkipped, Evidence: mustJSON(checkStepEvidence{
-			Phase: phase, Outcome: HealthDisabled, Checks: []CheckEvidence{},
-		})}
+		return StepResult{State: StepSkipped, Evidence: mustJSON(evidence)}
 	}
 	if e.checks == nil {
 		return StepResult{State: StepUnavailable, ErrorCode: "checks_unavailable", ErrorMessage: "runtime health checks are unavailable"}
 	}
-	target := targetForRuntime(*runtime, snapshot)
-	checks := make([]CheckEvidence, 0, len(selected))
-	for _, check := range selected {
-		_ = stepLog(execution, "status", fmt.Sprintf("Running %s check %q (%s)", phase, check.Name, check.Kind))
-		checks = append(checks, e.checks.Run(ctx, check, target))
-	}
+	checks := e.runReplicaChecks(ctx, execution, *runtime, snapshot, selected, func(check PlannedCheck, replica, replicas int) string {
+		return fmt.Sprintf("Running %s check %q (%s)%s", phase, check.Name, check.Kind, replicaSuffix(replica, replicas))
+	})
 	outcome := summarizeChecks(checks)
 	evidence := checkStepEvidence{Phase: phase, Outcome: outcome, Checks: checks}
 	if ctx.Err() != nil || requiredCheckFailed(checks) {
@@ -573,17 +669,29 @@ func (e *NormalizedStepExecutor) activate(
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
-	evidence := activationStepEvidence{ReleaseID: release.Release.ID, PublicChecks: []CheckEvidence{}}
+	evidence := activationStepEvidence{ReleaseID: release.Release.ID, PublicChecks: []CheckEvidence{}, ReadinessGated: hasReadinessCheck(snapshot.Checks)}
+	if !evidence.ReadinessGated {
+		_ = stepLog(execution, "status", ungatedCutoverLine(snapshot.Plan.Strategy, release.Release.Number))
+	}
 	var route *proxysvc.DeploymentRoute
 	var appliedRoute *proxysvc.DeploymentRouteResult
+	if snapshot.Plan.Tailnet != nil && len(snapshot.Domains) > 0 {
+		// Only a preview's plan can arrive here like this: a trigger's
+		// domain pattern under a tailnet-only environment. Publishing it
+		// would put on a public name what the environment keeps off one.
+		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
+		evidence.Recovery = &recovery
+		return StepResult{State: StepFailed, ErrorCode: "tailnet_only_has_domains",
+			ErrorMessage: "this environment is tailnet-only, so it is not published on " + snapshot.Domains[0].Hostname + "; remove the trigger's preview domain",
+			Evidence:     mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
+	}
 	if len(snapshot.Domains) > 0 {
 		if runtime.Port == 0 || e.proxy == nil {
 			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
 			evidence.Recovery = &recovery
 			return StepResult{State: StepUnavailable, ErrorCode: "proxy_unavailable", ErrorMessage: "a managed domain requires an available HTTP proxy", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
-		routeValue := deploymentRoute(release.Release.EnvironmentID, snapshot.Domains, runtime.Host, runtime.Port)
-		routeValue.MaxBodyMB = snapshot.Plan.MaxRequestBodyMB
+		routeValue := publicRoute(release.Release.EnvironmentID, snapshot, *runtime)
 		if routeValue.TLS {
 			resolver, ok := e.proxy.(interface {
 				ResolveDeploymentCertificate(context.Context, []string) (string, string, error)
@@ -593,13 +701,21 @@ func (e *NormalizedStepExecutor) activate(
 				evidence.Recovery = &recovery
 				return StepResult{State: StepUnavailable, ErrorCode: "certificate_unavailable", ErrorMessage: "TLS route activation cannot resolve an existing certificate", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 			}
-			certPath, keyPath, resolveErr := resolver.ResolveDeploymentCertificate(ctx, routeValue.Domains)
+			certPath, keyPath, resolveErr := resolver.ResolveDeploymentCertificate(ctx, routeValue.TLSHostnames())
 			if resolveErr != nil {
 				recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
 				evidence.Recovery = &recovery
 				return StepResult{State: StepUnavailable, ErrorCode: "certificate_unavailable", ErrorMessage: "no existing certificate covers every HTTPS domain", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 			}
 			routeValue.CertPath, routeValue.KeyPath = certPath, keyPath
+		}
+		if snapshot.Plan.SkewProtection {
+			pinned := e.activationPin(ctx, execution.Run, release.Release, snapshot.Plan)
+			e.withSkew(ctx, &routeValue, release.Release.EnvironmentID, release.Release.ID, pinned)
+			if pinned != nil {
+				_ = stepLog(execution, "status", fmt.Sprintf("Visitors release #%d answered first stay on it while it is kept; everyone else gets release #%d",
+					e.releaseNumber(ctx, pinned.ReleaseID), release.Release.Number))
+			}
 		}
 		route = &routeValue
 		applied, applyErr := e.proxy.ApplyDeploymentRoute(ctx, routeValue)
@@ -612,6 +728,9 @@ func (e *NormalizedStepExecutor) activate(
 			evidence.Recovery = &recovery
 			return StepResult{State: StepFailed, ErrorCode: "proxy_cutover_failed", ErrorMessage: "the proxy rejected the candidate and the prior route recovery was checked", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
+		// Before the public-route checks, which ask Cloudflare's edge for a
+		// tunnel's names.
+		e.routeThroughTunnel(ctx, execution, snapshot.Domains)
 	}
 
 	publicChecks := []PlannedCheck{}
@@ -619,6 +738,20 @@ func (e *NormalizedStepExecutor) activate(
 		if check.Phase == "smoke" && check.Kind == string(CheckPublicRoute) {
 			publicChecks = append(publicChecks, check)
 		}
+	}
+	if len(publicChecks) > 0 && route != nil && e.routeInMaintenance(ctx, route.Name) {
+		// Every visitor is answered with the maintenance page, so a check
+		// through the public route would read that page and fail a release
+		// it says nothing about. The candidate already passed its own checks,
+		// which dial it directly.
+		_ = stepLog(execution, "status", "Maintenance is on, so the public-route checks were not run: visitors get the maintenance page")
+		for _, check := range publicChecks {
+			evidence.PublicChecks = append(evidence.PublicChecks, CheckEvidence{
+				Name: check.Name, Kind: check.Kind, Phase: check.Phase, Required: check.Required, Outcome: HealthDisabled,
+				Attempts: []CheckAttemptEvidence{{Number: 1, Outcome: HealthDisabled, Code: "maintenance"}},
+			})
+		}
+		publicChecks = nil
 	}
 	if len(publicChecks) > 0 {
 		if e.checks == nil {
@@ -644,19 +777,46 @@ func (e *NormalizedStepExecutor) activate(
 			return StepResult{State: StepFailed, ErrorCode: "activation_verification_failed", ErrorMessage: "the proxy cutover could not be verified", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
 	}
-	address, err := e.store.PreviewAddressFor(ctx, release.Release.EnvironmentID)
-	if err != nil {
+	address, failure := e.tailnetAddressFor(ctx, release.Release.EnvironmentID, snapshot.Plan)
+	if failure != nil {
 		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
 		evidence.Recovery = &recovery
-		failure := normalizedStepFailure(err)
 		failure.Evidence, failure.Recovered = mustJSON(evidence), recoveryComplete(recovery, snapshot.Plan, release.Release)
-		return failure
+		return *failure
 	}
-	if address != nil && address.Kind == previewAddressTailnet {
+	// Every tailnet address is reached through the environment's front,
+	// which keeps the dashboard's session cookie from the application; an
+	// environment that names its visitors has its gate there, and goes live
+	// behind it or not at all.
+	gated := snapshot.Plan.Tailnet.IdentityAware()
+	fronted := gated || e.frontsTailnet()
+	// A release that is no longer tailnet-only, replacing one that was, is
+	// not published there: its address is withdrawn once it is live.
+	leaving := address != nil && address.Kind == previewAddressTailnet && snapshot.Plan.Tailnet == nil &&
+		!snapshot.Plan.PreviewIsolation && e.leftTheTailnet(ctx, release.Release)
+	if address != nil && address.Kind == previewAddressTailnet && !leaving {
+		upstream := runtime.Port
+		if fronted {
+			// The front goes before the candidate first and the mapping
+			// moves to the front after, so the tailnet never reaches the
+			// candidate without it — or without the check, for a gate.
+			gate, applied, failure := e.applyTailnetGate(ctx, execution, release.Release.EnvironmentID, *address, *runtime, snapshot.Plan)
+			if applied != nil {
+				appliedRoute = applied
+			}
+			evidence.TailnetGate = gate
+			if failure != nil {
+				recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
+				evidence.Recovery = &recovery
+				failure.Evidence, failure.Recovered = mustJSON(evidence), recoveryComplete(recovery, snapshot.Plan, release.Release)
+				return *failure
+			}
+			upstream = address.Port
+		}
 		// The tailnet mapping moves to the candidate before the release
 		// pointer does, so a mapping that cannot be made never leaves a
 		// live release nobody can reach.
-		published, failure := e.publishPreviewAddress(ctx, execution, release.Release.EnvironmentID, *address, *runtime)
+		published, failure := e.publishPreviewAddress(ctx, execution, release.Release.EnvironmentID, *address, upstream)
 		if failure != nil {
 			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
 			evidence.Recovery = &recovery
@@ -665,13 +825,58 @@ func (e *NormalizedStepExecutor) activate(
 		}
 		evidence.Tailnet = published
 	}
-	if _, err := e.store.ActivateCandidate(ctx, execution.Run.ID, execution.ClaimToken, release.Release.ID); err != nil {
+	activated, err := e.store.ActivateCandidate(ctx, execution.Run.ID, execution.ClaimToken, release.Release.ID)
+	if err != nil {
 		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
 		evidence.Recovery = &recovery
 		return StepResult{State: StepFailed, ErrorCode: "activation_commit_failed", ErrorMessage: "the release pointer could not be committed", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 	}
 	_ = stepLog(execution, "status", fmt.Sprintf("Activated immutable release #%d", release.Release.Number))
+	// Where each linked database stands at this moment is what "roll back
+	// to this release" can later bring its data back to.
+	activatedAt := time.Now().UTC()
+	if activated != nil && activated.ActivatedAt != nil {
+		activatedAt = *activated.ActivatedAt
+	}
+	e.recordDataPoints(ctx, execution, release.Release, activatedAt)
+	switch {
+	case address == nil || address.Kind != previewAddressTailnet:
+	case leaving:
+		// The environment left the tailnet, and what replaced it is live
+		// now: its address goes.
+		e.leaveTailnet(ctx, execution, release.Release.EnvironmentID)
+	case !fronted:
+		// No proxy here can front it: the mapping reaches the container
+		// directly, and a front left before an older release answers
+		// nobody.
+		e.dropTailnetGate(ctx, execution, release.Release.EnvironmentID)
+	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(evidence)}
+}
+
+// ungatedCutoverLine is the transcript's plain statement that no readiness
+// check stood between the candidate's start and this cutover, in the words
+// of the strategy: blue/green moves traffic, stop-first has already stopped
+// the previous release and now points visitors at the new one.
+func ungatedCutoverLine(strategy ReleaseStrategy, number int64) string {
+	if strategy.startsBeside() {
+		return fmt.Sprintf("Moving traffic to release #%d without a readiness check: the plan has none, so the candidate was started and never asked whether it answers. Add one under Settings → Runtime → Health checks to gate the next cutover.", number)
+	}
+	return fmt.Sprintf("Release #%d goes live without a readiness check: the plan has none, so it was started and never asked whether it answers before visitors reach it. Add one under Settings → Runtime → Health checks to gate the next release.", number)
+}
+
+// routeInMaintenance says whether the route's maintenance switch is on, on a
+// proxy that can say. One that cannot is taken as off, which runs the
+// checks as before.
+func (e *NormalizedStepExecutor) routeInMaintenance(ctx context.Context, name string) bool {
+	reader, ok := e.proxy.(interface {
+		DeploymentMaintenance(context.Context, string) (proxysvc.MaintenanceSwitch, error)
+	})
+	if !ok {
+		return false
+	}
+	state, err := reader.DeploymentMaintenance(ctx, name)
+	return err == nil && state.Ready && state.On
 }
 
 func publicRouteActivationEvidence(result proxysvc.DeploymentRouteResult) routeActivationEvidence {
@@ -682,35 +887,105 @@ func publicRouteActivationEvidence(result proxysvc.DeploymentRouteResult) routeA
 	}
 }
 
-func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, port int) proxysvc.DeploymentRoute {
+// publicRoute is the route a release's snapshot asks the proxy for: its
+// names, and the rules its plan sets on them.
+func publicRoute(environmentID int64, snapshot runtimeReleaseSnapshot, runtime ReleaseRuntime) proxysvc.DeploymentRoute {
+	route := deploymentRoute(environmentID, snapshot.Domains, runtimeUpstreams(runtime))
+	route.MaxBodyMB = snapshot.Plan.MaxRequestBodyMB
+	route.AllowFrom = snapshot.Plan.AllowFrom
+	route.EdgeRules, route.RateLimit, route.CrowdSec = snapshot.Plan.EdgeRules, snapshot.Plan.RateLimit, snapshot.Plan.CrowdSec
+	for _, header := range snapshot.Plan.ResponseHeaders {
+		route.ResponseHeaders = append(route.ResponseHeaders, proxysvc.HeaderValue{Name: header.Name, Value: header.Value})
+	}
+	if gate := snapshot.Plan.SignInGate(); gate != nil {
+		route.ForwardAuth = &proxysvc.SiteForwardAuth{Provider: gate.Provider, Verify: gate.Verify, SignIn: gate.SignIn}
+	}
+	if m := snapshot.Plan.Maintenance; m != nil {
+		route.Maintenance = proxysvc.DeploymentMaintenance{RetryAfter: m.RetryAfter, BypassFrom: m.BypassFrom}
+	}
+	route.ErrorPages, route.InterceptErrors = snapshot.Plan.ErrorPages, snapshot.Plan.InterceptErrors
+	// Only a TLS route has an HTTPS answer to send the policy on; a plan
+	// whose domains are all plain keeps it for the day one is not.
+	if h := snapshot.Plan.HSTS; h != nil && route.TLS {
+		policy := h.proxy()
+		route.HSTS = &policy
+	}
+	// A release that sleeps has a route that wakes it (sleep.go).
+	if sleep := snapshot.Plan.Sleep; sleep.on() {
+		route.Sleep = &proxysvc.DeploymentSleep{HoldSeconds: sleep.holdSeconds()}
+	}
+	return route
+}
+
+// deploymentRoute is the route for domains, sharing requests between
+// upstreams: the release's replicas, or its one container.
+func deploymentRoute(environmentID int64, domains []PlannedDomain, upstreams []string) proxysvc.DeploymentRoute {
 	names := make([]string, 0, len(domains))
 	tls := false
+	// Each domain is served on the scheme it chose: the route is TLS as
+	// soon as one is HTTPS, and the others are its plain-HTTP names, with
+	// no certificate to cover them and no redirect away from what they asked
+	// for.
+	var plain []string
 	// A protected domain protects the deployment's whole route: the proxy
 	// serves every domain from one site, so the credentials are its union.
 	var users []proxysvc.BasicAuthUser
 	seen := map[string]bool{}
+	var redirects []proxysvc.HostRedirect
 	for _, domain := range domains {
-		names = append(names, strings.ToLower(domain.Hostname))
-		tls = tls || domain.HTTPS
+		// A tunnel's name is HTTPS at Cloudflare's edge and plain HTTP here,
+		// where only the connector on the private network reaches it.
+		https := domain.HTTPS && !domain.Tunnel
+		tls = tls || https
+		if !https {
+			plain = append(plain, strings.ToLower(domain.Hostname))
+		}
+		if domain.Redirects() {
+			redirects = append(redirects, proxysvc.HostRedirect{
+				From: strings.ToLower(domain.Hostname), To: strings.ToLower(domain.RedirectTo), Code: domain.RedirectCode,
+			})
+		} else {
+			names = append(names, strings.ToLower(domain.Hostname))
+		}
 		if domain.Protection != nil && !seen[domain.Protection.Username] {
 			seen[domain.Protection.Username] = true
 			users = append(users, proxysvc.BasicAuthUser{Username: domain.Protection.Username, Hash: domain.Protection.Hash})
 		}
 	}
-	return proxysvc.DeploymentRoute{
+	route := proxysvc.DeploymentRoute{
 		Name: deploymentRouteName(environmentID), Domains: names,
-		Upstream: "http://" + net.JoinHostPort(runtimeCheckHost(host), fmt.Sprintf("%d", port)),
-		TLS:      tls, ForceHTTPS: tls, BasicAuth: users,
+		TLS: tls, ForceHTTPS: tls, BasicAuth: users, Redirects: redirects,
 		// The request record is what the project's Logs page reads. nginx has
 		// always written one for these routes; asking Caddy for it too is what
 		// makes the two drivers answer the same question.
 		AccessLog: true,
+		// And each request it records is a span: the ingress sends the
+		// application a traceparent and writes the same ids beside the
+		// request, which a log drain's traces stream exports.
+		Trace: true,
 	}
+	if tls {
+		route.PlainHostnames = plain
+	}
+	// A release of one container is the route's one upstream, exactly the
+	// route it was before replicas; several are its pool.
+	if len(upstreams) == 1 {
+		route.Upstream = upstreams[0]
+	} else {
+		route.Upstreams = upstreams
+	}
+	return route
 }
 
+// publicRouteURLs are the addresses a public-route check asks, which are
+// the names that serve the application: a redirecting name answers with a
+// redirect to one of them, which says nothing about the release.
 func publicRouteURLs(domains []PlannedDomain) []string {
 	urls := make([]string, 0, len(domains))
 	for _, domain := range domains {
+		if domain.Redirects() {
+			continue
+		}
 		scheme := "http"
 		if domain.HTTPS {
 			scheme = "https"
@@ -735,14 +1010,20 @@ func (e *NormalizedStepExecutor) stopCandidateAndRestore(
 	recovery := recoveryEvidence{CandidateStopped: stopErr == nil, Stop: &stop, RouteRestored: route == nil}
 	if route != nil && e.proxy != nil {
 		recovery.RouteRestored = e.proxy.RestoreDeploymentRoute(recoveryCtx, route.Snapshot) == nil
+		// The route put back may still send a canary's visitors to this
+		// candidate by their cookie; the live release's own route sends
+		// them nowhere it is not.
+		if recovery.RouteRestored && plan.SkewProtection && release.PredecessorReleaseID != 0 {
+			recovery.RouteRestored = e.restoreLiveRoute(recoveryCtx, release.PredecessorReleaseID) == nil
+		}
 	}
 	previous := e.restorePrevious(recoveryCtx, execution, release, plan)
 	if previous == nil {
-		recovery.RuntimeRestored = release.PredecessorReleaseID == 0 || plan.Strategy == StrategyBlueGreen
+		recovery.RuntimeRestored = release.PredecessorReleaseID == 0 || plan.Strategy.startsBeside()
 	} else {
 		recovery.RuntimeRestored = previous.RuntimeRestored
 	}
-	recovery.TailnetRestored = e.restoreTailnet(recoveryCtx, execution, release, recovery.RuntimeRestored)
+	recovery.TailnetRestored = e.restoreTailnet(recoveryCtx, execution, release, recovery.RuntimeRestored, route)
 	_ = e.store.SetRuntimeState(recoveryCtx, execution.Run.ID, execution.ClaimToken, release.ID, "failed")
 	return recovery
 }
@@ -787,7 +1068,7 @@ func (e *NormalizedStepExecutor) restorePrevious(
 }
 
 func recoveryComplete(recovery recoveryEvidence, plan RuntimePlanConfig, release Release) bool {
-	runtimeOK := recovery.RuntimeRestored || release.PredecessorReleaseID == 0 || plan.Strategy == StrategyBlueGreen
+	runtimeOK := recovery.RuntimeRestored || release.PredecessorReleaseID == 0 || plan.Strategy.startsBeside()
 	return recovery.CandidateStopped && recovery.RouteRestored && runtimeOK && recovery.TailnetRestored
 }
 
@@ -795,6 +1076,18 @@ func (e *NormalizedStepExecutor) retirePrevious(
 	ctx context.Context,
 	execution StepExecution,
 	_ *StoredExecutionPlan,
+) StepResult {
+	return e.retirePredecessor(ctx, execution, true)
+}
+
+// retirePredecessor stops the release this run replaced, or keeps it warm
+// when the environment's terms allow. A cancellation finishing a committed
+// cutover retires plainly: the operator stopped the run, not asked for a
+// window.
+func (e *NormalizedStepExecutor) retirePredecessor(
+	ctx context.Context,
+	execution StepExecution,
+	allowWarm bool,
 ) StepResult {
 	// Once the environment pointer has moved, cancellation must not strand the
 	// predecessor beside the new live runtime. Finish the bounded drain and
@@ -818,6 +1111,7 @@ func (e *NormalizedStepExecutor) retirePrevious(
 		return normalizedStepFailure(err)
 	}
 	var stop *RuntimeStopEvidence
+	var warmNote map[string]any
 	// A stop-first Compose release reuses one stable project identity. Its old
 	// containers were already replaced by `up`; stopping that identity here
 	// would stop the newly activated release.
@@ -832,6 +1126,21 @@ func (e *NormalizedStepExecutor) retirePrevious(
 			case <-timer.C:
 			}
 		}
+		if allowWarm && snapshot.Plan.Strategy.startsBeside() {
+			watch, why := e.keepWarm(retireCtx, execution, release.Release, snapshot, *previous, e.cutoverMoment(retireCtx, execution.Run.ID))
+			if watch != nil {
+				_ = stepLog(execution, "status", warmKeptLine(*watch))
+				return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{
+					"releaseId": predecessorID, "warm": map[string]any{
+						"kept": true, "watchId": watch.ID, "until": watch.ExpiresAt,
+						"runtimeId": previous.RuntimeID, "automatic": watch.Policy.Automatic,
+					},
+				})}
+			}
+			warmNote = map[string]any{"kept": false, "reason": why}
+			_ = stepLog(execution, "status", "Not keeping the previous release warm: "+why)
+		}
+		e.unpinPredecessor(retireCtx, execution, release.Release, snapshot)
 		variables, variablesErr := e.runtimeVariablesForRelease(retireCtx, predecessorID, *previous)
 		if variablesErr != nil {
 			return runtimeStepFailure(variablesErr, "retire_variables_unavailable", "the prior Compose release variables could not be opened", nil)
@@ -847,9 +1156,28 @@ func (e *NormalizedStepExecutor) retirePrevious(
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
-	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{
+	evidence := map[string]any{
 		"releaseId": retiredID, "stop": stop, "sharedComposeProject": sharedComposeProject,
-	})}
+	}
+	if warmNote != nil {
+		evidence["warm"] = warmNote
+	}
+	return StepResult{State: StepPassed, Evidence: mustJSON(evidence)}
+}
+
+// warmKeptLine is the transcript's account of a window opening.
+func warmKeptLine(watch RollbackWatch) string {
+	until := watch.ExpiresAt.UTC().Format("15:04:05 UTC")
+	how := "paused"
+	if watch.WarmRunning {
+		how = "running for the visitors it answered first"
+	}
+	if !watch.Policy.Automatic {
+		return fmt.Sprintf("Kept release #%d warm (%s) until %s, so it can be switched back to instantly",
+			watch.WarmReleaseNum, how, until)
+	}
+	return fmt.Sprintf("Kept release #%d warm (%s) until %s: if release #%d's 5xx share passes the previous release's by %.1f points or its p95 reaches %.4g× it, over at least %d requests, traffic goes back to it automatically",
+		watch.WarmReleaseNum, how, until, watch.ReleaseNumber, watch.Policy.ErrorRateMargin, watch.Policy.LatencyFactor, watch.Policy.MinRequests)
 }
 
 func (e *NormalizedStepExecutor) removePreview(ctx context.Context, execution StepExecution) StepResult {
@@ -933,7 +1261,8 @@ func (e *NormalizedStepExecutor) removePreview(ctx context.Context, execution St
 func (e *NormalizedStepExecutor) recordRelease(ctx context.Context, execution StepExecution) StepResult {
 	var release *ReleaseWithArtifacts
 	var err error
-	if operationTargetsLiveRelease(execution.Run.Operation) {
+	_, instant := instantRollbackOf(execution.Run)
+	if operationTargetsLiveRelease(execution.Run.Operation) || instant {
 		targetReleaseID, targetErr := operationTargetReleaseID(execution.Run)
 		if targetErr != nil {
 			return normalizedStepFailure(targetErr)
@@ -1035,13 +1364,34 @@ func decodeReleaseRuntimeSnapshot(release *ReleaseWithArtifacts) (runtimeRelease
 		if json.Unmarshal(envelope.Snapshot, &snapshot) != nil || snapshot.Version != 1 {
 			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot is malformed", ErrArtifactMissing)
 		}
-		if snapshot.Plan.Strategy != release.Release.Strategy ||
-			(release.Release.ImageDigest != "" && snapshot.Image.Digest != release.Release.ImageDigest) {
+		if snapshot.Plan.Strategy != release.Release.Strategy || !snapshotNamesReleaseImage(snapshot, release.Release.ImageDigest) {
 			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot does not match release identity", ErrInvalidPlan)
 		}
 		return snapshot, nil
 	}
 	return runtimeReleaseSnapshot{}, fmt.Errorf("%w: release runtime artifact is unavailable", ErrArtifactMissing)
+}
+
+// snapshotNamesReleaseImage is whether the runtime snapshot runs the image
+// the release row records. A container release has one image and both name
+// it. A Compose release records the first of its services' image artifacts
+// and keeps no single image of its own (snapshot.Image is empty), so the
+// recorded digest has to be one of the snapshot's services: comparing it with
+// the empty single image refused every Compose release at its first
+// activation step.
+func snapshotNamesReleaseImage(snapshot runtimeReleaseSnapshot, digest string) bool {
+	if digest == "" {
+		return true
+	}
+	if snapshot.Compose == nil {
+		return snapshot.Image.Digest == digest
+	}
+	for _, service := range snapshot.Compose.Services {
+		if service.Digest == digest {
+			return true
+		}
+	}
+	return false
 }
 
 // operationTargetsLiveRelease is true for the operations that act on the

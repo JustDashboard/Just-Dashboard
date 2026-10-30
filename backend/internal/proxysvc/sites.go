@@ -35,7 +35,11 @@ type SiteSpec struct {
 	Upstream string `json:"upstream,omitempty"`
 	// Pool, when set, replaces Upstream with several servers.
 	Pool *SitePool `json:"pool,omitempty"`
-	Root string    `json:"root,omitempty"`
+	// Split, beside a Pool, sends a share of the requests to a second set
+	// of servers: a deployment route in a canary. Only a deployment route
+	// sets it; the form never offers it.
+	Split *SiteSplit `json:"split,omitempty"`
+	Root  string     `json:"root,omitempty"`
 	// SPA answers a path with no file of its own with index.html, for a
 	// single-page app whose router runs in the browser. Static sites only:
 	// without it a deep link or a reload on /settings is nginx's 404.
@@ -64,6 +68,18 @@ type SiteSpec struct {
 	// Canonical is "www" or "apex": the other form of each domain gets a
 	// server of its own redirecting to the site's. Empty adds none.
 	Canonical string `json:"canonical,omitempty"`
+	// HostRedirects are names, not among Domains, that each get a server of
+	// their own sending visitors to one of the site's domains. Canonical
+	// derives its names from the domains; these are named outright, which is
+	// what a deployment route needs: its www. is a domain the plan lists.
+	HostRedirects []HostRedirect `json:"hostRedirects,omitempty"`
+	// PlainDomains are names among Domains a TLS site serves over plain
+	// HTTP alone: a server of their own on port 80, with no certificate, no
+	// redirect to HTTPS and no HSTS, marked so the parser reads them back.
+	// A site without TLS serves every name that way and lists none. A
+	// deployment's domains each choose, so one HTTPS name no longer puts
+	// the others behind a certificate that does not cover them.
+	PlainDomains []string `json:"plainDomains,omitempty"`
 
 	TLS        bool   `json:"tls"`
 	CertPath   string `json:"certPath,omitempty"`
@@ -144,6 +160,10 @@ type SiteSpec struct {
 	ForwardAuth *SiteForwardAuth `json:"forwardAuth,omitempty"`
 
 	AccessLog bool `json:"accessLog"`
+	// Trace sends the application a W3C traceparent and, on a timed access
+	// log, records it (trace.go). A deployment's route sets it; the Proxy
+	// form does not offer it.
+	Trace bool `json:"trace,omitempty"`
 	// AccessLogPath and ErrorLogPath are the files the site's access_log and
 	// error_log write to, read back from the file rather than set by the
 	// form: a hand-written site logs wherever its author said, and a page that
@@ -185,6 +205,28 @@ type SiteSpec struct {
 	// PagesDir is where the site's pages are served from. The service sets
 	// it from its own nginx directory; it is never taken from a request.
 	PagesDir string `json:"-"`
+	// shortVars names the site's variables and limit zones from
+	// NginxVarIdent. RenderNginx sets it on its own copy when a variable
+	// would be too long for nginx under the whole NginxIdent.
+	shortVars bool
+	// deployment says the spec is a deployment's route, whose rules are
+	// set on its Domains settings rather than the Proxy page's form, so a
+	// refusal points at the control the reader has.
+	deployment bool
+	// sleep is a deployment route's wake (deployment_sleep.go): the
+	// application may be stopped while nobody visits, and a request that
+	// finds it stopped is held while the dashboard starts it.
+	sleep *siteSleep
+	// dropCookies are the deployment route's DropCookies: taken out of the
+	// Cookie header every forwarding location and the sign-in check send.
+	dropCookies []string
+	// edgeRules, crowdSecList and limitRetryAfter are a deployment route's
+	// edge rules, the CrowdSec list it includes, and the Retry-After its
+	// rate limit answers 429 with (deployment_edge.go). They are set from a
+	// validated route and never read back from a file.
+	edgeRules       []EdgeRule
+	crowdSecList    string
+	limitRetryAfter int
 	// Custom is appended verbatim inside the server block. It is the escape
 	// hatch, and it is the one field not validated beyond refusing an
 	// unbalanced brace — a form that cannot express everything needs
@@ -233,6 +275,9 @@ type SiteLocation struct {
 	// whole site signs in, or "on" to sign in here when only chosen paths
 	// do; empty follows the site.
 	ForwardAuth string `json:"forwardAuth,omitempty"`
+	// wake is a sleeping route's own: the location it forwards from
+	// (wakeMain) or the one a woken request is sent on from (wakeRetry).
+	wake string
 }
 
 // SiteMaintenance is a site's maintenance switch.
@@ -244,16 +289,56 @@ type SiteMaintenance struct {
 	// BypassFrom are the addresses that reach the site as usual while it is
 	// in maintenance.
 	BypassFrom []string `json:"bypassFrom"`
+	// Switch puts the check behind a file instead of On: maintenance is on
+	// while maintenance.on exists in the site's pages folder, which nginx
+	// looks for on every request. A deployment's route is written only when
+	// a release goes live, so this is what lets its maintenance be turned on
+	// and off at once, with no reload and no rewrite of the route.
+	Switch bool `json:"switch,omitempty"`
+}
+
+// maintenanceSwitchFile is the file whose presence turns a switched site's
+// maintenance on.
+const maintenanceSwitchFile = "maintenance.on"
+
+// pagesDir is where the site's pages are served from: the service's folder
+// for them, or the one a spec read without a service would have.
+func (spec *SiteSpec) pagesDir() string {
+	if spec.PagesDir != "" {
+		return spec.PagesDir
+	}
+	return "/etc/nginx/jd-pages/" + spec.Name
+}
+
+// maintenanceSwitchPath is the file a switched site's maintenance follows.
+func (spec *SiteSpec) maintenanceSwitchPath() string {
+	return spec.pagesDir() + "/" + maintenanceSwitchFile
 }
 
 // errorPageCodes are the codes a site may give a page of its own, in the
 // order they are written.
 var errorPageCodes = []int{404, 502, 503, 504}
 
-// maintVar and maintIPVar name the site's maintenance map and geo.
-func (spec *SiteSpec) maintVar() string { return NginxIdent(spec.Name) + "_maint" }
+// varIdent is the ident the site's variables and limit zones are named
+// from. A zone shares it because its key is a variable named after it, and
+// nginx refuses a reload that finds a live zone counting by another key.
+func (spec *SiteSpec) varIdent() string {
+	if spec.shortVars {
+		return NginxVarIdent(spec.Name)
+	}
+	return NginxIdent(spec.Name)
+}
 
-func (spec *SiteSpec) maintIPVar() string { return NginxIdent(spec.Name) + "_maint_ip" }
+// ownsVar says whether v is the site's variable with that suffix, named from
+// either ident: a file is read before anything knows which one wrote it.
+func (spec *SiteSpec) ownsVar(v, suffix string) bool {
+	return v == "$"+NginxIdent(spec.Name)+suffix || v == "$"+NginxVarIdent(spec.Name)+suffix
+}
+
+// maintVar and maintIPVar name the site's maintenance map and geo.
+func (spec *SiteSpec) maintVar() string { return spec.varIdent() + "_maint" }
+
+func (spec *SiteSpec) maintIPVar() string { return spec.varIdent() + "_maint_ip" }
 
 // hasErrorPage says whether the site serves its own page for code.
 func (spec *SiteSpec) hasErrorPage(code int) bool {
@@ -278,7 +363,14 @@ func (spec *SiteSpec) timedLog() bool {
 // logFormatName and connectionVar name the http-level objects the site owns.
 func (spec *SiteSpec) logFormatName() string { return NginxIdent(spec.Name) + "_timed" }
 
-func (spec *SiteSpec) connectionVar() string { return NginxIdent(spec.Name) + "_connection" }
+func (spec *SiteSpec) connectionVar() string { return spec.varIdent() + "_connection" }
+
+// cookieVar is the Cookie header the site forwards when it drops cookies,
+// the last of its cookie maps.
+func (spec *SiteSpec) cookieVar() string { return spec.varIdent() + "_cookie" }
+
+// dropsCookies says whether the site takes cookies out of what it forwards.
+func (spec *SiteSpec) dropsCookies() bool { return spec.Kind == "proxy" && len(spec.dropCookies) > 0 }
 
 // usesWebSockets says whether any location the renderer writes forwards
 // upgrades, which is when the site's connection map is needed.
@@ -474,7 +566,13 @@ func ValidateSpec(spec *SiteSpec) error {
 	if err := validatePool(spec); err != nil {
 		return err
 	}
+	if err := validateSplit(spec); err != nil {
+		return err
+	}
 	if err := validTLSOptions(spec); err != nil {
+		return err
+	}
+	if err := validPlainDomains(spec); err != nil {
 		return err
 	}
 	switch spec.HostHeader {
