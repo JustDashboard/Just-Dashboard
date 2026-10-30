@@ -1,0 +1,40 @@
+{
+  "logs": [
+    {
+      "Level": "warn",
+      "Msg": "No node package manager detected, using npm",
+      "DocsPath": ""
+    },
+    {
+      "Level": "suggestion",
+      "Msg": "Specify the package manager and version explicitly",
+      "DocsPath": "/config/recommendations#specify-the-node-package-manager-version"
+    },
+    {
+      "Level": "info",
+      "Msg": "Detected Node",
+      "DocsPath": ""
+    },
+    {
+      "Level": "info",
+      "Msg": "Using npm package manager",
+      "DocsPath": ""
+    },
+    {
+      "Level": "info",
+      "Msg": "Custom start command detected, skipping Caddy start",
+      "DocsPath": ""
+    },
+    {
+      "Level": "suggestion",
+      "Msg": "Add a `package-lock.json` for more deterministic installs",
+      "DocsPath": "/architecture/recommendations"
+    },
+    {
+      "Level": "error",
+      "Msg": "failed to resolve version 99.1.0 of node",
+      "DocsPath": ""
+    }
+  ],
+  "success": false
+}

@@ -32,6 +32,9 @@ func (s *Server) mountBackupRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleBackupJobGet))
 		r.Method(http.MethodGet, "/{id}/runs", s.handle(s.handleBackupRuns))
 		r.Method(http.MethodGet, "/runs/{runID}/contents", s.handle(s.handleBackupContents))
+		// Where a restore in place would write on this host, and what it
+		// would make first, read from the manifest before anything is done.
+		r.Method(http.MethodGet, "/runs/{runID}/restore-plan", s.handle(s.handleBackupRestorePlan))
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
@@ -45,6 +48,13 @@ func (s *Server) mountBackupRoutes(r chi.Router) {
 			// configuration — so taking one off the server is an
 			// administrator's act, not a reader's.
 			r.Method(http.MethodGet, "/runs/{runID}/download", s.handle(s.handleBackupDownload))
+			// What a destination holds that this server did not write, and
+			// taking it on as imported runs; the key that opens what another
+			// server sealed. POSTs, because each carries a destination's keys
+			// or a backup key, never in a URL.
+			r.Method(http.MethodPost, "/catalogue", s.handle(s.handleBackupCatalogue))
+			r.Method(http.MethodPost, "/import", s.handle(s.handleBackupImport))
+			r.Method(http.MethodPost, "/key/import", s.handle(s.handleBackupKeyImport))
 			// The key opens every encrypted archive this server wrote, wherever
 			// they are copied to, and nothing here can take an exported copy
 			// back: an irreversible act, so the destructive budget too.
@@ -136,7 +146,20 @@ func (s *Server) handleBackupVerifyRestore(w http.ResponseWriter, r *http.Reques
 }
 
 func mapBackupError(err error) error {
+	var keyErr *backups.KeyError
 	switch {
+	case errors.As(err, &keyErr):
+		// The key the manifest names, as its own field, so the page can offer
+		// to import that one.
+		refused := httpx.Err(http.StatusConflict, "archive_key_unavailable", err.Error())
+		refused.Resource = keyErr.Recipient
+		return refused
+	case errors.Is(err, backups.ErrDigestMismatch):
+		return httpx.Err(http.StatusUnprocessableEntity, "archive_digest_mismatch", err.Error())
+	case errors.Is(err, backups.ErrImportedJob):
+		return httpx.Err(http.StatusConflict, "backup_job_imported", err.Error())
+	case errors.Is(err, backups.ErrNothingToImport):
+		return httpx.Err(http.StatusNotFound, "nothing_to_import", err.Error())
 	case errors.Is(err, backups.ErrNotFound):
 		return httpx.ErrNotFound
 	case errors.Is(err, backups.ErrConflict):
@@ -477,6 +500,9 @@ func (s *Server) startBackupRun(ctx context.Context, actor string, id int64) (*b
 	if err != nil {
 		return nil, mapBackupError(err)
 	}
+	if job.Imported {
+		return nil, mapBackupError(backups.ErrImportedJob)
+	}
 	if err := s.modules.backupStore.ValidatePaths(job); err != nil {
 		return nil, mapBackupError(err)
 	}
@@ -539,6 +565,11 @@ type restoreRequest struct {
 type restoreDatabaseRequest struct {
 	ConnectionID int64  `json:"connectionId"`
 	Database     string `json:"database"`
+	// Dump names the dump by where it lies in the archive (database-0001/…),
+	// and ConnectionID is then the connection it goes into, of the same
+	// engine. An imported run's dumps are named this way: the connection ids
+	// its manifest records are the other server's.
+	Dump string `json:"dump,omitempty"`
 }
 
 // handleBackupRestoreDatabase loads one native dump from a run back into its
@@ -555,6 +586,11 @@ func (s *Server) handleBackupRestoreDatabase(w http.ResponseWriter, r *http.Requ
 	}
 	if req.ConnectionID <= 0 {
 		return httpx.BadRequest("connectionId is required")
+	}
+	if req.Dump == "" {
+		if run, err := s.modules.backupStore.Run(r.Context(), runID); err == nil && run.Imported {
+			return httpx.BadRequest("this run was imported, and the connection ids its manifest records are another server's; name the dump by its archive path and the connection here it goes into")
+		}
 	}
 	conn, _, err := s.dbConnRow(r.Context(), req.ConnectionID)
 	if err != nil {
@@ -579,10 +615,19 @@ func (s *Server) handleBackupRestoreDatabase(w http.ResponseWriter, r *http.Requ
 	}
 	ctx, cancel := timeoutCtx(r, 60*time.Minute)
 	defer cancel()
-	output, err := s.modules.backupRunner.RestoreDatabase(ctx, runID, req.ConnectionID, req.Database)
+	var output string
+	if req.Dump != "" {
+		output, err = s.modules.backupRunner.RestoreDatabaseDump(ctx, runID, req.Dump, req.ConnectionID, req.Database)
+	} else {
+		output, err = s.modules.backupRunner.RestoreDatabase(ctx, runID, req.ConnectionID, req.Database)
+	}
 	if err != nil {
 		httpx.SetAudit(r, "backup.restore.database", strconv.FormatInt(runID, 10),
-			map[string]any{"connectionId": req.ConnectionID, "connection": conn.Name, "database": target, "error": err.Error()})
+			map[string]any{"connectionId": req.ConnectionID, "connection": conn.Name, "database": target, "dump": req.Dump, "error": err.Error()})
+		var keyErr *backups.KeyError
+		if errors.As(err, &keyErr) || errors.Is(err, backups.ErrDigestMismatch) {
+			return mapBackupError(err)
+		}
 		// The adapter refuses a protected database by whichever road it is
 		// reached, and that refusal keeps its own status.
 		var refused *httpx.APIError
@@ -592,7 +637,7 @@ func (s *Server) handleBackupRestoreDatabase(w http.ResponseWriter, r *http.Requ
 		return httpx.Err(http.StatusBadGateway, "restore_failed", err.Error())
 	}
 	httpx.SetAudit(r, "backup.restore.database", strconv.FormatInt(runID, 10),
-		map[string]any{"connectionId": req.ConnectionID, "connection": conn.Name, "database": target})
+		map[string]any{"connectionId": req.ConnectionID, "connection": conn.Name, "database": target, "dump": req.Dump})
 	httpx.JSON(w, http.StatusOK, map[string]any{"connection": conn.Name, "database": target, "output": output})
 	return nil
 }
@@ -617,7 +662,7 @@ func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request) err
 			return mapBackupError(err)
 		}
 		httpx.SetAudit(r, "backup.restore", strconv.FormatInt(runID, 10),
-			map[string]any{"inPlace": true, "targets": res.Targets, "paths": len(req.Paths), "entries": res.Entries, "bytes": res.Bytes})
+			map[string]any{"inPlace": true, "targets": res.Targets, "created": res.Created, "paths": len(req.Paths), "entries": res.Entries, "bytes": res.Bytes})
 		httpx.JSON(w, http.StatusOK, res)
 		return nil
 	}

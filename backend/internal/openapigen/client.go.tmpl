@@ -1,0 +1,202 @@
+// Package {{.Package}} is a client for the {{.Title}}: every route under
+// /api/v1/deploy as a method on Client, and every type those routes take and
+// answer as a Go type. It is generated from the API's OpenAPI description,
+// which the dashboard generates from its own router, so it says exactly what
+// that build serves.
+//
+// A Client calls one dashboard with a key: a deploy key (what jd and CI use),
+// or an API key, which reaches every route that does not need a session.
+//
+//	c := {{.Package}}.NewClient("https://dash.example.com", os.Getenv("JD_TOKEN"))
+//	run, err := c.DeploymentRunCreate(ctx, deploymentID, environmentID,
+//		{{.Package}}.DeploymentRunCreateRequest{Operation: {{.Package}}.DeployOperationDeploy})
+//
+// A refusal is an *Error carrying the API's code and message.
+package {{.Package}}
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+)
+
+// BasePath is where the API is served under the dashboard's address.
+const BasePath = "{{.BasePath}}"
+
+// errorBodyLimit bounds how much of a refusal is read.
+const errorBodyLimit = 1 << 20
+
+// Client calls one dashboard's deployment API.
+type Client struct {
+	// BaseURL is the dashboard's address, such as https://dash.example.com.
+	// BasePath is added unless it already ends with it.
+	BaseURL string
+	// Key is a deploy key or an API key, sent as a bearer token.
+	Key string
+	// HTTPClient sends the requests; nil is http.DefaultClient.
+	HTTPClient *http.Client
+	// UserAgent is sent with every request when it is set.
+	UserAgent string
+}
+
+// NewClient is a client for the dashboard at baseURL with a key.
+func NewClient(baseURL, key string) *Client {
+	return &Client{BaseURL: baseURL, Key: key}
+}
+
+// RequestOption changes one request before it is sent.
+type RequestOption func(*http.Request)
+
+// WithHeader sets a header on one request, such as the Idempotency-Key a run
+// is queued under.
+func WithHeader(name, value string) RequestOption {
+	return func(r *http.Request) { r.Header.Set(name, value) }
+}
+
+// Error is a refusal or a failure: the status the API answered with and its
+// error envelope, {"error": {...}}. Code is what a caller branches on;
+// Message is written to be read.
+type Error struct {
+	// Status is the HTTP status.
+	Status int `json:"-"`
+{{.ErrorFields}}
+	// Body is the answer as it came, for one that was not the envelope.
+	Body []byte `json:"-"`
+}
+
+func (e *Error) Error() string {
+	switch {
+	case e.Code != "" && e.Message != "":
+		return fmt.Sprintf("%d %s: %s", e.Status, e.Code, e.Message)
+	case e.Message != "":
+		return fmt.Sprintf("%d: %s", e.Status, e.Message)
+	}
+	return fmt.Sprintf("%d %s", e.Status, http.StatusText(e.Status))
+}
+
+// IsCode reports whether err is an *Error with this code, such as
+// "key_scope" or "not_found".
+func IsCode(err error, code string) bool {
+	var apiErr *Error
+	return errors.As(err, &apiErr) && apiErr.Code == code
+}
+
+// errorFrom reads a refusal: the envelope when it is one, and otherwise the
+// status with the answer's text as its message.
+func errorFrom(status int, body []byte) *Error {
+	var envelope struct {
+		Error *Error `json:"error"`
+	}
+	if json.Unmarshal(body, &envelope) == nil && envelope.Error != nil && envelope.Error.Code != "" {
+		envelope.Error.Status = status
+		envelope.Error.Body = body
+		return envelope.Error
+	}
+	message := strings.TrimSpace(string(body))
+	if len(message) > 300 {
+		message = message[:300]
+	}
+	return &Error{Status: status, Message: message, Body: body}
+}
+
+func (c *Client) url(path string, query url.Values) string {
+	base := strings.TrimRight(c.BaseURL, "/")
+	if !strings.HasSuffix(base, BasePath) {
+		base += BasePath
+	}
+	u := base + path
+	if len(query) > 0 {
+		u += "?" + query.Encode()
+	}
+	return u
+}
+
+// socketURL is a WebSocket route's address: the API's, with ws for http and
+// wss for https.
+func (c *Client) socketURL(path string) string {
+	u := c.url(path, nil)
+	switch {
+	case strings.HasPrefix(u, "https://"):
+		return "wss://" + strings.TrimPrefix(u, "https://")
+	case strings.HasPrefix(u, "http://"):
+		return "ws://" + strings.TrimPrefix(u, "http://")
+	}
+	return u
+}
+
+// send makes one request and returns the answer when it is not a refusal.
+func (c *Client) send(ctx context.Context, method, path string, query url.Values, body any, accept string, opts []RequestOption) (*http.Response, error) {
+	var reader io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("encode the request body: %w", err)
+		}
+		reader = bytes.NewReader(raw)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.url(path, query), reader)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Accept", accept)
+	if c.Key != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Key)
+	}
+	if c.UserAgent != "" {
+		req.Header.Set("User-Agent", c.UserAgent)
+	}
+	for _, opt := range opts {
+		opt(req)
+	}
+	client := c.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode >= 300 {
+		defer res.Body.Close()
+		raw, _ := io.ReadAll(io.LimitReader(res.Body, errorBodyLimit))
+		return nil, errorFrom(res.StatusCode, raw)
+	}
+	return res, nil
+}
+
+// do makes a JSON request and decodes a JSON answer into out, when out is
+// not nil and the answer has a body.
+func (c *Client) do(ctx context.Context, method, path string, query url.Values, body any, out any, opts []RequestOption) error {
+	res, err := c.send(ctx, method, path, query, body, "application/json", opts)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if out == nil || res.StatusCode == http.StatusNoContent {
+		_, _ = io.Copy(io.Discard, res.Body)
+		return nil
+	}
+	if err := json.NewDecoder(res.Body).Decode(out); err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("decode the answer to %s %s: %w", method, path, err)
+	}
+	return nil
+}
+
+// raw makes a request whose answer is not JSON and returns its bytes.
+func (c *Client) raw(ctx context.Context, method, path string, query url.Values, body any, accept string, opts []RequestOption) ([]byte, error) {
+	res, err := c.send(ctx, method, path, query, body, accept, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	return io.ReadAll(res.Body)
+}

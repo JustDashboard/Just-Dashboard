@@ -83,9 +83,28 @@ A change that weakens any of these has to say so explicitly.
    every key made before it): a deploy or a rollback goes through the same enqueue functions the
    deployment routes call and asks the key's role, narrowed to its owner's now, for the capability
    the route asks — `service.control` to deploy, `destructive` and the destructive budget to roll
-   back. A walk of
+   back. The grant reaches every deployment or, like a deploy key, only those chosen for it
+   (`api_token_deployments`, read with the key on every request). **With the generated tools on, it
+   deliberately reaches more than those two verbs:** every deployment route a deploy key may call (`keyOpen`, `keyEvery` in
+   `deployKeyRoutes`) is also a tool generated from the API's description, so `read` reads what a
+   deploy key reads and `deploy` changes what a deploy key changes — configuration, source, Git
+   policy, triggers, variables, drafts — held to the key's owner's role (not the administrator role a
+   deploy key carries), with the routes behind `s.destructive` only for a role holding `destructive`.
+   **The generated tools are each key's to turn on** (`api_tokens.mcp_operations`, additive, `0` for
+   every key made before them): a key without them is offered exactly the hand-written tools under its
+   grant and is refused a generated one by name, so no key gains a tool with an upgrade; a new key made
+   from the dialog has them on unless its maker unticks them, and the flag is audited with the grant.
+   A generated tool's call
+   never leaves the process: the MCP handler makes it through the dashboard's router as a request whose
+   context carries the MCP key's principal (`httpx.WithMCPDelegate`); `AuthenticateFeatures` admits it
+   only through the deploy key gate — the table's line, the key's chosen deployments, the
+   environment's — and marks it `Principal.ViaMCP`, which `DeployKey` reads as a deploy key, so every
+   handler's deploy key rule (write-only variables, `keyReferenceGuard`, `keySourceGuard`,
+   `hostAuthority`) holds; every other group refuses a delegated request, and no request from the
+   network can carry a context value. A walk of
    every route with an MCP key (`TestAnMCPKeyOpensNoOtherRoute`) holds the first half; the grants
-   are re-checked by the handler rather than trusted from the key.
+   are re-checked by the handler rather than trusted from the key, and
+   `TestEveryDeployKeyRouteIsAnMCPTool` holds that no session-only or deploy-key-refused route is a tool.
 
    A deploy key (`scope = 'deploy'`, made by `CreateDeployToken` on `POST /tokens/deploy`, which an
    administrator reaches only in a session) **deliberately changes the session-only rule** for part of
@@ -313,6 +332,17 @@ A change that weakens any of these has to say so explicitly.
     digest, as a build pulls it. The scanner image is pinned by tag and index digest. Scanning changes
     nothing a release runs: a rebuild is offered as the runs route's own `force_build`, gated and
     audited as any build is. See [image vulnerabilities](../deployments/image-vulnerabilities.md).
+
+15. Railpack's planner reads a checkout; it never reaches the host. `deploy.railpackPrepareSpec` runs
+    the pinned Railpack image (tag and index digest) with the build root mounted **read-only**, a fresh
+    output folder of its own, no capabilities, no new privileges, a read-only root, bounded memory, CPU
+    and processes, and never the Docker socket, a host path of the operator's or a credential. It has
+    Docker's bridge network, as a build has, because Railpack downloads its pinned mise release and
+    resolves language releases; it runs as root inside the container only because the checkout is a
+    root-only 0700 tree, and with every capability dropped. Build variables reach it by name only,
+    except plain `RAILPACK_*` ones, which configure the plan; their values reach the build as BuildKit
+    secret mounts, as a recipe's do. A Railpack plan runs only in BuildKit, like a Dockerfile's steps.
+    See [Railpack](../deployments/recipes.md#railpack).
 
 ## Invariant 2: what two-factor still guarantees
 

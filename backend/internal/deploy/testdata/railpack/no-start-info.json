@@ -1,0 +1,40 @@
+{
+  "logs": [
+    {
+      "Level": "warn",
+      "Msg": "No node package manager detected, using npm",
+      "DocsPath": ""
+    },
+    {
+      "Level": "suggestion",
+      "Msg": "Specify the package manager and version explicitly",
+      "DocsPath": "/config/recommendations#specify-the-node-package-manager-version"
+    },
+    {
+      "Level": "info",
+      "Msg": "Detected Node",
+      "DocsPath": ""
+    },
+    {
+      "Level": "info",
+      "Msg": "Using npm package manager",
+      "DocsPath": ""
+    },
+    {
+      "Level": "suggestion",
+      "Msg": "Add a `package-lock.json` for more deterministic installs",
+      "DocsPath": "/architecture/recommendations"
+    },
+    {
+      "Level": "suggestion",
+      "Msg": "Applying default exclude patterns: `node_modules`. Add a `.dockerignore` to customize",
+      "DocsPath": "/config/excluding-files"
+    },
+    {
+      "Level": "error",
+      "Msg": "No start command detected. Specify a start command: https://railpack.com/config/file#deploy\n\nTo configure your start command, Railpack will check:\n\n1. A \"start\" script in your package.json:\n   \"scripts\": {\n     \"start\": \"node index.js\"\n   }\n\n2. A \"main\" field in your package.json pointing to your entry file:\n   \"main\": \"src/server.js\"\n\n3. An index.js or index.ts file in your project root\n\n4. An Nx workspace with a Next.js app (nx.json + next)\n\nIf you have a static site, you can set the RAILPACK_SPA_OUTPUT_DIR environment variable\ncontaining the directory of your built static files.\n\nFor multi-app Nx workspaces, set RAILPACK_NX_APP to select which app to deploy.\n\nFor more information, see the Node.js production deployment guide: https://railway.app/docs/deploy/node",
+      "DocsPath": ""
+    }
+  ],
+  "success": false
+}

@@ -2828,8 +2828,10 @@ was written by (a server since moved to a newer major cannot start the older clu
 
 An AI client — Claude Code, Cursor, VS Code, anything that speaks the Model Context Protocol over
 Streamable HTTP — reaches the databases, and the deployments if its key was given them, through one
-endpoint, `POST /api/v1/mcp` (`api/handlers_mcp.go`, `handlers_mcp_tools.go`, `handlers_mcp_deploy.go`;
-the protocol is `internal/mcp`). It sits outside the `/databases` tree, as the metrics export does,
+endpoint, `POST /api/v1/mcp` (`api/handlers_mcp.go`, `handlers_mcp_tools.go`, `handlers_mcp_deploy.go`,
+`handlers_mcp_operations.go`; the protocol is `internal/mcp`). It offers 113 tools in all: the seven
+database tools, the six hand-written deployment tools, and 100 tools generated from the deployment API,
+the last to a key whose owner turned them on for it. It sits outside the `/databases` tree, as the metrics export does,
 because what admits a request there is different.
 
 - **Only an MCP key opens it, and an MCP key opens nothing else.** A key with `scope = 'mcp'` is
@@ -2844,25 +2846,35 @@ because what admits a request there is different.
 - **What a key reaches** is `api_token_connections`: one row per connection, `read` or `write`, at
   most 64, read again on every call so a grant taken away answers the next request. A key carries
   its owner's role or a narrower one, and like every key never more than its owner holds now.
-  `POST /tokens/mcp` (session only) makes one from `{name, role?, ttlDays, connections, deployments?}`
-  — Account → API keys sends the replaced key's role, its databases less those protected or forgotten
-  since, and its deployment grant (narrowed to `read` for a read-only role);
+  `POST /tokens/mcp` (session only) makes one from `{name, role?, ttlDays, connections, deployments?,
+  deploymentIds?, operations?}` — Account → API keys sends the replaced key's role, its databases less
+  those protected or forgotten since, its deployment grant (narrowed to `read` for a read-only role),
+  the deployments that grant was narrowed to and whether it had the generated tools, so a replacement
+  never reaches more;
   `PUT /tokens/{id}/connections` (session only, the owner's own active MCP key) replaces what it
-  reaches — its databases, and its deployment grant when `deployments` is sent (left out, it is kept) —
-  and keeps the secret. Both refuse a protected connection (`409 connection_read_only`), an
+  reaches — its databases, its deployment grant when `deployments` is sent, the deployments it is
+  narrowed to when `deploymentIds` is sent (an empty list is every deployment) and the generated tools
+  when `operations` is sent (each left out is kept) — and keeps the secret. Both refuse a protected connection (`409 connection_read_only`), an
   engine without the `mcp` capability (every SQL engine has it; MongoDB and Redis do not), a missing
-  one, a key that would reach no database and no deployments, and a `write` or `deploy` grant for a
-  key whose role lacks `service.control`. The dialog
+  one, a key that would reach no database and no deployments, a `write` or `deploy` grant for a
+  key whose role lacks `service.control`, and chosen deployments for a key given none of them, or one
+  missing, archived or named twice (`keyDeploymentNames`, as for a deploy key). The dialog
   lets a database protected since be cleared from a key, the one way to save the rest. They are audited as
   `dashboard.token.create` (with `scope`, the databases by name and `deployments`) and
-  `dashboard.token.connections`. Listing, revoking and deleting are the routes every key has.
+  `dashboard.token.connections`, with `reaches` (`every`, or the chosen deployments by name) beside a
+  deployment grant and `operations`, whether the key has the generated tools. Listing, revoking and deleting are the routes every key has.
 - **The deployments are a grant of their own**, `api_tokens.deploy_access` (additive, default `''`,
-  so every key made before reaches none): `''` none, `read`, or `deploy`. It is one grant for every
-  deployment, as the deployment pages are one section, and is read with the key on every request.
+  so every key made before reaches none): `''` none, `read`, or `deploy`. It reaches every deployment,
+  or — like a deploy key — only the ones chosen for it, in `api_token_deployments` (the deploy keys'
+  table, keyed by the key's id; no rows is every deployment, so every key made before reaches them
+  all). Both are read with the key on every request (`ResolveAPIToken` loads the list for an MCP key as
+  for a deploy key), so a deployment taken off the list is refused the next call.
   The deployment tools (`internal/mcp/deployments.go`, `api/handlers_mcp_deploy.go`) act on each
   deployment's production environment — the fleet's rows, archived deployments and previews left out —
   and name a deployment by its name: `list_deployments` (source, build, health, address, live release,
-  pending changes, the run in progress and the last one), `list_runs` (10, at most 50),
+  pending changes, the run in progress and the last one, and the deployment's and its production
+  environment's ids, `id` and `environmentId`, which the generated tools take), `list_runs` (10, at most
+  50, each run with its `id` beside its number),
   `read_run_log` (the run, its steps' states and errors, and the last transcript lines — 200, at most
   1,000, each cut at 1,000 bytes and the whole at 48 KB, newest kept — read from `deploy_log_chunks`
   as the run page reads them, so the build's secret values are masked as they were written) and
@@ -2877,8 +2889,66 @@ because what admits a request there is different.
   deployment, which rolls back to a commit from its page. A preview's approval, a cancel, a retry and
   every setting stay in the dashboard. `deploy` and `rollback` are offered in `tools/list` only when
   they can succeed for the key and its owner's role, and a key that reaches only the deployments is
-  offered no database tool. Each call is audited as `deploy.mcp.<tool>` with the deployment as
-  target and the run number, release or ref in the detail.
+  offered no database tool. A key narrowed to chosen deployments finds those alone: the others are
+  not listed, and naming one is answered as a deployment that is not there. Each call is audited as
+  `deploy.mcp.<tool>` with the deployment as target and the run number, release or ref in the detail.
+- **The tools generated from the deployment API** (`api/handlers_mcp_operations.go`, the tool's
+  shape in `mcp/operations.go`) are **each key's to turn on**: `api_tokens.mcp_operations`
+  (`APIToken.Operations`, additive, `0` for every key made before them, `mcp.Offer.Operations`). A key
+  without them is offered exactly the hand-written tools under its grant, its instructions say nothing
+  of the others, and a call to one by name is refused (`operations_off`: "this key's generated tools are
+  off; its owner can turn them on under Databases → MCP server"), so no key gains a tool with an
+  upgrade; the routes take `operations` (left out, a new key has them off), and the dialog makes a new
+  key with them on unless they are unticked. With them on, every route under `/api/v1/deploy` whose
+  line in `deployKeyRoutes`
+  is `keyOpen` or `keyEvery` is a tool named for its operationId in snake case
+  (`deploymentConfigurationSave` is `deployment_configuration_save`), its input schema the route's path
+  and query parameters by name and its JSON body under `body`, with the components the body refers to
+  copied into the schema's own `$defs` so it stands alone; a path parameter's description says which
+  tool lists its value (`id` from `list_deployments`, `env` its `environmentId` or
+  `deployment_environments`, `run` from `list_runs`). The list is read off the router `Routes` built and
+  the OpenAPI description generated from it, once, the first time the endpoint is asked (as the
+  description itself is built), so it cannot drift from the routes: a route given a deploy key line is
+  a tool, and a session-only route or one the table keeps from a deploy key (`keySession`, `keyDeny`)
+  never is. Left out, each with its reason in the catalogue: the six routes a hand-written tool already
+  is (`GET /deploy/` is `list_deployments`, `…/runs` `list_runs`, `…/runs/{run}/transcript`
+  `read_run_log`, `…/environments/{env}/releases` `list_releases`, `POST …/run` `deploy`,
+  `POST …/environments/{env}/rollback` `rollback` — the hand-written one is kept, with its names and
+  bounds), the three WebSocket streams, the four routes whose answer is not JSON (the favicon, the
+  preview frame, the CSV export, the YAML description) and the JSON description itself: 100 tools
+  generated, 113 tools in all. `TestEveryDeployKeyRouteIsAnMCPTool` walks the router and fails when a
+  deploy key route is neither a tool nor left out with a reason, when a route no deploy key reaches is
+  a tool, or when the count differs from `api.MCPGeneratedTools` and the 113 these pages, the README and
+  the deployment implementation notes quote.
+  - **Grants.** A `GET` is offered under `read`; any other method under `deploy` to an owner whose role
+    holds `service.control`; a route behind `s.destructive` (read off its chain by the `markDestructive`
+    marker, the description's `x-destructive`: removing a shared variable, the maintenance switch, the
+    instant rollback, the legacy rollback) under `deploy` to an owner whose role also holds
+    `destructive`. `destructiveHint` is set for those, for every `DELETE`, and for
+    `mcpDestructiveHints`: a run queued from the body (stop and restart are decided there), cancelling
+    a run, aborting a canary, rotating a variable or a trigger's secret. `readOnlyHint` marks the reads
+    and `idempotentHint` `GET`, `PUT` and `DELETE`. A call under the wrong grant is refused before
+    the route is called.
+  - **Through the router, as the key.** A call becomes a request to the route made through the
+    dashboard's own router (`dispatchMCP`): its path built from the pattern with each parameter
+    escaped, the query, the body, the client's resolved address, and the MCP key's principal in its
+    context (`httpx.WithMCPDelegate`) instead of a credential. `AuthenticateFeatures` admits it only
+    through the deploy key gate — the table's line for the route the router's `Find` resolves, the key's
+    chosen deployments and their environments, `keyEvery` for a narrowed key — and marks it `ViaMCP`,
+    which `Principal.DeployKey` reads as a deploy key from there: variables are write-only, a value a
+    route would hand back is withheld, `keyReferenceGuard`, `keySourceGuard`, `hostAuthority` and
+    `keyEnvironmentGuard` hold, a narrowed key's drafts are its own and what it commits is added to its
+    list. Every other group refuses a delegated request, and a context value cannot arrive from the
+    network. The allowlist, the rate limit, the route's capability checks and its own audit entry (under
+    the MCP key's id and name) apply as to any request; the key carries its owner's role, not the deploy
+    key's administrator, so an operator's key is refused what needs `system.admin`.
+  - **Answers.** The route's JSON is the result (a list or a scalar under `items`, since structured
+    content is an object; a `204` as `{status, done}`); past 48 KB the first 48 KB of its text are
+    returned with a note of the whole size. A refusal is the route's own code and message as a result
+    marked `isError`; a failure the dashboard could not answer is named without its text. Each call is
+    audited as `deploy.mcp.<tool>` with the route's path as target and the operationId, the route, the
+    status and the outcome in the detail, beside the route's own entry for a write. A call counts against
+    the key's four in flight.
 - **Both revisions of the protocol.** A 2025 client (`2025-03-26`, `2025-06-18`, `2025-11-25`)
   opens with `initialize` and repeats the version in `MCP-Protocol-Version`; a 2026-07-28 client
   sends no handshake and carries its version in every request's `_meta`, mirrored into
@@ -2888,7 +2958,9 @@ because what admits a request there is different.
   notification or a reply with `202`. `server/discover`, `ping`, `tools/list` and `tools/call` are
   the methods; `initialize` is recorded as `database.mcp.connect` with the client's name and
   version. The instructions `initialize` and `server/discover` give (`mcp.Instructions`) describe
-  what the key reaches: the databases, the deployments, or both.
+  what the key reaches: the databases, the deployments (with how the generated tools are named and
+  which ids they take), or both. `tools/list` gives the hand-written tools first, in their fixed
+  order, then the generated ones the grant reaches, in the order of their routes.
 - **The database tools** (`mcp.Tools`): `list_connections`, `list_tables`, `describe_schema` (structure only:
   column names and types, nullability, keys and what a foreign key references — no defaults or
   comments, which can be values somebody typed), `sample_rows` (10, at most 50), `explain` (planned,
@@ -2919,10 +2991,15 @@ because what admits a request there is different.
   `tools/list`, `ping` and discovery are not audited.
 - **The UI** is the *MCP server* dialog of the control center
   (`components/database/fleet/mcp-server-dialog.tsx`, logic in `mcp-server.ts`): the endpoint, the
-  signed-in account's active MCP keys with what each reaches ("reads shop, changes notes, deploys"),
+  signed-in account's active MCP keys with what each reaches ("reads shop, changes notes, deploys",
+  "deploys 2 deployments" for a narrowed one),
   a form choosing databases (those the server would refuse listed with why) and read or change for
-  each, and None, Read or Deploy for the deployments (Deploy disabled for a role without
-  `service.control` and for a key made read-only), the key shown once with the configuration for
+  each, None, Read or Deploy for the deployments (Deploy disabled for a role without
+  `service.control` and for a key made read-only) and, for Read or Deploy, which deployments (every
+  one, or those ticked, with the deploy key dialog's own picker) and *Offer every deployment route as
+  a tool* (on for a new key, off for one made before the generated tools, its hint saying what it adds
+  under each grant and that a destructive route needs a role that may take destructive actions), the
+  key shown once with the configuration for
   Claude Code, Cursor and VS Code, editing what a key reaches (*Edit access*) and revoking it.
   Account → API keys lists MCP keys as *MCP only* and replaces one with the same databases and
   deployment grant.

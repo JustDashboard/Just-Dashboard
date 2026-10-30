@@ -545,9 +545,16 @@ export function JobMap({
   const place = destinations([job])[0]
   const paused = job.pauseContainers ?? []
 
-  const title = running ? <TextShimmer>Backing up now</TextShimmer> : scheduleLabel(job.schedule)
-  const hint =
-    paused.length > 0
+  const title = running ? (
+    <TextShimmer>Backing up now</TextShimmer>
+  ) : job.imported ? (
+    "Imported"
+  ) : (
+    scheduleLabel(job.schedule)
+  )
+  const hint = job.imported
+    ? `from ${job.origin?.host || "another server"}; it never runs here`
+    : paused.length > 0
       ? `pauses ${paused.join(", ")} while it archives`
       : !job.schedule
         ? "runs by hand"

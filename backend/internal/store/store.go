@@ -85,6 +85,10 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   -- What an MCP key may do with the deployments: '' nothing, 'read' read
   -- them and their runs, 'deploy' also queue deploys and rollbacks.
   deploy_access TEXT NOT NULL DEFAULT '',
+  -- Whether an MCP key is offered the tools generated from the deployment
+  -- API beside the hand-written ones, under its deploy_access: 0 for every
+  -- key made before they existed, so none gains them with an upgrade.
+  mcp_operations INTEGER NOT NULL DEFAULT 0,
   created_at   INTEGER NOT NULL,
   expires_at   INTEGER NOT NULL DEFAULT 0,
   last_used_at INTEGER NOT NULL DEFAULT 0,
@@ -591,6 +595,8 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
   pause_containers TEXT NOT NULL DEFAULT '[]',
   revision    INTEGER NOT NULL DEFAULT 1,
   encrypt     INTEGER NOT NULL DEFAULT 0,
+  imported    INTEGER NOT NULL DEFAULT 0,
+  origin_json TEXT NOT NULL DEFAULT '',
   created_at  INTEGER NOT NULL
 );
 
@@ -604,7 +610,9 @@ CREATE TABLE IF NOT EXISTS backup_runs (
   size_bytes INTEGER NOT NULL DEFAULT 0,
   log        TEXT NOT NULL DEFAULT '',
   trigger    TEXT NOT NULL DEFAULT 'manual',
-  manifest_json TEXT NOT NULL DEFAULT '{}'
+  manifest_json TEXT NOT NULL DEFAULT '{}',
+  imported   INTEGER NOT NULL DEFAULT 0,
+  local_copy TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_backup_runs_job ON backup_runs(job_id, started_at DESC);
 
@@ -1696,6 +1704,15 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Backup jobs learned to encrypt their archives. A job that predates the
 	// setting keeps writing what it always wrote until somebody turns it on.
 	{"backup_jobs", "encrypt", "INTEGER NOT NULL DEFAULT 0"},
+	// A job and its runs can be imported from what a destination holds: the
+	// archives another server (or this one, before a rebuild) wrote there.
+	// Everything that existed before is this server's own.
+	{"backup_jobs", "imported", "INTEGER NOT NULL DEFAULT 0"},
+	{"backup_jobs", "origin_json", "TEXT NOT NULL DEFAULT ''"},
+	{"backup_runs", "imported", "INTEGER NOT NULL DEFAULT 0"},
+	// An imported run may keep a copy of its archive on this server; the
+	// destination's object stays where it was either way.
+	{"backup_runs", "local_copy", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_preview_approvals", "generation", "INTEGER NOT NULL DEFAULT 1"},
 	// A preview started from the dashboard's "Test this pull request" rather
 	// than from a webhook remembers where it came from, the pull request's
@@ -1891,6 +1908,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	// An MCP key can be given the deployments as well as databases. Every
 	// key made before reaches none of them.
 	{"api_tokens", "deploy_access", "TEXT NOT NULL DEFAULT ''"},
+	// An MCP key can be offered the tools generated from the deployment API.
+	// Every key made before them is not: it keeps the hand-written tools it
+	// had, and its owner turns the generated ones on.
+	{"api_tokens", "mcp_operations", "INTEGER NOT NULL DEFAULT 0"},
 	// A release taken back by an instant rollback says when and why: the
 	// reading that decided it, or the operator who pressed it. Every release
 	// made before was never rolled back this way.

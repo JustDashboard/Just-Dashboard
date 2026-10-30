@@ -9,21 +9,47 @@
                 "error": {
                   "properties": {
                     "code": {
-                      "description": "unauthorized, forbidden, session_required, key_scope, not_found, bad_request, revision_conflict and the route's own codes.",
+                      "description": "unauthorized, forbidden, session_required, key_scope, not_found, bad_request, revision_conflict and the route's own codes: what a client branches on.",
+                      "type": "string"
+                    },
+                    "field": {
+                      "description": "The request field the refusal is about, as a path such as runtime.internalPort or checks[2].kind, when it is about one field rather than the whole request.",
                       "type": "string"
                     },
                     "message": {
+                      "description": "The refusal in a sentence written to be read.",
+                      "type": "string"
+                    },
+                    "operation": {
+                      "description": "What the request was trying to do, when the handler names it.",
                       "type": "string"
                     },
                     "phrase": {
                       "description": "On a removal that takes a typed confirmation: the phrase to type.",
                       "type": "string"
+                    },
+                    "raw": {
+                      "description": "What the subsystem underneath reported, kept for the details rather than the headline.",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "description": "The likely reason it did not work.",
+                      "type": "string"
+                    },
+                    "resource": {
+                      "description": "What the request was acting on, when the handler names it.",
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "description": "Whether the same request may succeed if tried again: a timeout or a daemon that was briefly unreachable.",
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "code",
                     "message"
                   ],
+                  "title": "Error",
                   "type": "object"
                 }
               },
@@ -552,8 +578,10 @@
               "image",
               "compose",
               "none",
-              "legacy_compose"
+              "legacy_compose",
+              "railpack"
             ],
+            "title": "deploy.BuildMethod",
             "type": "string"
           },
           "composeFile": {
@@ -622,6 +650,7 @@
               "game",
               "imported"
             ],
+            "title": "deploy.WorkloadProfile",
             "type": "string"
           },
           "recipe": {
@@ -639,6 +668,7 @@
               "blueprint",
               "import"
             ],
+            "title": "deploy.SourceKind",
             "type": "string"
           },
           "sourceRef": {
@@ -684,6 +714,7 @@
               "automation",
               "game"
             ],
+            "title": "blueprint.Category",
             "type": "string"
           },
           "checks": {
@@ -772,6 +803,7 @@
               "game",
               "compose"
             ],
+            "title": "blueprint.Profile",
             "type": "string"
           },
           "provenance": {
@@ -1127,6 +1159,7 @@
               "import_adopt",
               "remove_managed"
             ],
+            "title": "deploy.Operation",
             "type": "string"
           },
           "ref": {
@@ -1194,6 +1227,7 @@
               "blueprint",
               "import"
             ],
+            "title": "deploy.SourceKind",
             "type": "string"
           },
           "localPath": {
@@ -1217,6 +1251,7 @@
               "existing_container",
               "existing_stack"
             ],
+            "title": "deploy.SourceMode",
             "type": "string"
           },
           "platform": {
@@ -1374,6 +1409,7 @@
               "conflict",
               "stale"
             ],
+            "title": "dnsrecords.Action",
             "type": "string"
           },
           "current": {
@@ -1411,6 +1447,7 @@
               "AAAA",
               "CNAME"
             ],
+            "title": "dnsrecords.Type",
             "type": "string"
           },
           "want": {
@@ -1451,6 +1488,7 @@
               "AAAA",
               "CNAME"
             ],
+            "title": "dnsrecords.Type",
             "type": "string"
           },
           "updatedAt": {
@@ -1708,6 +1746,7 @@
               "right",
               "insufficient_history"
             ],
+            "title": "metrics.Verdict",
             "type": "string"
           },
           "window": {
@@ -2122,6 +2161,7 @@
               "import_adopt",
               "remove_managed"
             ],
+            "title": "deploy.Operation",
             "type": "string"
           },
           "sourceRevision": {
@@ -2915,6 +2955,7 @@
               "open",
               "unavailable"
             ],
+            "title": "blueprint.AccessKind",
             "type": "string"
           },
           "note": {
@@ -2992,6 +3033,7 @@
               "automation",
               "game"
             ],
+            "title": "blueprint.Category",
             "type": "string"
           },
           "checks": {
@@ -3077,6 +3119,7 @@
               "game",
               "compose"
             ],
+            "title": "blueprint.Profile",
             "type": "string"
           },
           "provenance": {
@@ -3167,6 +3210,7 @@
               "game_handshake",
               "udp_probe"
             ],
+            "title": "blueprint.CheckKind",
             "type": "string"
           },
           "name": {
@@ -3251,6 +3295,7 @@
               "started",
               "completed"
             ],
+            "title": "blueprint.StartCondition",
             "type": "string"
           },
           "service": {
@@ -3391,6 +3436,7 @@
               "memory",
               "accept"
             ],
+            "title": "blueprint.InputKind",
             "type": "string"
           },
           "label": {
@@ -3437,6 +3483,7 @@
               "wait_for_log",
               "fetch_artifact"
             ],
+            "title": "blueprint.OperationKind",
             "type": "string"
           },
           "maxBytes": {
@@ -3625,6 +3672,7 @@
               "game",
               "compose"
             ],
+            "title": "blueprint.Profile",
             "type": "string"
           },
           "pullPolicy": {
@@ -3739,6 +3787,7 @@
               "memory",
               "accept"
             ],
+            "title": "blueprint.InputKind",
             "type": "string"
           },
           "label": {
@@ -3829,6 +3878,7 @@
               "game_handshake",
               "udp_probe"
             ],
+            "title": "blueprint.CheckKind",
             "type": "string"
           },
           "name": {
@@ -3939,6 +3989,7 @@
               "database",
               "cache"
             ],
+            "title": "blueprint.ServiceRole",
             "type": "string"
           },
           "volumes": {
@@ -4150,6 +4201,7 @@
               "database",
               "cache"
             ],
+            "title": "blueprint.ServiceRole",
             "type": "string"
           },
           "volumes": {
@@ -4190,6 +4242,7 @@
               "database",
               "cache"
             ],
+            "title": "blueprint.ServiceRole",
             "type": "string"
           }
         },
@@ -4213,6 +4266,7 @@
               "automation",
               "game"
             ],
+            "title": "blueprint.Category",
             "type": "string"
           },
           "deploymentSupported": {
@@ -4261,6 +4315,7 @@
               "game",
               "compose"
             ],
+            "title": "blueprint.Profile",
             "type": "string"
           },
           "requiresAcceptance": {
@@ -4347,6 +4402,7 @@
               "cancelled",
               "unavailable"
             ],
+            "title": "deploy.StepState",
             "type": "string"
           },
           "currentStep": {
@@ -4372,6 +4428,7 @@
               "notify",
               "legacy_pipeline"
             ],
+            "title": "deploy.StepKey",
             "type": "string"
           },
           "environment": {
@@ -4627,8 +4684,10 @@
               "image",
               "compose",
               "none",
-              "legacy_compose"
+              "legacy_compose",
+              "railpack"
             ],
+            "title": "deploy.BuildMethod",
             "type": "string"
           },
           "noCache": {
@@ -4650,6 +4709,15 @@
             "type": "string"
           },
           "pythonVersion": {
+            "type": "string"
+          },
+          "railpackConfig": {
+            "type": "string"
+          },
+          "railpackProvider": {
+            "type": "string"
+          },
+          "railpackVersion": {
             "type": "string"
           },
           "recipe": {
@@ -5262,6 +5330,7 @@
               "automation",
               "game"
             ],
+            "title": "blueprint.Category",
             "type": "string"
           },
           "compose": {
@@ -5514,6 +5583,7 @@
               "notify",
               "legacy_pipeline"
             ],
+            "title": "deploy.StepKey",
             "type": "string"
           },
           "label": {
@@ -5531,6 +5601,7 @@
               "cancelled",
               "unavailable"
             ],
+            "title": "deploy.StepState",
             "type": "string"
           }
         },
@@ -5871,8 +5942,10 @@
               "image",
               "compose",
               "none",
-              "legacy_compose"
+              "legacy_compose",
+              "railpack"
             ],
+            "title": "deploy.BuildMethod",
             "type": "string"
           },
           "desiredRevision": {
@@ -5892,6 +5965,7 @@
               "staging",
               "preview"
             ],
+            "title": "deploy.EnvironmentKind",
             "type": "string"
           },
           "environmentName": {
@@ -5962,6 +6036,7 @@
               "game",
               "imported"
             ],
+            "title": "deploy.WorkloadProfile",
             "type": "string"
           },
           "recentRuns": {
@@ -5989,6 +6064,7 @@
               "blueprint",
               "import"
             ],
+            "title": "deploy.SourceKind",
             "type": "string"
           },
           "sourceRef": {
@@ -6015,6 +6091,7 @@
               "stop_first",
               "canary"
             ],
+            "title": "deploy.ReleaseStrategy",
             "type": "string"
           },
           "updatedAt": {
@@ -6157,8 +6234,10 @@
               "image",
               "compose",
               "none",
-              "legacy_compose"
+              "legacy_compose",
+              "railpack"
             ],
+            "title": "deploy.BuildMethod",
             "type": "string"
           },
           "companions": {
@@ -6176,6 +6255,7 @@
               "medium",
               "low"
             ],
+            "title": "deploy.DetectionConfidence",
             "type": "string"
           },
           "databases": {
@@ -6474,6 +6554,7 @@
               "game",
               "imported"
             ],
+            "title": "deploy.WorkloadProfile",
             "type": "string"
           },
           "python": {
@@ -6493,6 +6574,9 @@
             "type": "string"
           },
           "pythonVersion": {
+            "type": "string"
+          },
+          "railpackProvider": {
             "type": "string"
           },
           "readiness": {
@@ -8365,6 +8449,7 @@
               "linked",
               "observed"
             ],
+            "title": "deploy.OwnershipMode",
             "type": "string"
           },
           "protected": {
@@ -8492,6 +8577,7 @@
               "configuration",
               "preflight"
             ],
+            "title": "deploy.DraftStep",
             "type": "string"
           },
           "data": {
@@ -8664,6 +8750,7 @@
               "game",
               "imported"
             ],
+            "title": "deploy.WorkloadProfile",
             "type": "string"
           }
         },
@@ -8731,6 +8818,7 @@
               "configuration",
               "preflight"
             ],
+            "title": "deploy.DraftStep",
             "type": "string"
           }
         },
@@ -8788,6 +8876,7 @@
               "blueprint",
               "import"
             ],
+            "title": "deploy.SourceKind",
             "type": "string"
           },
           "localPath": {
@@ -8811,6 +8900,7 @@
               "existing_container",
               "existing_stack"
             ],
+            "title": "deploy.SourceMode",
             "type": "string"
           },
           "platform": {
@@ -8851,6 +8941,7 @@
               "configuration",
               "preflight"
             ],
+            "title": "deploy.DraftStep",
             "type": "string"
           },
           "expiresAt": {
@@ -8955,6 +9046,7 @@
               "import_adopt",
               "remove_managed"
             ],
+            "title": "deploy.Operation",
             "type": "string"
           },
           "planRevision": {
@@ -9001,6 +9093,7 @@
               "heavy",
               "canary"
             ],
+            "title": "deploy.SlotClass",
             "type": "string"
           },
           "sourceRevision": {
@@ -9024,6 +9117,7 @@
               "rolled_back",
               "superseded"
             ],
+            "title": "deploy.RunState",
             "type": "string"
           },
           "supersededBy": {
@@ -9053,6 +9147,7 @@
               "migration",
               "auto_rollback"
             ],
+            "title": "deploy.TriggerKind",
             "type": "string"
           }
         },
@@ -9213,6 +9308,7 @@
               "staging",
               "preview"
             ],
+            "title": "deploy.EnvironmentKind",
             "type": "string"
           },
           "liveReleaseId": {
@@ -9606,6 +9702,7 @@
               "blocked",
               "unavailable"
             ],
+            "title": "deploy.PreflightSeverity",
             "type": "string"
           },
           "subject": {
@@ -10459,6 +10556,7 @@
               "linked",
               "observed"
             ],
+            "title": "deploy.OwnershipMode",
             "type": "string"
           },
           "resourceId": {
@@ -10485,6 +10583,7 @@
               "linked",
               "observed"
             ],
+            "title": "deploy.OwnershipMode",
             "type": "string"
           },
           "protection": {
@@ -10595,6 +10694,7 @@
               "blocked",
               "unavailable"
             ],
+            "title": "deploy.PreflightSeverity",
             "type": "string"
           },
           "title": {
@@ -11118,6 +11218,7 @@
               "game",
               "imported"
             ],
+            "title": "deploy.WorkloadProfile",
             "type": "string"
           },
           "repoPath": {
@@ -11352,6 +11453,7 @@
               "import_adopt",
               "remove_managed"
             ],
+            "title": "deploy.Operation",
             "type": "string"
           },
           "requestedAt": {
@@ -11380,6 +11482,7 @@
               "rolled_back",
               "superseded"
             ],
+            "title": "deploy.RunState",
             "type": "string"
           }
         },
@@ -11582,6 +11685,7 @@
               "stop_first",
               "canary"
             ],
+            "title": "deploy.ReleaseStrategy",
             "type": "string"
           },
           "variablesDigest": {
@@ -11607,6 +11711,7 @@
               "diagnostic",
               "export"
             ],
+            "title": "deploy.ArtifactKind",
             "type": "string"
           },
           "reason": {
@@ -12101,6 +12206,7 @@
               "linked",
               "observed"
             ],
+            "title": "deploy.OwnershipMode",
             "type": "string"
           },
           "requiresAdmin": {
@@ -12580,6 +12686,7 @@
               "success",
               "failed"
             ],
+            "title": "deploy.RunStatus",
             "type": "string"
           },
           "toCommit": {
@@ -12819,6 +12926,7 @@
               "notify",
               "legacy_pipeline"
             ],
+            "title": "deploy.StepKey",
             "type": "string"
           },
           "lastSeq": {
@@ -12852,6 +12960,7 @@
               "cancelled",
               "unavailable"
             ],
+            "title": "deploy.StepState",
             "type": "string"
           },
           "timeoutSeconds": {
@@ -12929,6 +13038,7 @@
               "count",
               "devices"
             ],
+            "title": "deploy.GPUMode",
             "type": "string"
           },
           "previews": {
@@ -12946,6 +13056,7 @@
               "linked",
               "observed"
             ],
+            "title": "deploy.OwnershipMode",
             "type": "string"
           },
           "readOnly": {
@@ -13211,6 +13322,7 @@
               "stop_first",
               "canary"
             ],
+            "title": "deploy.ReleaseStrategy",
             "type": "string"
           },
           "sysctls": {
@@ -13429,6 +13541,7 @@
               "sigpending",
               "stack"
             ],
+            "title": "deploy.UlimitName",
             "type": "string"
           },
           "soft": {
@@ -13886,6 +13999,7 @@
               "blueprint",
               "import"
             ],
+            "title": "deploy.SourceKind",
             "type": "string"
           },
           "local": {
@@ -14009,6 +14123,7 @@
               "linked",
               "observed"
             ],
+            "title": "deploy.OwnershipMode",
             "type": "string"
           },
           "readOnly": {
@@ -14318,6 +14433,7 @@
               "migration",
               "auto_rollback"
             ],
+            "title": "deploy.TriggerKind",
             "type": "string"
           },
           "lastDelivery": {
@@ -14509,6 +14625,7 @@
               "migration",
               "auto_rollback"
             ],
+            "title": "deploy.TriggerKind",
             "type": "string"
           },
           "name": {
@@ -14550,6 +14667,7 @@
               "deployment",
               "import"
             ],
+            "title": "deploy.TemplateOrigin",
             "type": "string"
           },
           "summary": {
@@ -14612,6 +14730,7 @@
               "deployment",
               "import"
             ],
+            "title": "deploy.TemplateOrigin",
             "type": "string"
           },
           "summary": {
@@ -14778,6 +14897,7 @@
               "conflict",
               "stale"
             ],
+            "title": "dnsrecords.Action",
             "type": "string"
           },
           "current": {
@@ -14812,6 +14932,7 @@
               "AAAA",
               "CNAME"
             ],
+            "title": "dnsrecords.Type",
             "type": "string"
           },
           "want": {
@@ -14848,6 +14969,7 @@
               "AAAA",
               "CNAME"
             ],
+            "title": "dnsrecords.Type",
             "type": "string"
           },
           "unwritable": {
@@ -15752,6 +15874,7 @@
               "right",
               "insufficient_history"
             ],
+            "title": "metrics.Verdict",
             "type": "string"
           }
         },
@@ -15900,6 +16023,7 @@
               "right",
               "insufficient_history"
             ],
+            "title": "metrics.Verdict",
             "type": "string"
           }
         },
@@ -16972,7 +17096,8 @@
         "tags": [
           "environments"
         ],
-        "x-deploy-key": "refused (session_required): saved registry and Git credentials are managed only in the dashboard"
+        "x-deploy-key": "refused (session_required): saved registry and Git credentials are managed only in the dashboard",
+        "x-destructive": true
       },
       "parameters": [
         {
@@ -18724,7 +18849,8 @@
         "tags": [
           "secret stores"
         ],
-        "x-deploy-key": "refused (session_required): secret store connections hold credentials of their own and are managed only in the dashboard"
+        "x-deploy-key": "refused (session_required): secret store connections hold credentials of their own and are managed only in the dashboard",
+        "x-destructive": true
       },
       "parameters": [
         {
@@ -18894,7 +19020,8 @@
         "tags": [
           "variables"
         ],
-        "x-deploy-key": "allowed for a key that reaches every deployment; refused to one narrowed to some"
+        "x-deploy-key": "allowed for a key that reaches every deployment; refused to one narrowed to some",
+        "x-destructive": true
       },
       "parameters": [
         {
@@ -19224,7 +19351,8 @@
         "tags": [
           "templates"
         ],
-        "x-deploy-key": "refused (session_required): a template is the operator's catalogue, which every deployment is made from, not a deployment a key is narrowed to; templates are added, changed and removed in the dashboard"
+        "x-deploy-key": "refused (session_required): a template is the operator's catalogue, which every deployment is made from, not a deployment a key is narrowed to; templates are added, changed and removed in the dashboard",
+        "x-destructive": true
       },
       "get": {
         "operationId": "templateGet",
@@ -19422,7 +19550,8 @@
         "tags": [
           "fleet"
         ],
-        "x-deploy-key": "refused (key_scope): archiving a deployment is done in the dashboard or with an ordinary key"
+        "x-deploy-key": "refused (key_scope): archiving a deployment is done in the dashboard or with an ordinary key",
+        "x-destructive": true
       },
       "get": {
         "operationId": "deployGet",
@@ -19819,7 +19948,8 @@
         "tags": [
           "fleet"
         ],
-        "x-deploy-key": "refused (key_scope): archiving a deployment is done in the dashboard or with an ordinary key"
+        "x-deploy-key": "refused (key_scope): archiving a deployment is done in the dashboard or with an ordinary key",
+        "x-destructive": true
       }
     },
     "/deploy/{id}/assistant": {
@@ -20486,7 +20616,8 @@
         "tags": [
           "environments"
         ],
-        "x-deploy-key": "refused (session_required): adding or removing an environment is done in the dashboard"
+        "x-deploy-key": "refused (session_required): adding or removing an environment is done in the dashboard",
+        "x-destructive": true
       },
       "parameters": [
         {
@@ -21631,7 +21762,8 @@
         "tags": [
           "domains"
         ],
-        "x-deploy-key": "allowed"
+        "x-deploy-key": "allowed",
+        "x-destructive": true
       }
     },
     "/deploy/{id}/environments/{env}/pages/{page}": {
@@ -22437,7 +22569,8 @@
         "tags": [
           "releases"
         ],
-        "x-deploy-key": "allowed"
+        "x-deploy-key": "allowed",
+        "x-destructive": true
       }
     },
     "/deploy/{id}/environments/{env}/rollback-policy": {
@@ -22674,7 +22807,8 @@
         "tags": [
           "releases"
         ],
-        "x-deploy-key": "allowed"
+        "x-deploy-key": "allowed",
+        "x-destructive": true
       }
     },
     "/deploy/{id}/environments/{env}/runs": {
@@ -24738,6 +24872,7 @@
               "whitelist_add",
               "whitelist_remove"
             ],
+            "title": "gameserver.PlayerAction",
             "type": "string"
           }
         }
@@ -24959,6 +25094,7 @@
                         "rolled_back",
                         "superseded"
                       ],
+                      "title": "deploy.RunState",
                       "type": "string"
                     }
                   },
@@ -25215,7 +25351,8 @@
         "tags": [
           "fleet"
         ],
-        "x-deploy-key": "refused (session_required): this removal takes its typed confirmation in the dashboard"
+        "x-deploy-key": "refused (session_required): this removal takes its typed confirmation in the dashboard",
+        "x-destructive": true
       },
       "parameters": [
         {
@@ -26058,7 +26195,8 @@
         "tags": [
           "previews"
         ],
-        "x-deploy-key": "refused (session_required): a pull request's preview runs its code, and a person approves that in the dashboard"
+        "x-deploy-key": "refused (session_required): a pull request's preview runs its code, and a person approves that in the dashboard",
+        "x-destructive": true
       }
     },
     "/deploy/{id}/removal-plan": {
@@ -26156,7 +26294,8 @@
         "tags": [
           "fleet"
         ],
-        "x-deploy-key": "refused (session_required): this removal takes its typed confirmation in the dashboard"
+        "x-deploy-key": "refused (session_required): this removal takes its typed confirmation in the dashboard",
+        "x-destructive": true
       }
     },
     "/deploy/{id}/requests": {
@@ -26587,6 +26726,7 @@
                         "rolled_back",
                         "superseded"
                       ],
+                      "title": "deploy.RunState",
                       "type": "string"
                     }
                   },
@@ -26615,7 +26755,8 @@
         "tags": [
           "releases"
         ],
-        "x-deploy-key": "allowed"
+        "x-deploy-key": "allowed",
+        "x-destructive": true
       }
     },
     "/deploy/{id}/rotate-secret": {
@@ -26719,6 +26860,7 @@
                         "rolled_back",
                         "superseded"
                       ],
+                      "title": "deploy.RunState",
                       "type": "string"
                     }
                   },
@@ -27675,7 +27817,8 @@
         "tags": [
           "variables"
         ],
-        "x-deploy-key": "allowed"
+        "x-deploy-key": "allowed",
+        "x-destructive": true
       },
       "parameters": [
         {

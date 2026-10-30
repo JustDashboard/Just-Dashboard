@@ -5,7 +5,12 @@ import {
   hasProductLogo,
   imageProduct,
 } from "@/components/product-logo"
-import { frameworkLabel, humanize, sourceProduct } from "@/components/deploy/vocabulary"
+import {
+  frameworkLabel,
+  humanize,
+  railpackProviderLabel,
+  sourceProduct,
+} from "@/components/deploy/vocabulary"
 import type { WizardErrors } from "@/components/deploy/deployment-defaults"
 import type { ConfigureFlow, ConfigureStepKey } from "@/components/deploy/new-project/draft"
 import type { PlanSection } from "@/components/deploy/new-project/plan-sections"
@@ -223,7 +228,9 @@ export function planGroups({
     reading: builds
       ? build.method === "recipe"
         ? `Automatic recipe${build.recipe ? ` · ${frameworkLabel(framework ?? build.recipe)}` : ""}`
-        : humanize(build.method)
+        : build.method === "railpack"
+          ? `Railpack · ${build.railpackProvider ? `${railpackProviderLabel(build.railpackProvider)} provider` : "its own detection"}`
+          : humanize(build.method)
       : source.kind === "import"
         ? "Adopted as it runs"
         : template

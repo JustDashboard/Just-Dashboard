@@ -1,7 +1,8 @@
 "use client"
 
+import { useState } from "react"
 import { Key } from "@/components/icons"
-import { get, postFile } from "@/lib/api"
+import { get, post, postFile } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
 import { downloadText } from "@/lib/metrics-export"
 import { notify } from "@/lib/toast"
@@ -9,12 +10,15 @@ import type { BackupArchiveKey } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import type { useConfirm } from "@/components/confirm-dialog"
+import { Field, FormNote } from "@/components/form"
+import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
 import { ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import { keyReach } from "@/components/backups/encryption"
 
 type Confirm = ReturnType<typeof useConfirm>["confirm"]
@@ -33,12 +37,24 @@ type Confirm = ReturnType<typeof useConfirm>["confirm"]
  * Exporting is behind an ordinary confirmation, like the other things here
  * that cannot be taken back: nothing can recall a copy once it has been saved.
  */
-export function BackupKeyPanel({ encrypting, confirm }: { encrypting: boolean; confirm: Confirm }) {
+export function BackupKeyPanel({
+  encrypting,
+  confirm,
+  importing = false,
+}: {
+  encrypting: boolean
+  confirm: Confirm
+  /** Jobs were imported, so a key from another server may be what opens them. */
+  importing?: boolean
+}) {
   const { can } = useAuth()
   const key = usePoll((signal) => get<BackupArchiveKey>("/backups/key", undefined, signal), 60_000)
+  const [importOpen, setImportOpen] = useState(false)
   const data = key.data
-  if (!encrypting && !data?.exists && !key.error) return null
+  const imported = data?.imported ?? []
+  if (!encrypting && !importing && !data?.exists && imported.length === 0 && !key.error) return null
   const mayExport = can("system.admin") && can("destructive")
+  const mayImport = can("system.admin")
 
   const exportKey = () =>
     confirm({
@@ -85,6 +101,16 @@ export function BackupKeyPanel({ encrypting, confirm }: { encrypting: boolean; c
             {data && keyReach(data) && (
               <span className="numeric text-hint text-muted-foreground">{keyReach(data)}</span>
             )}
+            {mayImport && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!data}
+                onClick={() => setImportOpen(true)}
+              >
+                Import key…
+              </Button>
+            )}
             {mayExport && (
               <Button size="sm" variant="outline" disabled={!data} onClick={() => void exportKey()}>
                 Export key…
@@ -123,6 +149,25 @@ export function BackupKeyPanel({ encrypting, confirm }: { encrypting: boolean; c
                 ))
               }
             />
+            {/* A key brought from another server opens what that server sealed;
+                nothing new is sealed to it, so it has no export to keep up. */}
+            {imported.map((other) => (
+              <Row
+                key={other.recipient}
+                leading={<ProductLogo size="sm" fallback={Key} />}
+                title="Imported key"
+                mono
+                subtitle={other.recipient}
+                trailing={
+                  <span
+                    className="text-hint text-muted-foreground"
+                    title={timestamp(other.importedAt)}
+                  >
+                    opens archives from another server · imported {relativeTime(other.importedAt)}
+                  </span>
+                }
+              />
+            ))}
           </RowList>
         )}
         {data?.exists && !data.exportedAt && (
@@ -132,6 +177,112 @@ export function BackupKeyPanel({ encrypting, confirm }: { encrypting: boolean; c
           </Notice>
         )}
       </PanelBody>
+      {importOpen && (
+        <Modal
+          open
+          onOpenChange={setImportOpen}
+          title="Import a backup key"
+          description="Paste or choose the key file another server exported, so the archives it sealed open here."
+        >
+          <KeyImport
+            onImported={() => {
+              setImportOpen(false)
+              key.refresh()
+            }}
+          />
+        </Modal>
+      )}
     </Panel>
+  )
+}
+
+/**
+ * Bringing a key exported elsewhere: the file Export key… saved, pasted or
+ * chosen. The first one on a server that holds no key becomes its own, so a
+ * moved or rebuilt server keeps sealing to the key already kept off it; any
+ * after that only opens what was sealed to it. The text is held in this
+ * component alone and sent once.
+ */
+export function KeyImport({
+  wanted = [],
+  onImported,
+}: {
+  /** The keys the archives in view were sealed to, by their public half. */
+  wanted?: string[]
+  onImported: (recipient: string) => void
+}) {
+  const [text, setText] = useState("")
+  const [busy, setBusy] = useState(false)
+  const submit = async () => {
+    setBusy(true)
+    try {
+      const res = await post<{ recipient: string; became: "own" | "opens" | "held" }>(
+        "/backups/key/import",
+        { key: text },
+      )
+      notify.success(
+        res.became === "own"
+          ? "Imported as this server's backup key"
+          : res.became === "opens"
+            ? "Imported to open the archives sealed to it"
+            : "This server already holds that key",
+        { description: res.recipient },
+      )
+      setText("")
+      onImported(res.recipient)
+    } catch (err) {
+      notify.error("Could not import the key", err)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="space-y-3">
+      {wanted.length > 0 && (
+        <div className="space-y-1">
+          <p className="eyebrow">Sealed to</p>
+          <ul className="space-y-0.5 font-mono text-xs break-all">
+            {wanted.map((recipient) => (
+              <li key={recipient}>{recipient}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <Field
+        label="Key file"
+        htmlFor="backup-key-import"
+        hint="just-dashboard-backup-key.txt, or its AGE-SECRET-KEY-1 line. Sealed with this server's master key on arrival."
+      >
+        <Textarea
+          id="backup-key-import"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          rows={4}
+          spellCheck={false}
+          autoComplete="off"
+          className="font-mono text-xs"
+          placeholder="AGE-SECRET-KEY-1…"
+        />
+      </Field>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <input
+          type="file"
+          accept=".txt,text/plain"
+          aria-label="Open a saved key"
+          className="text-hint text-muted-foreground file:mr-2 file:rounded-md file:border file:border-hairline file:bg-transparent file:px-2 file:py-1 file:text-foreground"
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) void file.text().then(setText)
+          }}
+        />
+        <Button size="sm" disabled={busy || !text.trim()} onClick={() => void submit()}>
+          {busy ? "Importing…" : "Import key"}
+        </Button>
+      </div>
+      <FormNote>
+        Anyone holding this file can open every archive sealed to it. Import it only on a server you
+        administer.
+      </FormNote>
+    </div>
   )
 }

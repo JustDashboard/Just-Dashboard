@@ -1063,6 +1063,13 @@ test("a detected site opens with its variables, its database and its single-page
   await page.locator("summary").filter({ hasText: "Build & output settings" }).click()
   await expect(page.getByRole("textbox", { name: "Output directory" })).toHaveValue("dist")
   await expect(page.getByRole("switch", { name: "Single-page application" })).toBeChecked()
+  // Railpack is offered where the recipes and a Dockerfile are, with the line
+  // that says what decides its build; looking changes nothing.
+  await page.getByRole("combobox", { name: "Build method" }).click()
+  const railpack = page.getByRole("option", { name: /^Railpack/ })
+  await expect(railpack).toContainText("the builder Railway and Coolify use")
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("combobox", { name: "Build method" })).toHaveText(/Automatic recipe/)
   await gotoStep(page, "runtime")
   await expect(page.getByRole("spinbutton", { name: /Port/ })).toHaveValue("80")
 

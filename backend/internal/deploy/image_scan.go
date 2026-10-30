@@ -570,7 +570,7 @@ func scanImageScan(row interface{ Scan(...any) error }) (*ImageScan, error) {
 		}
 	}
 	switch scan.method {
-	case BuildRecipe, BuildStatic, BuildDockerfile, BuildCompose:
+	case BuildRecipe, BuildStatic, BuildDockerfile, BuildCompose, BuildRailpack:
 		scan.Rebuildable = true
 	}
 	return &scan, nil

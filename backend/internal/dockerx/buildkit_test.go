@@ -108,3 +108,52 @@ func TestBuildxCommandPassesTargetAndBuildArgsThroughTheEnvironment(t *testing.T
 		}
 	}
 }
+
+func TestBuildxCommandBuildsThroughAPinnedFrontendWithTheHashOutOfArgv(t *testing.T) {
+	t.Setenv("secrets-hash", "inherited-from-the-dashboard")
+	frontend := "ghcr.io/railwayapp/railpack-frontend:v0.43.0@sha256:" + strings.Repeat("a", 64)
+	hash := strings.Repeat("b", 64)
+	argv, environment, err := BuildxCommand(ImmutableBuildOptions{
+		Dockerfile: ".just-dashboard/railpack-plan.json", Tag: "just-dashboard/test:run-9",
+		Secrets:  []BuildxSecret{{ID: "API_TOKEN", Value: "token-value"}},
+		Frontend: &BuildxFrontend{Image: frontend, CacheKey: "deployment-9", SecretsHash: hash},
+	}, "/tmp/build-metadata.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(argv, " ")
+	for _, want := range []string{
+		"--file .just-dashboard/railpack-plan.json",
+		"--build-arg BUILDKIT_SYNTAX=" + frontend,
+		"--build-arg cache-key=deployment-9",
+		"--build-arg secrets-hash .",
+		"--secret id=API_TOKEN,env=JD_DEPLOY_BUILDKIT_SECRET_0",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("argv = %s; want %q in it", joined, want)
+		}
+	}
+	if strings.Contains(joined, hash) || strings.Contains(joined, "token-value") {
+		t.Fatalf("a value derived from the secrets entered argv: %s", joined)
+	}
+	hashes := []string{}
+	for _, entry := range environment {
+		if strings.HasPrefix(entry, "secrets-hash=") {
+			hashes = append(hashes, entry)
+		}
+	}
+	if !slices.Equal(hashes, []string{"secrets-hash=" + hash}) {
+		t.Fatalf("secrets-hash environment = %v", hashes)
+	}
+
+	for name, options := range map[string]*BuildxFrontend{
+		"a frontend by tag alone": {Image: "ghcr.io/railwayapp/railpack-frontend:v0.43.0"},
+		"a frontend with a flag":  {Image: "x --push@sha256:" + strings.Repeat("a", 64)},
+		"a cache key with spaces": {Image: frontend, CacheKey: "a b"},
+		"a hash that is not hex":  {Image: frontend, SecretsHash: "not-a-hash"},
+	} {
+		if _, _, err := BuildxCommand(ImmutableBuildOptions{Dockerfile: "plan.json", Tag: "t:1", Frontend: options}, "/tmp/m.json"); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
+	}
+}

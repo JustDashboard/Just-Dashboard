@@ -41,7 +41,13 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   the endpoint the principal carries the key's role (narrowed to its owner's) with no capability
   scope, and every tool call
   is held to the databases `api_token_connections` grants the key, read again on each call, and to
-  its deployment grant (`api_tokens.deploy_access`), read with the key; see
+  its deployment grant (`api_tokens.deploy_access`, narrowed to chosen deployments in
+  `api_token_deployments` as a deploy key is), read with the key. A tool generated from the
+  deployment API (offered only to a key whose owner turned them on, `api_tokens.mcp_operations`) is a
+  second request made inside the process through the root router, with no
+  credential and the MCP key's principal in its context (`httpx.WithMCPDelegate`): it passes the same
+  layers, and the feature group's `AuthenticateFeatures` admits it only as the deploy key gate admits
+  a deploy key, marking it `Principal.ViaMCP` (every other group refuses it); see
   [the MCP server](../backend/databases-proxy-platform.md#the-mcp-server).
 - **A deploy key** (`api_tokens.scope = 'deploy'`, minted on `POST /tokens/deploy` by an administrator
   in a session, or from Account → API keys) is what `jd` and CI use, and it **deliberately reopens

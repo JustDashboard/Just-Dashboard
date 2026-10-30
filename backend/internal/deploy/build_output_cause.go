@@ -50,6 +50,9 @@ const (
 	phaseDockerfile  = "dockerfile"
 	phaseBaseImage   = "base_image"
 	phasePull        = "pull"
+	// phasePlan is Railpack's planner refusing the source before any build
+	// (build_railpack.go).
+	phasePlan = "plan"
 )
 
 // Fix kinds. set_build and set_runtime replace a plan field with Value;
@@ -547,8 +550,10 @@ func isPullFailure(err error) bool {
 }
 
 // installCommandRE names the recipes' dependency installers: whatever a
-// generated Dockerfile runs before the plan's own build command.
-var installCommandRE = regexp.MustCompile(`(?:^|&& |; )(?:[A-Z][A-Z0-9_]*=\S* )*(?:npm (?:ci|install)|corepack enable|pnpm install|yarn install|yarn$|bun install|pip3? install|python3? -m pip|uv (?:sync|pip)|poetry install|pipenv install|go mod download|go list -e -deps|cargo fetch|mvn .*dependency:|gradle .*dependencies|\./gradlew .*dependencies|dotnet restore|deno (?:install|cache)|composer install|bundle install|bundle lock --add-platform|mix deps\.get|mix deps\.compile|mix local\.hex|mix assets\.setup|dart pub get|dart pub global activate|gleam deps download|sbt -batch update|lein deps|clojure -P|apk add|apt-get|install-php-extensions)`)
+// generated Dockerfile runs before the plan's own build command, and the
+// installs a Railpack plan runs (mise for the languages, apt, the package
+// managers).
+var installCommandRE = regexp.MustCompile(`(?:^|&& |; )(?:[A-Z][A-Z0-9_]*=\S* )*(?:npm (?:ci|install)|corepack enable|pnpm install|yarn install|yarn$|bun install|pip3? install|python3? -m pip|uv (?:sync|pip)|poetry install|pipenv install|go mod download|go list -e -deps|cargo fetch|mvn .*dependency:|gradle .*dependencies|\./gradlew .*dependencies|dotnet restore|deno (?:install|cache)|composer install|bundle install|bundle lock --add-platform|mix deps\.get|mix deps\.compile|mix local\.hex|mix assets\.setup|dart pub get|dart pub global activate|gleam deps download|sbt -batch update|lein deps|clojure -P|apk add|apt-get|install-php-extensions|mise install)`)
 
 // buildCommandRE names the recipes' default build commands, for a plan that
 // left its own build command empty.
@@ -596,10 +601,28 @@ var recipeDefaultsRE = regexp.MustCompile(`^export (?:[A-Za-z_][A-Za-z0-9_]*="[^
 // defaults the recipe exported before it: that is the command its phase and
 // its sentence name. A repository's own Dockerfile keeps its words.
 func recipeStepCommand(context causeContext, command string) string {
+	if context.build.Method == BuildRailpack {
+		return railpackStepCommand(command)
+	}
 	if context.build.Method != BuildRecipe {
 		return command
 	}
 	return recipeDefaultsRE.ReplaceAllString(strings.TrimSpace(command), "")
+}
+
+// railpackStepCommand is a Railpack plan's command without the `sh -c '…'`
+// its shell commands are wrapped in, which BuildKit prints as the process.
+func railpackStepCommand(command string) string {
+	command = strings.TrimSpace(command)
+	inner, wrapped := strings.CutPrefix(command, "sh -c ")
+	if !wrapped {
+		return command
+	}
+	inner = strings.TrimSpace(inner)
+	if len(inner) >= 2 && inner[0] == '\'' && inner[len(inner)-1] == '\'' {
+		inner = inner[1 : len(inner)-1]
+	}
+	return inner
 }
 
 // stripRunFlags removes a RUN instruction's own flags, which the step's name

@@ -2812,6 +2812,24 @@ export type BackupJob = {
   /** New archives are sealed to the server's backup key before they are written. */
   encrypt?: boolean
   recovery?: BackupRecoveryPlan
+  /**
+   * Adopted from what a destination holds: the record of another server's job
+   * (or this one's before a rebuild). It never runs, is never scheduled, and
+   * its archives are never pruned from here.
+   */
+  imported?: boolean
+  origin?: BackupJobOrigin
+}
+
+/** What an imported job was on the server it came from. */
+export type BackupJobOrigin = {
+  /** The install's identity, a random value made once per install. */
+  id: string
+  host?: string
+  jobId: number
+  jobName: string
+  /** Archives this install wrote whose records it no longer had. */
+  thisServer?: boolean
 }
 
 /** The server's backup key, by its public half; the secret never leaves but by export. */
@@ -2823,6 +2841,8 @@ export type BackupArchiveKey = {
   exportedAt?: string
   encryptingJobs: number
   encryptedArchives: number
+  /** Keys brought from other servers to open what they sealed; nothing new is sealed to them. */
+  imported?: { recipient: string; importedAt: string }[]
 }
 
 export type BackupResourceKind =
@@ -2873,6 +2893,20 @@ export type BackupRestoreResult = {
   bytes: number
   skipped?: string[]
   targets?: string[]
+  /** What a restore in place made first: "volume NAME", or a directory. */
+  created?: string[]
+}
+
+/** Where one recorded source goes in a restore in place on this host, and what it makes first. */
+export type BackupRestoreTarget = {
+  archivePath: string
+  path: string
+  target: string
+  kind: "path" | "volume"
+  volume?: string
+  exists: boolean
+  creates?: "volume" | "directory"
+  refused?: string
 }
 
 export type BackupDatabaseDump = {
@@ -2892,10 +2926,28 @@ export type BackupManifest = {
   /** Over the bytes the destination holds: the ciphertext, for an encrypted archive. */
   artifactDigest: string
   complete: boolean
-  sources?: { path: string; archivePath: string }[]
+  sources?: BackupManifestSource[]
   databaseDumps?: BackupDatabaseDump[]
   pausedContainers?: string[]
   encryption?: BackupArchiveEncryption
+  artifactBytes?: number
+  /** The install, job and run that took the archive; written since 0.8.2. */
+  origin?: {
+    id: string
+    host?: string
+    jobId: number
+    jobName: string
+    runId: number
+    startedAt: string
+  }
+}
+
+export type BackupManifestSource = {
+  path: string
+  archivePath: string
+  /** "volume" for a Docker volume's directory; absent for a path. */
+  kind?: "volume"
+  volume?: string
 }
 
 /** How an archive was sealed: age, to the key whose public half is `recipient`. */
@@ -2948,6 +3000,10 @@ export type BackupRun = {
   duration?: string
   manifest?: BackupManifest
   restoreVerification?: BackupRestoreVerification
+  /** Adopted from a destination; its artifact is the destination's object. */
+  imported?: boolean
+  /** A copy the import kept on this server, read first while it is there. */
+  localCopy?: string
 }
 
 export type DeployProject = {
@@ -3114,6 +3170,7 @@ export type DeploymentBuildEvidence = {
       dockerfileDigest?: string
       targetPlatform?: string
       cachePolicy?: string
+      railpack?: RailpackEvidence
     }
   }
 }
@@ -3127,7 +3184,8 @@ export type DeploymentBuildEvidence = {
  */
 export type DeploymentFailureCause = {
   code: string
-  phase?: "install" | "build" | "output_check" | "setup" | "dockerfile" | "base_image" | "pull"
+  phase?:
+    "install" | "build" | "output_check" | "setup" | "dockerfile" | "base_image" | "pull" | "plan"
   command?: string
   exitCode?: number
   subjects?: string[]
@@ -5096,6 +5154,11 @@ export type DeploymentStaticSite = {
 
 export type DeploymentDetectionCandidate = {
   dockerfile?: string
+  /**
+   * The Railpack provider that would build this directory: beside a recipe, the choice
+   * offered next to it; on a Railpack candidate, the one it builds with.
+   */
+  railpackProvider?: RailpackProvider
   goVersion?: string
   packageManager?: NodePackageManager
   packageManagers?: NodePackageManager[]
@@ -5477,7 +5540,46 @@ export type DeploymentDetection = {
 }
 
 export type DeploymentBuildMethod =
-  "recipe" | "dockerfile" | "static" | "image" | "compose" | "none" | "legacy_compose"
+  "recipe" | "dockerfile" | "static" | "image" | "compose" | "none" | "legacy_compose" | "railpack"
+
+/** The providers Railpack has: the values its provider setting, like railpack.json's, takes. */
+export type RailpackProvider =
+  | "cpp"
+  | "deno"
+  | "dotnet"
+  | "elixir"
+  | "gleam"
+  | "golang"
+  | "java"
+  | "node"
+  | "php"
+  | "python"
+  | "ruby"
+  | "rust"
+  | "shell"
+  | "staticfile"
+  | "zig"
+
+/**
+ * What Railpack decided for a run, from its info and its plan: the release (pinned by
+ * digest), the providers it detected, the packages it resolved, the steps of its plan
+ * and the images that plan builds from, as Railpack names them.
+ */
+export type RailpackEvidence = {
+  version: string
+  image: string
+  provider?: RailpackProvider
+  providers: string[]
+  configFile?: string
+  packages: { name: string; requested?: string; resolved?: string; source?: string }[]
+  steps: { name: string; commands: string[] }[]
+  startCommand?: string
+  images: string[]
+  secrets?: string[]
+  facts?: Record<string, string>
+  logs?: { level: "error" | "warn" | "info" | "suggestion"; message: string }[]
+  success: boolean
+}
 
 export type DeploymentOwnership = "managed" | "linked" | "observed"
 
@@ -5696,6 +5798,12 @@ export type DeploymentConfiguration = {
     target?: string
     /** The Compose service readiness and the release's container follow; empty keeps detection's. */
     primaryService?: string
+    /** A Railpack build's release from the reviewed catalogue; empty is the dashboard's current one. */
+    railpackVersion?: string
+    /** The provider Railpack is told to use instead of detecting one. */
+    railpackProvider?: RailpackProvider
+    /** The configuration file Railpack reads, relative to the root; empty is railpack.json. */
+    railpackConfig?: string
     noCache?: boolean
     secrets?: { variable: string; step: BuildSecretStep }[]
     releaseTasks?: {
@@ -6597,10 +6705,16 @@ export type ApiToken = {
   /** What an MCP key may do with the deployments; absent is nothing. */
   deployments?: ApiTokenDeployments
   /**
-   * The deployments a deploy key is limited to. Absent or empty is every
-   * deployment, including the ones made after the key.
+   * The deployments a deploy key, or an MCP key's deployment grant, is
+   * limited to. Absent or empty is every deployment, including the ones made
+   * after the key.
    */
   deploymentIds?: number[]
+  /**
+   * Whether an MCP key is offered the tools generated from the deployment
+   * API under its grant; absent for every key made before them.
+   */
+  operations?: boolean
 }
 
 /** An MCP key's deployment grant: nothing, read them, or also deploy and roll back. */

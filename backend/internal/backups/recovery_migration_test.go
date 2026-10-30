@@ -38,7 +38,8 @@ func TestRecoveryMigrationPreservesExistingJobsAndDoesNotInventEvidence(t *testi
 	if err != nil || job.Name != "existing-job" || job.Schedule != "0 3 * * *" || job.Sources[0] != "/srv/important" || job.Recovery != nil || len(job.SQLitePaths) != 0 || job.Revision != 1 {
 		t.Fatalf("existing job changed: %+v %v", job, err)
 	}
-	if !job.Enabled || !job.HasCredentials || job.Retention != 7 || job.RetentionDays != 0 || len(job.DatabaseDumps) != 0 || len(job.PauseContainers) != 0 || job.Encrypt || job.Target.Path != "/var/backups" {
+	if !job.Enabled || !job.HasCredentials || job.Retention != 7 || job.RetentionDays != 0 || len(job.DatabaseDumps) != 0 || len(job.PauseContainers) != 0 || job.Encrypt || job.Target.Path != "/var/backups" ||
+		job.Imported || job.Origin != nil {
 		t.Fatalf("migration changed existing fields or additive defaults: %+v", job)
 	}
 	var sealed string
@@ -46,7 +47,8 @@ func TestRecoveryMigrationPreservesExistingJobsAndDoesNotInventEvidence(t *testi
 		t.Fatal("migration changed the stored credential bytes", err)
 	}
 	run, err := s.Run(t.Context(), 43)
-	if err != nil || run.Status != StatusSuccess || run.Artifact != "/var/backups/existing.tar.gz" || run.Manifest != nil || run.RestoreVerification != nil {
+	if err != nil || run.Status != StatusSuccess || run.Artifact != "/var/backups/existing.tar.gz" || run.Manifest != nil || run.RestoreVerification != nil ||
+		run.Imported || run.LocalCopy != "" {
 		t.Fatalf("invented legacy recovery evidence: %+v %v", run, err)
 	}
 	if job, err = s.SetEnabled(t.Context(), 42, false); err != nil || job.Revision != 2 {

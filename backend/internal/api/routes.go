@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"reflect"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
@@ -263,8 +264,29 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 // hand, after classifying the statement.
 func (s *Server) destructive(r chi.Router, fn func(chi.Router)) {
 	r.Group(func(r chi.Router) {
+		r.Use(markDestructive)
 		r.Use(httpx.RequireCapability(auth.CapDestructive))
 		r.Use(s.destrLim.ByPrincipal)
 		fn(r)
 	})
+}
+
+// markDestructive is s.destructive's mark on every route it wraps. It does
+// nothing to a request; its presence in a route's middleware chain, found by
+// function identity as requiresSession finds httpx.RequireSession, is how the
+// deployment API's description (x-destructive) and the MCP tools generated
+// from it read a route as destructive. RequireCapability is a closure and
+// cannot be told apart from the other capabilities' by identity.
+func markDestructive(next http.Handler) http.Handler { return next }
+
+// isDestructive reports whether s.destructive wraps a route, read off the
+// middleware chain chi.Walk gives for it.
+func isDestructive(middlewares []func(http.Handler) http.Handler) bool {
+	want := reflect.ValueOf(markDestructive).Pointer()
+	for _, mw := range middlewares {
+		if reflect.ValueOf(mw).Pointer() == want {
+			return true
+		}
+	}
+	return false
 }

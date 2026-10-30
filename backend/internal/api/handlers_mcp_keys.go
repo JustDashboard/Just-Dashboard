@@ -31,12 +31,49 @@ type mcpTokenRequest struct {
 	// Deployments is what the key may do with the deployments: "" nothing,
 	// "read", or "deploy".
 	Deployments auth.DeployAccess `json:"deployments"`
+	// DeploymentIDs narrows that grant to those deployments, as a deploy key
+	// is narrowed; empty is every deployment.
+	DeploymentIDs []int64 `json:"deploymentIds"`
+	// Operations offers the key the tools generated from the deployment API
+	// under that grant. Left out, it is not: a key gains them only when
+	// whoever makes it asks.
+	Operations bool `json:"operations"`
 }
 
 type mcpConnectionsRequest struct {
 	Connections []auth.TokenConnection `json:"connections"`
 	// Deployments left out keeps the key's deployment grant as it is.
 	Deployments *auth.DeployAccess `json:"deployments"`
+	// DeploymentIDs left out keeps the deployments the grant is narrowed to;
+	// an empty list is every deployment.
+	DeploymentIDs *[]int64 `json:"deploymentIds"`
+	// Operations left out keeps whether the key is offered the generated
+	// tools.
+	Operations *bool `json:"operations"`
+}
+
+// deploymentNamesOf names deployments for an audit entry, an id standing in
+// for one that cannot be read.
+func (s *Server) deploymentNamesOf(ctx context.Context, ids []int64) []string {
+	names := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if project, err := s.modules.deployStore.Get(ctx, id); err == nil {
+			names = append(names, project.Name)
+		} else {
+			names = append(names, fmt.Sprint(id))
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// mcpDeploymentsDetail is what an audit entry says a key's deployment grant
+// reaches: "every" deployment, or the ones it was narrowed to by name.
+func mcpDeploymentsDetail(names []string, ids []int64) any {
+	if len(ids) == 0 {
+		return "every"
+	}
+	return names
 }
 
 func (s *Server) handleCreateMCPToken(w http.ResponseWriter, r *http.Request) error {
@@ -48,18 +85,27 @@ func (s *Server) handleCreateMCPToken(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return err
 	}
+	names, err := s.keyDeploymentNames(r.Context(), req.DeploymentIDs)
+	if err != nil {
+		return err
+	}
 	var ttl time.Duration
 	if req.TTLDays > 0 {
 		ttl = time.Duration(req.TTLDays) * 24 * time.Hour
 	}
-	tok, secret, err := s.Auth.CreateMCPToken(r.Context(), httpx.MustPrincipal(r).User, req.Name, req.Role, ttl, req.Connections, req.Deployments)
+	tok, secret, err := s.Auth.CreateMCPToken(r.Context(), httpx.MustPrincipal(r).User, req.Name, req.Role, ttl, req.Connections, req.Deployments, req.DeploymentIDs, req.Operations)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
-	httpx.SetAudit(r, "dashboard.token.create", tok.Name, map[string]any{
+	detail := map[string]any{
 		"role": tok.Role, "ttlDays": req.TTLDays, "scope": tok.Scope,
 		"connections": mcpGrantedNames(conns, tok.Connections), "deployments": tok.Deployments,
-	})
+	}
+	if tok.Deployments != auth.DeployNone {
+		detail["reaches"] = mcpDeploymentsDetail(names, tok.DeploymentIDs)
+	}
+	detail["operations"] = tok.Operations
+	httpx.SetAudit(r, "dashboard.token.create", tok.Name, detail)
 	// The secret is returned exactly once; only its hash is retained.
 	httpx.JSON(w, http.StatusCreated, map[string]any{"token": tok, "secret": secret})
 	return nil
@@ -78,7 +124,13 @@ func (s *Server) handleSetMCPTokenConnections(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return err
 	}
-	tok, err := s.Auth.SetTokenConnections(r.Context(), httpx.MustPrincipal(r).User, id, req.Connections, req.Deployments)
+	var names []string
+	if req.DeploymentIDs != nil {
+		if names, err = s.keyDeploymentNames(r.Context(), *req.DeploymentIDs); err != nil {
+			return err
+		}
+	}
+	tok, err := s.Auth.SetTokenConnections(r.Context(), httpx.MustPrincipal(r).User, id, req.Connections, req.Deployments, req.DeploymentIDs, req.Operations)
 	switch {
 	case errors.Is(err, auth.ErrNotFound):
 		return httpx.ErrNotFound
@@ -89,9 +141,20 @@ func (s *Server) handleSetMCPTokenConnections(w http.ResponseWriter, r *http.Req
 	case err != nil:
 		return httpx.BadRequest("%v", err)
 	}
-	httpx.SetAudit(r, "dashboard.token.connections", tok.Name, map[string]any{
+	detail := map[string]any{
 		"connections": mcpGrantedNames(conns, tok.Connections), "deployments": tok.Deployments,
-	})
+	}
+	if tok.Deployments != auth.DeployNone {
+		if req.DeploymentIDs == nil {
+			// Kept as it was: named as they are now.
+			names = s.deploymentNamesOf(r.Context(), tok.DeploymentIDs)
+		}
+		detail["reaches"] = mcpDeploymentsDetail(names, tok.DeploymentIDs)
+	}
+	// Whether the key is offered the generated tools is recorded as the
+	// grant is: what it is now, beside what was sent.
+	detail["operations"] = tok.Operations
+	httpx.SetAudit(r, "dashboard.token.connections", tok.Name, detail)
 	httpx.JSON(w, http.StatusOK, tok)
 	return nil
 }

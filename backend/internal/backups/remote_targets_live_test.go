@@ -19,6 +19,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
+	"golang.org/x/crypto/ssh"
 )
 
 // SFTP and rclone destinations, end to end against real servers: OpenSSH's
@@ -119,7 +120,13 @@ func TestLiveSFTPAndRcloneBackupsUploadPruneAndRestore(t *testing.T) {
 		if remote(first.Artifact) || !remote(second.Artifact) {
 			t.Fatalf("retention of one kept the wrong archives: first=%v second=%v", remote(first.Artifact), remote(second.Artifact))
 		}
+		if remote(first.Artifact+sidecarSuffix) || !remote(second.Artifact+sidecarSuffix) {
+			t.Fatal("the manifests beside the archives were not kept and pruned with them")
+		}
 		liveRestoredNotes(t, ctx, runner, second.ID, "second revision")
+		liveImportedElsewhere(t, ctx, newStore(), Destination{Kind: TargetSFTP, Secrets: secrets,
+			Target: TargetConfig{Host: "127.0.0.1", Port: port, Username: "ops", Path: "backups/nightly"},
+			Pin:    func(context.Context, ssh.PublicKey) error { return nil }}, second, "second revision")
 
 		// The same address, new host keys: the run refuses, and says why.
 		docker("rm", "-f", "-v", name)
@@ -207,8 +214,34 @@ func TestLiveSFTPAndRcloneBackupsUploadPruneAndRestore(t *testing.T) {
 		if remote(first.Artifact) || !remote(second.Artifact) {
 			t.Fatalf("retention of one kept the wrong archives: first=%v second=%v", remote(first.Artifact), remote(second.Artifact))
 		}
+		if remote(first.Artifact+sidecarSuffix) || !remote(second.Artifact+sidecarSuffix) {
+			t.Fatal("the manifests beside the archives were not kept and pruned with them")
+		}
 		liveRestoredNotes(t, ctx, runner, second.ID, "second revision")
+		liveImportedElsewhere(t, ctx, newStore(), Destination{Kind: TargetRclone, Secrets: secrets,
+			Target: TargetConfig{Path: "backups/nightly"}}, second, "second revision")
 	})
+}
+
+// liveImportedElsewhere reads the destination from a store of its own — a
+// fresh server's — imports the run's archive and restores it there.
+func liveImportedElsewhere(t *testing.T, ctx context.Context, fresh *Store, dest Destination, run *Run, want string) {
+	t.Helper()
+	runner := NewRunner(fresh, t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	catalogue, err := runner.Catalogue(ctx, dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalogue.Origins) != 1 || len(catalogue.Origins[0].Jobs) != 1 || len(catalogue.Origins[0].Jobs[0].Archives) != 1 ||
+		catalogue.Origins[0].Jobs[0].Archives[0].Key != run.Artifact || !catalogue.Origins[0].Jobs[0].Archives[0].Importable {
+		t.Fatalf("catalogue = %+v", catalogue)
+	}
+	dest.Target.HostKey = catalogue.HostKey
+	result, err := runner.Import(ctx, ImportRequest{Destination: dest, Keys: []string{run.Artifact}})
+	if err != nil || len(result.Runs) != 1 {
+		t.Fatalf("import = %+v, %v", result, err)
+	}
+	liveRestoredNotes(t, ctx, runner, result.Runs[0].ID, want)
 }
 
 func liveBackupFreePort(t *testing.T) int {

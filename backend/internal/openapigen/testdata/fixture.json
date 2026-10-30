@@ -1,0 +1,177 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "Fixture deployment API", "version": "0.0.0"},
+  "servers": [{"url": "/api/v1"}],
+  "paths": {
+    "/deploy/": {
+      "get": {
+        "operationId": "deployList",
+        "summary": "List deployments, or the archived ones.",
+        "tags": ["fleet"],
+        "security": [{"session": []}, {"apiKey": []}, {"deployKey": []}],
+        "x-deploy-key": "allowed",
+        "parameters": [{"name": "view", "in": "query", "required": false, "description": "archived for the archived ones.", "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "OK", "content": {"application/json": {"schema": {"anyOf": [
+            {"$ref": "#/components/schemas/deploy.Fleet"},
+            {"type": ["array", "null"], "items": {"$ref": "#/components/schemas/api.archivedDeployment"}}
+          ]}}}},
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/deploy/{id}/environments/{env}/runs": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "description": "The deployment's id.", "schema": {"type": "integer", "format": "int64"}},
+        {"name": "env", "in": "path", "required": true, "description": "The environment's id.", "schema": {"type": "integer", "format": "int64"}}
+      ],
+      "post": {
+        "operationId": "deploymentRunCreate",
+        "summary": "Queue a run for an environment.",
+        "description": "Stop and restart need the destructive capability.",
+        "tags": ["runs"],
+        "security": [{"session": []}, {"apiKey": []}, {"deployKey": []}],
+        "x-deploy-key": "allowed",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {
+          "operation": {"type": "string", "enum": ["deploy", "restart", "stop"], "title": "deploy.Operation"},
+          "ref": {"type": "string"}
+        }}}}},
+        "responses": {
+          "202": {"description": "Accepted", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/deploy.EngineRun"}}}},
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/deploy/{id}/environments/{env}/variables/{name}": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}},
+        {"name": "env", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}},
+        {"name": "name", "in": "path", "required": true, "description": "The variable's name.", "schema": {"type": "string"}}
+      ],
+      "put": {
+        "operationId": "deploymentVariablePut",
+        "summary": "Set one variable.",
+        "tags": ["variables"],
+        "security": [{"session": []}, {"deployKey": []}],
+        "x-deploy-key": "allowed",
+        "parameters": [{"name": "dryRun", "in": "query", "required": false, "schema": {"type": "boolean"}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/deploy.VariableWrite"}}}},
+        "responses": {
+          "200": {"description": "OK", "content": {"application/json": {"schema": {"type": "object", "description": "Assembled by the handler; these are its properties.", "properties": {
+            "variable": {"$ref": "#/components/schemas/deploy.Variable"},
+            "changed": {"type": "boolean"}
+          }}}}},
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      },
+      "delete": {
+        "operationId": "deploymentVariableDelete",
+        "summary": "Remove one variable.",
+        "tags": ["variables"],
+        "security": [{"session": []}, {"deployKey": []}],
+        "x-deploy-key": "allowed",
+        "x-destructive": true,
+        "responses": {
+          "204": {"description": "No Content: done, with no body."},
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/deploy/{id}/runs/{run}/stream": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}},
+        {"name": "run", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}
+      ],
+      "get": {
+        "operationId": "deploymentRunStream",
+        "summary": "Follow a run's events over a WebSocket.",
+        "tags": ["runs"],
+        "security": [{"session": []}, {"apiKey": []}, {"deployKey": []}],
+        "x-deploy-key": "allowed",
+        "responses": {
+          "101": {"description": "The connection is upgraded to a WebSocket."},
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/deploy/{id}/requests/export": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}}],
+      "get": {
+        "operationId": "deploymentRequestExport",
+        "summary": "Export the requests as CSV.",
+        "tags": ["domains"],
+        "security": [{"session": []}, {"apiKey": []}, {"deployKey": []}],
+        "x-deploy-key": "allowed",
+        "parameters": [{"name": "limit", "in": "query", "required": false, "schema": {"type": "integer"}}],
+        "responses": {
+          "200": {"description": "OK", "content": {"text/csv": {"schema": {"type": "string"}}}},
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/deploy/{id}/game/players/{action}": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64"}},
+        {"name": "action", "in": "path", "required": true, "description": "The moderation action.", "schema": {"type": "string", "enum": ["kick", "ban"], "title": "gameserver.PlayerAction"}}
+      ],
+      "post": {
+        "operationId": "gamePlayerAction",
+        "summary": "Kick or ban a player.",
+        "tags": ["game"],
+        "security": [{"session": []}],
+        "x-deploy-key": "refused (session_required): operating a game server is not deploying it",
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/gameserver.PlayerRequest"}}}},
+        "responses": {
+          "200": {"description": "OK", "content": {"application/json": {"schema": {"type": ["array", "null"], "items": {"type": "string"}}}}},
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "deploy.Fleet": {"type": "object", "title": "deploy.Fleet", "properties": {
+        "deployments": {"type": ["array", "null"], "items": {"$ref": "#/components/schemas/deploy.Summary"}},
+        "counts": {"type": ["object", "null"], "additionalProperties": {"type": "integer", "format": "int64"}}
+      }},
+      "deploy.Summary": {"type": "object", "title": "deploy.Summary", "properties": {
+        "id": {"type": "integer", "format": "int64"},
+        "name": {"type": "string"},
+        "health": {"type": "string", "enum": ["passed", "failed"], "title": "deploy.HealthOutcome"},
+        "lastRun": {"oneOf": [{"$ref": "#/components/schemas/deploy.EngineRun"}, {"type": "null"}]},
+        "updatedAt": {"type": "string", "format": "date-time"},
+        "cpu": {"type": "object", "properties": {"p95": {"type": "number"}, "throttled": {"type": "boolean"}}}
+      }},
+      "imagescan.Summary": {"type": "object", "title": "imagescan.Summary", "properties": {"critical": {"type": "integer", "format": "int32"}}},
+      "deploy.EngineRun": {"type": "object", "title": "deploy.EngineRun", "description": "One run of the engine.", "properties": {
+        "id": {"type": "integer", "format": "int64"},
+        "state": {"type": "string", "enum": ["queued", "running", "succeeded"], "title": "deploy.RunState"},
+        "endedAt": {"type": ["string", "null"], "format": "date-time"},
+        "scan": {"allOf": [{"$ref": "#/components/schemas/imagescan.Summary"}], "description": "The latest scan."},
+        "evidence": {"description": "Any JSON value."},
+        "digest": {"type": ["string", "null"], "contentEncoding": "base64"}
+      }},
+      "deploy.Variable": {"type": "object", "title": "deploy.Variable", "properties": {
+        "name": {"type": "string"},
+        "digest": {"type": "string"}
+      }},
+      "deploy.VariableWrite": {"type": "object", "title": "deploy.VariableWrite", "properties": {
+        "value": {"type": "string", "writeOnly": true, "description": "A secret: it is accepted here and never read back by any route."},
+        "sealed": {"type": "boolean"}
+      }},
+      "api.archivedDeployment": {"type": "object", "title": "api.archivedDeployment", "properties": {
+        "id": {"type": "integer", "format": "int64"},
+        "archivedAt": {"type": "string", "format": "date-time"}
+      }},
+      "gameserver.PlayerRequest": {"type": "object", "title": "gameserver.PlayerRequest", "properties": {"player": {"type": "string"}}}
+    },
+    "responses": {
+      "Error": {"description": "A refusal.", "content": {"application/json": {"schema": {"type": "object", "properties": {"error": {"type": "object", "title": "Error", "properties": {
+        "code": {"type": "string", "description": "What a client branches on."},
+        "message": {"type": "string", "description": "The refusal in a sentence."},
+        "field": {"type": "string", "description": "The field it is about."},
+        "retryable": {"type": "boolean", "description": "Whether trying again may succeed."}
+      }, "required": ["code", "message"]}}, "required": ["error"]}}}}
+    }
+  }
+}

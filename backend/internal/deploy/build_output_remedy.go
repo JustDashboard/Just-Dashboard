@@ -65,33 +65,42 @@ var causeTitles = map[string]string{
 	"build_disk_full":                    "Disk full during build",
 	"build_dockerfile_invalid":           "Dockerfile does not parse",
 	"build_timeout":                      "Build timed out",
-	"build_failed":                       "Build failed",
-	"builder_missing":                    "Docker Buildx missing",
-	"registry_rate_limited":              "Registry rate limit reached",
-	"registry_unreachable":               "Registry unreachable",
-	"registry_auth_failed":               "Registry refused the server",
-	"base_image_missing":                 "Base image not found",
-	"java_version_unsupported":           "Java release unsupported",
-	"gradle_wrapper_incompatible":        "Gradle wrapper cannot run on the JDK",
-	"dotnet_version_unsupported":         ".NET release unsupported",
-	"dotnet_sdk_pin_unavailable":         ".NET SDK pin has no image",
-	"source_auth_failed":                 "Git credential refused",
-	"source_repository_missing":          "Repository not found",
-	"source_unreachable":                 "Git remote unreachable",
-	"source_revision_unavailable":        "Commit no longer on the remote",
-	"ref_not_found":                      "Branch or tag not found",
-	"runtime_port_in_use":                "Port already in use",
-	"image_missing":                      "Image missing",
-	"mount_invalid":                      "Mount cannot be created",
-	"runtime_gpu_unavailable":            "GPUs not available to Docker",
-	"runtime_ulimit_refused":             "Process limit refused",
-	"runtime_sysctl_refused":             "Kernel parameter refused",
-	"runtime_user_unknown":               "User not in the image",
-	"rehearsal_failed":                   "Migration failed on a copy of the database",
-	"rehearsal_unavailable":              "Migration could not be rehearsed",
-	"replay_status_drift":                "Candidate answered recorded requests differently",
-	"replay_latency":                     "Candidate slower on recorded requests",
-	"replay_unanswered":                  "Candidate did not answer recorded requests",
+	"build_apt_package_missing":          "Debian package not found",
+	// Railpack's planner and the packages its plan installs (build_railpack.go).
+	"railpack_no_provider":            "Railpack found nothing to build",
+	"railpack_start_command_missing":  "No start command for Railpack",
+	"railpack_package_unresolved":     "Railpack could not resolve a version",
+	"railpack_config_invalid":         "Railpack configuration unreadable",
+	"railpack_unavailable":            "Railpack could not fetch its tools",
+	"railpack_plan_failed":            "Railpack could not plan the build",
+	"railpack_package_install_failed": "Package install failed",
+	"build_failed":                    "Build failed",
+	"builder_missing":                 "Docker Buildx missing",
+	"registry_rate_limited":           "Registry rate limit reached",
+	"registry_unreachable":            "Registry unreachable",
+	"registry_auth_failed":            "Registry refused the server",
+	"base_image_missing":              "Base image not found",
+	"java_version_unsupported":        "Java release unsupported",
+	"gradle_wrapper_incompatible":     "Gradle wrapper cannot run on the JDK",
+	"dotnet_version_unsupported":      ".NET release unsupported",
+	"dotnet_sdk_pin_unavailable":      ".NET SDK pin has no image",
+	"source_auth_failed":              "Git credential refused",
+	"source_repository_missing":       "Repository not found",
+	"source_unreachable":              "Git remote unreachable",
+	"source_revision_unavailable":     "Commit no longer on the remote",
+	"ref_not_found":                   "Branch or tag not found",
+	"runtime_port_in_use":             "Port already in use",
+	"image_missing":                   "Image missing",
+	"mount_invalid":                   "Mount cannot be created",
+	"runtime_gpu_unavailable":         "GPUs not available to Docker",
+	"runtime_ulimit_refused":          "Process limit refused",
+	"runtime_sysctl_refused":          "Kernel parameter refused",
+	"runtime_user_unknown":            "User not in the image",
+	"rehearsal_failed":                "Migration failed on a copy of the database",
+	"rehearsal_unavailable":           "Migration could not be rehearsed",
+	"replay_status_drift":             "Candidate answered recorded requests differently",
+	"replay_latency":                  "Candidate slower on recorded requests",
+	"replay_unanswered":               "Candidate did not answer recorded requests",
 }
 
 // causeTitle is the short name of a cause code, or "" for a code that is not
@@ -278,6 +287,16 @@ func buildCauseFix(cause *BuildCause, context causeContext) *CauseFix {
 		return &CauseFix{Kind: fixReview, Field: "configuration.build.startCommand"}
 	case "build_wrong_root":
 		return &CauseFix{Kind: fixReview, Field: "configuration.build.rootDirectory"}
+	case "railpack_no_provider":
+		return &CauseFix{Kind: fixReview, Field: "configuration.build.railpackProvider"}
+	case "railpack_start_command_missing":
+		return &CauseFix{Kind: fixReview, Field: "configuration.build.startCommand"}
+	case "railpack_config_invalid":
+		return &CauseFix{Kind: fixReview, Field: "configuration.build.railpackConfig"}
+	case "build_apt_package_missing":
+		if recipe && build.Recipe == "python" {
+			return &CauseFix{Kind: fixReview, Field: "configuration.build.systemPackages"}
+		}
 	case "build_system_library_missing", "build_native_toolchain_missing":
 		if build.Recipe != "python" || !recipe {
 			return nil
@@ -440,6 +459,11 @@ func (c *BuildCause) lead() string {
 		return "The build could not use its base image"
 	case phasePull:
 		return "The image could not be pulled"
+	case phasePlan:
+		if c.ExitCode > 0 {
+			return fmt.Sprintf("Railpack could not plan the build (`railpack prepare` exited with code %d)", c.ExitCode)
+		}
+		return "Railpack could not plan the build"
 	}
 	return "The build failed"
 }
@@ -683,6 +707,38 @@ func (c *BuildCause) explain() (string, string) {
 		return "", "keep the build cache between builds (Rebuild without cache discards it), build less, or build the image elsewhere and deploy it as an image"
 	case "builder_missing":
 		return "Docker Buildx is not installed on this server", "install the docker-buildx plugin"
+	case "build_apt_package_missing":
+		what := "Debian has no package named " + orDefault(subject, "the one the build asked for")
+		switch {
+		case fix != nil:
+			return what, "correct the system packages in Build settings"
+		case c.Phase == phaseDockerfile:
+			return what, "correct the apt-get install line in the Dockerfile"
+		}
+		return what, "correct RAILPACK_BUILD_APT_PACKAGES or RAILPACK_DEPLOY_APT_PACKAGES (or the railpack.json that lists it), naming the Debian package that provides it"
+	case "railpack_no_provider":
+		return "Railpack found no language it builds in the root directory",
+			"choose Railpack's provider in Build settings, commit the language's manifest (package.json, requirements.txt, go.mod, …), or build with a recipe or a Dockerfile"
+	case "railpack_start_command_missing":
+		return "Railpack found no command that starts the application",
+			"set the start command in Build settings, or add a start script to the repository"
+	case "railpack_package_unresolved":
+		name, version := subject, ""
+		if len(c.Subjects) > 1 {
+			version = c.Subjects[1]
+		}
+		what := "no release of " + orDefault(name, "a package") + " matches " + orDefault(version, "the version asked for")
+		return what, "pin a release that exists in the repository's version file (.nvmrc, .python-version, mise.toml, …), or set RAILPACK_" +
+			strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(orDefault(name, "PACKAGE"))) + "_VERSION as a build variable"
+	case "railpack_config_invalid":
+		return "Railpack could not read its configuration file", "fix the JSON in the file Build settings names (railpack.json unless it names another), or clear the setting"
+	case "railpack_unavailable":
+		return "Railpack could not download its own tools, which is a transient failure", "deploy again"
+	case "railpack_plan_failed":
+		return "", "Railpack's own words are in the build log"
+	case "railpack_package_install_failed":
+		return "mise could not install " + orDefault(subject, "a language release") + " for the build",
+			"pin a release that exists, or deploy again if its download failed; mise's reason is in the build log"
 	}
 	return "", "the build log holds its output"
 }

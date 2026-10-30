@@ -621,7 +621,8 @@ export function defaultConfiguration(
       rootDirectory: candidate?.root,
       buildCommand: candidate?.buildCommand,
       startCommand: candidate?.startCommand,
-      outputDirectory: candidate?.outputDirectory,
+      // Railpack decides a static site's output itself.
+      outputDirectory: method === "railpack" ? undefined : candidate?.outputDirectory,
       dockerfile: method === "dockerfile" ? (candidate?.dockerfile ?? "Dockerfile") : undefined,
       target: method === "dockerfile" ? candidate?.dockerfileTarget : undefined,
       pythonVersion: candidate?.recipe === "python" ? candidate.pythonVersion : undefined,
@@ -1208,6 +1209,12 @@ export function validateConfiguration(
     errors.dotnetVersion = "Use .NET 8.0, 9.0 or 10.0, or let the project decide."
   if (configuration.build.target && !DOCKERFILE_STAGE.test(configuration.build.target))
     errors.target = "A stage name starts with a letter and has only letters, digits, . _ and -."
+  if (
+    configuration.build.railpackConfig &&
+    !validRailpackConfig(configuration.build.railpackConfig)
+  )
+    errors.railpackConfig =
+      "Name a .json file inside the root directory, such as railpack.json, or leave it empty."
   for (const [name, value] of [
     ["internalPort", configuration.runtime.internalPort ?? 0],
     ["hostPort", configuration.runtime.hostPort ?? 0],
@@ -1282,6 +1289,22 @@ export function withPreviousConnectionShape(link: string, previousTarget?: strin
   const connection = link.match(/^\$\{\{database\.(\d+)\}\}$/)
   if (!connection || database || !CONNECTION_FORMATS.has(format)) return link
   return `\${{database.${connection[1]}.${format}}}`
+}
+
+/**
+ * A Railpack configuration file the backend takes (`validateRailpackSettings`): a .json
+ * file inside the root directory, never above it nor among the dashboard's own files.
+ */
+export function validRailpackConfig(path: string) {
+  const parts = path.replace(/^(\.\/)+/, "").split("/")
+  return (
+    path.length <= 256 &&
+    !path.startsWith("/") &&
+    path.endsWith(".json") &&
+    !/[\0\r\n]/.test(path) &&
+    !parts.includes("..") &&
+    parts[0] !== ".just-dashboard"
+  )
 }
 
 /** Whether a build method produces an image a release task can run in, as the backend decides. */
