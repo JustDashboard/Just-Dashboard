@@ -222,7 +222,7 @@ func TestCloudflareAPIPointsAHostnameAtTheTunnel(t *testing.T) {
 		t.Fatalf("first = %s, %v", outcome, err)
 	}
 	record := f.records[zone.ID][0]
-	if record.Type != "CNAME" || record.Content != tunnel+".cfargotunnel.com" || !record.Proxied || record.Comment != recordComment {
+	if record.Type != "CNAME" || record.Content != tunnel+".cfargotunnel.com" || !record.Proxied || record.Comment != RecordComment {
 		t.Fatalf("record = %+v", record)
 	}
 	if outcome, err := api.EnsureCNAME(ctx, zone.ID, "shop.example.com", tunnel); err != nil || outcome != DNSPresent {

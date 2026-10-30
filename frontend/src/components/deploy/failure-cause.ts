@@ -264,6 +264,12 @@ export function fixTarget(
 ): { href: string; label: string } | undefined {
   const base = `/deploy/${projectId}/settings`
   const field = fix.field
+  // A domain's missing record, which saved DNS credentials can write: the
+  // Domains settings open on its sheet, whose button is the same words.
+  if (fix.kind === "dns_record" && field.startsWith("domains.")) {
+    const record = new URLSearchParams({ record: fix.value || field.slice("domains.".length) })
+    return { href: `${base}/domains?${record}`, label: "Create the record" }
+  }
   if (field.startsWith("variables.")) {
     const name = field.slice("variables.".length)
     const query = new URLSearchParams({ variable: name })

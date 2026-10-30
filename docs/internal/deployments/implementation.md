@@ -242,7 +242,8 @@ only renderer/executor/validation authority for their feature.
   proves it, because the answer looks up the zone's nameservers for a name the caller chose, which
   stays with administrators for the reason `resolves` does. Both are reported so the screen can say what the run
   will do, not so the operator has to do it. Asked about a hostname the operator typed (`?hostname=`), it also
-  answers `address`, this server's public IPv4, which is the A record the name needs, and — for
+  answers `address`, this server's public IPv4, which is the A record the name needs (once the name is
+  saved, the Domains settings' DNS record sheet can write it: [DNS records](dns-records.md)), and — for
   `system.admin` only — `resolves`, whether the name already points here, taken from the reverse
   proxy's own DNS check so the Domains sheet and the proxy page never disagree about one name. It is
   a pointer for the reason `nameTaken` is: a host with no public address cannot make the comparison,
@@ -1866,8 +1867,8 @@ only renderer/executor/validation authority for their feature.
   next to a routed primary (Gitea's SSH, Syncthing's sync protocol) becomes an additional
   `runtime.ports[]` publication on its own number (see published ports below) instead of silently
   replacing the routed port; the primary always stays the one the proxy and the checks reach. The
-  catalogue ships 142 reviewed definitions, 137 of them offered (see "how the first sign-in works"
-  below for the five that are retired; 43 are the multi-service templates of the next item). The
+  catalogue ships 162 reviewed definitions, 157 of them offered (see "how the first sign-in works"
+  below for the five that are retired; 56 are the multi-service templates of the next item). The
   three counts the competitive report quotes — built in, deployable, Compose — are constants in
   `blueprint/catalogue_counts.go`, and `catalogue_counts_test.go` fails when the shipped
   definitions disagree, so they are bumped deliberately in the change that adds a template. Every
@@ -1947,6 +1948,120 @@ only renderer/executor/validation authority for their feature.
   stack from a Git source is ([Compose previews](preview-isolation.md#compose-previews)). `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
   through the real build step and runtime owner and requires every check to pass, every service's
   healthcheck to report healthy, and only the public port to be published, on loopback.
+- **Templates added on this dashboard** (`blueprint/user.go`, `user_compose.go`,
+  `deploy/user_templates.go`, `template_from_plan.go`, `api/handlers_deploy_templates.go`). The
+  operator's own definitions, in blueprint's own schema, beside the built-ins. They are stored in
+  `deploy_templates` (`slug` — the definition's own id — `name`, `version`, `source` `compose`,
+  `deployment` or `import`, `definition_json`, `from_project_id`, created and updated by and at) and
+  never embedded: `CatalogueBuiltIn`, `CatalogueDeployable` and `CatalogueCompose` count the binary's
+  definitions only. Every added template's id is `user-<name>` (`blueprint.UserPrefix`; `UserID`
+  makes the slug from a name), the catalogue load refuses a built-in in that namespace and
+  `ParseUserTemplate` refuses an added template outside it, so neither can stand in for the other —
+  `?template=`, a source and a release name one or the other unambiguously, and an id the code keys
+  on (`mongo-express`, the Minecraft pair) can never be an added template's.
+  `PrepareUserTemplate` holds one to everything a built-in meets: `Validate` (what a built-in meets
+  at catalogue load), the built-in suite's own rules — each fixture renders, its digest recorded by
+  the server when the template is saved, since there is no reviewer to write it, and no input ships a
+  default for a credential-shaped name or variable — and four more a definition that did not ship
+  needs: it is not retired (it is deleted instead), not a game server (the console, players and
+  settings pages are written for the two Minecraft definitions), takes no privilege, host network,
+  capability, device or Docker socket (only a reviewed built-in may reach the host, and importing a
+  file must not be how a deployment gets one), and is at most 256 KiB. Then `DeploymentSupport`
+  must accept it and every fixture is planned through `RenderBlueprintPlan` — for a stack, the
+  Compose planner's own analysis — so a refusal comes when the template is saved, never after a
+  deployment was started from it. `TestUserTemplateValidationRefusesWhatABuiltInsDoes` walks the
+  built-ins' table of unsafe shapes (`unsafeShapes`) against added templates.
+  - From a pasted Compose file (`blueprint.FromCompose`): two or more services are a Compose
+    template, one is a single image (`FromImage`). What a template replaces is dropped (`restart`,
+    `container_name`, `labels`, `logging`, `networks`, `init`, `tty`); anything else it cannot carry
+    is refused by name — `build`, `privileged`, `user`, `entrypoint`, `env_file`, a bind mount (the
+    Docker socket included), an external volume, `secrets` or `configs`, replicas. Healthchecks
+    keep their argv (`CMD` dropped, `CMD-SHELL` or a string becomes `sh -c`), durations become
+    seconds, `depends_on` keeps its conditions, `mem_limit` or `deploy.resources.limits` the limit
+    (a default per role otherwise), and roles follow the image: a database (`postgres`, `mysql`,
+    `mariadb`, `mongo`, …), a cache (`redis`, `valkey`, `memcached`, …), the public service an
+    application, anything else a worker. The public service is the one named, else the only one
+    publishing a port, else the only one exposing one; its host port is dropped — the template
+    publishes it on loopback at `TemplateHostPort` behind the proxy — and a second publisher is
+    refused. Each `${VAR}` becomes the declared input or startup operation that sets VAR, else a
+    new input named after it (a secret input when the name is credential-shaped, a text input
+    defaulting to `${VAR:-x}`'s `x` otherwise); `$$` is a literal dollar, `${VAR:+…}` is refused,
+    and an interpolation anywhere but an environment value is refused. A password the file writes
+    out — under a credential-shaped name, or inside a URL's userinfo — becomes a secret the template
+    generates, one per distinct password however many services repeat it, named after the variable
+    that holds it, so the literal never reaches the definition. A domain input is always declared.
+    The metadata the schema requires defaults: access `open` (a template cannot know how an
+    application it has never seen signs people in, and open is the answer that warns), the docs and
+    upstream URL the public image's registry page (`ImageHomepage`), the maintainer the person who
+    added it, `reviewedAt` the day, `minimumDashboard` this version.
+  - From a deployment (`TemplateFromPlan`, Save as template): the live release's frozen plan
+    (`OrchestrationStore.ExecutionPlan` of the run that made it) with the plain literal values of
+    that run's frozen variable revisions (`FrozenPlainValues`, whose query keeps only
+    `sensitivity = 'plain'` literal rows before anything is decrypted, so a secret's value is never
+    opened). An image source is a single image — command, port, managed volumes renamed after where
+    they mount, published ports, memory and CPU, and its checks in the catalogue's vocabulary
+    (attempts times interval read back as the startup budget; the route, DNS, TLS and backup checks
+    belong to the deployment and are left out). A pasted Compose source goes through `FromCompose`
+    over the stored document, keeping only the variables it reads (`PruneUnread`). A template
+    source is the definition it rendered from under the new id, with this deployment's answers as
+    the defaults the next one is offered (never the domain, never a secret). A source built on this
+    server — Git, a folder, a Compose file read from either, an imported container — is refused, as
+    are privileges, GPUs and a host path, and the container's process flags (its user, a read-only
+    root, ulimits, sysctls), which a template's schema has no place for and whose silent loss would
+    run the next deployment as root on a writable root: they are named, to be cleared and set again
+    on the deployment made from the template. A secret variable, or a plain one with a credential-shaped name,
+    becomes a required secret input asked for on the next deployment's Variables screen; a plain
+    literal a text input defaulting to it; one naming the concrete domain a startup `set_variable`
+    from `{{input.domain}}` (the domain input then required); a reference or a value on several
+    lines an optional input. A fixed host port, and every published port whose host number differs
+    from the container's, becomes a bounded number input defaulting to it: `Port.hostInput` names
+    it, `Render` writes the answer as `RenderedPort.hostPort`, and `blueprintConfiguration`
+    publishes on it instead of the container's own number — additive, so every built-in renders to
+    the digest it records.
+  - Deploying one: the blueprint routes resolve an id through `PlanningStore.ResolveTemplate`, the
+    built-ins first and then the store. Every save of a source — the draft's source step and the
+    settings source route — first calls `WithUserTemplate`, which replaces whatever definition the
+    client sent with the stored one (`DraftSourceConfig.blueprintDefinition`, required for an
+    added template's id and refused for a built-in's) and refuses a version that is no longer the
+    template's. From then on `DraftSourceConfig.definition()` reads that frozen copy everywhere
+    `blueprint.GetVersion` was read — rendering, `ValidateForDeployment`, the secret-input checks,
+    materialization, detection — so an added template takes exactly the built-ins' planning,
+    validation, secrets and runtime path, and editing or deleting it changes what the next
+    deployment gets and nothing that already runs: a deployment renders and redeploys from its own
+    copy, and a duplicate copies it. Evidence and the rendered document's head comment say "this
+    dashboard's own" where a built-in's say "reviewed".
+  - Changing one: its id is its name in the catalogue and in every source, so an update keeps it,
+    and a definition that differs at the same version is the next patch version (the same
+    definition is no change). Removing one is destructive with an ordinary confirmation, and the
+    list says how many deployments' current sources name it.
+  - Routes: `GET /deploy/blueprints/` lists the offered built-ins, then the added templates, each
+    with `origin` (`builtin` or `user`); `/deploy/blueprints/{id}`, its versions and its render
+    resolve an added id. `GET /deploy/templates` lists the added templates with how each was made,
+    `GET /deploy/templates/{template}` reads one with its definition, and
+    `GET /deploy/templates/{template}/export` answers any template's definition — a built-in's too —
+    as a JSON file. `POST /deploy/templates` makes one from a Compose file and the declared inputs,
+    `POST /deploy/templates/from-deployment` from a deployment's live release (409 `no_live_release`
+    before it went live), and both answer a `dryRun` with the definition and whether its id is
+    taken, storing and auditing nothing. `POST /deploy/templates/import` takes a definition as it
+    was exported (an id outside the namespace is put in it, so an exported built-in becomes
+    `user-<id>`), `PUT /deploy/templates/{template}` replaces one, `DELETE` removes it. Writes take
+    what a draft takes, `system.admin` in a session, and the delete is inside `s.destructive` too;
+    the reads are as open as the catalogue. A deploy key reads all of them and is refused every
+    write with `whyTemplates` (keySession): a template is the operator's catalogue, which every
+    deployment is made from, not a deployment a key is narrowed to. Writes are audited as
+    `deploy.template.create` (with `source`, and for a deployment its id, environment and release),
+    `deploy.template.import`, `deploy.template.update` (with the previous version) and
+    `deploy.template.delete` (with how many deployments use it). Refusals answer 422
+    `invalid_template` in the catalogue's own words, 409 `template_exists`, 404 `template_not_found`.
+  - Pages: the picker's Your templates and its Yours chip, the Templates page and Save as template on
+    Settings → General ([feature map](../frontend/feature-map.md)). Tested by `blueprint/user_test.go`,
+    `deploy/user_templates_test.go` (a real store and run snapshot: nothing secret, no domain and no
+    volume name of the deployment survives, and the template plans for another address and port),
+    `api/handlers_deploy_templates_test.go` (every route, the secrecy proof through HTTP, the key and
+    role refusals), `templates.test.js`, `tests/browser/deploy-templates.spec.ts`, and
+    `TestLiveUserComposeTemplateStartsAndAnswersItsOwnChecks`, which makes an nginx-and-Redis template
+    through the call `POST /deploy/templates` makes, chooses it through the call every source save
+    makes, and brings it up through the Compose sweep's own harness (`liveComposeHarness`).
 - **How the first sign-in works**, declared rather than described. Every definition carries an
   `access` block: a closed `kind` — `setup` (the application asks the first visitor to create the
   account), `credentials` (a name from an input plus a password from a generated secret, both
@@ -2158,7 +2273,9 @@ only renderer/executor/validation authority for their feature.
   database port, no stateful workload without persistence, no download without https plus a size limit and
   a checksum or declared version source, no uncontained path, no privilege without a stated reason, and a
   render fixture whose digest CI recomputes. The container form's starting points are rendered from the
-  same catalogue through `GET /docker/templates`; there is no second template list.
+  same catalogue's built-ins through `GET /docker/templates`; there is no second template list. A
+  template added on this dashboard is held to the same rules and a few more, and deploys from the copy
+  its source froze (see "Templates added on this dashboard" above).
 - `internal/gameserver` holds the game-specific adapters. The console runs one command through the
   container's own client as separate argv and refuses anything carrying a shell metacharacter, newline or
   NUL *before* it looks at whether a container is running. Player identities come from the server's own
@@ -2276,6 +2393,22 @@ private network the connector shares with the ingress; activation sets the tunne
 the name's proxied CNAME to `<tunnel>.cfargotunnel.com` before the public-route checks. The tunnel's
 health is cloudflared's own (its `/ready` and its log), and the host alert kind **Tunnel down** tells the
 channels when the connector loses the edge. See [Cloudflare Tunnel](cloudflare-tunnel.md).
+
+A domain's **DNS record** is written from here with the credentials the Certificates page saved for
+DNS-01 (`dnsrecords`, `api/handlers_deploy_dns_record.go`): an `A` and an `AAAA` to the host's first
+public address of each family — the addresses preflight compares — or for a tunnel's name a proxied
+`CNAME` to `<tunnel>.cfargotunnel.com` with the tunnel's own comment, in the longest zone any saved
+provider's credentials reach (Cloudflare, Route 53, DigitalOcean, Google Cloud DNS, Linode, OVH and Gandi
+through their documented REST APIs, RFC 2136 through a signed DNS UPDATE over TCP). `GET
+/deploy/{id}/domains/{domain}/dns-record` is the dry run — what the zone holds, what a write does, through
+which credential and zone — and `POST` writes it; both are `system.admin` in a session and refused to a
+deploy key, the write audited as `deploy.domain.record`. Nothing is deleted: a CNAME where an address is
+wanted, or a set a one-record-per-value provider would have to shrink, is a refusal in words, and a
+record this dashboard did not write is replaced only with `replace`. What was written is kept in
+`deploy_dns_records` (who, when, which provider and zone), which is how the sheet tells a record managed
+here from one that is not. When a planned name does not resolve where it should, preflight adds
+`dns_record_writable` (the Domains sheet's **Create the record** as its fix) or `dns_record_missing`
+beside `dns_unverified`. See [DNS records](dns-records.md).
 
 ## Deployment topology
 

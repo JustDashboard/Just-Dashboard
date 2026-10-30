@@ -3147,7 +3147,8 @@ export type DeploymentFailureCause = {
  * The one plan change a cause's evidence supports. `set_build` and
  * `set_runtime` replace the field with `value`; `add_variable` creates the
  * variable in `scope`; `variable_scope` adds `scope` to an existing one;
- * `review` opens a field whose right value the output cannot prove.
+ * `review` opens a field whose right value the output cannot prove;
+ * `dns_record` opens a domain's DNS record sheet on Domains settings.
  */
 export type DeploymentCauseFix = {
   kind:
@@ -3157,7 +3158,8 @@ export type DeploymentCauseFix = {
     | "variable_scope"
     | "remove_variable_scope"
     | "review"
-  /** `configuration.build.packageManager`, `runtime.internalPort`, `variables.NAME`, `dependencies`. */
+    | "dns_record"
+  /** `configuration.build.packageManager`, `runtime.internalPort`, `variables.NAME`, `dependencies`, `domains.HOST`. */
   field: string
   value?: string
   scope?: string
@@ -3314,6 +3316,43 @@ export type BlueprintSummary = {
    */
   sourceKind?: "blueprint" | "compose"
   services?: BlueprintServiceSummary[]
+  /**
+   * Shipped with the dashboard, or added on it — a template from a Compose
+   * file, a deployment saved as one, or an imported file. An added
+   * template's id is always `user-<name>`, so it never stands in for a
+   * built-in.
+   */
+  origin?: "builtin" | "user"
+}
+
+/** How a template added on this dashboard was made. */
+export type DeploymentTemplateSource = "compose" | "deployment" | "import"
+
+/** One template added on this dashboard, as `GET /deploy/templates` lists it. */
+export type UserTemplate = {
+  id: string
+  name: string
+  version: string
+  source: DeploymentTemplateSource
+  /** The deployment a template was saved from; it may have been removed since. */
+  fromDeploymentId?: number
+  summary: BlueprintSummary
+  /** How many deployments' sources name it. Each runs its own copy. */
+  deployments: number
+  createdBy: string
+  createdAt: string
+  updatedBy: string
+  updatedAt: string
+}
+
+export type UserTemplateDetail = UserTemplate & { definition: BlueprintDetail }
+
+/** A dry run's answer: the definition a file or a deployment makes, not stored. */
+export type TemplatePreview = {
+  definition: BlueprintDetail
+  summary: BlueprintSummary
+  /** Whether a template already has this id, so saving would be refused. */
+  exists: boolean
 }
 
 export type BlueprintServiceRole = "app" | "worker" | "database" | "cache"
@@ -4712,6 +4751,87 @@ export type DeploymentHostnameSuggestion = {
    * about project names at all.
    */
   nameTaken?: boolean
+}
+
+/** One record set: a name, a type, and every value the name holds of it. */
+export type DeploymentDNSRecordSet = {
+  name: string
+  type: "A" | "AAAA" | "CNAME"
+  values: string[]
+  /** Seconds; 1 is Cloudflare's automatic, which a proxied record has. */
+  ttl: number
+  /** Cloudflare's edge answers for the name: a tunnel's CNAME always is. */
+  proxied?: boolean
+  comment?: string
+}
+
+/** A set's line of a DNS record plan: what the zone holds and what a write does. */
+export type DeploymentDNSRecordChange = {
+  type: DeploymentDNSRecordSet["type"]
+  name: string
+  /** `conflict` blocks the write; `stale` is said and left alone, since nothing is deleted. */
+  action: "create" | "update" | "keep" | "conflict" | "stale"
+  current: string[]
+  want: string[]
+  currentTtl?: number
+  ttl?: number
+  proxied?: boolean
+  detail: string
+  /** The set as the zone holds it now is the one this dashboard wrote. */
+  ours: boolean
+}
+
+/** A set this dashboard wrote into the zone, with who and when. */
+export type DeploymentDNSRecordManaged = {
+  type: DeploymentDNSRecordSet["type"]
+  values: string[]
+  ttl: number
+  provider: string
+  zone: string
+  createdBy: string
+  createdAt: string
+  updatedBy: string
+  updatedAt: string
+  /** The zone still holds what was written. */
+  current: boolean
+}
+
+/**
+ * `GET /deploy/{id}/domains/{domain}/dns-record`, the dry run, and the POST
+ * that writes it: what the name should hold (A and AAAA to this server, or a
+ * proxied CNAME to the tunnel), what its zone holds, and through which saved
+ * DNS credential and zone it is written.
+ */
+export type DeploymentDNSRecordPlan = {
+  hostname: string
+  environmentId: number
+  environment: string
+  tunnel: boolean
+  want: DeploymentDNSRecordSet[]
+  provider?: string
+  providerKey?: string
+  zone?: string
+  account?: string
+  candidates: { key: string; provider: string; zone?: string; error?: string }[]
+  problems: string[]
+  changes: DeploymentDNSRecordChange[]
+  writable: boolean
+  ready: boolean
+  /** The write would change a record this dashboard did not write; it is sent with `replace`. */
+  foreign: boolean
+  refusal?: string
+  refusalCode?:
+    | "no_public_address"
+    | "tunnel_not_connected"
+    | "no_credentials"
+    | "no_zone"
+    | "ambiguous"
+    | "tunnel_zone"
+    | "provider_error"
+    | "conflict"
+  summary: string
+  managed: DeploymentDNSRecordManaged[]
+  written?: DeploymentDNSRecordChange[]
 }
 
 export type DeploymentDraftSource = {

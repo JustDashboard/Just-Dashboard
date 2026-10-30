@@ -246,6 +246,9 @@ func validateServicePorts(service *Service) (bool, error) {
 		default:
 			return false, fmt.Errorf("port %q uses exposure %q; a Compose template's ports are proxy or internal", port.Name, port.Exposure)
 		}
+		if port.HostInput != "" {
+			return false, fmt.Errorf("port %q takes a host port from an input; a Compose template publishes only its proxied port, on loopback", port.Name)
+		}
 		if port.Primary && port.Exposure != "proxy" {
 			return false, fmt.Errorf("port %q is marked primary but is not the proxied port", port.Name)
 		}

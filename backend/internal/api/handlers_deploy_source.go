@@ -60,8 +60,13 @@ func (s *Server) handleDeploymentSourceUpdate(w http.ResponseWriter, r *http.Req
 		return err
 	}
 	// A template source is inspected and saved as this dashboard's render of
-	// the version it names; a document in the request is never used.
-	source, err := request.DraftSourceConfig.WithTemplateDocuments()
+	// the version it names; a document or definition in the request is never
+	// used — a template added here is read from the store and frozen in.
+	source, err := s.modules.deployPlanning.WithUserTemplate(r.Context(), request.DraftSourceConfig)
+	if err != nil {
+		return mapDeploymentPlanningError(err)
+	}
+	source, err = source.WithTemplateDocuments()
 	if err != nil {
 		return mapDeploymentPlanningError(err)
 	}

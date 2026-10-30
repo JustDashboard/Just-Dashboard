@@ -19,6 +19,11 @@
   tunnel created with the saved Cloudflare API token, the cloudflared connector as a managed container,
   a domain served through it (no certificate here, no public-address check), its routes and CNAME
   records, health in cloudflared's own words and the Tunnel down alert.
+- [`dns-records.md`](dns-records.md) — a domain's DNS record written from here with the DNS-01
+  credentials saved under Certificates: A and AAAA to this server or the tunnel's proxied CNAME, the
+  longest zone a saved credential reaches, the eight providers' APIs (RFC 2136 over signed DNS UPDATE),
+  the plan that never deletes, the dry-run and write routes, what was written and by whom, preflight's
+  `dns_record_writable` / `dns_record_missing` and the Domains sheet's Create the record.
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
   logs, the request readings, container lifecycle events, and the three container-output fixes.
 - [`image-vulnerabilities.md`](image-vulnerabilities.md) — each release's image and the bases it was

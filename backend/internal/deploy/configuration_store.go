@@ -1562,7 +1562,11 @@ func (s *PlanningStore) saveEnvironmentSource(
 	fail := func(err error) (*EnvironmentConfiguration, *DetectionProposal, error) { return nil, nil, err }
 	// A template source is saved as this dashboard's render of the version it
 	// names, which is also how a deployment moves to a newer version.
-	source, err := canonicalSourceConfig(source).WithTemplateDocuments()
+	source, err := s.WithUserTemplate(ctx, canonicalSourceConfig(source))
+	if err != nil {
+		return fail(err)
+	}
+	source, err = source.WithTemplateDocuments()
 	if err != nil {
 		return fail(err)
 	}

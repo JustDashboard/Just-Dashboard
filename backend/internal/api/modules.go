@@ -406,7 +406,7 @@ func (s *Server) initModules() {
 		s.modules.proxy,
 	).WithFirewall(s.modules.netsec).WithTailnet(preflightTailnet{server: s}).WithDependencies(newDeploymentDependencyObserver(
 		s.Store, s.modules.backupStore, s.modules.docker,
-	).withExtensionProbe(s.databaseExtensions)).WithTunnel(s.tunnelObserver())
+	).withExtensionProbe(s.databaseExtensions)).WithTunnel(s.tunnelObserver()).WithDNSRecords(s.dnsRecordObserver())
 	s.modules.deployChecker = deploy.NewDeploymentChecker(
 		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,
 	)

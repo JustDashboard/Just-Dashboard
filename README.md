@@ -97,8 +97,11 @@ free.
 
 ### 🚀 Deployments
 
-- Deploy from a repository, an image, a Compose stack or **137 reviewed templates**, 43 of them
+- Deploy from a repository, an image, a Compose stack or **157 reviewed templates**, 56 of them
   multi-service stacks — an application with its own database, cache or worker
+- Templates of your own beside them: a pasted Compose file or a running deployment saved as one,
+  validated as a built-in is, its passwords made secrets each deployment generates or is asked for,
+  exported and imported as JSON
 - Minecraft Java and Bedrock servers with their console, players and settings file, kept on
   loopback until you open the port and its firewall rule
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more, and builds what no
@@ -117,6 +120,9 @@ free.
 - The container flags `docker run` has, per deployment: the user it runs as, a read-only root with
   writable paths in memory, ulimits, the container's own sysctls and NVIDIA GPUs
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
+- A domain's DNS record created from its settings with those same credentials: the A and AAAA to this
+  server, or a tunnel's CNAME, written into its zone at Cloudflare, Route 53, DigitalOcean, Google Cloud
+  DNS, Linode, OVH, Gandi or your own RFC 2136 server, shown as a dry run first and never deleting a record
 - Domains served through Cloudflare Tunnel from a server with no public address or open port: the
   connector runs as a container, and its routes and DNS records are set as each release goes live
 - Edge rules per deployment: block, answer or redirect by path, method, user agent or address, a
