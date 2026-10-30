@@ -104,11 +104,11 @@ marker. SQLite transactions and constraints enforce one-time claims, unique publ
 job nonces, monotonic request counters and single result acceptance under concurrent requests.
 No PID, executable path or shell capability is persisted.
 
-Build the standalone rootless executable with the repository's Go 1.26.8 toolchain:
+Build the standalone rootless executable with the repository's Go 1.26.10 toolchain:
 
 ```bash
 cd backend
-GOTOOLCHAIN=go1.26.8 go build -o /trusted/local/path/jd-vantage ./cmd/vantage
+GOTOOLCHAIN=go1.26.10 go build -o /trusted/local/path/jd-vantage ./cmd/vantage
 ```
 
 On the controlled source, provide the token through standard input, never an argument:
