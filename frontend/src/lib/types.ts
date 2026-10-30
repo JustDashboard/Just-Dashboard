@@ -3312,6 +3312,43 @@ export type BlueprintSummary = {
    */
   sourceKind?: "blueprint" | "compose"
   services?: BlueprintServiceSummary[]
+  /**
+   * Shipped with the dashboard, or added on it — a template from a Compose
+   * file, a deployment saved as one, or an imported file. An added
+   * template's id is always `user-<name>`, so it never stands in for a
+   * built-in.
+   */
+  origin?: "builtin" | "user"
+}
+
+/** How a template added on this dashboard was made. */
+export type DeploymentTemplateSource = "compose" | "deployment" | "import"
+
+/** One template added on this dashboard, as `GET /deploy/templates` lists it. */
+export type UserTemplate = {
+  id: string
+  name: string
+  version: string
+  source: DeploymentTemplateSource
+  /** The deployment a template was saved from; it may have been removed since. */
+  fromDeploymentId?: number
+  summary: BlueprintSummary
+  /** How many deployments' sources name it. Each runs its own copy. */
+  deployments: number
+  createdBy: string
+  createdAt: string
+  updatedBy: string
+  updatedAt: string
+}
+
+export type UserTemplateDetail = UserTemplate & { definition: BlueprintDetail }
+
+/** A dry run's answer: the definition a file or a deployment makes, not stored. */
+export type TemplatePreview = {
+  definition: BlueprintDetail
+  summary: BlueprintSummary
+  /** Whether a template already has this id, so saving would be refused. */
+  exists: boolean
 }
 
 export type BlueprintServiceRole = "app" | "worker" | "database" | "cache"
