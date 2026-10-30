@@ -97,7 +97,7 @@ free.
 
 ### 🚀 Deployments
 
-- Deploy from a repository, an image, a Compose stack or **137 reviewed templates**, 43 of them
+- Deploy from a repository, an image, a Compose stack or **157 reviewed templates**, 56 of them
   multi-service stacks — an application with its own database, cache or worker
 - Minecraft Java and Bedrock servers with their console, players and settings file, kept on
   loopback until you open the port and its firewall rule

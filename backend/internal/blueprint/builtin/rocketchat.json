@@ -1,0 +1,204 @@
+{
+  "id": "rocketchat",
+  "version": "1.0.0",
+  "name": "Rocket.Chat",
+  "category": "http",
+  "profile": "compose",
+  "description": "Team chat with channels, threads, direct messages, voice and video calls, and an omnichannel inbox for customer conversations, with apps from its marketplace. Runs Rocket.Chat with MongoDB as a single-member replica set; only Rocket.Chat is behind the domain.",
+  "iconId": "chat",
+  "docsUrl": "https://docs.rocket.chat/docs/deploy-with-docker-docker-compose",
+  "access": {
+    "kind": "setup",
+    "note": "A new Rocket.Chat opens its setup wizard for the first visitor, who creates the administrator and names the workspace. Open the address yourself right after deploying. Registering the workspace with Rocket.Chat's cloud (for push notifications and the marketplace) is optional."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT (with an enterprise directory)",
+    "upstreamUrl": "https://github.com/RocketChat/Rocket.Chat",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Rocket.Chat's ROOT_URL: links, e-mails and the mobile apps' server address come from it."
+    }
+  ],
+  "services": [
+    {
+      "name": "rocketchat",
+      "role": "app",
+      "purpose": "The Rocket.Chat server and web client, behind the domain",
+      "image": {
+        "reference": "rocketchat/rocket.chat:8.9.0",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "MONGO_URL",
+          "value": "mongodb://db:27017/rocketchat?replicaSet=rs0"
+        },
+        {
+          "name": "ROOT_URL",
+          "value": "{{variable.ROOT_URL}}"
+        },
+        {
+          "name": "PORT",
+          "value": "3000"
+        },
+        {
+          "name": "DEPLOY_METHOD",
+          "value": "docker"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 3000,
+          "protocol": "tcp",
+          "purpose": "The web client, the REST API and real-time sockets",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "uploads",
+          "target": "/app/uploads",
+          "purpose": "Uploaded files and avatars",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 2048,
+        "minMemoryMb": 1024
+      },
+      "healthcheck": {
+        "test": [
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 30,
+        "startPeriodSeconds": 120
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "MongoDB as a single-member replica set, which Rocket.Chat's change streams require",
+      "image": {
+        "reference": "mongo:8.0.34",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing",
+        "command": [
+          "mongod",
+          "--replSet",
+          "rs0",
+          "--bind_ip_all"
+        ]
+      },
+      "ports": [
+        {
+          "name": "mongo",
+          "internal": 27017,
+          "protocol": "tcp",
+          "purpose": "MongoDB connections from Rocket.Chat",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/data/db",
+          "purpose": "Every message, room and user",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "configdb",
+          "target": "/data/configdb",
+          "purpose": "MongoDB's own configuration database",
+          "data": true,
+          "backup": false
+        }
+      ],
+      "resources": {
+        "memoryMb": 1024,
+        "minMemoryMb": 512
+      },
+      "healthcheck": {
+        "test": [
+          "mongosh",
+          "--quiet",
+          "--eval",
+          "try { if (rs.status().myState !== 1) { quit(1) } } catch (e) { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'db:27017'}]}); quit(1) }"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 10,
+        "retries": 30,
+        "startPeriodSeconds": 20
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health",
+      "port": "http",
+      "timeoutSeconds": 900
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "ROOT_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "Rocket.Chat migrates its database on start and does not migrate back; take a backup and read the release notes before moving the major version, which may require a newer MongoDB."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "chat.example.test"
+      },
+      "digest": "sha256:ed1b0a6c48e36a661a4a2ffd1dbc22788ca27e11ea23a0aae86b396c58091691"
+    }
+  ]
+}

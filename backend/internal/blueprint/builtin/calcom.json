@@ -1,0 +1,246 @@
+{
+  "id": "calcom",
+  "version": "1.0.0",
+  "name": "Cal.com",
+  "category": "http",
+  "profile": "compose",
+  "description": "Scheduling infrastructure: booking pages people pick a time from, with calendar sync, team round-robin, routing forms, workflows and reminders. Runs the Cal.com web app with PostgreSQL; only the app is behind the domain. The image is built for amd64 only and is large.",
+  "iconId": "chart",
+  "docsUrl": "https://cal.com/docs/self-hosting/docker",
+  "access": {
+    "kind": "setup",
+    "path": "/auth/setup",
+    "note": "Cal.com starts with no account: open https://<domain>/auth/setup right after deploying to create the administrator, because whoever finishes it first owns the instance. Calendar and video integrations need their providers' credentials, and booking e-mails need EMAIL_SERVER_* settings, added as variables."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/calcom/cal.com",
+    "reviewedAt": "2026-10-29",
+    "minimumDashboard": "0.8.2"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "Booking links, calendar invitations and OAuth callbacks are built from this address."
+    }
+  ],
+  "secrets": [
+    {
+      "name": "nextauth-secret",
+      "variable": "NEXTAUTH_SECRET",
+      "label": "Session signing secret",
+      "length": 48,
+      "description": "Signs sessions; changing it signs everybody out."
+    },
+    {
+      "name": "encryption-key",
+      "variable": "CALENDSO_ENCRYPTION_KEY",
+      "label": "Encryption key",
+      "length": 32,
+      "description": "Encrypts stored calendar and app credentials; Cal.com needs exactly 32 characters."
+    },
+    {
+      "name": "db-password",
+      "variable": "CALCOM_DB_PASSWORD",
+      "label": "Database password",
+      "length": 40,
+      "description": "Generated here and given only to the services that sign in to the database."
+    }
+  ],
+  "services": [
+    {
+      "name": "calcom",
+      "role": "app",
+      "purpose": "The Cal.com web app and API, behind the domain; it migrates the database before it starts",
+      "image": {
+        "reference": "calcom/cal.com:v6.2.0",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "NEXT_PUBLIC_WEBAPP_URL",
+          "value": "{{variable.NEXT_PUBLIC_WEBAPP_URL}}"
+        },
+        {
+          "name": "NEXTAUTH_URL",
+          "value": "{{variable.NEXTAUTH_URL}}"
+        },
+        {
+          "name": "NEXTAUTH_SECRET",
+          "value": "{{secret.nextauth-secret}}"
+        },
+        {
+          "name": "CALENDSO_ENCRYPTION_KEY",
+          "value": "{{secret.encryption-key}}"
+        },
+        {
+          "name": "DATABASE_URL",
+          "value": "postgresql://calcom:{{secret.db-password}}@db:5432/calcom"
+        },
+        {
+          "name": "DATABASE_DIRECT_URL",
+          "value": "postgresql://calcom:{{secret.db-password}}@db:5432/calcom"
+        },
+        {
+          "name": "CALCOM_TELEMETRY_DISABLED",
+          "value": "1"
+        },
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 3000,
+          "protocol": "tcp",
+          "purpose": "Booking pages, the app and the API",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 2048,
+        "minMemoryMb": 1024
+      },
+      "healthcheck": {
+        "test": [
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:3000/auth/login"
+        ],
+        "intervalSeconds": 15,
+        "timeoutSeconds": 10,
+        "retries": 30,
+        "startPeriodSeconds": 180
+      },
+      "dependsOn": [
+        {
+          "service": "db",
+          "condition": "healthy"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "role": "database",
+      "purpose": "PostgreSQL, holding every user, event type and booking",
+      "image": {
+        "reference": "postgres:17.11-alpine",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "POSTGRES_DB",
+          "value": "calcom"
+        },
+        {
+          "name": "POSTGRES_USER",
+          "value": "calcom"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "value": "{{secret.db-password}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "postgres",
+          "internal": 5432,
+          "protocol": "tcp",
+          "purpose": "SQL connections from Cal.com",
+          "exposure": "internal"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "database",
+          "target": "/var/lib/postgresql/data",
+          "purpose": "Every table Cal.com keeps",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "pg_isready",
+          "-h",
+          "127.0.0.1",
+          "-U",
+          "calcom",
+          "-d",
+          "calcom"
+        ],
+        "intervalSeconds": 5,
+        "timeoutSeconds": 5,
+        "retries": 20,
+        "startPeriodSeconds": 20
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "Sign-in page answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/auth/login",
+      "port": "http",
+      "timeoutSeconds": 900
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "NEXT_PUBLIC_WEBAPP_URL",
+        "value": "https://{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "NEXTAUTH_URL",
+        "value": "https://{{input.domain}}/api/auth"
+      }
+    ]
+  },
+  "automation": [
+    {
+      "name": "Nightly backup",
+      "description": "Archives every volume of the stack every night.",
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "actions": [
+        "backup"
+      ],
+      "default": true
+    }
+  ],
+  "update": {
+    "detector": "registry",
+    "backupFirst": true,
+    "notes": "Cal.com migrates its database on start and does not migrate back; take a backup before moving to a newer image."
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "cal.example.test"
+      },
+      "digest": "sha256:d49839457e369b2a8d0ede1538cecd9b48b571a802496f8c14f996878d415b22"
+    }
+  ]
+}

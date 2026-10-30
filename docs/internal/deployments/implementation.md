@@ -1808,8 +1808,8 @@ only renderer/executor/validation authority for their feature.
   next to a routed primary (Gitea's SSH, Syncthing's sync protocol) becomes an additional
   `runtime.ports[]` publication on its own number (see published ports below) instead of silently
   replacing the routed port; the primary always stays the one the proxy and the checks reach. The
-  catalogue ships 142 reviewed definitions, 137 of them offered (see "how the first sign-in works"
-  below for the five that are retired; 43 are the multi-service templates of the next item). The
+  catalogue ships 162 reviewed definitions, 157 of them offered (see "how the first sign-in works"
+  below for the five that are retired; 56 are the multi-service templates of the next item). The
   three counts the competitive report quotes — built in, deployable, Compose — are constants in
   `blueprint/catalogue_counts.go`, and `catalogue_counts_test.go` fails when the shipped
   definitions disagree, so they are bumped deliberately in the change that adds a template. Every
